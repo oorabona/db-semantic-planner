@@ -1980,7 +1980,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
-			bindingProjections.set(emittedBindName(name, naming), compiled);
+			const outputSchema = bundle.bindingOutputSchemas?.get(name);
+			bindingProjections.set(
+				emittedBindName(name, naming),
+				outputSchema?.outputProvenance !== undefined
+					? fromOutputProvenance({
+							sql: compiled.sql,
+							parameters: compiled.parameters,
+							columns: outputSchema.columns,
+							outputProvenance: outputSchema.outputProvenance,
+							model: deps.model,
+							naming,
+							...(compiled.hydrationPlan !== undefined && {
+								hydrationPlan: compiled.hydrationPlan,
+							}),
+						})
+					: compiled,
+			);
 		}
 
 		const leafBundle: CompiledNqlQuery = {

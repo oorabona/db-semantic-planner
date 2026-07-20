@@ -1,7 +1,8 @@
-import { createOrm, schema } from '@dbsp/core';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
+import { compile as compileNql } from '../../../nql/src/index.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 
 const ctx = {
@@ -64,6 +65,41 @@ const conversionSchema = schema({
 		bigCount: { type: 'bigint', js: 'bigint' },
 	},
 });
+
+const relationConversionSchema = schema({
+	users: {
+		id: 'uuid',
+		accountNumber: { type: 'bigint', js: 'bigint' },
+	},
+	profiles: {
+		id: 'uuid',
+		userId: ref('users', {
+			as: 'user',
+			inverse: 'profile',
+			references: ['id'],
+			unique: true,
+		}),
+		accountNumber: { type: 'bigint', js: 'bigint' },
+	},
+	events: {
+		id: 'uuid',
+		userId: ref('users', {
+			as: 'user',
+			inverse: 'events',
+			references: ['id'],
+		}),
+	},
+});
+
+function compileRelationConversionNql(nql: string): CompiledNqlQuery {
+	const result = compileNql(nql, relationConversionSchema.model);
+	if (!result.success || !result.ast) {
+		throw new Error(
+			`NQL compilation failed: ${result.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+	return result.ast;
+}
 
 describe('bigint js read conversion rules', () => {
 	it('converts js:bigint values and preserves nullish values', () => {
@@ -329,6 +365,78 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		const rows = await adapter.execute(compiled);
 
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
+	it('converts NQL binding outputs projected from scalar relation bigint provenance', async () => {
+		const bundle = compileRelationConversionNql(`events
+			| select id, userId
+			| bind projected_events
+projected_events
+			| select user.accountNumber as accountNumber
+			| bind event_accounts
+event_accounts | select accountNumber`);
+		const adapter = createPgsqlAdapter(
+			makePool([{ accountNumber: '9007199254740993' }]),
+			{ model: relationConversionSchema.model },
+		);
+
+		expect(
+			bundle.bindingOutputSchemas?.get('event_accounts')?.outputProvenance,
+		).toEqual([
+			{
+				outputColumn: 'accountNumber',
+				table: 'users',
+				column: 'accountNumber',
+			},
+		]);
+		const compiled = adapter.compile(bundle, {
+			model: relationConversionSchema.model,
+		});
+		expect(compiled.columnMetadata?.get('accountNumber')).toEqual({
+			table: 'users',
+			column: 'accountNumber',
+			js: 'bigint',
+		});
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ accountNumber: 9007199254740993n }]);
+	});
+
+	it('converts NQL binding outputs projected from multihop relation bigint provenance', async () => {
+		const bundle = compileRelationConversionNql(`events
+			| select id, userId
+			| bind projected_events
+projected_events
+			| select user.profile.accountNumber as profileAccountNumber
+			| bind profile_accounts
+profile_accounts | select profileAccountNumber`);
+		const adapter = createPgsqlAdapter(
+			makePool([{ profileAccountNumber: '9007199254740995' }]),
+			{ model: relationConversionSchema.model },
+		);
+
+		expect(
+			bundle.bindingOutputSchemas?.get('profile_accounts')?.outputProvenance,
+		).toEqual([
+			{
+				outputColumn: 'profileAccountNumber',
+				table: 'profiles',
+				column: 'accountNumber',
+			},
+		]);
+		const compiled = adapter.compile(bundle, {
+			model: relationConversionSchema.model,
+		});
+		expect(compiled.columnMetadata?.get('profileAccountNumber')).toEqual({
+			table: 'profiles',
+			column: 'accountNumber',
+			js: 'bigint',
+		});
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ profileAccountNumber: 9007199254740995n }]);
 	});
 
 	it('converts rows from a WITH body that reads an NQL binding', async () => {

@@ -2486,6 +2486,69 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		).toEqual([{ outputColumn: 'author', table: 'posts', column: 'authorId' }]);
 	});
 
+	it('records resolved provenance for binding-projected scalar, multihop, and hasMany relation columns', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.name as authorName, author.profile.bio as authorBio, comments.body as commentBodies | bind related_post_columns
+related_post_columns | select authorName, authorBio, commentBodies`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('related_post_columns')
+				?.outputProvenance,
+		).toEqual([
+			{ outputColumn: 'authorName', table: 'users', column: 'name' },
+			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
+			{ outputColumn: 'commentBodies', table: 'comments', column: 'body' },
+		]);
+	});
+
+	it('records resolved provenance for binding-projected recursive relation columns', () => {
+		const result = compile(
+			`categories | select id, parentId | bind c
+c | select ascendant.name as ancestorName, descendant.name as descendantName | bind related_categories
+related_categories | select ancestorName, descendantName`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('related_categories')
+				?.outputProvenance,
+		).toEqual([
+			{ outputColumn: 'ancestorName', table: 'categories', column: 'name' },
+			{ outputColumn: 'descendantName', table: 'categories', column: 'name' },
+		]);
+	});
+
+	it('keeps relation-column binding provenance unresolved without a trusted target', () => {
+		const outputSchema = getQueryOutputSchema(
+			{
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'relationColumn',
+							relation: 'author',
+							column: 'name',
+							as: 'authorName',
+						},
+					],
+				},
+			},
+			compilerContextForValidator(new ColumnValidator(schema)),
+			'physical_relation_projection',
+		);
+
+		expect(outputSchema.outputProvenance).toEqual([
+			{ outputColumn: 'authorName' },
+		]);
+	});
+
 	it('detects unresolved SELECT * output-schema errors by typed discriminant', () => {
 		const error = new UnresolvedSelectAllOutputSchemaError(
 			'changed human-readable output-schema wording',

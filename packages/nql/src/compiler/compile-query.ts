@@ -27,7 +27,10 @@ import {
 	toColumnList,
 	type WhereIntent,
 } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	type Mutable,
+} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlExpression,
@@ -1490,6 +1493,25 @@ export function getQueryOutputSchema(
 		typeCandidates.push({ column: outputColumn, untypeable: reason });
 		addColumn(outputColumn);
 	};
+	const addRelationColumn = (outputColumn: string, expr: ExpressionIntent) => {
+		const trusted = getTrustedNqlRelationFilterFields(expr);
+		const targetTable = trusted?.hops.at(-1)?.target ?? trusted?.targetTable;
+		addProvenanceCandidate(
+			outputColumn,
+			targetTable !== undefined && trusted?.selectedColumn !== undefined
+				? {
+						outputColumn,
+						table: targetTable,
+						column: trusted.selectedColumn,
+					}
+				: unresolvedProvenance(outputColumn),
+		);
+		typeCandidates.push({
+			column: outputColumn,
+			untypeable: 'relation-column',
+		});
+		addColumn(outputColumn);
+	};
 	// #213 B3: `count(*)` / `count(col)` is statically typeable — PostgreSQL
 	// always returns bigint for COUNT regardless of the argument, so this is
 	// the ONE aggregate the neutral `NqlBindingColumnTypeInfo` union can
@@ -1602,14 +1624,15 @@ export function getQueryOutputSchema(
 			// #213 B3: `count(*) as n` / `count(col) as n` is statically
 			// typeable regardless of which select-shape carries it.
 			addCountAggregateColumn(outputColumn);
+		} else if (expr.kind === 'relationColumn') {
+			addRelationColumn(outputColumn, expr);
 		} else {
 			// #213 B3 scope fence: every OTHER aggregate expression stays
 			// untypeable — unify on 'unsupported-aggregate' so the gate's
 			// backward-compat message special-case (keyed on this reason)
 			// covers both shapes.
 			let reason: NqlBindingColumnUntypeableReason = 'computed-expression';
-			if (expr.kind === 'relationColumn') reason = 'relation-column';
-			else if (expr.kind === 'aggregate') reason = 'unsupported-aggregate';
+			if (expr.kind === 'aggregate') reason = 'unsupported-aggregate';
 			addUntypedColumn(outputColumn, reason);
 		}
 	}
