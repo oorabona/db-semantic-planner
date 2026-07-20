@@ -1,10 +1,4 @@
-import type {
-	ColumnIR,
-	ColumnJsReadType,
-	CompiledColumnMetadata,
-	ModelIR,
-	TableIR,
-} from '@dbsp/types';
+import type { ColumnIR, ColumnJsReadType, ModelIR, TableIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { NamingPlugin } from './naming-plugin.js';
 
@@ -432,31 +426,6 @@ function finalizeProjections(
 	return projections.size > 0 ? projections : undefined;
 }
 
-function metadataForProjection(
-	projection: ColumnMetadataProjection,
-): CompiledColumnMetadata | undefined {
-	if (projection.kind !== 'modelColumn' || projection.js === undefined) {
-		return undefined;
-	}
-	return {
-		table: projection.table,
-		column: projection.column,
-		js: projection.js,
-	};
-}
-
-function metadataForProjections(
-	projections: ReadonlyMap<string, ColumnMetadataProjection> | undefined,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
-	if (!projections || projections.size === 0) return undefined;
-	const metadata = new Map<string, CompiledColumnMetadata>();
-	for (const [outputKey, projection] of projections) {
-		const entry = metadataForProjection(projection);
-		if (entry) metadata.set(outputKey, entry);
-	}
-	return metadata.size > 0 ? metadata : undefined;
-}
-
 function targetListForAst(ast: Node): readonly unknown[] | undefined {
 	const record = ast as {
 		SelectStmt?: { targetList?: unknown };
@@ -512,26 +481,4 @@ export function buildModelColumnProjections(
 		);
 	}
 	return projections.size > 0 ? projections : undefined;
-}
-
-export function buildCompiledColumnMetadata(
-	ast: Node,
-	rootTable: string,
-	model: ModelIR | undefined,
-	naming: NamingPlugin,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
-	return metadataForProjections(
-		buildCompiledColumnProjections(ast, rootTable, model, naming),
-	);
-}
-
-export function metadataForModelColumns(
-	tableName: string,
-	columns: readonly string[],
-	model: ModelIR,
-	naming: NamingPlugin,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
-	return metadataForProjections(
-		buildModelColumnProjections(tableName, columns, model, naming),
-	);
 }

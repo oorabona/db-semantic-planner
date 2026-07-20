@@ -12,7 +12,7 @@ import {
 	type ProjectionEnvelope,
 	preserveOneToOne,
 	projectNamedFields,
-	supplementOutputProvenance,
+	supplementOutputDescriptors,
 } from '../projection-envelope.js';
 
 const testSchema = schema({
@@ -344,7 +344,7 @@ describe('projection envelope', () => {
 		});
 	});
 
-	it('supplements unresolved outputs without downgrading resolved model columns', () => {
+	it('supplements declared descriptor outputs alongside existing model columns', () => {
 		const source = fromModelColumns({
 			sql: 'SELECT sequence FROM events',
 			parameters: [],
@@ -354,19 +354,18 @@ describe('projection envelope', () => {
 			naming: identityNaming,
 		});
 
-		const supplemented = supplementOutputProvenance(source, {
-			columns: ['sequence', 'safeSequence'],
-			outputProvenance: [
-				{ outputColumn: 'sequence' },
-				{
-					outputColumn: 'safeSequence',
+		const supplemented = supplementOutputDescriptors(source, [
+			{
+				outputKey: 'safeSequence',
+				source: {
+					kind: 'modelColumn',
 					table: 'events',
 					column: 'safeSequence',
+					js: 'number',
 				},
-			],
-			model: testSchema.model,
-			naming: identityNaming,
-		});
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+		]);
 		const compiled = finalizeEnvelope(supplemented);
 
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({

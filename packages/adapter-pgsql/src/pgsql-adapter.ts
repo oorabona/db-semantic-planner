@@ -2127,11 +2127,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				bindingNames,
 				bindingProjections,
 			);
+			const outputSchema = bundle.bindingOutputSchemas?.get(name);
+			const bindingProjection =
+				outputSchema?.declaredOutputs !== undefined
+					? fromOutputDescriptors({
+							sql: compiled.sql,
+							parameters: compiled.parameters,
+							columns: outputSchema.columns,
+							declaredOutputs: outputSchema.declaredOutputs,
+							naming,
+							...(compiled.hydrationPlan !== undefined && {
+								hydrationPlan: compiled.hydrationPlan,
+							}),
+						})
+					: compiled;
 			ctes.push(
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
-			bindingProjections.set(emittedBindName(name, naming), compiled);
+			bindingProjections.set(emittedBindName(name, naming), bindingProjection);
 		}
 
 		const leafBundle: CompiledNqlQuery = {

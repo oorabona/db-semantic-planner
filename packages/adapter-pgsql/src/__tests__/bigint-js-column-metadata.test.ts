@@ -9,7 +9,7 @@ import {
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile as compileNql } from '../../../nql/src/index.js';
-import { buildCompiledColumnMetadata } from '../column-metadata.js';
+import { buildCompiledColumnProjections } from '../column-metadata.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -438,7 +438,7 @@ describe('bigint js column metadata provenance', () => {
 	});
 
 	it('does not resolve WITH CTE names through shadowed model tables', () => {
-		const metadata = buildCompiledColumnMetadata(
+		const projections = buildCompiledColumnProjections(
 			{
 				SelectStmt: {
 					targetList: [
@@ -502,7 +502,10 @@ describe('bigint js column metadata provenance', () => {
 			identityNaming,
 		);
 
-		expect(metadata?.has('sequence') ?? false).toBe(false);
+		expect(projections?.get('sequence')).toEqual({
+			kind: 'unresolved',
+			reason: 'projection column could not be resolved to a model column',
+		});
 	});
 
 	it('does not re-resolve a shadowing CTE as a same-named model table', () => {

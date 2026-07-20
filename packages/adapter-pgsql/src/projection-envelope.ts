@@ -2,21 +2,17 @@ import type {
 	CompiledColumnMetadata,
 	CompiledQuery,
 	ModelIR,
-	NqlBindingOutputProvenance,
 	OutputDescriptor,
 	OutputSource,
 	OutputValueShape,
 	PlanReport,
-	TableIR,
 } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
-	buildCompiledColumnMetadata,
 	buildCompiledColumnProjections,
 	buildModelColumnProjections,
 	type ColumnMetadataProjection,
-	metadataForModelColumns,
 } from './column-metadata.js';
 import type { NamingPlugin } from './naming-plugin.js';
 
@@ -75,16 +71,6 @@ export type FromModelColumnsOptions = {
 	readonly naming: NamingPlugin;
 };
 
-export type FromOutputProvenanceOptions = {
-	readonly sql: string;
-	readonly parameters: readonly unknown[];
-	readonly columns: readonly string[];
-	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
-	readonly model: ModelIR | undefined;
-	readonly naming: NamingPlugin;
-	readonly hydrationPlan?: PlanReport;
-};
-
 export type FromOutputDescriptorsOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
@@ -93,11 +79,6 @@ export type FromOutputDescriptorsOptions = {
 	readonly naming: NamingPlugin;
 	readonly hydrationPlan?: PlanReport;
 };
-
-export type SupplementOutputProvenanceOptions = Omit<
-	FromOutputProvenanceOptions,
-	'sql' | 'parameters' | 'hydrationPlan'
->;
 
 export type ProjectNamedFieldsSelection = {
 	readonly inputKey: string;
@@ -232,30 +213,6 @@ function outputMapFromColumnProjections(
 	return outputs;
 }
 
-function overlayCompiledMetadata(
-	outputs: ReadonlyMap<string, OutputProjection>,
-	metadata: ReadonlyMap<string, CompiledColumnMetadata> | undefined,
-): ReadonlyMap<string, OutputProjection> {
-	if (!metadata || metadata.size === 0) return outputs;
-	const merged = new Map(outputs);
-	for (const [outputKey, entry] of metadata) {
-		merged.set(
-			outputKey,
-			descriptor(
-				outputKey,
-				{
-					kind: 'modelColumn',
-					table: entry.table,
-					column: entry.column,
-					js: entry.js,
-				},
-				scalarOneShape,
-			),
-		);
-	}
-	return merged;
-}
-
 export function fromCompiledQuery<T = unknown>(
 	compiled: CompiledQueryWithHydrationPlan<T>,
 ): ProjectionEnvelope<T> {
@@ -321,17 +278,8 @@ function projectedHydrationPlan(
 export function fromAstProjection<T = unknown>(
 	options: FromAstProjectionOptions,
 ): ProjectionEnvelope<T> {
-	const projectedOutputs = outputMapFromColumnProjections(
+	const outputs = outputMapFromColumnProjections(
 		buildCompiledColumnProjections(
-			options.ast,
-			options.rootTable,
-			options.model,
-			options.naming,
-		),
-	);
-	const outputs = overlayCompiledMetadata(
-		projectedOutputs,
-		buildCompiledColumnMetadata(
 			options.ast,
 			options.rootTable,
 			options.model,
@@ -352,22 +300,13 @@ export function fromAstProjection<T = unknown>(
 export function fromModelColumns<T = unknown>(
 	options: FromModelColumnsOptions,
 ): ProjectionEnvelope<T> {
-	const projectedOutputs = outputMapFromColumnProjections(
-		buildModelColumnProjections(
-			options.table,
-			options.columns,
-			options.model,
-			options.naming,
-		),
-	);
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
 		projection: {
 			kind: 'known',
-			outputs: overlayCompiledMetadata(
-				projectedOutputs,
-				metadataForModelColumns(
+			outputs: outputMapFromColumnProjections(
+				buildModelColumnProjections(
 					options.table,
 					options.columns,
 					options.model,
@@ -375,114 +314,6 @@ export function fromModelColumns<T = unknown>(
 				),
 			),
 		},
-	});
-}
-
-function findModelTable(
-	model: ModelIR | undefined,
-	tableName: string,
-	naming: NamingPlugin,
-): TableIR | undefined {
-	if (model === undefined) return undefined;
-	return (
-		model.getTable(tableName) ??
-		[...model.tables.values()].find(
-			(table) =>
-				table.name === tableName || naming.toDatabase(table.name) === tableName,
-		)
-	);
-}
-
-function outputFromProvenance(
-	provenance: NqlBindingOutputProvenance,
-	model: ModelIR | undefined,
-	naming: NamingPlugin,
-): OutputSource {
-	if (provenance.table === undefined || provenance.column === undefined) {
-		return {
-			kind: 'unresolved',
-			reason: 'binding output provenance did not name a model column',
-		};
-	}
-	const table = findModelTable(model, provenance.table, naming);
-	const column = table?.columns.find(
-		(candidate) =>
-			candidate.name === provenance.column ||
-			naming.toDatabase(candidate.name) === provenance.column,
-	);
-	if (table === undefined || column === undefined) {
-		return {
-			kind: 'unresolved',
-			reason: 'binding output provenance could not be resolved in the model',
-		};
-	}
-	return {
-		kind: 'modelColumn',
-		table: table.name,
-		column: column.name,
-		...(column.type === 'bigint' && column.js !== undefined
-			? { js: column.js }
-			: {}),
-	};
-}
-
-export function fromOutputProvenance<T = unknown>(
-	options: FromOutputProvenanceOptions,
-): ProjectionEnvelope<T> {
-	const provenanceByOutput = new Map<string, NqlBindingOutputProvenance[]>();
-	for (const provenance of options.outputProvenance ?? []) {
-		const outputKey = options.naming.toDatabase(provenance.outputColumn);
-		const entries = provenanceByOutput.get(outputKey) ?? [];
-		entries.push(provenance);
-		provenanceByOutput.set(outputKey, entries);
-	}
-
-	const outputs = new Map<string, OutputProjection>();
-	for (const column of options.columns) {
-		const outputKey = options.naming.toDatabase(column);
-		const entries = provenanceByOutput.get(outputKey) ?? [];
-		if (entries.length === 0) {
-			outputs.set(
-				outputKey,
-				descriptorForSource(outputKey, {
-					kind: 'unresolved',
-					reason: 'binding output provenance was not provided',
-				}),
-			);
-			continue;
-		}
-		if (entries.length > 1) {
-			outputs.set(
-				outputKey,
-				descriptorForSource(outputKey, {
-					kind: 'ambiguous',
-					reason: `binding output '${outputKey}' had multiple provenance entries`,
-				}),
-			);
-			continue;
-		}
-		const [provenance] = entries;
-		outputs.set(
-			outputKey,
-			descriptorForSource(
-				outputKey,
-				provenance
-					? outputFromProvenance(provenance, options.model, options.naming)
-					: {
-							kind: 'unresolved',
-							reason: 'binding output provenance could not be read',
-						},
-			),
-		);
-	}
-
-	return makeEnvelope<T>({
-		sql: options.sql,
-		parameters: options.parameters,
-		projection: { kind: 'known', outputs },
-		...(options.hydrationPlan !== undefined
-			? { hydrationPlan: options.hydrationPlan }
-			: {}),
 	});
 }
 
@@ -556,47 +387,6 @@ export function fromOutputDescriptors<T = unknown>(
 		projection: { kind: 'known', outputs },
 		...(options.hydrationPlan !== undefined
 			? { hydrationPlan: options.hydrationPlan }
-			: {}),
-	});
-}
-
-export function supplementOutputProvenance<T = unknown>(
-	source: ProjectionEnvelope<T>,
-	options: SupplementOutputProvenanceOptions,
-): ProjectionEnvelope<T> {
-	if (source.projection.kind === 'dropped') return source;
-	const supplemental = fromOutputProvenance({
-		sql: source.sql,
-		parameters: source.parameters,
-		columns: options.columns,
-		...(options.outputProvenance !== undefined && {
-			outputProvenance: options.outputProvenance,
-		}),
-		model: options.model,
-		naming: options.naming,
-	});
-	if (supplemental.projection.kind === 'dropped') return source;
-
-	const outputs = new Map(source.projection.outputs);
-	for (const [outputKey, supplementalOutput] of supplemental.projection
-		.outputs) {
-		const sourceOutput = outputs.get(outputKey);
-		if (
-			sourceOutput === undefined ||
-			(sourceOutput.source.kind !== 'modelColumn' &&
-				supplementalOutput.source.kind === 'modelColumn')
-		) {
-			outputs.set(outputKey, supplementalOutput);
-		}
-	}
-
-	return makeEnvelope<T>({
-		sql: source.sql,
-		parameters: source.parameters,
-		...(source.ast !== undefined ? { ast: source.ast } : {}),
-		projection: { kind: 'known', outputs },
-		...(source.hydrationPlan !== undefined
-			? { hydrationPlan: source.hydrationPlan }
 			: {}),
 	});
 }

@@ -177,12 +177,6 @@ export interface NqlBindingColumnLineage {
 	readonly outputColumn: string;
 }
 
-export interface NqlBindingOutputProvenance {
-	readonly outputColumn: string;
-	readonly table?: string;
-	readonly column?: string;
-}
-
 export interface NqlBindingRelationFilterMetadata {
 	readonly sourceTable?: string;
 	readonly unsafeReason?: string;
