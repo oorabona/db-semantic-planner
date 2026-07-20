@@ -1459,6 +1459,12 @@ export function getQueryOutputSchema(
 		for (const relationName of relationPath) {
 			const relation = ctx.validator.getRelation(targetTable, relationName);
 			if (relation === undefined) return undefined;
+			if (
+				(relation.type !== 'belongsTo' && relation.type !== 'hasOne') ||
+				relation.recursive !== undefined
+			) {
+				return undefined;
+			}
 			targetTable = relation.target;
 		}
 		const resolvedColumn = ctx.validator.resolvePhysicalColumnName(
@@ -1522,16 +1528,24 @@ export function getQueryOutputSchema(
 	const addRelationColumn = (outputColumn: string, expr: ExpressionIntent) => {
 		const trusted = getTrustedNqlRelationFilterFields(expr);
 		const targetTable = trusted?.hops.at(-1)?.target ?? trusted?.targetTable;
+		const isScalarRelationColumn =
+			trusted?.selectedColumn !== undefined &&
+			trusted.cardinality === 'one' &&
+			trusted.recursive === undefined &&
+			(trusted.relationType === 'belongsTo' ||
+				trusted.relationType === 'hasOne');
 		const provenance =
-			targetTable !== undefined && trusted?.selectedColumn !== undefined
+			targetTable !== undefined && isScalarRelationColumn
 				? {
 						outputColumn,
 						table: targetTable,
 						column: trusted.selectedColumn,
 					}
-				: expr.kind === 'relationColumn'
-					? resolvePhysicalRelationColumnProvenance(outputColumn, expr)
-					: undefined;
+				: trusted !== undefined
+					? undefined
+					: expr.kind === 'relationColumn'
+						? resolvePhysicalRelationColumnProvenance(outputColumn, expr)
+						: undefined;
 		addProvenanceCandidate(
 			outputColumn,
 			provenance ?? unresolvedProvenance(outputColumn),

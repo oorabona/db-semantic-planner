@@ -2486,7 +2486,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		).toEqual([{ outputColumn: 'author', table: 'posts', column: 'authorId' }]);
 	});
 
-	it('records resolved provenance for binding-projected scalar, multihop, and hasMany relation columns', () => {
+	it('records scalar relation-column provenance and leaves hasMany aggregate outputs unresolved', () => {
 		const result = compile(
 			`posts | select id, authorId | bind projected_posts
 projected_posts | select author.name as authorName, author.profile.bio as authorBio, comments.body as commentBodies | bind related_post_columns
@@ -2501,11 +2501,11 @@ related_post_columns | select authorName, authorBio, commentBodies`,
 		).toEqual([
 			{ outputColumn: 'authorName', table: 'users', column: 'name' },
 			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
-			{ outputColumn: 'commentBodies', table: 'comments', column: 'body' },
+			{ outputColumn: 'commentBodies' },
 		]);
 	});
 
-	it('records resolved provenance for binding-projected recursive relation columns', () => {
+	it('leaves binding-projected recursive aggregate relation columns unresolved', () => {
 		const result = compile(
 			`categories | select id, parentId | bind c
 c | select ascendant.name as ancestorName, descendant.name as descendantName | bind related_categories
@@ -2518,12 +2518,12 @@ related_categories | select ancestorName, descendantName`,
 			result.ast?.bindingOutputSchemas?.get('related_categories')
 				?.outputProvenance,
 		).toEqual([
-			{ outputColumn: 'ancestorName', table: 'categories', column: 'name' },
-			{ outputColumn: 'descendantName', table: 'categories', column: 'name' },
+			{ outputColumn: 'ancestorName' },
+			{ outputColumn: 'descendantName' },
 		]);
 	});
 
-	it('records resolved provenance for physical-source single-hop, multihop, and hasMany relation columns without a trusted binding proof', () => {
+	it('records scalar physical relation-column provenance and leaves hasMany aggregate outputs unresolved without a trusted binding proof', () => {
 		const outputSchema = getQueryOutputSchema(
 			{
 				type: 'select',
@@ -2559,7 +2559,7 @@ related_categories | select ancestorName, descendantName`,
 		expect(outputSchema.outputProvenance).toEqual([
 			{ outputColumn: 'authorName', table: 'users', column: 'name' },
 			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
-			{ outputColumn: 'commentBody', table: 'comments', column: 'body' },
+			{ outputColumn: 'commentBody' },
 		]);
 		expect(outputSchema.columnTypes).toBeUndefined();
 		expect(outputSchema.columnTypesUnavailable).toEqual({

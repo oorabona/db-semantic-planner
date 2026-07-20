@@ -777,6 +777,29 @@ function orderedNqlBindingNames(bundle: CompiledNqlQuery): string[] {
 	return names;
 }
 
+function shadowingLocalCteNames(bundle: CompiledNqlQuery): readonly string[] {
+	return bundle.cteQuery?.ctes.map((cte) => cte.name) ?? [];
+}
+
+function removeShadowedNqlBindingNames(
+	bindingNames: readonly string[],
+	localCteNames: readonly string[],
+	naming: NamingPlugin,
+): string[] {
+	if (bindingNames.length === 0 || localCteNames.length === 0) {
+		return [...bindingNames];
+	}
+	const localLogicalNames = new Set(localCteNames);
+	const localEmittedNames = new Set(
+		localCteNames.map((name) => emittedBindName(name, naming)),
+	);
+	return bindingNames.filter(
+		(name) =>
+			!localLogicalNames.has(name) &&
+			!localEmittedNames.has(emittedBindName(name, naming)),
+	);
+}
+
 function runtimeBindingSourceTable(
 	bundle: CompiledNqlQuery,
 	name: string,
@@ -2026,7 +2049,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const parameters: unknown[] = [];
 		const deps = this.buildCompileDeps(options);
 		const { naming } = deps;
-		const bindingNamesInOrder = orderedNqlBindingNames(bundle);
+		const bindingNamesInOrder = removeShadowedNqlBindingNames(
+			orderedNqlBindingNames(bundle),
+			shadowingLocalCteNames(bundle),
+			naming,
+		);
 		const duplicateEmittedBinding =
 			bindingNamesInOrder.length > 0
 				? findDuplicateEmittedNqlBindingName(bindingNamesInOrder, naming)

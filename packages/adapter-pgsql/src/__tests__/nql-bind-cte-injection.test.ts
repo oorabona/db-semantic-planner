@@ -189,6 +189,34 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).toContain('WITH "ids" as (');
 	});
 
+	it('lets a local WITH CTE shadow a read binding without emitting duplicate CTE names', () => {
+		const bundle = compileNqlBundle(
+			'items | select id | bind e\nwith e as (archivedItems | select id) e | select id',
+		);
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql?.match(/"e"\s+as\s+\(/gi)).toHaveLength(1);
+		expect(sql).toContain('FROM "archivedItems"');
+	});
+
+	it('dedupes local WITH CTE shadowing by emitted snake_case binding name', () => {
+		const bundle = compileNqlBundle(
+			'items | select id | bind activeItems\nwith active_items as (archivedItems | select id) active_items | select id',
+		);
+
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(error).toBeUndefined();
+		expect(sql?.match(/"active_items"\s+as\s+\(/gi)).toHaveLength(1);
+		expect(sql).toContain('FROM archived_items');
+		expect(sql).not.toContain('"active_items" as (SELECT items.id FROM items)');
+		expect(sql).not.toContain('activeItems');
+	});
+
 	it('emits camelCase read binding declarations and references through snake_case naming', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind activeItems\nitems | where id in (activeItems) | select id',

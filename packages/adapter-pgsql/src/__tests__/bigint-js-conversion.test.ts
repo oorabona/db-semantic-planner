@@ -1,5 +1,6 @@
 import { createOrm, type RecursivePlanReport, ref, schema } from '@dbsp/core';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { compile as compileNql } from '../../../nql/src/index.js';
@@ -141,6 +142,14 @@ const relationConversionSchema = schema({
 		viewCount: { type: 'bigint', js: 'bigint' },
 		safeViewCount: { type: 'bigint', js: 'number' },
 		stringViewCount: { type: 'bigint', js: 'string' },
+	},
+	tags: {
+		id: 'uuid',
+		score: { type: 'bigint', js: 'bigint' },
+	},
+	postTags: {
+		postId: ref('posts', { inverse: 'tags', through: true }),
+		tagId: ref('tags', { inverse: 'posts', through: true }),
 	},
 });
 
@@ -639,7 +648,7 @@ profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profil
 		]);
 	});
 
-	it('converts NQL binding outputs projected from hasMany physical relation provenance', async () => {
+	it('leaves NQL binding outputs projected from hasMany aggregate relation columns metadata-free', async () => {
 		const bundle = compileRelationConversionNql(`users
 			| select posts.viewCount as postViewCount, posts.safeViewCount as postSafeViewCount, posts.stringViewCount as postStringViewCount
 			| bind user_post_counts
@@ -647,9 +656,9 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		const adapter = createPgsqlAdapter(
 			makePool([
 				{
-					postViewCount: '9007199254740997',
-					postSafeViewCount: '45',
-					postStringViewCount: '9007199254740998',
+					postViewCount: ['9007199254740997'],
+					postSafeViewCount: ['45'],
+					postStringViewCount: ['9007199254740998'],
 				},
 			]),
 			{ model: relationConversionSchema.model },
@@ -658,50 +667,105 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		expect(
 			bundle.bindingOutputSchemas?.get('user_post_counts')?.outputProvenance,
 		).toEqual([
-			{
-				outputColumn: 'postViewCount',
-				table: 'posts',
-				column: 'viewCount',
-			},
-			{
-				outputColumn: 'postSafeViewCount',
-				table: 'posts',
-				column: 'safeViewCount',
-			},
-			{
-				outputColumn: 'postStringViewCount',
-				table: 'posts',
-				column: 'stringViewCount',
-			},
+			{ outputColumn: 'postViewCount' },
+			{ outputColumn: 'postSafeViewCount' },
+			{ outputColumn: 'postStringViewCount' },
 		]);
 		const compiled = adapter.compile(bundle, {
 			model: relationConversionSchema.model,
 		});
-		expect(compiled.columnMetadata?.get('postViewCount')).toEqual({
-			table: 'posts',
-			column: 'viewCount',
-			js: 'bigint',
-		});
-		expect(compiled.columnMetadata?.get('postSafeViewCount')).toEqual({
-			table: 'posts',
-			column: 'safeViewCount',
-			js: 'number',
-		});
-		expect(compiled.columnMetadata?.get('postStringViewCount')).toEqual({
-			table: 'posts',
-			column: 'stringViewCount',
-			js: 'string',
-		});
+		expect(compiled.sql).toContain('json_agg');
+		expect(compiled.columnMetadata?.has('postViewCount') ?? false).toBe(false);
+		expect(compiled.columnMetadata?.has('postSafeViewCount') ?? false).toBe(
+			false,
+		);
+		expect(compiled.columnMetadata?.has('postStringViewCount') ?? false).toBe(
+			false,
+		);
 
 		const rows = await adapter.execute(compiled);
 
 		expect(rows).toEqual([
 			{
-				postViewCount: 9007199254740997n,
-				postSafeViewCount: 45,
-				postStringViewCount: '9007199254740998',
+				postViewCount: ['9007199254740997'],
+				postSafeViewCount: ['45'],
+				postStringViewCount: ['9007199254740998'],
 			},
 		]);
+	});
+
+	it('leaves NQL binding outputs projected from many-to-many aggregate relation columns metadata-free', async () => {
+		const tagScoresColumn = markNqlTrustedRelationFilter(
+			{
+				kind: 'relationColumn' as const,
+				relation: 'tags',
+				column: 'score',
+				as: 'tagScores',
+			},
+			{
+				relation: 'tags',
+				targetTable: 'tags',
+				sourceColumn: ['id'],
+				targetColumn: ['id'],
+				hops: [],
+				through: 'postTags',
+				throughSourceColumn: 'postId',
+				throughTargetColumn: 'tagId',
+				selectedColumn: 'score',
+				cardinality: 'many',
+				relationType: 'manyToMany',
+			},
+		);
+		const bundle: CompiledNqlQuery = {
+			bindings: new Map([
+				[
+					'post_tag_scores',
+					{
+						type: 'select',
+						from: 'posts',
+						select: {
+							type: 'expressions',
+							columns: [tagScoresColumn],
+						},
+					},
+				],
+			]),
+			bindingOutputSchemas: new Map([
+				[
+					'post_tag_scores',
+					{
+						columns: ['tagScores'],
+						outputProvenance: [{ outputColumn: 'tagScores' }],
+						columnTypesUnavailable: {
+							column: 'tagScores',
+							reason: 'relation-column',
+						},
+					},
+				],
+			]),
+			query: {
+				type: 'select',
+				from: 'post_tag_scores',
+				select: { type: 'fields', fields: ['tagScores'] },
+			},
+		};
+		const adapter = createPgsqlAdapter(
+			makePool([{ tagScores: ['9007199254740999'] }]),
+			{ model: relationConversionSchema.model },
+		);
+
+		expect(
+			bundle.bindingOutputSchemas?.get('post_tag_scores')?.outputProvenance,
+		).toEqual([{ outputColumn: 'tagScores' }]);
+		const compiled = adapter.compile(bundle, {
+			model: relationConversionSchema.model,
+		});
+		expect(compiled.sql).toContain('json_agg');
+		expect(compiled.columnMetadata?.has('tagScores') ?? false).toBe(false);
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ tagScores: ['9007199254740999'] }]);
 	});
 
 	it('converts rows from a WITH body that reads an NQL binding', async () => {
