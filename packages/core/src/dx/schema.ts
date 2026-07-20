@@ -2025,6 +2025,7 @@ export async function getSchemaFromDb<
 					if (fk.unique) sourceColumn.unique = true;
 					tableDef[column.name] = sourceColumn;
 					constraints[table.name] ??= {};
+					// biome-ignore lint/style/noNonNullAssertion: constraints entry is initialized above
 					const tableConstraints = constraints[table.name]!;
 					tableConstraints.foreignKeys ??= [];
 					const foreignKeys = tableConstraints.foreignKeys;
@@ -2064,6 +2065,7 @@ export async function getSchemaFromDb<
 			const externalSchema = fk.references.schema;
 			if (externalSchema === undefined) continue;
 			constraints[table.name] ??= {};
+			// biome-ignore lint/style/noNonNullAssertion: constraints entry is initialized above
 			const tableConstraints = constraints[table.name]!;
 			tableConstraints.foreignKeys ??= [];
 			const foreignKeys = tableConstraints.foreignKeys;

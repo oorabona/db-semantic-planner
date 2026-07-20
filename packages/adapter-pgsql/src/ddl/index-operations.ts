@@ -7,14 +7,11 @@
  * @module ddl/index-operations
  */
 
-import type {
-	CreateIndexOptions,
-	DropIndexOptions,
-} from '@dbsp/core';
+import type { CreateIndexOptions, DropIndexOptions } from '@dbsp/core';
 import {
-	renderCreateIndex,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
+	renderCreateIndex,
 } from './index-render.js';
 import { quoteIdent } from './phases/utils.js';
 

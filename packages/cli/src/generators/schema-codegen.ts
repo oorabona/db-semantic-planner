@@ -467,9 +467,9 @@ function indexRepresentationWarning(
 	if (hasExpressions(idx)) {
 		return `Expression index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp. dbsp will neither drop nor recreate it; maintain it by hand.`;
 	}
-	const ddlWarning = ddlIndexRepresentationWarning(tableName, idx);
 	const schemaWarning = schemaIndexRepresentationWarning(tableName, idx);
-	return ddlWarning ?? schemaWarning;
+	const ddlWarning = ddlIndexRepresentationWarning(tableName, idx);
+	return schemaWarning ?? ddlWarning;
 }
 
 function ddlIndexRepresentationWarning(

@@ -13,10 +13,10 @@ export {
 export {
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
-	IndexFeatureUnsupportedError,
-	renderCreateIndex,
 	type IndexCapabilityContext,
+	IndexFeatureUnsupportedError,
 	type IndexRenderSpec,
+	renderCreateIndex,
 } from './index-render.js';
 export {
 	type AddedEnumValue,

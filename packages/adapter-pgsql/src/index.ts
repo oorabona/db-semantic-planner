@@ -31,6 +31,8 @@ export {
 // DDL Generation
 export {
 	type AddedEnumValue,
+	assertCreateIndexesSupported,
+	assertCreateIndexSupported,
 	assertNoRepeatedExpressionSurfaceDrift,
 	type ChangeKind,
 	CheckConstraintNewEnumValueError,
@@ -50,6 +52,9 @@ export {
 	generateMigrationSQL,
 	getAppliedMigrations,
 	getNextSchemaVersion,
+	type IndexCapabilityContext,
+	IndexFeatureUnsupportedError,
+	type IndexRenderSpec,
 	isDestructiveDown,
 	isMigrationApplied,
 	type MigrationRecord,
@@ -59,17 +64,12 @@ export {
 	NonConvergentSchemaDiffError,
 	type ParsedMigrationFile,
 	parseMigrationFile,
-	IndexFeatureUnsupportedError,
 	recordMigration,
 	removeMigrationRecord,
+	renderCreateIndex,
 	type SchemaChange,
 	type SchemaDiff,
 	withMigrationLock,
-	assertCreateIndexesSupported,
-	assertCreateIndexSupported,
-	renderCreateIndex,
-	type IndexCapabilityContext,
-	type IndexRenderSpec,
 } from './ddl/index.js';
 // EXPLAIN support
 export {

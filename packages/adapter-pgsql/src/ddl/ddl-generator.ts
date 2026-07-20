@@ -18,15 +18,12 @@ import type {
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
-import {
-	validateIdentifier,
-	validateSqlExpression,
-} from '../validate.js';
+import { validateIdentifier, validateSqlExpression } from '../validate.js';
 import {
 	assertCreateIndexesSupported,
-	renderCreateIndex,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
+	renderCreateIndex,
 } from './index-render.js';
 import { generateCommentsPhase } from './phases/comments.js';
 import { generateConstraintsPhase } from './phases/constraints.js';
