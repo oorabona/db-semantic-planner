@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.9.5...nql-v1.10.0) (2026-07-20)
+
+
+### Features
+
+* **core:** Opt-in js: read-side JS type for bigint columns ([#354](https://github.com/oorabona/db-semantic-planner/issues/354)) ([70b9405](https://github.com/oorabona/db-semantic-planner/commit/70b9405e0c745788b6001f05c59fcd5af6e3abb1)), closes [#310](https://github.com/oorabona/db-semantic-planner/issues/310)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 3.1.0
+
 ## [1.9.5](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.9.4...nql-v1.9.5) (2026-07-14)
 
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [3.1.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.0.0...adapter-pgsql-v3.1.0) (2026-07-20)
+
+
+### Features
+
+* **adapter-pgsql:** Version-gate index features via ADR-0003 capability model ([#349](https://github.com/oorabona/db-semantic-planner/issues/349)) ([618f07b](https://github.com/oorabona/db-semantic-planner/commit/618f07b69968b988a005627568b8da6f9bc27937)), closes [#245](https://github.com/oorabona/db-semantic-planner/issues/245)
+* **core:** ADR-0003 rule-based schema-transition planner ([#348](https://github.com/oorabona/db-semantic-planner/issues/348)) ([6d41829](https://github.com/oorabona/db-semantic-planner/commit/6d418299f6a9700298aa67bbde56ac91ea42e268))
+* **core:** Opt-in js: read-side JS type for bigint columns ([#354](https://github.com/oorabona/db-semantic-planner/issues/354)) ([70b9405](https://github.com/oorabona/db-semantic-planner/commit/70b9405e0c745788b6001f05c59fcd5af6e3abb1)), closes [#310](https://github.com/oorabona/db-semantic-planner/issues/310)
+* **types:** Make CompiledQuery a constructor-only, runtime-branded capability ([#356](https://github.com/oorabona/db-semantic-planner/issues/356)) ([421ae11](https://github.com/oorabona/db-semantic-planner/commit/421ae113d52a71a96fb0be9efc0819ce75f78c4b)), closes [#353](https://github.com/oorabona/db-semantic-planner/issues/353)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 3.1.0
+    * @dbsp/types bumped to 3.1.0
+
 ## [3.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v2.0.0...adapter-pgsql-v3.0.0) (2026-07-14)
 
 

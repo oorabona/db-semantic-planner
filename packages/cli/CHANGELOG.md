@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.1.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.0.1...cli-v2.1.0) (2026-07-20)
+
+
+### Features
+
+* **core:** Opt-in js: read-side JS type for bigint columns ([#354](https://github.com/oorabona/db-semantic-planner/issues/354)) ([70b9405](https://github.com/oorabona/db-semantic-planner/commit/70b9405e0c745788b6001f05c59fcd5af6e3abb1)), closes [#310](https://github.com/oorabona/db-semantic-planner/issues/310)
+
+
+### Bug Fixes
+
+* **cli:** Make the migration-integrity guards real, by making the code reachable ([#339](https://github.com/oorabona/db-semantic-planner/issues/339)) ([df46c05](https://github.com/oorabona/db-semantic-planner/commit/df46c057c96a00762c0df13207f8b14d8d7df823))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 3.1.0
+    * @dbsp/core bumped to 3.1.0
+    * @dbsp/nql bumped to 1.10.0
+    * @dbsp/types bumped to 3.1.0
+
 ## [2.0.1](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.0.0...cli-v2.0.1) (2026-07-14)
 
 
