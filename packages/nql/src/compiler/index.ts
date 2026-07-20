@@ -54,6 +54,7 @@ export type {
 import type {
 	MutationIntent,
 	MutationReturningItem,
+	NqlBindingOutputProvenance,
 	NqlBindingOutputSchema,
 	NqlProgramSequenceStep,
 	QueryIntent,
@@ -927,6 +928,10 @@ export class NqlCompiler {
 			if (columns !== undefined) {
 				return {
 					columns,
+					outputProvenance: this.buildMutationReturningOutputProvenance(
+						mutation.table,
+						columns,
+					),
 					...this.buildMutationReturningColumnTypes(mutation.table, columns),
 				};
 			}
@@ -955,13 +960,42 @@ export class NqlCompiler {
 			});
 			return {
 				columns,
+				outputProvenance: this.buildMutationReturningOutputProvenance(
+					mutation.table,
+					columns,
+				),
 				...this.buildMutationReturningColumnTypes(mutation.table, columns),
 			};
 		}
 		return {
 			columns,
+			outputProvenance: this.buildMutationReturningOutputProvenance(
+				mutation.table,
+				columns,
+			),
 			...this.buildMutationReturningColumnTypes(mutation.table, columns),
 		};
+	}
+
+	private buildMutationReturningOutputProvenance(
+		table: string,
+		columns: readonly string[],
+	): readonly NqlBindingOutputProvenance[] {
+		const items = this.ctx.lastMutationReturningItems;
+		return columns.map((column, index) => {
+			const item =
+				items !== undefined && items !== 'star' ? items[index] : undefined;
+			const sourceColumn =
+				item !== undefined
+					? (this.ctx.validator?.resolveColumnName(table, item.source) ??
+						item.source)
+					: column;
+			return {
+				outputColumn: column,
+				table,
+				column: sourceColumn,
+			};
+		});
 	}
 
 	/**

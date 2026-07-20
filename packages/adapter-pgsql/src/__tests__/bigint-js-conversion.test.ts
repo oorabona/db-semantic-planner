@@ -287,6 +287,50 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
 	});
 
+	it('converts runtime NQL binding-final rows from neutral provenance', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ sequence: '9007199254740993' }]),
+			{ model: conversionSchema.model },
+		);
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'e',
+				select: { type: 'fields', fields: ['sequence'] },
+			},
+			runtimeBindings: new Map([
+				[
+					'e',
+					{
+						columns: ['sequence'],
+						rows: [{ sequence: '9007199254740993' }],
+						outputProvenance: [
+							{
+								outputColumn: 'sequence',
+								table: 'events',
+								column: 'sequence',
+							},
+						],
+						columnTypes: {
+							sequence: { kind: 'column', type: 'bigint' },
+						},
+					},
+				],
+			]),
+		};
+
+		const compiled = adapter.compile(bundle, { model: conversionSchema.model });
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
 	it('converts fluent withCte outer rows by threading the ORM model', async () => {
 		const adapter = createPgsqlAdapter(
 			makePool([{ sequence: '9007199254740993' }]),

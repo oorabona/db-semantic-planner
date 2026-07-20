@@ -958,12 +958,15 @@ function createRuntimeBinding(
 	dbCasing?: DbCasing,
 ): NqlRuntimeBinding {
 	const columns = requireMutationBindingColumns(bundle, bindName);
-	const columnTypes = bundle.bindingOutputSchemas?.get(bindName)?.columnTypes;
+	const outputSchema = bundle.bindingOutputSchemas?.get(bindName);
+	const columnTypes = outputSchema?.columnTypes;
+	const outputProvenance = outputSchema?.outputProvenance;
 	return {
 		columns,
 		rows: rows.map((row) =>
 			toRuntimeBindingRow(bindName, row, columns, dbCasing),
 		),
+		...(outputProvenance !== undefined && { outputProvenance }),
 		...(columnTypes !== undefined && { columnTypes }),
 	};
 }
@@ -1848,11 +1851,13 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const steps = createNqlProgramSteps(compiledIntent);
 
 		const dumpRuntimeBindingPreview = (bindName: string): NqlRuntimeBinding => {
-			const columnTypes =
-				sourceBundle.bindingOutputSchemas?.get(bindName)?.columnTypes;
+			const outputSchema = sourceBundle.bindingOutputSchemas?.get(bindName);
+			const columnTypes = outputSchema?.columnTypes;
+			const outputProvenance = outputSchema?.outputProvenance;
 			return {
 				columns: requireMutationBindingColumns(sourceBundle, bindName),
 				rows: [],
+				...(outputProvenance !== undefined && { outputProvenance }),
 				...(columnTypes !== undefined && { columnTypes }),
 			};
 		};

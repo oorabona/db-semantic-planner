@@ -45,6 +45,7 @@ import type {
 	PlanReport,
 	QueryIntent,
 	RecursivePlanReport,
+	SelectIntent,
 	SetOperationIntent,
 	SubqueryIncludeInfo,
 	TableIR,
@@ -124,7 +125,16 @@ import {
 	type NamingPlugin,
 } from './naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
-import { finalizeEnvelope } from './projection-envelope.js';
+import {
+	finalizeEnvelope,
+	fromCompiledQuery,
+	fromOutputProvenance,
+	type ProjectionEnvelope,
+	type ProjectNamedFieldsExpression,
+	type ProjectNamedFieldsSelection,
+	preserveOneToOne,
+	projectNamedFields,
+} from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
 	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
@@ -1169,6 +1179,191 @@ function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
 		},
 	};
 }
+
+type NqlBindingProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
+
+function nqlBindingOutputKey(name: string, naming: NamingPlugin): string {
+	return naming.toDatabase(name);
+}
+
+function addNqlBindingSelection(
+	selections: ProjectNamedFieldsSelection[],
+	inputKey: string,
+	outputKey: string,
+): void {
+	selections.push({ inputKey, outputKey });
+}
+
+function addNqlBindingExpression(
+	expressions: ProjectNamedFieldsExpression[],
+	outputKey: string | undefined,
+	reason: string,
+): void {
+	if (outputKey === undefined) return;
+	expressions.push({ outputKey, reason });
+}
+
+function addNqlBindingStarSelections(
+	source: ProjectionEnvelope,
+	selections: ProjectNamedFieldsSelection[],
+): void {
+	if (source.projection.kind === 'dropped') return;
+	for (const outputKey of source.projection.outputs.keys()) {
+		addNqlBindingSelection(selections, outputKey, outputKey);
+	}
+}
+
+function nqlBindingAliasOutputKey(
+	value: unknown,
+	naming: NamingPlugin,
+): string | undefined {
+	return typeof value === 'string'
+		? nqlBindingOutputKey(value, naming)
+		: undefined;
+}
+
+function nqlBindingExpressionOutputKey(
+	expr: ExpressionIntent,
+	naming: NamingPlugin,
+): string | undefined {
+	const record = expr as unknown as Record<string, unknown>;
+	return nqlBindingAliasOutputKey(record.as ?? record.alias, naming);
+}
+
+function buildNqlBindingProjectionShape(
+	source: ProjectionEnvelope,
+	select: SelectIntent | undefined,
+	naming: NamingPlugin,
+): {
+	selections: ProjectNamedFieldsSelection[];
+	expressions: ProjectNamedFieldsExpression[];
+	preserveOneToOne: boolean;
+} {
+	if (
+		!select ||
+		typeof select !== 'object' ||
+		!('type' in select) ||
+		select.type === 'all'
+	) {
+		return { selections: [], expressions: [], preserveOneToOne: true };
+	}
+
+	const selections: ProjectNamedFieldsSelection[] = [];
+	const expressions: ProjectNamedFieldsExpression[] = [];
+
+	if (select.type === 'fields') {
+		for (const field of select.fields) {
+			const outputKey = nqlBindingOutputKey(field, naming);
+			addNqlBindingSelection(selections, outputKey, outputKey);
+		}
+		return { selections, expressions, preserveOneToOne: false };
+	}
+
+	if (select.type === 'aggregate') {
+		for (const field of select.fields ?? []) {
+			const outputKey = nqlBindingOutputKey(field, naming);
+			addNqlBindingSelection(selections, outputKey, outputKey);
+		}
+		for (const aggregate of select.aggregates) {
+			addNqlBindingExpression(
+				expressions,
+				nqlBindingAliasOutputKey(aggregate.as, naming),
+				'aggregate projection has no raw column provenance',
+			);
+		}
+		return { selections, expressions, preserveOneToOne: false };
+	}
+
+	for (const expr of select.columns) {
+		const record = expr as unknown as Record<string, unknown>;
+		switch (expr.kind) {
+			case 'column': {
+				const column = record.column;
+				if (column === '*') {
+					addNqlBindingStarSelections(source, selections);
+					break;
+				}
+				if (typeof column !== 'string') {
+					addNqlBindingExpression(
+						expressions,
+						nqlBindingExpressionOutputKey(expr, naming),
+						'column projection could not be resolved',
+					);
+					break;
+				}
+				addNqlBindingSelection(
+					selections,
+					nqlBindingOutputKey(column, naming),
+					nqlBindingAliasOutputKey(record.as, naming) ??
+						nqlBindingOutputKey(column, naming),
+				);
+				break;
+			}
+			case 'columnAlias': {
+				const column = record.column;
+				const alias = record.alias;
+				if (typeof column !== 'string' || typeof alias !== 'string') {
+					addNqlBindingExpression(
+						expressions,
+						nqlBindingExpressionOutputKey(expr, naming),
+						'column alias projection could not be resolved',
+					);
+					break;
+				}
+				addNqlBindingSelection(
+					selections,
+					nqlBindingOutputKey(column, naming),
+					nqlBindingOutputKey(alias, naming),
+				);
+				break;
+			}
+			default:
+				addNqlBindingExpression(
+					expressions,
+					nqlBindingExpressionOutputKey(expr, naming),
+					'expression projection has no raw column provenance',
+				);
+				break;
+		}
+	}
+
+	return { selections, expressions, preserveOneToOne: false };
+}
+
+function projectNqlBindingQueryEnvelope<T = unknown>(
+	source: ProjectionEnvelope<T>,
+	query: QueryIntent,
+	sql: string,
+	parameters: readonly unknown[],
+	naming: NamingPlugin,
+	hydrationPlan: PlanReport | undefined,
+): ProjectionEnvelope<T> {
+	const shape = buildNqlBindingProjectionShape(source, query.select, naming);
+	if (shape.preserveOneToOne) {
+		return preserveOneToOne(source, {
+			sql,
+			parameters,
+			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+			preserveHydrationPlan: false,
+		});
+	}
+	return projectNamedFields(source, {
+		sql,
+		parameters,
+		selections: shape.selections,
+		expressions: shape.expressions,
+		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+		preserveHydrationPlan: false,
+	});
+}
+
+function getNqlBindingProjection(
+	registry: NqlBindingProjectionRegistry | undefined,
+	name: string,
+	naming: NamingPlugin,
+): ProjectionEnvelope | undefined {
+	return registry?.get(emittedBindName(name, naming));
+}
 // ============================================================================
 // Options
 // ============================================================================
@@ -1605,11 +1800,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		);
 	}
 
-	private compileNqlBundleLeaf<T = unknown>(
+	private compileNqlBundleLeafEnvelope<T = unknown>(
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
-	): CompiledQuery<T> {
+		bindingProjections?: NqlBindingProjectionRegistry,
+	): ProjectionEnvelope<T> {
 		if (bundle.query !== undefined) {
 			const deps = this.buildCompileDeps(options, bindingNames);
 			const queryFromBinding = hasBindingName(
@@ -1624,42 +1820,60 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,
 					});
-			return guardCompiledQuery(
-				compileSelect<T>(planReport, options, deps),
-				'NQL query',
+			const compiled = compileSelectEnvelope<T>(planReport, options, deps);
+			const registeredSource = getNqlBindingProjection(
+				bindingProjections,
+				bundle.query.from,
+				deps.naming,
 			);
+			return registeredSource
+				? projectNqlBindingQueryEnvelope<T>(
+						registeredSource as ProjectionEnvelope<T>,
+						bundle.query,
+						compiled.sql,
+						compiled.parameters,
+						deps.naming,
+						compiled.hydrationPlan,
+					)
+				: compiled;
 		}
 		if (bundle.cteQuery !== undefined) {
-			return guardCompiledQuery(
-				compileCteQueryImpl(
-					bundle.cteQuery,
-					options,
-					this.buildCompileDeps(options, bindingNames),
+			return fromCompiledQuery(
+				guardCompiledQuery(
+					compileCteQueryImpl(
+						bundle.cteQuery,
+						options,
+						this.buildCompileDeps(options, bindingNames),
+					) as CompiledQuery<T>,
+					'NQL CTE query',
 				) as CompiledQuery<T>,
-				'NQL CTE query',
-			) as CompiledQuery<T>;
+			);
 		}
 		if (bundle.setOperation !== undefined) {
 			const model = this.requireNqlCompileModel(options);
-			return guardCompiledQuery(
-				this.compileSetOperationWithBindings(
-					bundle.setOperation,
-					model,
-					options,
-					bindingNames,
+			return fromCompiledQuery(
+				guardCompiledQuery(
+					this.compileSetOperationWithBindings(
+						bundle.setOperation,
+						model,
+						options,
+						bindingNames,
+					) as CompiledQuery<T>,
+					'NQL set operation',
 				) as CompiledQuery<T>,
-				'NQL set operation',
-			) as CompiledQuery<T>;
+			);
 		}
 		if (bundle.mutation !== undefined) {
-			return guardCompiledQuery(
-				this.compileNqlMutation(
-					bundle,
-					options,
-					bindingNames,
+			return fromCompiledQuery(
+				guardCompiledQuery(
+					this.compileNqlMutation(
+						bundle,
+						options,
+						bindingNames,
+					) as CompiledQuery<T>,
+					'NQL mutation',
 				) as CompiledQuery<T>,
-				'NQL mutation',
-			) as CompiledQuery<T>;
+			);
 		}
 		throw new Error('NQL bundle did not contain a compilable intent.');
 	}
@@ -1690,6 +1904,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					)
 				: undefined;
 		this.assertNqlBindingNamesDisjointFromTables(bindingNames, options);
+		const bindingProjections = new Map<string, ProjectionEnvelope>();
 
 		for (const name of bindingNamesInOrder) {
 			const runtimeBinding = bundle.runtimeBindings?.get(name);
@@ -1706,6 +1921,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 				ctes.push(compiledRuntimeBinding.cte);
 				parameters.push(...compiledRuntimeBinding.parameters);
+				const outputProvenance =
+					runtimeBinding.outputProvenance ??
+					bundle.bindingOutputSchemas?.get(name)?.outputProvenance;
+				bindingProjections.set(
+					emittedBindName(name, naming),
+					fromOutputProvenance({
+						sql: '',
+						parameters: [],
+						columns: runtimeBinding.columns,
+						...(outputProvenance !== undefined && { outputProvenance }),
+						model: deps.model,
+						naming,
+					}),
+				);
 				continue;
 			}
 
@@ -1719,15 +1948,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
-			const compiled = this.compileNqlBundleLeaf(
+			const compiled = this.compileNqlBundleLeafEnvelope(
 				bindingBundle,
 				options,
 				bindingNames,
+				bindingProjections,
 			);
 			ctes.push(
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
+			bindingProjections.set(emittedBindName(name, naming), compiled);
 		}
 
 		const leafBundle: CompiledNqlQuery = {
@@ -1740,11 +1971,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				setOperation: bundle.setOperation,
 			}),
 		};
-		const compiled = this.compileNqlBundleLeaf<T>(
+		const compiledEnvelope = this.compileNqlBundleLeafEnvelope<T>(
 			leafBundle,
 			options,
 			bindingNames,
+			bindingProjections,
 		);
+		const compiled = finalizeEnvelope(compiledEnvelope);
 		if (ctes.length === 0) {
 			return guardCompiledQuery(compiled, 'NQL bundle');
 		}

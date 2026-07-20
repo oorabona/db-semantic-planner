@@ -7,6 +7,7 @@ import {
 	schema,
 } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { compile as compileNql } from '../../../nql/src/index.js';
 import { buildCompiledColumnMetadata } from '../column-metadata.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -34,6 +35,20 @@ const testSchema = schema({
 function compile(plan: PlanReport) {
 	const adapter = createPgsqlCompileOnlyAdapter();
 	return adapter.compile(plan, { model: testSchema.model });
+}
+
+function compileNqlToPg(nql: string) {
+	const result = compileNql(nql, testSchema.model);
+	if (!result.success || !result.ast) {
+		throw new Error(
+			`NQL compilation failed: ${result.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+	const adapter = createPgsqlCompileOnlyAdapter();
+	return {
+		bundle: result.ast,
+		compiled: adapter.compile(result.ast, { model: testSchema.model }),
+	};
 }
 
 describe('bigint js column metadata provenance', () => {
@@ -664,6 +679,54 @@ describe('bigint js column metadata provenance', () => {
 			column: 'sequence',
 			js: 'bigint',
 		});
+	});
+
+	it('carries NQL binding provenance through a final passthrough select', () => {
+		const { bundle, compiled } = compileNqlToPg(`events
+			| select sequence
+			| bind e
+e | select sequence`);
+
+		expect(bundle.bindingOutputSchemas?.get('e')?.outputProvenance).toEqual([
+			{ outputColumn: 'sequence', table: 'events', column: 'sequence' },
+		]);
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+	});
+
+	it('carries NQL binding provenance through an aliased final select', () => {
+		const { compiled } = compileNqlToPg(`events
+			| select sequence
+			| bind e
+e | select sequence as seq`);
+
+		expect(compiled.columnMetadata?.get('seq')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+	});
+
+	it('keeps non-js NQL binding pipelines metadata-free', () => {
+		const { compiled } = compileNqlToPg(`events
+			| select legacySequence
+			| bind e
+e | select legacySequence`);
+
+		expect(compiled.columnMetadata).toBeUndefined();
+	});
+
+	it('keeps expression finals over NQL bindings metadata-free', () => {
+		const { compiled } = compileNqlToPg(`events
+			| select sequence
+			| bind e
+e | select sequence + 1 as nextSequence`);
+
+		expect(compiled.columnMetadata).toBeUndefined();
 	});
 
 	it('throws when set operations would carry bigint js metadata', () => {

@@ -14,6 +14,7 @@ import {
 	type NqlBindingColumnLineage,
 	type NqlBindingColumnTypeInfo,
 	type NqlBindingColumnUntypeableReason,
+	type NqlBindingOutputProvenance,
 	type NqlBindingOutputSchema,
 	type NqlBindingRelationFilterMetadata,
 	type NqlBindingVirtualRelation,
@@ -1389,6 +1390,7 @@ export function getQueryOutputSchema(
 	const columns: string[] = [];
 	const seen = new Set<string>();
 	const directProjectionLineage: NqlBindingColumnLineage[] = [];
+	const provenanceCandidates = new Map<string, NqlBindingOutputProvenance[]>();
 	const typeCandidates: BindingColumnTypeCandidate[] = [];
 	const sourceIsPhysicalTable =
 		ctx.validator?.hasPhysicalTable(intent.from) ?? false;
@@ -1403,12 +1405,54 @@ export function getQueryOutputSchema(
 	const addColumn = (column: string) => addUnique(columns, seen, column);
 	const resolveSourceColumn = (column: string) =>
 		ctx.validator?.resolveColumnName(intent.from, column) ?? column;
+	const addProvenanceCandidate = (
+		outputColumn: string,
+		provenance: NqlBindingOutputProvenance,
+	) => {
+		const candidates = provenanceCandidates.get(outputColumn) ?? [];
+		candidates.push(provenance);
+		provenanceCandidates.set(outputColumn, candidates);
+	};
+	const unresolvedProvenance = (
+		outputColumn: string,
+	): NqlBindingOutputProvenance => ({ outputColumn });
+	const resolveDirectProjectionProvenance = (
+		outputColumn: string,
+		resolvedSourceColumn: string,
+	): NqlBindingOutputProvenance => {
+		if (sourceIsPhysicalTable) {
+			return {
+				outputColumn,
+				table: intent.from,
+				column: resolvedSourceColumn,
+			};
+		}
+		const sourceProvenance = sourceBindingSchema?.outputProvenance?.filter(
+			(provenance) =>
+				columnsMatch(provenance.outputColumn, resolvedSourceColumn),
+		);
+		if (sourceProvenance?.length === 1) {
+			const [provenance] = sourceProvenance;
+			if (provenance?.table !== undefined && provenance.column !== undefined) {
+				return {
+					outputColumn,
+					table: provenance.table,
+					column: provenance.column,
+				};
+			}
+		}
+		return unresolvedProvenance(outputColumn);
+	};
 	const addDirectProjection = (outputColumn: string, sourceColumn: string) => {
 		const resolvedSourceColumn = resolveSourceColumn(sourceColumn);
 		// Record the type-resolution attempt BEFORE the dedup check below so a
 		// duplicate output name (second `addColumn` call returning false) is
 		// still visible to buildBindingColumnTypes as a second candidate for
 		// the same column — the existing dedup silently drops it otherwise.
+		addProvenanceCandidate(
+			outputColumn,
+			resolveDirectProjectionProvenance(outputColumn, resolvedSourceColumn),
+		);
 		let typeInfo: NqlBindingColumnTypeInfo | undefined;
 		let untypeableReason: NqlBindingColumnUntypeableReason =
 			'unresolvable-source';
@@ -1442,6 +1486,7 @@ export function getQueryOutputSchema(
 		outputColumn: string,
 		reason: NqlBindingColumnUntypeableReason,
 	) => {
+		addProvenanceCandidate(outputColumn, unresolvedProvenance(outputColumn));
 		typeCandidates.push({ column: outputColumn, untypeable: reason });
 		addColumn(outputColumn);
 	};
@@ -1451,6 +1496,7 @@ export function getQueryOutputSchema(
 	// represent without dialect-specific type-promotion knowledge (ARCH-001;
 	// see `{kind:'aggregate', fn:'count'}` in packages/types/src/adapter.ts).
 	const addCountAggregateColumn = (outputColumn: string) => {
+		addProvenanceCandidate(outputColumn, unresolvedProvenance(outputColumn));
 		typeCandidates.push({
 			column: outputColumn,
 			typed: { kind: 'aggregate', fn: 'count' },
@@ -1465,8 +1511,17 @@ export function getQueryOutputSchema(
 	const finalizeOutputSchema = (): NqlBindingOutputSchema => {
 		const outputSchema = { columns, directProjectionLineage };
 		const typesResult = buildBindingColumnTypes(columns, typeCandidates);
+		const outputProvenance = columns.map((column) => {
+			const candidates = provenanceCandidates.get(column) ?? [];
+			if (candidates.length !== 1) return unresolvedProvenance(column);
+			const [provenance] = candidates;
+			return provenance?.table !== undefined && provenance.column !== undefined
+				? provenance
+				: unresolvedProvenance(column);
+		});
 		return {
 			columns: outputSchema.columns,
+			outputProvenance,
 			relationFilters: getBindingRelationFilterMetadata(
 				intent,
 				ctx,

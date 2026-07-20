@@ -3,7 +3,9 @@ import type {
 	CompiledColumnMetadata,
 	CompiledQuery,
 	ModelIR,
+	NqlBindingOutputProvenance,
 	PlanReport,
+	TableIR,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -72,6 +74,16 @@ export type FromModelColumnsOptions = {
 	readonly columns: readonly string[];
 	readonly model: ModelIR;
 	readonly naming: NamingPlugin;
+};
+
+export type FromOutputProvenanceOptions = {
+	readonly sql: string;
+	readonly parameters: readonly unknown[];
+	readonly columns: readonly string[];
+	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
+	readonly model: ModelIR | undefined;
+	readonly naming: NamingPlugin;
+	readonly hydrationPlan?: PlanReport;
 };
 
 export type ProjectNamedFieldsSelection = {
@@ -293,6 +305,105 @@ export function fromModelColumns<T = unknown>(
 				),
 			),
 		},
+	});
+}
+
+function findModelTable(
+	model: ModelIR | undefined,
+	tableName: string,
+	naming: NamingPlugin,
+): TableIR | undefined {
+	if (model === undefined) return undefined;
+	return (
+		model.getTable(tableName) ??
+		[...model.tables.values()].find(
+			(table) =>
+				table.name === tableName || naming.toDatabase(table.name) === tableName,
+		)
+	);
+}
+
+function outputFromProvenance(
+	provenance: NqlBindingOutputProvenance,
+	model: ModelIR | undefined,
+	naming: NamingPlugin,
+): OutputProjection {
+	if (provenance.table === undefined || provenance.column === undefined) {
+		return {
+			kind: 'unresolved',
+			reason: 'binding output provenance did not name a model column',
+		};
+	}
+	const table = findModelTable(model, provenance.table, naming);
+	const column = table?.columns.find(
+		(candidate) =>
+			candidate.name === provenance.column ||
+			naming.toDatabase(candidate.name) === provenance.column,
+	);
+	if (table === undefined || column === undefined) {
+		return {
+			kind: 'unresolved',
+			reason: 'binding output provenance could not be resolved in the model',
+		};
+	}
+	return {
+		kind: 'modelColumn',
+		table: table.name,
+		column: column.name,
+		...(column.type === 'bigint' && column.js !== undefined
+			? { js: column.js }
+			: {}),
+	};
+}
+
+export function fromOutputProvenance<T = unknown>(
+	options: FromOutputProvenanceOptions,
+): ProjectionEnvelope<T> {
+	const provenanceByOutput = new Map<string, NqlBindingOutputProvenance[]>();
+	for (const provenance of options.outputProvenance ?? []) {
+		const outputKey = options.naming.toDatabase(provenance.outputColumn);
+		const entries = provenanceByOutput.get(outputKey) ?? [];
+		entries.push(provenance);
+		provenanceByOutput.set(outputKey, entries);
+	}
+
+	const outputs = new Map<string, OutputProjection>();
+	for (const column of options.columns) {
+		const outputKey = options.naming.toDatabase(column);
+		const entries = provenanceByOutput.get(outputKey) ?? [];
+		if (entries.length === 0) {
+			outputs.set(outputKey, {
+				kind: 'unresolved',
+				reason: 'binding output provenance was not provided',
+			});
+			continue;
+		}
+		if (entries.length > 1) {
+			outputs.set(outputKey, {
+				kind: 'ambiguous',
+				reason: `binding output '${outputKey}' had multiple provenance entries`,
+			});
+			continue;
+		}
+		const [provenance] = entries;
+		outputs.set(
+			outputKey,
+			provenance
+				? outputFromProvenance(provenance, options.model, options.naming)
+				: {
+						kind: 'unresolved',
+						reason: 'binding output provenance could not be read',
+					},
+		);
+	}
+
+	return makeEnvelope<T>({
+		sql: options.sql,
+		parameters: options.parameters,
+		projection: { kind: 'known', outputs },
+		...(options.hydrationPlan !== undefined
+			? { hydrationPlan: options.hydrationPlan }
+			: {}),
 	});
 }
 

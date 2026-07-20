@@ -2469,6 +2469,23 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 	});
 
+	it('carries binding output provenance through aliases and binding chains', () => {
+		const result = compile(
+			'posts | select authorId as aid | bind projected_posts\nprojected_posts | select aid as author | bind projected_authors\nprojected_authors | select author',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('projected_posts')
+				?.outputProvenance,
+		).toEqual([{ outputColumn: 'aid', table: 'posts', column: 'authorId' }]);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('projected_authors')
+				?.outputProvenance,
+		).toEqual([{ outputColumn: 'author', table: 'posts', column: 'authorId' }]);
+	});
+
 	it('detects unresolved SELECT * output-schema errors by typed discriminant', () => {
 		const error = new UnresolvedSelectAllOutputSchemaError(
 			'changed human-readable output-schema wording',

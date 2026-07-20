@@ -176,6 +176,12 @@ export interface NqlBindingColumnLineage {
 	readonly outputColumn: string;
 }
 
+export interface NqlBindingOutputProvenance {
+	readonly outputColumn: string;
+	readonly table?: string;
+	readonly column?: string;
+}
+
 export interface NqlBindingRelationFilterMetadata {
 	readonly sourceTable?: string;
 	readonly unsafeReason?: string;
@@ -209,6 +215,11 @@ export type NqlBindingColumnUntypeableReason =
 
 export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
+	/**
+	 * Neutral output-column provenance. Entries with `table` + `column` name a
+	 * proven model column; output-only entries are intentionally metadata-free.
+	 */
+	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
 	readonly relationFilters?: NqlBindingRelationFilterMetadata;
 	/**
 	 * Present when EVERY projected column's type is statically resolvable
@@ -230,6 +241,7 @@ export interface NqlBindingOutputSchema {
 export interface NqlRuntimeBinding {
 	readonly columns: readonly string[];
 	readonly rows: readonly Readonly<Record<string, unknown>>[];
+	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
 	/** Per-column type info carried from the binding's output schema (absent → fall back to model-walk anchor resolution). */
 	readonly columnTypes?: Readonly<Record<string, NqlBindingColumnTypeInfo>>;
 }
