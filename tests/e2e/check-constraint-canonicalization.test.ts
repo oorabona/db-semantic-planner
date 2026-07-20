@@ -326,10 +326,40 @@ async function grantNoTempRoleTableRead(
 	);
 }
 
+function isDatabaseInUseError(error: unknown): boolean {
+	if (typeof error !== 'object' || error === null) return false;
+	const code = (error as { code?: unknown }).code;
+	const message = (error as { message?: unknown }).message;
+	return (
+		code === '55006' ||
+		(typeof message === 'string' &&
+			message.includes('is being accessed by other users'))
+	);
+}
+
 async function dropDatabaseIfExists(
 	pool: Awaited<ReturnType<typeof getTestPool>>,
 	database: string,
 ): Promise<void> {
+	// The pools connected to this temp DB close themselves (await pool.end()), but the
+	// server-side backends can linger for a few ms after the client disconnects. Retry the
+	// DROP so those backends clear on their own, instead of issuing pg_terminate_backend
+	// eagerly — that races with the graceful close, terminates a connection mid-close, and
+	// surfaces a 57P01 that flakes CI (#357). Force-terminate only as a last resort, for a
+	// backend that is genuinely stuck.
+	const dropStatement = `DROP DATABASE IF EXISTS ${quoteIdent(database)}`;
+	for (let attempt = 1; attempt <= 20; attempt++) {
+		try {
+			await pool.query(dropStatement);
+			return;
+		} catch (error) {
+			if (!isDatabaseInUseError(error) || attempt === 20) {
+				if (!isDatabaseInUseError(error)) throw error;
+				break;
+			}
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+	}
 	await pool.query(
 		`SELECT pg_terminate_backend(pid)
 		   FROM pg_stat_activity
@@ -337,7 +367,7 @@ async function dropDatabaseIfExists(
 		    AND pid <> pg_backend_pid()`,
 		[database],
 	);
-	await pool.query(`DROP DATABASE IF EXISTS ${quoteIdent(database)}`);
+	await pool.query(dropStatement);
 }
 
 async function connectionIdentity(pool: pg.Pool): Promise<{
