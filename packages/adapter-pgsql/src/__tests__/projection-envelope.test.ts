@@ -1,4 +1,5 @@
 import { schema } from '@dbsp/core';
+import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../naming-plugin.js';
@@ -8,6 +9,7 @@ import {
 	finalizeEnvelope,
 	fromAstProjection,
 	fromModelColumns,
+	type ProjectionEnvelope,
 	preserveOneToOne,
 	projectNamedFields,
 	supplementOutputProvenance,
@@ -83,6 +85,79 @@ describe('projection envelope', () => {
 		});
 		expect(compiled.columnMetadata?.has('legacySequence') ?? false).toBe(false);
 		expect(compiled.columnMetadata?.has('label') ?? false).toBe(false);
+	});
+
+	it('finalizeEnvelope routes descriptor handling through the neutral resolver', () => {
+		const source = fromModelColumns({
+			sql: 'SELECT sequence FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['sequence'],
+			model: testSchema.model,
+			naming: identityNaming,
+		});
+		expect(source.projection.kind).toBe('known');
+		if (source.projection.kind !== 'known') return;
+
+		const scalarDescriptor = source.projection.outputs.get('sequence');
+		expect(scalarDescriptor).toEqual({
+			outputKey: 'sequence',
+			source: {
+				kind: 'modelColumn',
+				table: 'events',
+				column: 'sequence',
+				js: 'bigint',
+			},
+			shape: { kind: 'scalar', cardinality: 'one' },
+		});
+		expect(resolveOutputReadHandling(scalarDescriptor!)).toEqual({
+			kind: 'scalarConvert',
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(finalizeEnvelope(source).columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+
+		const [expressionKey, expressionOutput] = expressionColumn(
+			'total',
+			'aggregate result',
+		);
+		expect(resolveOutputReadHandling(expressionOutput)).toEqual({
+			kind: 'none',
+		});
+		const expressionEnvelope = {
+			sql: 'SELECT count(*) AS total FROM events',
+			parameters: [],
+			projection: {
+				kind: 'known',
+				outputs: new Map([[expressionKey, expressionOutput]]),
+			},
+		} as ProjectionEnvelope;
+		expect(finalizeEnvelope(expressionEnvelope).columnMetadata).toBeUndefined();
+
+		const unknownShapeEnvelope = {
+			sql: 'SELECT sequence FROM events',
+			parameters: [],
+			projection: {
+				kind: 'known',
+				outputs: new Map([
+					[
+						'sequence',
+						{
+							...scalarDescriptor!,
+							shape: { kind: 'unknown', reason: 'unit test' },
+						},
+					],
+				]),
+			},
+		} as ProjectionEnvelope;
+		expect(
+			finalizeEnvelope(unknownShapeEnvelope).columnMetadata,
+		).toBeUndefined();
 	});
 
 	it('projectNamedFields moves aliased metadata and keeps non-convertible sources metadata-free', () => {
@@ -161,8 +236,15 @@ describe('projection envelope', () => {
 		const [outputKey, output] = expressionColumn('total', 'aggregate result');
 		expect(outputKey).toBe('total');
 		expect(output).toEqual({
-			kind: 'expression',
-			reason: 'aggregate result',
+			outputKey: 'total',
+			source: {
+				kind: 'expression',
+				reason: 'aggregate result',
+			},
+			shape: {
+				kind: 'unknown',
+				reason: 'aggregate result',
+			},
 		});
 
 		const env = fromAstProjection({

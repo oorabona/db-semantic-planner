@@ -1,12 +1,15 @@
 import type {
-	ColumnJsReadType,
 	CompiledColumnMetadata,
 	CompiledQuery,
 	ModelIR,
 	NqlBindingOutputProvenance,
+	OutputDescriptor,
+	OutputSource,
+	OutputValueShape,
 	PlanReport,
 	TableIR,
 } from '@dbsp/types';
+import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	buildCompiledColumnMetadata,
@@ -40,16 +43,12 @@ export type ProjectionState =
 			readonly hadConvertibleSource: boolean;
 	  };
 
-export type OutputProjection =
-	| {
-			readonly kind: 'modelColumn';
-			readonly table: string;
-			readonly column: string;
-			readonly js?: ColumnJsReadType;
-	  }
-	| { readonly kind: 'expression'; readonly reason: string }
-	| { readonly kind: 'ambiguous'; readonly reason: string }
-	| { readonly kind: 'unresolved'; readonly reason: string };
+export type OutputProjection = OutputDescriptor;
+export type {
+	OutputDescriptor,
+	OutputSource,
+	OutputValueShape,
+} from '@dbsp/types';
 
 export type ProjectionDropReason =
 	| 'set-operation-positional-merge'
@@ -135,6 +134,46 @@ type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
 	readonly hydrationPlan?: PlanReport;
 };
 
+const scalarOneShape: OutputValueShape = {
+	kind: 'scalar',
+	cardinality: 'one',
+};
+
+function unknownShape(reason: string): OutputValueShape {
+	return { kind: 'unknown', reason };
+}
+
+function descriptor(
+	outputKey: string,
+	source: OutputSource,
+	shape: OutputValueShape,
+): OutputProjection {
+	return { outputKey, source, shape };
+}
+
+function descriptorForSource(
+	outputKey: string,
+	source: OutputSource,
+): OutputProjection {
+	if (source.kind === 'modelColumn') {
+		return descriptor(outputKey, source, scalarOneShape);
+	}
+	return descriptor(
+		outputKey,
+		source,
+		unknownShape(
+			`projection output '${outputKey}' has no scalar model column shape`,
+		),
+	);
+}
+
+function withOutputKey(
+	output: OutputProjection,
+	outputKey: string,
+): OutputProjection {
+	return descriptor(outputKey, output.source, output.shape);
+}
+
 function makeEnvelope<T = unknown>(
 	fields: EnvelopeFields,
 ): ProjectionEnvelope<T> {
@@ -152,7 +191,7 @@ function makeEnvelope<T = unknown>(
 
 function outputFromColumnProjection(
 	projection: ColumnMetadataProjection,
-): OutputProjection {
+): OutputSource {
 	switch (projection.kind) {
 		case 'modelColumn':
 			return {
@@ -176,7 +215,10 @@ function outputMapFromColumnProjections(
 	const outputs = new Map<string, OutputProjection>();
 	if (!projections) return outputs;
 	for (const [outputKey, projection] of projections) {
-		outputs.set(outputKey, outputFromColumnProjection(projection));
+		outputs.set(
+			outputKey,
+			descriptorForSource(outputKey, outputFromColumnProjection(projection)),
+		);
 	}
 	return outputs;
 }
@@ -188,12 +230,19 @@ function overlayCompiledMetadata(
 	if (!metadata || metadata.size === 0) return outputs;
 	const merged = new Map(outputs);
 	for (const [outputKey, entry] of metadata) {
-		merged.set(outputKey, {
-			kind: 'modelColumn',
-			table: entry.table,
-			column: entry.column,
-			js: entry.js,
-		});
+		merged.set(
+			outputKey,
+			descriptor(
+				outputKey,
+				{
+					kind: 'modelColumn',
+					table: entry.table,
+					column: entry.column,
+					js: entry.js,
+				},
+				scalarOneShape,
+			),
+		);
 	}
 	return merged;
 }
@@ -203,12 +252,19 @@ export function fromCompiledQuery<T = unknown>(
 ): ProjectionEnvelope<T> {
 	const outputs = new Map<string, OutputProjection>();
 	for (const [outputKey, entry] of compiled.columnMetadata ?? []) {
-		outputs.set(outputKey, {
-			kind: 'modelColumn',
-			table: entry.table,
-			column: entry.column,
-			js: entry.js,
-		});
+		outputs.set(
+			outputKey,
+			descriptor(
+				outputKey,
+				{
+					kind: 'modelColumn',
+					table: entry.table,
+					column: entry.column,
+					js: entry.js,
+				},
+				scalarOneShape,
+			),
+		);
 	}
 	return makeEnvelope<T>({
 		sql: compiled.sql,
@@ -223,7 +279,7 @@ export function fromCompiledQuery<T = unknown>(
 function hasConvertibleModelColumn(projection: ProjectionState): boolean {
 	if (projection.kind === 'dropped') return projection.hadConvertibleSource;
 	for (const output of projection.outputs.values()) {
-		if (output.kind === 'modelColumn' && output.js !== undefined) return true;
+		if (resolveOutputReadHandling(output).kind !== 'none') return true;
 	}
 	return false;
 }
@@ -332,7 +388,7 @@ function outputFromProvenance(
 	provenance: NqlBindingOutputProvenance,
 	model: ModelIR | undefined,
 	naming: NamingPlugin,
-): OutputProjection {
+): OutputSource {
 	if (provenance.table === undefined || provenance.column === undefined) {
 		return {
 			kind: 'unresolved',
@@ -377,28 +433,37 @@ export function fromOutputProvenance<T = unknown>(
 		const outputKey = options.naming.toDatabase(column);
 		const entries = provenanceByOutput.get(outputKey) ?? [];
 		if (entries.length === 0) {
-			outputs.set(outputKey, {
-				kind: 'unresolved',
-				reason: 'binding output provenance was not provided',
-			});
+			outputs.set(
+				outputKey,
+				descriptorForSource(outputKey, {
+					kind: 'unresolved',
+					reason: 'binding output provenance was not provided',
+				}),
+			);
 			continue;
 		}
 		if (entries.length > 1) {
-			outputs.set(outputKey, {
-				kind: 'ambiguous',
-				reason: `binding output '${outputKey}' had multiple provenance entries`,
-			});
+			outputs.set(
+				outputKey,
+				descriptorForSource(outputKey, {
+					kind: 'ambiguous',
+					reason: `binding output '${outputKey}' had multiple provenance entries`,
+				}),
+			);
 			continue;
 		}
 		const [provenance] = entries;
 		outputs.set(
 			outputKey,
-			provenance
-				? outputFromProvenance(provenance, options.model, options.naming)
-				: {
-						kind: 'unresolved',
-						reason: 'binding output provenance could not be read',
-					},
+			descriptorForSource(
+				outputKey,
+				provenance
+					? outputFromProvenance(provenance, options.model, options.naming)
+					: {
+							kind: 'unresolved',
+							reason: 'binding output provenance could not be read',
+						},
+			),
 		);
 	}
 
@@ -435,8 +500,8 @@ export function supplementOutputProvenance<T = unknown>(
 		const sourceOutput = outputs.get(outputKey);
 		if (
 			sourceOutput === undefined ||
-			(sourceOutput.kind !== 'modelColumn' &&
-				supplementalOutput.kind === 'modelColumn')
+			(sourceOutput.source.kind !== 'modelColumn' &&
+				supplementalOutput.source.kind === 'modelColumn')
 		) {
 			outputs.set(outputKey, supplementalOutput);
 		}
@@ -474,10 +539,12 @@ export function projectNamedFields<T = unknown>(
 		setProjectedOutput(
 			outputs,
 			selection.outputKey,
-			sourceOutput ?? {
-				kind: 'unresolved',
-				reason: `projection input '${selection.inputKey}' was not present in source`,
-			},
+			sourceOutput
+				? withOutputKey(sourceOutput, selection.outputKey)
+				: descriptorForSource(selection.outputKey, {
+						kind: 'unresolved',
+						reason: `projection input '${selection.inputKey}' was not present in source`,
+					}),
 		);
 	}
 	for (const expression of options.expressions ?? []) {
@@ -502,10 +569,13 @@ function setProjectedOutput(
 	output: OutputProjection,
 ): void {
 	if (outputs.has(outputKey)) {
-		outputs.set(outputKey, {
-			kind: 'ambiguous',
-			reason: `projection output '${outputKey}' was selected more than once`,
-		});
+		outputs.set(
+			outputKey,
+			descriptorForSource(outputKey, {
+				kind: 'ambiguous',
+				reason: `projection output '${outputKey}' was selected more than once`,
+			}),
+		);
 		return;
 	}
 	outputs.set(outputKey, output);
@@ -545,7 +615,10 @@ export function expressionColumn(
 	outputKey: string,
 	reason: string,
 ): readonly [string, OutputProjection] {
-	return [outputKey, { kind: 'expression', reason }] as const;
+	return [
+		outputKey,
+		descriptor(outputKey, { kind: 'expression', reason }, unknownShape(reason)),
+	] as const;
 }
 
 export function finalizeEnvelope<T = unknown>(
@@ -566,13 +639,19 @@ export function finalizeEnvelope<T = unknown>(
 	}
 
 	const columnMetadata = new Map<string, CompiledColumnMetadata>();
-	for (const [outputKey, output] of env.projection.outputs) {
-		if (output.kind === 'modelColumn' && output.js !== undefined) {
-			columnMetadata.set(outputKey, {
-				table: output.table,
-				column: output.column,
-				js: output.js,
-			});
+	for (const [outputKey, descriptor] of env.projection.outputs) {
+		const handling = resolveOutputReadHandling(descriptor);
+		switch (handling.kind) {
+			case 'scalarConvert':
+				columnMetadata.set(outputKey, {
+					table: handling.table,
+					column: handling.column,
+					js: handling.js,
+				});
+				break;
+			case 'nestedTransform':
+			case 'none':
+				break;
 		}
 	}
 
