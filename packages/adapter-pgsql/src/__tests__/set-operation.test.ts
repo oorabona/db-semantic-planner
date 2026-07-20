@@ -361,7 +361,7 @@ departments | select name | union (employee_names | select name | except (depart
 				/^\(select .+ from .+\) union \(select .+ from .+\)$/,
 			);
 			expect(result.parameters).toEqual([]);
-			expect(result.columnMetadata).toBeUndefined();
+			expect(result.columnMetadata?.size).toBe(0);
 		});
 
 		it('fails loud through envelope finalization when a branch carries js metadata', () => {

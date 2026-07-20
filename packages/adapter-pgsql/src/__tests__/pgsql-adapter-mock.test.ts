@@ -16,6 +16,7 @@
  */
 
 import { type Adapter, createOrm, schema } from '@dbsp/core';
+import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -36,6 +37,16 @@ const TRANSACTION_CONTROL_BOUNDARY =
 	'`COMMIT`, `ROLLBACK`, and `PREPARE TRANSACTION` end the transaction dbsp is working inside; dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
 	'Raw savepoint control (`SAVEPOINT`, `RELEASE SAVEPOINT`, `ROLLBACK TO SAVEPOINT`) can alter the savepoint stack before dbsp sees the command tag; dbsp poisons the scope, but it cannot make that command un-run. ' +
 	"Manage your transaction outside dbsp's calls.";
+
+function testQuery<T = unknown>(
+	sql: string,
+	parameters: readonly unknown[] = [],
+) {
+	return projectionlessCompiledQuery<T>(
+		{ sql, parameters },
+		'pgsql-adapter-mock-test',
+	);
+}
 
 const ownershipOrmSchema = schema({
 	items: {
@@ -1370,7 +1381,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 
 		const result = await adapter.transaction(async (tx) => {
 			innerInTransaction = (tx as PgsqlAdapter).inTransaction;
-			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+			await tx.execute(testQuery('SELECT 1'));
 			return 'ok';
 		});
 
@@ -1397,7 +1408,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 
 		await expect(
 			adapter.transaction(async (tx) => {
-				await tx.execute({ sql: 'INSERT INTO t VALUES (1)', parameters: [] });
+				await tx.execute(testQuery('INSERT INTO t VALUES (1)'));
 				throw boom;
 			}),
 		).rejects.toBe(boom);
@@ -1660,7 +1671,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 
 		const error = await captureRejection(() =>
 			adapter.transaction(async (tx) => {
-				await tx.execute({ sql: 'SAVEPOINT s', parameters: [] });
+				await tx.execute(testQuery('SAVEPOINT s'));
 			}),
 		);
 
@@ -1741,7 +1752,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		});
 
 		await adapter.transaction(async (tx) => {
-			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+			await tx.execute(testQuery('SELECT 1'));
 		});
 
 		expect(client.release).not.toHaveBeenCalled();
@@ -2623,7 +2634,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		const pool = makePool({ rows: [{ user_id: 1, full_name: 'Alice' }] });
 		const adapter = createPgsqlAdapter(pool);
 
-		const rows = await adapter.execute({ sql: 'SELECT 1', parameters: [] });
+		const rows = await adapter.execute(testQuery('SELECT 1'));
 
 		expect(rows).toEqual([{ user_id: 1, full_name: 'Alice' }]);
 	});
@@ -2634,10 +2645,9 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		});
 		const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
 
-		const rows = await adapter.execute<Record<string, unknown>>({
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const rows = await adapter.execute<Record<string, unknown>>(
+			testQuery('SELECT 1'),
+		);
 
 		expect(rows).toEqual([{ userId: 1, fullName: 'Alice', isActive: true }]);
 	});
@@ -2651,10 +2661,9 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		});
 		const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
 
-		const rows = await adapter.execute<Record<string, unknown>>({
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const rows = await adapter.execute<Record<string, unknown>>(
+			testQuery('SELECT 1'),
+		);
 
 		expect(rows).toEqual([
 			{ orderId: 1, totalPrice: 100 },
@@ -2669,9 +2678,9 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		);
 		const adapter = createPgsqlAdapter(pool);
 
-		await expect(
-			adapter.execute({ sql: 'SELECT 1', parameters: [] }),
-		).rejects.toThrow('connection refused');
+		await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
+			'connection refused',
+		);
 	});
 
 	it('reports transaction control distinctly when borrowed-client execute destroys the savepoint', async () => {
@@ -2696,7 +2705,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
 		const error = await captureRejection(() =>
-			adapter.execute({ sql: 'COMMIT', parameters: [] }),
+			adapter.execute(testQuery('COMMIT')),
 		);
 
 		expectRawSqlTransactionControlError(error, commitResult);
@@ -2727,7 +2736,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
 		const error = await captureRejection(() =>
-			adapter.execute({ sql, parameters: [1] }),
+			adapter.execute(testQuery(sql, [1])),
 		);
 
 		expect(error).toBe(pgError);
@@ -2764,9 +2773,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		} as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
-		const error = await captureRejection(() =>
-			adapter.execute({ sql, parameters: [] }),
-		);
+		const error = await captureRejection(() => adapter.execute(testQuery(sql)));
 
 		expect(error).toBeInstanceOf(AggregateError);
 		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
@@ -3189,10 +3196,7 @@ describe('PgsqlAdapter borrowed-client savepoint scope guard', () => {
 		await firstSqlStarted.promise;
 
 		const secondError = await captureRejection(() =>
-			adapter.execute<{ value: number }>({
-				sql: 'SELECT second',
-				parameters: [],
-			}),
+			adapter.execute<{ value: number }>(testQuery('SELECT second')),
 		);
 
 		expect(secondError).toBeInstanceOf(Error);
@@ -3282,10 +3286,7 @@ describe('PgsqlAdapter.withSchema — pool inheritance', () => {
 		const adapter = createPgsqlAdapter(pool);
 		const scoped = adapter.withSchema('tenant_9');
 
-		const rows = await (scoped as PgsqlAdapter).execute({
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const rows = await (scoped as PgsqlAdapter).execute(testQuery('SELECT 1'));
 
 		expect(rows).toEqual([{ id: 1 }]);
 		expect(pool.query).toHaveBeenCalledOnce();
@@ -3438,7 +3439,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 	it('refuses an unmanaged borrowed client before opening a cursor', async () => {
 		const client = makeClient();
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 
 		await expect(iter.next()).rejects.toThrow(/managedTransactions: true/);
 		expect(client.query).not.toHaveBeenCalled();
@@ -3462,7 +3463,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			borrowedClient: true,
 			managedTransactions: true,
 		});
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 
 		const collected: unknown[] = [];
 		for await (const row of iter) {
@@ -3506,10 +3507,9 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		const collected: unknown[] = [];
 
 		const error = await captureRejection(async () => {
-			for await (const row of adapter.stream(
-				{ sql: 'SELECT * FROM t', parameters: [] },
-				{ chunkSize: 1 },
-			)) {
+			for await (const row of adapter.stream(testQuery('SELECT * FROM t'), {
+				chunkSize: 1,
+			})) {
 				collected.push(row);
 			}
 		});
@@ -3569,10 +3569,9 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		const collected: unknown[] = [];
 
 		const error = await captureRejection(async () => {
-			for await (const row of adapter.stream(
-				{ sql: 'SELECT * FROM t', parameters: [] },
-				{ chunkSize: 1 },
-			)) {
+			for await (const row of adapter.stream(testQuery('SELECT * FROM t'), {
+				chunkSize: 1,
+			})) {
 				collected.push(row);
 			}
 		});
@@ -3643,16 +3642,14 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 
 		const result = await adapter.transaction(async (tx) => {
 			const first = collect(
-				tx.stream<{ stream: string }>(
-					{ sql: 'SELECT first', parameters: [] },
-					{ chunkSize: 1 },
-				),
+				tx.stream<{ stream: string }>(testQuery('SELECT first'), {
+					chunkSize: 1,
+				}),
 			);
 			const second = collect(
-				tx.stream<{ stream: string }>(
-					{ sql: 'SELECT second', parameters: [] },
-					{ chunkSize: 1 },
-				),
+				tx.stream<{ stream: string }>(testQuery('SELECT second'), {
+					chunkSize: 1,
+				}),
 			);
 			return Promise.all([first, second]);
 		});
@@ -3683,7 +3680,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			managedTransactions: true,
 		});
 
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 		const error = await captureRejection(() => iter.next());
 
 		expectCleanupFailure(
@@ -3715,7 +3712,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			managedTransactions: true,
 		});
 
-		const iter = adapter.stream({ sql: 'SELECT 1 / 0', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT 1 / 0'));
 		const error = await captureRejection(() => iter.next());
 
 		expect(error).toBe(fetchError);
@@ -3769,10 +3766,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		});
 
 		const collected: unknown[] = [];
-		for await (const row of adapter.stream({
-			sql: 'SELECT * FROM t',
-			parameters: [],
-		})) {
+		for await (const row of adapter.stream(testQuery('SELECT * FROM t'))) {
 			collected.push(row);
 		}
 
@@ -3840,20 +3834,16 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		};
 
 		const first = collect(
-			adapter.stream<{ stream: string }>(
-				{ sql: 'SELECT first', parameters: [] },
-				{ chunkSize: 1 },
-			),
+			adapter.stream<{ stream: string }>(testQuery('SELECT first'), {
+				chunkSize: 1,
+			}),
 		);
 		void first.catch(() => undefined);
 		await beginStarted.promise;
 
 		let secondError: unknown;
 		const secondNext = adapter
-			.stream<{ stream: string }>(
-				{ sql: 'SELECT second', parameters: [] },
-				{ chunkSize: 1 },
-			)
+			.stream<{ stream: string }>(testQuery('SELECT second'), { chunkSize: 1 })
 			.next()
 			.catch((error) => {
 				secondError = error;
@@ -3919,7 +3909,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			managedTransactions: true,
 		});
 
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 		const error = await captureRejection(() => iter.next());
 
 		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
@@ -3945,10 +3935,7 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		const collected: unknown[] = [];
-		for await (const row of adapter.stream({
-			sql: 'SELECT * FROM t',
-			parameters: [],
-		})) {
+		for await (const row of adapter.stream(testQuery('SELECT * FROM t'))) {
 			collected.push(row);
 		}
 
@@ -3973,7 +3960,7 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const pool = makePool({ rows: [] }, streamClient);
 		const adapter = createPgsqlAdapter(pool);
 
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 		await expect(iter.next()).rejects.toThrow('cursor error');
 
 		expect(streamClient.release).toHaveBeenCalledOnce();
@@ -4000,7 +3987,7 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const pool = makePool({ rows: [] }, streamClient);
 		const adapter = createPgsqlAdapter(pool);
 
-		const iter = adapter.stream({ sql: 'SELECT 1; COMMIT', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT 1; COMMIT'));
 		const error = await captureRejection(() => iter.next());
 
 		expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
@@ -4038,11 +4025,78 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const pool = makePool({ rows: [] }, streamClient);
 		const adapter = createPgsqlAdapter(pool);
 
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const iter = adapter.stream(testQuery('SELECT * FROM t'));
 		const error = await captureRejection(() => iter.next());
 
 		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
 		expect(streamClient.release).toHaveBeenCalledWith(rollbackError);
+	});
+});
+
+describe('PgsqlAdapter.streamRaw', () => {
+	it('streams a plain raw SQL string with parameters through the cursor path', async () => {
+		const rows: Record<string, unknown>[] = [{ raw_id: 1 }, { raw_id: 2 }];
+		let fetchCount = 0;
+		const streamClient = makeClient(async (sql) => {
+			if (sql === 'BEGIN') return { rows: [], rowCount: 0 } as QueryResult;
+			if (/^DECLARE /.test(sql))
+				return { rows: [], rowCount: 0 } as QueryResult;
+			if (/^FETCH FORWARD 1 FROM /.test(sql)) {
+				const row = rows[fetchCount];
+				fetchCount++;
+				return {
+					rows: row === undefined ? [] : [row],
+					rowCount: row === undefined ? 0 : 1,
+				} as QueryResult;
+			}
+			if (/^CLOSE /.test(sql)) return { rows: [], rowCount: 0 } as QueryResult;
+			if (sql === 'COMMIT') return { rows: [], rowCount: 0 } as QueryResult;
+			throw new Error(`unexpected SQL: ${sql}`);
+		});
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const collected: { raw_id: number }[] = [];
+		for await (const row of adapter.streamRaw<{ raw_id: number }>(
+			'SELECT raw_id FROM t WHERE id > $1 ORDER BY id',
+			[10],
+			{ chunkSize: 1 },
+		)) {
+			collected.push(row);
+		}
+
+		expect(collected).toEqual(rows);
+		expect(queryCalls(streamClient.query as ReturnType<typeof vi.fn>)).toEqual([
+			'BEGIN',
+			expect.stringMatching(
+				/^DECLARE \S+ NO SCROLL CURSOR FOR SELECT raw_id FROM t WHERE id > \$1 ORDER BY id$/,
+			),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			'COMMIT',
+		]);
+		const declareCall = (
+			streamClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.find(([input]) => /^DECLARE /.test(queryText(input)));
+		expect(declareCall?.[1]).toEqual([10]);
+	});
+
+	it('rejects invalid chunkSize synchronously before pool checkout', () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() => adapter.streamRaw('SELECT 1', [], { chunkSize: 0 })).toThrow(
+			'Invalid stream chunkSize: 0. Must be a positive integer.',
+		);
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('throws on streamRaw in compile-only mode', async () => {
+		const adapter = new PgsqlAdapter(undefined, {});
+		const iter = adapter.streamRaw('SELECT 1');
+		await expect(iter.next()).rejects.toThrow('compile-only mode');
 	});
 });
 
@@ -4205,10 +4259,9 @@ describe('PgsqlAdapter [P2-T5]: withSchema preserves full config', () => {
 		const adapter = new PgsqlAdapter(pool, { dbCasing: 'snake_case' });
 		const scoped = adapter.withSchema('tenant_2') as PgsqlAdapter;
 
-		const rows = await scoped.execute<Record<string, unknown>>({
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const rows = await scoped.execute<Record<string, unknown>>(
+			testQuery('SELECT 1'),
+		);
 
 		// camelCase keys prove the scoped adapter inherited snake_case dbCasing
 		expect(rows).toEqual([{ userId: 42, fullName: 'Bob' }]);
@@ -4247,10 +4300,9 @@ describe('PgsqlAdapter [P2-T5]: withSchema preserves full config', () => {
 
 		// The scoped adapter must inherit dbCasing (snake_case) — proves
 		// cloneOptions propagated the full options including deriveFkColumnName.
-		const rows = await scoped.execute<Record<string, unknown>>({
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const rows = await scoped.execute<Record<string, unknown>>(
+			testQuery('SELECT 1'),
+		);
 		expect(rows).toEqual([{ orderId: 7 }]);
 		// dbCasing public getter confirms the option snapshot was correct
 		expect(scoped.dbCasing).toBe('snake_case');
@@ -4295,10 +4347,7 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		await adapter.transaction(async (tx) => {
 			capturedRows = await (tx as PgsqlAdapter).execute<
 				Record<string, unknown>
-			>({
-				sql: 'SELECT 1',
-				parameters: [],
-			});
+			>(testQuery('SELECT 1'));
 		});
 
 		// camelCase keys prove the tx adapter inherited snake_case dbCasing
@@ -4388,7 +4437,7 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		const pool = makePool({ rows: [] }, streamClient);
 		const adapter = new PgsqlAdapter(pool, { logger });
 
-		const gen = adapter.stream<unknown>({ sql: 'SELECT 1', parameters: [] });
+		const gen = adapter.stream<unknown>(testQuery('SELECT 1'));
 		const error = await captureRejection(() => gen.next());
 
 		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
@@ -4570,7 +4619,7 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		expect(() =>
-			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: 0 }),
+			adapter.stream(testQuery('SELECT 1'), { chunkSize: 0 }),
 		).toThrow('Invalid stream chunkSize: 0. Must be a positive integer.');
 
 		// Pool.connect must NOT have been called — guard fires before any I/O.
@@ -4582,7 +4631,7 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		expect(() =>
-			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: -1 }),
+			adapter.stream(testQuery('SELECT 1'), { chunkSize: -1 }),
 		).toThrow('Invalid stream chunkSize: -1. Must be a positive integer.');
 
 		expect(pool.connect).not.toHaveBeenCalled();
@@ -4593,7 +4642,7 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		expect(() =>
-			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: 1.5 }),
+			adapter.stream(testQuery('SELECT 1'), { chunkSize: 1.5 }),
 		).toThrow('Invalid stream chunkSize: 1.5. Must be a positive integer.');
 
 		expect(pool.connect).not.toHaveBeenCalled();
@@ -4604,10 +4653,7 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		expect(() =>
-			adapter.stream(
-				{ sql: 'SELECT 1', parameters: [] },
-				{ chunkSize: Number.NaN },
-			),
+			adapter.stream(testQuery('SELECT 1'), { chunkSize: Number.NaN }),
 		).toThrow('Invalid stream chunkSize: NaN. Must be a positive integer.');
 
 		expect(pool.connect).not.toHaveBeenCalled();
@@ -4631,10 +4677,7 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 
 		const collected: unknown[] = [];
 		// No chunkSize option → uses default 100, must not throw.
-		for await (const row of adapter.stream({
-			sql: 'SELECT 1',
-			parameters: [],
-		})) {
+		for await (const row of adapter.stream(testQuery('SELECT 1'))) {
 			collected.push(row);
 		}
 

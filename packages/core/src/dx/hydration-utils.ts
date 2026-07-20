@@ -41,18 +41,11 @@ type JsonAggNestedReadTransformMap = ReadonlyMap<
 	NestedOutputReadHandling
 >;
 
-type CompiledQueryWithHydrationPlan = CompiledQuery & {
-	readonly hydrationPlan?: PlanReport;
-};
-
 export function planForJsonAggHydration(
 	planReport: PlanReport,
 	query?: CompiledQuery,
 ): PlanReport {
-	return (
-		(query as CompiledQueryWithHydrationPlan | undefined)?.hydrationPlan ??
-		planReport
-	);
+	return query?.hydrationPlan ?? planReport;
 }
 
 function relationTypeIsToOne(type: RelationType | undefined): boolean {

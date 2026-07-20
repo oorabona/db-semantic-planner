@@ -291,19 +291,19 @@ function sourceHydrationPlanForCteProjection(
 		: undefined;
 }
 
-function projectCteQueryEnvelope(
-	source: ProjectionEnvelope,
+function projectCteQueryEnvelope<T = unknown>(
+	source: ProjectionEnvelope<T>,
 	query: QueryIntent,
 	sql: string,
 	parameters: readonly unknown[],
 	deps: AdapterCompilerDeps,
 	hydrationPlan: PlanReport | undefined,
-): ProjectionEnvelope {
+): ProjectionEnvelope<T> {
 	const shape = buildCteProjectionShape(source, query.select, deps);
 	const projectedHydrationPlan =
 		hydrationPlan ?? sourceHydrationPlanForCteProjection(source, shape, deps);
 	if (shape.preserveOneToOne) {
-		return preserveOneToOne(source, {
+		return preserveOneToOne<T>(source, {
 			sql,
 			parameters,
 			...(projectedHydrationPlan !== undefined
@@ -312,7 +312,7 @@ function projectCteQueryEnvelope(
 			preserveHydrationPlan: false,
 		});
 	}
-	return projectNamedFields(source, {
+	return projectNamedFields<T>(source, {
 		sql,
 		parameters,
 		selections: shape.selections,
@@ -376,12 +376,12 @@ function rehomeQueryEnvelope(
  * Supports adjacency-list and edge-table traversal modes.
  * Extracted body of PgsqlAdapter.compileRecursive().
  */
-export function compileRecursive(
+export function compileRecursive<T = unknown>(
 	report: RecursivePlanReport,
 	model: ModelIR,
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
-): CompiledQuery {
+): CompiledQuery<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 	const state = createCompilerState();
@@ -577,7 +577,7 @@ export function compileRecursive(
 
 	// Deparse AST to SQL
 	const sql = deparseQuoted({ SelectStmt: selectStmt });
-	const sourceEnv = fromModelColumns({
+	const sourceEnv = fromModelColumns<T>({
 		sql,
 		parameters: state.parameters,
 		table: config.table,
@@ -585,14 +585,14 @@ export function compileRecursive(
 		model,
 		naming: deps.naming,
 	});
-	const env = projectNamedFields(sourceEnv, {
+	const env = projectNamedFields<T>(sourceEnv, {
 		sql,
 		parameters: state.parameters,
 		selections: finalSelections,
 		...(finalExpressions.length > 0 ? { expressions: finalExpressions } : {}),
 	});
 
-	return finalizeEnvelope(env);
+	return finalizeEnvelope<T>(env);
 }
 
 // ============================================================================
@@ -608,12 +608,12 @@ export function compileRecursive(
  *
  * Extracted body of PgsqlAdapter.compileCteQuery().
  */
-export function compileCteQuery(
+export function compileCteQuery<T = unknown>(
 	intent: CteQueryIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 	initialProjectionByName?: CteProjectionRegistry,
-): CompiledQuery {
+): CompiledQuery<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const state = createCompilerState();
 
@@ -751,9 +751,9 @@ export function compileCteQuery(
 				deps,
 				outerCompiled.hydrationPlan,
 			)
-		: preserveOneToOne(outerCompiled, { sql, parameters });
+		: preserveOneToOne<T>(outerCompiled, { sql, parameters });
 
-	return finalizeEnvelope(env);
+	return finalizeEnvelope<T>(env);
 }
 
 // ============================================================================

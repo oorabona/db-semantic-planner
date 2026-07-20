@@ -102,13 +102,18 @@ function renumberSqlParams(sql: string, offset: number): string {
 	});
 }
 
+type SourceCteFragment = {
+	readonly sql: string;
+	readonly parameters: readonly unknown[];
+};
+
 function compileSourceQueryCte(
 	operation: 'compileInsertFrom' | 'compileUpsertFrom',
 	sourceName: string,
 	sourceQuery: QueryIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
-): CompiledQuery {
+): SourceCteFragment {
 	const model = deps.model;
 	if (model === undefined) {
 		throw new Error(
@@ -158,7 +163,7 @@ function compileMutationQuery(
 function prependSourceCte(
 	query: ProjectionEnvelope,
 	sourceName: string,
-	sourceCte: CompiledQuery | undefined,
+	sourceCte: SourceCteFragment | undefined,
 	naming: NamingPlugin,
 ): CompiledQuery {
 	if (sourceCte === undefined) {

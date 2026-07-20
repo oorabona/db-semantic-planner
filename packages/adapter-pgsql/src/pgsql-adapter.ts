@@ -55,6 +55,11 @@ import type {
 	UpsertIntent,
 } from '@dbsp/types';
 import { convertBigintJsReadValue } from '@dbsp/types';
+import {
+	assertCompiledQuery,
+	projectionlessCompiledQuery,
+	rebuildCompiledQuery,
+} from '@dbsp/types/adapter-sdk';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
@@ -156,6 +161,8 @@ type CompileSubqueryResult = {
 type PgsqlInternalCompileOptions = CompileOptions & {
 	readonly naming?: NamingPlugin;
 };
+
+type StreamRowMapper<T> = (rows: Record<string, unknown>[]) => T[];
 
 const MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS = 32_000;
 
@@ -693,6 +700,7 @@ function guardCompiledQuery<T>(
 	query: CompiledQuery<T>,
 	context: string,
 ): CompiledQuery<T> {
+	assertCompiledQuery(query);
 	const found = findNqlBindingRefMarker(query.parameters, 'parameters');
 	if (found) {
 		throw new Error(
@@ -702,18 +710,6 @@ function guardCompiledQuery<T>(
 	}
 
 	return query;
-}
-
-function carriedCompiledQueryFields<T>(query: CompiledQuery<T>): {
-	columnMetadata?: NonNullable<CompiledQuery<T>['columnMetadata']>;
-	hydrationPlan?: PlanReport;
-} {
-	const hydrationPlan = (query as { readonly hydrationPlan?: PlanReport })
-		.hydrationPlan;
-	return {
-		...(query.columnMetadata ? { columnMetadata: query.columnMetadata } : {}),
-		...(hydrationPlan ? { hydrationPlan } : {}),
-	};
 }
 
 function guardCompileResultWithIncludes<T>(
@@ -2008,43 +2004,39 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				: compiled;
 		}
 		if (bundle.cteQuery !== undefined) {
-			return fromCompiledQuery(
+			return fromCompiledQuery<T>(
 				guardCompiledQuery(
-					compileCteQueryImpl(
+					compileCteQueryImpl<T>(
 						bundle.cteQuery,
 						options,
 						this.buildCompileDeps(options, bindingNames),
 						bindingProjections,
-					) as CompiledQuery<T>,
+					),
 					'NQL CTE query',
-				) as CompiledQuery<T>,
+				),
 			);
 		}
 		if (bundle.setOperation !== undefined) {
 			const model = this.requireNqlCompileModel(options);
-			return fromCompiledQuery(
+			return fromCompiledQuery<T>(
 				guardCompiledQuery(
-					this.compileSetOperationWithBindings(
+					this.compileSetOperationWithBindings<T>(
 						bundle.setOperation,
 						model,
 						options,
 						bindingNames,
 						bindingProjections,
-					) as CompiledQuery<T>,
+					),
 					'NQL set operation',
-				) as CompiledQuery<T>,
+				),
 			);
 		}
 		if (bundle.mutation !== undefined) {
-			return fromCompiledQuery(
+			return fromCompiledQuery<T>(
 				guardCompiledQuery(
-					this.compileNqlMutation(
-						bundle,
-						options,
-						bindingNames,
-					) as CompiledQuery<T>,
+					this.compileNqlMutation(bundle, options, bindingNames),
 					'NQL mutation',
-				) as CompiledQuery<T>,
+				),
 			);
 		}
 		throw new Error('NQL bundle did not contain a compilable intent.');
@@ -2171,20 +2163,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			bindingNames,
 			bindingProjections,
 		);
-		const compiled = finalizeEnvelope(compiledEnvelope);
+		const compiled = finalizeEnvelope<T>(compiledEnvelope);
 		if (ctes.length === 0) {
 			return guardCompiledQuery(compiled, 'NQL bundle');
 		}
 
 		return guardCompiledQuery(
-			{
+			rebuildCompiledQuery(compiled, {
 				sql: prefixNqlBindingCtes(
 					ctes,
 					renumberSqlParams(compiled.sql, parameters.length),
 				),
 				parameters: [...parameters, ...compiled.parameters],
-				...carriedCompiledQueryFields(compiled),
-			},
+			}),
 			'NQL bundle',
 		);
 	}
@@ -2299,7 +2290,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param expr - ExpressionIntent to evaluate
 	 * @returns Compiled SQL and parameters
 	 */
-	compileSelectExpression(expr: ExpressionIntent): CompiledQuery {
+	compileSelectExpression<T = unknown>(
+		expr: ExpressionIntent,
+	): CompiledQuery<T> {
 		const naming = this.naming;
 		const schemaName = this.schemaName;
 		const dialectCapabilities = this.dialectCapabilities;
@@ -2339,7 +2332,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		});
 		const sql = deparseQuoted(ast);
 		return guardCompiledQuery(
-			{ sql, parameters: state.parameters },
+			projectionlessCompiledQuery(
+				{ sql, parameters: state.parameters },
+				'fromless-select-expression',
+			),
 			'select expression',
 		);
 	}
@@ -2439,13 +2435,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile a recursive CTE plan to executable SQL.
 	 * Supports adjacency-list and edge-table traversal modes.
 	 */
-	compileRecursive(
+	compileRecursive<T = unknown>(
 		report: RecursivePlanReport,
 		model: ModelIR,
 		options?: CompileOptions,
-	): CompiledQuery {
+	): CompiledQuery<T> {
 		return guardCompiledQuery(
-			compileRecursiveImpl(
+			compileRecursiveImpl<T>(
 				report,
 				model,
 				options,
@@ -2462,12 +2458,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * independently (parameters starting at $1), then renumber outer params
 	 * to start after CTE params and prepend WITH clause.
 	 */
-	compileCteQuery(
+	compileCteQuery<T = unknown>(
 		intent: CteQueryIntent,
 		options?: CompileOptions,
-	): CompiledQuery {
+	): CompiledQuery<T> {
 		return guardCompiledQuery(
-			compileCteQueryImpl(intent, options, this.buildCompileDeps(options)),
+			compileCteQueryImpl<T>(intent, options, this.buildCompileDeps(options)),
 			'CTE query',
 		);
 	}
@@ -2475,24 +2471,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Compile a set operation (UNION / INTERSECT / EXCEPT) to SQL.
 	 */
-	compileSetOperation(
+	compileSetOperation<T = unknown>(
 		intent: SetOperationIntent,
 		model: ModelIR,
 		options?: CompileOptions,
-	): CompiledQuery {
+	): CompiledQuery<T> {
 		return guardCompiledQuery(
-			this.compileSetOperationWithBindings(intent, model, options),
+			this.compileSetOperationWithBindings<T>(intent, model, options),
 			'set operation',
 		);
 	}
 
-	private compileSetOperationWithBindings(
+	private compileSetOperationWithBindings<T = unknown>(
 		intent: SetOperationIntent,
 		model: ModelIR,
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
 		bindingProjections?: NqlBindingProjectionRegistry,
-	): CompiledQuery {
+	): CompiledQuery<T> {
 		const compileFn: LeafCompileFn = (query) => {
 			const leafOptions: CompileOptions & { model: ModelIR } = {
 				...options,
@@ -2528,7 +2524,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				: compiled;
 		};
 		const envelope = compileSetOperationEnvelopeImpl(intent, compileFn);
-		return guardCompiledQuery(finalizeEnvelope(envelope), 'set operation');
+		return guardCompiledQuery(finalizeEnvelope<T>(envelope), 'set operation');
 	}
 
 	/**
@@ -2556,10 +2552,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
+		const guardedQuery = guardCompiledQuery(query, 'execute');
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
-		>(query.sql, query.parameters);
-		return this.transformResultRows(result.rows, query) as T[];
+		>(guardedQuery.sql, guardedQuery.parameters);
+		return this.transformResultRows(result.rows, guardedQuery) as T[];
 	}
 
 	/**
@@ -2628,6 +2625,35 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		query: CompiledQuery<T>,
 		options?: AdapterStreamOptions,
 	): AsyncIterableIterator<T> {
+		const guardedQuery = guardCompiledQuery(query, 'stream');
+		return this.streamCursor<T>(
+			guardedQuery.sql,
+			guardedQuery.parameters,
+			options,
+			(rows) => this.transformResultRows(rows, guardedQuery) as T[],
+		);
+	}
+
+	/** Stream raw SQL directly using the same cursor machinery as stream(). */
+	streamRaw<T = unknown>(
+		sql: string,
+		parameters: readonly unknown[] = [],
+		options?: AdapterStreamOptions,
+	): AsyncIterableIterator<T> {
+		return this.streamCursor<T>(
+			sql,
+			parameters,
+			options,
+			(rows) => rows as T[],
+		);
+	}
+
+	private streamCursor<T>(
+		sql: string,
+		parameters: readonly unknown[],
+		options: AdapterStreamOptions | undefined,
+		mapRows: StreamRowMapper<T>,
+	): AsyncIterableIterator<T> {
 		const chunkSize = options?.chunkSize ?? 100;
 		if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
 			throw new Error(
@@ -2648,8 +2674,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 				yield* adapter.streamWithManagedClient<T>(
 					adapter.client,
-					query,
+					sql,
+					parameters,
 					chunkSize,
+					mapRows,
 				);
 				return;
 			}
@@ -2691,8 +2719,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				};
 				yield* adapter.streamWithClient<T>(
 					client,
-					query,
+					sql,
+					parameters,
 					chunkSize,
+					mapRows,
 					scopeToken,
 					scopeState.streamFailureRecovery,
 				);
@@ -2772,8 +2802,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	private async *streamWithClient<T>(
 		client: PoolClient,
-		query: CompiledQuery<T>,
+		sql: string,
+		parameters: readonly unknown[],
 		chunkSize: number,
+		mapRows: StreamRowMapper<T>,
 		allowedScopeToken?: DbspScopeToken,
 		recoverBeforeCloseOnError?: () => Promise<void>,
 	): AsyncIterableIterator<T> {
@@ -2783,8 +2815,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Declare cursor
 		await this.executeConnectionStatement(
 			client,
-			`DECLARE ${cursorName} NO SCROLL CURSOR FOR ${query.sql}`,
-			query.parameters as unknown[],
+			`DECLARE ${cursorName} NO SCROLL CURSOR FOR ${sql}`,
+			parameters as unknown[],
 			{
 				...(allowedScopeToken !== undefined && { allowedScopeToken }),
 			},
@@ -2807,9 +2839,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					break;
 				}
 
-				const transformedRows = this.transformResultRows(
+				const transformedRows = mapRows(
 					result.rows as Record<string, unknown>[],
-					query,
 				);
 				for (const row of transformedRows) {
 					yield row as T;
@@ -2867,15 +2898,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async *streamWithManagedClient<T>(
 		client: PoolClient,
-		query: CompiledQuery<T>,
+		sql: string,
+		parameters: readonly unknown[],
 		chunkSize: number,
+		mapRows: StreamRowMapper<T>,
 	): AsyncIterableIterator<T> {
 		if (this.adapterManagedTransaction) {
 			this.assertCanUseClient(client, this.scopeToken);
 			yield* this.streamWithClient<T>(
 				client,
-				query,
+				sql,
+				parameters,
 				chunkSize,
+				mapRows,
 				this.scopeToken,
 				this.scopeState?.streamFailureRecovery,
 			);
@@ -2883,15 +2918,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		yield* this.streamWithManagedClientSavepointScope<T>(
 			client,
-			query,
+			sql,
+			parameters,
 			chunkSize,
+			mapRows,
 		);
 	}
 
 	private async *streamWithManagedClientSavepointScope<T>(
 		client: PoolClient,
-		query: CompiledQuery<T>,
+		sql: string,
+		parameters: readonly unknown[],
 		chunkSize: number,
+		mapRows: StreamRowMapper<T>,
 	): AsyncIterableIterator<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = this.scopeToken ?? createScopeToken();
@@ -2915,7 +2954,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		} catch (error) {
 			releaseScope();
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				yield* this.streamWithClientTransaction(client, query, chunkSize);
+				yield* this.streamWithClientTransaction(
+					client,
+					sql,
+					parameters,
+					chunkSize,
+					mapRows,
+				);
 				return;
 			}
 			throw error;
@@ -2936,8 +2981,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			yield* this.streamWithClient<T>(
 				client,
-				query,
+				sql,
+				parameters,
 				chunkSize,
+				mapRows,
 				scopeToken,
 				recoverStreamFailure,
 			);
@@ -3017,8 +3064,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async *streamWithClientTransaction<T>(
 		client: PoolClient,
-		query: CompiledQuery<T>,
+		sql: string,
+		parameters: readonly unknown[],
 		chunkSize: number,
+		mapRows: StreamRowMapper<T>,
 	): AsyncIterableIterator<T> {
 		let begun = false;
 		let committed = false;
@@ -3045,8 +3094,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			};
 			yield* this.streamWithClient<T>(
 				client,
-				query,
+				sql,
+				parameters,
 				chunkSize,
+				mapRows,
 				scopeToken,
 				scopeState.streamFailureRecovery,
 			);

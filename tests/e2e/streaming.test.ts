@@ -274,6 +274,23 @@ describe('STREAMING-001: Cursor/Streaming Support', () => {
 		});
 	});
 
+	describe('Scenario 7: Raw SQL streaming', () => {
+		it('should stream raw SQL with parameters and chunkSize', async () => {
+			const adapter = await getTestAdapter();
+			const rows: { name: string }[] = [];
+
+			for await (const row of adapter.streamRaw<{ name: string }>(
+				`SELECT name FROM "${SCHEMA}".authors WHERE name = $1 ORDER BY id`,
+				['Alice Johnson'],
+				{ chunkSize: 1 },
+			)) {
+				rows.push(row);
+			}
+
+			expect(rows).toEqual([{ name: 'Alice Johnson' }]);
+		});
+	});
+
 	describe('Scenario 9: Empty result set', () => {
 		it('should handle empty results gracefully', async () => {
 			const adapter = await getTestAdapter();

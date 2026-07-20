@@ -137,7 +137,7 @@ describe('projection envelope', () => {
 				outputs: new Map([[expressionKey, expressionOutput]]),
 			},
 		} as ProjectionEnvelope;
-		expect(finalizeEnvelope(expressionEnvelope).columnMetadata).toBeUndefined();
+		expect(finalizeEnvelope(expressionEnvelope).columnMetadata?.size).toBe(0);
 
 		const unknownShapeEnvelope = {
 			sql: 'SELECT sequence FROM events',
@@ -155,9 +155,7 @@ describe('projection envelope', () => {
 				]),
 			},
 		} as ProjectionEnvelope;
-		expect(
-			finalizeEnvelope(unknownShapeEnvelope).columnMetadata,
-		).toBeUndefined();
+		expect(finalizeEnvelope(unknownShapeEnvelope).columnMetadata?.size).toBe(0);
 	});
 
 	it('projectNamedFields moves aliased metadata and keeps non-convertible sources metadata-free', () => {
@@ -238,7 +236,7 @@ describe('projection envelope', () => {
 			column: 'sequence',
 			js: 'bigint',
 		});
-		expect(finalizeEnvelope(projected).columnMetadata).toBeUndefined();
+		expect(finalizeEnvelope(projected).columnMetadata?.size).toBe(0);
 	});
 
 	it('dropPositionalUnion throws for convertible branches and finalizes metadata-free without one', () => {
@@ -278,7 +276,7 @@ describe('projection envelope', () => {
 				reason: 'set-operation-positional-merge',
 			}),
 		);
-		expect(compiled.columnMetadata).toBeUndefined();
+		expect(compiled.columnMetadata?.size).toBe(0);
 	});
 
 	it('expressionColumn outputs are metadata-free', () => {
@@ -317,7 +315,7 @@ describe('projection envelope', () => {
 			naming: identityNaming,
 		});
 
-		expect(finalizeEnvelope(env).columnMetadata).toBeUndefined();
+		expect(finalizeEnvelope(env).columnMetadata?.size).toBe(0);
 	});
 
 	it('preserveOneToOne carries the source projection', () => {

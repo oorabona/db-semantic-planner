@@ -202,10 +202,7 @@ export class RawCteQueryBuilder<TResult = unknown> {
 						...(this.model !== undefined && { model: this.model }),
 					}
 				: undefined;
-		const compiled = adapter.compileCteQuery(
-			intent,
-			compileOptions,
-		) as CompiledQuery<TResult>;
+		const compiled = adapter.compileCteQuery<TResult>(intent, compileOptions);
 		return adapter.execute(compiled);
 	}
 

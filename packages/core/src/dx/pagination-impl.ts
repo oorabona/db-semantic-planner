@@ -254,10 +254,10 @@ export async function paginate<TResult>(
 			const baseCompiled = adapter.compile(basePlan, compileOptions);
 
 			const wrapSql = `SELECT COUNT(*) AS "_count" FROM (${baseCompiled.sql}) _count_subq`;
-			const wrapResult = (await adapter.execute({
-				sql: wrapSql,
-				parameters: baseCompiled.parameters,
-			})) as Array<{ _count: string | number }>;
+			const wrapResult = await adapter.executeRaw<{ _count: string | number }>(
+				wrapSql,
+				baseCompiled.parameters,
+			);
 			total = Number(wrapResult[0]?._count ?? 0);
 		} else {
 			const countBuilder = builder.clone() as unknown as QueryBuilderImpl<{

@@ -43,6 +43,13 @@ function createTestSchema() {
 	});
 }
 
+function mockCompiledQuery<T>(fields: {
+	sql: string;
+	parameters: readonly unknown[];
+}): CompiledQuery<T> {
+	return fields as CompiledQuery<T>;
+}
+
 /**
  * Create a mock adapter that can compile and execute (returns controlled results).
  */
@@ -50,10 +57,11 @@ function createCompilableAdapter(rows: unknown[] = []): Adapter {
 	const base = createMockAdapter();
 	return {
 		...base,
-		compile: <T>(): CompiledQuery<T> => ({
-			sql: 'SELECT "id", "name" FROM "users"',
-			parameters: [],
-		}),
+		compile: <T>(): CompiledQuery<T> =>
+			mockCompiledQuery({
+				sql: 'SELECT "id", "name" FROM "users"',
+				parameters: [],
+			}),
 		execute: async <T>(): Promise<T[]> => rows as T[],
 	};
 }

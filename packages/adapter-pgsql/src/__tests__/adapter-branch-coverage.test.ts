@@ -14,6 +14,7 @@
 
 import { supportsTransactions } from '@dbsp/core';
 import type { RecursivePlanReport } from '@dbsp/types';
+import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -46,6 +47,16 @@ import {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function testQuery<T = unknown>(
+	sql: string,
+	parameters: readonly unknown[] = [],
+) {
+	return projectionlessCompiledQuery<T>(
+		{ sql, parameters },
+		'adapter-branch-coverage-test',
+	);
+}
 
 function makePool(rows: Record<string, unknown>[][] = []): Pool {
 	let idx = 0;
@@ -119,7 +130,7 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 
 		expect(supportsTransactions(adapter)).toBe(true);
 		await adapter.transaction(async (tx) => {
-			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+			await tx.execute(testQuery('SELECT 1'));
 		});
 
 		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
@@ -163,24 +174,22 @@ describe('PgsqlAdapter.execute error paths', () => {
 			new Error('db error'),
 		);
 		const adapter = createPgsqlAdapter(pool);
-		await expect(
-			adapter.execute({ sql: 'SELECT 1', parameters: [] }),
-		).rejects.toThrow('db error');
+		await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
+			'db error',
+		);
 	});
 
 	it('executeOne returns null when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
 		const adapter = createPgsqlAdapter(pool);
-		expect(await adapter.executeOne({ sql: 'SELECT 1', parameters: [] })).toBe(
-			null,
-		);
+		expect(await adapter.executeOne(testQuery('SELECT 1'))).toBe(null);
 	});
 
 	it('executeOneOrThrow throws when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
 		const adapter = createPgsqlAdapter(pool);
 		await expect(
-			adapter.executeOneOrThrow({ sql: 'SELECT 1', parameters: [] }),
+			adapter.executeOneOrThrow(testQuery('SELECT 1')),
 		).rejects.toThrow('No results found');
 	});
 });

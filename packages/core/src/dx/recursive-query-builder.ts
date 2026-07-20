@@ -520,6 +520,23 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		return intent;
 	}
 
+	private compileOnce(): {
+		readonly intent: RecursiveIntent;
+		readonly compiled: CompiledQuery<TResult>;
+	} {
+		const intent = this.buildIntent();
+		const report = planRecursive(intent, this.schema);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = this.adapter.compileRecursive<TResult>(
+			report,
+			this.schema,
+			compileOptions,
+		);
+		return { intent, compiled };
+	}
+
 	/**
 	 * Plan and compile the recursive query.
 	 * Returns the compiled SQL and parameters.
@@ -530,20 +547,11 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 		columnMetadata?: CompiledQuery['columnMetadata'];
 		intent: RecursiveIntent;
 	} {
-		const intent = this.buildIntent();
-		const report = planRecursive(intent, this.schema);
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
-		const compiled = this.adapter.compileRecursive(
-			report,
-			this.schema,
-			compileOptions,
-		);
+		const { intent, compiled } = this.compileOnce();
 		return {
 			sql: compiled.sql,
 			parameters: compiled.parameters,
-			...(compiled.columnMetadata
+			...(compiled.columnMetadata !== undefined
 				? { columnMetadata: compiled.columnMetadata }
 				: {}),
 			intent,
@@ -554,13 +562,8 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	 * Execute the recursive query and return results.
 	 */
 	async execute(): Promise<TResult[]> {
-		const { sql, parameters, columnMetadata } = this.dump();
-		const compiledQuery: CompiledQuery<TResult> = {
-			sql,
-			parameters,
-			...(columnMetadata ? { columnMetadata } : {}),
-		};
-		return this.adapter.execute(compiledQuery);
+		const { compiled } = this.compileOnce();
+		return this.adapter.execute(compiled);
 	}
 }
 

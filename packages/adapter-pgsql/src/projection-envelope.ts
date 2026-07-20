@@ -8,6 +8,7 @@ import type {
 	PlanReport,
 } from '@dbsp/types';
 import { resolveOutputReadHandling } from '@dbsp/types';
+import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
 import type { Node } from '@pgsql/types';
 import {
 	buildCompiledColumnProjections,
@@ -121,7 +122,7 @@ type EnvelopeFields = {
 };
 
 type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
-	readonly hydrationPlan?: PlanReport;
+	readonly hydrationPlan?: CompiledQuery<T>['hydrationPlan'];
 };
 
 const scalarOneShape: OutputValueShape = {
@@ -214,7 +215,7 @@ function outputMapFromColumnProjections(
 }
 
 export function fromCompiledQuery<T = unknown>(
-	compiled: CompiledQueryWithHydrationPlan<T>,
+	compiled: CompiledQuery,
 ): ProjectionEnvelope<T> {
 	const outputs = new Map<string, OutputProjection>();
 	for (const [outputKey, entry] of compiled.columnMetadata ?? []) {
@@ -416,7 +417,7 @@ export function supplementOutputDescriptors<T = unknown>(
 }
 
 export function projectNamedFields<T = unknown>(
-	source: ProjectionEnvelope<T>,
+	source: ProjectionEnvelope,
 	options: ProjectNamedFieldsOptions,
 ): ProjectionEnvelope<T> {
 	if (source.projection.kind === 'dropped') {
@@ -479,7 +480,7 @@ function setProjectedOutput(
 }
 
 export function preserveOneToOne<T = unknown>(
-	source: ProjectionEnvelope<T>,
+	source: ProjectionEnvelope,
 	options: PreserveOneToOneOptions,
 ): ProjectionEnvelope<T> {
 	const hydrationPlan = projectedHydrationPlan(source, options);
@@ -519,19 +520,21 @@ export function expressionColumn(
 }
 
 export function finalizeEnvelope<T = unknown>(
-	env: ProjectionEnvelope<T>,
+	env: ProjectionEnvelope,
 ): CompiledQuery<T> {
 	if (env.projection.kind === 'dropped') {
 		if (env.projection.hadConvertibleSource) {
 			throw new Error(droppedProjectionErrorMessage(env.projection.reason));
 		}
-		const compiled: CompiledQueryWithHydrationPlan<T> = {
-			sql: env.sql,
-			parameters: env.parameters,
-			...(env.hydrationPlan !== undefined
-				? { hydrationPlan: env.hydrationPlan }
-				: {}),
-		};
+		const compiled: CompiledQueryWithHydrationPlan<T> =
+			compiledQueryFromProjection({
+				sql: env.sql,
+				parameters: env.parameters,
+				columnMetadata: new Map<string, CompiledColumnMetadata>(),
+				...(env.hydrationPlan !== undefined
+					? { hydrationPlan: env.hydrationPlan }
+					: {}),
+			});
 		return compiled;
 	}
 
@@ -552,13 +555,14 @@ export function finalizeEnvelope<T = unknown>(
 		}
 	}
 
-	const compiled: CompiledQueryWithHydrationPlan<T> = {
-		sql: env.sql,
-		parameters: env.parameters,
-		...(columnMetadata.size > 0 ? { columnMetadata } : {}),
-		...(env.hydrationPlan !== undefined
-			? { hydrationPlan: env.hydrationPlan }
-			: {}),
-	};
+	const compiled: CompiledQueryWithHydrationPlan<T> =
+		compiledQueryFromProjection({
+			sql: env.sql,
+			parameters: env.parameters,
+			columnMetadata,
+			...(env.hydrationPlan !== undefined
+				? { hydrationPlan: env.hydrationPlan }
+				: {}),
+		});
 	return compiled;
 }

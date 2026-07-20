@@ -1,5 +1,6 @@
 import { createOrm, type RecursivePlanReport, ref, schema } from '@dbsp/core';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
+import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -245,25 +246,27 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 			]),
 		);
 
-		const rows = await adapter.execute({
-			sql: 'select',
-			parameters: [],
-			columnMetadata: new Map([
-				['sequence', { table: 'events', column: 'sequence', js: 'bigint' }],
-				[
-					'safeSequence',
-					{ table: 'events', column: 'safeSequence', js: 'number' },
-				],
-				[
-					'stringSequence',
-					{ table: 'events', column: 'stringSequence', js: 'string' },
-				],
-				[
-					'nullableSequence',
-					{ table: 'events', column: 'nullableSequence', js: 'bigint' },
-				],
-			]),
-		});
+		const rows = await adapter.execute(
+			compiledQueryFromProjection({
+				sql: 'select',
+				parameters: [],
+				columnMetadata: new Map([
+					['sequence', { table: 'events', column: 'sequence', js: 'bigint' }],
+					[
+						'safeSequence',
+						{ table: 'events', column: 'safeSequence', js: 'number' },
+					],
+					[
+						'stringSequence',
+						{ table: 'events', column: 'stringSequence', js: 'string' },
+					],
+					[
+						'nullableSequence',
+						{ table: 'events', column: 'nullableSequence', js: 'bigint' },
+					],
+				]),
+			}),
+		);
 
 		expect(rows[0]).toEqual({
 			sequence: 9007199254740993n,
@@ -280,13 +283,15 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 			makePool([{ id: '550e8400-e29b-41d4-a716-446655440000', metricId: '7' }]),
 		);
 
-		const rows = await adapter.execute({
-			sql: 'select',
-			parameters: [],
-			columnMetadata: new Map([
-				['metricId', { table: 'metrics', column: 'id', js: 'bigint' }],
-			]),
-		});
+		const rows = await adapter.execute(
+			compiledQueryFromProjection({
+				sql: 'select',
+				parameters: [],
+				columnMetadata: new Map([
+					['metricId', { table: 'metrics', column: 'id', js: 'bigint' }],
+				]),
+			}),
+		);
 
 		expect(rows[0]).toEqual({
 			id: '550e8400-e29b-41d4-a716-446655440000',
@@ -300,16 +305,18 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		);
 
 		await expect(
-			adapter.execute({
-				sql: 'select',
-				parameters: [],
-				columnMetadata: new Map([
-					[
-						'safeSequence',
-						{ table: 'events', column: 'safeSequence', js: 'number' },
-					],
-				]),
-			}),
+			adapter.execute(
+				compiledQueryFromProjection({
+					sql: 'select',
+					parameters: [],
+					columnMetadata: new Map([
+						[
+							'safeSequence',
+							{ table: 'events', column: 'safeSequence', js: 'number' },
+						],
+					]),
+				}),
+			),
 		).rejects.toThrow(/events\.safeSequence.*9007199254740992/);
 	});
 

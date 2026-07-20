@@ -912,20 +912,16 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			const [first, second] = await adapter.transaction(async (tx) => {
 				return Promise.all([
 					collect(
-						tx.stream<{ id: number }>(
-							{
-								sql: `SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
-								parameters: [11, 12],
-							},
+						tx.streamRaw<{ id: number }>(
+							`SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
+							[11, 12],
 							{ chunkSize: 1 },
 						),
 					),
 					collect(
-						tx.stream<{ id: number }>(
-							{
-								sql: `SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
-								parameters: [13, 14],
-							},
+						tx.streamRaw<{ id: number }>(
+							`SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
+							[13, 14],
 							{ chunkSize: 1 },
 						),
 					),
