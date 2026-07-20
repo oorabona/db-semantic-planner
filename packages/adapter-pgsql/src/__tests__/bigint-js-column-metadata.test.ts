@@ -868,7 +868,7 @@ with ignored as (events | select id) e | select sequence`);
 			| bind e
 e | select legacySequence`);
 
-		expect(compiled.columnMetadata).toBeUndefined();
+		expect(compiled.columnMetadata?.size).toBe(0);
 	});
 
 	it('keeps expression finals over NQL bindings metadata-free', () => {
@@ -877,7 +877,7 @@ e | select legacySequence`);
 			| bind e
 e | select sequence + 1 as nextSequence`);
 
-		expect(compiled.columnMetadata).toBeUndefined();
+		expect(compiled.columnMetadata?.size).toBe(0);
 	});
 
 	it('throws when set operations would carry bigint js metadata', () => {

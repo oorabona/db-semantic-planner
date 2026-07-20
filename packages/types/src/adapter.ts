@@ -42,6 +42,8 @@ import type {
 import type { OutputDescriptor } from './output-provenance.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
+declare const compiledQueryBrand: unique symbol;
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -91,9 +93,11 @@ export interface CompiledColumnMetadata {
  * @typeParam T - The expected result type (phantom type for inference)
  */
 export interface CompiledQuery<T = unknown> {
+	readonly [compiledQueryBrand]: true;
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
 	readonly columnMetadata?: ReadonlyMap<string, CompiledColumnMetadata>;
+	readonly hydrationPlan?: PlanReport;
 	/** Phantom type for result inference - not used at runtime */
 	readonly __resultType?: T;
 }
@@ -492,27 +496,29 @@ export interface CompilingAdapter extends BaseAdapter {
 	): CompiledQuery;
 
 	/** Compile a recursive CTE plan to executable SQL. */
-	compileRecursive(
+	compileRecursive<T = unknown>(
 		report: RecursivePlanReport,
 		model: ModelIR,
 		options?: CompileOptions,
-	): CompiledQuery;
+	): CompiledQuery<T>;
 
 	/** Compile a CTE query backed by unnest() arrays (BATCH-001). */
-	compileCteQuery(
+	compileCteQuery<T = unknown>(
 		intent: CteQueryIntent,
 		options?: CompileOptions,
-	): CompiledQuery;
+	): CompiledQuery<T>;
 
 	/** Compile a set operation (UNION / INTERSECT / EXCEPT) to SQL. */
-	compileSetOperation(
+	compileSetOperation<T = unknown>(
 		intent: SetOperationIntent,
 		model: ModelIR,
 		options?: CompileOptions,
-	): CompiledQuery;
+	): CompiledQuery<T>;
 
 	/** Compile a FROM-less SELECT expression to SQL (e.g. SELECT nextval('seq')). */
-	compileSelectExpression(expr: ExpressionIntent): CompiledQuery;
+	compileSelectExpression<T = unknown>(
+		expr: ExpressionIntent,
+	): CompiledQuery<T>;
 
 	/** Create a dump for observability. */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;
@@ -645,6 +651,13 @@ export interface RawSqlAdapter extends BaseAdapter {
 		sql: string,
 		parameters?: readonly unknown[],
 	): Promise<T[]>;
+
+	/** Stream a raw SQL query, if the adapter exposes a raw streaming escape hatch. */
+	streamRaw?<T = unknown>(
+		sql: string,
+		parameters?: readonly unknown[],
+		options?: AdapterStreamOptions,
+	): AsyncIterableIterator<T>;
 }
 
 // ============================================================================
@@ -844,6 +857,7 @@ export type CompileOnlyAdapter = CompilingAdapter &
 		readonly executeOne?: never;
 		readonly executeOneOrThrow?: never;
 		readonly stream?: never;
+		readonly streamRaw?: never;
 		readonly introspect?: never;
 		readonly transaction?: never;
 		readonly executeRaw?: never;

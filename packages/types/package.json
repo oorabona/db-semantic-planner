@@ -37,6 +37,10 @@
 		"./internal": {
 			"types": "./dist/internal.d.ts",
 			"import": "./dist/internal.js"
+		},
+		"./adapter-sdk": {
+			"types": "./dist/adapter-sdk.d.ts",
+			"import": "./dist/adapter-sdk.js"
 		}
 	},
 	"files": [

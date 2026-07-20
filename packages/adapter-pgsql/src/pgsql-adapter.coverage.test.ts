@@ -14,11 +14,22 @@
  */
 
 import type { PlanReport } from '@dbsp/types';
+import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it } from 'vitest';
 import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 } from './pgsql-adapter.js';
+
+function testQuery<T = unknown>(
+	sql: string,
+	parameters: readonly unknown[] = [],
+) {
+	return projectionlessCompiledQuery<T>(
+		{ sql, parameters },
+		'pgsql-adapter-coverage-test',
+	);
+}
 
 describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('createPgsqlCompileOnlyAdapter', () => {
@@ -1833,7 +1844,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		it('creates a dump with minimal meta', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = { rootTable: 'users', decisions: [] } as any;
-			const query = { sql: 'SELECT 1', parameters: [] };
+			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query);
 
 			expect(dump.sql).toBe('SELECT 1');
@@ -1847,7 +1858,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				schemaName: 'tenant_dump',
 			});
 			const plan = { rootTable: 'users', decisions: [] } as any;
-			const query = { sql: 'SELECT 1', parameters: [] };
+			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query);
 
 			expect(dump.meta?.schema).toBe('tenant_dump');
@@ -1856,7 +1867,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		it('creates dump with custom meta overrides', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = { rootTable: 'users', decisions: [] } as any;
-			const query = { sql: 'SELECT 1', parameters: [] };
+			const query = testQuery('SELECT 1');
 			const dump = adapter.createDump(plan, query, {
 				queryName: 'test-query',
 				correlationId: 'abc-123',
@@ -1870,16 +1881,16 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	describe('error paths - compile-only adapter', () => {
 		it('throws on execute', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			await expect(
-				adapter.execute({ sql: 'SELECT 1', parameters: [] }),
-			).rejects.toThrow(/compile-only mode/);
+			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
+				/compile-only mode/,
+			);
 		});
 
 		it('throws on executeOne', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			await expect(
-				adapter.executeOne({ sql: 'SELECT 1', parameters: [] }),
-			).rejects.toThrow(/compile-only mode/);
+			await expect(adapter.executeOne(testQuery('SELECT 1'))).rejects.toThrow(
+				/compile-only mode/,
+			);
 		});
 
 		it('throws on executeRaw', async () => {
@@ -1908,7 +1919,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 		it('stream throws on compile-only adapter', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			const iter = adapter.stream({ sql: 'SELECT 1', parameters: [] });
+			const iter = adapter.stream(testQuery('SELECT 1'));
 			// The generator should throw when iterated
 			expect(iter.next()).rejects.toThrow(/compile-only mode/);
 		});

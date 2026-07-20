@@ -58,6 +58,7 @@ describe('createPgsqlCompileOnlyAdapter — type contract (S-1)', () => {
 		expectTypeOf(adapter).not.toHaveProperty('executeOne');
 		expectTypeOf(adapter).not.toHaveProperty('executeOneOrThrow');
 		expectTypeOf(adapter).not.toHaveProperty('stream');
+		expectTypeOf(adapter).not.toHaveProperty('streamRaw');
 		expectTypeOf(adapter).not.toHaveProperty('transaction');
 		expectTypeOf(adapter).not.toHaveProperty('introspect');
 		expectTypeOf(adapter).not.toHaveProperty('executeRaw');

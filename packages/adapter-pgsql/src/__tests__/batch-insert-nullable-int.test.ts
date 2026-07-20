@@ -285,10 +285,11 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			UNNEST_OPTIONS,
 		);
 
-		expect(result).toEqual({
-			sql: 'INSERT INTO flags (bits) SELECT unnest(CAST($1 AS bit varying[])) AS bits',
-			parameters: [['10101010', '11110000']],
-		});
+		expect(result.sql).toBe(
+			'INSERT INTO flags (bits) SELECT unnest(CAST($1 AS bit varying[])) AS bits',
+		);
+		expect(result.parameters).toEqual([['10101010', '11110000']]);
+		expect(result.columnMetadata?.size).toBe(0);
 	});
 
 	it('casts numeric originalDbType as numeric[] without precision loss', () => {
@@ -320,10 +321,11 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			UNNEST_OPTIONS,
 		);
 
-		expect(result).toEqual({
-			sql: 'INSERT INTO invoices (amount) SELECT unnest(CAST($1 AS numeric[])) AS amount',
-			parameters: [['10.25', '20.50']],
-		});
+		expect(result.sql).toBe(
+			'INSERT INTO invoices (amount) SELECT unnest(CAST($1 AS numeric[])) AS amount',
+		);
+		expect(result.parameters).toEqual([['10.25', '20.50']]);
+		expect(result.columnMetadata?.size).toBe(0);
 	});
 
 	it('compiles faithful adapter DB types in batch insert casts', () => {
@@ -378,14 +380,15 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			UNNEST_OPTIONS,
 		);
 
-		expect(result).toEqual({
-			sql: 'INSERT INTO places (shape, label, duration) SELECT unnest(CAST($1 AS geometry(Point,4326)[])) AS shape, unnest(CAST($2 AS "LabelType"[])) AS label, unnest(CAST($3 AS interval day to second[])) AS duration',
-			parameters: [
-				['POINT(1 2)', 'POINT(3 4)'],
-				['home', 'work'],
-				['1 day 02:03:04', '2 days 03:04:05'],
-			],
-		});
+		expect(result.sql).toBe(
+			'INSERT INTO places (shape, label, duration) SELECT unnest(CAST($1 AS geometry(Point,4326)[])) AS shape, unnest(CAST($2 AS "LabelType"[])) AS label, unnest(CAST($3 AS interval day to second[])) AS duration',
+		);
+		expect(result.parameters).toEqual([
+			['POINT(1 2)', 'POINT(3 4)'],
+			['home', 'work'],
+			['1 day 02:03:04', '2 days 03:04:05'],
+		]);
+		expect(result.columnMetadata?.size).toBe(0);
 	});
 
 	it('fails loud on batch insert into an array-typed column (unnest cannot express it)', () => {
@@ -461,9 +464,10 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 			UNNEST_OPTIONS,
 		);
 
-		expect(result).toEqual({
-			sql: 'INSERT INTO payments (amount) SELECT unnest(CAST($1 AS "Money"[])) AS amount',
-			parameters: [['10.25', '20.50']],
-		});
+		expect(result.sql).toBe(
+			'INSERT INTO payments (amount) SELECT unnest(CAST($1 AS "Money"[])) AS amount',
+		);
+		expect(result.parameters).toEqual([['10.25', '20.50']]);
+		expect(result.columnMetadata?.size).toBe(0);
 	});
 });

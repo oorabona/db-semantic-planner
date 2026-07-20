@@ -300,24 +300,20 @@ describe('FIND-018: paginate() count query uses full query state', () => {
 });
 
 describe('M-1 regression: paginate() count wraps GROUP BY as subquery', () => {
-	it('groupBy query: compile() called for base, execute() called with wrapped SQL', async () => {
-		// Setup: spy adapter that records execute() calls and their SQL
+	it('groupBy query: compile() called for base, executeRaw() called with wrapped SQL', async () => {
+		// Setup: spy adapter that records the count SQL
 		const adapter = createSpyAdapter([{ id: 1 }]);
-		let executeCallCount = 0;
+		let executeRawCallCount = 0;
 		let countSql = '';
 		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute =
-			vi.fn(
-				async (compiled: { sql: string; parameters: readonly unknown[] }) => {
-					executeCallCount++;
-					if (executeCallCount === 1) {
-						// First call: the paginated data query
-						return [{ id: 1 }, { id: 2 }];
-					}
-					// Second call: the count query — should be the subquery-wrapped form
-					countSql = compiled.sql;
-					return [{ _count: 3 }]; // 3 distinct groups
-				},
-			);
+			vi.fn(async () => [{ id: 1 }, { id: 2 }]);
+		(
+			adapter as unknown as { executeRaw: ReturnType<typeof vi.fn> }
+		).executeRaw = vi.fn(async (sql: string) => {
+			executeRawCallCount++;
+			countSql = sql;
+			return [{ _count: 3 }]; // 3 distinct groups
+		});
 
 		const orm = createOrm({ adapter, schema: simpleSchema });
 		const result = await orm
@@ -331,8 +327,7 @@ describe('M-1 regression: paginate() count wraps GROUP BY as subquery', () => {
 		// Format: SELECT COUNT(*) AS "_count" FROM (base_sql) _count_subq
 		expect(countSql).toMatch(/^SELECT COUNT\(\*\) AS "_count" FROM \(/);
 		expect(countSql).toMatch(/\) _count_subq$/);
-		// execute() is called twice: once for data, once for wrapped count
-		expect(executeCallCount).toBe(2);
+		expect(executeRawCallCount).toBe(1);
 	});
 });
 

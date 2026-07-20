@@ -5,6 +5,7 @@
  */
 
 import type { PlanReport } from '@dbsp/core';
+import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
@@ -24,6 +25,16 @@ function createMockPool(): Pool {
 		end: vi.fn(),
 		// Add other Pool methods as needed
 	} as unknown as Pool;
+}
+
+function testQuery<T = unknown>(
+	sql: string,
+	parameters: readonly unknown[] = [],
+) {
+	return projectionlessCompiledQuery<T>(
+		{ sql, parameters },
+		'pgsql-adapter-unit-test',
+	);
 }
 
 // ============================================================================
@@ -367,7 +378,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
 			const adapter = createPgsqlAdapter(pool);
-			const query = { sql: 'SELECT * FROM users', parameters: [] };
+			const query = testQuery('SELECT * FROM users');
 
 			const results = await adapter.execute(query);
 
@@ -383,7 +394,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
 			const adapter = createPgsqlAdapter(pool);
-			const query = { sql: 'SELECT * FROM users LIMIT 1', parameters: [] };
+			const query = testQuery('SELECT * FROM users LIMIT 1');
 
 			const result = await adapter.executeOne(query);
 
@@ -395,10 +406,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(pool.query).mockResolvedValue({ rows: [] } as any);
 
 			const adapter = createPgsqlAdapter(pool);
-			const query = {
-				sql: 'SELECT * FROM users WHERE id = $1',
-				parameters: [999],
-			};
+			const query = testQuery('SELECT * FROM users WHERE id = $1', [999]);
 
 			const result = await adapter.executeOne(query);
 
@@ -413,7 +421,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
 
 			const adapter = createPgsqlAdapter(pool);
-			const query = { sql: 'SELECT * FROM users LIMIT 1', parameters: [] };
+			const query = testQuery('SELECT * FROM users LIMIT 1');
 
 			const result = await adapter.executeOneOrThrow(query);
 
@@ -425,10 +433,7 @@ describe('PgsqlAdapter', () => {
 			vi.mocked(pool.query).mockResolvedValue({ rows: [] } as any);
 
 			const adapter = createPgsqlAdapter(pool);
-			const query = {
-				sql: 'SELECT * FROM users WHERE id = $1',
-				parameters: [999],
-			};
+			const query = testQuery('SELECT * FROM users WHERE id = $1', [999]);
 
 			await expect(adapter.executeOneOrThrow(query)).rejects.toThrow(
 				'No results found',
@@ -525,10 +530,7 @@ describe('PgsqlAdapter', () => {
 				decisions: [],
 			} as any;
 
-			const query = {
-				sql: 'SELECT * FROM users',
-				parameters: [],
-			};
+			const query = testQuery('SELECT * FROM users');
 
 			const dump = adapter.createDump(plan, query);
 
@@ -550,10 +552,7 @@ describe('PgsqlAdapter', () => {
 				decisions: [],
 			} as any;
 
-			const query = {
-				sql: 'SELECT * FROM users',
-				parameters: [],
-			};
+			const query = testQuery('SELECT * FROM users');
 
 			const dump = adapter.createDump(plan, query);
 
@@ -640,7 +639,7 @@ describe('PgsqlAdapter', () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool);
 
-			const query = { sql: 'SELECT * FROM users', parameters: [] };
+			const query = testQuery('SELECT * FROM users');
 
 			const iterator = adapter.stream(query);
 
@@ -686,14 +685,14 @@ describe('PgsqlAdapter', () => {
 
 		it('should throw on execute in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
-			await expect(
-				adapter.execute({ sql: 'SELECT 1', parameters: [] }),
-			).rejects.toThrow('compile-only mode');
+			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
+				'compile-only mode',
+			);
 		});
 
 		it('should throw on stream in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
-			const iter = adapter.stream({ sql: 'SELECT 1', parameters: [] });
+			const iter = adapter.stream(testQuery('SELECT 1'));
 			await expect(iter.next()).rejects.toThrow('compile-only mode');
 		});
 
@@ -717,9 +716,9 @@ describe('PgsqlAdapter', () => {
 
 			expect(scoped).toBeInstanceOf(PgsqlAdapter);
 			// Scoped adapter should also be in compile-only mode
-			await expect(
-				scoped.execute({ sql: 'SELECT 1', parameters: [] }),
-			).rejects.toThrow('compile-only mode');
+			await expect(scoped.execute(testQuery('SELECT 1'))).rejects.toThrow(
+				'compile-only mode',
+			);
 		});
 
 		it('should generate DDL in compile-only mode', () => {

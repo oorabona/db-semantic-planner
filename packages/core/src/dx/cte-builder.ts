@@ -212,10 +212,7 @@ export class CteQueryBuilder<TResult = unknown> {
 		const intent = this.buildIntent();
 		const compileOptions = this.compileOptions();
 
-		const compiled = adapter.compileCteQuery(
-			intent,
-			compileOptions,
-		) as CompiledQuery<TResult>;
+		const compiled = adapter.compileCteQuery<TResult>(intent, compileOptions);
 
 		return adapter.execute(compiled);
 	}
