@@ -100,7 +100,7 @@ describe('bigint js json_agg SQL projection', () => {
 		expect(compiled.sql).not.toMatch(/CAST\(__t__\.code AS text\)/);
 	});
 
-	it('records exact emitted JSON key mappings on the compile-local hydration plan', () => {
+	it('records exact JSON keys and resolver nested transforms on the compile-local hydration plan', () => {
 		const adapter = createPgsqlCompileOnlyAdapter({
 			model: includeSchema.model,
 			dbCasing: 'snake_case',
@@ -116,6 +116,13 @@ describe('bigint js json_agg SQL projection', () => {
 			model: includeSchema.model,
 		});
 
+		expect(compiled.main.sql).toMatch(/CAST\(__t__\.observed_at AS text\)/);
+		expect(compiled.main.sql).toMatch(/CAST\(__t__\.safe_count AS text\)/);
+		expect(compiled.main.sql).toMatch(/CAST\(__t__\.string_count AS text\)/);
+		expect(compiled.main.sql).toMatch(/CAST\(__t__\.parse_json AS text\)/);
+		expect(compiled.main.sql).not.toMatch(
+			/CAST\(__t__\.legacy_count AS text\)/,
+		);
 		const decision = plan.decisions.find(
 			(candidate) =>
 				candidate.type === 'include-strategy' &&
@@ -128,6 +135,7 @@ describe('bigint js json_agg SQL projection', () => {
 					| undefined
 			)?.jsonAggColumnKeyMap,
 		).toBeUndefined();
+		expect(decision?.context.jsonAggNestedReadTransforms).toBeUndefined();
 		const hydrationPlan = (compiled.main as { hydrationPlan?: PlanReport })
 			.hydrationPlan;
 		const hydrationDecision = hydrationPlan?.decisions.find(
@@ -142,5 +150,31 @@ describe('bigint js json_agg SQL projection', () => {
 					| undefined
 			)?.jsonAggColumnKeyMap?.parse_json,
 		).toBe('parseJSON');
+		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual([
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'observedAt',
+				js: 'bigint',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'safeCount',
+				js: 'number',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'stringCount',
+				js: 'string',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'parseJSON',
+				js: 'bigint',
+			},
+		]);
 	});
 });

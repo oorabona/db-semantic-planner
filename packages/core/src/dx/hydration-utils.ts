@@ -3,7 +3,10 @@
  *
  * Extracted from ResultHydrator and QueryBuilderImpl to avoid duplication (DRY).
  */
-import { convertBigintJsReadValue } from '@dbsp/types';
+import {
+	convertBigintJsReadValue,
+	type NestedOutputReadHandling,
+} from '@dbsp/types';
 import type { CompiledQuery } from '../adapter.js';
 import type { ModelIR, RelationType } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
@@ -22,15 +25,21 @@ type JsonAggRelationInfo = {
 	readonly sourceTable?: string;
 	readonly targetTable?: string;
 	readonly columnKeyMap?: JsonAggColumnKeyMap;
+	readonly nestedReadTransforms?: JsonAggNestedReadTransformMap;
 };
 
 type NestedRelationInfo = {
 	readonly targetTable: string;
 	readonly isToOne: boolean;
 	readonly columnKeyMap?: JsonAggColumnKeyMap;
+	readonly nestedReadTransforms?: JsonAggNestedReadTransformMap;
 };
 
 type JsonAggColumnKeyMap = ReadonlyMap<string, string>;
+type JsonAggNestedReadTransformMap = ReadonlyMap<
+	string,
+	NestedOutputReadHandling
+>;
 
 type CompiledQueryWithHydrationPlan = CompiledQuery & {
 	readonly hydrationPlan?: PlanReport;
@@ -69,12 +78,37 @@ function keyCandidates(name: string): readonly string[] {
 function readJsonAggColumnKeyMap(
 	context: PlanReport['decisions'][number]['context'],
 ): JsonAggColumnKeyMap | undefined {
-	const raw = (context as { jsonAggColumnKeyMap?: unknown })
-		.jsonAggColumnKeyMap;
+	const raw = context.jsonAggColumnKeyMap;
 	if (!isRecord(raw)) return undefined;
 	const entries = Object.entries(raw).filter(
 		(entry): entry is [string, string] => typeof entry[1] === 'string',
 	);
+	return entries.length > 0 ? new Map(entries) : undefined;
+}
+
+function isNestedOutputReadHandling(
+	value: unknown,
+): value is NestedOutputReadHandling {
+	return (
+		isRecord(value) &&
+		value.kind === 'nestedTransform' &&
+		typeof value.table === 'string' &&
+		typeof value.column === 'string' &&
+		(value.js === 'bigint' || value.js === 'number' || value.js === 'string')
+	);
+}
+
+function readJsonAggNestedReadTransforms(
+	context: PlanReport['decisions'][number]['context'],
+): JsonAggNestedReadTransformMap | undefined {
+	const raw = context.jsonAggNestedReadTransforms;
+	if (!Array.isArray(raw)) return undefined;
+	const entries: [string, NestedOutputReadHandling][] = [];
+	for (const item of raw) {
+		if (isNestedOutputReadHandling(item)) {
+			entries.push([item.column, item]);
+		}
+	}
 	return entries.length > 0 ? new Map(entries) : undefined;
 }
 
@@ -149,10 +183,14 @@ function buildNestedRelationLookup(
 				: undefined);
 		if (!sourceTable || !targetTable) continue;
 		const columnKeyMap = readJsonAggColumnKeyMap(decision.context);
+		const nestedReadTransforms = readJsonAggNestedReadTransforms(
+			decision.context,
+		);
 		const info = {
 			targetTable,
 			isToOne: relationTypeIsToOne(decision.context.relationType),
 			...(columnKeyMap ? { columnKeyMap } : {}),
+			...(nestedReadTransforms ? { nestedReadTransforms } : {}),
 		};
 		addNestedRelationInfo(lookup, sourceTable, canonicalName, info);
 		addNestedRelationInfo(lookup, sourceTable, includeAlias, info);
@@ -166,11 +204,19 @@ function convertJsonAggPayload(
 	model: ModelIR | undefined,
 	lookup: ReadonlyMap<string, ReadonlyMap<string, NestedRelationInfo>>,
 	columnKeyMap?: JsonAggColumnKeyMap,
+	nestedReadTransforms?: JsonAggNestedReadTransformMap,
 ): unknown {
 	if (!model || !tableName) return value;
 	if (Array.isArray(value)) {
 		return value.map((item) =>
-			convertJsonAggPayload(item, tableName, model, lookup, columnKeyMap),
+			convertJsonAggPayload(
+				item,
+				tableName,
+				model,
+				lookup,
+				columnKeyMap,
+				nestedReadTransforms,
+			),
 		);
 	}
 	if (!isRecord(value)) return value;
@@ -181,18 +227,18 @@ function convertJsonAggPayload(
 			const key = findExistingKey(value, column.name, columnKeyMap);
 			if (key === undefined) continue;
 			const outputKey = renameExistingKey(value, key, column.name);
+			const transform = nestedReadTransforms?.get(column.name);
 			if (
-				column.type === 'bigint' &&
-				(column.js === 'bigint' ||
-					column.js === 'number' ||
-					column.js === 'string')
+				transform?.kind === 'nestedTransform' &&
+				transform.table === tableName &&
+				transform.column === column.name
 			) {
 				value[outputKey] = convertBigintJsReadValue(
 					value[outputKey],
-					column.js,
+					transform.js,
 					{
-						table: tableName,
-						column: column.name,
+						table: transform.table,
+						column: transform.column,
 						outputKey,
 					},
 				);
@@ -211,6 +257,7 @@ function convertJsonAggPayload(
 			model,
 			lookup,
 			info.columnKeyMap,
+			info.nestedReadTransforms,
 		);
 		value[key] =
 			info.isToOne && Array.isArray(converted)
@@ -262,6 +309,9 @@ export function hydrateJsonAggIncludes<T>(
 		const sourceTable = decision.context?.sourceTable;
 		const targetTable = decision.context?.target;
 		const columnKeyMap = readJsonAggColumnKeyMap(decision.context);
+		const nestedReadTransforms = readJsonAggNestedReadTransforms(
+			decision.context,
+		);
 
 		// Primary key: canonical relation name (matches adapter SQL alias)
 		if (typeof canonicalName === 'string') {
@@ -273,6 +323,7 @@ export function hydrateJsonAggIncludes<T>(
 				...(sourceTable !== undefined ? { sourceTable } : {}),
 				...(targetTable !== undefined ? { targetTable } : {}),
 				...(columnKeyMap ? { columnKeyMap } : {}),
+				...(nestedReadTransforms ? { nestedReadTransforms } : {}),
 			};
 			relationInfo.set(canonicalName, info);
 		} else if (typeof includeAlias === 'string') {
@@ -283,6 +334,7 @@ export function hydrateJsonAggIncludes<T>(
 				...(sourceTable !== undefined ? { sourceTable } : {}),
 				...(targetTable !== undefined ? { targetTable } : {}),
 				...(columnKeyMap ? { columnKeyMap } : {}),
+				...(nestedReadTransforms ? { nestedReadTransforms } : {}),
 			};
 			relationInfo.set(includeAlias, info);
 		}
@@ -355,6 +407,7 @@ export function hydrateJsonAggIncludes<T>(
 					model,
 					nestedRelationLookup,
 					info.columnKeyMap,
+					info.nestedReadTransforms,
 				);
 
 				// Set property using includeAlias (user-facing name, e.g., 'posts')

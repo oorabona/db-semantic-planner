@@ -12,6 +12,7 @@ import type {
 	CompileResultWithIncludes,
 	JoinIntent,
 	ModelIR,
+	NestedOutputReadHandling,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
@@ -34,6 +35,10 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
+import {
+	jsonAggContainerShape,
+	resolveJsonAggColumnReadHandling,
+} from './json-agg-read-handling.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
@@ -628,6 +633,33 @@ function buildJsonAggColumnKeyMap(
 	return Object.keys(map).length > 0 ? map : undefined;
 }
 
+function buildJsonAggNestedReadTransforms(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): readonly NestedOutputReadHandling[] | undefined {
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+	const table = model?.getTable(targetTable);
+	if (!table) return undefined;
+	const shape = jsonAggContainerShape(decision.relationType);
+	const transforms: NestedOutputReadHandling[] = [];
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column) continue;
+		const handling = resolveJsonAggColumnReadHandling(
+			targetTable,
+			column,
+			shape,
+		);
+		if (handling) transforms.push(handling);
+	}
+	return transforms.length > 0 ? transforms : undefined;
+}
+
 function findJsonAggPlanDecision(
 	plan: PlanReport,
 	decision: PlanDecision,
@@ -670,14 +702,20 @@ function annotateJsonAggColumnKeyMaps(
 				targetTable && planDecision
 					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming)
 					: undefined;
-			if (keyMap && planDecision) {
-				(
-					planDecision.context as Mutable<
-						PlanReport['decisions'][number]['context']
-					> & {
-						jsonAggColumnKeyMap?: Record<string, string>;
-					}
-				).jsonAggColumnKeyMap = keyMap;
+			const nestedReadTransforms =
+				targetTable && planDecision
+					? buildJsonAggNestedReadTransforms(decision, targetTable, model)
+					: undefined;
+			if ((keyMap || nestedReadTransforms) && planDecision) {
+				const context = planDecision.context as Mutable<
+					PlanReport['decisions'][number]['context']
+				>;
+				if (keyMap) {
+					context.jsonAggColumnKeyMap = keyMap;
+				}
+				if (nestedReadTransforms) {
+					context.jsonAggNestedReadTransforms = nestedReadTransforms;
+				}
 				annotated = true;
 			}
 		}

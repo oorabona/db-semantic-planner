@@ -47,6 +47,11 @@ export type OutputReadHandling =
 	  }
 	| { readonly kind: 'none' };
 
+export type NestedOutputReadHandling = Extract<
+	OutputReadHandling,
+	{ readonly kind: 'nestedTransform' }
+>;
+
 export function resolveOutputReadHandling(
 	descriptor: OutputDescriptor,
 ): OutputReadHandling {

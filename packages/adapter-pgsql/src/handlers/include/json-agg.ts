@@ -16,6 +16,10 @@ import {
 	jsonAggSubquery,
 	typeCast,
 } from '../../ast-helpers.js';
+import {
+	jsonAggContainerShape,
+	resolveJsonAggColumnReadHandling,
+} from '../../json-agg-read-handling.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -64,20 +68,11 @@ function resolveJsonAggOrderBy(
 		: undefined;
 }
 
-function columnNeedsJsonTextCast(column: {
-	readonly type?: string;
-	readonly js?: string;
-}): boolean {
-	return (
-		column.type === 'bigint' &&
-		(column.js === 'bigint' || column.js === 'number' || column.js === 'string')
-	);
-}
-
 function resolveJsonAggProjection(
 	decision: Decision,
 	targetTable: string,
 	ctx: CompilerContext,
+	shape: ReturnType<typeof jsonAggContainerShape>,
 ): readonly string[] | undefined {
 	const requested = decision.columns;
 	const hasExplicitProjection =
@@ -88,7 +83,11 @@ function resolveJsonAggProjection(
 
 	const table = ctx.model?.getTable(targetTable);
 	const needsExplicitProjection =
-		table?.columns.some((column) => columnNeedsJsonTextCast(column)) ?? false;
+		table?.columns.some(
+			(column) =>
+				resolveJsonAggColumnReadHandling(targetTable, column, shape) !==
+				undefined,
+		) ?? false;
 	if (!needsExplicitProjection || !table) return requested;
 	return table.columns.map((column) => column.name);
 }
@@ -98,6 +97,7 @@ function buildJsonAggColumnValueOverrides(
 	columns: readonly string[] | undefined,
 	innerAlias: string,
 	ctx: CompilerContext,
+	shape: ReturnType<typeof jsonAggContainerShape>,
 ): ReadonlyMap<string, Node> | undefined {
 	if (!columns || columns.length === 0) return undefined;
 	const table = ctx.model?.getTable(targetTable);
@@ -107,7 +107,12 @@ function buildJsonAggColumnValueOverrides(
 		const column = table.columns.find(
 			(candidate) => candidate.name === columnName,
 		);
-		if (!column || !columnNeedsJsonTextCast(column)) continue;
+		if (
+			!column ||
+			resolveJsonAggColumnReadHandling(targetTable, column, shape) === undefined
+		) {
+			continue;
+		}
 		overrides.set(
 			columnName,
 			typeCast(
@@ -193,12 +198,14 @@ function compileJsonAggRecursive(
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
-	const columns = resolveJsonAggProjection(decision, targetTable, ctx);
+	const shape = jsonAggContainerShape(decision.relationType);
+	const columns = resolveJsonAggProjection(decision, targetTable, ctx, shape);
 	const columnValueOverrides = buildJsonAggColumnValueOverrides(
 		targetTable,
 		columns,
 		innerAlias,
 		ctx,
+		shape,
 	);
 
 	return jsonAggSubquery(

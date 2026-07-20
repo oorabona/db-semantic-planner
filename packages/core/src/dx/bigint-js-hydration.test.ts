@@ -1,3 +1,8 @@
+import {
+	type ColumnJsReadType,
+	type NestedOutputReadHandling,
+	resolveOutputReadHandling,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type { PlanReport } from '../planner.js';
 import { hydrateJsonAggIncludes } from './hydration-utils.js';
@@ -33,6 +38,49 @@ const includeSchema = schema({
 	},
 });
 
+function nestedTransform(
+	table: string,
+	column: string,
+	js: ColumnJsReadType,
+	shape: 'array' | 'object' = 'array',
+): NestedOutputReadHandling {
+	const handling = resolveOutputReadHandling({
+		outputKey: column,
+		source: {
+			kind: 'modelColumn',
+			table,
+			column,
+			js,
+		},
+		shape:
+			shape === 'object'
+				? { kind: 'object', cardinality: 'one', aggregate: 'json_agg' }
+				: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
+	});
+	if (handling.kind !== 'nestedTransform') {
+		throw new Error(`Expected nestedTransform for ${table}.${column}`);
+	}
+	return handling;
+}
+
+const readingArrayTransforms = [
+	nestedTransform('readings', 'observedAt', 'bigint'),
+	nestedTransform('readings', 'safeCount', 'number'),
+	nestedTransform('readings', 'stringCount', 'string'),
+	nestedTransform('readings', 'parseJSON', 'bigint'),
+	nestedTransform('readings', 'constructor', 'bigint'),
+	nestedTransform('readings', 'toString', 'bigint'),
+] as const;
+
+const readingObjectTransforms = [
+	nestedTransform('readings', 'observedAt', 'bigint', 'object'),
+	nestedTransform('readings', 'safeCount', 'number', 'object'),
+] as const;
+
+const sampleArrayTransforms = [
+	nestedTransform('samples', 'rawValue', 'bigint'),
+] as const;
+
 const report = {
 	rootTable: 'parents',
 	decisions: [
@@ -44,6 +92,7 @@ const report = {
 				target: 'readings',
 				relation: 'readings',
 				relationType: 'hasMany',
+				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
 		{
@@ -55,6 +104,7 @@ const report = {
 				relation: 'samples',
 				relationType: 'hasMany',
 				intentPath: 'include[readings].include[samples]',
+				jsonAggNestedReadTransforms: sampleArrayTransforms,
 			},
 		},
 	],
@@ -71,6 +121,7 @@ const toOneReport = {
 				target: 'readings',
 				relation: 'reading',
 				relationType: 'belongsTo',
+				jsonAggNestedReadTransforms: readingObjectTransforms,
 			},
 		},
 	],
@@ -87,6 +138,7 @@ const noNestedIncludeReport = {
 				target: 'readings',
 				relation: 'readings',
 				relationType: 'hasMany',
+				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
 	],
@@ -111,6 +163,7 @@ const exactKeyReport = {
 					parse_json: 'parseJSON',
 					legacy_count: 'legacyCount',
 				},
+				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
 	],
@@ -127,6 +180,7 @@ const nestedToOneReport = {
 				target: 'readings',
 				relation: 'readings',
 				relationType: 'hasMany',
+				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
 		{
@@ -186,6 +240,50 @@ describe('bigint js json_agg hydration', () => {
 								rawValue: 9007199254740995n,
 							},
 						],
+					},
+				],
+			},
+		]);
+	});
+
+	it('converts only columns named by resolver nestedTransform directives', () => {
+		const resolverDrivenReport = {
+			rootTable: 'parents',
+			decisions: [
+				{
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'parents',
+						target: 'readings',
+						relation: 'readings',
+						relationType: 'hasMany',
+						jsonAggNestedReadTransforms: [
+							nestedTransform('readings', 'observedAt', 'bigint'),
+						],
+					},
+				},
+			],
+		} as unknown as PlanReport;
+		const results: Record<string, unknown>[] = [
+			{
+				readings_json: JSON.stringify([
+					{
+						observed_at: '9007199254740993',
+						safe_count: '42',
+					},
+				]),
+			},
+		];
+
+		hydrateJsonAggIncludes(results, resolverDrivenReport, includeSchema.model);
+
+		expect(results).toEqual([
+			{
+				readings: [
+					{
+						observedAt: 9007199254740993n,
+						safeCount: '42',
 					},
 				],
 			},
