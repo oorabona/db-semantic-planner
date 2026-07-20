@@ -79,15 +79,25 @@ export type ProjectNamedFieldsSelection = {
 	readonly outputKey: string;
 };
 
+export type ProjectNamedFieldsExpression = {
+	readonly outputKey: string;
+	readonly reason: string;
+};
+
 export type ProjectNamedFieldsOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
 	readonly selections: readonly ProjectNamedFieldsSelection[];
+	readonly expressions?: readonly ProjectNamedFieldsExpression[];
+	readonly hydrationPlan?: PlanReport;
+	readonly preserveHydrationPlan?: boolean;
 };
 
 export type PreserveOneToOneOptions = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly hydrationPlan?: PlanReport;
+	readonly preserveHydrationPlan?: boolean;
 };
 
 export type DropPositionalUnionOptions = {
@@ -192,6 +202,18 @@ function droppedProjectionErrorMessage(reason: ProjectionDropReason): string {
 	}
 }
 
+function projectedHydrationPlan(
+	source: ProjectionEnvelope<unknown>,
+	options: {
+		readonly hydrationPlan?: PlanReport;
+		readonly preserveHydrationPlan?: boolean;
+	},
+): PlanReport | undefined {
+	if (options.hydrationPlan !== undefined) return options.hydrationPlan;
+	if (options.preserveHydrationPlan === false) return undefined;
+	return source.hydrationPlan;
+}
+
 export function fromAstProjection<T = unknown>(
 	options: FromAstProjectionOptions,
 ): ProjectionEnvelope<T> {
@@ -257,27 +279,21 @@ export function projectNamedFields<T = unknown>(
 	options: ProjectNamedFieldsOptions,
 ): ProjectionEnvelope<T> {
 	if (source.projection.kind === 'dropped') {
+		const hydrationPlan = projectedHydrationPlan(source, options);
 		return makeEnvelope<T>({
 			sql: options.sql,
 			parameters: options.parameters,
 			projection: source.projection,
-			...(source.hydrationPlan !== undefined
-				? { hydrationPlan: source.hydrationPlan }
-				: {}),
+			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 		});
 	}
 
+	const hydrationPlan = projectedHydrationPlan(source, options);
 	const outputs = new Map<string, OutputProjection>();
 	for (const selection of options.selections) {
-		if (outputs.has(selection.outputKey)) {
-			outputs.set(selection.outputKey, {
-				kind: 'ambiguous',
-				reason: `projection output '${selection.outputKey}' was selected more than once`,
-			});
-			continue;
-		}
 		const sourceOutput = source.projection.outputs.get(selection.inputKey);
-		outputs.set(
+		setProjectedOutput(
+			outputs,
 			selection.outputKey,
 			sourceOutput ?? {
 				kind: 'unresolved',
@@ -285,28 +301,47 @@ export function projectNamedFields<T = unknown>(
 			},
 		);
 	}
+	for (const expression of options.expressions ?? []) {
+		const [outputKey, output] = expressionColumn(
+			expression.outputKey,
+			expression.reason,
+		);
+		setProjectedOutput(outputs, outputKey, output);
+	}
 
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
 		projection: { kind: 'known', outputs },
-		...(source.hydrationPlan !== undefined
-			? { hydrationPlan: source.hydrationPlan }
-			: {}),
+		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 	});
+}
+
+function setProjectedOutput(
+	outputs: Map<string, OutputProjection>,
+	outputKey: string,
+	output: OutputProjection,
+): void {
+	if (outputs.has(outputKey)) {
+		outputs.set(outputKey, {
+			kind: 'ambiguous',
+			reason: `projection output '${outputKey}' was selected more than once`,
+		});
+		return;
+	}
+	outputs.set(outputKey, output);
 }
 
 export function preserveOneToOne<T = unknown>(
 	source: ProjectionEnvelope<T>,
 	options: PreserveOneToOneOptions,
 ): ProjectionEnvelope<T> {
+	const hydrationPlan = projectedHydrationPlan(source, options);
 	return makeEnvelope<T>({
 		sql: options.sql,
 		parameters: options.parameters,
 		projection: source.projection,
-		...(source.hydrationPlan !== undefined
-			? { hydrationPlan: source.hydrationPlan }
-			: {}),
+		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
 	});
 }
 

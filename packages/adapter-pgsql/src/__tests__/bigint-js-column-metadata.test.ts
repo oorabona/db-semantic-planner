@@ -309,6 +309,48 @@ describe('bigint js column metadata provenance', () => {
 		});
 	});
 
+	it('moves bigint js metadata through an aliased CTE passthrough column', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'event_cte',
+						query: {
+							type: 'select',
+							from: 'events',
+							select: { type: 'fields', fields: ['sequence'] },
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'event_cte',
+					select: {
+						type: 'expressions',
+						columns: [
+							{
+								kind: 'columnAlias',
+								column: 'sequence',
+								alias: 'seq',
+							},
+						],
+					},
+				},
+			},
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.columnMetadata?.get('seq')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+	});
+
 	it('does not resolve WITH CTE names through shadowed model tables', () => {
 		const metadata = buildCompiledColumnMetadata(
 			{
@@ -414,6 +456,72 @@ describe('bigint js column metadata provenance', () => {
 		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
 	});
 
+	it('keeps same-name CTE output fail-closed when the CTE shadows a bigint table', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'metrics',
+						query: {
+							type: 'select',
+							from: 'users',
+							select: { type: 'fields', fields: ['id'] },
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'metrics',
+					select: { type: 'fields', fields: ['id'] },
+				},
+			},
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.columnMetadata?.has('id') ?? false).toBe(false);
+	});
+
+	it('does not leak metadata through an expression CTE projection', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'event_cte',
+						query: {
+							type: 'select',
+							from: 'events',
+							select: {
+								type: 'expressions',
+								columns: [
+									{
+										kind: 'raw',
+										sql: '"sequence" + 1',
+										as: 'sequence',
+									},
+								],
+							},
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'event_cte',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+			},
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.sql).toContain('"sequence" + 1');
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+	});
+
 	it('throws when a raw recursive CTE would carry bigint js metadata', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 
@@ -442,6 +550,55 @@ describe('bigint js column metadata provenance', () => {
 						type: 'select',
 						from: 'event_chain',
 						select: { type: 'fields', fields: ['sequence'] },
+					},
+				},
+				{ model: testSchema.model },
+			),
+		).toThrow(
+			'`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)',
+		);
+	});
+
+	it('throws for raw recursive positional merge instead of applying base metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		expect(() =>
+			adapter.compileCteQuery(
+				{
+					kind: 'cteQuery',
+					ctes: [
+						{
+							kind: 'rawCte',
+							name: 'event_chain',
+							base: {
+								type: 'select',
+								from: 'events',
+								select: { type: 'fields', fields: ['sequence'] },
+							},
+							step: {
+								type: 'select',
+								from: 'event_chain',
+								select: {
+									type: 'expressions',
+									columns: [{ kind: 'column', column: 'sequence' }],
+								},
+							},
+							unionAll: false,
+						},
+					],
+					query: {
+						type: 'select',
+						from: 'event_chain',
+						select: {
+							type: 'expressions',
+							columns: [
+								{
+									kind: 'columnAlias',
+									column: 'sequence',
+									alias: 'seq',
+								},
+							],
+						},
 					},
 				},
 				{ model: testSchema.model },

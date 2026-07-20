@@ -42,7 +42,11 @@ import {
 	extractAllIncludeDecisions,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
-import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
+import {
+	finalizeEnvelope,
+	fromAstProjection,
+	type ProjectionEnvelope,
+} from './projection-envelope.js';
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -744,11 +748,11 @@ function buildSimplifiedPlanReport(
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgsqlAdapter.compile().
  */
-export function compileSelect<T = unknown>(
+export function compileSelectEnvelope<T = unknown>(
 	plan: PlanReport,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
-): CompiledQuery<T> {
+): ProjectionEnvelope<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 
@@ -979,7 +983,15 @@ export function compileSelect<T = unknown>(
 		naming: deps.naming,
 		...(hydrationPlan ? { hydrationPlan } : {}),
 	});
-	return finalizeEnvelope(env);
+	return env;
+}
+
+export function compileSelect<T = unknown>(
+	plan: PlanReport,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): CompiledQuery<T> {
+	return finalizeEnvelope(compileSelectEnvelope(plan, options, deps));
 }
 
 export function compileWithIncludes<T = unknown>(
