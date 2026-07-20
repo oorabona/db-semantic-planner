@@ -11,6 +11,7 @@ import { toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type {
 	Adapter,
+	CompiledQuery,
 	CompileOptions,
 	SubqueryIncludeInfo,
 } from '../adapter.js';
@@ -19,7 +20,10 @@ import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { planRecursive } from '../planner.js';
 import { RelationNotFoundError } from './errors.js';
-import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
+import {
+	hydrateJsonAggIncludes as hydrateJsonAggIncludesShared,
+	planForJsonAggHydration,
+} from './hydration-utils.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
 import {
 	countDistinctRelationPathsByName,
@@ -382,8 +386,16 @@ export class ResultHydrator<TResult = unknown> {
 	 * E2E-004: json_agg strategy returns data as JSON string in *_json columns.
 	 * STRAT-SIMPLIFY: For to-one relations (belongsTo/hasOne), unwrap array to single object.
 	 */
-	hydrateJsonAggIncludes(results: TResult[], planReport: PlanReport): void {
-		hydrateJsonAggIncludesShared(results, planReport);
+	hydrateJsonAggIncludes(
+		results: TResult[],
+		planReport: PlanReport,
+		query?: CompiledQuery,
+	): void {
+		hydrateJsonAggIncludesShared(
+			results,
+			planForJsonAggHydration(planReport, query),
+			this.model,
+		);
 	}
 
 	/**

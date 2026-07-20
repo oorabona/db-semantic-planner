@@ -1384,7 +1384,11 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			const idx = loaded.model.getTable('notes')?.indexes[0];
 			expect(Object.hasOwn(idx?.opclass ?? {}, '__proto__')).toBe(true);
 			expect(Object.hasOwn(idx?.with ?? {}, '__proto__')).toBe(true);
+			// biome-ignore lint/suspicious/noProto: intentional __proto__ key for injection-safety coverage
+			// biome-ignore lint/complexity/useLiteralKeys: __proto__ must use bracket access
 			expect(idx?.opclass?.['__proto__']).toBe('text_pattern_ops');
+			// biome-ignore lint/suspicious/noProto: intentional __proto__ key for injection-safety coverage
+			// biome-ignore lint/complexity/useLiteralKeys: __proto__ must use bracket access
 			expect(idx?.with?.['__proto__']).toBe('70');
 		});
 	});

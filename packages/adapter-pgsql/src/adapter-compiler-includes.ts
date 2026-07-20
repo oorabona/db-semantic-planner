@@ -18,6 +18,26 @@ import { innerJoin, rangeVar } from './ast-helpers.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
+import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
+
+function compileIncludeSelectEnvelope(
+	selectAst: Node,
+	targetTable: string,
+	parameters: readonly unknown[],
+	deps: AdapterCompilerDeps,
+	sql = deparseQuoted(selectAst),
+): CompiledQuery {
+	return finalizeEnvelope(
+		fromAstProjection({
+			sql,
+			parameters,
+			ast: selectAst,
+			rootTable: targetTable,
+			model: deps.model,
+			naming: deps.naming,
+		}),
+	);
+}
 
 // ============================================================================
 // compileSubqueryInclude
@@ -41,14 +61,38 @@ export function compileSubqueryInclude(
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
 		const dbTargetTable = deps.naming.toDatabase(info.targetTable);
+		const targetList = [
+			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
+		];
+		const fromClause = [
+			{
+				RangeVar: {
+					relname: dbTargetTable,
+					inh: true,
+					relpersistence: 'p',
+					...(schemaName && {
+						schemaname: schemaName,
+					}),
+				},
+			},
+		];
+		const selectAst: Node = {
+			SelectStmt: {
+				targetList,
+				fromClause,
+			},
+		};
 		const tableName = schemaName
 			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
 			: quoteIdent(dbTargetTable, 'table');
 
-		return {
-			sql: `SELECT * FROM ${tableName} WHERE FALSE`,
-			parameters: [],
-		};
+		return compileIncludeSelectEnvelope(
+			selectAst,
+			info.targetTable,
+			[],
+			deps,
+			`SELECT * FROM ${tableName} WHERE FALSE`,
+		);
 	}
 
 	// Determine FK column(s)
@@ -161,12 +205,12 @@ export function compileSubqueryInclude(
 		},
 	};
 
-	const sql = deparseQuoted(selectAst);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileIncludeSelectEnvelope(
+		selectAst,
+		info.targetTable,
+		state.parameters,
+		deps,
+	);
 }
 
 // ============================================================================
@@ -292,10 +336,10 @@ function compileSubqueryIncludeManyToMany(
 		},
 	};
 
-	const sql = deparseQuoted(selectAst);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileIncludeSelectEnvelope(
+		selectAst,
+		info.targetTable,
+		state.parameters,
+		deps,
+	);
 }

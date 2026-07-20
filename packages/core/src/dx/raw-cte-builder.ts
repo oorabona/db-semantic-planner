@@ -20,6 +20,7 @@ import type {
 	Adapter,
 	CompiledQuery,
 	CteQueryIntent,
+	ModelIR,
 	OrderByIntent,
 	QueryIntent,
 	RawCteIntent,
@@ -69,6 +70,7 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	private readonly rawCteIntent: RawCteIntent;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
+	private readonly model: ModelIR | undefined;
 
 	private outerSelect: SelectWithExpressionsIntent | undefined;
 	private outerWhere: WhereIntent | undefined;
@@ -81,11 +83,13 @@ export class RawCteQueryBuilder<TResult = unknown> {
 		rawCteIntent: RawCteIntent,
 		adapter?: Adapter,
 		schemaName?: string,
+		model?: ModelIR,
 	) {
 		this.cteName = cteName;
 		this.rawCteIntent = rawCteIntent;
 		this.adapter = adapter;
 		this.schemaName = schemaName;
+		this.model = model;
 	}
 
 	/**
@@ -163,9 +167,15 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	dump(): RecursiveDump {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
+		const compileOptions =
+			this.schemaName !== undefined || this.model !== undefined
+				? {
+						...(this.schemaName !== undefined && {
+							schemaName: this.schemaName,
+						}),
+						...(this.model !== undefined && { model: this.model }),
+					}
+				: undefined;
 		const compiled: CompiledQuery = adapter.compileCteQuery(
 			intent,
 			compileOptions,
@@ -183,9 +193,15 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	async all(): Promise<TResult[]> {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
+		const compileOptions =
+			this.schemaName !== undefined || this.model !== undefined
+				? {
+						...(this.schemaName !== undefined && {
+							schemaName: this.schemaName,
+						}),
+						...(this.model !== undefined && { model: this.model }),
+					}
+				: undefined;
 		const compiled = adapter.compileCteQuery(
 			intent,
 			compileOptions,
@@ -209,6 +225,7 @@ export function createRawCteBuilder<TResult = unknown>(
 	options: RecursiveOptions,
 	adapter?: Adapter,
 	schemaName?: string,
+	model?: ModelIR,
 ): RawCteQueryBuilder<TResult> {
 	const baseIntent = (
 		options.base as unknown as QueryBuilderImpl<unknown>
@@ -234,5 +251,6 @@ export function createRawCteBuilder<TResult = unknown>(
 		rawCteIntent,
 		adapter,
 		schemaName,
+		model,
 	);
 }

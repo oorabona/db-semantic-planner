@@ -32,9 +32,9 @@ import {
 import { assertPartitionStrategy } from './ddl-generator.js';
 import {
 	assertCreateIndexesSupported,
-	renderCreateIndex,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
+	renderCreateIndex,
 } from './index-render.js';
 import {
 	formatSqlDefault,

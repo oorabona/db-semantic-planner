@@ -551,6 +551,33 @@ describe('Error handling without adapter', () => {
 // ============================================================================
 
 describe('Schema scoping', () => {
+	it('passes model to compile for dump() and all()', async () => {
+		const adapter = createMockAdapter();
+		const capturedOptions: unknown[] = [];
+		adapter.compile = vi.fn((_plan, options) => {
+			capturedOptions.push(options);
+			return {
+				sql: 'SELECT * FROM users',
+				parameters: [],
+			};
+		});
+		adapter.createDump = vi.fn((plan, compiled) => ({
+			plan,
+			sql: compiled.sql,
+			params: compiled.parameters,
+		}));
+		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1, name: 'Alice' }]));
+		const orm = createTypedOrm(testSchema.model, adapter);
+		const { users } = testSchema.tables;
+
+		orm.from(users).dump();
+		await orm.from(users).all();
+
+		expect(capturedOptions).toHaveLength(2);
+		expect((capturedOptions[0] as any)?.model).toBe(testSchema.model);
+		expect((capturedOptions[1] as any)?.model).toBe(testSchema.model);
+	});
+
 	it('should pass schemaName to compile when using exists() with schema', async () => {
 		// Arrange
 		const adapter = createMockAdapter();

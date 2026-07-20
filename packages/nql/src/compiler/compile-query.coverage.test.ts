@@ -2469,6 +2469,199 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 	});
 
+	it('carries declared binding outputs through aliases and binding chains', () => {
+		const result = compile(
+			'posts | select authorId as aid | bind projected_posts\nprojected_posts | select aid as author | bind projected_authors\nprojected_authors | select author',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('projected_posts')?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'aid',
+				source: { kind: 'modelColumn', table: 'posts', column: 'authorId' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+		]);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('projected_authors')
+				?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'author',
+				source: { kind: 'modelColumn', table: 'posts', column: 'authorId' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+		]);
+	});
+
+	it('records scalar relation-column descriptors and declares hasMany outputs non-scalar', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.name as authorName, author.profile.bio as authorBio, comments.body as commentBodies | bind related_post_columns
+related_post_columns | select authorName, authorBio, commentBodies`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('related_post_columns')
+				?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'authorName',
+				source: { kind: 'modelColumn', table: 'users', column: 'name' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'authorBio',
+				source: { kind: 'modelColumn', table: 'profiles', column: 'bio' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'commentBodies',
+				source: { kind: 'modelColumn', table: 'comments', column: 'body' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
+		]);
+	});
+
+	it('declares binding-projected recursive relation columns non-scalar', () => {
+		const result = compile(
+			`categories | select id, parentId | bind c
+c | select ascendant.name as ancestorName, descendant.name as descendantName | bind related_categories
+related_categories | select ancestorName, descendantName`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('related_categories')
+				?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'ancestorName',
+				source: { kind: 'modelColumn', table: 'categories', column: 'name' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
+			{
+				outputKey: 'descendantName',
+				source: { kind: 'modelColumn', table: 'categories', column: 'name' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
+		]);
+	});
+
+	it('records scalar physical relation-column descriptors and leaves hasMany outputs unresolved without a trusted binding proof', () => {
+		const outputSchema = getQueryOutputSchema(
+			{
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'relationColumn',
+							relation: 'author',
+							column: 'name',
+							as: 'authorName',
+						},
+						{
+							kind: 'relationColumn',
+							relation: 'author.profile',
+							column: 'bio',
+							as: 'authorBio',
+						},
+						{
+							kind: 'relationColumn',
+							relation: 'comments',
+							column: 'body',
+							as: 'commentBody',
+						},
+					],
+				},
+			},
+			compilerContextForValidator(new ColumnValidator(schema)),
+			'physical_relation_projection',
+		);
+
+		expect(outputSchema.declaredOutputs).toEqual([
+			{
+				outputKey: 'authorName',
+				source: { kind: 'modelColumn', table: 'users', column: 'name' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'authorBio',
+				source: { kind: 'modelColumn', table: 'profiles', column: 'bio' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'commentBody',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'commentBody' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'commentBody' has no proven scalar model column source",
+				},
+			},
+		]);
+		expect(outputSchema.columnTypes).toBeUndefined();
+		expect(outputSchema.columnTypesUnavailable).toEqual({
+			column: 'authorName',
+			reason: 'relation-column',
+		});
+	});
+
+	it('keeps relation-column binding descriptors unresolved without a validated target', () => {
+		const outputSchema = getQueryOutputSchema(
+			{
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'relationColumn',
+							relation: 'missing',
+							column: 'name',
+							as: 'missingName',
+						},
+					],
+				},
+			},
+			compilerContextForValidator(new ColumnValidator(schema)),
+			'unresolvable_physical_relation_projection',
+		);
+
+		expect(outputSchema.declaredOutputs).toEqual([
+			{
+				outputKey: 'missingName',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'missingName' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'missingName' has no proven scalar model column source",
+				},
+			},
+		]);
+		expect(outputSchema.columnTypes).toBeUndefined();
+		expect(outputSchema.columnTypesUnavailable).toEqual({
+			column: 'missingName',
+			reason: 'relation-column',
+		});
+	});
+
 	it('detects unresolved SELECT * output-schema errors by typed discriminant', () => {
 		const error = new UnresolvedSelectAllOutputSchemaError(
 			'changed human-readable output-schema wording',

@@ -58,7 +58,9 @@ function makeDDLAdapter(overrides: Record<string, unknown> = {}) {
 	return ddlAdapter;
 }
 
-function firstDDLStatement(executeDDL: { mock: { calls: unknown[][] } }): string {
+function firstDDLStatement(executeDDL: {
+	mock: { calls: unknown[][] };
+}): string {
 	const call = executeDDL.mock.calls[0];
 	if (!call) throw new Error('Expected executeDDL to be called');
 	return call[0] as string;
@@ -668,17 +670,17 @@ describe('createOrmInstance — transaction and raw error branches', () => {
 		);
 	});
 
-		it('should throw when listAncestors is called on a table with no self-referential relation', async () => {
-			await expect(() =>
-				ormWithMock.listAncestors('users', 1, { parentId: 'parent_id' }),
-			).rejects.toThrow(InvalidOperationError);
-		});
+	it('should throw when listAncestors is called on a table with no self-referential relation', async () => {
+		await expect(() =>
+			ormWithMock.listAncestors('users', 1, { parentId: 'parent_id' }),
+		).rejects.toThrow(InvalidOperationError);
+	});
 
-		it('should throw when listDescendants is called on a table with no self-referential relation', async () => {
-			await expect(() =>
-				ormWithMock.listDescendants('users', 1, { parentId: 'parent_id' }),
-			).rejects.toThrow(InvalidOperationError);
-		});
+	it('should throw when listDescendants is called on a table with no self-referential relation', async () => {
+		await expect(() =>
+			ormWithMock.listDescendants('users', 1, { parentId: 'parent_id' }),
+		).rejects.toThrow(InvalidOperationError);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -930,9 +932,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 		const { adapter, base, step } = makeBaseStep();
 		const builder = createRawCteBuilder('tree', { base, step }, adapter);
 		const intent = builder.buildIntent();
-		expect(
-			firstCteRecord(intent).maxDepth,
-		).toBeUndefined();
+		expect(firstCteRecord(intent).maxDepth).toBeUndefined();
 	});
 
 	it('should include depthColumn in CTE intent when depthColumn option is specified', () => {
@@ -950,9 +950,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 		const { adapter, base, step } = makeBaseStep();
 		const builder = createRawCteBuilder('tree', { base, step }, adapter);
 		const intent = builder.buildIntent();
-		expect(
-			firstCteRecord(intent).depthColumn,
-		).toBeUndefined();
+		expect(firstCteRecord(intent).depthColumn).toBeUndefined();
 	});
 
 	it('should include outer select columns in intent when .columns() is called', () => {
@@ -974,8 +972,13 @@ describe('createRawCteBuilder — intent building branches', () => {
 
 	it('should include outer where in intent when .where() is called', () => {
 		const { adapter, base, step } = makeBaseStep();
-		const whereIntent = { kind: 'eq', field: 'id', value: 1 } as unknown as
-			Parameters<ReturnType<typeof createRawCteBuilder>['where']>[0];
+		const whereIntent = {
+			kind: 'eq',
+			field: 'id',
+			value: 1,
+		} as unknown as Parameters<
+			ReturnType<typeof createRawCteBuilder>['where']
+		>[0];
 		const builder = createRawCteBuilder('tree', { base, step }, adapter).where(
 			whereIntent,
 		);
@@ -1121,9 +1124,7 @@ describe('CteBuilder — error branches', () => {
 		const builder = new CteBuilder('my_cte').fromUnnest({ id: [1, 2] });
 		const cteQueryBuilder = builder.query(orm.select('users'));
 		const intent = cteQueryBuilder.buildIntent();
-		expect(
-			firstCteRecord(intent).indexColumn,
-		).toBeUndefined();
+		expect(firstCteRecord(intent).indexColumn).toBeUndefined();
 	});
 
 	it('should include correct CTE name in the intent', () => {

@@ -335,6 +335,7 @@ function columnForComparison(
 	desiredIntent: ColumnIR = column,
 ): unknown {
 	const {
+		js: _js,
 		logicalIdentity: _logicalIdentity,
 		uniqueConstraintName: _uniqueConstraintName,
 		...rest

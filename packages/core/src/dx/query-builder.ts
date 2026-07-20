@@ -736,7 +736,11 @@ export class QueryBuilderImpl<TResult = unknown>
 		);
 
 		// E2E-004: Hydrate json_agg includes by parsing JSON columns
-		hydrator.hydrateJsonAggIncludes(mainResults, planReport);
+		hydrator.hydrateJsonAggIncludes(
+			mainResults,
+			planReport,
+			compiledWithIncludes.main,
+		);
 
 		// E2E-004: Hydrate JOIN includes by grouping dot-prefixed columns
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
@@ -1409,7 +1413,11 @@ export class QueryBuilderImpl<TResult = unknown>
 			this.from,
 			this.ctx.schemaName,
 		);
-		hydrator.hydrateJsonAggIncludes(mainResults, planReport);
+		hydrator.hydrateJsonAggIncludes(
+			mainResults,
+			planReport,
+			compiledWithIncludes.main,
+		);
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
 		if (compiledWithIncludes.subqueryIncludes.length > 0) {
 			await hydrator.hydrateIncludes(

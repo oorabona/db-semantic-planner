@@ -1,6 +1,6 @@
 import type {
-	CompilingAdapter,
 	CompileOnlyAdapter,
+	CompilingAdapter,
 	DDLGeneratingAdapter,
 	TableDDLGeneratorAdapter,
 } from './adapter.js';

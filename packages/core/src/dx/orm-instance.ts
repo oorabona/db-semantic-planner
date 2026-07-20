@@ -907,14 +907,20 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		},
 
 		withCte(name: string): CteBuilder {
-			return new CteBuilder(name, adapter, schemaName);
+			return new CteBuilder(name, adapter, schemaName, model);
 		},
 
 		recursive<TResult = unknown>(
 			name: string,
 			options: RecursiveOptions,
 		): RawCteQueryBuilder<TResult> {
-			return createRawCteBuilder<TResult>(name, options, adapter, schemaName);
+			return createRawCteBuilder<TResult>(
+				name,
+				options,
+				adapter,
+				schemaName,
+				model,
+			);
 		},
 
 		// =====================================================================

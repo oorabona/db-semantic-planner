@@ -11,11 +11,16 @@ import type {
 	CompileOptions,
 	CompileResultWithIncludes,
 	JoinIntent,
+	ModelIR,
+	NestedOutputReadHandling,
+	OutputDescriptor,
+	OutputValueShape,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
@@ -33,6 +38,11 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { validateDbType } from './db-type.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
+import {
+	jsonAggColumnDescriptor,
+	jsonAggContainerShape,
+	resolveJsonAggColumnReadHandling,
+} from './json-agg-read-handling.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
@@ -41,6 +51,12 @@ import {
 	extractAllIncludeDecisions,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
+import {
+	finalizeEnvelope,
+	fromAstProjection,
+	type ProjectionEnvelope,
+	supplementOutputDescriptors,
+} from './projection-envelope.js';
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -449,6 +465,10 @@ function buildRelationColumnsMap(
 	return map;
 }
 
+function rootRelationName(relation: string): string {
+	return relation.split('.')[0] ?? relation;
+}
+
 /**
  * Inject user-specified columns from relationColumnsMap into matching
  * includeStrategy decisions, then validate them against the model schema.
@@ -586,6 +606,348 @@ function enrichRangeDecisions(
 	}
 }
 
+function jsonAggProjectedColumns(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): readonly string[] | undefined {
+	const requested = decision.columns;
+	const hasExplicitProjection =
+		requested &&
+		requested.length > 0 &&
+		!(requested.length === 1 && requested[0] === '*');
+	if (hasExplicitProjection) return requested;
+
+	const table = model?.getTable(targetTable);
+	return table ? table.columns.map((column) => column.name) : requested;
+}
+
+function buildJsonAggColumnKeyMap(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): Record<string, string> | undefined {
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+	const table = model?.getTable(targetTable);
+	const map: Record<string, string> = {};
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const modelColumn =
+			table?.columns.find((column) => column.name === columnName)?.name ??
+			columnName;
+		map[naming.toDatabase(modelColumn)] = modelColumn;
+	}
+	return Object.keys(map).length > 0 ? map : undefined;
+}
+
+function buildJsonAggNestedReadTransforms(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): readonly NestedOutputReadHandling[] | undefined {
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+	const table = model?.getTable(targetTable);
+	if (!table) return undefined;
+	const shape = jsonAggContainerShape(decision.relationType);
+	const transforms: NestedOutputReadHandling[] = [];
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column) continue;
+		const handling = resolveJsonAggColumnReadHandling(
+			targetTable,
+			column,
+			shape,
+		);
+		if (handling) transforms.push(handling);
+	}
+	return transforms.length > 0 ? transforms : undefined;
+}
+
+function buildJsonAggOutputDescriptor(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): OutputDescriptor | undefined {
+	const relation = decision.relation ?? decision.relationName;
+	if (!relation) return undefined;
+	const table = model?.getTable(targetTable);
+	if (!table) return undefined;
+
+	const shape = jsonAggContainerShape(decision.relationType);
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column) continue;
+		const descriptor = jsonAggColumnDescriptor(targetTable, column, shape);
+		if (resolveJsonAggColumnReadHandling(targetTable, column, shape)) {
+			return {
+				...descriptor,
+				outputKey: `${relation}_json`,
+			};
+		}
+	}
+	return undefined;
+}
+
+function buildJsonAggOutputDescriptors(
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+): readonly OutputDescriptor[] {
+	const descriptors: OutputDescriptor[] = [];
+	for (const decision of decisions) {
+		if (decision.type !== 'includeStrategy' || decision.choice !== 'json_agg') {
+			continue;
+		}
+		const targetTable = decision.targetTable;
+		const descriptor = targetTable
+			? buildJsonAggOutputDescriptor(decision, targetTable, model)
+			: undefined;
+		if (descriptor) descriptors.push(descriptor);
+	}
+	return descriptors;
+}
+
+function trustedRelationColumnShape(
+	cardinality: 'one' | 'many' | undefined,
+): OutputValueShape | undefined {
+	if (cardinality === 'one') {
+		return { kind: 'scalar', cardinality: 'one' };
+	}
+	if (cardinality === 'many') {
+		return { kind: 'array', cardinality: 'many', aggregate: 'json_agg' };
+	}
+	return undefined;
+}
+
+function buildTrustedRelationColumnOutputDescriptor(
+	decision: PlanDecision,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): OutputDescriptor | undefined {
+	if (decision.type !== 'selectRelationColumn') return undefined;
+	const trusted = getTrustedNqlRelationFilterFields(decision);
+	if (trusted?.selectedColumn === undefined) return undefined;
+	const shape = trustedRelationColumnShape(trusted.cardinality);
+	if (shape === undefined) return undefined;
+	const sourceTable = trusted.hops.at(-1)?.target ?? trusted.targetTable;
+	const table = model?.getTable(sourceTable);
+	const column = table?.columns.find(
+		(candidate) =>
+			candidate.name === trusted.selectedColumn ||
+			naming.toDatabase(candidate.name) === trusted.selectedColumn,
+	);
+	if (table === undefined || column === undefined) return undefined;
+	const outputColumn =
+		decision.alias ?? decision.column ?? trusted.selectedColumn;
+	const js = column.type === 'bigint' ? column.js : undefined;
+	return {
+		outputKey: naming.toDatabase(outputColumn),
+		source: {
+			kind: 'modelColumn',
+			table: table.name,
+			column: column.name,
+			...(js !== undefined ? { js } : {}),
+		},
+		shape,
+	};
+}
+
+function buildTrustedRelationColumnOutputDescriptors(
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): readonly OutputDescriptor[] {
+	const descriptors: OutputDescriptor[] = [];
+	for (const decision of decisions) {
+		const descriptor = buildTrustedRelationColumnOutputDescriptor(
+			decision,
+			model,
+			naming,
+		);
+		if (descriptor) descriptors.push(descriptor);
+	}
+	return descriptors;
+}
+
+function physicalScalarRelationColumnTarget(
+	relationPath: string,
+	rootTable: string,
+	model: ModelIR | undefined,
+): string | undefined {
+	if (model === undefined) return undefined;
+	const segments = relationPath.split('.').filter(Boolean);
+	if (segments.length === 0) return undefined;
+
+	let currentTable = rootTable;
+	for (const segment of segments) {
+		const relation = model.getRelation(`${currentTable}.${segment}`);
+		if (
+			relation === undefined ||
+			relation.recursive !== undefined ||
+			relation.cardinality !== 'one' ||
+			(relation.type !== 'belongsTo' && relation.type !== 'hasOne')
+		) {
+			return undefined;
+		}
+		currentTable = relation.target;
+	}
+	return currentTable;
+}
+
+function buildPhysicalRelationColumnOutputDescriptor(
+	decision: PlanDecision,
+	rootTable: string,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): OutputDescriptor | undefined {
+	if (
+		decision.type !== 'selectRelationColumn' ||
+		decision.relation === undefined ||
+		decision.column === undefined ||
+		decision.column === '*' ||
+		getTrustedNqlRelationFilterFields(decision) !== undefined
+	) {
+		return undefined;
+	}
+
+	const targetTable = physicalScalarRelationColumnTarget(
+		decision.relation,
+		rootTable,
+		model,
+	);
+	const table = targetTable ? model?.getTable(targetTable) : undefined;
+	const column = table?.columns.find(
+		(candidate) =>
+			candidate.name === decision.column ||
+			naming.toDatabase(candidate.name) === decision.column,
+	);
+	if (table === undefined || column === undefined) return undefined;
+
+	const outputColumn = decision.alias ?? decision.column;
+	return {
+		outputKey: naming.toDatabase(outputColumn),
+		source: {
+			kind: 'modelColumn',
+			table: table.name,
+			column: column.name,
+			...(column.js !== undefined ? { js: column.js } : {}),
+		},
+		shape: { kind: 'scalar', cardinality: 'one' },
+	};
+}
+
+function buildPhysicalRelationColumnOutputDescriptors(
+	decisions: readonly PlanDecision[],
+	rootTable: string,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): readonly OutputDescriptor[] {
+	const descriptors: OutputDescriptor[] = [];
+	for (const decision of decisions) {
+		const descriptor = buildPhysicalRelationColumnOutputDescriptor(
+			decision,
+			rootTable,
+			model,
+			naming,
+		);
+		if (descriptor) descriptors.push(descriptor);
+	}
+	return descriptors;
+}
+
+function findJsonAggPlanDecision(
+	plan: PlanReport,
+	decision: PlanDecision,
+): PlanReport['decisions'][number] | undefined {
+	if (decision.intentPath) {
+		const byIntentPath = plan.decisions.find(
+			(candidate) =>
+				candidate.type === 'include-strategy' &&
+				candidate.choice === 'json_agg' &&
+				candidate.context.intentPath === decision.intentPath,
+		);
+		if (byIntentPath) return byIntentPath;
+	}
+	return plan.decisions.find((candidate) => {
+		if (candidate.type !== 'include-strategy') return false;
+		if (candidate.choice !== 'json_agg') return false;
+		const relationName =
+			candidate.context.relation ?? candidate.context.includeAlias;
+		return (
+			relationName === decision.relationName &&
+			candidate.context.target === decision.targetTable
+		);
+	});
+}
+
+function annotateJsonAggColumnKeyMaps(
+	plan: PlanReport,
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): boolean {
+	let annotated = false;
+	for (const decision of decisions) {
+		if (decision.type === 'includeStrategy' && decision.choice === 'json_agg') {
+			const targetTable = decision.targetTable;
+			const planDecision = targetTable
+				? findJsonAggPlanDecision(plan, decision)
+				: undefined;
+			const keyMap =
+				targetTable && planDecision
+					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming)
+					: undefined;
+			const nestedReadTransforms =
+				targetTable && planDecision
+					? buildJsonAggNestedReadTransforms(decision, targetTable, model)
+					: undefined;
+			if ((keyMap || nestedReadTransforms) && planDecision) {
+				const context = planDecision.context as Mutable<
+					PlanReport['decisions'][number]['context']
+				>;
+				if (keyMap) {
+					context.jsonAggColumnKeyMap = keyMap;
+				}
+				if (nestedReadTransforms) {
+					context.jsonAggNestedReadTransforms = nestedReadTransforms;
+				}
+				annotated = true;
+			}
+		}
+		if (decision.children && decision.children.length > 0) {
+			annotated =
+				annotateJsonAggColumnKeyMaps(plan, decision.children, model, naming) ||
+				annotated;
+		}
+	}
+	return annotated;
+}
+
+function clonePlanReportForHydration(plan: PlanReport): PlanReport {
+	return {
+		...plan,
+		decisions: plan.decisions.map((decision) => {
+			const context = (decision as { context?: unknown }).context;
+			if (context === null || typeof context !== 'object') return decision;
+			return {
+				...decision,
+				context: { ...(context as Record<string, unknown>) },
+			};
+		}) as PlanReport['decisions'],
+	};
+}
+
 /**
  * Assemble the SimplifiedPlanReport from the compiled decisions and plan metadata.
  * Handles BatchValues FROM source construction and optional fields (existsWrap, lock, schema).
@@ -630,11 +992,11 @@ function buildSimplifiedPlanReport(
  * Compile a PlanReport to a parameterised SELECT query.
  * Extracted body of PgsqlAdapter.compile().
  */
-export function compileSelect<T = unknown>(
+export function compileSelectEnvelope<T = unknown>(
 	plan: PlanReport,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
-): CompiledQuery<T> {
+): ProjectionEnvelope<T> {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
 
@@ -666,6 +1028,7 @@ export function compileSelect<T = unknown>(
 	// (observable via dump()). All SQL-generation paths below use execIntent so that
 	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
 	const execIntent = plan.executableIntent ?? plan.intent;
+	let hydrationPlan: PlanReport | undefined;
 	// planForCompilation: a view of the plan where .intent is the executable intent.
 	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
 	// extractAllIncludeDecisions) so they read the correct WHERE for SQL generation.
@@ -679,10 +1042,10 @@ export function compileSelect<T = unknown>(
 	if (execIntent) {
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
+		const resolvedModel = options?.model ?? deps.model;
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
-		const resolvedModel = options?.model ?? deps.model;
 		if (resolvedModel) {
 			decisions = convertDottedFieldsToExists(
 				decisions,
@@ -788,7 +1151,7 @@ export function compileSelect<T = unknown>(
 							// relation may be a dotted path (e.g. "userRoles.role.permissions")
 							// — check if the root segment is covered by an include
 							const rel = d.relation as string;
-							const rootRelation = rel.split('.')[0] ?? rel;
+							const rootRelation = rootRelationName(rel);
 							if (includedRelations.has(rootRelation)) {
 								return false; // covered by include strategy
 							}
@@ -824,6 +1187,16 @@ export function compileSelect<T = unknown>(
 		// Use deps.model as fallback so ORM queries through deps also get enriched.
 		const rangeModel = options?.model ?? deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
+		const candidateHydrationPlan = clonePlanReportForHydration(plan);
+		const hasJsonAggColumnKeyMaps = annotateJsonAggColumnKeyMaps(
+			candidateHydrationPlan,
+			allDecisions,
+			resolvedModelForCompiler,
+			deps.naming,
+		);
+		if (hasJsonAggColumnKeyMaps) {
+			hydrationPlan = candidateHydrationPlan;
+		}
 
 		// planForCompilation carries executableIntent as .intent, so
 		// buildSimplifiedPlanReport reads batchValuesSource / existsWrap / lock
@@ -845,11 +1218,40 @@ export function compileSelect<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
-
-	return {
+	const baseEnv = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
-	};
+		ast: result.ast,
+		rootTable: plan.rootTable,
+		model: resolvedModelForCompiler,
+		naming: deps.naming,
+		...(hydrationPlan ? { hydrationPlan } : {}),
+	});
+	return supplementOutputDescriptors(baseEnv, [
+		...buildJsonAggOutputDescriptors(
+			simplifiedPlan.decisions,
+			resolvedModelForCompiler,
+		),
+		...buildPhysicalRelationColumnOutputDescriptors(
+			simplifiedPlan.decisions,
+			plan.rootTable,
+			resolvedModelForCompiler,
+			deps.naming,
+		),
+		...buildTrustedRelationColumnOutputDescriptors(
+			simplifiedPlan.decisions,
+			resolvedModelForCompiler,
+			deps.naming,
+		),
+	]);
+}
+
+export function compileSelect<T = unknown>(
+	plan: PlanReport,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): CompiledQuery<T> {
+	return finalizeEnvelope(compileSelectEnvelope(plan, options, deps));
 }
 
 export function compileWithIncludes<T = unknown>(

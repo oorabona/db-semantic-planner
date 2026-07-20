@@ -335,6 +335,7 @@ abstract class MutationBuilderBase<
 		const adapter = this.requireAdapter('dump');
 		const intent = this.buildIntent();
 		const compileOptions: CompileOptions = {
+			model: this.model,
 			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
 			...extraOptions,
 		};
@@ -383,9 +384,10 @@ abstract class MutationBuilderBase<
 		adapter: Adapter,
 		intent: TIntent,
 	): PreparedMutationExecution<T> {
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
+		const compileOptions: CompileOptions = {
+			model: this.model,
+			...(this.schemaName ? { schemaName: this.schemaName } : {}),
+		};
 		const compiled = this.compileIntent(adapter, intent, compileOptions);
 
 		if (this.returningColumns && this.returningColumns.length > 0) {

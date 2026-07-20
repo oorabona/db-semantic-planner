@@ -9,6 +9,8 @@
 
 // Adapter types (interfaces, options, dump)
 export * from './adapter.js';
+// Bigint read-side conversion helper
+export * from './bigint-js-read.js';
 // Shared relation-key helpers
 export * from './column-list.js';
 // Dialect types (capabilities, column type unions)
@@ -22,6 +24,8 @@ export type { LoadedSchema } from './loaded-schema.js';
 export { isValidSchema } from './loaded-schema.js';
 // ModelIR types (schema representation)
 export * from './model-ir.js';
+// Dialect-neutral output source/shape provenance and read-handling resolver
+export * from './output-provenance.js';
 // Planner types (plan report, decisions, warnings)
 export * from './planner.js';
 // Dialect-neutral RelationIR key-field builder

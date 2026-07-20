@@ -8,11 +8,6 @@ import type { DbCasing } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import {
-	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY_DESCRIPTOR,
-	INDEX_INCLUDE_CAPABILITY,
-	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
-} from './index-feature-capabilities.js';
-import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
 	ALTER_TABLE_ADD_CHECK_CAPABILITY,
@@ -22,6 +17,11 @@ import {
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 } from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
+import {
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY_DESCRIPTOR,
+	INDEX_INCLUDE_CAPABILITY,
+	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+} from './index-feature-capabilities.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';

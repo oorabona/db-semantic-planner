@@ -19,8 +19,8 @@ import {
 	generateMigrationSQL,
 	introspect,
 } from '@dbsp/adapter-pgsql';
-import { ModelIRImpl, ref, schema } from '@dbsp/core';
 import type { IndexIR, TableIR } from '@dbsp/core';
+import { ModelIRImpl, ref, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { pushCommand } from '../../packages/cli/src/commands/push.js';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
@@ -232,16 +232,11 @@ describe('DDL Provisioning E2E', () => {
 				expect(() =>
 					generateDDL(model, {
 						schemaName: tenantSchema,
-						dialectCapabilities:
-							derivePostgresqlCapabilitiesForVersion('14'),
+						dialectCapabilities: derivePostgresqlCapabilitiesForVersion('14'),
 					}),
 				).toThrow('NULLS NOT DISTINCT requires PostgreSQL >= 15');
 
-				const table = await getTableOid(
-					pool,
-					tenantSchema,
-					'index_cap_users',
-				);
+				const table = await getTableOid(pool, tenantSchema, 'index_cap_users');
 				expect(table).toBeUndefined();
 			} finally {
 				await dropSchema(tenantSchema);

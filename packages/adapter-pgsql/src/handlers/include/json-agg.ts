@@ -10,7 +10,16 @@
 
 import { type JsonAggOrderByEntry, resolveJsonAggOrderKey } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import { andExpr, jsonAggSubquery } from '../../ast-helpers.js';
+import {
+	andExpr,
+	columnRef,
+	jsonAggSubquery,
+	typeCast,
+} from '../../ast-helpers.js';
+import {
+	jsonAggContainerShape,
+	resolveJsonAggColumnReadHandling,
+} from '../../json-agg-read-handling.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -57,6 +66,62 @@ function resolveJsonAggOrderBy(
 				fallback: decision.orderByFallback === true,
 			}
 		: undefined;
+}
+
+function resolveJsonAggProjection(
+	decision: Decision,
+	targetTable: string,
+	ctx: CompilerContext,
+	shape: ReturnType<typeof jsonAggContainerShape>,
+): readonly string[] | undefined {
+	const requested = decision.columns;
+	const hasExplicitProjection =
+		requested &&
+		requested.length > 0 &&
+		!(requested.length === 1 && requested[0] === '*');
+	if (hasExplicitProjection) return requested;
+
+	const table = ctx.model?.getTable(targetTable);
+	const needsExplicitProjection =
+		table?.columns.some(
+			(column) =>
+				resolveJsonAggColumnReadHandling(targetTable, column, shape) !==
+				undefined,
+		) ?? false;
+	if (!needsExplicitProjection || !table) return requested;
+	return table.columns.map((column) => column.name);
+}
+
+function buildJsonAggColumnValueOverrides(
+	targetTable: string,
+	columns: readonly string[] | undefined,
+	innerAlias: string,
+	ctx: CompilerContext,
+	shape: ReturnType<typeof jsonAggContainerShape>,
+): ReadonlyMap<string, Node> | undefined {
+	if (!columns || columns.length === 0) return undefined;
+	const table = ctx.model?.getTable(targetTable);
+	if (!table) return undefined;
+	const overrides = new Map<string, Node>();
+	for (const columnName of columns) {
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (
+			!column ||
+			resolveJsonAggColumnReadHandling(targetTable, column, shape) === undefined
+		) {
+			continue;
+		}
+		overrides.set(
+			columnName,
+			typeCast(
+				columnRef(columnName, innerAlias, undefined, ctx.naming),
+				'text',
+			),
+		);
+	}
+	return overrides.size > 0 ? overrides : undefined;
 }
 
 /**
@@ -133,6 +198,15 @@ function compileJsonAggRecursive(
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
+	const shape = jsonAggContainerShape(decision.relationType);
+	const columns = resolveJsonAggProjection(decision, targetTable, ctx, shape);
+	const columnValueOverrides = buildJsonAggColumnValueOverrides(
+		targetTable,
+		columns,
+		innerAlias,
+		ctx,
+		shape,
+	);
 
 	return jsonAggSubquery(
 		targetTable,
@@ -144,7 +218,8 @@ function compileJsonAggRecursive(
 			...(childNodes && { childNodes }),
 			innerAlias,
 			...(limit !== undefined && { limit }),
-			...(decision.columns && { columns: decision.columns }),
+			...(columns && { columns }),
+			...(columnValueOverrides && { columnValueOverrides }),
 			...(orderBy && { orderBy: orderBy.columns }),
 			...(orderBy?.fallback && { orderByFallback: true }),
 		},

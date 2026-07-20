@@ -27,6 +27,7 @@ import type {
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	ColumnJsReadType,
 	ColumnType,
 	EnumIR,
 	ForeignKeyIR,
@@ -38,6 +39,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from './model-ir.js';
+import type { OutputDescriptor } from './output-provenance.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
 // ============================================================================
@@ -77,6 +79,12 @@ export interface AdapterCapabilities {
 // Compiled Query
 // ============================================================================
 
+export interface CompiledColumnMetadata {
+	readonly table: string;
+	readonly column: string;
+	readonly js: ColumnJsReadType;
+}
+
 /**
  * A compiled query ready for execution.
  *
@@ -85,6 +93,7 @@ export interface AdapterCapabilities {
 export interface CompiledQuery<T = unknown> {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly columnMetadata?: ReadonlyMap<string, CompiledColumnMetadata>;
 	/** Phantom type for result inference - not used at runtime */
 	readonly __resultType?: T;
 }
@@ -201,6 +210,13 @@ export type NqlBindingColumnUntypeableReason =
 
 export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
+	/**
+	 * Neutral output descriptors declared by the compiler for runtime/materialized
+	 * binding rows. Only scalar model-column descriptors are eligible for scalar
+	 * read conversion; unresolved/non-scalar descriptors are intentionally
+	 * metadata-free.
+	 */
+	readonly declaredOutputs?: readonly OutputDescriptor[];
 	readonly relationFilters?: NqlBindingRelationFilterMetadata;
 	/**
 	 * Present when EVERY projected column's type is statically resolvable
@@ -222,6 +238,7 @@ export interface NqlBindingOutputSchema {
 export interface NqlRuntimeBinding {
 	readonly columns: readonly string[];
 	readonly rows: readonly Readonly<Record<string, unknown>>[];
+	readonly declaredOutputs?: readonly OutputDescriptor[];
 	/** Per-column type info carried from the binding's output schema (absent → fall back to model-walk anchor resolution). */
 	readonly columnTypes?: Readonly<Record<string, NqlBindingColumnTypeInfo>>;
 }

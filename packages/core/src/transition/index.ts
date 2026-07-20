@@ -167,12 +167,12 @@ export {
 	PackRegistry,
 	type RegisteredOperationSemantics,
 	type RulePrecedenceFact,
+	serverVersionNum,
 	type TransactionCoordinatorBinding,
 	type TransitionConnectionPool,
 	type TransitionExecutionClient,
 	type TransitionPack,
 	type TransitionQueryClient,
-	serverVersionNum,
 } from './registry.js';
 export {
 	assumptionAccepted,
