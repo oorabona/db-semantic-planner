@@ -431,22 +431,29 @@ export function compileRecursive(
 	const { cte, extraCtes } = buildRecursiveCte(config);
 
 	// Build final target list (include __depth and __path when tracked)
-	const finalTargets: Node[] = config.selectColumns.map((col: string) => ({
-		ResTarget: {
-			val: {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: config.cteAlias } },
-						{ String: { sval: deps.naming.toDatabase(col) } },
-					],
+	const finalSelections: ProjectNamedFieldsSelection[] = [];
+	const finalExpressions: ProjectNamedFieldsExpression[] = [];
+	const finalTargets: Node[] = config.selectColumns.map((col: string) => {
+		const outputKey = deps.naming.toDatabase(col);
+		addSelection(finalSelections, outputKey, outputKey);
+		return {
+			ResTarget: {
+				val: {
+					ColumnRef: {
+						fields: [
+							{ String: { sval: config.cteAlias } },
+							{ String: { sval: outputKey } },
+						],
+					},
 				},
+				name: outputKey,
 			},
-			name: deps.naming.toDatabase(col),
-		},
-	}));
+		};
+	});
 
 	if (trackDepth) {
 		const depthAlias = intent.track?.depth?.as ?? '__depth';
+		addExpression(finalExpressions, depthAlias, 'recursive depth tracker');
 		finalTargets.push({
 			ResTarget: {
 				val: {
@@ -464,6 +471,7 @@ export function compileRecursive(
 
 	if (trackPath) {
 		const pathAlias = intent.track?.path?.as ?? '__path';
+		addExpression(finalExpressions, pathAlias, 'recursive path tracker');
 		finalTargets.push({
 			ResTarget: {
 				val: {
@@ -506,13 +514,19 @@ export function compileRecursive(
 
 	// Deparse AST to SQL
 	const sql = deparseQuoted({ SelectStmt: selectStmt });
-	const env = fromModelColumns({
+	const sourceEnv = fromModelColumns({
 		sql,
 		parameters: state.parameters,
 		table: config.table,
 		columns: config.selectColumns,
 		model,
 		naming: deps.naming,
+	});
+	const env = projectNamedFields(sourceEnv, {
+		sql,
+		parameters: state.parameters,
+		selections: finalSelections,
+		...(finalExpressions.length > 0 ? { expressions: finalExpressions } : {}),
 	});
 
 	return finalizeEnvelope(env);

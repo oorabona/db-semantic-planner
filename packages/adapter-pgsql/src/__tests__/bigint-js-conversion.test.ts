@@ -1,4 +1,4 @@
-import { createOrm, ref, schema } from '@dbsp/core';
+import { createOrm, type RecursivePlanReport, ref, schema } from '@dbsp/core';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -65,6 +65,44 @@ const conversionSchema = schema({
 		bigCount: { type: 'bigint', js: 'bigint' },
 	},
 });
+
+function recursiveConversionReport(
+	track?: RecursivePlanReport['intent']['track'],
+): RecursivePlanReport {
+	return {
+		rootTable: 'events',
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: {
+			type: 'recursive',
+			cteName: 'event_tree',
+			start: {
+				from: 'events',
+				nodeIdExpr: { kind: 'column', name: 'id' },
+				select: ['sequence'],
+			},
+			traversal: {
+				kind: 'adjacency',
+				nodeTable: 'events',
+				nodeId: 'id',
+				parentId: 'id',
+				direction: 'descendants',
+			},
+			...(track !== undefined ? { track } : {}),
+			maxDepth: 2,
+		},
+		metadata: {
+			planningTimeMs: 0,
+			relationsAnalyzed: 0,
+			isAmbiguous: false,
+			isRecursive: true,
+			traversalKind: 'adjacency',
+			usesBidirectional: false,
+			dedupeStrategy: 'none',
+		},
+	};
+}
 
 const relationConversionSchema = schema({
 	users: {
@@ -707,6 +745,95 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		const rows = await adapter.execute(compiled);
 
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
+	it('does not convert recursive depth tracking when its alias collides with a js column', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ id: 'event-1', sequence: 1 }]),
+			{ model: conversionSchema.model },
+		);
+		const compiled = adapter.compileRecursive(
+			recursiveConversionReport({ depth: { as: 'sequence' } }),
+			conversionSchema.model,
+		);
+
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		await expect(adapter.execute(compiled)).resolves.toEqual([
+			{ id: 'event-1', sequence: 1 },
+		]);
+	});
+
+	it('does not convert recursive path tracking when its alias collides with a js column', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ id: 'event-1', sequence: ['event-1'] }]),
+			{ model: conversionSchema.model },
+		);
+		const compiled = adapter.compileRecursive(
+			recursiveConversionReport({ path: { as: 'sequence' } }),
+			conversionSchema.model,
+		);
+
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+		await expect(adapter.execute(compiled)).resolves.toEqual([
+			{ id: 'event-1', sequence: ['event-1'] },
+		]);
+	});
+
+	it('converts normal recursive js columns and leaves non-colliding tracking aliases raw', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([
+				{
+					id: 'event-1',
+					sequence: '9007199254740993',
+					depth: 1,
+					nodePath: ['event-1'],
+				},
+			]),
+			{ model: conversionSchema.model },
+		);
+		const compiled = adapter.compileRecursive(
+			recursiveConversionReport({
+				depth: { as: 'depth' },
+				path: { as: 'nodePath' },
+			}),
+			conversionSchema.model,
+		);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.has('depth') ?? false).toBe(false);
+		expect(compiled.columnMetadata?.has('nodePath') ?? false).toBe(false);
+		await expect(adapter.execute(compiled)).resolves.toEqual([
+			{
+				id: 'event-1',
+				sequence: 9007199254740993n,
+				depth: 1,
+				nodePath: ['event-1'],
+			},
+		]);
+	});
+
+	it('converts recursive js columns without tracking collisions', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ id: 'event-1', sequence: '9007199254740993' }]),
+			{ model: conversionSchema.model },
+		);
+		const compiled = adapter.compileRecursive(
+			recursiveConversionReport(),
+			conversionSchema.model,
+		);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		await expect(adapter.execute(compiled)).resolves.toEqual([
+			{ id: 'event-1', sequence: 9007199254740993n },
+		]);
 	});
 
 	it('converts fluent withCte outer rows by threading the ORM model', async () => {

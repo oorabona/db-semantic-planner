@@ -52,6 +52,44 @@ function compileNqlToPg(nql: string) {
 	};
 }
 
+function recursiveEventsReport(
+	track?: RecursivePlanReport['intent']['track'],
+): RecursivePlanReport {
+	return {
+		rootTable: 'events',
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: {
+			type: 'recursive',
+			cteName: 'event_tree',
+			start: {
+				from: 'events',
+				nodeIdExpr: { kind: 'column', name: 'id' },
+				select: ['sequence'],
+			},
+			traversal: {
+				kind: 'adjacency',
+				nodeTable: 'events',
+				nodeId: 'id',
+				parentId: 'userId',
+				direction: 'descendants',
+			},
+			...(track !== undefined ? { track } : {}),
+			maxDepth: 2,
+		},
+		metadata: {
+			planningTimeMs: 0,
+			relationsAnalyzed: 0,
+			isAmbiguous: false,
+			isRecursive: true,
+			traversalKind: 'adjacency',
+			usesBidirectional: false,
+			dedupeStrategy: 'none',
+		},
+	};
+}
+
 describe('bigint js column metadata provenance', () => {
 	it('expands SELECT * from model columns', () => {
 		const compiled = compile({
@@ -672,46 +710,57 @@ describe('bigint js column metadata provenance', () => {
 
 	it('emits bigint js metadata for standalone recursive CTE output columns', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const report: RecursivePlanReport = {
-			rootTable: 'events',
-			decisions: [],
-			warnings: [],
-			ctes: [],
-			intent: {
-				type: 'recursive',
-				cteName: 'event_tree',
-				start: {
-					from: 'events',
-					nodeIdExpr: { kind: 'column', name: 'id' },
-					select: ['sequence'],
-				},
-				traversal: {
-					kind: 'adjacency',
-					nodeTable: 'events',
-					nodeId: 'id',
-					parentId: 'userId',
-					direction: 'descendants',
-				},
-				maxDepth: 2,
-			},
-			metadata: {
-				planningTimeMs: 0,
-				relationsAnalyzed: 0,
-				isAmbiguous: false,
-				isRecursive: true,
-				traversalKind: 'adjacency',
-				usesBidirectional: false,
-				dedupeStrategy: 'none',
-			},
-		};
-
-		const compiled = adapter.compileRecursive(report, testSchema.model);
+		const compiled = adapter.compileRecursive(
+			recursiveEventsReport(),
+			testSchema.model,
+		);
 
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({
 			table: 'events',
 			column: 'sequence',
 			js: 'bigint',
 		});
+	});
+
+	it('drops recursive depth metadata when the tracking alias collides with a selected js column', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileRecursive(
+			recursiveEventsReport({ depth: { as: 'sequence' } }),
+			testSchema.model,
+		);
+
+		expect(compiled.sql).toContain('__depth AS sequence');
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+	});
+
+	it('drops recursive path metadata when the tracking alias collides with a selected js column', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileRecursive(
+			recursiveEventsReport({ path: { as: 'sequence' } }),
+			testSchema.model,
+		);
+
+		expect(compiled.sql).toContain('__path AS sequence');
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+	});
+
+	it('keeps non-colliding recursive tracking aliases metadata-free', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileRecursive(
+			recursiveEventsReport({
+				depth: { as: 'depth' },
+				path: { as: 'nodePath' },
+			}),
+			testSchema.model,
+		);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.has('depth') ?? false).toBe(false);
+		expect(compiled.columnMetadata?.has('nodePath') ?? false).toBe(false);
 	});
 
 	it('carries NQL binding provenance through a final passthrough select', () => {
