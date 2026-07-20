@@ -64,9 +64,13 @@ function resolveJsonAggOrderBy(
 		: undefined;
 }
 
-function columnNeedsJsonTextCast(column: { readonly js?: string }): boolean {
+function columnNeedsJsonTextCast(column: {
+	readonly type?: string;
+	readonly js?: string;
+}): boolean {
 	return (
-		column.js === 'bigint' || column.js === 'number' || column.js === 'string'
+		column.type === 'bigint' &&
+		(column.js === 'bigint' || column.js === 'number' || column.js === 'string')
 	);
 }
 

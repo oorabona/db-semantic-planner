@@ -53,6 +53,53 @@ describe('bigint js json_agg SQL projection', () => {
 		expect(compiled.sql).not.toMatch(/CAST\(__t__\."legacyCount" AS text\)/);
 	});
 
+	it('does not cast forged js metadata on non-bigint columns', () => {
+		const forgedSchema = schema({
+			parents: {
+				id: 'uuid',
+			},
+			readings: {
+				id: 'uuid',
+				parentId: ref('parents', {
+					as: 'parent',
+					inverse: 'readings',
+					references: ['id'],
+				}),
+				code: 'uuid',
+			},
+		});
+		const codeColumn = forgedSchema.model
+			.getTable('readings')
+			?.columns.find((column) => column.name === 'code');
+		(codeColumn as { js?: 'bigint' }).js = 'bigint';
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		const compiled = adapter.compile(
+			{
+				rootTable: 'parents',
+				decisions: [
+					{ type: 'select', column: 'id' },
+					{
+						type: 'includeStrategy',
+						choice: 'json_agg',
+						relation: 'readings',
+						relationName: 'readings',
+						relationType: 'hasMany',
+						sourceTable: 'parents',
+						targetTable: 'readings',
+						sourceColumn: ['id'],
+						targetColumn: ['parentId'],
+					},
+				],
+			} as unknown as PlanReport,
+			{ model: forgedSchema.model },
+		);
+
+		expect(compiled.sql).toContain('to_jsonb(__t__)');
+		expect(compiled.sql).not.toContain('jsonb_build_object');
+		expect(compiled.sql).not.toMatch(/CAST\(__t__\.code AS text\)/);
+	});
+
 	it('records exact emitted JSON key mappings on the compile-local hydration plan', () => {
 		const adapter = createPgsqlCompileOnlyAdapter({
 			model: includeSchema.model,

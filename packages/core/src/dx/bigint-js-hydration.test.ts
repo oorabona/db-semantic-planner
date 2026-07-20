@@ -220,6 +220,65 @@ describe('bigint js json_agg hydration', () => {
 		]);
 	});
 
+	it('leaves stray js metadata on non-bigint nested columns unconverted', () => {
+		const forgedSchema = schema({
+			parents: {
+				id: 'uuid',
+			},
+			readings: {
+				id: 'uuid',
+				parentId: ref('parents', {
+					as: 'parent',
+					inverse: 'readings',
+					references: ['id'],
+				}),
+				code: 'uuid',
+			},
+		});
+		const codeColumn = forgedSchema.model
+			.getTable('readings')
+			?.columns.find((column) => column.name === 'code');
+		(codeColumn as { js?: 'bigint' }).js = 'bigint';
+		const forgedReport = {
+			rootTable: 'parents',
+			decisions: [
+				{
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'parents',
+						target: 'readings',
+						relation: 'readings',
+						relationType: 'hasMany',
+					},
+				},
+			],
+		} as unknown as PlanReport;
+		const results: Record<string, unknown>[] = [
+			{
+				readings_json: JSON.stringify([
+					{
+						id: 'reading-1',
+						code: 'not-a-bigint',
+					},
+				]),
+			},
+		];
+
+		hydrateJsonAggIncludes(results, forgedReport, forgedSchema.model);
+
+		expect(results).toEqual([
+			{
+				readings: [
+					{
+						id: 'reading-1',
+						code: 'not-a-bigint',
+					},
+				],
+			},
+		]);
+	});
+
 	it('throws on nested js:number overflow', () => {
 		const results: Record<string, unknown>[] = [
 			{

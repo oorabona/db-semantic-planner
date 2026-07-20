@@ -30,6 +30,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
+import { emittedBindName } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -55,6 +56,19 @@ import {
 } from './recursive/index.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
+
+function getRegisteredProjection(
+	registry: CteProjectionRegistry,
+	name: string,
+	deps: AdapterCompilerDeps,
+): ProjectionEnvelope | undefined {
+	if (registry.size === 0) return undefined;
+	const exact = registry.get(name);
+	if (exact !== undefined) return exact;
+	const naming = deps.naming;
+	if (naming === undefined) return undefined;
+	return registry.get(emittedBindName(name, naming));
+}
 
 function createPlanReportForQuery(query: QueryIntent): PlanReport {
 	return {
@@ -140,6 +154,10 @@ function buildCteProjectionShape(
 
 	if (select.type === 'fields') {
 		for (const field of select.fields) {
+			if (field === '*') {
+				addStarSelections(source, selections);
+				continue;
+			}
 			const outputKey = dbOutputKey(field, deps);
 			addSelection(selections, outputKey, outputKey);
 		}
@@ -254,7 +272,7 @@ function compileQueryEnvelope(
 		options,
 		deps,
 	);
-	const registeredSource = registry.get(query.from);
+	const registeredSource = getRegisteredProjection(registry, query.from, deps);
 	if (registeredSource) {
 		return projectCteQueryEnvelope(
 			registeredSource,
@@ -517,6 +535,7 @@ export function compileCteQuery(
 	intent: CteQueryIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
+	initialProjectionByName?: CteProjectionRegistry,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const state = createCompilerState();
@@ -526,7 +545,9 @@ export function compileCteQuery(
 
 	// 1. Build CTE SQL fragments, accumulating parameters
 	const cteSqlFragments: string[] = [];
-	const cteProjectionByName = new Map<string, ProjectionEnvelope>();
+	const cteProjectionByName = new Map<string, ProjectionEnvelope>(
+		initialProjectionByName,
+	);
 	let isRecursive = false;
 
 	for (const cte of intent.ctes) {
@@ -640,7 +661,11 @@ export function compileCteQuery(
 			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
 			: renumberedOuterSql;
 	const parameters = [...allCteParams, ...outerCompiled.parameters];
-	const registeredSource = cteProjectionByName.get(intent.query.from);
+	const registeredSource = getRegisteredProjection(
+		cteProjectionByName,
+		intent.query.from,
+		deps,
+	);
 	const env = registeredSource
 		? projectCteQueryEnvelope(
 				registeredSource,
@@ -796,7 +821,9 @@ function buildRawCte(
 			: `${finalStepSql} WHERE ${depthCol} < $${depthParamIndex}`;
 	}
 	const stepRegisteredSource =
-		stepQuery.from === cte.name ? baseCompiled : registry.get(stepQuery.from);
+		stepQuery.from === cte.name
+			? baseCompiled
+			: getRegisteredProjection(registry, stepQuery.from, deps);
 	const stepCompiled = stepRegisteredSource
 		? rehomeQueryEnvelope(
 				stepRegisteredSource,

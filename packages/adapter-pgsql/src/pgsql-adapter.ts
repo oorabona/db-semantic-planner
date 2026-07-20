@@ -609,6 +609,22 @@ function renumberSqlParams(sql: string, offset: number): string {
 	});
 }
 
+function prefixNqlBindingCtes(
+	bindingCtes: readonly string[],
+	sql: string,
+): string {
+	if (bindingCtes.length === 0) return sql;
+	const withMatch = /^(WITH\s+RECURSIVE\s+|WITH\s+)/i.exec(sql);
+	if (!withMatch) {
+		return `WITH ${bindingCtes.join(', ')} ${sql}`;
+	}
+	const [prefix] = withMatch;
+	const withKeyword = /^WITH\s+RECURSIVE\s+/i.test(prefix)
+		? 'WITH RECURSIVE'
+		: 'WITH';
+	return `${withKeyword} ${bindingCtes.join(', ')}, ${sql.slice(prefix.length)}`;
+}
+
 function isCompiledNqlQuery(
 	input: PlanReport | CompiledNqlQuery,
 ): input is CompiledNqlQuery {
@@ -1253,6 +1269,10 @@ function buildNqlBindingProjectionShape(
 
 	if (select.type === 'fields') {
 		for (const field of select.fields) {
+			if (field === '*') {
+				addNqlBindingStarSelections(source, selections);
+				continue;
+			}
 			const outputKey = nqlBindingOutputKey(field, naming);
 			addNqlBindingSelection(selections, outputKey, outputKey);
 		}
@@ -1844,6 +1864,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						bundle.cteQuery,
 						options,
 						this.buildCompileDeps(options, bindingNames),
+						bindingProjections,
 					) as CompiledQuery<T>,
 					'NQL CTE query',
 				) as CompiledQuery<T>,
@@ -1858,6 +1879,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						model,
 						options,
 						bindingNames,
+						bindingProjections,
 					) as CompiledQuery<T>,
 					'NQL set operation',
 				) as CompiledQuery<T>,
@@ -1984,7 +2006,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		return guardCompiledQuery(
 			{
-				sql: `WITH ${ctes.join(', ')} ${renumberSqlParams(compiled.sql, parameters.length)}`,
+				sql: prefixNqlBindingCtes(
+					ctes,
+					renumberSqlParams(compiled.sql, parameters.length),
+				),
 				parameters: [...parameters, ...compiled.parameters],
 				...carriedCompiledQueryFields(compiled),
 			},
@@ -2294,6 +2319,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
+		bindingProjections?: NqlBindingProjectionRegistry,
 	): CompiledQuery {
 		const compileFn: LeafCompileFn = (query) => {
 			const leafOptions: CompileOptions & { model: ModelIR } = {
@@ -2312,7 +2338,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,
 					});
-			return compileSelectEnvelope(planReport, leafOptions, deps);
+			const compiled = compileSelectEnvelope(planReport, leafOptions, deps);
+			const registeredSource = getNqlBindingProjection(
+				bindingProjections,
+				query.from,
+				deps.naming,
+			);
+			return registeredSource
+				? projectNqlBindingQueryEnvelope(
+						registeredSource,
+						query,
+						compiled.sql,
+						compiled.parameters,
+						deps.naming,
+						compiled.hydrationPlan,
+					)
+				: compiled;
 		};
 		const envelope = compileSetOperationEnvelopeImpl(intent, compileFn);
 		return guardCompiledQuery(finalizeEnvelope(envelope), 'set operation');

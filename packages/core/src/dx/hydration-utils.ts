@@ -182,9 +182,10 @@ function convertJsonAggPayload(
 			if (key === undefined) continue;
 			const outputKey = renameExistingKey(value, key, column.name);
 			if (
-				column.js === 'bigint' ||
-				column.js === 'number' ||
-				column.js === 'string'
+				column.type === 'bigint' &&
+				(column.js === 'bigint' ||
+					column.js === 'number' ||
+					column.js === 'string')
 			) {
 				value[outputKey] = convertBigintJsReadValue(
 					value[outputKey],

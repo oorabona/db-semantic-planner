@@ -331,6 +331,49 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
 	});
 
+	it('converts rows from a WITH body that reads an NQL binding', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ sequence: '9007199254740993' }]),
+			{ model: conversionSchema.model },
+		);
+		const bundle: CompiledNqlQuery = {
+			bindings: new Map([
+				[
+					'e',
+					{
+						type: 'select',
+						from: 'events',
+						select: { type: 'fields', fields: ['sequence'] },
+					},
+				],
+			]),
+			cteQuery: {
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'projected',
+						query: {
+							type: 'select',
+							from: 'e',
+							select: { type: 'fields', fields: ['sequence'] },
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'projected',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+			},
+		};
+
+		const compiled = adapter.compile(bundle, { model: conversionSchema.model });
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
 	it('converts fluent withCte outer rows by threading the ORM model', async () => {
 		const adapter = createPgsqlAdapter(
 			makePool([{ sequence: '9007199254740993' }]),

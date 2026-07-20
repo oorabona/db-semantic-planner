@@ -6,6 +6,7 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
+import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile as compileNql } from '../../../nql/src/index.js';
 import { buildCompiledColumnMetadata } from '../column-metadata.js';
@@ -312,6 +313,38 @@ describe('bigint js column metadata provenance', () => {
 					type: 'select',
 					from: 'event_cte',
 					select: { type: 'fields', fields: ['sequence'] },
+				},
+			},
+			{ model: testSchema.model },
+		);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+	});
+
+	it('expands SELECT * from a CTE source without dropping bigint js metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const compiled = adapter.compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'event_cte',
+						query: {
+							type: 'select',
+							from: 'events',
+							select: { type: 'fields', fields: ['sequence'] },
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'event_cte',
+					select: { type: 'fields', fields: ['*'] },
 				},
 			},
 			{ model: testSchema.model },
@@ -711,6 +744,63 @@ e | select sequence as seq`);
 		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
 	});
 
+	it('expands SELECT * over an NQL binding source without dropping bigint js metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const bundle: CompiledNqlQuery = {
+			bindings: new Map([
+				[
+					'e',
+					{
+						type: 'select',
+						from: 'events',
+						select: { type: 'fields', fields: ['sequence'] },
+					},
+				],
+			]),
+			query: {
+				type: 'select',
+				from: 'e',
+				select: { type: 'fields', fields: ['*'] },
+			},
+		};
+
+		const compiled = adapter.compile(bundle, { model: testSchema.model });
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+	});
+
+	it('carries NQL binding provenance through a WITH body reading the binding', () => {
+		const { compiled } = compileNqlToPg(`events
+			| select sequence
+			| bind e
+with projected as (e | select sequence) projected | select sequence`);
+
+		expect(compiled.sql).toMatch(/^WITH /);
+		expect(compiled.sql).not.toMatch(/\)\s+WITH\s/i);
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+	});
+
+	it('carries NQL binding provenance through a WITH outer query reading the binding', () => {
+		const { compiled } = compileNqlToPg(`events
+			| select sequence
+			| bind e
+with ignored as (events | select id) e | select sequence`);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+	});
+
 	it('keeps non-js NQL binding pipelines metadata-free', () => {
 		const { compiled } = compileNqlToPg(`events
 			| select legacySequence
@@ -752,6 +842,85 @@ e | select sequence + 1 as nextSequence`);
 				testSchema.model,
 			),
 		).toThrow(
+			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+		);
+	});
+
+	it('throws when set operations over an NQL binding would carry bigint js metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const bundle: CompiledNqlQuery = {
+			bindings: new Map([
+				[
+					'e',
+					{
+						type: 'select',
+						from: 'events',
+						select: { type: 'fields', fields: ['sequence'] },
+					},
+				],
+			]),
+			setOperation: {
+				kind: 'setOperation',
+				op: 'union',
+				all: false,
+				left: {
+					type: 'select',
+					from: 'e',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+				right: {
+					type: 'select',
+					from: 'e',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+			},
+		};
+
+		expect(() => adapter.compile(bundle, { model: testSchema.model })).toThrow(
+			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+		);
+	});
+
+	it('throws when set operations over a runtime NQL binding would carry bigint js metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const bundle: CompiledNqlQuery = {
+			runtimeBindings: new Map([
+				[
+					'e',
+					{
+						columns: ['sequence'],
+						rows: [],
+						outputProvenance: [
+							{
+								outputColumn: 'sequence',
+								table: 'events',
+								column: 'sequence',
+							},
+						],
+						columnTypes: {
+							sequence: { kind: 'column', type: 'bigint' },
+						},
+					},
+				],
+			]),
+			setOperation: {
+				kind: 'setOperation',
+				op: 'union',
+				all: false,
+				left: {
+					type: 'select',
+					from: 'e',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+				right: {
+					type: 'select',
+					from: 'e',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+			},
+		};
+
+		expect(() => adapter.compile(bundle, { model: testSchema.model })).toThrow(
 			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
 		);
 	});
