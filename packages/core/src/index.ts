@@ -414,6 +414,7 @@ export type {
 	StreamingAdapter,
 	SubqueryIncludeInfo,
 	TransactionalAdapter,
+	TransactionOptions,
 } from './adapter.js';
 export {
 	AdapterRequiredError,

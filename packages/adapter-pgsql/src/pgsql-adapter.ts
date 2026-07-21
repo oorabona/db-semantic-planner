@@ -50,6 +50,7 @@ import type {
 	SetOperationIntent,
 	SubqueryIncludeInfo,
 	TableIR,
+	TransactionOptions,
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
@@ -147,6 +148,12 @@ import {
 	type LeafCompileFn,
 } from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
+import {
+	type PgsqlTransactionTimeoutParameter,
+	type PgsqlTransactionTimeoutStatement,
+	setLocalTransactionTimeoutSql,
+	transactionTimeoutStatements,
+} from './transaction-timeouts.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -200,6 +207,12 @@ const ABORTED_COMMIT_MESSAGE =
 
 const TRANSACTION_ABORTED_MESSAGE =
 	'PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope and that failure was caught. Roll back the surrounding transaction; the swallowed statement failure is the cause worth reporting.';
+
+const NESTED_TRANSACTION_OPTIONS_MESSAGE =
+	'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint';
+
+const TRANSACTION_TIMEOUT_MESSAGE =
+	'PostgreSQL transaction timeout elapsed inside a dbsp-managed transaction.';
 
 const SAVEPOINT_SCOPE_BUSY_MESSAGE =
 	'Cannot start another dbsp savepoint scope on this PostgreSQL connection because one is already active. Savepoint scopes are single-flight per connection; await the active dbsp operation before starting another.';
@@ -315,6 +328,24 @@ type CleanupFailureError = AggregateError & {
 	readonly originalError?: unknown;
 };
 
+type PgsqlTransactionTimeoutSnapshot = readonly {
+	readonly parameter: PgsqlTransactionTimeoutParameter;
+	readonly value: string;
+}[];
+
+interface ResolvedPgsqlTransactionOptions {
+	readonly isolationLevel?:
+		| 'read committed'
+		| 'repeatable read'
+		| 'serializable';
+	readonly readOnly?: boolean;
+	readonly lockTimeoutMs?: number;
+	readonly statementTimeoutMs?: number;
+	readonly timeoutStatements: readonly PgsqlTransactionTimeoutStatement[];
+	readonly hasLockTimeout: boolean;
+	readonly hasStatementTimeout: boolean;
+}
+
 export class PgsqlRawSqlTransactionControlError extends Error {
 	readonly dbspRawSqlTransactionControl = true;
 
@@ -339,6 +370,43 @@ export class PgsqlTransactionAbortedError extends Error {
 	constructor(cause: unknown) {
 		super(TRANSACTION_ABORTED_MESSAGE, { cause });
 		this.name = 'PgsqlTransactionAbortedError';
+	}
+}
+
+export class PgsqlTransactionOptionsError extends Error {
+	readonly dbspTransactionOptions = true;
+
+	constructor(message: string) {
+		super(message);
+		this.name = 'PgsqlTransactionOptionsError';
+	}
+}
+
+/**
+ * Raised when a statement inside a dbsp-managed transaction fails with a SQLSTATE
+ * that matches a timeout the caller configured for that transaction: `55P03`
+ * (`lock_not_available`) when `lockTimeoutMs` was set, or `57014` (`query_canceled`)
+ * when `statementTimeoutMs` was set. The original PostgreSQL error is preserved as
+ * `cause`.
+ *
+ * Classification is by SQLSTATE only. PostgreSQL assigns these codes to the OUTCOME,
+ * not the cause: `55P03` is also raised by `FOR UPDATE NOWAIT`, and `57014` is also
+ * raised by an external cancel (e.g. `pg_cancel_backend`). There is no locale-stable
+ * structured field that separates the timeout from the other cause, so the message
+ * text is deliberately NOT parsed. dbsp never emits `NOWAIT` itself, so a `55P03`
+ * here is the configured `lock_timeout` unless the caller's own raw SQL used
+ * `NOWAIT`; a `57014` is the configured `statement_timeout` unless the backend was
+ * cancelled from outside. Inspect `cause` when that distinction matters.
+ */
+export class PgsqlTransactionTimeoutError extends Error {
+	readonly dbspTransactionTimeout = true;
+
+	constructor(
+		cause: unknown,
+		readonly timeout: PgsqlTransactionTimeoutParameter,
+	) {
+		super(TRANSACTION_TIMEOUT_MESSAGE, { cause });
+		this.name = 'PgsqlTransactionTimeoutError';
 	}
 }
 
@@ -378,6 +446,179 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 		'code' in error &&
 		(error as { code?: unknown }).code === code
 	);
+}
+
+function describeTransactionOptionValue(value: unknown): string {
+	if (value === null) return 'null';
+	if (typeof value === 'string') return `string ${JSON.stringify(value)}`;
+	if (typeof value === 'number' && Number.isNaN(value)) return 'number NaN';
+	try {
+		return `${typeof value} ${String(value)}`;
+	} catch {
+		return typeof value;
+	}
+}
+
+function resolvePgsqlTransactionIsolationLevel(
+	value: unknown,
+): ResolvedPgsqlTransactionOptions['isolationLevel'] {
+	if (value === undefined) return undefined;
+	if (
+		value === 'read committed' ||
+		value === 'repeatable read' ||
+		value === 'serializable'
+	) {
+		return value;
+	}
+	throw new PgsqlTransactionOptionsError(
+		`Unsupported transaction isolationLevel: ${describeTransactionOptionValue(value)}`,
+	);
+}
+
+function resolvePgsqlTransactionReadOnly(
+	value: unknown,
+): ResolvedPgsqlTransactionOptions['readOnly'] {
+	if (value === undefined) return undefined;
+	if (typeof value === 'boolean') return value;
+	throw new PgsqlTransactionOptionsError(
+		`transaction readOnly must be a boolean when defined; received ${describeTransactionOptionValue(value)}`,
+	);
+}
+
+function resolvePgsqlTransactionTimeoutMs(
+	optionName: 'lockTimeoutMs' | 'statementTimeoutMs',
+	value: unknown,
+): number | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	throw new PgsqlTransactionOptionsError(
+		`transaction ${optionName} must be a finite number when defined; received ${describeTransactionOptionValue(value)}`,
+	);
+}
+
+function resolveTransactionOptions(
+	options: TransactionOptions | undefined,
+): ResolvedPgsqlTransactionOptions {
+	const optionRecord = options as
+		| {
+				readonly isolationLevel?: unknown;
+				readonly readOnly?: unknown;
+				readonly lockTimeoutMs?: unknown;
+				readonly statementTimeoutMs?: unknown;
+		  }
+		| null
+		| undefined;
+	const rawIsolationLevel = optionRecord?.isolationLevel;
+	const rawReadOnly = optionRecord?.readOnly;
+	const rawLockTimeoutMs = optionRecord?.lockTimeoutMs;
+	const rawStatementTimeoutMs = optionRecord?.statementTimeoutMs;
+
+	const isolationLevel =
+		resolvePgsqlTransactionIsolationLevel(rawIsolationLevel);
+	const readOnly = resolvePgsqlTransactionReadOnly(rawReadOnly);
+	const lockTimeoutMs = resolvePgsqlTransactionTimeoutMs(
+		'lockTimeoutMs',
+		rawLockTimeoutMs,
+	);
+	const statementTimeoutMs = resolvePgsqlTransactionTimeoutMs(
+		'statementTimeoutMs',
+		rawStatementTimeoutMs,
+	);
+	const timeoutOptions: TransactionOptions = {
+		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
+		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
+	};
+	const timeoutStatements: readonly PgsqlTransactionTimeoutStatement[] =
+		Object.freeze([...transactionTimeoutStatements(timeoutOptions)]);
+
+	return Object.freeze({
+		...(isolationLevel !== undefined && { isolationLevel }),
+		...(readOnly !== undefined && { readOnly }),
+		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
+		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
+		timeoutStatements,
+		hasLockTimeout: lockTimeoutMs !== undefined,
+		hasStatementTimeout: statementTimeoutMs !== undefined,
+	});
+}
+
+function renderTransactionIsolationLevel(
+	isolationLevel: ResolvedPgsqlTransactionOptions['isolationLevel'],
+): string {
+	switch (isolationLevel) {
+		case 'read committed':
+			return 'READ COMMITTED';
+		case 'repeatable read':
+			return 'REPEATABLE READ';
+		case 'serializable':
+			return 'SERIALIZABLE';
+		case undefined:
+			throw new PgsqlTransactionOptionsError(
+				'transaction isolationLevel cannot be undefined when rendering BEGIN',
+			);
+		default:
+			throw new PgsqlTransactionOptionsError(
+				`Unsupported transaction isolationLevel: ${String(isolationLevel)}`,
+			);
+	}
+}
+
+function transactionBeginSql(
+	options: ResolvedPgsqlTransactionOptions | undefined,
+): string {
+	const parts = ['BEGIN'];
+	if (options?.isolationLevel !== undefined) {
+		parts.push(
+			`ISOLATION LEVEL ${renderTransactionIsolationLevel(
+				options.isolationLevel,
+			)}`,
+		);
+	}
+	if (options?.readOnly === true) {
+		parts.push('READ ONLY');
+	} else if (options?.readOnly === false) {
+		parts.push('READ WRITE');
+	}
+	return parts.join(' ');
+}
+
+function assertTopLevelOnlyTransactionOptionsAreAbsent(
+	options: ResolvedPgsqlTransactionOptions | undefined,
+): void {
+	if (
+		options?.isolationLevel !== undefined ||
+		options?.readOnly !== undefined
+	) {
+		throw new PgsqlTransactionOptionsError(NESTED_TRANSACTION_OPTIONS_MESSAGE);
+	}
+}
+
+function classifyPgsqlTransactionTimeout(
+	error: unknown,
+	options: ResolvedPgsqlTransactionOptions | undefined,
+): PgsqlTransactionTimeoutError | undefined {
+	if (error instanceof PgsqlTransactionTimeoutError) {
+		return error;
+	}
+	if (options === undefined) return undefined;
+	// Classify by SQLSTATE only, gated on the caller having configured that timeout.
+	// PostgreSQL overloads 55P03 (also NOWAIT) and 57014 (also external cancel) and
+	// exposes no locale-stable field to separate the causes; see the JSDoc on
+	// PgsqlTransactionTimeoutError for the boundary. The original error is the `cause`.
+	if (options.hasLockTimeout && isPgErrorWithCode(error, '55P03')) {
+		return new PgsqlTransactionTimeoutError(error, 'lock_timeout');
+	}
+	if (options.hasStatementTimeout && isPgErrorWithCode(error, '57014')) {
+		return new PgsqlTransactionTimeoutError(error, 'statement_timeout');
+	}
+	return undefined;
+}
+
+function transactionTimeoutErrorOrOriginal(
+	error: unknown,
+	options: ResolvedPgsqlTransactionOptions | undefined,
+): unknown {
+	return classifyPgsqlTransactionTimeout(error, options) ?? error;
 }
 
 function nextSavepointName(): string {
@@ -1806,6 +2047,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			supportsSchemas: true,
 			supportsStreaming: supportsManagedTransactions,
 			supportsTransactions: supportsManagedTransactions,
+			supportsTransactionOptions: supportsManagedTransactions,
 			supportsRecursiveCTE: true,
 			supportsWindowFunctions: true,
 			supportsArrayType: true,
@@ -3255,7 +3497,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * and hand dbsp a `borrowedClient` **without** `managedTransactions`. dbsp will then
 	 * contain its own statements inside *your* transaction instead of the other way round.
 	 */
-	transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T> {
+	transaction<T>(
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+		options?: TransactionOptions,
+	): Promise<T> {
+		const resolvedOptions =
+			options === undefined ? undefined : resolveTransactionOptions(options);
 		const childObserver = this.createChildTransactionObserver();
 		if (this.client) {
 			if (!this.managedTransactions) {
@@ -3273,6 +3520,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					fn,
 					childObserver,
 					'release',
+					resolvedOptions,
 				),
 				childObserver,
 			);
@@ -3295,6 +3543,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						fn,
 						childObserver,
 						'commit',
+						resolvedOptions,
 					);
 				} catch (error) {
 					releaseError = cleanupReleaseReason(error);
@@ -3462,12 +3711,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: SavepointTransactionSuccessAction = 'release',
+		options?: ResolvedPgsqlTransactionOptions,
 	): Promise<T> {
 		return this.transactionWithManagedClientSavepointScope(
 			client,
 			fn,
 			childObserver,
 			successAction,
+			options,
 		);
 	}
 
@@ -3476,6 +3727,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: SavepointTransactionSuccessAction = 'release',
+		options?: ResolvedPgsqlTransactionOptions,
 	): Promise<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = createScopeToken();
@@ -3518,6 +3770,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					fn,
 					childObserver,
 					successAction === 'rollback' ? 'rollback' : 'commit',
+					options,
 				);
 			}
 			releaseScope({ error });
@@ -3535,17 +3788,31 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		try {
 			let result: T;
+			let timeoutSnapshot: PgsqlTransactionTimeoutSnapshot = [];
 			try {
+				assertTopLevelOnlyTransactionOptionsAreAbsent(options);
+				timeoutSnapshot = await this.captureAndApplySavepointTimeouts(
+					client,
+					scopeToken,
+					scopeState,
+					options,
+				);
 				result = await fn(txAdapter);
 				this.closeScopeAndAssertChildren(scopeState);
 				await this.drainScopeWork(scopeState);
 				this.throwIfScopePoisoned(scopeState);
 			} catch (error) {
-				let transactionError = error;
+				let transactionError = transactionTimeoutErrorOrOriginal(
+					error,
+					options,
+				);
 				try {
 					this.closeScopeAndAssertChildren(scopeState);
 				} catch (scopeError) {
-					transactionError = scopeError;
+					transactionError = transactionTimeoutErrorOrOriginal(
+						scopeError,
+						options,
+					);
 				}
 				let cleanupErr: unknown;
 				try {
@@ -3592,6 +3859,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					scopeState,
 					transactionError,
 				);
+				transactionError = transactionTimeoutErrorOrOriginal(
+					transactionError,
+					options,
+				);
 				scopeFailure = { error: transactionError };
 				throw transactionError;
 			}
@@ -3614,6 +3885,26 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						throw cleanupFailure;
 					}
 					return result;
+				}
+				try {
+					await this.restoreSavepointTimeouts(
+						client,
+						scopeToken,
+						scopeState,
+						timeoutSnapshot,
+					);
+				} catch (restoreErr) {
+					const cleanupFailure =
+						await this.rollbackSavepointAfterReleaseFailure(
+							client,
+							savepointName,
+							scopeToken,
+							scopeState,
+							restoreErr,
+							'PostgreSQL transaction cleanup failed: timeout restore failed before RELEASE SAVEPOINT after the transaction body returned',
+						);
+					scopeFailure = { error: cleanupFailure };
+					throw cleanupFailure;
 				}
 				await this.executeScopeBoundaryStatement(
 					client,
@@ -3642,11 +3933,82 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
+	private async applyTransactionTimeouts(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+		options: ResolvedPgsqlTransactionOptions | undefined,
+	): Promise<void> {
+		for (const statement of options?.timeoutStatements ?? []) {
+			await this.executeScopeBoundaryStatement(
+				client,
+				scopeToken,
+				scopeState,
+				statement.sql,
+			);
+		}
+	}
+
+	private async captureAndApplySavepointTimeouts(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+		options: ResolvedPgsqlTransactionOptions | undefined,
+	): Promise<PgsqlTransactionTimeoutSnapshot> {
+		const statements = options?.timeoutStatements ?? [];
+		if (statements.length === 0) return [];
+
+		const snapshot: {
+			readonly parameter: PgsqlTransactionTimeoutParameter;
+			readonly value: string;
+		}[] = [];
+		for (const statement of statements) {
+			const result = await this.executeScopeBoundaryStatement(
+				client,
+				scopeToken,
+				scopeState,
+				`SHOW ${statement.parameter}`,
+			);
+			const value = result.rows[0]?.[statement.parameter];
+			if (typeof value !== 'string') {
+				throw new Error(
+					`SHOW ${statement.parameter} did not return a string value`,
+				);
+			}
+			snapshot.push({ parameter: statement.parameter, value });
+		}
+
+		await this.applyTransactionTimeouts(
+			client,
+			scopeToken,
+			scopeState,
+			options,
+		);
+		return snapshot;
+	}
+
+	private async restoreSavepointTimeouts(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+		snapshot: PgsqlTransactionTimeoutSnapshot,
+	): Promise<void> {
+		for (const setting of snapshot) {
+			await this.executeScopeBoundaryStatement(
+				client,
+				scopeToken,
+				scopeState,
+				setLocalTransactionTimeoutSql(setting.parameter, setting.value),
+			);
+		}
+	}
+
 	private async transactionWithClientTransaction<T>(
 		client: PoolClient,
 		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
 		childObserver?: DbspChildTransactionObserver,
 		successAction: ClientTransactionSuccessAction = 'commit',
+		options?: ResolvedPgsqlTransactionOptions,
 	): Promise<T> {
 		let begun = false;
 		let committed = false;
@@ -3668,9 +4030,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				client,
 				scopeToken,
 				scopeState,
-				'BEGIN',
+				transactionBeginSql(options),
 			);
 			begun = true;
+			await this.applyTransactionTimeouts(
+				client,
+				scopeToken,
+				scopeState,
+				options,
+			);
 			scopeState.streamFailureRecovery = async () => {
 				await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				transactionRolledBackBeforeClose = true;
@@ -3713,11 +4081,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
-			let transactionError = error;
+			let transactionError = transactionTimeoutErrorOrOriginal(error, options);
 			try {
 				this.closeScopeAndAssertChildren(scopeState);
 			} catch (scopeError) {
-				transactionError = scopeError;
+				transactionError = transactionTimeoutErrorOrOriginal(
+					scopeError,
+					options,
+				);
 			}
 			if (begun && !committed && !transactionRolledBackBeforeClose) {
 				try {
@@ -3737,6 +4108,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			transactionError = this.scopePoisonOutranksError(
 				scopeState,
 				transactionError,
+			);
+			transactionError = transactionTimeoutErrorOrOriginal(
+				transactionError,
+				options,
 			);
 			scopeFailure = { error: transactionError };
 			throw transactionError;

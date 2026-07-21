@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { Adapter, Dump } from '../adapter.js';
+import type { Adapter, Dump, TransactionOptions } from '../adapter.js';
 import { createHookManager } from './hooks.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
@@ -189,11 +189,56 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 		expect((error as Error).message).not.toContain('managedTransactions');
 		expect(streamSpy).not.toHaveBeenCalled();
 	});
+	it('transaction() rejects non-empty options unless the adapter declares support', async () => {
+		const baseAdapter = createSpyAdapter();
+		let transactionAdapter: Adapter;
+		const transactionSpy = vi.fn(
+			async (fn: (txAdapter: Adapter) => Promise<unknown>) => {
+				return fn(transactionAdapter);
+			},
+		);
+		transactionAdapter = {
+			...baseAdapter,
+			capabilities: {
+				...baseAdapter.capabilities,
+				supportsTransactions: true,
+			},
+			transaction: transactionSpy,
+			withSchema: (_schemaName: string) => transactionAdapter,
+		} as unknown as Adapter;
+		const orm = createOrm({
+			adapter: transactionAdapter,
+			schema: simpleSchema,
+		});
+
+		await expect(
+			orm.transaction(async () => 'ok', { readOnly: true }),
+		).rejects.toThrow('does not support transaction options');
+		expect(transactionSpy).not.toHaveBeenCalled();
+
+		const allUndefinedOptions = {
+			isolationLevel: undefined,
+			readOnly: undefined,
+			lockTimeoutMs: undefined,
+			statementTimeoutMs: undefined,
+		} as unknown as TransactionOptions;
+
+		await expect(
+			orm.transaction(async () => 'ok', allUndefinedOptions),
+		).resolves.toBe('ok');
+		expect(transactionSpy).toHaveBeenCalledWith(
+			expect.any(Function),
+			allUndefinedOptions,
+		);
+	});
 	it('transaction() and stream() delegate when the adapter declares both capabilities', async () => {
 		const baseAdapter = createSpyAdapter([{ id: 1 }]);
 		let capableAdapter: Adapter;
 		const transactionSpy = vi.fn(
-			async (fn: (txAdapter: Adapter) => Promise<unknown>) => {
+			async (
+				fn: (txAdapter: Adapter) => Promise<unknown>,
+				_options?: TransactionOptions,
+			) => {
 				return fn(capableAdapter);
 			},
 		);
@@ -203,23 +248,32 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 				...baseAdapter.capabilities,
 				supportsStreaming: true,
 				supportsTransactions: true,
+				supportsTransactionOptions: true,
 			},
 			transaction: transactionSpy,
 			withSchema: (_schemaName: string) => capableAdapter,
 		} as unknown as Adapter;
 		const orm = createOrm({ adapter: capableAdapter, schema: simpleSchema });
 
+		const transactionOptions = {
+			isolationLevel: 'repeatable read',
+			readOnly: true,
+		} satisfies TransactionOptions;
+
 		await expect(
 			orm.transaction(async () => {
 				return 'ok';
-			}),
+			}, transactionOptions),
 		).resolves.toBe('ok');
 
 		const collected: unknown[] = [];
 		for await (const row of orm.select('users').stream()) collected.push(row);
 
 		expect(collected).toEqual([{ id: 1 }]);
-		expect(transactionSpy).toHaveBeenCalledTimes(1);
+		expect(transactionSpy).toHaveBeenCalledWith(
+			expect.any(Function),
+			transactionOptions,
+		);
 		expect(capableAdapter.stream).toHaveBeenCalledTimes(1);
 	});
 	it('stream() without hooks yields all rows', async () => {

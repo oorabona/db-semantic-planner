@@ -8,7 +8,7 @@
  * @since R01
  */
 
-import type { Adapter } from '../adapter.js';
+import type { Adapter, TransactionOptions } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
@@ -559,7 +559,10 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * });
 	 * ```
 	 */
-	transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T>;
+	transaction<T>(
+		fn: (tx: OrmInstance<DB>) => Promise<T>,
+		options?: TransactionOptions,
+	): Promise<T>;
 
 	// =========================================================================
 	// NQL Template Literal API (DX-040 Block 8)

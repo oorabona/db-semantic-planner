@@ -72,6 +72,11 @@ export interface AdapterCapabilities {
 	readonly supportsSchemas: boolean;
 	readonly supportsStreaming: boolean;
 	readonly supportsTransactions: boolean;
+	/**
+	 * When true, transaction() honors TransactionOptions. When absent/false, the
+	 * adapter ignores them and core rejects non-empty options.
+	 */
+	readonly supportsTransactionOptions?: boolean;
 	readonly supportsRecursiveCTE: boolean;
 	readonly supportsWindowFunctions: boolean;
 	readonly supportsArrayType: boolean;
@@ -141,6 +146,16 @@ export interface CompileOptionsBase {
 	 * @default undefined (no limit)
 	 */
 	readonly maxBatchSize?: number;
+}
+
+export interface TransactionOptions {
+	readonly isolationLevel?:
+		| 'read committed'
+		| 'repeatable read'
+		| 'serializable';
+	readonly readOnly?: boolean;
+	readonly lockTimeoutMs?: number;
+	readonly statementTimeoutMs?: number;
 }
 
 /**
@@ -637,7 +652,10 @@ export interface IntrospectingAdapter extends BaseAdapter {
  */
 export interface TransactionalAdapter<DB = unknown> extends BaseAdapter {
 	/** Execute a callback within a database transaction. */
-	transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T>;
+	transaction<T>(
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+		options?: TransactionOptions,
+	): Promise<T>;
 
 	/** Create a schema-scoped adapter for multi-tenant queries. */
 	withSchema(schemaName: string): Adapter<DB>;

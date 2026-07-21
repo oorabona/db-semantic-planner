@@ -173,6 +173,8 @@ export {
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
+	PgsqlTransactionOptionsError,
+	PgsqlTransactionTimeoutError,
 } from './pgsql-adapter.js';
 export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)

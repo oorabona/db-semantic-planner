@@ -112,6 +112,44 @@ describe('Transactions', () => {
 			expect(result).toHaveProperty('count');
 			expect(typeof result.count).toBe('number');
 		});
+
+		it('repeatable read read-only transaction keeps a stable snapshot', async () => {
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ schema: blogSchema, adapter });
+			const scoped = orm.withSchema(SCHEMA);
+			const pool = await getTestPool();
+			const s = sql.ref(SCHEMA);
+			const marker = `Snapshot Post ${Date.now()}`;
+
+			const [before, after] = await scoped.transaction(
+				async (tx) => {
+					const beforeRows = await tx.raw<{ count_value: number }>(
+						`SELECT count(*)::integer AS count_value FROM "${SCHEMA}".posts WHERE title LIKE 'Snapshot Post%'`,
+					);
+					await sql`
+						INSERT INTO ${s}.posts (title, content, published, author_id)
+						VALUES (${marker}, 'Concurrent commit', false, 1)
+					`.execute(pool);
+					const afterRows = await tx.raw<{ count_value: number }>(
+						`SELECT count(*)::integer AS count_value FROM "${SCHEMA}".posts WHERE title LIKE 'Snapshot Post%'`,
+					);
+					return [
+						beforeRows[0]?.count_value ?? 0,
+						afterRows[0]?.count_value ?? 0,
+					] as const;
+				},
+				{ isolationLevel: 'repeatable read', readOnly: true },
+			);
+
+			expect(after).toBe(before);
+
+			const committed = await sql`
+				SELECT count(*)::integer AS count_value
+				FROM ${s}.posts
+				WHERE title = ${marker}
+			`.execute(pool);
+			expect(committed.rows[0]?.count_value).toBe(1);
+		});
 	});
 
 	describe('Nested transaction', () => {
