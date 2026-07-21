@@ -27,6 +27,17 @@ const testSchema = schema({
 	},
 });
 
+function makeExecuteOnlyAdapter() {
+	const adapter = createMockAdapter();
+	Object.defineProperty(adapter, 'executeWithMeta', {
+		value: undefined,
+		configurable: true,
+		writable: true,
+	});
+	adapter.execute = vi.fn(() => Promise.resolve([]));
+	return adapter;
+}
+
 // ============================================================================
 // InsertBuilder: Column combinations and returning
 // ============================================================================
@@ -151,7 +162,9 @@ describe('InsertBuilder coverage', () => {
 			sql: 'INSERT INTO users (name) VALUES ($1)',
 			parameters: ['Alice'],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -169,7 +182,9 @@ describe('InsertBuilder coverage', () => {
 			sql: 'INSERT INTO users (name) VALUES ($1) RETURNING id',
 			parameters: ['Alice'],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [{ id: 1 }], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -300,7 +315,9 @@ describe('UpdateBuilder coverage', () => {
 			sql: 'UPDATE users SET name = $1 WHERE id = $2',
 			parameters: ['Alice', 1],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -321,7 +338,9 @@ describe('UpdateBuilder coverage', () => {
 			sql: 'UPDATE users SET name = $1 WHERE id = $2 RETURNING id',
 			parameters: ['Alice', 1],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [{ id: 1 }], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -334,6 +353,173 @@ describe('UpdateBuilder coverage', () => {
 
 		// Assert
 		expect(result).toEqual([{ id: 1 }]);
+	});
+
+	it('affectedRows() should return rowCount without returning rows', async () => {
+		// Arrange
+		const adapter = createMockAdapter();
+		adapter.compileUpdate = vi.fn(() => ({
+			sql: 'UPDATE users SET active = $1 WHERE active = $2',
+			parameters: [false, true],
+		}));
+		adapter.execute = vi.fn(() => {
+			throw new Error('execute() should not be used for affectedRows()');
+		});
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 3, command: 'UPDATE' }),
+		);
+		const orm = createOrm({ schema: testSchema, adapter });
+
+		// Act
+		const count = await orm
+			.update('users')
+			.set({ active: false })
+			.where({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			})
+			.affectedRows();
+
+		// Assert
+		expect(count).toBe(3);
+		expect(adapter.executeWithMeta).toHaveBeenCalledOnce();
+		expect(adapter.execute).not.toHaveBeenCalled();
+	});
+
+	it('affectedRows() should distinguish a lost CAS from an updated row without RETURNING', async () => {
+		// Arrange
+		const adapter = createMockAdapter();
+		adapter.compileUpdate = vi.fn(() => ({
+			sql: 'UPDATE project_state SET rev = rev + 1 WHERE id = $1 AND rev = $2',
+			parameters: ['project-1', 7],
+		}));
+		adapter.executeWithMeta = vi
+			.fn()
+			.mockResolvedValueOnce({ rows: [], rowCount: 0, command: 'UPDATE' })
+			.mockResolvedValueOnce({ rows: [], rowCount: 1, command: 'UPDATE' });
+		const orm = createOrm({ schema: testSchema, adapter });
+
+		const casUpdate = () =>
+			orm
+				.update('users')
+				.set({ active: true })
+				.where({
+					kind: 'comparison',
+					field: 'id',
+					operator: 'eq',
+					value: 1,
+				})
+				.affectedRows();
+
+		// Act & Assert
+		await expect(casUpdate()).resolves.toBe(0);
+		await expect(casUpdate()).resolves.toBe(1);
+		expect(adapter.executeWithMeta).toHaveBeenCalledTimes(2);
+	});
+
+	it('affectedRows() should fail loud when adapter lacks executeWithMeta', async () => {
+		// Arrange
+		const adapter = makeExecuteOnlyAdapter();
+		adapter.compileUpdate = vi.fn(() => ({
+			sql: 'UPDATE users SET active = $1 WHERE active = $2',
+			parameters: [false, true],
+		}));
+		const orm = createOrm({ schema: testSchema, adapter });
+
+		// Act / Assert
+		await expect(
+			orm
+				.update('users')
+				.set({ active: false })
+				.where({
+					kind: 'comparison',
+					field: 'active',
+					operator: 'eq',
+					value: true,
+				})
+				.affectedRows(),
+		).rejects.toThrow(/does not support affectedRows\(\).*executeWithMeta/s);
+		expect(adapter.execute).not.toHaveBeenCalled();
+	});
+});
+
+describe('Execute-only mutation adapter compatibility', () => {
+	it('should run ordinary insert, update, delete, and upsert mutations via execute()', async () => {
+		// Arrange
+		const adapter = makeExecuteOnlyAdapter();
+		adapter.compileInsert = vi.fn(() => ({
+			sql: 'INSERT INTO users (name) VALUES ($1)',
+			parameters: ['Alice'],
+		}));
+		adapter.compileUpdate = vi.fn(() => ({
+			sql: 'UPDATE users SET active = $1 WHERE id = $2',
+			parameters: [false, 1],
+		}));
+		adapter.compileDelete = vi.fn(() => ({
+			sql: 'DELETE FROM users WHERE id = $1',
+			parameters: [1],
+		}));
+		adapter.compileUpsert = vi.fn(() => ({
+			sql: 'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
+			parameters: [1, 'Alice'],
+		}));
+		const orm = createOrm({ schema: testSchema, adapter });
+
+		// Act / Assert
+		await expect(
+			orm.insert('users').values({ name: 'Alice' }).execute(),
+		).resolves.toBeUndefined();
+		await expect(
+			orm
+				.update('users')
+				.set({ active: false })
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+				.execute(),
+		).resolves.toBeUndefined();
+		await expect(
+			orm
+				.delete('users')
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+				.execute(),
+		).resolves.toBeUndefined();
+		await expect(
+			orm
+				.upsert('users')
+				.values({ id: 1, name: 'Alice' })
+				.onConflict(['id'])
+				.doNothing()
+				.execute(),
+		).resolves.toBeUndefined();
+		expect(adapter.execute).toHaveBeenCalledTimes(4);
+	});
+
+	it('should leave afterMutation affectedRows undefined without executeWithMeta', async () => {
+		// Arrange
+		const adapter = makeExecuteOnlyAdapter();
+		adapter.compileUpdate = vi.fn(() => ({
+			sql: 'UPDATE users SET active = $1 WHERE id = $2',
+			parameters: [false, 1],
+		}));
+		const afterMutation = vi.fn((ctx, rows) => {
+			expect(ctx.affectedRows).toBeUndefined();
+			expect(rows).toEqual([]);
+			return rows;
+		});
+		const { createHookManager } = await import('./hooks.js');
+		const hooks = createHookManager().afterMutation(afterMutation);
+		const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+		// Act
+		await orm
+			.update('users')
+			.set({ active: false })
+			.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+			.execute();
+
+		// Assert
+		expect(afterMutation).toHaveBeenCalledOnce();
 	});
 });
 
@@ -446,7 +632,9 @@ describe('DeleteBuilder coverage', () => {
 			sql: 'DELETE FROM users WHERE id = $1',
 			parameters: [1],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -466,7 +654,9 @@ describe('DeleteBuilder coverage', () => {
 			sql: 'DELETE FROM users WHERE id = $1 RETURNING id',
 			parameters: [1],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [{ id: 1 }], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -678,7 +868,9 @@ describe('UpsertBuilder coverage', () => {
 			sql: 'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING',
 			parameters: [1, 'Alice'],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -700,7 +892,9 @@ describe('UpsertBuilder coverage', () => {
 			sql: 'INSERT INTO users (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING RETURNING id',
 			parameters: [1, 'Alice'],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [{ id: 1 }], rowCount: 1 }),
+		);
 		const orm = createOrm({ schema: testSchema, adapter });
 
 		// Act
@@ -730,7 +924,9 @@ describe('Mutation builders with hooks', () => {
 			sql: 'INSERT INTO users (name) VALUES ($1)',
 			parameters: ['Alice'],
 		}));
-		adapter.execute = vi.fn(() => Promise.resolve([]));
+		adapter.executeWithMeta = vi.fn(() =>
+			Promise.resolve({ rows: [], rowCount: 1 }),
+		);
 
 		const { createHookManager } = await import('./hooks.js');
 		const hooks = createHookManager().afterMutation(() => {

@@ -1803,12 +1803,13 @@ Mutation hooks run for tag mutations during execution:
 ```typescript
 const { createHookManager } = await import('@dbsp/core');
 
-const adapterWithExecute = createPgsqlCompileOnlyAdapter() as ReturnType<
-  typeof createPgsqlCompileOnlyAdapter
-> & {
-  execute: () => Promise<Array<{ id: string }>>;
-};
-adapterWithExecute.execute = async () => [{ id: 'user-1' }];
+const adapterWithExecute = createPgsqlCompileOnlyAdapter() as unknown as NonNullable<
+  Parameters<typeof createOrm>[0]['adapter']
+>;
+adapterWithExecute.executeWithMeta = async () => ({
+  rows: [{ id: 'user-1' }],
+  rowCount: 1,
+});
 
 const events: string[] = [];
 const hooks = createHookManager()

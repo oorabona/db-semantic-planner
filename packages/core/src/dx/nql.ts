@@ -1691,12 +1691,27 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					sql: compiled.sql,
 					parameters: compiled.parameters,
 					execute: async () => {
+						if (typeof adapter.executeWithMeta === 'function') {
+							const metadata = await adapter.executeWithMeta(compiled);
+							const hookRows = metadata.rows as unknown[];
+							const rawRows = snapshotMutationRows(hookRows);
+							return {
+								result: {
+									rawRows,
+									hookRows,
+									transformedRows: hookRows,
+								},
+								affectedRows: metadata.rowCount,
+							};
+						}
 						const hookRows = (await adapter.execute(compiled)) as unknown[];
 						const rawRows = snapshotMutationRows(hookRows);
 						return {
-							rawRows,
-							hookRows,
-							transformedRows: hookRows,
+							result: {
+								rawRows,
+								hookRows,
+								transformedRows: hookRows,
+							},
 						};
 					},
 					getAfterMutationResult: (result) =>

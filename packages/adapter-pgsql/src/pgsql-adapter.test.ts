@@ -375,7 +375,11 @@ describe('PgsqlAdapter', () => {
 				{ id: 1, name: 'Alice' },
 				{ id: 2, name: 'Bob' },
 			];
-			vi.mocked(pool.query).mockResolvedValue({ rows: mockRows } as any);
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: mockRows,
+				rowCount: 2,
+				command: 'SELECT',
+			} as any);
 
 			const adapter = createPgsqlAdapter(pool);
 			const query = testQuery('SELECT * FROM users');
@@ -383,7 +387,55 @@ describe('PgsqlAdapter', () => {
 			const results = await adapter.execute(query);
 
 			expect(results).toEqual(mockRows);
+			expect(results).not.toHaveProperty('rowCount');
+			expect(results).not.toHaveProperty('command');
 			expect(pool.query).toHaveBeenCalledWith(query.sql, query.parameters);
+		});
+	});
+
+	describe('executeWithMeta', () => {
+		it('should return transformed rows with mutation rowCount and command', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [{ id: 1, full_name: 'Alice' }],
+				rowCount: 1,
+				command: 'UPDATE',
+			} as any);
+
+			const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+			const query = testQuery('UPDATE users SET full_name = $1 WHERE id = $2', [
+				'Alice',
+				1,
+			]);
+
+			const result = await adapter.executeWithMeta(query);
+
+			expect(result).toEqual({
+				rows: [{ id: 1, fullName: 'Alice' }],
+				rowCount: 1,
+				command: 'UPDATE',
+			});
+			expect(pool.query).toHaveBeenCalledWith(query.sql, query.parameters);
+		});
+
+		it('should normalize null rowCount to zero', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [],
+				rowCount: null,
+				command: 'UPDATE',
+			} as any);
+
+			const adapter = createPgsqlAdapter(pool);
+			const result = await adapter.executeWithMeta(
+				testQuery('UPDATE users SET active = false'),
+			);
+
+			expect(result).toEqual({
+				rows: [],
+				rowCount: 0,
+				command: 'UPDATE',
+			});
 		});
 	});
 

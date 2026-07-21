@@ -89,6 +89,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		compileSetOperation: notImplemented,
 		createDump: notImplemented,
 		execute: notImplemented,
+		executeWithMeta: notImplemented,
 		executeOne: notImplemented,
 		executeOneOrThrow: notImplemented,
 		stream: notImplemented as () => AsyncIterableIterator<never>,

@@ -24,7 +24,37 @@ function createMutationTag(executeResult: readonly unknown[] = []) {
 	}) as unknown as Adapter;
 
 	const compile = vi.spyOn(adapter, 'compile');
+	adapter.executeWithMeta = vi.fn(async () => ({
+		rows: [...executeResult],
+		rowCount: executeResult.length,
+	}));
+
+	return {
+		adapter,
+		compile,
+		nql: createNqlTag(db.definition, db.model, adapter),
+	};
+}
+
+function createExecuteOnlyMutationTag(executeResult: readonly unknown[] = []) {
+	const db = schema({
+		users: {
+			id: 'integer',
+			name: 'string',
+			active: 'boolean',
+		},
+	} as const);
+	const adapter = createPgsqlCompileOnlyAdapter({
+		model: db.model,
+	}) as unknown as Adapter;
+
+	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
+	Object.defineProperty(adapter, 'executeWithMeta', {
+		value: undefined,
+		configurable: true,
+		writable: true,
+	});
 
 	return {
 		adapter,
@@ -172,7 +202,7 @@ describe('nql`...` mutation support', () => {
 		}>`update users set name = ${'Eve'} where id = ${6} | select id, name`.all();
 
 		expect(compile).toHaveBeenCalledOnce();
-		expect(adapter.execute).toHaveBeenCalledOnce();
+		expect(adapter.executeWithMeta).toHaveBeenCalledOnce();
 		expect(result).toEqual(rows);
 	});
 
@@ -184,7 +214,35 @@ describe('nql`...` mutation support', () => {
 			await nql`delete from users where id = ${7} | select id`.run();
 
 		expect(compile).toHaveBeenCalledOnce();
+		expect(adapter.executeWithMeta).toHaveBeenCalledOnce();
+		expect(result).toBeUndefined();
+	});
+
+	it('all() executes a RETURNING mutation on an execute-only adapter', async () => {
+		const rows = [{ id: 6, name: 'Eve' }];
+		const { adapter, compile, nql } = createExecuteOnlyMutationTag(rows);
+
+		const result = await nql<{
+			id: number;
+			name: string;
+		}>`update users set name = ${'Eve'} where id = ${6} | select id, name`.all();
+
+		expect(compile).toHaveBeenCalledOnce();
 		expect(adapter.execute).toHaveBeenCalledOnce();
+		expect(adapter.executeWithMeta).toBeUndefined();
+		expect(result).toEqual(rows);
+	});
+
+	it('run() executes a mutation on an execute-only adapter', async () => {
+		const rows = [{ id: 7 }];
+		const { adapter, compile, nql } = createExecuteOnlyMutationTag(rows);
+
+		const result =
+			await nql`delete from users where id = ${7} | select id`.run();
+
+		expect(compile).toHaveBeenCalledOnce();
+		expect(adapter.execute).toHaveBeenCalledOnce();
+		expect(adapter.executeWithMeta).toBeUndefined();
 		expect(result).toBeUndefined();
 	});
 

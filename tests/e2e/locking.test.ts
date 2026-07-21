@@ -7,7 +7,7 @@
  * - Lock strengths produce correct SQL and execute against real PostgreSQL
  */
 
-import { createOrm, schema } from '@dbsp/core';
+import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSchema, dropSchema } from './testkit/db.js';
 import { closeTestDb, getTestAdapter, getTestPool } from './testkit/index.js';
@@ -100,6 +100,31 @@ describe('E15 — Row-level locking', () => {
 		});
 
 		expect(jobs.length).toBe(5);
+	});
+
+	it('reports affected row counts for UPDATE and DELETE terminals', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: jobSchema.model, adapter });
+		const scoped = orm.withSchema(SCHEMA);
+		const rollback = new Error('rollback affectedRows probe');
+
+		await expect(
+			scoped.transaction(async (tx) => {
+				const updated = await tx
+					.update('jobs')
+					.set({ workerId: 'affected-rows-probe' })
+					.where(eq('status', 'pending'))
+					.affectedRows();
+				const deleted = await tx
+					.delete('jobs')
+					.where(eq('workerId', 'affected-rows-probe'))
+					.affectedRows();
+
+				expect(updated).toBe(5);
+				expect(deleted).toBe(5);
+				throw rollback;
+			}),
+		).rejects.toBe(rollback);
 	});
 
 	// ========================================================================

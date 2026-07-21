@@ -68,9 +68,9 @@ export function supportsExecution(
 	adapter: BaseAdapter,
 ): adapter is ExecutingAdapter {
 	return (
-		'execute' in adapter &&
-		'executeOne' in adapter &&
-		typeof (adapter as ExecutingAdapter).execute === 'function'
+		typeof (adapter as ExecutingAdapter).execute === 'function' &&
+		typeof (adapter as ExecutingAdapter).executeOne === 'function' &&
+		typeof (adapter as ExecutingAdapter).executeOneOrThrow === 'function'
 	);
 }
 

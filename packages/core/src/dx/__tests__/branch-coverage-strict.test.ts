@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { Adapter, Dump } from '../../adapter.js';
+import type { Adapter, CompiledQuery, Dump } from '../../adapter.js';
 import type { QueryIntent } from '../../index.js';
 import { plan } from '../../planner.js';
 import { ref as exprRef } from '../expressions.js';
@@ -69,6 +69,14 @@ const testSchema = schema({
 	},
 });
 
+function attachExecuteWithMeta(adapter: Adapter): void {
+	const execute = adapter.execute.bind(adapter);
+	adapter.executeWithMeta = vi.fn(async <T>(query: CompiledQuery<T>) => {
+		const rows = await execute<T>(query);
+		return { rows, rowCount: rows.length };
+	}) as Adapter['executeWithMeta'];
+}
+
 function makeAdapter(overrides: Partial<Adapter> = {}): Adapter {
 	const base = createMockAdapter();
 	const adapter = {
@@ -98,6 +106,9 @@ function makeAdapter(overrides: Partial<Adapter> = {}): Adapter {
 		},
 		...overrides,
 	} as unknown as Adapter;
+	if (overrides.executeWithMeta === undefined) {
+		attachExecuteWithMeta(adapter);
+	}
 	return adapter;
 }
 
@@ -552,6 +563,7 @@ describe('UpdateBuilder.batchSet coverage', () => {
 		const adapter = createMockAdapter();
 		adapter.compileBatchUpdate = compileBatchUpdate;
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const orm = createOrm({ schema: testSchema, adapter });
 		await orm
 			.update('users')
@@ -570,6 +582,7 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 		const adapter = createMockAdapter();
 		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT...', parameters: [] }));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
 		const hooks = createHookManager().beforeMutation((ctx) => {
 			hookCalled.push(ctx.cardinality as string);
@@ -584,6 +597,7 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 		const adapter = createMockAdapter();
 		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT...', parameters: [] }));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
 		const hooks = createHookManager().beforeMutation((ctx) => {
 			hookCalled.push(ctx.cardinality as string);
@@ -601,6 +615,7 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 		const adapter = createMockAdapter();
 		adapter.compileDelete = vi.fn(() => ({ sql: 'DELETE...', parameters: [] }));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const hookCalled: Array<{ cardinality: string; data: unknown }> = [];
 		const hooks = createHookManager().beforeMutation((ctx) => {
 			hookCalled.push({
@@ -622,6 +637,7 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 			parameters: [],
 		}));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
 		const hooks = createHookManager().beforeMutation((ctx) => {
 			hookCalled.push(ctx.cardinality as string);
@@ -652,6 +668,7 @@ describe('MutationBuilderBase.executeWithoutHooks with returning', () => {
 			parameters: [],
 		}));
 		adapter.execute = executeMock;
+		attachExecuteWithMeta(adapter);
 		const orm = createOrm({ schema: testSchema, adapter });
 		const result = await orm
 			.insert('users')
@@ -675,6 +692,7 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 			parameters: [],
 		}));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
+		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().afterMutation((ctx, results) => {
 			afterCalled.push({ table: ctx.table, count: results.length });
 			return results;
@@ -693,6 +711,7 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 			parameters: [],
 		}));
 		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().afterMutation((_ctx, results) => {
 			afterCalled.push(results);
 			return results;
@@ -714,6 +733,7 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 			parameters: [],
 		}));
 		adapter.execute = vi.fn(() => Promise.reject(new Error('DB failure')));
+		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().onError((ctx) => {
 			errorCaptured.push(ctx.error);
 			return ctx.error;

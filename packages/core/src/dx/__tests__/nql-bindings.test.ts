@@ -8,7 +8,11 @@
 import type { ModelIR, RelationIR } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
-import type { Adapter, CompiledNqlQuery } from '../../adapter.js';
+import type {
+	Adapter,
+	CompiledNqlQuery,
+	CompiledQuery,
+} from '../../adapter.js';
 import type { IncludeIntent, QueryIntent } from '../../intent-ast.js';
 import { createHookManager, getHookStore, type HookStore } from '../hooks.js';
 import type { MutationDump } from '../mutation-builders.js';
@@ -23,6 +27,15 @@ function markSupportsTransactions(adapter: Adapter): void {
 		},
 		configurable: true,
 	});
+}
+
+function executeWithMetaFromRows(
+	execute: Adapter['execute'],
+): Adapter['executeWithMeta'] {
+	return async <T>(query: CompiledQuery<T>) => {
+		const rows = await execute<T>(query);
+		return { rows, rowCount: rows.length };
+	};
 }
 
 function createBindingTag(executeResult: readonly unknown[] = []) {
@@ -47,6 +60,7 @@ function createBindingTag(executeResult: readonly unknown[] = []) {
 	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
+	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
 
 	return {
 		adapter,
@@ -82,6 +96,7 @@ function createBlogBindingTag(executeResult: readonly unknown[] = []) {
 	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
+	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
 
 	return {
 		adapter,
@@ -167,6 +182,7 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 	}) as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
+	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
 
 	return {
 		adapter,
@@ -203,6 +219,7 @@ function createMutationBindingTag(
 	}) as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = execute;
+	adapter.executeWithMeta = executeWithMetaFromRows(execute);
 	adapter.transaction =
 		transaction ??
 		vi.fn(async (fn) => {
@@ -790,6 +807,7 @@ b | select id`.dump();
 				.fn()
 				.mockResolvedValueOnce([{ name: 'Alice' }])
 				.mockResolvedValueOnce([{ name: 'Alice' }]);
+			adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
 			adapter.transaction = vi.fn(async (fn) => fn(adapter));
 			markSupportsTransactions(adapter);
 			const nql = createNqlTag(db.definition, model, adapter);
@@ -1146,6 +1164,7 @@ users | select id`.dump();
 			}) as unknown as Adapter;
 			const compile = vi.spyOn(adapter, 'compile');
 			adapter.execute = execute;
+			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = vi.fn(async (fn) => fn(adapter));
 			markSupportsTransactions(adapter);
 			return {
@@ -2229,6 +2248,7 @@ posts | where authorId in (touched) | select authorId`.all(),
 			events.push('begin');
 			const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 			adapter.execute = execute;
+			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = transaction as Adapter['transaction'];
 			try {
 				const result = await fn(adapter);
