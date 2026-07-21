@@ -272,12 +272,10 @@ const __nqlHookDb = schema({
   },
 } as const);
 
-const __nqlHookAdapter = createPgsqlCompileOnlyAdapter() as ReturnType<
-  typeof createPgsqlCompileOnlyAdapter
-> & {
-  execute: () => Promise<Array<{ id: number }>>;
-};
-__nqlHookAdapter.execute = async () => [{ id: 1 }];
+const __nqlHookAdapter = createPgsqlCompileOnlyAdapter() as unknown as NonNullable<
+  Parameters<typeof createOrm>[0]['adapter']
+>;
+__nqlHookAdapter.executeWithMeta = async () => ({ rows: [{ id: 1 }], rowCount: 1 });
 
 const __nqlHookEvents: string[] = [];
 const __nqlHooks = createHookManager()

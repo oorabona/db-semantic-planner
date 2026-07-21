@@ -728,7 +728,10 @@ describe('Query Hook Integration (SC-01 to SC-06)', () => {
 
 import type { MutationHookContext as MutCtx } from './hooks.js';
 
-function createSpyAdapterForMutations(executeResult: unknown[] = []) {
+function createSpyAdapterForMutations(
+	executeResult: unknown[] = [],
+	rowCount = executeResult.length,
+) {
 	const base = createMockAdapter();
 	const compileInsertSpy = vi.fn(
 		(_intent: unknown, _opts?: unknown) =>
@@ -751,27 +754,29 @@ function createSpyAdapterForMutations(executeResult: unknown[] = []) {
 				parameters: [1] as readonly unknown[],
 			}) as const,
 	);
-	const executeSpy = vi.fn(() => Promise.resolve(executeResult));
+	const executeWithMetaSpy = vi.fn(() =>
+		Promise.resolve({ rows: executeResult, rowCount }),
+	);
 
 	const adapter = {
 		...base,
 		compileInsert: compileInsertSpy,
 		compileUpdate: compileUpdateSpy,
 		compileDelete: compileDeleteSpy,
-		execute: executeSpy,
+		executeWithMeta: executeWithMetaSpy,
 		withSchema: (_schemaName: string) => adapter,
 		_spies: {
 			compileInsert: compileInsertSpy,
 			compileUpdate: compileUpdateSpy,
 			compileDelete: compileDeleteSpy,
-			execute: executeSpy,
+			executeWithMeta: executeWithMetaSpy,
 		},
 	} as unknown as Adapter & {
 		_spies: {
 			compileInsert: typeof compileInsertSpy;
 			compileUpdate: typeof compileUpdateSpy;
 			compileDelete: typeof compileDeleteSpy;
-			execute: typeof executeSpy;
+			executeWithMeta: typeof executeWithMetaSpy;
 		};
 	};
 	return adapter;
@@ -899,6 +904,27 @@ describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 
 			// Assert
 			expect(result).toEqual([{ id: 42, name: 'Alice', transformed: true }]);
+		});
+
+		it('should populate affectedRows for mutations without RETURNING', async () => {
+			// Arrange
+			const adapter = createSpyAdapterForMutations([], 2);
+			const spy = vi.fn((_ctx: MutCtx, result: unknown[]) => result);
+			const hooks = createHookManager().afterMutation(spy as never);
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			// Act
+			await (orm as unknown as OrmInstanceInternal)
+				.update('users')
+				.set({ name: 'Alice' })
+				.where({ kind: 'comparison', field: 'id', operator: 'eq', value: 1 })
+				.execute();
+
+			// Assert
+			expect(spy).toHaveBeenCalledOnce();
+			const [ctx, hookResult] = spy.mock.calls[0]!;
+			expect(ctx.affectedRows).toBe(2);
+			expect(hookResult).toEqual([]);
 		});
 	});
 });

@@ -38,23 +38,55 @@ describe('supportsExecution', () => {
 		expect(supportsExecution({} as BaseAdapter)).toBe(false);
 	});
 
-	it('returns false when only execute is present (missing executeOne)', () => {
+	it('returns false when executeOne is missing', () => {
 		const adapter = { execute: () => {} } as unknown as BaseAdapter;
 		expect(supportsExecution(adapter)).toBe(false);
+	});
+
+	it('returns true when the required execution methods are present (no executeWithMeta needed)', () => {
+		const adapter = {
+			execute: () => {},
+			executeOne: () => {},
+			executeOneOrThrow: () => {},
+		} as unknown as BaseAdapter;
+		expect(supportsExecution(adapter)).toBe(true);
 	});
 
 	it('returns false when execute is not a function', () => {
 		const adapter = {
 			execute: 'notFunction',
+			executeWithMeta: () => {},
+			executeOne: () => {},
+			executeOneOrThrow: () => {},
+		} as unknown as BaseAdapter;
+		expect(supportsExecution(adapter)).toBe(false);
+	});
+
+	it('ignores executeWithMeta when it is not a function', () => {
+		const adapter = {
+			execute: () => {},
+			executeWithMeta: 'notFunction',
+			executeOne: () => {},
+			executeOneOrThrow: () => {},
+		} as unknown as BaseAdapter;
+		expect(supportsExecution(adapter)).toBe(true);
+	});
+
+	it('returns false when executeOneOrThrow is missing', () => {
+		const adapter = {
+			execute: () => {},
+			executeWithMeta: () => {},
 			executeOne: () => {},
 		} as unknown as BaseAdapter;
 		expect(supportsExecution(adapter)).toBe(false);
 	});
 
-	it('returns true when execute and executeOne are both functions', () => {
+	it('returns true when all execution methods are functions', () => {
 		const adapter = {
 			execute: () => {},
+			executeWithMeta: () => {},
 			executeOne: () => {},
+			executeOneOrThrow: () => {},
 		} as unknown as BaseAdapter;
 		expect(supportsExecution(adapter)).toBe(true);
 	});

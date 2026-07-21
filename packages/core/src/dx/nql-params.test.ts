@@ -482,7 +482,10 @@ describe('NQL mutation hook lifecycle', () => {
 					parameters: ['compiled-param'],
 				};
 			},
-			execute: async () => [{ id: 1 }],
+			executeWithMeta: async () => ({
+				rows: [{ id: 1 }],
+				rowCount: 1,
+			}),
 		};
 		const hooks = createHookManager()
 			.beforeMutation((ctx) => {
@@ -494,6 +497,7 @@ describe('NQL mutation hook lifecycle', () => {
 				events.push(`after:${ctx.table}:${ctx.operation}:${rows.length}`);
 				expect(ctx.sql).toMatch(/insert/i);
 				expect(ctx.parameters).toEqual(['compiled-param']);
+				expect(ctx.affectedRows).toBe(1);
 				return [{ id: 2 }];
 			});
 		const orm = createOrm({
@@ -528,7 +532,7 @@ describe('NQL mutation hook lifecycle', () => {
 					parameters: compiled.parameters,
 				};
 			},
-			execute: async () => {
+			executeWithMeta: async () => {
 				throw new Error('adapter failed');
 			},
 		};

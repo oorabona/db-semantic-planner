@@ -55,6 +55,7 @@ describe('createPgsqlCompileOnlyAdapter — type contract (S-1)', () => {
 		// Type-level assertions: fail if the factory return type is widened
 		// to include these methods (i.e., if `?: never` is removed from CompileOnlyAdapter).
 		expectTypeOf(adapter).not.toHaveProperty('execute');
+		expectTypeOf(adapter).not.toHaveProperty('executeWithMeta');
 		expectTypeOf(adapter).not.toHaveProperty('executeOne');
 		expectTypeOf(adapter).not.toHaveProperty('executeOneOrThrow');
 		expectTypeOf(adapter).not.toHaveProperty('stream');

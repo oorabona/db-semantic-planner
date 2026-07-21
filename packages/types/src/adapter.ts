@@ -531,6 +531,15 @@ export interface ExecutingAdapter extends BaseAdapter {
 	/** Execute a query and return all results. */
 	execute<T>(query: CompiledQuery<T>): Promise<T[]>;
 
+	/** Execute a compiled query and return the rows plus result metadata, when the adapter supports it. */
+	executeWithMeta?<T = unknown>(
+		query: CompiledQuery<T>,
+	): Promise<{
+		readonly rows: T[];
+		readonly rowCount: number;
+		readonly command?: string;
+	}>;
+
 	/** Execute a query and return the first result or null. */
 	executeOne<T>(query: CompiledQuery<T>): Promise<T | null>;
 
@@ -854,6 +863,7 @@ export type CompileOnlyAdapter = CompilingAdapter &
 		withSchema(schemaName: string): CompileOnlyAdapter;
 
 		readonly execute?: never;
+		readonly executeWithMeta?: never;
 		readonly executeOne?: never;
 		readonly executeOneOrThrow?: never;
 		readonly stream?: never;

@@ -110,13 +110,18 @@ type MutationBaseOpts = {
 export type PreparedMutationExecution<T> = {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
-	readonly execute: () => Promise<T>;
+	readonly execute: () => Promise<PreparedMutationExecutionResult<T>>;
 	readonly getAfterMutationResult?: (result: T) => readonly unknown[];
 	readonly mapAfterMutationResult?: (
 		result: T,
 		transformed: readonly unknown[],
 	) => T;
 	readonly returnAfterMutationResult?: boolean;
+};
+
+export type PreparedMutationExecutionResult<T> = {
+	readonly result: T;
+	readonly affectedRows?: number;
 };
 
 export type RunMutationWithHooksOptions<
@@ -136,6 +141,16 @@ export async function runMutationWithHooks<
 	T,
 	TIntent extends MutationIntent = MutationIntent,
 >(opts: RunMutationWithHooksOptions<T, TIntent>): Promise<T> {
+	const execution = await runMutationWithHooksMeta(opts);
+	return execution.result;
+}
+
+async function runMutationWithHooksMeta<
+	T,
+	TIntent extends MutationIntent = MutationIntent,
+>(
+	opts: RunMutationWithHooksOptions<T, TIntent>,
+): Promise<PreparedMutationExecutionResult<T>> {
 	if (!opts.hookStore || !hasHooks(opts.hookStore)) {
 		const prepared = opts.prepare(opts.intent);
 		return prepared.execute();
@@ -149,7 +164,10 @@ export async function runMutationWithHooks<
 async function runMutationWithHooksInner<
 	T,
 	TIntent extends MutationIntent = MutationIntent,
->(opts: RunMutationWithHooksOptions<T, TIntent>, store: HookStore): Promise<T> {
+>(
+	opts: RunMutationWithHooksOptions<T, TIntent>,
+	store: HookStore,
+): Promise<PreparedMutationExecutionResult<T>> {
 	const { intent } = opts;
 	const operation = intent.type as MutationOperation;
 	const startTime = Date.now();
@@ -176,7 +194,8 @@ async function runMutationWithHooksInner<
 
 		const prepared = opts.prepare(intent);
 		const duration = Date.now() - startTime;
-		const result = await prepared.execute();
+		const execution = await prepared.execute();
+		let result = execution.result;
 
 		if (store.afterMutation.length > 0) {
 			const afterCtx: MutationHookContext = Object.freeze({
@@ -184,22 +203,29 @@ async function runMutationWithHooksInner<
 				sql: prepared.sql,
 				parameters: prepared.parameters,
 				duration,
+				...(execution.affectedRows !== undefined
+					? { affectedRows: execution.affectedRows }
+					: {}),
 			});
 			const transformed = await runAfterMutationHooks(
 				store.afterMutation,
 				afterCtx,
-				[...(prepared.getAfterMutationResult?.(result) ?? [])],
+				[...(prepared.getAfterMutationResult?.(execution.result) ?? [])],
 				opts.onHookError,
 			);
 			if (prepared.returnAfterMutationResult) {
-				return (
+				result =
 					prepared.mapAfterMutationResult?.(result, transformed) ??
-					(transformed as T)
-				);
+					(transformed as T);
 			}
 		}
 
-		return result;
+		return {
+			result,
+			...(execution.affectedRows !== undefined
+				? { affectedRows: execution.affectedRows }
+				: {}),
+		};
 	} catch (error) {
 		if (store.onError.length > 0) {
 			const errorCtx = {
@@ -380,6 +406,38 @@ abstract class MutationBuilderBase<
 		});
 	}
 
+	async affectedRows(): Promise<number> {
+		const adapter = this.requireAdapter(this.operationName);
+		const intent = this.buildIntent();
+		if (typeof adapter.executeWithMeta !== 'function') {
+			throw new ExecutionError({
+				operation: `${this.operationName}.affectedRows`,
+				reason:
+					'this adapter does not support affectedRows(); it does not implement executeWithMeta',
+				fix: 'Use an adapter that implements executeWithMeta, or call execute() when row count metadata is not required.',
+			});
+		}
+		const execution = await runMutationWithHooksMeta({
+			table: this.table,
+			intent,
+			hookStore: this.hookStore,
+			onHookError: this.onHookError,
+			schemaName: this.schemaName,
+			inTransaction: this.inTransaction,
+			prepare: (preparedIntent) =>
+				this.prepareMutationExecution(adapter, preparedIntent),
+		});
+		if (execution.affectedRows === undefined) {
+			throw new ExecutionError({
+				operation: `${this.operationName}.affectedRows`,
+				reason:
+					'this adapter does not support affectedRows(); it did not return executeWithMeta metadata',
+				fix: 'Use an adapter that implements executeWithMeta and returns rowCount metadata.',
+			});
+		}
+		return execution.affectedRows;
+	}
+
 	private prepareMutationExecution(
 		adapter: Adapter,
 		intent: TIntent,
@@ -394,7 +452,19 @@ abstract class MutationBuilderBase<
 			return {
 				sql: compiled.sql,
 				parameters: compiled.parameters,
-				execute: () => adapter.execute(compiled) as Promise<T>,
+				execute: async () => {
+					if (typeof adapter.executeWithMeta === 'function') {
+						const result = await adapter.executeWithMeta(compiled);
+						return {
+							result: result.rows as T,
+							affectedRows: result.rowCount,
+						};
+					}
+					const result = await adapter.execute(compiled);
+					return {
+						result: result as T,
+					};
+				},
 				getAfterMutationResult: (result) => result as unknown[],
 				returnAfterMutationResult: true,
 			};
@@ -404,8 +474,17 @@ abstract class MutationBuilderBase<
 			sql: compiled.sql,
 			parameters: compiled.parameters,
 			execute: async () => {
+				if (typeof adapter.executeWithMeta === 'function') {
+					const result = await adapter.executeWithMeta(compiled);
+					return {
+						result: undefined as T,
+						affectedRows: result.rowCount,
+					};
+				}
 				await adapter.execute(compiled);
-				return undefined as T;
+				return {
+					result: undefined as T,
+				};
 			},
 			getAfterMutationResult: () => [],
 		};

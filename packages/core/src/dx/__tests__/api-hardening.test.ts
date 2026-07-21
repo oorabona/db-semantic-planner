@@ -162,6 +162,37 @@ describe('FIND-032+033: .returning() and execute() types', () => {
 		expect(builder).toBeInstanceOf(UpsertBuilder);
 		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<Upserted[]>>();
 	});
+
+	it('mutation builders expose affectedRows(): Promise<number>', () => {
+		const insertBuilder = orm
+			.into(orm.tables.users)
+			.values({ name: 'Alice', email: 'a@b.com', active: true });
+		const updateBuilder = orm
+			.modify(orm.tables.users)
+			.set({ active: false })
+			.where(eq(orm.tables.users.id, 1));
+		const deleteBuilder = orm
+			.removeFrom(orm.tables.users)
+			.where(eq(orm.tables.users.id, 1));
+		const upsertBuilder = orm
+			.upsertInto(orm.tables.users)
+			.values({ name: 'Alice', email: 'a@b.com', active: true })
+			.onConflict(['email'])
+			.doUpdate({ name: 'Alice' });
+
+		expectTypeOf(insertBuilder.affectedRows).returns.toEqualTypeOf<
+			Promise<number>
+		>();
+		expectTypeOf(updateBuilder.affectedRows).returns.toEqualTypeOf<
+			Promise<number>
+		>();
+		expectTypeOf(deleteBuilder.affectedRows).returns.toEqualTypeOf<
+			Promise<number>
+		>();
+		expectTypeOf(upsertBuilder.affectedRows).returns.toEqualTypeOf<
+			Promise<number>
+		>();
+	});
 });
 
 // ──────────────────────────────────────────────────────────────────────────────

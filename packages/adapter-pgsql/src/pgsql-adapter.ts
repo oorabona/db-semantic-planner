@@ -2552,11 +2552,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
+		const result = await this.executeWithMeta(query);
+		return result.rows;
+	}
+
+	/**
+	 * Execute a query and return rows plus PostgreSQL result metadata.
+	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
+	 */
+	async executeWithMeta<T = unknown>(
+		query: CompiledQuery<T>,
+	): Promise<{
+		readonly rows: T[];
+		readonly rowCount: number;
+		readonly command?: string;
+	}> {
 		const guardedQuery = guardCompiledQuery(query, 'execute');
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
 		>(guardedQuery.sql, guardedQuery.parameters);
-		return this.transformResultRows(result.rows, guardedQuery) as T[];
+		const metadata = queryResultMetadata(result);
+		const rows = this.transformResultRows(result.rows, guardedQuery) as T[];
+		return {
+			rows,
+			rowCount: metadata.rowCount ?? 0,
+			...(metadata.command !== undefined ? { command: metadata.command } : {}),
+		};
 	}
 
 	/**
