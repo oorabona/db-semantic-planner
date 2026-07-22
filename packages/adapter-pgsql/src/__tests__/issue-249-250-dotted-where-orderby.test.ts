@@ -215,3 +215,58 @@ describe('FIX-249: orderBy dotted string', () => {
 		expect(dump.params).toEqual([]);
 	});
 });
+
+describe('FIX-347: any() casts by the declared column type when dbType is absent', () => {
+	// A manually defined schema declares `type` but not `dbType`, so no
+	// originalDbType is populated (this is how astix defines its schema). The
+	// array element type must come from the declared ColumnType, not runtime value
+	// sniffing — otherwise ids that read back from PostgreSQL as JS strings emit
+	// `col = ANY($1::text[])` and PostgreSQL rejects `integer = text`.
+	const manualSchema = schema({
+		rows: {
+			id: { type: 'integer', primaryKey: true },
+			big: { type: 'bigint' },
+			label: { type: 'text' },
+		},
+	});
+	function buildManualOrm() {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: manualSchema.model,
+		});
+		return createOrm({ model: manualSchema.model, adapter });
+	}
+
+	it('casts string values to int4[] for an integer column declared without dbType', () => {
+		const dump = buildManualOrm()
+			.select('rows')
+			.where(any('id', ['1', '2']))
+			.columns(['id'])
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'SELECT rows.id FROM rows WHERE rows.id = ANY (CAST($1 AS int4[]))',
+		);
+		expect(dump.params).toEqual([['1', '2']]);
+	});
+
+	it('casts string values to int8[] for a bigint column declared without dbType', () => {
+		const dump = buildManualOrm()
+			.select('rows')
+			.where(any('big', ['1', '2']))
+			.columns(['id'])
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'SELECT rows.id FROM rows WHERE rows.big = ANY (CAST($1 AS int8[]))',
+		);
+	});
+
+	it('keeps text[] for a text column declared without dbType', () => {
+		const dump = buildManualOrm()
+			.select('rows')
+			.where(any('label', ['a', 'b']))
+			.columns(['id'])
+			.dump();
+		expect(ws(dump.sql)).toEqual(
+			'SELECT rows.id FROM rows WHERE rows.label = ANY (CAST($1 AS text[]))',
+		);
+	});
+});

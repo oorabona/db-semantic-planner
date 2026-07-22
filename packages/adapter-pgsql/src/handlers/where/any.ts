@@ -21,7 +21,11 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef, resolveColumnPgType } from './utils.js';
+import {
+	buildColumnRef,
+	resolveColumnAbstractPgBase,
+	resolveColumnPgType,
+} from './utils.js';
 
 /**
  * Infer PostgreSQL base type from a runtime value sample.
@@ -89,9 +93,15 @@ export const anyHandler: WhereHandler = {
 		if (columnType) {
 			typedParam = createTypeCastParamRef(state.paramIndex, columnType, true);
 		} else {
-			// Fallback behavior for unresolved columns/expressions.
+			// Fallback for a column with no introspected DB type, or an expression LHS.
 			let pgBaseType: string;
-			if (decision.dataType) {
+			const abstractBase = resolveColumnAbstractPgBase(column, ctx);
+			if (abstractBase) {
+				// Declared column type (manually defined schemas) — the authoritative
+				// element type for the array cast. Fixes `integer = text` when ids read
+				// back as JS strings on a schema that omits originalDbType.
+				pgBaseType = abstractBase;
+			} else if (decision.dataType) {
 				// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
 				pgBaseType =
 					mapModelIRTypeToPgBase(decision.dataType) ?? decision.dataType;
