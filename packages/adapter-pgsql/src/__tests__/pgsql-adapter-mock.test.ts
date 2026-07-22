@@ -34,6 +34,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 	type PgsqlBorrowedClientAdapterOptions,
+	resolveTransactionBeginOptions,
 } from '../pgsql-adapter.js';
 
 const TRANSACTION_CONTROL_BOUNDARY =
@@ -4013,6 +4014,90 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(calls).not.toContain('COMMIT');
 	});
 
+	it('rejects isolationLevel and readOnly for a nested managed borrowed stream', async () => {
+		for (const options of [
+			{ isolationLevel: 'repeatable read' },
+			{ readOnly: false },
+		] as const) {
+			const client = makeClient();
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+
+			const iter = adapter.stream(testQuery('SELECT * FROM t'), options);
+			const error = await captureRejection(() => iter.next());
+
+			expect(error).toBeInstanceOf(PgsqlTransactionOptionsError);
+			expect((error as Error).message).toBe(
+				'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint',
+			);
+			expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+				expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+				expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+				expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			]);
+		}
+	});
+
+	it('restores nested managed borrowed stream timeouts after CLOSE and before RELEASE', async () => {
+		let lockTimeout = '7s';
+		let statementTimeout = '12s';
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			const lockMatch = /^SET LOCAL lock_timeout = '(.+)'$/.exec(sql);
+			if (lockMatch) {
+				lockTimeout = lockMatch[1] ?? lockTimeout;
+			}
+			const statementMatch = /^SET LOCAL statement_timeout = '(.+)'$/.exec(sql);
+			if (statementMatch) {
+				statementTimeout = statementMatch[1] ?? statementTimeout;
+			}
+			if (sql === 'SHOW lock_timeout') {
+				return {
+					rows: [{ lock_timeout: lockTimeout }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			if (sql === 'SHOW statement_timeout') {
+				return {
+					rows: [{ statement_timeout: statementTimeout }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		for await (const _row of adapter.stream(testQuery('SELECT * FROM t'), {
+			lockTimeoutMs: 10,
+			statementTimeoutMs: 20,
+		})) {
+			// Empty result set.
+		}
+
+		expect(lockTimeout).toBe('7s');
+		expect(statementTimeout).toBe('12s');
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SHOW lock_timeout',
+			'SHOW statement_timeout',
+			"SET LOCAL lock_timeout = '10ms'",
+			"SET LOCAL statement_timeout = '20ms'",
+			expect.stringMatching(/^DECLARE /),
+			expect.stringMatching(/^FETCH FORWARD 100 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			"SET LOCAL lock_timeout = '7s'",
+			"SET LOCAL statement_timeout = '12s'",
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('rolls back a completed managed borrowed stream when RELEASE SAVEPOINT fails', async () => {
 		const releaseError = new Error('stream release failed');
 		let fetchCount = 0;
@@ -4314,6 +4399,42 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		]);
 	});
 
+	it('applies stream begin options when a managed borrowed client opens its own transaction', async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) {
+				throw Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+			}
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		for await (const _row of adapter.stream(testQuery('SELECT * FROM t'), {
+			isolationLevel: 'serializable',
+			readOnly: false,
+			lockTimeoutMs: 25,
+		})) {
+			// Empty result set.
+		}
+
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'BEGIN ISOLATION LEVEL SERIALIZABLE READ WRITE',
+			"SET LOCAL lock_timeout = '25ms'",
+			expect.stringMatching(/^DECLARE /),
+			expect.stringMatching(/^FETCH FORWARD 100 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			'COMMIT',
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('registers the borrowed stream fallback before BEGIN reaches PostgreSQL', async () => {
 		const beginStarted = deferred();
 		const releaseBegin = deferred();
@@ -4481,6 +4602,98 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		expect(calls[calls.length - 1]).toBe('COMMIT');
 	});
 
+	it('composes BEGIN for each stream isolationLevel and readOnly option before DECLARE', async () => {
+		const isolationCases = [
+			{ value: undefined, clause: '' },
+			{ value: 'read committed', clause: 'ISOLATION LEVEL READ COMMITTED' },
+			{
+				value: 'repeatable read',
+				clause: 'ISOLATION LEVEL REPEATABLE READ',
+			},
+			{ value: 'serializable', clause: 'ISOLATION LEVEL SERIALIZABLE' },
+		] as const;
+		const accessModeCases = [
+			{ value: undefined, clause: '' },
+			{ value: true, clause: 'READ ONLY' },
+			{ value: false, clause: 'READ WRITE' },
+		] as const;
+
+		for (const isolation of isolationCases) {
+			for (const accessMode of accessModeCases) {
+				const streamClient = makeClient();
+				const pool = makePool({ rows: [] }, streamClient);
+				const adapter = createPgsqlAdapter(pool);
+				const options = {
+					...(isolation.value !== undefined && {
+						isolationLevel: isolation.value,
+					}),
+					...(accessMode.value !== undefined && {
+						readOnly: accessMode.value,
+					}),
+				};
+
+				for await (const _row of adapter.stream(
+					testQuery('SELECT * FROM t'),
+					options,
+				)) {
+					// Empty result set.
+				}
+
+				const expectedBegin = ['BEGIN', isolation.clause, accessMode.clause]
+					.filter(Boolean)
+					.join(' ');
+				const calls = queryCalls(
+					streamClient.query as ReturnType<typeof vi.fn>,
+				);
+				expect(calls[0]).toBe(expectedBegin);
+				expect(calls[1]).toMatch(/^DECLARE /);
+			}
+		}
+	});
+
+	it('emits clamped stream timeout statements after BEGIN and before DECLARE', async () => {
+		const streamClient = makeClient();
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		for await (const _row of adapter.stream(testQuery('SELECT * FROM t'), {
+			lockTimeoutMs: 0,
+			statementTimeoutMs: 600_001,
+		})) {
+			// Empty result set.
+		}
+
+		expect(queryCalls(streamClient.query as ReturnType<typeof vi.fn>)).toEqual([
+			'BEGIN',
+			"SET LOCAL lock_timeout = '1ms'",
+			"SET LOCAL statement_timeout = '600000ms'",
+			expect.stringMatching(/^DECLARE /),
+			expect.stringMatching(/^FETCH FORWARD 100 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			'COMMIT',
+		]);
+	});
+
+	it('rejects a runtime signal on stream begin options before pool checkout', () => {
+		const streamClient = makeClient();
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+		const signal = AbortSignal.abort();
+
+		expect(() =>
+			adapter.stream(testQuery('SELECT * FROM t'), {
+				signal,
+			} as never),
+		).toThrow(PgsqlTransactionOptionsError);
+		expect(() =>
+			resolveTransactionBeginOptions({
+				signal,
+			} as never),
+		).toThrow(PgsqlTransactionOptionsError);
+		expect(pool.connect).not.toHaveBeenCalled();
+		expect(streamClient.query).not.toHaveBeenCalled();
+	});
+
 	it('issues ROLLBACK when stream error occurs, releases client', async () => {
 		let callIdx = 0;
 		const streamClient = makeClient(async (_sql) => {
@@ -4614,6 +4827,25 @@ describe('PgsqlAdapter.streamRaw', () => {
 			streamClient.query as ReturnType<typeof vi.fn>
 		).mock.calls.find(([input]) => /^DECLARE /.test(queryText(input)));
 		expect(declareCall?.[1]).toEqual([10]);
+	});
+
+	it('applies begin options to streamRaw through the shared cursor path', async () => {
+		const streamClient = makeClient();
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		for await (const _row of adapter.streamRaw('SELECT raw_id FROM t', [], {
+			isolationLevel: 'repeatable read',
+			readOnly: true,
+		})) {
+			// Empty result set.
+		}
+
+		const calls = queryCalls(streamClient.query as ReturnType<typeof vi.fn>);
+		expect(calls[0]).toBe('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+		expect(calls[1]).toMatch(
+			/^DECLARE \S+ NO SCROLL CURSOR FOR SELECT raw_id FROM t$/,
+		);
 	});
 
 	it('rejects invalid chunkSize synchronously before pool checkout', () => {

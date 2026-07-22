@@ -5,6 +5,7 @@
  * Uses the blog schema for comprehensive testing.
  */
 
+import { PgsqlTransactionTimeoutError } from '@dbsp/adapter-pgsql';
 import { createOrm, type Dump, eq } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
@@ -13,7 +14,9 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	getTestAdapter,
+	getTestPool,
 	seedBlogData,
+	sql,
 } from './testkit/index.js';
 
 describe('STREAMING-001: Cursor/Streaming Support', () => {
@@ -288,6 +291,104 @@ describe('STREAMING-001: Cursor/Streaming Support', () => {
 			}
 
 			expect(rows).toEqual([{ name: 'Alice Johnson' }]);
+		});
+	});
+
+	describe('Scenario 8: Streaming transaction begin options', () => {
+		it('repeatable read stream keeps a stable snapshot across FETCHes', async () => {
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: blogModel, adapter });
+			const scoped = orm.withSchema(SCHEMA);
+			const pool = await getTestPool();
+			const s = sql.ref(SCHEMA);
+			const marker = `Stream Snapshot ${Date.now()}`;
+			let insertedId: number | undefined;
+			let completed = false;
+			const iterator = scoped
+				.select('posts')
+				.columns(['id', 'title'])
+				.orderBy('id')
+				.stream({
+					chunkSize: 1,
+					isolationLevel: 'repeatable read',
+					readOnly: true,
+				});
+
+			try {
+				const seenIds: number[] = [];
+				const first = await iterator.next();
+				expect(first.done).toBe(false);
+				if (!first.done) {
+					seenIds.push((first.value as { id: number }).id);
+				}
+
+				const inserted = await sql`
+					INSERT INTO ${s}.posts (title, content, published, author_id)
+					VALUES (${marker}, 'Concurrent stream commit', false, 1)
+					RETURNING id
+				`.execute(pool);
+				insertedId = inserted.rows[0]?.id as number | undefined;
+				expect(insertedId).toBeDefined();
+
+				for await (const row of iterator) {
+					seenIds.push((row as { id: number }).id);
+				}
+				completed = true;
+
+				expect(seenIds).not.toContain(insertedId);
+				const committed = await sql`
+					SELECT count(*)::integer AS count_value
+					FROM ${s}.posts
+					WHERE id = ${insertedId}
+				`.execute(pool);
+				expect(committed.rows[0]?.count_value).toBe(1);
+			} finally {
+				if (!completed) {
+					await iterator.return?.().catch(() => undefined);
+				}
+				if (insertedId !== undefined) {
+					await sql`DELETE FROM ${s}.posts WHERE id = ${insertedId}`.execute(
+						pool,
+					);
+				}
+			}
+		});
+
+		it('lockTimeoutMs raises a typed timeout when a streamed row is locked', async () => {
+			const pool = await getTestPool();
+			const holder = await pool.connect();
+			try {
+				await holder.query('BEGIN');
+				await holder.query(
+					`SELECT * FROM "${SCHEMA}".posts WHERE id = 1 FOR UPDATE`,
+				);
+
+				const adapter = await getTestAdapter();
+				const orm = createOrm({ model: blogModel, adapter });
+				const error = await (async (): Promise<unknown> => {
+					try {
+						for await (const _row of orm
+							.withSchema(SCHEMA)
+							.select('posts')
+							.where(eq('id', 1))
+							.forUpdate()
+							.stream({ lockTimeoutMs: 50 })) {
+							// The DECLARE should time out before yielding.
+						}
+					} catch (caught) {
+						return caught;
+					}
+					throw new Error('Expected stream lock timeout');
+				})();
+
+				expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+				expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+					'lock_timeout',
+				);
+			} finally {
+				await holder.query('ROLLBACK').catch(() => undefined);
+				holder.release();
+			}
 		});
 	});
 

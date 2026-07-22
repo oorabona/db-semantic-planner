@@ -284,6 +284,73 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 		);
 		expect(capableAdapter.stream).toHaveBeenCalledTimes(1);
 	});
+	it('stream() forwards begin options to the adapter and keeps onStart core-only', async () => {
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		(
+			adapter as unknown as { capabilities: Adapter['capabilities'] }
+		).capabilities = {
+			...adapter.capabilities,
+			supportsTransactionOptions: true,
+		};
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const onStart = vi.fn();
+
+		const collected: unknown[] = [];
+		for await (const row of orm.select('users').stream({
+			chunkSize: 10,
+			isolationLevel: 'serializable',
+			readOnly: false,
+			lockTimeoutMs: 0,
+			statementTimeoutMs: 25,
+			onStart,
+		})) {
+			collected.push(row);
+		}
+
+		expect(collected).toEqual([{ id: 1 }]);
+		expect(onStart).toHaveBeenCalledOnce();
+		expect(adapter.stream).toHaveBeenCalledWith(expect.any(Object), {
+			chunkSize: 10,
+			isolationLevel: 'serializable',
+			readOnly: false,
+			lockTimeoutMs: 0,
+			statementTimeoutMs: 25,
+		});
+	});
+	it('stream() rejects begin options when the adapter does not support transaction options', async () => {
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const iterator = orm.select('users').stream({
+			readOnly: false,
+			lockTimeoutMs: 0,
+		});
+
+		await expect(iterator.next()).rejects.toThrow(
+			'does not support stream transaction options',
+		);
+		expect(adapter.stream).not.toHaveBeenCalled();
+		expect(
+			(adapter as unknown as { compile: ReturnType<typeof vi.fn> }).compile,
+		).not.toHaveBeenCalled();
+	});
+	it('stream() rejects a runtime signal instead of dropping it before adapter forwarding', async () => {
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		(
+			adapter as unknown as { capabilities: Adapter['capabilities'] }
+		).capabilities = {
+			...adapter.capabilities,
+			supportsTransactionOptions: true,
+		};
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const iterator = orm.select('users').stream({
+			signal: AbortSignal.abort(),
+		} as never);
+
+		await expect(iterator.next()).rejects.toThrow(
+			'stream() does not support signal',
+		);
+		expect(adapter.stream).not.toHaveBeenCalled();
+	});
 	it('stream() without hooks yields all rows', async () => {
 		const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
 		const adapter = createSpyAdapter(rows);

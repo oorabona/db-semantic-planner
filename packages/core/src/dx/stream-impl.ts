@@ -9,6 +9,7 @@
  */
 
 import {
+	type AdapterStreamOptions,
 	type CompiledQuery,
 	type Dump,
 	supportsStreaming,
@@ -35,6 +36,49 @@ function createUnsupportedStreamingError(): ExecutionError {
 	});
 }
 
+function hasStreamTransactionBeginOptions(
+	options: StreamOptions | undefined,
+): boolean {
+	return (
+		options != null &&
+		(options.isolationLevel !== undefined ||
+			options.readOnly !== undefined ||
+			options.lockTimeoutMs !== undefined ||
+			options.statementTimeoutMs !== undefined)
+	);
+}
+
+function hasRuntimeStreamSignalOption(
+	options: StreamOptions | undefined,
+): boolean {
+	return typeof options === 'object' && options !== null && 'signal' in options;
+}
+
+function createAdapterStreamOptions(
+	options: StreamOptions | undefined,
+): AdapterStreamOptions | undefined {
+	if (
+		options === undefined ||
+		(options.chunkSize === undefined &&
+			!hasStreamTransactionBeginOptions(options))
+	) {
+		return undefined;
+	}
+	return {
+		...(options.chunkSize !== undefined && { chunkSize: options.chunkSize }),
+		...(options.isolationLevel !== undefined && {
+			isolationLevel: options.isolationLevel,
+		}),
+		...(options.readOnly !== undefined && { readOnly: options.readOnly }),
+		...(options.lockTimeoutMs !== undefined && {
+			lockTimeoutMs: options.lockTimeoutMs,
+		}),
+		...(options.statementTimeoutMs !== undefined && {
+			statementTimeoutMs: options.statementTimeoutMs,
+		}),
+	};
+}
+
 /**
  * Create a lazy AsyncIterableIterator for streaming query results.
  *
@@ -48,12 +92,9 @@ export function stream<TResult>(
 	options?: StreamOptions,
 ): AsyncIterableIterator<TResult> {
 	const adapter = builder.getConfiguredAdapter();
-
-	// Only pass chunkSize to adapter; onStart is handled in the wrapper
-	const adapterOptions =
-		options?.chunkSize !== undefined
-			? { chunkSize: options.chunkSize }
-			: undefined;
+	const hasBeginOptions = hasStreamTransactionBeginOptions(options);
+	const hasSignalOption = hasRuntimeStreamSignalOption(options);
+	const adapterOptions = createAdapterStreamOptions(options);
 
 	// E17b: Fire beforeQuery hook with isStreaming=true (afterQuery does NOT fire for streams)
 	const hookStore = builder.ctx.hookStore;
@@ -85,6 +126,19 @@ export function stream<TResult>(
 		async next() {
 			if (!supportsStreaming(adapter)) {
 				throw createUnsupportedStreamingError();
+			}
+			if (hasSignalOption) {
+				throw new Error(
+					'stream() does not support signal; AbortSignal is only supported by transaction().',
+				);
+			}
+			if (
+				hasBeginOptions &&
+				adapter.capabilities.supportsTransactionOptions !== true
+			) {
+				throw new Error(
+					'This adapter does not support stream transaction options (isolationLevel/readOnly/lockTimeoutMs/statementTimeoutMs); it does not declare supportsTransactionOptions.',
+				);
 			}
 
 			// E17b: Fire beforeQuery on first iteration (lazy), then compile with

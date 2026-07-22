@@ -73,8 +73,9 @@ export interface AdapterCapabilities {
 	readonly supportsStreaming: boolean;
 	readonly supportsTransactions: boolean;
 	/**
-	 * When true, transaction() honors TransactionOptions. When absent/false, the
-	 * adapter ignores them and core rejects non-empty options.
+	 * When true, transaction() and stream-owned cursor transactions honor
+	 * transaction-scope options. When absent/false, the adapter ignores them and
+	 * core rejects non-empty options.
 	 */
 	readonly supportsTransactionOptions?: boolean;
 	readonly supportsRecursiveCTE: boolean;
@@ -148,7 +149,7 @@ export interface CompileOptionsBase {
 	readonly maxBatchSize?: number;
 }
 
-export interface TransactionOptions {
+export interface TransactionBeginOptions {
 	readonly isolationLevel?:
 		| 'read committed'
 		| 'repeatable read'
@@ -156,6 +157,9 @@ export interface TransactionOptions {
 	readonly readOnly?: boolean;
 	readonly lockTimeoutMs?: number;
 	readonly statementTimeoutMs?: number;
+}
+
+export interface TransactionOptions extends TransactionBeginOptions {
 	readonly signal?: AbortSignal;
 }
 
@@ -302,10 +306,23 @@ export interface CompiledNqlQuery {
 
 /**
  * Options for streaming query results.
+ *
+ * Streaming adapters that own the cursor transaction may apply the transaction
+ * begin options to that cursor transaction. `statementTimeoutMs` is PostgreSQL's
+ * per-command timeout: it bounds each DECLARE/FETCH/CLOSE separately, not the
+ * whole stream wall-clock. Time spent by a slow consumer between chunks is idle
+ * time in transaction and is not counted; a single slow FETCH past the bound
+ * cancels the stream.
+ *
+ * Serializable streams can fail late, including after rows have already been
+ * yielded. Consumers must not treat side effects driven by streamed rows as
+ * committed until iteration completes cleanly.
  */
-export interface AdapterStreamOptions {
+export interface AdapterStreamOptions extends TransactionBeginOptions {
 	/** Number of rows to fetch per chunk */
 	readonly chunkSize?: number;
+	/** AbortSignal is intentionally unsupported on stream-owned transactions. */
+	readonly signal?: never;
 }
 
 /**

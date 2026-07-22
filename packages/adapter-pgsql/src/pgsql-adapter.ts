@@ -50,6 +50,7 @@ import type {
 	SetOperationIntent,
 	SubqueryIncludeInfo,
 	TableIR,
+	TransactionBeginOptions,
 	TransactionOptions,
 	UpdateIntent,
 	UpsertFromIntent,
@@ -339,7 +340,7 @@ type PgsqlTransactionTimeoutSnapshot = readonly {
 	readonly value: string;
 }[];
 
-interface ResolvedPgsqlTransactionOptions {
+export interface ResolvedPgsqlTransactionBeginOptions {
 	readonly isolationLevel?:
 		| 'read committed'
 		| 'repeatable read'
@@ -347,10 +348,14 @@ interface ResolvedPgsqlTransactionOptions {
 	readonly readOnly?: boolean;
 	readonly lockTimeoutMs?: number;
 	readonly statementTimeoutMs?: number;
-	readonly signal?: AbortSignal;
 	readonly timeoutStatements: readonly PgsqlTransactionTimeoutStatement[];
 	readonly hasLockTimeout: boolean;
 	readonly hasStatementTimeout: boolean;
+}
+
+interface ResolvedPgsqlTransactionOptions
+	extends ResolvedPgsqlTransactionBeginOptions {
+	readonly signal?: AbortSignal;
 }
 
 export class PgsqlRawSqlTransactionControlError extends Error {
@@ -482,7 +487,7 @@ function describeTransactionOptionValue(value: unknown): string {
 
 function resolvePgsqlTransactionIsolationLevel(
 	value: unknown,
-): ResolvedPgsqlTransactionOptions['isolationLevel'] {
+): ResolvedPgsqlTransactionBeginOptions['isolationLevel'] {
 	if (value === undefined) return undefined;
 	if (
 		value === 'read committed' ||
@@ -498,7 +503,7 @@ function resolvePgsqlTransactionIsolationLevel(
 
 function resolvePgsqlTransactionReadOnly(
 	value: unknown,
-): ResolvedPgsqlTransactionOptions['readOnly'] {
+): ResolvedPgsqlTransactionBeginOptions['readOnly'] {
 	if (value === undefined) return undefined;
 	if (typeof value === 'boolean') return value;
 	throw new PgsqlTransactionOptionsError(
@@ -527,24 +532,30 @@ function resolvePgsqlTransactionSignal(
 	);
 }
 
-function resolveTransactionOptions(
-	options: TransactionOptions | undefined,
-): ResolvedPgsqlTransactionOptions {
-	const optionRecord = options as
-		| {
-				readonly isolationLevel?: unknown;
-				readonly readOnly?: unknown;
-				readonly lockTimeoutMs?: unknown;
-				readonly statementTimeoutMs?: unknown;
-				readonly signal?: unknown;
-		  }
-		| null
-		| undefined;
+type PgsqlTransactionBeginOptionRecord =
+	| {
+			readonly isolationLevel?: unknown;
+			readonly readOnly?: unknown;
+			readonly lockTimeoutMs?: unknown;
+			readonly statementTimeoutMs?: unknown;
+			readonly signal?: unknown;
+	  }
+	| null
+	| undefined;
+
+function transactionBeginOptionRecord(
+	options: TransactionBeginOptions | TransactionOptions | undefined,
+): PgsqlTransactionBeginOptionRecord {
+	return options as PgsqlTransactionBeginOptionRecord;
+}
+
+function resolveTransactionBeginOptionsCore(
+	optionRecord: PgsqlTransactionBeginOptionRecord,
+): ResolvedPgsqlTransactionBeginOptions {
 	const rawIsolationLevel = optionRecord?.isolationLevel;
 	const rawReadOnly = optionRecord?.readOnly;
 	const rawLockTimeoutMs = optionRecord?.lockTimeoutMs;
 	const rawStatementTimeoutMs = optionRecord?.statementTimeoutMs;
-	const rawSignal = optionRecord?.signal;
 
 	const isolationLevel =
 		resolvePgsqlTransactionIsolationLevel(rawIsolationLevel);
@@ -557,7 +568,6 @@ function resolveTransactionOptions(
 		'statementTimeoutMs',
 		rawStatementTimeoutMs,
 	);
-	const signal = resolvePgsqlTransactionSignal(rawSignal);
 	const timeoutOptions: TransactionOptions = {
 		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
 		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
@@ -570,15 +580,50 @@ function resolveTransactionOptions(
 		...(readOnly !== undefined && { readOnly }),
 		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
 		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
-		...(signal !== undefined && { signal }),
 		timeoutStatements,
 		hasLockTimeout: lockTimeoutMs !== undefined,
 		hasStatementTimeout: statementTimeoutMs !== undefined,
 	});
 }
 
+export function resolveTransactionBeginOptions(
+	options: TransactionBeginOptions | undefined,
+): ResolvedPgsqlTransactionBeginOptions {
+	const optionRecord = transactionBeginOptionRecord(options);
+	if (
+		optionRecord !== null &&
+		optionRecord !== undefined &&
+		'signal' in optionRecord
+	) {
+		throw new PgsqlTransactionOptionsError(
+			'stream transaction options do not support signal; AbortSignal is only supported by transaction()',
+		);
+	}
+	return resolveTransactionBeginOptionsCore(optionRecord);
+}
+
+function resolveTransactionOptions(
+	options: TransactionOptions | undefined,
+): ResolvedPgsqlTransactionOptions {
+	const optionRecord = transactionBeginOptionRecord(options) as
+		| {
+				readonly signal?: unknown;
+		  }
+		| null
+		| undefined;
+	const beginOptions = resolveTransactionBeginOptionsCore(optionRecord);
+	const rawSignal = optionRecord?.signal;
+
+	const signal = resolvePgsqlTransactionSignal(rawSignal);
+
+	return Object.freeze({
+		...beginOptions,
+		...(signal !== undefined && { signal }),
+	});
+}
+
 function renderTransactionIsolationLevel(
-	isolationLevel: ResolvedPgsqlTransactionOptions['isolationLevel'],
+	isolationLevel: ResolvedPgsqlTransactionBeginOptions['isolationLevel'],
 ): string {
 	switch (isolationLevel) {
 		case 'read committed':
@@ -599,7 +644,7 @@ function renderTransactionIsolationLevel(
 }
 
 function transactionBeginSql(
-	options: ResolvedPgsqlTransactionOptions | undefined,
+	options: ResolvedPgsqlTransactionBeginOptions | undefined,
 ): string {
 	const parts = ['BEGIN'];
 	if (options?.isolationLevel !== undefined) {
@@ -618,7 +663,7 @@ function transactionBeginSql(
 }
 
 function assertTopLevelOnlyTransactionOptionsAreAbsent(
-	options: ResolvedPgsqlTransactionOptions | undefined,
+	options: ResolvedPgsqlTransactionBeginOptions | undefined,
 ): void {
 	if (
 		options?.isolationLevel !== undefined ||
@@ -630,7 +675,7 @@ function assertTopLevelOnlyTransactionOptionsAreAbsent(
 
 function classifyPgsqlTransactionTimeout(
 	error: unknown,
-	options: ResolvedPgsqlTransactionOptions | undefined,
+	options: ResolvedPgsqlTransactionBeginOptions | undefined,
 ): PgsqlTransactionTimeoutError | undefined {
 	if (error instanceof PgsqlTransactionTimeoutError) {
 		return error;
@@ -651,7 +696,7 @@ function classifyPgsqlTransactionTimeout(
 
 function transactionTimeoutErrorOrOriginal(
 	error: unknown,
-	options: ResolvedPgsqlTransactionOptions | undefined,
+	options: ResolvedPgsqlTransactionBeginOptions | undefined,
 ): unknown {
 	return classifyPgsqlTransactionTimeout(error, options) ?? error;
 }
@@ -2958,6 +3003,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				`Invalid stream chunkSize: ${chunkSize}. Must be a positive integer.`,
 			);
 		}
+		const resolvedOptions = resolveTransactionBeginOptions(options);
 		const adapter = this;
 
 		// Use a wrapper to create the async generator
@@ -2976,6 +3022,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					parameters,
 					chunkSize,
 					mapRows,
+					resolvedOptions,
 				);
 				return;
 			}
@@ -3004,9 +3051,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					client,
 					scopeToken,
 					scopeState,
-					'BEGIN',
+					transactionBeginSql(resolvedOptions),
 				);
 				begun = true;
+				await adapter.applyTransactionTimeouts(
+					client,
+					scopeToken,
+					scopeState,
+					resolvedOptions,
+				);
 				scopeState.streamFailureRecovery = async () => {
 					await adapter.rollbackTransactionIfOpen(
 						client,
@@ -3042,6 +3095,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				} catch (scopeError) {
 					transactionError = scopeError;
 				}
+				transactionError = transactionTimeoutErrorOrOriginal(
+					transactionError,
+					resolvedOptions,
+				);
 				streamFailed = true;
 				if (begun && !committed && !streamRolledBackBeforeClose) {
 					try {
@@ -3200,9 +3257,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters: readonly unknown[],
 		chunkSize: number,
 		mapRows: StreamRowMapper<T>,
+		options: ResolvedPgsqlTransactionBeginOptions,
 	): AsyncIterableIterator<T> {
 		if (this.adapterManagedTransaction) {
 			this.assertCanUseClient(client, this.scopeToken);
+			if (
+				options.isolationLevel !== undefined ||
+				options.readOnly !== undefined ||
+				options.timeoutStatements.length > 0
+			) {
+				yield* this.streamWithManagedClientSavepointScope<T>(
+					client,
+					sql,
+					parameters,
+					chunkSize,
+					mapRows,
+					options,
+				);
+				return;
+			}
 			yield* this.streamWithClient<T>(
 				client,
 				sql,
@@ -3220,6 +3293,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters,
 			chunkSize,
 			mapRows,
+			options,
 		);
 	}
 
@@ -3229,6 +3303,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters: readonly unknown[],
 		chunkSize: number,
 		mapRows: StreamRowMapper<T>,
+		options: ResolvedPgsqlTransactionBeginOptions,
 	): AsyncIterableIterator<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = this.scopeToken ?? createScopeToken();
@@ -3258,6 +3333,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					parameters,
 					chunkSize,
 					mapRows,
+					options,
 				);
 				return;
 			}
@@ -3266,6 +3342,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		let completed = false;
 		let streamError: unknown;
+		let timeoutSnapshot: PgsqlTransactionTimeoutSnapshot = [];
 		let savepointRolledBackBeforeClose = false;
 		const recoverStreamFailure = async () => {
 			const rolledBack = await this.rollbackSavepoint(
@@ -3277,6 +3354,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			savepointRolledBackBeforeClose ||= rolledBack;
 		};
 		try {
+			assertTopLevelOnlyTransactionOptionsAreAbsent(options);
+			timeoutSnapshot = await this.captureAndApplySavepointTimeouts(
+				client,
+				scopeToken,
+				scopeState,
+				options,
+			);
 			yield* this.streamWithClient<T>(
 				client,
 				sql,
@@ -3288,8 +3372,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 			completed = true;
 		} catch (error) {
-			streamError = error;
-			throw error;
+			streamError = transactionTimeoutErrorOrOriginal(error, options);
+			throw streamError;
 		} finally {
 			try {
 				this.closeScope(scopeState);
@@ -3297,6 +3381,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					this.assertScopeChildrenSettled(scopeState);
 					await this.drainScopeWork(scopeState);
 					this.throwIfScopePoisoned(scopeState);
+					try {
+						await this.restoreSavepointTimeouts(
+							client,
+							scopeToken,
+							scopeState,
+							timeoutSnapshot,
+						);
+					} catch (restoreErr) {
+						raise(
+							await this.rollbackSavepointAfterReleaseFailure(
+								client,
+								savepointName,
+								scopeToken,
+								scopeState,
+								restoreErr,
+								'PostgreSQL stream cleanup failed: timeout restore failed before RELEASE SAVEPOINT after the stream completed',
+							),
+						);
+					}
 					try {
 						await this.executeScopeBoundaryStatement(
 							client,
@@ -3366,6 +3469,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters: readonly unknown[],
 		chunkSize: number,
 		mapRows: StreamRowMapper<T>,
+		options: ResolvedPgsqlTransactionBeginOptions,
 	): AsyncIterableIterator<T> {
 		let begun = false;
 		let committed = false;
@@ -3383,9 +3487,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				client,
 				scopeToken,
 				scopeState,
-				'BEGIN',
+				transactionBeginSql(options),
 			);
 			begun = true;
+			await this.applyTransactionTimeouts(
+				client,
+				scopeToken,
+				scopeState,
+				options,
+			);
 			scopeState.streamFailureRecovery = async () => {
 				await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				streamRolledBackBeforeClose = true;
@@ -3417,6 +3527,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			} catch (scopeError) {
 				transactionError = scopeError;
 			}
+			transactionError = transactionTimeoutErrorOrOriginal(
+				transactionError,
+				options,
+			);
 			streamFailed = true;
 			if (begun && !committed && !streamRolledBackBeforeClose) {
 				try {
@@ -4036,7 +4150,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
-		options: ResolvedPgsqlTransactionOptions | undefined,
+		options: ResolvedPgsqlTransactionBeginOptions | undefined,
 	): Promise<void> {
 		for (const statement of options?.timeoutStatements ?? []) {
 			await this.executeScopeBoundaryStatement(
@@ -4052,7 +4166,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
-		options: ResolvedPgsqlTransactionOptions | undefined,
+		options: ResolvedPgsqlTransactionBeginOptions | undefined,
 	): Promise<PgsqlTransactionTimeoutSnapshot> {
 		const statements = options?.timeoutStatements ?? [];
 		if (statements.length === 0) return [];

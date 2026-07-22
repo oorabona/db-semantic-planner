@@ -59,4 +59,20 @@ export async function seedBlogData(schemaName: string): Promise<void> {
       (9, 1, 'Kate', 'Bookmarked for later!', '2024-03-20 10:00:00'),
       (10, 2, 'Leo', 'This helped me at work.', '2024-03-25 09:00:00')
   `.execute(pool);
+
+	// The rows above carry explicit ids, which does NOT advance the identity
+	// sequences. Sync them to MAX(id) so a later auto-id INSERT (e.g. a
+	// concurrent-writer e2e test streaming/transaction snapshot) does not collide
+	// on the primary key. Guarded so a table without an id sequence is a no-op.
+	for (const table of ['companies', 'authors', 'posts', 'comments'] as const) {
+		await sql`
+      SELECT setval(q.seq, GREATEST(q.max_id, 1), q.max_id IS NOT NULL)
+      FROM (
+        SELECT
+          pg_get_serial_sequence(${`${schemaName}.${table}`}, 'id') AS seq,
+          (SELECT MAX(id) FROM ${sql.ref(schemaName)}.${sql.ref(table)}) AS max_id
+      ) AS q
+      WHERE q.seq IS NOT NULL
+    `.execute(pool);
+	}
 }
