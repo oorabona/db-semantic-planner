@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.2.0...adapter-pgsql-v3.2.1) (2026-07-22)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Any() casts by declared column type without originalDbType ([#379](https://github.com/oorabona/db-semantic-planner/issues/379)) ([66547f5](https://github.com/oorabona/db-semantic-planner/commit/66547f55bd6685f7265305e992cd412e42af01cf))
+
 ## [3.2.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.1.0...adapter-pgsql-v3.2.0) (2026-07-22)
 
 
