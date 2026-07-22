@@ -222,6 +222,9 @@ const BORROWED_TRANSACTION_ABORT_SIGNAL_MESSAGE =
 const BORROWED_PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE =
 	'AbortSignal is only supported for a pool-owned withPinnedConnection(); it cannot be used with a borrowed or nested pinned connection because dbsp does not own that connection.';
 
+const ADVISORY_LOCK_CLEANUP_OWNERSHIP_MESSAGE =
+	'the session may still hold the advisory lock; pool-owned connections are destroyed to free it, but borrowed connections remain caller-owned and must not be returned to a pool while they may still hold the lock';
+
 const NESTED_TRANSACTION_OPTIONS_MESSAGE =
 	'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint';
 
@@ -346,6 +349,32 @@ type CleanupFailureError = AggregateError & {
 	readonly originalError?: unknown;
 };
 
+export type PgAdvisoryLockKey =
+	| bigint
+	| { readonly classId: number; readonly objId: number };
+
+export type PgAdvisoryLockResult<T> =
+	| { readonly acquired: true; readonly value: T }
+	| { readonly acquired: false };
+
+type ResolvedPgAdvisoryLockKey =
+	| {
+			readonly kind: 'bigint';
+			readonly parameters: readonly [bigint];
+			readonly lockSql: 'SELECT pg_advisory_lock($1)';
+			readonly tryLockSql: 'SELECT pg_try_advisory_lock($1) AS acquired';
+			readonly unlockSql: 'SELECT pg_advisory_unlock($1) AS unlocked';
+			readonly description: string;
+	  }
+	| {
+			readonly kind: 'pair';
+			readonly parameters: readonly [number, number];
+			readonly lockSql: 'SELECT pg_advisory_lock($1, $2)';
+			readonly tryLockSql: 'SELECT pg_try_advisory_lock($1, $2) AS acquired';
+			readonly unlockSql: 'SELECT pg_advisory_unlock($1, $2) AS unlocked';
+			readonly description: string;
+	  };
+
 type PgsqlTransactionTimeoutSnapshot = readonly {
 	readonly parameter: PgsqlTransactionTimeoutParameter;
 	readonly value: string;
@@ -425,6 +454,15 @@ export class PgsqlTransactionOptionsError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = 'PgsqlTransactionOptionsError';
+	}
+}
+
+export class PgsqlAdvisoryLockOptionsError extends Error {
+	readonly dbspAdvisoryLockOptions = true;
+
+	constructor(message: string) {
+		super(message);
+		this.name = 'PgsqlAdvisoryLockOptionsError';
 	}
 }
 
@@ -905,6 +943,78 @@ function cleanupReleaseReason(error: unknown): Error | boolean | undefined {
 	const cleanupError = (error as { readonly cleanupError?: unknown })
 		.cleanupError;
 	return cleanupError instanceof Error ? cleanupError : true;
+}
+
+const PG_ADVISORY_LOCK_INT64_MIN = -(1n << 63n);
+const PG_ADVISORY_LOCK_INT64_MAX = (1n << 63n) - 1n;
+const PG_ADVISORY_LOCK_INT32_MIN = -(2 ** 31);
+const PG_ADVISORY_LOCK_INT32_MAX = 2 ** 31 - 1;
+
+function resolvePgAdvisoryLockWait(wait: unknown): 'block' | 'try' {
+	if (wait === undefined) return 'block';
+	if (wait === 'block' || wait === 'try') return wait;
+	throw new PgsqlAdvisoryLockOptionsError(
+		"PostgreSQL advisory lock wait option must be 'block' or 'try'.",
+	);
+}
+
+function assertPgAdvisoryLockBigintKey(key: bigint): void {
+	if (key < PG_ADVISORY_LOCK_INT64_MIN || key > PG_ADVISORY_LOCK_INT64_MAX) {
+		throw new PgsqlAdvisoryLockOptionsError(
+			`PostgreSQL advisory lock bigint key must fit signed int64 (${PG_ADVISORY_LOCK_INT64_MIN} to ${PG_ADVISORY_LOCK_INT64_MAX}).`,
+		);
+	}
+}
+
+function assertPgAdvisoryLockInt32KeyPart(
+	value: unknown,
+	name: 'classId' | 'objId',
+): asserts value is number {
+	if (
+		typeof value !== 'number' ||
+		!Number.isInteger(value) ||
+		value < PG_ADVISORY_LOCK_INT32_MIN ||
+		value > PG_ADVISORY_LOCK_INT32_MAX
+	) {
+		throw new PgsqlAdvisoryLockOptionsError(
+			`PostgreSQL advisory lock ${name} must fit signed int32 (${PG_ADVISORY_LOCK_INT32_MIN} to ${PG_ADVISORY_LOCK_INT32_MAX}).`,
+		);
+	}
+}
+
+function resolvePgAdvisoryLockKey(
+	key: PgAdvisoryLockKey,
+): ResolvedPgAdvisoryLockKey {
+	if (typeof key === 'bigint') {
+		assertPgAdvisoryLockBigintKey(key);
+		return {
+			kind: 'bigint',
+			parameters: [key],
+			lockSql: 'SELECT pg_advisory_lock($1)',
+			tryLockSql: 'SELECT pg_try_advisory_lock($1) AS acquired',
+			unlockSql: 'SELECT pg_advisory_unlock($1) AS unlocked',
+			description: `bigint key ${key}`,
+		};
+	}
+
+	if (typeof key === 'object' && key !== null) {
+		const classId = (key as { readonly classId?: unknown }).classId;
+		const objId = (key as { readonly objId?: unknown }).objId;
+		assertPgAdvisoryLockInt32KeyPart(classId, 'classId');
+		assertPgAdvisoryLockInt32KeyPart(objId, 'objId');
+		return {
+			kind: 'pair',
+			parameters: [classId, objId],
+			lockSql: 'SELECT pg_advisory_lock($1, $2)',
+			tryLockSql: 'SELECT pg_try_advisory_lock($1, $2) AS acquired',
+			unlockSql: 'SELECT pg_advisory_unlock($1, $2) AS unlocked',
+			description: `classId ${classId}, objId ${objId}`,
+		};
+	}
+
+	throw new PgsqlAdvisoryLockOptionsError(
+		'PostgreSQL advisory lock key must be a bigint or { classId, objId }; strings are not accepted and dbsp does not hash lock keys.',
+	);
 }
 
 function isRawSqlTransactionControlError(error: unknown): boolean {
@@ -3674,6 +3784,126 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	// =========================================================================
 	// TransactionalAdapter Methods
 	// =========================================================================
+
+	/**
+	 * Acquire an exclusive session-level PostgreSQL advisory lock for the callback.
+	 *
+	 * The lock, callback, and unlock run on one `withPinnedConnection()` adapter.
+	 * dbsp performs one PostgreSQL acquire and one matching unlock per call. It
+	 * does not track reentrant depth in v1; PostgreSQL's session-level stacking
+	 * still applies when callers deliberately nest on the same pinned adapter.
+	 */
+	withAdvisoryLock<T>(
+		key: PgAdvisoryLockKey,
+		fn: (locked: Adapter<DB>) => Promise<T>,
+	): Promise<T>;
+	withAdvisoryLock<T>(
+		key: PgAdvisoryLockKey,
+		fn: (locked: Adapter<DB>) => Promise<T>,
+		options: { readonly wait?: 'block'; readonly signal?: AbortSignal },
+	): Promise<T>;
+	withAdvisoryLock<T>(
+		key: PgAdvisoryLockKey,
+		fn: (locked: Adapter<DB>) => Promise<T>,
+		options: { readonly wait: 'try'; readonly signal?: AbortSignal },
+	): Promise<PgAdvisoryLockResult<T>>;
+	withAdvisoryLock<T>(
+		key: PgAdvisoryLockKey,
+		fn: (locked: Adapter<DB>) => Promise<T>,
+		options?: {
+			readonly wait?: 'block' | 'try';
+			readonly signal?: AbortSignal;
+		},
+	): Promise<T | PgAdvisoryLockResult<T>>;
+	withAdvisoryLock<T>(
+		key: PgAdvisoryLockKey,
+		fn: (locked: Adapter<DB>) => Promise<T>,
+		options?: {
+			readonly wait?: 'block' | 'try';
+			readonly signal?: AbortSignal;
+		},
+	): Promise<T | PgAdvisoryLockResult<T>> {
+		const lockKey = resolvePgAdvisoryLockKey(key);
+		const wait = resolvePgAdvisoryLockWait(options?.wait);
+		const pinnedOptions =
+			options?.signal === undefined ? undefined : { signal: options.signal };
+
+		return this.withPinnedConnection(async (locked) => {
+			const pgLocked = locked as PgsqlAdapter<DB>;
+			let acquired = false;
+			let hasOriginalError = false;
+			let hasResult = false;
+			let originalError: unknown;
+			let result: T | PgAdvisoryLockResult<T> | undefined;
+
+			try {
+				if (wait === 'try') {
+					const rows = await pgLocked.executeRaw<{ acquired: boolean }>(
+						lockKey.tryLockSql,
+						lockKey.parameters,
+					);
+					if (rows[0]?.acquired !== true) {
+						result = { acquired: false };
+						hasResult = true;
+					} else {
+						acquired = true;
+						const value = await fn(locked);
+						result = { acquired: true, value };
+						hasResult = true;
+					}
+				} else {
+					await pgLocked.executeRaw(lockKey.lockSql, lockKey.parameters);
+					acquired = true;
+					result = await fn(locked);
+					hasResult = true;
+				}
+			} catch (error) {
+				hasOriginalError = true;
+				originalError = error;
+			}
+
+			if (acquired) {
+				try {
+					await this.unlockAdvisoryLock(pgLocked, lockKey);
+				} catch (cleanupError) {
+					if (hasOriginalError) {
+						throw createCleanupFailureError(
+							`PostgreSQL advisory lock cleanup failed: pg_advisory_unlock failed after the advisory lock body failed; ${ADVISORY_LOCK_CLEANUP_OWNERSHIP_MESSAGE}`,
+							originalError,
+							cleanupError,
+						);
+					}
+					throw createCleanupOnlyError(
+						`PostgreSQL advisory lock cleanup failed: pg_advisory_unlock failed after the advisory lock body returned; ${ADVISORY_LOCK_CLEANUP_OWNERSHIP_MESSAGE}`,
+						cleanupError,
+					);
+				}
+			}
+
+			if (hasOriginalError) {
+				throw originalError;
+			}
+			if (!hasResult) {
+				throw new Error('PostgreSQL advisory lock callback did not settle.');
+			}
+			return result as T | PgAdvisoryLockResult<T>;
+		}, pinnedOptions);
+	}
+
+	private async unlockAdvisoryLock(
+		locked: PgsqlAdapter<DB>,
+		lockKey: ResolvedPgAdvisoryLockKey,
+	): Promise<void> {
+		const rows = await locked.executeRaw<{ unlocked: boolean }>(
+			lockKey.unlockSql,
+			lockKey.parameters,
+		);
+		if (rows[0]?.unlocked !== true) {
+			throw new Error(
+				`pg_advisory_unlock returned false for ${lockKey.description}; the session did not hold the lock. Pool-owned connections are destroyed before reuse, but borrowed connections remain caller-owned.`,
+			);
+		}
+	}
 
 	withPinnedConnection<T>(
 		fn: (adapter: Adapter<DB>) => Promise<T>,

@@ -11,6 +11,7 @@ import {
 	getAppliedMigrations,
 	getNextSchemaVersion,
 	isMigrationApplied,
+	MIGRATION_LOCK_KEY,
 	recordMigration,
 	removeMigrationRecord,
 	withMigrationLock,
@@ -29,7 +30,16 @@ function createMockPool(queryResult: { rows: unknown[] } = { rows: [] }) {
 
 function createMockClient(queryResult: { rows: unknown[] } = { rows: [] }) {
 	return {
-		query: vi.fn().mockResolvedValue(queryResult),
+		query: vi.fn().mockImplementation((input: string) => {
+			if (input.includes('pg_advisory_unlock')) {
+				return Promise.resolve({
+					rows: [{ unlocked: true }],
+					rowCount: 1,
+					command: 'SELECT',
+				});
+			}
+			return Promise.resolve(queryResult);
+		}),
 		release: vi.fn(),
 	};
 }
@@ -53,22 +63,26 @@ describe('migration lock public surface', () => {
 // ============================================================================
 
 describe('withMigrationLock', () => {
-	it('should acquire lock, execute fn, then release lock', async () => {
+	it('pins the legacy migration lock key and passes the pinned client to fn', async () => {
 		const client = createMockClient();
 		const pool = createMockPool();
 		pool.connect.mockResolvedValue(client);
+		let callbackClient: unknown;
 
-		const result = await withMigrationLock(pool as never, async () => {
+		const result = await withMigrationLock(pool as never, async (locked) => {
+			callbackClient = locked;
 			return 'done';
 		});
 
 		expect(result).toBe('done');
+		expect(callbackClient).toBe(client);
 		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(client.query).toHaveBeenCalledWith('SELECT pg_advisory_lock($1)', [
+			MIGRATION_LOCK_KEY,
+		]);
 		expect(client.query).toHaveBeenCalledWith(
-			expect.stringContaining('pg_advisory_lock'),
-		);
-		expect(client.query).toHaveBeenCalledWith(
-			expect.stringContaining('pg_advisory_unlock'),
+			'SELECT pg_advisory_unlock($1) AS unlocked',
+			[MIGRATION_LOCK_KEY],
 		);
 		expect(client.release).toHaveBeenCalledOnce();
 	});
@@ -85,30 +99,34 @@ describe('withMigrationLock', () => {
 		).rejects.toThrow('boom');
 
 		expect(client.query).toHaveBeenCalledWith(
-			expect.stringContaining('pg_advisory_unlock'),
+			'SELECT pg_advisory_unlock($1) AS unlocked',
+			[MIGRATION_LOCK_KEY],
 		);
 		expect(client.release).toHaveBeenCalledOnce();
 	});
 
-	it('should release client even if unlock query fails', async () => {
+	it('destroys the client if unlock query fails', async () => {
 		const client = createMockClient();
-		// Lock succeeds, callback succeeds, unlock fails
-		let callCount = 0;
-		client.query.mockImplementation(() => {
-			callCount++;
-			if (callCount === 2) {
-				// Second call is the unlock in finally
-				return Promise.reject(new Error('unlock failed'));
+		const unlockError = new Error('unlock failed');
+		client.query.mockImplementation((input: string) => {
+			if (input.includes('pg_advisory_unlock')) {
+				return Promise.reject(unlockError);
 			}
 			return Promise.resolve({ rows: [] });
 		});
 		const pool = createMockPool();
 		pool.connect.mockResolvedValue(client);
 
-		const result = await withMigrationLock(pool as never, async () => 'ok');
+		await expect(
+			withMigrationLock(pool as never, async () => 'ok'),
+		).rejects.toThrow('unlock failed');
 
-		expect(result).toBe('ok');
 		expect(client.release).toHaveBeenCalledOnce();
+		expect(client.release).toHaveBeenCalledWith(unlockError);
+	});
+
+	it('pins the migration lock key constant', () => {
+		expect(MIGRATION_LOCK_KEY).toBe(-1232477147n);
 	});
 });
 

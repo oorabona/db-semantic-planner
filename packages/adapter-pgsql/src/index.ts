@@ -166,9 +166,13 @@ export {
 export {
 	createPgsqlAdapter,
 	createPgsqlCompileOnlyAdapter,
+	type PgAdvisoryLockKey,
+	type PgAdvisoryLockResult,
 	PgsqlAdapter,
 	type PgsqlAdapterOptions,
+	PgsqlAdvisoryLockOptionsError,
 	type PgsqlBorrowedClientAdapterOptions,
+	PgsqlPinnedConnectionAbortSignalError,
 	type PgsqlPoolAdapterOptions,
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,

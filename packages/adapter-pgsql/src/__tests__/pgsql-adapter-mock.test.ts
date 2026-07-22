@@ -22,6 +22,7 @@ import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	introspect,
+	PgsqlAdvisoryLockOptionsError,
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
@@ -84,14 +85,18 @@ function queryCalls(query: ReturnType<typeof vi.fn>): string[] {
 // ---------------------------------------------------------------------------
 
 function makeClient(
-	queryImpl?: (sql: string) => Promise<QueryResult>,
+	queryImpl?: (
+		sql: string,
+		parameters: readonly unknown[] | undefined,
+	) => Promise<QueryResult>,
 ): PoolClient {
 	return {
 		query: queryImpl
 			? vi
 					.fn()
-					.mockImplementation((input: MockQueryInput) =>
-						queryImpl(queryText(input)),
+					.mockImplementation(
+						(input: MockQueryInput, parameters?: readonly unknown[]) =>
+							queryImpl(queryText(input), parameters),
 					)
 			: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
 		release: vi.fn(),
@@ -504,6 +509,196 @@ describe('PgsqlAdapter.withPinnedConnection', () => {
 		expect(pool.query).not.toHaveBeenCalled();
 		expect(queryCalls(query)).toEqual(['BEGIN', 'SELECT in tx', 'COMMIT']);
 		expect(client.release).toHaveBeenCalledOnce();
+	});
+});
+
+describe('PgsqlAdapter.withAdvisoryLock', () => {
+	it('validates keys before acquiring a client', async () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() =>
+			adapter.withAdvisoryLock(1n << 63n, async () => undefined),
+		).toThrow(PgsqlAdvisoryLockOptionsError);
+		expect(() =>
+			adapter.withAdvisoryLock(
+				{ classId: 2 ** 31, objId: 0 },
+				async () => undefined,
+			),
+		).toThrow(PgsqlAdvisoryLockOptionsError);
+		expect(() =>
+			adapter.withAdvisoryLock('dbsp_migrate' as never, async () => undefined),
+		).toThrow(PgsqlAdvisoryLockOptionsError);
+
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('blocks, runs the callback on the pinned client, unlocks, and releases cleanly', async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql.includes('pg_advisory_unlock')) {
+				return {
+					rows: [{ unlocked: true }],
+					rowCount: 1,
+					command: 'SELECT',
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+		let callbackClient: Pool | PoolClient | undefined;
+
+		const result = await adapter.withAdvisoryLock(42n, async (locked) => {
+			const pgLocked = locked as unknown as PgsqlAdapter;
+			callbackClient = pgLocked.getPoolInstance();
+			await locked.executeRaw('SELECT inside advisory lock');
+			return 'done';
+		});
+
+		expect(result).toBe('done');
+		expect(callbackClient).toBe(client);
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalled();
+		expect(query.mock.calls).toEqual([
+			['SELECT pg_advisory_lock($1)', [42n]],
+			['SELECT inside advisory lock', []],
+			['SELECT pg_advisory_unlock($1) AS unlocked', [42n]],
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+			[],
+		);
+	});
+
+	it("returns acquired false on wait:'try' without running the callback or unlocking", async () => {
+		const client = makeClient(async () => ({
+			rows: [{ acquired: false }],
+			rowCount: 1,
+			command: 'SELECT',
+		}));
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+		const fn = vi.fn(async () => 'should not run');
+
+		const result = await adapter.withAdvisoryLock(
+			{ classId: 341, objId: 1 },
+			fn,
+			{ wait: 'try' },
+		);
+
+		expect(result).toEqual({ acquired: false });
+		expect(fn).not.toHaveBeenCalled();
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+			'SELECT pg_try_advisory_lock($1, $2) AS acquired',
+		]);
+		expect((client.query as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+			'SELECT pg_try_advisory_lock($1, $2) AS acquired',
+			[341, 1],
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+			[],
+		);
+	});
+
+	it("returns acquired true with the callback value on wait:'try' acquisition", async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql.includes('pg_try_advisory_lock')) {
+				return {
+					rows: [{ acquired: true }],
+					rowCount: 1,
+					command: 'SELECT',
+				} as QueryResult;
+			}
+			if (sql.includes('pg_advisory_unlock')) {
+				return {
+					rows: [{ unlocked: true }],
+					rowCount: 1,
+					command: 'SELECT',
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		const result = await adapter.withAdvisoryLock(43n, async () => 'value', {
+			wait: 'try',
+		});
+
+		expect(result).toEqual({ acquired: true, value: 'value' });
+		expect(query.mock.calls).toEqual([
+			['SELECT pg_try_advisory_lock($1) AS acquired', [43n]],
+			['SELECT pg_advisory_unlock($1) AS unlocked', [43n]],
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+			[],
+		);
+	});
+
+	it('destroys the connection when the unlock query fails', async () => {
+		const unlockError = new Error('unlock failed');
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql.includes('pg_advisory_unlock')) {
+				throw unlockError;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.withAdvisoryLock(44n, async () => 'done'),
+		);
+
+		expect(error).toBeInstanceOf(AggregateError);
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			unlockError,
+		);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+			unlockError,
+		]);
+	});
+
+	it('destroys the connection when pg_advisory_unlock returns false', async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql.includes('pg_advisory_unlock')) {
+				return {
+					rows: [{ unlocked: false }],
+					rowCount: 1,
+					command: 'SELECT',
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.withAdvisoryLock(45n, async () => 'done'),
+		);
+
+		const cleanupError = (error as { readonly cleanupError?: unknown })
+			.cleanupError;
+		expect(error).toBeInstanceOf(AggregateError);
+		expect(cleanupError).toBeInstanceOf(Error);
+		expect((cleanupError as Error).message).toContain(
+			'pg_advisory_unlock returned false',
+		);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+			cleanupError,
+		]);
 	});
 });
 
