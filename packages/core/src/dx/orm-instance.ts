@@ -1,3 +1,4 @@
+import { convertBigintJsReadValue } from '@dbsp/types';
 import {
 	type Adapter,
 	supportsTransactions,
@@ -27,7 +28,10 @@ import {
 	UpsertBuilder,
 } from './mutation-builders.js';
 import { createNqlTag, type NqlTag } from './nql.js';
-import type { SelectExpressionResult } from './orm-instance-types.js';
+import type {
+	RawReadOptions,
+	SelectExpressionResult,
+} from './orm-instance-types.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
 import {
@@ -128,6 +132,25 @@ function hasTransactionOptions(
 			options.statementTimeoutMs !== undefined ||
 			options.signal !== undefined)
 	);
+}
+
+function applyBigintReads<T>(
+	row: T,
+	bigintReads: NonNullable<RawReadOptions['bigintReads']>,
+): T {
+	if (row === null || typeof row !== 'object') return row;
+
+	const rowRecord = row as Record<string, unknown>;
+	const converted = { ...rowRecord };
+	for (const [outputKey, js] of Object.entries(bigintReads)) {
+		if (!(outputKey in rowRecord)) continue;
+		converted[outputKey] = convertBigintJsReadValue(rowRecord[outputKey], js, {
+			table: '(raw)',
+			column: outputKey,
+			outputKey,
+		});
+	}
+	return converted as T;
 }
 
 function adapterTransactionState(
@@ -899,6 +922,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		async raw<T = unknown>(
 			sqlString: string,
 			parameters: readonly unknown[] = [],
+			options?: RawReadOptions,
 		): Promise<T[]> {
 			if (!adapter) {
 				throw new Error(
@@ -908,7 +932,12 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			}
 
 			// Passthrough to adapter's executeRaw API
-			return adapter.executeRaw<T>(sqlString, parameters);
+			const rows = await adapter.executeRaw<T>(sqlString, parameters);
+			const bigintReads = options?.bigintReads;
+			if (!bigintReads || Object.keys(bigintReads).length === 0) {
+				return rows;
+			}
+			return rows.map((row) => applyBigintReads(row, bigintReads));
 		},
 
 		batchValues(

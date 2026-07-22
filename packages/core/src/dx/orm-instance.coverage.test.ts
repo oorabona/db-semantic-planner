@@ -647,6 +647,124 @@ describe('orm-instance coverage', () => {
 			);
 			expect(result).toEqual([{ id: '1', email: 'test@example.com' }]);
 		});
+
+		it('should coerce declared raw bigint reads to bigint', async () => {
+			const adapter = createMockAdapter();
+			const rows = [{ n: '42' }];
+			adapter.executeRaw = vi.fn().mockResolvedValue(rows);
+			const orm = createOrmInstance(model, false, {}, adapter);
+			const result = await orm.raw<{ n: bigint }>(
+				'SELECT 42::bigint AS n',
+				[],
+				{
+					bigintReads: { n: 'bigint' },
+				},
+			);
+			expect(result).toEqual([{ n: 42n }]);
+			expect(result[0]).not.toBe(rows[0]);
+			expect(rows).toEqual([{ n: '42' }]);
+		});
+
+		it('should coerce declared raw bigint reads to number', async () => {
+			const adapter = createMockAdapter();
+			adapter.executeRaw = vi.fn().mockResolvedValue([{ n: '42' }]);
+			const orm = createOrmInstance(model, false, {}, adapter);
+			const result = await orm.raw<{ n: number }>(
+				'SELECT 42::bigint AS n',
+				[],
+				{
+					bigintReads: { n: 'number' },
+				},
+			);
+			expect(result).toEqual([{ n: 42 }]);
+		});
+
+		it('should throw RangeError for unsafe raw bigint number reads', async () => {
+			const adapter = createMockAdapter();
+			adapter.executeRaw = vi
+				.fn()
+				.mockResolvedValue([{ n: '9007199254740992' }]);
+			const orm = createOrmInstance(model, false, {}, adapter);
+
+			let thrown: unknown;
+			try {
+				await orm.raw<{ n: number }>(
+					'SELECT 9007199254740992::bigint AS n',
+					[],
+					{
+						bigintReads: { n: 'number' },
+					},
+				);
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(thrown).toBeInstanceOf(RangeError);
+			expect((thrown as Error).message).toContain('output key "n"');
+		});
+
+		it('should leave declared raw bigint string reads unchanged', async () => {
+			const adapter = createMockAdapter();
+			adapter.executeRaw = vi.fn().mockResolvedValue([{ n: '42' }]);
+			const orm = createOrmInstance(model, false, {}, adapter);
+			const result = await orm.raw<{ n: string }>(
+				'SELECT 42::bigint AS n',
+				[],
+				{
+					bigintReads: { n: 'string' },
+				},
+			);
+			expect(result).toEqual([{ n: '42' }]);
+		});
+
+		it('should leave raw rows unchanged when read options are omitted or empty', async () => {
+			const adapter = createMockAdapter();
+			const rows = [{ n: '42' }];
+			adapter.executeRaw = vi.fn().mockResolvedValue(rows);
+			const orm = createOrmInstance(model, false, {}, adapter);
+
+			const withoutOptions = await orm.raw<{ n: string }>(
+				'SELECT 42::bigint AS n',
+			);
+			const emptyOptions = await orm.raw<{ n: string }>(
+				'SELECT 42::bigint AS n',
+				[],
+				{},
+			);
+
+			expect(withoutOptions).toBe(rows);
+			expect(emptyOptions).toBe(rows);
+			expect(withoutOptions).toEqual([{ n: '42' }]);
+			expect(emptyOptions).toEqual([{ n: '42' }]);
+		});
+
+		it('should ignore absent declared raw bigint keys without injecting them', async () => {
+			const adapter = createMockAdapter();
+			adapter.executeRaw = vi.fn().mockResolvedValue([{ n: '42' }]);
+			const orm = createOrmInstance(model, false, {}, adapter);
+			const result = await orm.raw<{ n: bigint; missing?: number }>(
+				'SELECT 42::bigint AS n',
+				[],
+				{ bigintReads: { n: 'bigint', missing: 'number' } },
+			);
+
+			expect(result).toEqual([{ n: 42n }]);
+			expect('missing' in result[0]).toBe(false);
+		});
+
+		it('should pass null through for declared raw bigint reads', async () => {
+			const adapter = createMockAdapter();
+			adapter.executeRaw = vi.fn().mockResolvedValue([{ n: null }]);
+			const orm = createOrmInstance(model, false, {}, adapter);
+			const result = await orm.raw<{ n: null }>(
+				'SELECT NULL::bigint AS n',
+				[],
+				{
+					bigintReads: { n: 'bigint' },
+				},
+			);
+			expect(result).toEqual([{ n: null }]);
+		});
 	});
 
 	describe('select', () => {

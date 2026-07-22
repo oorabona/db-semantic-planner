@@ -8,6 +8,7 @@
  * @since R01
  */
 
+import type { ColumnJsReadType } from '@dbsp/types';
 import type { Adapter, TransactionOptions } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
@@ -240,6 +241,14 @@ export interface SelectExpressionResult {
 	 * @returns Array of result rows (typically one row for scalar expressions)
 	 */
 	execute<T = Record<string, unknown>>(): Promise<T[]>;
+}
+
+export interface RawReadOptions {
+	/**
+	 * Map of output-key -> JS read type, applied to bigint columns read via raw SQL.
+	 * The caller declares provenance explicitly; dbsp does not infer it for arbitrary SQL.
+	 */
+	readonly bigintReads?: Readonly<Record<string, ColumnJsReadType>>;
 }
 
 export interface OrmInstance<DB = Record<string, unknown>> {
@@ -596,9 +605,14 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @typeParam T - Expected result type (defaults to unknown)
 	 * @param sql - Raw SQL string with parameter placeholders
 	 * @param parameters - Parameter values for placeholders
+	 * @param options - Explicit raw read coercion options
 	 * @returns Promise resolving to array of results
 	 */
-	raw<T = unknown>(sql: string, parameters?: readonly unknown[]): Promise<T[]>;
+	raw<T = unknown>(
+		sql: string,
+		parameters?: readonly unknown[],
+		options?: RawReadOptions,
+	): Promise<T[]>;
 
 	/**
 	 * Create a CTE (Common Table Expression) backed by unnest() arrays.
