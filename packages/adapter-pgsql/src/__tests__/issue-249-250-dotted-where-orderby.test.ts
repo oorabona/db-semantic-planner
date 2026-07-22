@@ -14,9 +14,28 @@ const testSchema = schema({
 	},
 } as const);
 
+const typedCastSchema = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+		name: { type: 'string', dbType: 'text' },
+		file_id: ref('files', { as: 'file', inverse: 'symbols' }),
+	},
+	files: {
+		id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+		project_id: { type: 'integer', dbType: 'integer' },
+	},
+} as const);
+
 function buildOrm() {
 	const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 	return createOrm({ model: testSchema.model, adapter });
+}
+
+function buildTypedCastOrm() {
+	const adapter = createPgsqlCompileOnlyAdapter({
+		model: typedCastSchema.model,
+	});
+	return createOrm({ model: typedCastSchema.model, adapter });
 }
 
 function ws(sql: string): string {
@@ -94,6 +113,79 @@ describe('FIX-250: dotted relation WHERE with any()/inArray()', () => {
 			'SELECT symbols.id FROM symbols WHERE symbols.file_id = ANY ($1)',
 		);
 		expect(dump.params).toEqual([[1, 2, 3]]);
+	});
+});
+
+describe('FIX-347: any() array casts use resolved column DB type', () => {
+	it('casts string values to integer[] for an integer root column', () => {
+		const orm = buildTypedCastOrm();
+		const dump = orm
+			.select('symbols')
+			.where(any('id', ['1', '2']))
+			.columns(['id'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.id FROM symbols WHERE symbols.id = ANY (CAST($1 AS integer[]))',
+		);
+		expect(dump.params).toEqual([['1', '2']]);
+	});
+
+	it('casts empty arrays to integer[] for an integer root column', () => {
+		const orm = buildTypedCastOrm();
+		const dump = orm
+			.select('symbols')
+			.where(any('id', []))
+			.columns(['id'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.id FROM symbols WHERE symbols.id = ANY (CAST($1 AS integer[]))',
+		);
+		expect(dump.params).toEqual([[]]);
+	});
+
+	it('casts mixed-null arrays to integer[] for an integer root column', () => {
+		const orm = buildTypedCastOrm();
+		const values = [null, '1', undefined];
+		const dump = orm
+			.select('symbols')
+			.where(any('id', values))
+			.columns(['id'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.id FROM symbols WHERE symbols.id = ANY (CAST($1 AS integer[]))',
+		);
+		expect(dump.params).toEqual([values]);
+	});
+
+	it('keeps string values as text[] for a text root column', () => {
+		const orm = buildTypedCastOrm();
+		const dump = orm
+			.select('symbols')
+			.where(any('name', ['alpha', 'beta']))
+			.columns(['name'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.name FROM symbols WHERE symbols.name = ANY (CAST($1 AS text[]))',
+		);
+		expect(dump.params).toEqual([['alpha', 'beta']]);
+	});
+
+	it('casts dotted relation string values by the related integer column type', () => {
+		const orm = buildTypedCastOrm();
+		const dump = orm
+			.select('symbols')
+			.where(any('file.project_id', ['1']))
+			.columns(['id'])
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.id FROM symbols WHERE EXISTS (SELECT 1 FROM files AS files_exists_0 WHERE symbols.file_id = files_exists_0.id AND files_exists_0.project_id = ANY (CAST($1 AS integer[])))',
+		);
+		expect(dump.params).toEqual([['1']]);
 	});
 });
 
