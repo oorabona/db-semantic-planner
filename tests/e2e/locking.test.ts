@@ -7,6 +7,7 @@
  * - Lock strengths produce correct SQL and execute against real PostgreSQL
  */
 
+import { PgsqlTransactionTimeoutError } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSchema, dropSchema } from './testkit/db.js';
@@ -234,6 +235,42 @@ describe('E15 — Row-level locking', () => {
 		} finally {
 			client1.release();
 			client2.release();
+		}
+	});
+
+	it('lock_timeout raises a typed transaction timeout under a held lock', async () => {
+		const pool = await getTestPool();
+		const holder = await pool.connect();
+		try {
+			await holder.query('BEGIN');
+			await holder.query(
+				`SELECT * FROM "${SCHEMA}".jobs WHERE id = 1 FOR UPDATE`,
+			);
+
+			const adapter = await getTestAdapter();
+			const error = await (async (): Promise<unknown> => {
+				try {
+					await adapter.transaction(
+						async (tx) => {
+							await tx.executeRaw(
+								`SELECT * FROM "${SCHEMA}".jobs WHERE id = 1 FOR UPDATE`,
+							);
+						},
+						{ lockTimeoutMs: 50 },
+					);
+				} catch (caught) {
+					return caught;
+				}
+				throw new Error('Expected lock timeout');
+			})();
+
+			expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+			expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+				'lock_timeout',
+			);
+		} finally {
+			await holder.query('ROLLBACK').catch(() => undefined);
+			holder.release();
 		}
 	});
 

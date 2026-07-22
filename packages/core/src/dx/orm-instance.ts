@@ -1,4 +1,8 @@
-import { type Adapter, supportsTransactions } from '../adapter.js';
+import {
+	type Adapter,
+	supportsTransactions,
+	type TransactionOptions,
+} from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
@@ -111,6 +115,18 @@ function createUnsupportedTransactionError(): ExecutionError {
 			'The adapter does not declare capabilities.supportsTransactions: true for this ORM instance.',
 		fix: 'Use an adapter that implements transaction() and withSchema(), and declare adapter.capabilities.supportsTransactions: true.',
 	});
+}
+
+function hasTransactionOptions(
+	options: TransactionOptions | undefined,
+): boolean {
+	return (
+		options != null &&
+		(options.isolationLevel !== undefined ||
+			options.readOnly !== undefined ||
+			options.lockTimeoutMs !== undefined ||
+			options.statementTimeoutMs !== undefined)
+	);
 }
 
 function adapterTransactionState(
@@ -786,7 +802,10 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// as awaited, by core, before the caller ever touched it. So the adapter's
 		// promise is passed through untouched. The guards still reject rather than
 		// throwing synchronously, because that is what callers already rely on.
-		transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
+		transaction<T>(
+			fn: (tx: OrmInstance<DB>) => Promise<T>,
+			options?: TransactionOptions,
+		): Promise<T> {
 			if (!adapter) {
 				return Promise.reject(
 					new Error(
@@ -798,6 +817,17 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 			if (!supportsTransactions<DB>(adapter)) {
 				return Promise.reject(createUnsupportedTransactionError());
+			}
+
+			if (
+				hasTransactionOptions(options) &&
+				adapter.capabilities.supportsTransactionOptions !== true
+			) {
+				return Promise.reject(
+					new Error(
+						'This adapter does not support transaction options (isolationLevel/readOnly/lockTimeoutMs/statementTimeoutMs); it does not declare supportsTransactionOptions.',
+					),
+				);
 			}
 
 			// Passthrough to adapter's transaction API.
@@ -830,7 +860,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						tablesProxy,
 					);
 					return fn(txOrm);
-				});
+				}, options);
 			} catch (error) {
 				return Promise.reject(error);
 			}

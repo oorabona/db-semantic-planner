@@ -16,6 +16,7 @@
  */
 
 import { type Adapter, createOrm, schema } from '@dbsp/core';
+import type { TransactionOptions } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -24,6 +25,8 @@ import {
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
+	PgsqlTransactionOptionsError,
+	PgsqlTransactionTimeoutError,
 } from '../index.js';
 import {
 	createPgsqlAdapter,
@@ -362,6 +365,304 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		expect(calls[0]).toBe('BEGIN');
 		expect(calls[calls.length - 1]).toBe('COMMIT');
 		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
+	it('composes BEGIN for each isolationLevel and readOnly option', async () => {
+		const isolationCases = [
+			{ value: undefined, clause: '' },
+			{ value: 'read committed', clause: 'ISOLATION LEVEL READ COMMITTED' },
+			{
+				value: 'repeatable read',
+				clause: 'ISOLATION LEVEL REPEATABLE READ',
+			},
+			{ value: 'serializable', clause: 'ISOLATION LEVEL SERIALIZABLE' },
+		] as const;
+		const accessModeCases = [
+			{ value: undefined, clause: '' },
+			{ value: true, clause: 'READ ONLY' },
+			{ value: false, clause: 'READ WRITE' },
+		] as const;
+
+		for (const isolation of isolationCases) {
+			for (const accessMode of accessModeCases) {
+				const txClient = makeClient();
+				const pool = makePool({ rows: [] }, txClient);
+				const adapter = createPgsqlAdapter(pool);
+				const options: TransactionOptions = {
+					...(isolation.value !== undefined && {
+						isolationLevel: isolation.value,
+					}),
+					...(accessMode.value !== undefined && {
+						readOnly: accessMode.value,
+					}),
+				};
+
+				await adapter.transaction(async () => undefined, options);
+
+				const expectedBegin = ['BEGIN', isolation.clause, accessMode.clause]
+					.filter(Boolean)
+					.join(' ');
+				const calls = queryCalls(txClient.query as ReturnType<typeof vi.fn>);
+				expect(calls[0]).toBe(expectedBegin);
+			}
+		}
+	});
+
+	it('emits clamped SET LOCAL timeout statements after BEGIN', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async () => undefined, {
+			lockTimeoutMs: 0,
+			statementTimeoutMs: 600_001,
+		});
+
+		expect(queryCalls(txClient.query as ReturnType<typeof vi.fn>)).toEqual([
+			'BEGIN',
+			"SET LOCAL lock_timeout = '1ms'",
+			"SET LOCAL statement_timeout = '600000ms'",
+			'COMMIT',
+		]);
+	});
+
+	it('rejects invalid runtime transaction option values before SQL', async () => {
+		const invalidCases = [
+			{ options: { readOnly: 'true' }, message: 'readOnly' },
+			{ options: { readOnly: null }, message: 'readOnly' },
+			{ options: { readOnly: 0 }, message: 'readOnly' },
+			{ options: { lockTimeoutMs: Number.NaN }, message: 'lockTimeoutMs' },
+			{ options: { lockTimeoutMs: Infinity }, message: 'lockTimeoutMs' },
+			{ options: { lockTimeoutMs: '5' }, message: 'lockTimeoutMs' },
+			{ options: { lockTimeoutMs: null }, message: 'lockTimeoutMs' },
+			{
+				options: { statementTimeoutMs: Number.NaN },
+				message: 'statementTimeoutMs',
+			},
+			{
+				options: { statementTimeoutMs: Infinity },
+				message: 'statementTimeoutMs',
+			},
+			{ options: { statementTimeoutMs: '5' }, message: 'statementTimeoutMs' },
+			{ options: { statementTimeoutMs: null }, message: 'statementTimeoutMs' },
+			{ options: { isolationLevel: 'bogus' }, message: 'isolationLevel' },
+		] as const;
+
+		for (const invalidCase of invalidCases) {
+			const txClient = makeClient();
+			const pool = makePool({ rows: [] }, txClient);
+			const adapter = createPgsqlAdapter(pool);
+
+			const error = await captureRejection(() =>
+				adapter.transaction(
+					async () => undefined,
+					invalidCase.options as unknown as TransactionOptions,
+				),
+			);
+
+			expect(error).toBeInstanceOf(PgsqlTransactionOptionsError);
+			expect((error as Error).message).toContain(invalidCase.message);
+			expect(pool.connect).not.toHaveBeenCalled();
+			expect(txClient.query).not.toHaveBeenCalled();
+		}
+	});
+
+	it('accepts explicit read write and clamps a zero lock timeout', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async () => undefined, {
+			readOnly: false,
+			lockTimeoutMs: 0,
+		});
+
+		expect(queryCalls(txClient.query as ReturnType<typeof vi.fn>)).toEqual([
+			'BEGIN READ WRITE',
+			"SET LOCAL lock_timeout = '1ms'",
+			'COMMIT',
+		]);
+	});
+
+	it('wraps dbsp transaction lock timeouts in a typed error', async () => {
+		const lockError = Object.assign(
+			new Error('canceling statement due to lock timeout'),
+			{
+				code: '55P03',
+			},
+		);
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT blocked') throw lockError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw('SELECT blocked');
+				},
+				{ lockTimeoutMs: 25 },
+			),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+		expect((error as Error).cause).toBe(lockError);
+		expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+			'lock_timeout',
+		);
+	});
+
+	// Classification is by SQLSTATE only (55P03/57014), gated on the option being set.
+	// PostgreSQL overloads these codes — 55P03 also = NOWAIT, 57014 also = external
+	// cancel — and exposes no locale-stable field to separate them, so a message that
+	// happens to be a NOWAIT/cancel is STILL classified as the configured timeout. This
+	// documented overlap is the price of not parsing locale-dependent message text; the
+	// original error is preserved as `cause`.
+	it('classifies a NOWAIT-shaped 55P03 as lock_timeout when lockTimeoutMs was set (SQLSTATE-only overlap)', async () => {
+		const lockError = Object.assign(
+			new Error('could not obtain lock on row in relation "x"'),
+			{
+				code: '55P03',
+			},
+		);
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT blocked') throw lockError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw('SELECT blocked');
+				},
+				{ lockTimeoutMs: 25 },
+			),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+		expect((error as Error).cause).toBe(lockError);
+		expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+			'lock_timeout',
+		);
+	});
+
+	it('classifies an external-cancel 57014 as statement_timeout when statementTimeoutMs was set (SQLSTATE-only overlap)', async () => {
+		const statementError = Object.assign(
+			new Error('canceling statement due to user request'),
+			{
+				code: '57014',
+			},
+		);
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT canceled') throw statementError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw('SELECT canceled');
+				},
+				{ statementTimeoutMs: 25 },
+			),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+		expect((error as Error).cause).toBe(statementError);
+		expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+			'statement_timeout',
+		);
+	});
+
+	it('wraps dbsp transaction statement timeouts in a typed error', async () => {
+		const statementError = Object.assign(
+			new Error('canceling statement due to statement timeout'),
+			{
+				code: '57014',
+			},
+		);
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT slow') throw statementError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw('SELECT slow');
+				},
+				{ statementTimeoutMs: 25 },
+			),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionTimeoutError);
+		expect((error as Error).cause).toBe(statementError);
+		expect((error as PgsqlTransactionTimeoutError).timeout).toBe(
+			'statement_timeout',
+		);
+	});
+
+	it('does not claim caller statement timeouts when dbsp did not set one', async () => {
+		const statementError = Object.assign(new Error('statement timeout'), {
+			code: '57014',
+		});
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT caller_timeout') throw statementError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('SELECT caller_timeout');
+			}),
+		);
+
+		expect(error).toBe(statementError);
+	});
+
+	it('does not claim lock timeouts when dbsp only set statement_timeout', async () => {
+		const lockError = Object.assign(new Error('lock timeout'), {
+			code: '55P03',
+		});
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT caller_lock_timeout') throw lockError;
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw('SELECT caller_lock_timeout');
+				},
+				{ statementTimeoutMs: 25 },
+			),
+		);
+
+		expect(error).toBe(lockError);
 	});
 
 	it('throws when COMMIT reports that PostgreSQL rolled the transaction back', async () => {
@@ -942,6 +1243,129 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			'COMMIT',
 		]);
 		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+	});
+
+	it('rejects isolationLevel and readOnly inside a true nested savepoint', async () => {
+		for (const options of [
+			{ isolationLevel: 'repeatable read' },
+			{ readOnly: false },
+		] satisfies readonly TransactionOptions[]) {
+			const client = makeClient();
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+
+			const error = await captureRejection(() =>
+				adapter.transaction(async () => undefined, options),
+			);
+
+			expect(error).toBeInstanceOf(PgsqlTransactionOptionsError);
+			expect((error as Error).message).toBe(
+				'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint',
+			);
+			expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+				expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+				expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+				expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			]);
+		}
+	});
+
+	it('restores nested savepoint timeouts before release so they do not leak', async () => {
+		let lockTimeout = '7s';
+		let statementTimeout = '12s';
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			const lockMatch = /^SET LOCAL lock_timeout = '(.+)'$/.exec(sql);
+			if (lockMatch) {
+				lockTimeout = lockMatch[1] ?? lockTimeout;
+			}
+			const statementMatch = /^SET LOCAL statement_timeout = '(.+)'$/.exec(sql);
+			if (statementMatch) {
+				statementTimeout = statementMatch[1] ?? statementTimeout;
+			}
+			if (sql === 'SHOW lock_timeout') {
+				return {
+					rows: [{ lock_timeout: lockTimeout }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			if (sql === 'SHOW statement_timeout') {
+				return {
+					rows: [{ statement_timeout: statementTimeout }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await adapter.transaction(
+			async (tx) => {
+				await tx.executeRaw('SELECT nested');
+			},
+			{ lockTimeoutMs: 10, statementTimeoutMs: 20 },
+		);
+
+		expect(lockTimeout).toBe('7s');
+		expect(statementTimeout).toBe('12s');
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SHOW lock_timeout',
+			'SHOW statement_timeout',
+			"SET LOCAL lock_timeout = '10ms'",
+			"SET LOCAL statement_timeout = '20ms'",
+			'SELECT nested',
+			"SET LOCAL lock_timeout = '7s'",
+			"SET LOCAL statement_timeout = '12s'",
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+	});
+
+	it('uses the same resolved timeout list for nested savepoint capture and apply', async () => {
+		let lockTimeout = '7s';
+		const options: TransactionOptions = { lockTimeoutMs: 10 };
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			const lockMatch = /^SET LOCAL lock_timeout = '(.+)'$/.exec(sql);
+			if (lockMatch) {
+				lockTimeout = lockMatch[1] ?? lockTimeout;
+			}
+			if (sql === 'SHOW lock_timeout') {
+				(
+					options as TransactionOptions & { statementTimeoutMs?: number }
+				).statementTimeoutMs = 20;
+				return {
+					rows: [{ lock_timeout: lockTimeout }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await adapter.transaction(async (tx) => {
+			await tx.executeRaw('SELECT nested');
+		}, options);
+
+		expect(lockTimeout).toBe('7s');
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SHOW lock_timeout',
+			"SET LOCAL lock_timeout = '10ms'",
+			'SELECT nested',
+			"SET LOCAL lock_timeout = '7s'",
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
 	});
 
 	it('rolls back to and releases the nested savepoint on failure', async () => {

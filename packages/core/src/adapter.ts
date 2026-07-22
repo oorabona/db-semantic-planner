@@ -41,6 +41,7 @@ export type {
 	SubqueryIncludeInfo,
 	TableDDLGeneratorAdapter,
 	TransactionalAdapter,
+	TransactionOptions,
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/types';
