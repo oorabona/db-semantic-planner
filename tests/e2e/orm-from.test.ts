@@ -1,4 +1,4 @@
-import { createOrm, eq, normalizeSQL } from '@dbsp/core';
+import { any, createOrm, eq, normalizeSQL } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogModel,
@@ -101,6 +101,26 @@ describe('orm.from() table-ref API', () => {
 			.all();
 
 		expect(rows).toEqual([{ id: 2, name: 'Bob Smith' }]);
+	});
+
+	it('executes from(posts).where(any("id", string ids)) against integer ids', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const { posts } = orm.tables;
+		const ids = ['1', '2'];
+
+		const query = orm
+			.from(posts)
+			.where(any('id', ids))
+			.columns(['id'])
+			.orderBy('id');
+		const dump = query.dump();
+		const rows = (await query.all()) as Array<{ id: number }>;
+
+		expect(dump.sql).toContain('CAST($1 AS integer[])');
+		expect(dump.sql).not.toContain('text[]');
+		expect(dump.params).toEqual([ids]);
+		expect(rows.map((row) => row.id)).toEqual([1, 2]);
 	});
 
 	it('composes from() with include() relation hydration', async () => {

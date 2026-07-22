@@ -3,17 +3,17 @@
  *
  * Handles: any (col = ANY($N::type[]))
  *
- * Unlike the `in` handler which omits the type cast, this handler always
- * emits an explicit `$N::type[]` cast, derived from:
- *   1. decision.dataType  (set by normalizeToDecision when schema info is available)
- *   2. Runtime value inspection of the first non-null value in the array
+ * Emits an explicit `$N::type[]` cast, derived from:
+ *   1. The target column's originalDbType from the compiler context
+ *   2. decision.dataType when no column DB type can be resolved
+ *   3. Runtime value inspection of the first non-null value in the array
  */
 
 import type { Node } from '@pgsql/types';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
-import { createParamRef } from '../../param-ref.js';
+import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -21,7 +21,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef } from './utils.js';
+import { buildColumnRef, resolveColumnPgType } from './utils.js';
 
 /**
  * Infer PostgreSQL base type from a runtime value sample.
@@ -79,24 +79,29 @@ export const anyHandler: WhereHandler = {
 		const rawValues = unwrapParamIntent(decision.values);
 		const values = Array.isArray(rawValues) ? rawValues : [];
 		const columnNode = buildColumnRef(column, ctx);
-
-		// Determine the PG base type
-		let pgBaseType: string;
-		if (decision.dataType) {
-			// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
-			pgBaseType =
-				mapModelIRTypeToPgBase(decision.dataType) ?? decision.dataType;
-		} else {
-			// Runtime inspection: find first non-null value
-			const sample = values.find((v) => v !== null && v !== undefined);
-			pgBaseType = sample !== undefined ? inferPgBaseType(sample) : 'text';
-		}
+		const columnType = resolveColumnPgType(column, ctx);
 
 		// Register the array as a single parameter
 		state.paramIndex++;
 		state.parameters.push(values);
 
-		const typedParam = createTypedArrayParam(state.paramIndex, pgBaseType);
+		let typedParam: Node;
+		if (columnType) {
+			typedParam = createTypeCastParamRef(state.paramIndex, columnType, true);
+		} else {
+			// Fallback behavior for unresolved columns/expressions.
+			let pgBaseType: string;
+			if (decision.dataType) {
+				// mapModelIRTypeToPgBase returns undefined for custom DX-050 dbType — use verbatim
+				pgBaseType =
+					mapModelIRTypeToPgBase(decision.dataType) ?? decision.dataType;
+			} else {
+				// Runtime inspection: find first non-null value
+				const sample = values.find((v) => v !== null && v !== undefined);
+				pgBaseType = sample !== undefined ? inferPgBaseType(sample) : 'text';
+			}
+			typedParam = createTypedArrayParam(state.paramIndex, pgBaseType);
+		}
 
 		return {
 			A_Expr: {
