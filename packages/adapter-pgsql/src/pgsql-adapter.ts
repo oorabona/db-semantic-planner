@@ -43,6 +43,7 @@ import type {
 	NqlBindingColumnTypeInfo,
 	NqlRuntimeBinding,
 	OutputDescriptor,
+	PinnedConnectionOptions,
 	PlanReport,
 	QueryIntent,
 	RecursivePlanReport,
@@ -212,8 +213,14 @@ const TRANSACTION_ABORTED_MESSAGE =
 const TRANSACTION_ABORT_SIGNAL_MESSAGE =
 	'transaction aborted via AbortSignal before it committed';
 
+const PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE =
+	'pinned connection aborted via AbortSignal before the callback completed';
+
 const BORROWED_TRANSACTION_ABORT_SIGNAL_MESSAGE =
 	'AbortSignal is only supported for a pool-owned top-level transaction; it cannot be used with a borrowed or nested transaction because dbsp does not own that connection.';
+
+const BORROWED_PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE =
+	'AbortSignal is only supported for a pool-owned withPinnedConnection(); it cannot be used with a borrowed or nested pinned connection because dbsp does not own that connection.';
 
 const NESTED_TRANSACTION_OPTIONS_MESSAGE =
 	'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint';
@@ -229,6 +236,9 @@ const SAVEPOINT_SCOPE_OWNER_MESSAGE =
 
 const TRANSACTION_SCOPE_ENDED_MESSAGE =
 	'This PostgreSQL transaction adapter belongs to a transaction that has ended.';
+
+const PINNED_CONNECTION_SCOPE_ENDED_MESSAGE =
+	'This PostgreSQL pinned connection adapter belongs to a withPinnedConnection() scope that has ended.';
 
 const NESTED_TRANSACTION_NOT_AWAITED_MESSAGE =
 	'Nested transactions must be awaited before the transaction callback returns.';
@@ -251,6 +261,7 @@ const pgsqlAdapterInternalOptionsKey: unique symbol = Symbol(
 
 type DbspClientScopeKind =
 	| 'transaction'
+	| 'pinned-connection'
 	| 'transaction-savepoint'
 	| 'statement-savepoint';
 
@@ -396,6 +407,15 @@ export class PgsqlTransactionAbortSignalError extends Error {
 	constructor() {
 		super(TRANSACTION_ABORT_SIGNAL_MESSAGE);
 		this.name = 'PgsqlTransactionAbortSignalError';
+	}
+}
+
+export class PgsqlPinnedConnectionAbortSignalError extends Error {
+	readonly dbspPinnedConnectionAbortSignal = true;
+
+	constructor() {
+		super(PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE);
+		this.name = 'PgsqlPinnedConnectionAbortSignalError';
 	}
 }
 
@@ -1918,6 +1938,7 @@ interface PgsqlAdapterInternalOptions
 	extends PgsqlBorrowedClientAdapterOptions {
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	readonly adapterManagedTransaction?: true;
+	readonly adapterManagedPinnedConnection?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
 	readonly dbspScopeState?: DbspScopeState;
 }
@@ -1939,6 +1960,7 @@ type PgsqlAdapterConstructionOverrides = Partial<PgsqlAdapterOptions> & {
 type PgsqlAdapterInternalConstructionOverrides =
 	PgsqlAdapterConstructionOverrides & {
 		readonly adapterManagedTransaction?: true;
+		readonly adapterManagedPinnedConnection?: true;
 		readonly dbspScopeToken?: DbspScopeToken;
 		readonly dbspScopeState?: DbspScopeState;
 	};
@@ -1982,6 +2004,15 @@ function isAdapterManagedTransactionOption(
 	return (
 		isPgsqlAdapterInternalOptions(options) &&
 		options.adapterManagedTransaction === true
+	);
+}
+
+function isAdapterManagedPinnedConnectionOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		isPgsqlAdapterInternalOptions(options) &&
+		options.adapterManagedPinnedConnection === true
 	);
 }
 
@@ -2036,6 +2067,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly borrowedClient: boolean;
 	private readonly managedTransactions: boolean;
 	private readonly adapterManagedTransaction: boolean;
+	private readonly adapterManagedPinnedConnection: boolean;
 	private readonly scopeToken: DbspScopeToken | undefined;
 	private readonly scopeState: DbspScopeState | undefined;
 	private readonly schemaName: string | undefined;
@@ -2107,6 +2139,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		this.managedTransactions = hasManagedTransactionsOption(options);
 		this.adapterManagedTransaction = isAdapterManagedTransactionOption(options);
+		this.adapterManagedPinnedConnection =
+			isAdapterManagedPinnedConnectionOption(options);
 		this.scopeToken = getDbspScopeTokenOption(options);
 		this.scopeState = getDbspScopeStateOption(options);
 
@@ -2128,6 +2162,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			supportsStreaming: supportsManagedTransactions,
 			supportsTransactions: supportsManagedTransactions,
 			supportsTransactionOptions: supportsManagedTransactions,
+			supportsPinnedConnections: supportsManagedTransactions,
 			supportsRecursiveCTE: true,
 			supportsWindowFunctions: true,
 			supportsArrayType: true,
@@ -2151,10 +2186,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			(overrides.adapterManagedTransaction ?? this.adapterManagedTransaction)
 				? true
 				: undefined;
+		const adapterManagedPinnedConnection =
+			adapterManagedTransaction === true
+				? undefined
+				: (overrides.adapterManagedPinnedConnection ??
+						this.adapterManagedPinnedConnection)
+					? true
+					: undefined;
 		const scopeToken = overrides.dbspScopeToken ?? this.scopeToken;
 		const scopeState = overrides.dbspScopeState ?? this.scopeState;
 		const hasInternalOptions =
 			adapterManagedTransaction === true ||
+			adapterManagedPinnedConnection === true ||
 			scopeToken !== undefined ||
 			scopeState !== undefined;
 		return {
@@ -2170,6 +2213,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this.borrowedClient && { borrowedClient: true as const }),
 			...(this.managedTransactions && { managedTransactions: true as const }),
 			...(adapterManagedTransaction === true && { adapterManagedTransaction }),
+			...(adapterManagedPinnedConnection === true && {
+				adapterManagedPinnedConnection,
+			}),
 			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
 			...(scopeState !== undefined && { dbspScopeState: scopeState }),
 			...overrides,
@@ -3259,6 +3305,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		mapRows: StreamRowMapper<T>,
 		options: ResolvedPgsqlTransactionBeginOptions,
 	): AsyncIterableIterator<T> {
+		if (this.adapterManagedPinnedConnection) {
+			this.assertCanUseClient(client, this.scopeToken);
+			yield* this.streamWithClientTransaction<T>(
+				client,
+				sql,
+				parameters,
+				chunkSize,
+				mapRows,
+				options,
+			);
+			return;
+		}
 		if (this.adapterManagedTransaction) {
 			this.assertCanUseClient(client, this.scopeToken);
 			if (
@@ -3481,7 +3539,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let streamRolledBackBeforeClose = false;
 		try {
 			scopeToken = createScopeToken();
-			scopeState = createScopeState();
+			scopeState = createScopeState(this.scopeState?.statementLock);
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			await this.executeScopeBoundaryStatement(
 				client,
@@ -3605,7 +3663,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				) =>
 					this.executeConnectionStatement<T>(executor, sql, parameters, {
 						protectBorrowedClientTransaction:
-							this.client !== undefined && !this.adapterManagedTransaction,
+							this.shouldProtectBorrowedClientTransaction(),
 					}),
 				sequentialCatalogReads: this.client !== undefined,
 			},
@@ -3616,6 +3674,179 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	// =========================================================================
 	// TransactionalAdapter Methods
 	// =========================================================================
+
+	withPinnedConnection<T>(
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+		options?: PinnedConnectionOptions,
+	): Promise<T> {
+		if (this.client) {
+			if (options?.signal !== undefined) {
+				return Promise.reject(
+					new PgsqlTransactionOptionsError(
+						BORROWED_PINNED_CONNECTION_ABORT_SIGNAL_MESSAGE,
+					),
+				);
+			}
+			if (this.scopeToken !== undefined && !this.adapterManagedScopeIsLive()) {
+				return Promise.reject(new Error(this.managedScopeEndedMessage()));
+			}
+			const childObserver = this.createChildTransactionObserver();
+			return this.observeChildTransaction(
+				(async () => {
+					let scopeFailure: DbspScopeFailure | undefined;
+					try {
+						return await fn(this as unknown as Adapter<DB>);
+					} catch (error) {
+						scopeFailure = { error };
+						throw error;
+					} finally {
+						childObserver?.release(scopeFailure);
+					}
+				})(),
+				childObserver,
+			);
+		}
+
+		let pool: Pool;
+		try {
+			pool = this.requireConnection() as Pool;
+		} catch (error) {
+			return Promise.reject(error);
+		}
+
+		return (async () => {
+			const signal = options?.signal;
+			if (signal?.aborted) {
+				throw new PgsqlPinnedConnectionAbortSignalError();
+			}
+			const client = await pool.connect();
+			let released = false;
+			const releaseOnce = (reason?: Error | boolean): void => {
+				if (released) return;
+				released = true;
+				this.releaseClient(client, reason);
+			};
+			const abortErr =
+				signal === undefined
+					? undefined
+					: new PgsqlPinnedConnectionAbortSignalError();
+			if (signal?.aborted) {
+				releaseOnce(abortErr);
+				throw abortErr;
+			}
+
+			let callbackSettled = false;
+			let onAbort: (() => void) | undefined;
+			const removeAbortListener = (): void => {
+				if (signal === undefined || onAbort === undefined) return;
+				signal.removeEventListener('abort', onAbort);
+				onAbort = undefined;
+			};
+			const abortPromise =
+				signal === undefined || abortErr === undefined
+					? undefined
+					: new Promise<never>((_, reject) => {
+							onAbort = () => {
+								if (callbackSettled) return;
+								try {
+									releaseOnce(abortErr);
+								} catch {
+									// abort() must never throw out of the caller's stack.
+								}
+								reject(abortErr);
+							};
+							signal.addEventListener('abort', onAbort, { once: true });
+						});
+
+			let caughtError: unknown;
+			try {
+				const pinnedPromise = this.pinnedConnectionWithClient(
+					client,
+					async (pinnedAdapter) => {
+						try {
+							return await fn(pinnedAdapter);
+						} finally {
+							callbackSettled = true;
+						}
+					},
+				);
+				void pinnedPromise.catch(() => undefined);
+				return await (abortPromise === undefined
+					? pinnedPromise
+					: Promise.race([pinnedPromise, abortPromise]));
+			} catch (error) {
+				caughtError = error;
+				throw error;
+			} finally {
+				removeAbortListener();
+				if (!released) {
+					releaseOnce(this.pinnedConnectionReleaseReason(caughtError));
+				}
+			}
+		})();
+	}
+
+	private pinnedConnectionReleaseReason(
+		error: unknown,
+	): Error | boolean | undefined {
+		if (isRawSqlTransactionControlError(error)) {
+			return error instanceof Error ? error : true;
+		}
+		return cleanupReleaseReason(error);
+	}
+
+	private async pinnedConnectionWithClient<T>(
+		client: PoolClient,
+		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		childObserver?: DbspChildTransactionObserver,
+	): Promise<T> {
+		let releaseScope: ((failure?: DbspScopeFailure) => void) | undefined;
+		let scopeFailure: DbspScopeFailure | undefined;
+		let scopeToken: DbspScopeToken | undefined;
+		let scopeState: DbspScopeState | undefined;
+		try {
+			scopeToken = createScopeToken();
+			scopeState = createScopeState();
+			releaseScope = this.enterPinnedConnectionScope(
+				client,
+				scopeToken,
+				scopeState,
+				childObserver,
+			);
+			const pinnedAdapter = this.createPinnedConnectionAdapter(
+				client,
+				scopeToken,
+				scopeState,
+			);
+			const result = await fn(pinnedAdapter);
+			this.closeScopeAndAssertChildren(scopeState);
+			await this.drainScopeWork(scopeState);
+			this.throwIfScopePoisoned(scopeState);
+			return result;
+		} catch (error) {
+			let pinnedError = error;
+			try {
+				this.closeScopeAndAssertChildren(scopeState);
+			} catch (scopeError) {
+				pinnedError = scopeError;
+			}
+			await this.drainScopeChildren(scopeState);
+			if (scopeState !== undefined) {
+				await this.drainScopeWork(scopeState);
+				pinnedError = this.scopePoisonOutranksError(scopeState, pinnedError);
+			}
+			scopeFailure = { error: pinnedError };
+			throw pinnedError;
+		} finally {
+			if (releaseScope === undefined) {
+				if (scopeFailure !== undefined) {
+					childObserver?.release(scopeFailure);
+				}
+			} else {
+				releaseScope(scopeFailure);
+			}
+		}
+	}
 
 	/**
 	 * Execute a callback within a database transaction.
@@ -3668,6 +3899,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							'This connection is yours, so the transaction is yours. Pass managedTransactions: true ' +
 							'to let dbsp run transactions on it through a savepoint, and read the managedTransactions option documentation for the limits of that contract.',
 					),
+				);
+			}
+			if (this.adapterManagedPinnedConnection) {
+				return this.observeChildTransaction(
+					this.transactionWithClientTransaction(
+						this.client,
+						fn,
+						childObserver,
+						'commit',
+						resolvedOptions,
+					),
+					childObserver,
 				);
 			}
 			return this.observeChildTransaction(
@@ -3833,6 +4076,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				borrowedClient: true,
 				managedTransactions: true,
 				adapterManagedTransaction: true,
+				dbspScopeToken: scopeToken,
+				dbspScopeState: scopeState,
+			}),
+		);
+	}
+
+	private createPinnedConnectionAdapter(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+	): PgsqlAdapter<DB> {
+		return createPgsqlAdapterFromConstructionOptions<DB>(
+			client,
+			this.cloneOptions({
+				borrowedClient: true,
+				managedTransactions: true,
+				adapterManagedPinnedConnection: true,
 				dbspScopeToken: scopeToken,
 				dbspScopeState: scopeState,
 			}),
@@ -4233,7 +4493,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let transactionRolledBackBeforeClose = false;
 		try {
 			scopeToken = createScopeToken();
-			scopeState = createScopeState();
+			scopeState = createScopeState(this.scopeState?.statementLock);
 			releaseScope = this.enterTransactionScope(
 				client,
 				scopeToken,
@@ -4651,12 +4911,48 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (current.token !== this.scopeToken) {
 				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 			}
+			if (current.kind === 'pinned-connection') {
+				return this.pushClientScope(
+					client,
+					{
+						kind: 'transaction',
+						token: scopeToken,
+						state: scopeState,
+					},
+					childObserver,
+				);
+			}
 			throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
 		}
 		return this.pushClientScope(
 			client,
 			{
 				kind: 'transaction',
+				token: scopeToken,
+				state: scopeState,
+			},
+			childObserver,
+		);
+	}
+
+	private enterPinnedConnectionScope(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+		childObserver?: DbspChildTransactionObserver,
+	): (failure?: DbspScopeFailure) => void {
+		const current = this.currentClientScope(client);
+		if (current !== undefined) {
+			if (current.state.closing) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
+			this.assertScopeNotPoisoned(current);
+			throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
+		}
+		return this.pushClientScope(
+			client,
+			{
+				kind: 'pinned-connection',
 				token: scopeToken,
 				state: scopeState,
 			},
@@ -4748,6 +5044,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return activeClientScopes.get(client)?.at(-1);
 	}
 
+	private managedScopeEndedMessage(): string {
+		return this.adapterManagedPinnedConnection
+			? PINNED_CONNECTION_SCOPE_ENDED_MESSAGE
+			: TRANSACTION_SCOPE_ENDED_MESSAGE;
+	}
+
 	private assertCanUseClient(
 		client: PoolClient,
 		allowedScopeToken = this.scopeToken,
@@ -4769,7 +5071,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				allowPoisonedScope,
 			);
 			if (current.state.closing && !allowClosingScope) {
-				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+				throw new Error(this.managedScopeEndedMessage());
 			}
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(current);
@@ -4778,7 +5080,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		const allowedScope = this.findClientScope(client, allowedScopeToken);
 		if (allowedScope?.state.closing && !allowClosingScope) {
-			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			throw new Error(this.managedScopeEndedMessage());
 		}
 		if (allowAncestorScopeToken && allowedScope !== undefined) {
 			this.assertUsableScopeAncestors(
@@ -4793,7 +5095,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			return;
 		}
 		if (allowedScope === undefined) {
-			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			throw new Error(this.managedScopeEndedMessage());
 		}
 		throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 	}
@@ -4808,7 +5110,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const ancestor = stack[index];
 			if (ancestor === undefined) continue;
 			if (ancestor.state.closing && !allowClosingScope) {
-				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+				throw new Error(this.managedScopeEndedMessage());
 			}
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(ancestor);
@@ -5114,13 +5416,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	get inTransaction(): boolean {
 		if (this.adapterManagedTransaction) return this.adapterManagedScopeIsLive();
+		if (this.adapterManagedPinnedConnection) return false;
 		if (this.client === undefined) return false;
 		return poolClientTransactionOpen(this.client) !== false;
 	}
 
 	private adapterManagedScopeIsLive(): boolean {
 		if (
-			!this.adapterManagedTransaction ||
+			(!this.adapterManagedTransaction &&
+				!this.adapterManagedPinnedConnection) ||
 			this.client === undefined ||
 			this.scopeToken === undefined ||
 			this.scopeState === undefined
@@ -5130,6 +5434,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return (
 			this.findClientScope(this.client, this.scopeToken)?.state ===
 			this.scopeState
+		);
+	}
+
+	private shouldProtectBorrowedClientTransaction(): boolean {
+		return (
+			this.client !== undefined &&
+			!this.adapterManagedTransaction &&
+			!this.adapterManagedPinnedConnection
 		);
 	}
 
@@ -5147,7 +5459,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			{
 				...options,
 				protectBorrowedClientTransaction:
-					this.client !== undefined && !this.adapterManagedTransaction,
+					this.shouldProtectBorrowedClientTransaction(),
 			},
 		);
 	}

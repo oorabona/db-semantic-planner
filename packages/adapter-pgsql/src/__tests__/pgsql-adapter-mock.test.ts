@@ -352,6 +352,161 @@ describe('@dbsp/adapter-pgsql public API', () => {
 	});
 });
 
+describe('PgsqlAdapter.withPinnedConnection', () => {
+	it('pins pool-owned work to one client and releases once on success', async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			return { rows: [{ sql }], rowCount: 1, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [{ sql: 'pool' }] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		const result = await adapter.withPinnedConnection(async (pinned) => {
+			await pinned.execute(testQuery('SELECT compiled'));
+			return pinned.executeRaw('SELECT raw');
+		});
+
+		expect(result).toEqual([{ sql: 'SELECT raw' }]);
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalled();
+		expect(queryCalls(query)).toEqual(['SELECT compiled', 'SELECT raw']);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+			[],
+		);
+	});
+
+	it('releases a pool-owned pinned client exactly once when the callback throws', async () => {
+		const boom = new Error('pinned callback failed');
+		const client = makeClient(async () => ({
+			rows: [],
+			rowCount: 0,
+			command: 'SELECT',
+		}));
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		await expect(
+			adapter.withPinnedConnection(async (pinned) => {
+				await pinned.executeRaw('SELECT before throw');
+				throw boom;
+			}),
+		).rejects.toBe(boom);
+
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+			'SELECT before throw',
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
+			[],
+		);
+	});
+
+	it('runs a borrowed-client callback on this adapter without releasing it', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		let callbackAdapter: Adapter | undefined;
+
+		const result = await adapter.withPinnedConnection(async (pinned) => {
+			callbackAdapter = pinned;
+			return 'ok';
+		});
+
+		expect(result).toBe('ok');
+		expect(callbackAdapter).toBe(adapter);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rejects AbortSignal on a borrowed-client pinned adapter', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		await expect(
+			adapter.withPinnedConnection(async () => undefined, {
+				signal: new AbortController().signal,
+			}),
+		).rejects.toThrow('pool-owned withPinnedConnection()');
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rejects a pinned adapter retained after the callback returns', async () => {
+		const client = makeClient(async () => ({
+			rows: [],
+			rowCount: 0,
+			command: 'SELECT',
+		}));
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+		let leaked: Adapter | undefined;
+
+		await adapter.withPinnedConnection(async (pinned) => {
+			leaked = pinned;
+			await pinned.executeRaw('SELECT inside');
+		});
+
+		if (leaked === undefined) {
+			throw new Error('Expected pinned adapter to be captured');
+		}
+		await expect(leaked.executeRaw('SELECT late')).rejects.toThrow(
+			'pinned connection adapter',
+		);
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+			'SELECT inside',
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+	});
+
+	it('preserves withSchema() and dbCasing on the pinned adapter', async () => {
+		const client = makeClient(async () => ({
+			rows: [],
+			rowCount: 0,
+			command: 'SELECT',
+		}));
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+
+		await adapter.withPinnedConnection(async (pinned) => {
+			const pgPinned = pinned as unknown as PgsqlAdapter;
+			expect(pgPinned.dbCasing).toBe('snake_case');
+			const scoped = pgPinned.withSchema('tenant_1') as unknown as PgsqlAdapter;
+			expect(scoped.dbCasing).toBe('snake_case');
+			expect(scoped.generateTruncate('items')).toBe(
+				'TRUNCATE "tenant_1"."items"',
+			);
+			await scoped.executeRaw('SELECT scoped');
+		});
+
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+			'SELECT scoped',
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+	});
+
+	it('runs pinned.transaction() as a real transaction on the same client', async () => {
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			const command = sql === 'BEGIN' || sql === 'COMMIT' ? sql : 'SELECT';
+			return { rows: [], rowCount: 0, command } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.withPinnedConnection(async (pinned) => {
+			await pinned.transaction(async (tx) => {
+				await tx.executeRaw('SELECT in tx');
+			});
+		});
+
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalled();
+		expect(queryCalls(query)).toEqual(['BEGIN', 'SELECT in tx', 'COMMIT']);
+		expect(client.release).toHaveBeenCalledOnce();
+	});
+});
+
 describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 	it('issues BEGIN before calling fn and COMMIT after', async () => {
 		const queryMock = vi.fn().mockResolvedValue({ rows: [] });

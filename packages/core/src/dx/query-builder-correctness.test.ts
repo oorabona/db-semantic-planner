@@ -3,6 +3,7 @@
  * Covers FIND-016 through FIND-020.
  */
 
+import type { PinnedConnectionOptions } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, Dump, TransactionOptions } from '../adapter.js';
 import { createHookManager } from './hooks.js';
@@ -238,6 +239,25 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 			expect.any(Function),
 			allUndefinedOptions,
 		);
+	});
+	it('withPinnedConnection() rejects unless the adapter declares support', async () => {
+		const baseAdapter = createSpyAdapter();
+		const pinnedSpy = vi.fn(
+			async (
+				fn: (pinnedAdapter: Adapter) => Promise<unknown>,
+				_options?: PinnedConnectionOptions,
+			) => fn(baseAdapter),
+		);
+		const adapter = {
+			...baseAdapter,
+			withPinnedConnection: pinnedSpy,
+		} as unknown as Adapter;
+		const orm = createOrm({ adapter, schema: simpleSchema });
+
+		await expect(orm.withPinnedConnection(async () => 'ok')).rejects.toThrow(
+			'capabilities.supportsPinnedConnections: true',
+		);
+		expect(pinnedSpy).not.toHaveBeenCalled();
 	});
 	it('transaction() and stream() delegate when the adapter declares both capabilities', async () => {
 		const baseAdapter = createSpyAdapter([{ id: 1 }]);

@@ -78,6 +78,12 @@ export interface AdapterCapabilities {
 	 * core rejects non-empty options.
 	 */
 	readonly supportsTransactionOptions?: boolean;
+	/**
+	 * When true, the adapter can pin one physical connection for a bounded
+	 * callback via withPinnedConnection(). When absent/false, core rejects
+	 * withPinnedConnection().
+	 */
+	readonly supportsPinnedConnections?: boolean;
 	readonly supportsRecursiveCTE: boolean;
 	readonly supportsWindowFunctions: boolean;
 	readonly supportsArrayType: boolean;
@@ -160,6 +166,10 @@ export interface TransactionBeginOptions {
 }
 
 export interface TransactionOptions extends TransactionBeginOptions {
+	readonly signal?: AbortSignal;
+}
+
+export interface PinnedConnectionOptions {
 	readonly signal?: AbortSignal;
 }
 
@@ -675,6 +685,15 @@ export interface TransactionalAdapter<DB = unknown> extends BaseAdapter {
 		options?: TransactionOptions,
 	): Promise<T>;
 
+	/**
+	 * Execute a callback on one pinned physical connection without opening a
+	 * transaction.
+	 */
+	withPinnedConnection?<T>(
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+		options?: PinnedConnectionOptions,
+	): Promise<T>;
+
 	/** Create a schema-scoped adapter for multi-tenant queries. */
 	withSchema(schemaName: string): Adapter<DB>;
 }
@@ -906,6 +925,7 @@ export type CompileOnlyAdapter = CompilingAdapter &
 		readonly streamRaw?: never;
 		readonly introspect?: never;
 		readonly transaction?: never;
+		readonly withPinnedConnection?: never;
 		readonly executeRaw?: never;
 		readonly executeDDL?: never;
 	};

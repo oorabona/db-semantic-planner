@@ -55,6 +55,7 @@ describe('PgsqlAdapter', () => {
 				supportsStreaming: true,
 				supportsTransactions: true,
 				supportsTransactionOptions: true,
+				supportsPinnedConnections: true,
 				supportsRecursiveCTE: true,
 				supportsWindowFunctions: true,
 				supportsArrayType: true,
