@@ -7,6 +7,7 @@ import type {
 import type { DbCasing } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import { setLocalTransactionTimeoutSql } from '../transaction-timeouts.js';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
@@ -97,6 +98,7 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 }
 
 function boundedLockTimeout(maxWaitMs: number): number {
+	// Generic coordinator bounds are intentional: [0, 86_400_000], with 0 disabling the timeout.
 	if (!Number.isFinite(maxWaitMs)) {
 		return 5000;
 	}
@@ -127,7 +129,10 @@ function createPgExecutionCoordinator(): ExecutionCoordinator {
 		},
 		async setLockTimeout(client: TransitionExecutionClient, maxWaitMs: number) {
 			await clientQuery(client).query(
-				`SET LOCAL lock_timeout = '${boundedLockTimeout(maxWaitMs)}ms'`,
+				setLocalTransactionTimeoutSql(
+					'lock_timeout',
+					`${boundedLockTimeout(maxWaitMs)}ms`,
+				),
 			);
 		},
 		async commit(client: TransitionExecutionClient) {

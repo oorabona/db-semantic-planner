@@ -47,11 +47,20 @@ export function quotePgLiteral(value: string): string {
 	return `'${value.replaceAll("'", "''")}'`;
 }
 
+export function setTransactionTimeoutSql(
+	parameter: PgsqlTransactionTimeoutParameter,
+	value: string,
+	options: { local: boolean },
+): string {
+	const command = options.local ? 'SET LOCAL' : 'SET';
+	return `${command} ${parameter} = ${quotePgLiteral(value)}`;
+}
+
 export function setLocalTransactionTimeoutSql(
 	parameter: PgsqlTransactionTimeoutParameter,
 	value: string,
 ): string {
-	return `SET LOCAL ${parameter} = ${quotePgLiteral(value)}`;
+	return setTransactionTimeoutSql(parameter, value, { local: true });
 }
 
 export function transactionTimeoutStatements(
