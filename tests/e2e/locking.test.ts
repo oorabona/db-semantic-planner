@@ -13,8 +13,14 @@ import {
 } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { MIGRATION_LOCK_KEY } from '../../packages/adapter-pgsql/src/ddl/migration-tracker.js';
 import { createSchema, dropSchema } from './testkit/db.js';
-import { closeTestDb, getTestAdapter, getTestPool } from './testkit/index.js';
+import {
+	closeTestDb,
+	getPgsqlAdapter,
+	getTestAdapter,
+	getTestPool,
+} from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
 // ============================================================================
@@ -123,6 +129,57 @@ describe('E15 — Row-level locking', () => {
 		} finally {
 			await pool.query('SELECT pg_advisory_unlock($1, $2)', [...key]);
 		}
+	});
+
+	it('withAdvisoryLock holds and releases an exclusive session-level lock', async () => {
+		const adapter = await getPgsqlAdapter();
+		const pool = await getTestPool();
+		const key = 341_000_001n;
+
+		const result = await adapter.withAdvisoryLock(key, async () => {
+			const contender = await pool.connect();
+			try {
+				const second = await contender.query<{ locked: boolean }>(
+					'SELECT pg_try_advisory_lock($1) AS locked',
+					[key],
+				);
+				expect(second.rows[0]?.locked).toBe(false);
+			} finally {
+				contender.release();
+			}
+			return 'held';
+		});
+
+		expect(result).toBe('held');
+
+		const after = await pool.connect();
+		let reacquired = false;
+		try {
+			const lock = await after.query<{ locked: boolean }>(
+				'SELECT pg_try_advisory_lock($1) AS locked',
+				[key],
+			);
+			reacquired = lock.rows[0]?.locked === true;
+			expect(reacquired).toBe(true);
+		} finally {
+			try {
+				if (reacquired) {
+					await after.query('SELECT pg_advisory_unlock($1)', [key]);
+				}
+			} finally {
+				after.release();
+			}
+		}
+	});
+
+	it('pins the migration advisory key to PostgreSQL hashtext', async () => {
+		const pool = await getTestPool();
+
+		const result = await pool.query<{ key: string | number }>(
+			"SELECT hashtext('dbsp_migrate')::bigint AS key",
+		);
+
+		expect(BigInt(String(result.rows[0]?.key))).toBe(MIGRATION_LOCK_KEY);
 	});
 
 	it('FOR SHARE executes without error', async () => {

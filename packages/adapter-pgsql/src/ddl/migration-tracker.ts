@@ -6,6 +6,7 @@
  */
 
 import type { Pool, PoolClient } from 'pg';
+import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Types
@@ -30,6 +31,12 @@ export interface MigrationRecord {
 
 const MIGRATIONS_TABLE = '_dbsp_migrations';
 
+// hashtext('dbsp_migrate') = -1232477147 (int4) -> the bigint advisory key.
+// Locked by an e2e test that asserts SELECT hashtext('dbsp_migrate')::bigint
+// equals this value, so a future PostgreSQL hashtext change is caught before it
+// silently splits old and new migration runners into separate lock namespaces.
+export const MIGRATION_LOCK_KEY = -1232477147n;
+
 const CREATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS "${MIGRATIONS_TABLE}" (
   "id" serial PRIMARY KEY,
@@ -45,26 +52,22 @@ CREATE TABLE IF NOT EXISTS "${MIGRATIONS_TABLE}" (
 // ============================================================================
 
 /**
- * Execute a callback under an advisory lock using a dedicated client.
+ * Execute a callback under the migration advisory lock using a pinned client.
  * The lock is held for the duration of the callback.
- * The client is released (and lock freed) after the callback completes.
+ *
+ * Intentional latent-bug fix: session-level advisory locks are not freed by
+ * returning a PoolClient to pg's pool. If unlock fails, PgsqlAdapter destroys the
+ * session instead of returning a possibly lock-holding connection to the pool.
  */
 export async function withMigrationLock<T>(
 	pool: Pool,
 	fn: (client: PoolClient) => Promise<T>,
 ): Promise<T> {
-	const client = await pool.connect();
-	try {
-		await client.query(`SELECT pg_advisory_lock(hashtext('dbsp_migrate'))`);
-		return await fn(client);
-	} finally {
-		await client
-			.query(`SELECT pg_advisory_unlock(hashtext('dbsp_migrate'))`)
-			.catch(() => {
-				/* unlock failure is non-fatal — lock freed on client.release() */
-			});
-		client.release();
-	}
+	return createPgsqlAdapter(pool).withAdvisoryLock(
+		MIGRATION_LOCK_KEY,
+		async (locked) =>
+			fn((locked as PgsqlAdapter<unknown>).getPoolInstance() as PoolClient),
+	);
 }
 
 // ============================================================================
