@@ -125,7 +125,8 @@ function hasTransactionOptions(
 		(options.isolationLevel !== undefined ||
 			options.readOnly !== undefined ||
 			options.lockTimeoutMs !== undefined ||
-			options.statementTimeoutMs !== undefined)
+			options.statementTimeoutMs !== undefined ||
+			options.signal !== undefined)
 	);
 }
 
@@ -825,7 +826,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			) {
 				return Promise.reject(
 					new Error(
-						'This adapter does not support transaction options (isolationLevel/readOnly/lockTimeoutMs/statementTimeoutMs); it does not declare supportsTransactionOptions.',
+						'This adapter does not support transaction options (isolationLevel/readOnly/lockTimeoutMs/statementTimeoutMs/signal); it does not declare supportsTransactionOptions.',
 					),
 				);
 			}

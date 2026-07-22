@@ -25,6 +25,7 @@ import {
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
+	PgsqlTransactionAbortSignalError,
 	PgsqlTransactionOptionsError,
 	PgsqlTransactionTimeoutError,
 } from '../index.js';
@@ -446,6 +447,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			{ options: { statementTimeoutMs: '5' }, message: 'statementTimeoutMs' },
 			{ options: { statementTimeoutMs: null }, message: 'statementTimeoutMs' },
 			{ options: { isolationLevel: 'bogus' }, message: 'isolationLevel' },
+			{ options: { signal: 'x' }, message: 'signal' },
 		] as const;
 
 		for (const invalidCase of invalidCases) {
@@ -482,6 +484,76 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			"SET LOCAL lock_timeout = '1ms'",
 			'COMMIT',
 		]);
+	});
+
+	it('rejects a pre-aborted signal before acquiring a client', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await expect(
+			adapter.transaction(async () => undefined, {
+				signal: AbortSignal.abort(),
+			}),
+		).rejects.toBeInstanceOf(PgsqlTransactionAbortSignalError);
+
+		expect(pool.connect).not.toHaveBeenCalled();
+		expect(txClient.query).not.toHaveBeenCalled();
+		expect(txClient.release).not.toHaveBeenCalled();
+	});
+
+	it('destroys the pool-owned client exactly once when the signal aborts during fn', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const controller = new AbortController();
+		const fnStarted = deferred();
+
+		const transaction = adapter.transaction(
+			async () => {
+				fnStarted.resolve();
+				await new Promise<never>(() => undefined);
+			},
+			{ signal: controller.signal },
+		);
+		void transaction.catch(() => undefined);
+
+		await fnStarted.promise;
+		setTimeout(() => controller.abort(), 0);
+		const error = await captureRejection(() => transaction);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionAbortSignalError);
+		expect(txClient.release).toHaveBeenCalledOnce();
+		expect(
+			(txClient.release as ReturnType<typeof vi.fn>).mock.calls[0],
+		).toEqual([error]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(txClient.release).toHaveBeenCalledOnce();
+		expect(queryCalls(txClient.query as ReturnType<typeof vi.fn>)).toEqual([
+			'BEGIN',
+		]);
+	});
+
+	it('ignores aborts after COMMIT has started', async () => {
+		const controller = new AbortController();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'COMMIT') controller.abort();
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await expect(
+			adapter.transaction(async () => 'ok', { signal: controller.signal }),
+		).resolves.toBe('ok');
+
+		expect(queryCalls(query)).toEqual(['BEGIN', 'COMMIT']);
+		expect(txClient.release).toHaveBeenCalledOnce();
+		expect(
+			(txClient.release as ReturnType<typeof vi.fn>).mock.calls[0],
+		).toEqual([]);
 	});
 
 	it('wraps dbsp transaction lock timeouts in a typed error', async () => {
@@ -1792,6 +1864,43 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			/managedTransactions: true/,
 		);
 		expect(client.query).not.toHaveBeenCalled();
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rejects AbortSignal for an unmanaged borrowed client before SQL', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const signal = new AbortController().signal;
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => undefined, { signal }),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionOptionsError);
+		expect((error as Error).message).toContain(
+			'AbortSignal is only supported for a pool-owned top-level transaction',
+		);
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rejects AbortSignal for a managed borrowed client before SAVEPOINT', async () => {
+		const client = Object.assign(makeClient(), { _txStatus: 'T' });
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const signal = new AbortController().signal;
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => undefined, { signal }),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionOptionsError);
+		expect((error as Error).message).toContain(
+			'AbortSignal is only supported for a pool-owned top-level transaction',
+		);
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 

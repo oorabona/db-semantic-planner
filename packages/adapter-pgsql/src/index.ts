@@ -173,6 +173,7 @@ export {
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
+	PgsqlTransactionAbortSignalError,
 	PgsqlTransactionOptionsError,
 	PgsqlTransactionTimeoutError,
 } from './pgsql-adapter.js';

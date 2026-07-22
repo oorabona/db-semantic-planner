@@ -216,11 +216,19 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 		).rejects.toThrow('does not support transaction options');
 		expect(transactionSpy).not.toHaveBeenCalled();
 
+		await expect(
+			orm.transaction(async () => 'ok', {
+				signal: new AbortController().signal,
+			}),
+		).rejects.toThrow('does not support transaction options');
+		expect(transactionSpy).not.toHaveBeenCalled();
+
 		const allUndefinedOptions = {
 			isolationLevel: undefined,
 			readOnly: undefined,
 			lockTimeoutMs: undefined,
 			statementTimeoutMs: undefined,
+			signal: undefined,
 		} as unknown as TransactionOptions;
 
 		await expect(
