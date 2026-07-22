@@ -8,13 +8,14 @@
  * @since R01
  */
 
+import type { TransactionBeginOptions } from '@dbsp/types';
 import type { Dump } from '../adapter.js';
 
 /**
  * Options for streaming query execution.
  * Options for configuring streaming behavior.
  */
-export interface StreamOptions {
+export interface StreamOptions extends TransactionBeginOptions {
 	/**
 	 * Number of rows to fetch per batch from the database.
 	 * Only affects PostgreSQL with pg-cursor configured.
@@ -27,6 +28,9 @@ export interface StreamOptions {
 	 * Receives the query dump for observability/logging.
 	 */
 	readonly onStart?: (dump: Dump) => void;
+
+	/** AbortSignal is intentionally unsupported by stream-owned transactions. */
+	readonly signal?: never;
 }
 
 /**
