@@ -827,3 +827,76 @@ describe('orm-instance coverage', () => {
 		});
 	});
 });
+
+describe('orm.inTransaction', () => {
+	const model = new ModelIRImpl(
+		new Map<string, TableIR>([
+			[
+				'users',
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]),
+		new Map(),
+	);
+
+	// A mock adapter that reports a fixed transaction state and preserves it across
+	// withSchema() — mirrors a real adapter that shares one connection.
+	const txAwareMock = (inTx: boolean) => {
+		const adapter = createMockAdapter();
+		(adapter as { inTransaction: boolean }).inTransaction = inTx;
+		adapter.withSchema = () => txAwareMock(inTx);
+		return adapter;
+	};
+
+	it('is false for a top-level instance on an idle connection', () => {
+		const orm = createOrmInstance(model, false, undefined, createMockAdapter());
+		expect(orm.inTransaction).toBe(false);
+	});
+
+	it('reflects an adapter already inside a caller-owned transaction', () => {
+		// A top-level ORM (construction flag undefined) built on an adapter that is
+		// ALREADY mid-transaction must report true — the connection IS in a transaction,
+		// which the construction flag alone cannot see.
+		const orm = createOrmInstance(model, false, undefined, txAwareMock(true));
+		expect(orm.inTransaction).toBe(true);
+	});
+
+	it('is true for the instance passed to a transaction() callback', async () => {
+		const adapter = createMockAdapter();
+		(
+			adapter.capabilities as { supportsTransactions: boolean }
+		).supportsTransactions = true;
+		// Pass-through: dbsp's inner fn runs with a tx adapter whose connection is in a BEGIN.
+		adapter.transaction = ((fn: (a: unknown) => unknown) =>
+			Promise.resolve(fn(txAwareMock(true)))) as typeof adapter.transaction;
+
+		const orm = createOrmInstance(model, false, undefined, adapter);
+		let observed: boolean | undefined;
+		await orm.transaction(async (tx) => {
+			observed = tx.inTransaction;
+		});
+
+		expect(observed).toBe(true);
+		// The outer top-level instance is on an idle connection.
+		expect(orm.inTransaction).toBe(false);
+	});
+
+	it('preserves the connection transaction state across withSchema()', () => {
+		expect(
+			createOrmInstance(model, false, undefined, txAwareMock(true)).withSchema(
+				'blog',
+			).inTransaction,
+		).toBe(true);
+		expect(
+			createOrmInstance(model, false, undefined, txAwareMock(false)).withSchema(
+				'blog',
+			).inTransaction,
+		).toBe(false);
+	});
+});

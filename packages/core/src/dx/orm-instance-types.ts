@@ -437,6 +437,27 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	readonly strictMode: boolean;
 
 	/**
+	 * Whether the connection backing this ORM instance is inside a transaction.
+	 *
+	 * Reflects the backing adapter's real transaction state: `true` inside a
+	 * {@link OrmInstance.transaction} callback, and also `true` for a top-level
+	 * instance built on an adapter that is ALREADY inside a caller-owned
+	 * transaction (e.g. a borrowed pg client mid-`BEGIN`); `false` otherwise.
+	 *
+	 * Callers use this to enforce a top-level precondition: an operation whose
+	 * effects a caller's outer rollback must not silently undo — DDL that cannot
+	 * be nested, or a process-level cache that would go stale if the surrounding
+	 * transaction rolls back — can fail closed when the connection is already in a
+	 * transaction instead of assuming it owns the top-level transaction.
+	 *
+	 * Optional for backward compatibility: instances produced by `createOrm`
+	 * always populate it, but a pre-existing hand-built `OrmInstance` double may
+	 * omit it (reads as `undefined`), so a fail-closed caller should treat a
+	 * non-`true` value it cannot confirm accordingly.
+	 */
+	readonly inTransaction?: boolean;
+
+	/**
 	 * Create a schema-scoped ORM instance.
 	 * All queries from the returned instance will include the schema prefix.
 	 * Type information is preserved in the returned instance.

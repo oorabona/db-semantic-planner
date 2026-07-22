@@ -523,6 +523,22 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 	return {
 		strictMode,
+		// Reflect the REAL transaction state of the backing adapter so callers can
+		// enforce a top-level precondition. This is authoritative even when the ORM
+		// was handed an adapter ALREADY inside a caller-owned transaction (e.g. a
+		// borrowed pg client mid-BEGIN): the adapter tracks the connection's actual
+		// state, which dbsp's construction-time nesting flag alone cannot see. Falls
+		// back to that flag only when no adapter exposes the state (e.g. a compile-only
+		// ORM). withSchema/transaction() re-derive it from their own (scoped/tx)
+		// adapter, so every instance reports the state of the connection it uses.
+		get inTransaction(): boolean {
+			const adapterState = (
+				adapter as { readonly inTransaction?: unknown } | undefined
+			)?.inTransaction;
+			return typeof adapterState === 'boolean'
+				? adapterState
+				: (inTransaction ?? false);
+		},
 		nql,
 		tables: tablesDDLProxy as OrmInstance<DB>['tables'],
 		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
