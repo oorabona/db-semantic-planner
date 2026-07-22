@@ -7,7 +7,10 @@
  * - Lock strengths produce correct SQL and execute against real PostgreSQL
  */
 
-import { PgsqlTransactionTimeoutError } from '@dbsp/adapter-pgsql';
+import {
+	PgsqlTransactionAbortSignalError,
+	PgsqlTransactionTimeoutError,
+} from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createSchema, dropSchema } from './testkit/db.js';
@@ -272,6 +275,55 @@ describe('E15 — Row-level locking', () => {
 			await holder.query('ROLLBACK').catch(() => undefined);
 			holder.release();
 		}
+	});
+
+	it('AbortSignal destroys a pool-owned transaction blocked on a row lock', async () => {
+		const pool = await getTestPool();
+		const holder = await pool.connect();
+		const adapter = await getTestAdapter();
+		const controller = new AbortController();
+		let abortTimer: ReturnType<typeof setTimeout> | undefined;
+
+		try {
+			await holder.query('BEGIN');
+			await holder.query(
+				`SELECT * FROM "${SCHEMA}".jobs WHERE id = 1 FOR UPDATE`,
+			);
+
+			abortTimer = setTimeout(() => controller.abort(), 50);
+			const error = await (async (): Promise<unknown> => {
+				try {
+					await adapter.transaction(
+						async (tx) => {
+							await tx.executeRaw(
+								`SELECT * FROM "${SCHEMA}".jobs WHERE id = 1 FOR UPDATE`,
+							);
+						},
+						{ signal: controller.signal },
+					);
+				} catch (caught) {
+					return caught;
+				}
+				throw new Error('Expected AbortSignal transaction abort');
+			})();
+
+			expect(error).toBeInstanceOf(PgsqlTransactionAbortSignalError);
+		} finally {
+			if (abortTimer !== undefined) clearTimeout(abortTimer);
+			await holder.query('ROLLBACK').catch(() => undefined);
+			holder.release();
+		}
+
+		await expect(
+			adapter.transaction(
+				async (tx) => {
+					await tx.executeRaw(
+						`SELECT * FROM "${SCHEMA}".jobs WHERE id = 1 FOR UPDATE`,
+					);
+				},
+				{ lockTimeoutMs: 100 },
+			),
+		).resolves.toBeUndefined();
 	});
 
 	it('SKIP LOCKED returns empty when all rows are locked', async () => {

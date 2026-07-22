@@ -208,6 +208,12 @@ const ABORTED_COMMIT_MESSAGE =
 const TRANSACTION_ABORTED_MESSAGE =
 	'PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope and that failure was caught. Roll back the surrounding transaction; the swallowed statement failure is the cause worth reporting.';
 
+const TRANSACTION_ABORT_SIGNAL_MESSAGE =
+	'transaction aborted via AbortSignal before it committed';
+
+const BORROWED_TRANSACTION_ABORT_SIGNAL_MESSAGE =
+	'AbortSignal is only supported for a pool-owned top-level transaction; it cannot be used with a borrowed or nested transaction because dbsp does not own that connection.';
+
 const NESTED_TRANSACTION_OPTIONS_MESSAGE =
 	'isolationLevel/readOnly apply only to a top-level transaction, not a nested savepoint';
 
@@ -341,6 +347,7 @@ interface ResolvedPgsqlTransactionOptions {
 	readonly readOnly?: boolean;
 	readonly lockTimeoutMs?: number;
 	readonly statementTimeoutMs?: number;
+	readonly signal?: AbortSignal;
 	readonly timeoutStatements: readonly PgsqlTransactionTimeoutStatement[];
 	readonly hasLockTimeout: boolean;
 	readonly hasStatementTimeout: boolean;
@@ -370,6 +377,20 @@ export class PgsqlTransactionAbortedError extends Error {
 	constructor(cause: unknown) {
 		super(TRANSACTION_ABORTED_MESSAGE, { cause });
 		this.name = 'PgsqlTransactionAbortedError';
+	}
+}
+
+/**
+ * Raised when a pool-owned top-level transaction is aborted through
+ * `TransactionOptions.signal`. If the signal aborts while `pool.connect()` is
+ * still pending, dbsp honors it only after a client is acquired.
+ */
+export class PgsqlTransactionAbortSignalError extends Error {
+	readonly dbspTransactionAbortSignal = true;
+
+	constructor() {
+		super(TRANSACTION_ABORT_SIGNAL_MESSAGE);
+		this.name = 'PgsqlTransactionAbortSignalError';
 	}
 }
 
@@ -496,6 +517,16 @@ function resolvePgsqlTransactionTimeoutMs(
 	);
 }
 
+function resolvePgsqlTransactionSignal(
+	value: unknown,
+): ResolvedPgsqlTransactionOptions['signal'] {
+	if (value === undefined) return undefined;
+	if (value instanceof AbortSignal) return value;
+	throw new PgsqlTransactionOptionsError(
+		`transaction signal must be an AbortSignal when defined; received ${describeTransactionOptionValue(value)}`,
+	);
+}
+
 function resolveTransactionOptions(
 	options: TransactionOptions | undefined,
 ): ResolvedPgsqlTransactionOptions {
@@ -505,6 +536,7 @@ function resolveTransactionOptions(
 				readonly readOnly?: unknown;
 				readonly lockTimeoutMs?: unknown;
 				readonly statementTimeoutMs?: unknown;
+				readonly signal?: unknown;
 		  }
 		| null
 		| undefined;
@@ -512,6 +544,7 @@ function resolveTransactionOptions(
 	const rawReadOnly = optionRecord?.readOnly;
 	const rawLockTimeoutMs = optionRecord?.lockTimeoutMs;
 	const rawStatementTimeoutMs = optionRecord?.statementTimeoutMs;
+	const rawSignal = optionRecord?.signal;
 
 	const isolationLevel =
 		resolvePgsqlTransactionIsolationLevel(rawIsolationLevel);
@@ -524,6 +557,7 @@ function resolveTransactionOptions(
 		'statementTimeoutMs',
 		rawStatementTimeoutMs,
 	);
+	const signal = resolvePgsqlTransactionSignal(rawSignal);
 	const timeoutOptions: TransactionOptions = {
 		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
 		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
@@ -536,6 +570,7 @@ function resolveTransactionOptions(
 		...(readOnly !== undefined && { readOnly }),
 		...(lockTimeoutMs !== undefined && { lockTimeoutMs }),
 		...(statementTimeoutMs !== undefined && { statementTimeoutMs }),
+		...(signal !== undefined && { signal }),
 		timeoutStatements,
 		hasLockTimeout: lockTimeoutMs !== undefined,
 		hasStatementTimeout: statementTimeoutMs !== undefined,
@@ -3505,6 +3540,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			options === undefined ? undefined : resolveTransactionOptions(options);
 		const childObserver = this.createChildTransactionObserver();
 		if (this.client) {
+			if (resolvedOptions?.signal !== undefined) {
+				return Promise.reject(
+					new PgsqlTransactionOptionsError(
+						BORROWED_TRANSACTION_ABORT_SIGNAL_MESSAGE,
+					),
+				);
+			}
 			if (!this.managedTransactions) {
 				return Promise.reject(
 					new Error(
@@ -3535,21 +3577,78 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		return this.observeChildTransaction(
 			(async () => {
+				const signal = resolvedOptions?.signal;
+				if (signal?.aborted) {
+					throw new PgsqlTransactionAbortSignalError();
+				}
+				// Abort during pool.connect() is honored after acquisition; we do not
+				// race pool.connect() itself.
 				const client = await pool.connect();
-				let releaseError: Error | boolean | undefined;
+				let released = false;
+				const releaseOnce = (reason?: Error | boolean): void => {
+					if (released) return;
+					released = true;
+					this.releaseClient(client, reason);
+				};
+				const abortErr =
+					signal === undefined
+						? undefined
+						: new PgsqlTransactionAbortSignalError();
+				if (signal?.aborted) {
+					releaseOnce(abortErr);
+					throw abortErr;
+				}
+				let commitStarted = false;
+				let onAbort: (() => void) | undefined;
+				const removeAbortListener = (): void => {
+					if (signal === undefined || onAbort === undefined) return;
+					signal.removeEventListener('abort', onAbort);
+					onAbort = undefined;
+				};
+				const abortPromise =
+					signal === undefined || abortErr === undefined
+						? undefined
+						: new Promise<never>((_, reject) => {
+								onAbort = () => {
+									if (commitStarted) return;
+									try {
+										releaseOnce(abortErr);
+									} catch {
+										// abort() must never throw out of the caller's stack.
+									}
+									reject(abortErr);
+								};
+								signal.addEventListener('abort', onAbort, { once: true });
+							});
+				const onCommitStart =
+					signal === undefined
+						? undefined
+						: () => {
+								commitStarted = true;
+								removeAbortListener();
+							};
+				let caughtError: unknown;
 				try {
-					return await this.transactionWithClientTransaction(
+					const txPromise = this.transactionWithClientTransaction(
 						client,
 						fn,
 						childObserver,
 						'commit',
 						resolvedOptions,
+						onCommitStart,
 					);
+					void txPromise.catch(() => undefined);
+					return await (abortPromise === undefined
+						? txPromise
+						: Promise.race([txPromise, abortPromise]));
 				} catch (error) {
-					releaseError = cleanupReleaseReason(error);
+					caughtError = error;
 					throw error;
 				} finally {
-					this.releaseClient(client, releaseError);
+					removeAbortListener();
+					if (!released) {
+						releaseOnce(cleanupReleaseReason(caughtError));
+					}
 				}
 			})(),
 			childObserver,
@@ -4009,6 +4108,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		childObserver?: DbspChildTransactionObserver,
 		successAction: ClientTransactionSuccessAction = 'commit',
 		options?: ResolvedPgsqlTransactionOptions,
+		onCommitStart?: () => void,
 	): Promise<T> {
 		let begun = false;
 		let committed = false;
@@ -4071,6 +4171,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 				return result;
 			}
+			onCommitStart?.();
 			const commitResult = await this.executeScopeBoundaryStatement(
 				client,
 				scopeToken,

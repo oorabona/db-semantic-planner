@@ -156,6 +156,7 @@ export interface TransactionOptions {
 	readonly readOnly?: boolean;
 	readonly lockTimeoutMs?: number;
 	readonly statementTimeoutMs?: number;
+	readonly signal?: AbortSignal;
 }
 
 /**
