@@ -6,6 +6,7 @@
 import { isFieldRef, isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
+import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import {
 	dbTypeCastTarget,
 	renderColumnDbType,
@@ -151,4 +152,34 @@ export function resolveColumnPgType(
 		return dbTypeCastTarget(typeName);
 	}
 	return undefined;
+}
+
+/**
+ * Resolve the PostgreSQL base type for a column's array cast from its DECLARED
+ * abstract {@link ColumnType}, for the `any(col, array)` element cast.
+ *
+ * `resolveColumnPgType` deliberately trusts only an introspection-populated
+ * `originalDbType` and returns `undefined` for manually defined schemas, so that
+ * the scalar comparison path never guesses a type. But the `any(col, array)`
+ * element cast is not optional — without it, ids that read back from PostgreSQL
+ * as JS strings make the builder emit `col = ANY($1::text[])`, which fails with
+ * `operator does not exist: integer = text` on an integer column of a manually
+ * defined schema. There, the declared column type IS the authoritative target,
+ * so map it through the safe `mapModelIRTypeToPgBase` whitelist (which returns
+ * `undefined` for anything outside a known scalar type, leaving the caller's
+ * runtime-inference fallback intact). PostgreSQL coerces across compatible
+ * integer widths, so a declared `integer` on a `bigint` column still resolves.
+ *
+ * Returns the base type name (without `[]`); the caller appends the array cast.
+ */
+export function resolveColumnAbstractPgBase(
+	columnName: string,
+	ctx: CompilerContext,
+): string | undefined {
+	if (!ctx.model) return undefined;
+	const table = ctx.model.getTable(ctx.rootTable);
+	if (!table) return undefined;
+	const column = table.columns.find((c) => c.name === columnName);
+	if (!column) return undefined;
+	return mapModelIRTypeToPgBase(column.type);
 }

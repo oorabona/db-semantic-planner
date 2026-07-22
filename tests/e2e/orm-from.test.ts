@@ -1,4 +1,4 @@
-import { any, createOrm, eq, normalizeSQL } from '@dbsp/core';
+import { any, createOrm, eq, normalizeSQL, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogModel,
@@ -118,6 +118,33 @@ describe('orm.from() table-ref API', () => {
 		const rows = (await query.all()) as Array<{ id: number }>;
 
 		expect(dump.sql).toContain('CAST($1 AS integer[])');
+		expect(dump.sql).not.toContain('text[]');
+		expect(dump.params).toEqual([ids]);
+		expect(rows.map((row) => row.id)).toEqual([1, 2]);
+	});
+
+	it('executes any("id", string ids) on a manually defined schema without dbType', async () => {
+		const adapter = await getTestAdapter();
+		// A hand-written schema declares `type` but NOT `dbType`, so no originalDbType is
+		// populated — the array element type must come from the declared ColumnType.
+		// Before the fix this emitted CAST($1 AS text[]) → "operator does not exist:
+		// integer = text" against the integer posts.id column.
+		const manualSchema = schema({
+			posts: { id: { type: 'integer', primaryKey: true } },
+		});
+		const orm = createOrm({ schema: manualSchema, adapter }).withSchema(SCHEMA);
+		const { posts } = orm.tables;
+		const ids = ['1', '2'];
+
+		const query = orm
+			.from(posts)
+			.where(any('id', ids))
+			.columns(['id'])
+			.orderBy('id');
+		const dump = query.dump();
+		const rows = (await query.all()) as Array<{ id: number }>;
+
+		expect(dump.sql).toContain('CAST($1 AS int4[])');
 		expect(dump.sql).not.toContain('text[]');
 		expect(dump.params).toEqual([ids]);
 		expect(rows.map((row) => row.id)).toEqual([1, 2]);
