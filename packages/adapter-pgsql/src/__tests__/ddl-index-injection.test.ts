@@ -391,7 +391,7 @@ describe('S-1 ddl-generator generateCreateIndex — WITH key injection', () => {
 describe('S-1 index-operations generateCreateIndexSQL — WHERE injection', () => {
 	it('throws on semicolon injection in WHERE', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				where: 'active = true; DROP TABLE users',
@@ -401,7 +401,7 @@ describe('S-1 index-operations generateCreateIndexSQL — WHERE injection', () =
 
 	it('throws on line-comment injection in WHERE', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				where: 'active = true -- injected',
@@ -411,7 +411,7 @@ describe('S-1 index-operations generateCreateIndexSQL — WHERE injection', () =
 
 	it('allows a safe WHERE predicate', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				where: 'active = true',
@@ -423,7 +423,7 @@ describe('S-1 index-operations generateCreateIndexSQL — WHERE injection', () =
 describe('S-1 index-operations generateCreateIndexSQL — expression injection', () => {
 	it('throws on semicolon in expression column', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: [{ expression: 'lower(email); DROP TABLE users' }],
 			}),
@@ -432,7 +432,7 @@ describe('S-1 index-operations generateCreateIndexSQL — expression injection',
 
 	it('allows a safe expression column', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: [{ expression: 'lower(email)' }],
 			}),
@@ -443,7 +443,7 @@ describe('S-1 index-operations generateCreateIndexSQL — expression injection',
 describe('S-1 index-operations generateCreateIndexSQL — WITH key injection', () => {
 	it('throws on injection in WITH storage parameter key', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				with: { 'fillfactor = 10; DROP TABLE users --': '1' },
@@ -452,7 +452,7 @@ describe('S-1 index-operations generateCreateIndexSQL — WITH key injection', (
 	});
 
 	it('quotes unsafe WITH storage parameter values instead of raw-splicing them', () => {
-		const sql = generateCreateIndexSQL('users', {
+		const sql = generateCreateIndexSQL('users', 'public', {
 			name: 'idx_test',
 			columns: ['id'],
 			with: { fillfactor: unsafeWithValue },
@@ -463,7 +463,7 @@ describe('S-1 index-operations generateCreateIndexSQL — WITH key injection', (
 	});
 
 	it('emits safe numeric and boolean WITH values unchanged', () => {
-		const sql = generateCreateIndexSQL('users', {
+		const sql = generateCreateIndexSQL('users', 'public', {
 			name: 'idx_test',
 			columns: ['id'],
 			with: { fillfactor: 70, fastupdate: 'on' },
@@ -620,7 +620,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 	it('allows standard index methods: btree, hash, gin, gist, brin', () => {
 		for (const method of ['btree', 'hash', 'gin', 'gist', 'brin'] as const) {
 			expect(() =>
-				generateCreateIndexSQL('users', {
+				generateCreateIndexSQL('users', 'public', {
 					name: 'idx_test',
 					columns: ['id'],
 					method,
@@ -631,7 +631,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 
 	it('allows spgist (M-4: SP-GiST core access method)', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				method: 'spgist',
@@ -642,7 +642,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 	it('allows hnsw and bm25 (extension methods)', () => {
 		for (const method of ['hnsw', 'bm25'] as const) {
 			expect(() =>
-				generateCreateIndexSQL('users', {
+				generateCreateIndexSQL('users', 'public', {
 					name: 'idx_test',
 					columns: ['id'],
 					method,
@@ -653,7 +653,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 
 	it('rejects injection via idx.method: semicolon + DROP', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				method: 'btree); DROP TABLE users --',
@@ -663,7 +663,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 
 	it('rejects injection via idx.method: NUL byte', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				method: 'btree\x00',
@@ -673,7 +673,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 
 	it('rejects unknown method string', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
 				method: 'spgist_unknown',

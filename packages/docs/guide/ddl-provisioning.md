@@ -16,6 +16,10 @@ Three CLI commands manage your database schema lifecycle:
 | `dbsp migrate` | Version-controlled migration files | Staging, production |
 | `dbsp verify` | Compare schema with live database | CI/CD, pre-deploy checks |
 
+Runtime DDL helpers are always schema-scoped. Scope DDL with
+`orm.withSchema('public')` or a tenant schema; there is no bare schema-scoped
+DDL that relies on PostgreSQL `search_path`.
+
 ## Quick Start
 
 ```bash
@@ -229,4 +233,3 @@ dbsp verify -s dbsp.schema.ts -d $DATABASE_URL --strict --json
 
 # Exit code: 0 = match, 1 = drift detected
 ```
-

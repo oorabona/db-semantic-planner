@@ -18,18 +18,16 @@ function quoteIdentifier(name: string): string {
 	return quoteIdent(name, 'alias');
 }
 
-function qualifyTable(table: string, schema?: string): string {
-	return schema
-		? `${quoteIdent(schema, 'schema')}.${quoteIdent(table, 'table')}`
-		: quoteIdent(table, 'table');
+function qualifyTable(table: string, schemaName: string): string {
+	return `${quoteIdent(schemaName, 'schema')}.${quoteIdent(table, 'table')}`;
 }
 
 export function generateTruncateSQL(
 	table: string,
-	schema?: string,
+	schemaName: string,
 	options?: TruncateOptions,
 ): string {
-	const target = qualifyTable(table, schema);
+	const target = qualifyTable(table, schemaName);
 	const parts: string[] = [`TRUNCATE ${target}`];
 	if (options?.restartIdentity) parts.push('RESTART IDENTITY');
 	if (options?.cascade) parts.push('CASCADE');
@@ -38,14 +36,14 @@ export function generateTruncateSQL(
 
 export function generateVacuumSQL(
 	table: string,
-	_schema?: string,
+	schemaName: string,
 	options?: VacuumOptions,
 ): string {
 	const modifiers: string[] = [];
 	if (options?.full) modifiers.push('FULL');
 	if (options?.analyze) modifiers.push('ANALYZE');
 	const modifier = modifiers.length > 0 ? ` ${modifiers.join(' ')}` : '';
-	return `VACUUM${modifier} ${quoteIdentifier(table)}`;
+	return `VACUUM${modifier} ${qualifyTable(table, schemaName)}`;
 }
 
 // M-6: formatDefault is now a thin alias for the shared formatSqlDefault from phases/utils.
@@ -56,11 +54,11 @@ function formatDefault(value: unknown): string {
 
 export function generateAlterColumnSQL(
 	table: string,
+	schemaName: string,
 	column: string,
 	options: AlterColumnOptions,
-	schema?: string,
 ): string {
-	const target = qualifyTable(table, schema);
+	const target = qualifyTable(table, schemaName);
 	const quotedCol = quoteIdentifier(column);
 	const prefix = `ALTER TABLE ${target} ALTER COLUMN ${quotedCol}`;
 	const statements: string[] = [];

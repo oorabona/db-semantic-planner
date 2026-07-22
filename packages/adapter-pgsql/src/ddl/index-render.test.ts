@@ -173,7 +173,7 @@ describe('CREATE INDEX pre-refactor goldens', () => {
 
 	it('captures public create-index maximal SQL byte-for-byte', () => {
 		expect(
-			generateCreateIndexSQL('orders', maximalPublicOptions, 'app'),
+			generateCreateIndexSQL('orders', 'app', maximalPublicOptions),
 		).toEqual(
 			'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "idx_orders_email_cover" ON "app"."orders" USING gin (lower(email) text_pattern_ops, "tenant_id" int4_ops) INCLUDE ("id", "created_at") NULLS NOT DISTINCT WITH (fillfactor = 80, fastupdate = off) WHERE deleted_at IS NULL AND note = \'active\'',
 		);
@@ -212,26 +212,26 @@ describe('CREATE INDEX capability assertions', () => {
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'uk_users_email_nulls',
 					columns: ['email'],
 					unique: true,
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg14Caps, targetVersion: '14' },
 			),
 		).toThrow(IndexFeatureUnsupportedError);
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'uk_users_email_nulls',
 					columns: ['email'],
 					unique: true,
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg14Caps, targetVersion: '14' },
 			),
 		).toThrow(
@@ -243,12 +243,12 @@ describe('CREATE INDEX capability assertions', () => {
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'idx_users_email_cover',
 					columns: ['email'],
 					include: ['id'],
 				},
-				undefined,
 				{ caps: pg10Caps, targetVersion: '10' },
 			),
 		).toThrow(
@@ -262,20 +262,20 @@ describe('CREATE INDEX capability assertions', () => {
 			expect(
 				generateCreateIndexSQL(
 					'users',
+					'public',
 					{
 						name: 'uk_users_email_concurrent',
 						columns: ['email'],
 						unique: true,
 						concurrently: true,
 					},
-					undefined,
 					{
 						caps,
 						targetVersion: version,
 					},
 				),
 			).toEqual(
-				'CREATE UNIQUE INDEX CONCURRENTLY "uk_users_email_concurrent" ON "users" ("email")',
+				'CREATE UNIQUE INDEX CONCURRENTLY "uk_users_email_concurrent" ON "public"."users" ("email")',
 			);
 		}
 	});
@@ -284,17 +284,17 @@ describe('CREATE INDEX capability assertions', () => {
 		expect(
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'uk_users_email_nulls',
 					columns: ['email'],
 					unique: true,
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg15Caps, targetVersion: '15' },
 			),
 		).toEqual(
-			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "users" ("email") NULLS NOT DISTINCT',
+			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "public"."users" ("email") NULLS NOT DISTINCT',
 		);
 	});
 
@@ -302,12 +302,12 @@ describe('CREATE INDEX capability assertions', () => {
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'idx_users_email_nulls',
 					columns: ['email'],
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg15Caps, targetVersion: '15' },
 			),
 		).toThrow(
@@ -317,26 +317,26 @@ describe('CREATE INDEX capability assertions', () => {
 
 	it('keeps the public API permissive without a context and gated with one', () => {
 		expect(
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'uk_users_email_nulls',
 				columns: ['email'],
 				unique: true,
 				nullsNotDistinct: true,
 			}),
 		).toEqual(
-			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "users" ("email") NULLS NOT DISTINCT',
+			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "public"."users" ("email") NULLS NOT DISTINCT',
 		);
 
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'uk_users_email_nulls',
 					columns: ['email'],
 					unique: true,
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg14Caps, targetVersion: '14' },
 			),
 		).toThrow(IndexFeatureUnsupportedError);
@@ -347,6 +347,7 @@ describe('CREATE INDEX capability assertions', () => {
 		try {
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'uk_users_email_cover_nulls',
 					columns: ['email'],
@@ -354,7 +355,6 @@ describe('CREATE INDEX capability assertions', () => {
 					include: ['id'],
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg10Caps, targetVersion: '10' },
 			);
 		} catch (caught) {
@@ -375,13 +375,13 @@ describe('CREATE INDEX capability assertions', () => {
 		try {
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'idx_users_email_cover_nulls',
 					columns: ['email'],
 					include: ['id'],
 					nullsNotDistinct: true,
 				},
-				undefined,
 				{ caps: pg10Caps, targetVersion: '10' },
 			);
 		} catch (caught) {
@@ -403,11 +403,11 @@ describe('CREATE INDEX capability assertions', () => {
 		expect(() =>
 			generateCreateIndexSQL(
 				'users',
+				'public',
 				{
 					name: 'idx_users_lower_email',
 					columns: [{ expression: 'lower(email)' }],
 				},
-				undefined,
 				{ caps: noExpressionCaps },
 			),
 		).toThrow(
@@ -423,7 +423,7 @@ describe('CREATE INDEX capability assertions', () => {
 			'idx*/comment',
 		]) {
 			expect(() =>
-				generateCreateIndexSQL('users', {
+				generateCreateIndexSQL('users', 'public', {
 					name,
 					columns: ['email'],
 				}),
@@ -433,7 +433,7 @@ describe('CREATE INDEX capability assertions', () => {
 
 	it('throws on empty keys and omits empty WITH clauses', () => {
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_empty',
 				columns: [],
 			}),
@@ -449,7 +449,7 @@ describe('CREATE INDEX capability assertions', () => {
 			'index `idx_empty_expression`: CREATE INDEX key #1 must declare a non-empty column or expression',
 		);
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_blank_expression',
 				columns: [{ expression: '   ' }],
 			}),
@@ -457,7 +457,7 @@ describe('CREATE INDEX capability assertions', () => {
 			'index `idx_blank_expression`: CREATE INDEX key #1 must declare a non-empty column or expression',
 		);
 		expect(() =>
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_empty_column',
 				columns: [''],
 			}),
@@ -476,12 +476,12 @@ describe('CREATE INDEX capability assertions', () => {
 		);
 
 		expect(
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_no_with',
 				columns: ['email'],
 				with: {},
 			}),
-		).toEqual('CREATE INDEX "idx_no_with" ON "users" ("email")');
+		).toEqual('CREATE INDEX "idx_no_with" ON "public"."users" ("email")');
 	});
 
 	it('routes equivalent site inputs through the same renderer output', () => {
@@ -491,20 +491,16 @@ describe('CREATE INDEX capability assertions', () => {
 			'app',
 			identityNaming,
 		).replace(/;$/, '');
-		const publicSql = generateCreateIndexSQL(
-			'orders',
-			{
-				...maximalPublicOptions,
-				concurrently: false,
-				ifNotExists: false,
-				columns: [{ expression: 'lower(email)' }, 'email', 'tenant_id'],
-				opclass: {
-					email: 'gin_trgm_ops',
-					tenant_id: 'int4_ops',
-				},
+		const publicSql = generateCreateIndexSQL('orders', 'app', {
+			...maximalPublicOptions,
+			concurrently: false,
+			ifNotExists: false,
+			columns: [{ expression: 'lower(email)' }, 'email', 'tenant_id'],
+			opclass: {
+				email: 'gin_trgm_ops',
+				tenant_id: 'int4_ops',
 			},
-			'app',
-		);
+		});
 		const migrationSql = generateMigrationSQL(createIndexDiff(), {
 			schemaName: 'app',
 		})[0]!

@@ -472,7 +472,7 @@ describe('PgsqlAdapter.withPinnedConnection', () => {
 			expect(pgPinned.dbCasing).toBe('snake_case');
 			const scoped = pgPinned.withSchema('tenant_1') as unknown as PgsqlAdapter;
 			expect(scoped.dbCasing).toBe('snake_case');
-			expect(scoped.generateTruncate('items')).toBe(
+			expect(scoped.generateTruncate('items', 'tenant_1')).toBe(
 				'TRUNCATE "tenant_1"."items"',
 			);
 			await scoped.executeRaw('SELECT scoped');
