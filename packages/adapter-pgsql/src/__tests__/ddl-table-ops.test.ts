@@ -20,28 +20,30 @@ import {
 
 describe('generateTruncateSQL', () => {
 	it('basic truncate', () => {
-		expect(generateTruncateSQL('embeddings')).toEqual('TRUNCATE "embeddings"');
+		expect(generateTruncateSQL('embeddings', 'public')).toEqual(
+			'TRUNCATE "public"."embeddings"',
+		);
 	});
 
 	it('truncate with cascade', () => {
 		expect(
-			generateTruncateSQL('embeddings', undefined, { cascade: true }),
-		).toEqual('TRUNCATE "embeddings" CASCADE');
+			generateTruncateSQL('embeddings', 'public', { cascade: true }),
+		).toEqual('TRUNCATE "public"."embeddings" CASCADE');
 	});
 
 	it('truncate with restart identity', () => {
 		expect(
-			generateTruncateSQL('embeddings', undefined, { restartIdentity: true }),
-		).toEqual('TRUNCATE "embeddings" RESTART IDENTITY');
+			generateTruncateSQL('embeddings', 'public', { restartIdentity: true }),
+		).toEqual('TRUNCATE "public"."embeddings" RESTART IDENTITY');
 	});
 
 	it('truncate with both cascade and restart identity', () => {
 		expect(
-			generateTruncateSQL('embeddings', undefined, {
+			generateTruncateSQL('embeddings', 'public', {
 				cascade: true,
 				restartIdentity: true,
 			}),
-		).toEqual('TRUNCATE "embeddings" RESTART IDENTITY CASCADE');
+		).toEqual('TRUNCATE "public"."embeddings" RESTART IDENTITY CASCADE');
 	});
 
 	it('truncate with schema scope', () => {
@@ -59,8 +61,17 @@ describe('generateTruncateSQL', () => {
 	it('rejects identifiers with embedded double-quotes (security: validateIdentifier)', () => {
 		// S-2: validateIdentifier now rejects double-quotes in identifiers to prevent injection.
 		// PostgreSQL table names with embedded double-quotes are rejected at the API boundary.
-		expect(() => generateTruncateSQL('my"table')).toThrow(
+		expect(() => generateTruncateSQL('my"table', 'public')).toThrow(
 			/Invalid.*identifier/i,
+		);
+	});
+
+	it('throws before SQL generation when schema is missing or empty', () => {
+		expect(() => generateTruncateSQL('embeddings', '')).toThrow(
+			/Invalid.*schema.*identifier/i,
+		);
+		expect(() => generateTruncateSQL('embeddings', undefined as never)).toThrow(
+			/Invalid schema identifier/i,
 		);
 	});
 });
@@ -71,31 +82,42 @@ describe('generateTruncateSQL', () => {
 
 describe('generateVacuumSQL', () => {
 	it('basic vacuum', () => {
-		expect(generateVacuumSQL('embeddings')).toEqual('VACUUM "embeddings"');
+		expect(generateVacuumSQL('embeddings', 'public')).toEqual(
+			'VACUUM "public"."embeddings"',
+		);
 	});
 
 	it('vacuum full', () => {
-		expect(generateVacuumSQL('embeddings', undefined, { full: true })).toEqual(
-			'VACUUM FULL "embeddings"',
+		expect(generateVacuumSQL('embeddings', 'public', { full: true })).toEqual(
+			'VACUUM FULL "public"."embeddings"',
 		);
 	});
 
 	it('vacuum analyze', () => {
 		expect(
-			generateVacuumSQL('embeddings', undefined, { analyze: true }),
-		).toEqual('VACUUM ANALYZE "embeddings"');
+			generateVacuumSQL('embeddings', 'public', { analyze: true }),
+		).toEqual('VACUUM ANALYZE "public"."embeddings"');
 	});
 
 	it('vacuum full analyze', () => {
 		expect(
-			generateVacuumSQL('embeddings', undefined, { full: true, analyze: true }),
-		).toEqual('VACUUM FULL ANALYZE "embeddings"');
+			generateVacuumSQL('embeddings', 'public', { full: true, analyze: true }),
+		).toEqual('VACUUM FULL ANALYZE "public"."embeddings"');
 	});
 
-	it('ignores schema (PostgreSQL VACUUM does not support schema-qualified names)', () => {
-		// VACUUM only takes the bare table name regardless of schema
+	it('schema-qualifies the table', () => {
+		// PostgreSQL VACUUM accepts an optionally schema-qualified table name.
 		expect(generateVacuumSQL('embeddings', 'tenant_42')).toEqual(
-			'VACUUM "embeddings"',
+			'VACUUM "tenant_42"."embeddings"',
+		);
+	});
+
+	it('throws before SQL generation when schema is missing or empty', () => {
+		expect(() => generateVacuumSQL('embeddings', '')).toThrow(
+			/Invalid.*schema.*identifier/i,
+		);
+		expect(() => generateVacuumSQL('embeddings', undefined as never)).toThrow(
+			/Invalid schema identifier/i,
 		);
 	});
 });
@@ -107,97 +129,131 @@ describe('generateVacuumSQL', () => {
 describe('generateAlterColumnSQL', () => {
 	it('alter column type', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'vector', { type: 'vector(384)' }),
+			generateAlterColumnSQL('embeddings', 'public', 'vector', {
+				type: 'vector(384)',
+			}),
 		).toEqual(
-			'ALTER TABLE "embeddings" ALTER COLUMN "vector" TYPE vector(384)',
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "vector" TYPE vector(384)',
 		);
 	});
 
 	it('alter column type with USING', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'vector', {
+			generateAlterColumnSQL('embeddings', 'public', 'vector', {
 				type: 'vector(384)',
 				using: 'vector::vector(384)',
 			}),
 		).toEqual(
-			'ALTER TABLE "embeddings" ALTER COLUMN "vector" TYPE vector(384) USING vector::vector(384)',
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "vector" TYPE vector(384) USING vector::vector(384)',
 		);
 	});
 
 	it('alter column set not null', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'model', { setNotNull: true }),
-		).toEqual('ALTER TABLE "embeddings" ALTER COLUMN "model" SET NOT NULL');
+			generateAlterColumnSQL('embeddings', 'public', 'model', {
+				setNotNull: true,
+			}),
+		).toEqual(
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "model" SET NOT NULL',
+		);
 	});
 
 	it('alter column drop not null', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'model', { setNotNull: false }),
-		).toEqual('ALTER TABLE "embeddings" ALTER COLUMN "model" DROP NOT NULL');
+			generateAlterColumnSQL('embeddings', 'public', 'model', {
+				setNotNull: false,
+			}),
+		).toEqual(
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "model" DROP NOT NULL',
+		);
 	});
 
 	it('alter column drop default', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'model', { dropDefault: true }),
-		).toEqual('ALTER TABLE "embeddings" ALTER COLUMN "model" DROP DEFAULT');
+			generateAlterColumnSQL('embeddings', 'public', 'model', {
+				dropDefault: true,
+			}),
+		).toEqual(
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "model" DROP DEFAULT',
+		);
 	});
 
 	it('alter column set default string', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'status', { setDefault: 'active' }),
+			generateAlterColumnSQL('embeddings', 'public', 'status', {
+				setDefault: 'active',
+			}),
 		).toEqual(
-			'ALTER TABLE "embeddings" ALTER COLUMN "status" SET DEFAULT \'active\'',
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "status" SET DEFAULT \'active\'',
 		);
 	});
 
 	it('alter column set default number', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'score', { setDefault: 0 }),
-		).toEqual('ALTER TABLE "embeddings" ALTER COLUMN "score" SET DEFAULT 0');
+			generateAlterColumnSQL('embeddings', 'public', 'score', {
+				setDefault: 0,
+			}),
+		).toEqual(
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "score" SET DEFAULT 0',
+		);
 	});
 
 	it('alter column set default null', () => {
 		expect(
-			generateAlterColumnSQL('embeddings', 'score', { setDefault: null }),
-		).toEqual('ALTER TABLE "embeddings" ALTER COLUMN "score" SET DEFAULT NULL');
+			generateAlterColumnSQL('embeddings', 'public', 'score', {
+				setDefault: null,
+			}),
+		).toEqual(
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "score" SET DEFAULT NULL',
+		);
 	});
 
 	it('alter column with schema scope', () => {
 		expect(
-			generateAlterColumnSQL(
-				'embeddings',
-				'vector',
-				{ type: 'vector(384)' },
-				'tenant_42',
-			),
+			generateAlterColumnSQL('embeddings', 'tenant_42', 'vector', {
+				type: 'vector(384)',
+			}),
 		).toEqual(
 			'ALTER TABLE "tenant_42"."embeddings" ALTER COLUMN "vector" TYPE vector(384)',
 		);
 	});
 
 	it('multiple clauses produce multiple statements joined by semicolon', () => {
-		const sql = generateAlterColumnSQL('embeddings', 'vector', {
+		const sql = generateAlterColumnSQL('embeddings', 'public', 'vector', {
 			type: 'vector(384)',
 			setNotNull: true,
 		});
 		expect(sql).toEqual(
-			'ALTER TABLE "embeddings" ALTER COLUMN "vector" TYPE vector(384);\n' +
-				'ALTER TABLE "embeddings" ALTER COLUMN "vector" SET NOT NULL',
+			'ALTER TABLE "public"."embeddings" ALTER COLUMN "vector" TYPE vector(384);\n' +
+				'ALTER TABLE "public"."embeddings" ALTER COLUMN "vector" SET NOT NULL',
 		);
 	});
 
 	it('throws when no options specified', () => {
-		expect(() => generateAlterColumnSQL('embeddings', 'vector', {})).toThrow(
-			'generateAlterColumnSQL: at least one option must be specified',
-		);
+		expect(() =>
+			generateAlterColumnSQL('embeddings', 'public', 'vector', {}),
+		).toThrow('generateAlterColumnSQL: at least one option must be specified');
 	});
 
 	it('rejects unsafe type names', () => {
 		expect(() =>
-			generateAlterColumnSQL('embeddings', 'vector', {
+			generateAlterColumnSQL('embeddings', 'public', 'vector', {
 				type: "'; DROP TABLE users; --",
 			}),
 		).toThrow();
+	});
+
+	it('throws before SQL generation when schema is missing or empty', () => {
+		expect(() =>
+			generateAlterColumnSQL('embeddings', '', 'vector', {
+				type: 'text',
+			}),
+		).toThrow(/Invalid.*schema.*identifier/i);
+		expect(() =>
+			generateAlterColumnSQL('embeddings', undefined as never, 'vector', {
+				type: 'text',
+			}),
+		).toThrow(/Invalid schema identifier/i);
 	});
 });
 
@@ -208,16 +264,16 @@ describe('generateAlterColumnSQL', () => {
 describe('generateCreateIndexSQL', () => {
 	it('basic index', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_model',
 				columns: ['model'],
 			}),
-		).toEqual('CREATE INDEX "idx_model" ON "embeddings" ("model")');
+		).toEqual('CREATE INDEX "idx_model" ON "public"."embeddings" ("model")');
 	});
 
 	it('HNSW index with opclass and WITH params', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_vec',
 				columns: ['vector'],
 				method: 'hnsw',
@@ -225,72 +281,74 @@ describe('generateCreateIndexSQL', () => {
 				with: { m: 16, ef_construction: 64 },
 			}),
 		).toEqual(
-			'CREATE INDEX "idx_vec" ON "embeddings" USING hnsw ("vector" vector_cosine_ops) WITH (m = 16, ef_construction = 64)',
+			'CREATE INDEX "idx_vec" ON "public"."embeddings" USING hnsw ("vector" vector_cosine_ops) WITH (m = 16, ef_construction = 64)',
 		);
 	});
 
 	it('unique index', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_uniq',
 				columns: ['model', 'symbol_id'],
 				unique: true,
 			}),
 		).toEqual(
-			'CREATE UNIQUE INDEX "idx_uniq" ON "embeddings" ("model", "symbol_id")',
+			'CREATE UNIQUE INDEX "idx_uniq" ON "public"."embeddings" ("model", "symbol_id")',
 		);
 	});
 
 	it('unique index with NULLS NOT DISTINCT', () => {
 		expect(
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'uk_users_email_nulls',
 				columns: ['email'],
 				unique: true,
 				nullsNotDistinct: true,
 			}),
 		).toEqual(
-			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "users" ("email") NULLS NOT DISTINCT',
+			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "public"."users" ("email") NULLS NOT DISTINCT',
 		);
 	});
 
 	it('partial index with WHERE clause', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_active',
 				columns: ['status'],
 				where: "status = 'active'",
 			}),
 		).toEqual(
-			'CREATE INDEX "idx_active" ON "embeddings" ("status") WHERE status = \'active\'',
+			'CREATE INDEX "idx_active" ON "public"."embeddings" ("status") WHERE status = \'active\'',
 		);
 	});
 
 	it('create index CONCURRENTLY', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_conc',
 				columns: ['model'],
 				concurrently: true,
 			}),
-		).toEqual('CREATE INDEX CONCURRENTLY "idx_conc" ON "embeddings" ("model")');
+		).toEqual(
+			'CREATE INDEX CONCURRENTLY "idx_conc" ON "public"."embeddings" ("model")',
+		);
 	});
 
 	it('create index IF NOT EXISTS', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_safe',
 				columns: ['model'],
 				ifNotExists: true,
 			}),
 		).toEqual(
-			'CREATE INDEX IF NOT EXISTS "idx_safe" ON "embeddings" ("model")',
+			'CREATE INDEX IF NOT EXISTS "idx_safe" ON "public"."embeddings" ("model")',
 		);
 	});
 
 	it('create unique index CONCURRENTLY IF NOT EXISTS', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_all',
 				columns: ['model'],
 				unique: true,
@@ -298,35 +356,34 @@ describe('generateCreateIndexSQL', () => {
 				ifNotExists: true,
 			}),
 		).toEqual(
-			'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "idx_all" ON "embeddings" ("model")',
+			'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "idx_all" ON "public"."embeddings" ("model")',
 		);
 	});
 
 	it('index with schema scope', () => {
 		expect(
-			generateCreateIndexSQL(
-				'embeddings',
-				{ name: 'idx_t', columns: ['model'] },
-				'tenant_42',
-			),
+			generateCreateIndexSQL('embeddings', 'tenant_42', {
+				name: 'idx_t',
+				columns: ['model'],
+			}),
 		).toEqual('CREATE INDEX "idx_t" ON "tenant_42"."embeddings" ("model")');
 	});
 
 	it('covering index with INCLUDE', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_cover',
 				columns: ['model'],
 				include: ['symbol_id', 'vector'],
 			}),
 		).toEqual(
-			'CREATE INDEX "idx_cover" ON "embeddings" ("model") INCLUDE ("symbol_id", "vector")',
+			'CREATE INDEX "idx_cover" ON "public"."embeddings" ("model") INCLUDE ("symbol_id", "vector")',
 		);
 	});
 
 	it('unique NULLS NOT DISTINCT covering index places INCLUDE first', () => {
 		expect(
-			generateCreateIndexSQL('users', {
+			generateCreateIndexSQL('users', 'public', {
 				name: 'uk_users_email_nulls_cover',
 				columns: ['email'],
 				unique: true,
@@ -334,60 +391,79 @@ describe('generateCreateIndexSQL', () => {
 				include: ['id'],
 			}),
 		).toEqual(
-			'CREATE UNIQUE INDEX "uk_users_email_nulls_cover" ON "users" ("email") INCLUDE ("id") NULLS NOT DISTINCT',
+			'CREATE UNIQUE INDEX "uk_users_email_nulls_cover" ON "public"."users" ("email") INCLUDE ("id") NULLS NOT DISTINCT',
 		);
 	});
 
 	it('expression index', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_lower',
 				columns: [{ expression: 'lower(name)' }],
 			}),
-		).toEqual('CREATE INDEX "idx_lower" ON "embeddings" (lower(name))');
+		).toEqual(
+			'CREATE INDEX "idx_lower" ON "public"."embeddings" (lower(name))',
+		);
 	});
 
 	it('expression index with opclass', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_expr_op',
 				columns: [{ expression: 'lower(email)', opclass: 'text_pattern_ops' }],
 			}),
 		).toEqual(
-			'CREATE INDEX "idx_expr_op" ON "embeddings" (lower(email) text_pattern_ops)',
+			'CREATE INDEX "idx_expr_op" ON "public"."embeddings" (lower(email) text_pattern_ops)',
 		);
 	});
 
 	it('multi-column index with per-column opclass', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_multi',
 				columns: ['a', 'b'],
 				opclass: { a: 'text_pattern_ops', b: 'varchar_ops' },
 			}),
 		).toEqual(
-			'CREATE INDEX "idx_multi" ON "embeddings" ("a" text_pattern_ops, "b" varchar_ops)',
+			'CREATE INDEX "idx_multi" ON "public"."embeddings" ("a" text_pattern_ops, "b" varchar_ops)',
 		);
 	});
 
 	it('BM25 index method', () => {
 		expect(
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_bm25',
 				columns: ['content'],
 				method: 'bm25',
 			}),
-		).toEqual('CREATE INDEX "idx_bm25" ON "embeddings" USING bm25 ("content")');
+		).toEqual(
+			'CREATE INDEX "idx_bm25" ON "public"."embeddings" USING bm25 ("content")',
+		);
 	});
 
 	it('rejects invalid index method', () => {
 		expect(() =>
-			generateCreateIndexSQL('embeddings', {
+			generateCreateIndexSQL('embeddings', 'public', {
 				name: 'idx_x',
 				columns: ['y'],
 				method: 'invalid' as any,
 			}),
 		).toThrow('Invalid index method');
+	});
+
+	it('throws before SQL generation when schema is missing or empty', () => {
+		expect(() =>
+			generateCreateIndexSQL('embeddings', '', {
+				name: 'idx_model',
+				columns: ['model'],
+			}),
+		).toThrow(/Invalid.*schema.*identifier/i);
+		expect(() =>
+			generateCreateIndexSQL('embeddings', undefined as never, {
+				name: 'idx_model',
+				columns: ['model'],
+			}),
+		).toThrow(/Invalid schema identifier/i);
 	});
 });
 
@@ -395,45 +471,67 @@ describe('generateCreateIndexSQL', () => {
 // DROP INDEX
 // ===========================================================================
 
+const dropIndexSchemaTypeLocks = () => {
+	// @ts-expect-error schemaName is required; options cannot occupy argument 2.
+	generateDropIndexSQL('idx_vec', { ifExists: true });
+	// @ts-expect-error schemaName is required.
+	generateDropIndexSQL('idx_vec');
+};
+void dropIndexSchemaTypeLocks;
+
 describe('generateDropIndexSQL', () => {
 	it('basic drop', () => {
-		expect(generateDropIndexSQL('idx_vec')).toEqual('DROP INDEX "idx_vec"');
+		expect(generateDropIndexSQL('idx_vec', 'public')).toEqual(
+			'DROP INDEX "public"."idx_vec"',
+		);
 	});
 
 	it('drop if exists', () => {
-		expect(generateDropIndexSQL('idx_vec', { ifExists: true })).toEqual(
-			'DROP INDEX IF EXISTS "idx_vec"',
-		);
+		expect(
+			generateDropIndexSQL('idx_vec', 'public', { ifExists: true }),
+		).toEqual('DROP INDEX IF EXISTS "public"."idx_vec"');
 	});
 
 	it('drop with cascade', () => {
-		expect(generateDropIndexSQL('idx_vec', { cascade: true })).toEqual(
-			'DROP INDEX "idx_vec" CASCADE',
-		);
+		expect(
+			generateDropIndexSQL('idx_vec', 'public', { cascade: true }),
+		).toEqual('DROP INDEX "public"."idx_vec" CASCADE');
 	});
 
 	it('drop if exists with cascade', () => {
 		expect(
-			generateDropIndexSQL('idx_vec', { ifExists: true, cascade: true }),
-		).toEqual('DROP INDEX IF EXISTS "idx_vec" CASCADE');
+			generateDropIndexSQL('idx_vec', 'public', {
+				ifExists: true,
+				cascade: true,
+			}),
+		).toEqual('DROP INDEX IF EXISTS "public"."idx_vec" CASCADE');
 	});
 
 	it('drop concurrently', () => {
-		expect(generateDropIndexSQL('idx_vec', { concurrently: true })).toEqual(
-			'DROP INDEX CONCURRENTLY "idx_vec"',
-		);
+		expect(
+			generateDropIndexSQL('idx_vec', 'public', { concurrently: true }),
+		).toEqual('DROP INDEX CONCURRENTLY "public"."idx_vec"');
 	});
 
 	it('drop with schema (global orm.ddl.dropIndex)', () => {
 		expect(
-			generateDropIndexSQL('idx_name', { ifExists: true, schema: 'tenant_42' }),
+			generateDropIndexSQL('idx_name', 'tenant_42', { ifExists: true }),
 		).toEqual('DROP INDEX IF EXISTS "tenant_42"."idx_name"');
 	});
 
 	it('rejects index names with embedded double-quotes (security: validateIdentifier)', () => {
 		// S-2: validateIdentifier now rejects double-quotes in identifiers to prevent injection.
-		expect(() => generateDropIndexSQL('my"index')).toThrow(
+		expect(() => generateDropIndexSQL('my"index', 'public')).toThrow(
 			/Invalid.*identifier/i,
+		);
+	});
+
+	it('throws before SQL generation when schema is missing or empty', () => {
+		expect(() => generateDropIndexSQL('idx_vec', '')).toThrow(
+			/Invalid.*schema.*identifier/i,
+		);
+		expect(() => generateDropIndexSQL('idx_vec', undefined as never)).toThrow(
+			/Invalid schema identifier/i,
 		);
 	});
 });

@@ -187,7 +187,7 @@ describe('ITEM-3: rangeVar rejects unsafe identifiers', () => {
 describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 	it('rejects USING with semicolon injection', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'status', {
+			generateAlterColumnSQL('users', 'public', 'status', {
 				type: 'text',
 				using: 'old_status::text; DROP TABLE users --',
 			}),
@@ -196,7 +196,7 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 
 	it('rejects USING with line-comment injection', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'score', {
+			generateAlterColumnSQL('users', 'public', 'score', {
 				type: 'integer',
 				using: 'old_score::integer -- bypass',
 			}),
@@ -205,7 +205,7 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 
 	it('rejects USING with block-comment injection', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'val', {
+			generateAlterColumnSQL('users', 'public', 'val', {
 				type: 'bigint',
 				using: 'val::bigint /* injected */',
 			}),
@@ -214,7 +214,7 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 
 	it('allows valid USING expression: old_column::text', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'status', {
+			generateAlterColumnSQL('users', 'public', 'status', {
 				type: 'text',
 				using: 'old_status::text',
 			}),
@@ -223,7 +223,7 @@ describe('ITEM-4: generateAlterColumnSQL USING injection defense', () => {
 
 	it('allows valid USING with type cast: CAST(old_col AS varchar)', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'name', {
+			generateAlterColumnSQL('users', 'public', 'name', {
 				type: 'varchar',
 				using: 'old_name::varchar',
 			}),
@@ -1486,7 +1486,7 @@ describe('FINDING-1: non-string namedArg name throws (typeof guard)', () => {
 describe('FINDING-1: non-string ALTER COLUMN USING throws (typeof guard)', () => {
 	it('rejects number as USING expression', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'status', {
+			generateAlterColumnSQL('users', 'public', 'status', {
 				type: 'text',
 				using: 42 as unknown as string,
 			}),
@@ -1495,7 +1495,7 @@ describe('FINDING-1: non-string ALTER COLUMN USING throws (typeof guard)', () =>
 
 	it('rejects object as USING expression', () => {
 		expect(() =>
-			generateAlterColumnSQL('users', 'status', {
+			generateAlterColumnSQL('users', 'public', 'status', {
 				type: 'text',
 				using: { toString: () => 'old_status::text' } as unknown as string,
 			}),
@@ -1601,7 +1601,7 @@ describe('TOCTOU getter-probe: ALTER COLUMN USING snapshot-once', () => {
 					: 'old_status::text; DROP TABLE users --';
 			},
 		};
-		const sql = generateAlterColumnSQL('users', 'status', options);
+		const sql = generateAlterColumnSQL('users', 'public', 'status', options);
 		expect(sql).toContain('old_status::text');
 		expect(sql).not.toContain('DROP TABLE');
 	});

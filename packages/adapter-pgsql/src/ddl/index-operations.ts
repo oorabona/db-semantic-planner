@@ -26,6 +26,11 @@ function quoteIdentifier(name: string): string {
 	return quoteIdent(name, 'alias');
 }
 
+function validateSchemaName(schemaName: string): string {
+	quoteIdent(schemaName, 'schema');
+	return schemaName;
+}
+
 // ---------------------------------------------------------------------------
 // CREATE INDEX
 // ---------------------------------------------------------------------------
@@ -42,18 +47,18 @@ function quoteIdentifier(name: string): string {
  * - WHERE partial index predicate (raw SQL escape hatch)
  *
  * @example
- * generateCreateIndexSQL('embeddings', { name: 'idx_model', columns: ['model'] })
- * // → 'CREATE INDEX "idx_model" ON "embeddings" ("model")'
+ * generateCreateIndexSQL('embeddings', 'public', { name: 'idx_model', columns: ['model'] })
+ * // → 'CREATE INDEX "idx_model" ON "public"."embeddings" ("model")'
  *
- * generateCreateIndexSQL('embeddings', {
+ * generateCreateIndexSQL('embeddings', 'public', {
  *   name: 'idx_vec', columns: ['vector'], method: 'hnsw',
  *   opclass: { vector: 'vector_cosine_ops' }, with: { m: 16, ef_construction: 64 }
  * })
- * // → 'CREATE INDEX "idx_vec" ON "embeddings" USING hnsw ("vector" vector_cosine_ops) WITH (m = 16, ef_construction = 64)'
+ * // → 'CREATE INDEX "idx_vec" ON "public"."embeddings" USING hnsw ("vector" vector_cosine_ops) WITH (m = 16, ef_construction = 64)'
  *
  * @param table - Table name
+ * @param schemaName - Required schema name for the table
  * @param options - Index creation options
- * @param schema - Optional schema name for the table
  *
  * @security index name and column names are identifier-quoted.
  * `where` (S-1) and expression columns (S-1) are validated via validateSqlExpression()
@@ -61,10 +66,11 @@ function quoteIdentifier(name: string): string {
  */
 export function generateCreateIndexSQL(
 	table: string,
+	schemaName: string,
 	options: CreateIndexOptions,
-	schema?: string,
 	context?: IndexCapabilityContext,
 ): string {
+	const validatedSchemaName = validateSchemaName(schemaName);
 	const keys: IndexRenderSpec['keys'] = options.columns.map((col) => {
 		if (typeof col === 'string') {
 			return { column: col, opclass: options.opclass?.[col] };
@@ -76,7 +82,7 @@ export function generateCreateIndexSQL(
 		{
 			name: options.name,
 			table,
-			schema,
+			schema: validatedSchemaName,
 			unique: options.unique === true,
 			method: options.method,
 			keys,
@@ -99,20 +105,22 @@ export function generateCreateIndexSQL(
  * Generate a DROP INDEX statement.
  *
  * @example
- * generateDropIndexSQL('idx_vec', { ifExists: true })
- * // → 'DROP INDEX IF EXISTS "idx_vec"'
+ * generateDropIndexSQL('idx_vec', 'public', { ifExists: true })
+ * // → 'DROP INDEX IF EXISTS "public"."idx_vec"'
  *
- * generateDropIndexSQL('idx_vec', { cascade: true })
- * // → 'DROP INDEX "idx_vec" CASCADE'
+ * generateDropIndexSQL('idx_vec', 'public', { cascade: true })
+ * // → 'DROP INDEX "public"."idx_vec" CASCADE'
  *
- * generateDropIndexSQL('idx_vec', { ifExists: true, schema: 'tenant_42' })
+ * generateDropIndexSQL('idx_vec', 'tenant_42', { ifExists: true })
  * // → 'DROP INDEX IF EXISTS "tenant_42"."idx_vec"'
  *
  * @param name - Index name
+ * @param schemaName - Required schema name for the index
  * @param options - Optional DROP INDEX modifiers
  */
 export function generateDropIndexSQL(
 	name: string,
+	schemaName: string,
 	options?: DropIndexOptions,
 ): string {
 	const parts: string[] = ['DROP INDEX'];
@@ -120,12 +128,7 @@ export function generateDropIndexSQL(
 	if (options?.concurrently) parts.push('CONCURRENTLY');
 	if (options?.ifExists) parts.push('IF EXISTS');
 
-	// Schema-qualified index name (for global orm.ddl.dropIndex)
-	if (options?.schema) {
-		parts.push(`${quoteIdentifier(options.schema)}.${quoteIdentifier(name)}`);
-	} else {
-		parts.push(quoteIdentifier(name));
-	}
+	parts.push(`${quoteIdent(schemaName, 'schema')}.${quoteIdentifier(name)}`);
 
 	if (options?.cascade) parts.push('CASCADE');
 

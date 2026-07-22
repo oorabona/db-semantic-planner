@@ -82,7 +82,7 @@ orm.tables.users.indexes.exists(name)  // name: string → Promise<boolean>
 | `ifNotExists` | `boolean` | no | Skip if already exists |
 | `concurrently` | `boolean` | no | Non-blocking CREATE INDEX CONCURRENTLY |
 
-**`DropIndexOptions`** fields: `{ ifExists?, cascade?, concurrently?, schema? }`
+**`DropIndexOptions`** fields: `{ ifExists?, cascade?, concurrently? }`
 
 ### Global Shortcuts
 
@@ -94,7 +94,9 @@ orm.ddl.dropIndex(name, options)  // name: string, options?: DropIndexOptions �
 
 ### Schema Scoping
 
-All methods respect `orm.withSchema()`:
+All DDL methods are schema-scoped. Scope DDL with `orm.withSchema('public')` or
+a tenant schema; there is no bare schema-scoped DDL that relies on PostgreSQL
+`search_path`. If you do not scope an ORM explicitly, DDL uses `public`.
 
 ```typescript
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
@@ -120,7 +122,7 @@ await __orm.tables.orders.truncate({ cascade: true, restartIdentity: true })
 
 Generated SQL:
 ```sql
-TRUNCATE "orders" CASCADE RESTART IDENTITY
+TRUNCATE "public"."orders" CASCADE RESTART IDENTITY
 ```
 
 ### 2. VACUUM FULL with ANALYZE
@@ -138,7 +140,7 @@ await __orm.tables.events.vacuum({ full: true, analyze: true })
 
 Generated SQL:
 ```sql
-VACUUM FULL ANALYZE "events"
+VACUUM FULL ANALYZE "public"."events"
 ```
 
 ### 3. HNSW vector index
@@ -163,7 +165,7 @@ await __orm.tables.embeddings.indexes.create({
 Generated SQL:
 ```sql
 CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
-  ON "embeddings" USING hnsw ("vector" vector_cosine_ops)
+  ON "public"."embeddings" USING hnsw ("vector" vector_cosine_ops)
   WITH (m = 16, ef_construction = 64)
 ```
 
@@ -181,7 +183,7 @@ await orm.tables.users.indexes.create({
 Generated SQL:
 ```sql
 CREATE INDEX "idx_users_email_lower"
-  ON "users" ("email")
+  ON "public"."users" ("email")
   WHERE "active" = true
 ```
 
@@ -203,7 +205,7 @@ await __orm.tables.products.alterColumn('price_cents', {
 
 Generated SQL:
 ```sql
-ALTER TABLE "products"
+ALTER TABLE "public"."products"
   ALTER COLUMN "price_cents" TYPE integer USING "price_cents"::integer
 ```
 

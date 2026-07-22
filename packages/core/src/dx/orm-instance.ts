@@ -82,19 +82,34 @@ function quoteIdent(name: string): string {
 	return `"${name.replace(/"/g, '""')}"`;
 }
 
-/** Build a qualified `"schema"."table"` or `"table"` reference. */
-function buildQualifiedTable(
-	tableName: string,
-	schemaName: string | undefined,
-): string {
-	return schemaName
-		? `${quoteIdent(schemaName)}.${quoteIdent(tableName)}`
-		: quoteIdent(tableName);
+const DEFAULT_DDL_SCHEMA_NAME = 'public';
+
+function resolveDDLSchemaName(schemaName: string | undefined): string {
+	const resolved = schemaName ?? DEFAULT_DDL_SCHEMA_NAME;
+	validateIdentifier(resolved, 'schema');
+	return resolved;
+}
+
+function sanitizeDropIndexOptions(
+	options: DropIndexOptions | undefined,
+): DropIndexOptions | undefined {
+	if (options === undefined || !('schema' in options)) {
+		return options;
+	}
+	const { schema: _schema, ...rest } = options as DropIndexOptions & {
+		readonly schema?: unknown;
+	};
+	return Object.keys(rest).length > 0 ? rest : undefined;
+}
+
+/** Build a qualified `"schema"."table"` reference. */
+function buildQualifiedTable(tableName: string, schemaName: string): string {
+	return `${quoteIdent(schemaName)}.${quoteIdent(tableName)}`;
 }
 
 function generateTruncateSQL(
 	tableName: string,
-	schemaName: string | undefined,
+	schemaName: string,
 	options: TruncateOptions | undefined,
 ): string {
 	const parts = [`TRUNCATE ${buildQualifiedTable(tableName, schemaName)}`];
@@ -105,7 +120,7 @@ function generateTruncateSQL(
 
 function generateVacuumSQL(
 	tableName: string,
-	schemaName: string | undefined,
+	schemaName: string,
 	options: VacuumOptions | undefined,
 ): string {
 	const modifiers: string[] = [];
@@ -210,11 +225,11 @@ function assertOutsideTransaction(
 
 function generateAlterColumnSQL(
 	tableName: string,
-	column: string,
 	schemaName: string | undefined,
+	column: string,
 	options: AlterColumnOptions,
 ): string {
-	const tbl = buildQualifiedTable(tableName, schemaName);
+	const tbl = buildQualifiedTable(tableName, resolveDDLSchemaName(schemaName));
 	const col = quoteIdent(column);
 	const clauses: string[] = [];
 
@@ -246,14 +261,13 @@ function generateAlterColumnSQL(
 
 function generateDropIndexSQL(
 	name: string,
-	schemaName: string | undefined,
+	schemaName: string,
 	options: DropIndexOptions | undefined,
 ): string {
 	const parts: string[] = ['DROP INDEX'];
 	if (options?.concurrently) parts.push('CONCURRENTLY');
 	if (options?.ifExists) parts.push('IF EXISTS');
-	const sc = options?.schema ?? schemaName;
-	parts.push(sc ? `${quoteIdent(sc)}.${quoteIdent(name)}` : quoteIdent(name));
+	parts.push(`${quoteIdent(schemaName)}.${quoteIdent(name)}`);
 	if (options?.cascade) parts.push('CASCADE');
 	return parts.join(' ');
 }
@@ -272,7 +286,8 @@ function buildIndexAPI(
 			if (opts.concurrently) {
 				assertOutsideTransaction(a, 'createIndex', 'CREATE INDEX CONCURRENTLY');
 			}
-			const sql = a.generateCreateIndex(tableName, opts, schemaName);
+			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const sql = a.generateCreateIndex(tableName, ddlSchemaName, opts);
 			await a.executeDDL?.(sql);
 		},
 
@@ -281,19 +296,11 @@ function buildIndexAPI(
 			if (options?.concurrently) {
 				assertOutsideTransaction(a, 'dropIndex', 'DROP INDEX CONCURRENTLY');
 			}
-			// Every other generator on this port takes the schema as an explicit
-			// parameter — generateCreateIndex, generateTruncate, generateVacuum,
-			// generateAlterColumn — so none of them can forget it. generateDropIndex
-			// expects it inside `options`, so it can, and it did: the fallback below
-			// used `schemaName` while the adapter path handed PostgreSQL a bare name to
-			// resolve through search_path, which in a multi-tenant database drops an
-			// index — just possibly somebody else's. An explicit option still wins.
-			const scopedOptions: DropIndexOptions | undefined = schemaName
-				? { ...options, schema: options?.schema ?? schemaName }
-				: options;
+			const ddlSchemaName = resolveDDLSchemaName(schemaName);
+			const sanitizedOptions = sanitizeDropIndexOptions(options);
 			const sql = a.generateDropIndex
-				? a.generateDropIndex(name, scopedOptions)
-				: generateDropIndexSQL(name, schemaName, options);
+				? a.generateDropIndex(name, ddlSchemaName, sanitizedOptions)
+				: generateDropIndexSQL(name, ddlSchemaName, sanitizedOptions);
 			await a.executeDDL?.(sql);
 		},
 
@@ -359,18 +366,20 @@ function buildTableDDL(
 	return {
 		async truncate(options?: TruncateOptions): Promise<void> {
 			const a = requireAdapter();
+			const ddlSchemaName = resolveDDLSchemaName(schemaName);
 			const sql = a.generateTruncate
-				? a.generateTruncate(tableName, schemaName, options)
-				: generateTruncateSQL(tableName, schemaName, options);
+				? a.generateTruncate(tableName, ddlSchemaName, options)
+				: generateTruncateSQL(tableName, ddlSchemaName, options);
 			await a.executeDDL?.(sql);
 		},
 
 		async vacuum(options?: VacuumOptions): Promise<void> {
 			const a = requireAdapter();
 			assertOutsideTransaction(a, 'vacuum', 'VACUUM');
+			const ddlSchemaName = resolveDDLSchemaName(schemaName);
 			const sql = a.generateVacuum
-				? a.generateVacuum(tableName, schemaName, options)
-				: generateVacuumSQL(tableName, schemaName, options);
+				? a.generateVacuum(tableName, ddlSchemaName, options)
+				: generateVacuumSQL(tableName, ddlSchemaName, options);
 			await a.executeDDL?.(sql);
 		},
 
@@ -381,9 +390,10 @@ function buildTableDDL(
 			validateIdentifier(tableName, 'table');
 			validateIdentifier(column, 'column');
 			const a = requireAdapter();
+			const ddlSchemaName = resolveDDLSchemaName(schemaName);
 			const sql = a.generateAlterColumn
-				? a.generateAlterColumn(tableName, column, options, schemaName)
-				: generateAlterColumnSQL(tableName, column, schemaName, options);
+				? a.generateAlterColumn(tableName, ddlSchemaName, column, options)
+				: generateAlterColumnSQL(tableName, ddlSchemaName, column, options);
 			await a.executeDDL?.(sql);
 		},
 
@@ -1079,31 +1089,20 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'DROP INDEX CONCURRENTLY',
 					);
 				}
-				// FIND-003: Validate index name and optional schema before building SQL
+				// FIND-003: Validate index name and schema before building SQL
 				validateIdentifier(name, 'index');
-				const sc = options?.schema ?? schemaName;
-				if (sc) {
-					validateIdentifier(sc, 'schema');
-				}
-				// `sc` resolves the ORM's schema scope, and the adapter must be given it:
-				// passing only the caller's options drops `withSchema('tenant')` on the
-				// floor and leaves PostgreSQL to resolve the name through search_path —
-				// which, in a multi-tenant database, can drop an index in another schema.
-				const scopedOptions: DropIndexOptions | undefined = sc
-					? { ...options, schema: sc }
-					: options;
+				const ddlSchemaName = resolveDDLSchemaName(schemaName);
+				const sanitizedOptions = sanitizeDropIndexOptions(options);
 				const sql = adapter.generateDropIndex
-					? adapter.generateDropIndex(name, scopedOptions)
+					? adapter.generateDropIndex(name, ddlSchemaName, sanitizedOptions)
 					: (() => {
 							const parts: string[] = ['DROP INDEX'];
-							if (options?.concurrently) parts.push('CONCURRENTLY');
-							if (options?.ifExists) parts.push('IF EXISTS');
+							if (sanitizedOptions?.concurrently) parts.push('CONCURRENTLY');
+							if (sanitizedOptions?.ifExists) parts.push('IF EXISTS');
 							parts.push(
-								sc
-									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`
-									: `"${name.replace(/"/g, '""')}"`,
+								`"${ddlSchemaName.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`,
 							);
-							if (options?.cascade) parts.push('CASCADE');
+							if (sanitizedOptions?.cascade) parts.push('CASCADE');
 							return parts.join(' ');
 						})();
 				await adapter.executeDDL(sql);

@@ -771,7 +771,6 @@ export type DropIndexOptions = {
 	readonly ifExists?: boolean;
 	readonly cascade?: boolean;
 	readonly concurrently?: boolean;
-	readonly schema?: string;
 };
 
 /** Options for VACUUM. */
@@ -818,7 +817,7 @@ export interface TableDDLGeneratorAdapter {
 	 */
 	generateTruncate?(
 		table: string,
-		schema?: string,
+		schemaName: string,
 		options?: TruncateOptions,
 	): string;
 
@@ -827,7 +826,7 @@ export interface TableDDLGeneratorAdapter {
 	 */
 	generateVacuum?(
 		table: string,
-		schema?: string,
+		schemaName: string,
 		options?: VacuumOptions,
 	): string;
 
@@ -836,9 +835,9 @@ export interface TableDDLGeneratorAdapter {
 	 */
 	generateAlterColumn?(
 		table: string,
+		schemaName: string,
 		column: string,
 		options: AlterColumnOptions,
-		schema?: string,
 	): string;
 
 	/**
@@ -846,14 +845,18 @@ export interface TableDDLGeneratorAdapter {
 	 */
 	generateCreateIndex(
 		table: string,
+		schemaName: string,
 		options: CreateIndexOptions,
-		schema?: string,
 	): string;
 
 	/**
 	 * Generate SQL for DROP INDEX.
 	 */
-	generateDropIndex?(name: string, options?: DropIndexOptions): string;
+	generateDropIndex?(
+		name: string,
+		schemaName: string,
+		options?: DropIndexOptions,
+	): string;
 
 	/**
 	 * List all indexes on a table, with optional name pattern filter.

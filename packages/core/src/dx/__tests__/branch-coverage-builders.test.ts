@@ -191,7 +191,7 @@ describe('generateTruncateSQL — option branches', () => {
 			restartIdentity: true,
 		});
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('TRUNCATE "users" RESTART IDENTITY');
+		expect(sql).toBe('TRUNCATE "public"."users" RESTART IDENTITY');
 	});
 
 	it('should include CASCADE when cascade option is true', async () => {
@@ -205,7 +205,7 @@ describe('generateTruncateSQL — option branches', () => {
 			orm.tables.users as unknown as { truncate(o: object): Promise<void> }
 		).truncate({ cascade: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('TRUNCATE "users" CASCADE');
+		expect(sql).toBe('TRUNCATE "public"."users" CASCADE');
 	});
 
 	it('should include both RESTART IDENTITY and CASCADE when both options are true', async () => {
@@ -222,7 +222,7 @@ describe('generateTruncateSQL — option branches', () => {
 			cascade: true,
 		});
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('TRUNCATE "users" RESTART IDENTITY CASCADE');
+		expect(sql).toBe('TRUNCATE "public"."users" RESTART IDENTITY CASCADE');
 	});
 
 	it('should include schema prefix when schemaName is set', async () => {
@@ -254,7 +254,7 @@ describe('generateVacuumSQL — option branches', () => {
 		});
 		await (orm.tables.users as unknown as { vacuum(): Promise<void> }).vacuum();
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('VACUUM "users"');
+		expect(sql).toBe('VACUUM "public"."users"');
 	});
 
 	it('should include FULL modifier when full option is true', async () => {
@@ -268,7 +268,7 @@ describe('generateVacuumSQL — option branches', () => {
 			orm.tables.users as unknown as { vacuum(o: object): Promise<void> }
 		).vacuum({ full: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('VACUUM (FULL) "users"');
+		expect(sql).toBe('VACUUM (FULL) "public"."users"');
 	});
 
 	it('should include ANALYZE modifier when analyze option is true', async () => {
@@ -282,7 +282,7 @@ describe('generateVacuumSQL — option branches', () => {
 			orm.tables.users as unknown as { vacuum(o: object): Promise<void> }
 		).vacuum({ analyze: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('VACUUM (ANALYZE) "users"');
+		expect(sql).toBe('VACUUM (ANALYZE) "public"."users"');
 	});
 
 	it('should include both FULL and ANALYZE when both options are true', async () => {
@@ -299,7 +299,7 @@ describe('generateVacuumSQL — option branches', () => {
 			analyze: true,
 		});
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('VACUUM (FULL, ANALYZE) "users"');
+		expect(sql).toBe('VACUUM (FULL, ANALYZE) "public"."users"');
 	});
 });
 
@@ -338,7 +338,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 		).alterColumn('name', { type: 'integer', using: 'name::integer' });
 		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe(
-			'ALTER TABLE "users" ALTER COLUMN "name" TYPE integer USING name::integer',
+			'ALTER TABLE "public"."users" ALTER COLUMN "name" TYPE integer USING name::integer',
 		);
 	});
 
@@ -355,7 +355,9 @@ describe('generateAlterColumnSQL — option branches', () => {
 			}
 		).alterColumn('name', { setNotNull: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" SET NOT NULL');
+		expect(sql).toBe(
+			'ALTER TABLE "public"."users" ALTER COLUMN "name" SET NOT NULL',
+		);
 	});
 
 	it('should generate DROP NOT NULL clause when setNotNull is false', async () => {
@@ -371,7 +373,9 @@ describe('generateAlterColumnSQL — option branches', () => {
 			}
 		).alterColumn('name', { setNotNull: false });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" DROP NOT NULL');
+		expect(sql).toBe(
+			'ALTER TABLE "public"."users" ALTER COLUMN "name" DROP NOT NULL',
+		);
 	});
 
 	it('should generate DROP DEFAULT when dropDefault is true', async () => {
@@ -387,7 +391,9 @@ describe('generateAlterColumnSQL — option branches', () => {
 			}
 		).alterColumn('name', { dropDefault: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" DROP DEFAULT');
+		expect(sql).toBe(
+			'ALTER TABLE "public"."users" ALTER COLUMN "name" DROP DEFAULT',
+		);
 	});
 
 	it('should generate SET DEFAULT when setDefault is provided', async () => {
@@ -404,7 +410,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 		).alterColumn('name', { setDefault: "'unknown'" });
 		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe(
-			'ALTER TABLE "users" ALTER COLUMN "name" SET DEFAULT \'unknown\'',
+			'ALTER TABLE "public"."users" ALTER COLUMN "name" SET DEFAULT \'unknown\'',
 		);
 	});
 });
@@ -427,11 +433,10 @@ describe('required generateCreateIndex delegation', () => {
 				indexes: { create(opts: object): Promise<void> };
 			}
 		).indexes.create({ name: 'idx', columns: ['name'] });
-		expect(generateCreateIndex).toHaveBeenCalledWith(
-			'users',
-			{ name: 'idx', columns: ['name'] },
-			undefined,
-		);
+		expect(generateCreateIndex).toHaveBeenCalledWith('users', 'public', {
+			name: 'idx',
+			columns: ['name'],
+		});
 		expect(executeDDL).toHaveBeenCalledWith('CUSTOM CREATE INDEX');
 	});
 
@@ -474,7 +479,7 @@ describe('generateDropIndexSQL — option branches', () => {
 			}
 		).indexes.drop('my_index');
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('DROP INDEX "my_index"');
+		expect(sql).toBe('DROP INDEX "public"."my_index"');
 	});
 
 	it('should include CONCURRENTLY keyword when concurrently option is true', async () => {
@@ -490,7 +495,7 @@ describe('generateDropIndexSQL — option branches', () => {
 			}
 		).indexes.drop('my_index', { concurrently: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('DROP INDEX CONCURRENTLY "my_index"');
+		expect(sql).toBe('DROP INDEX CONCURRENTLY "public"."my_index"');
 	});
 
 	it('should throw InvalidOperationError when CONCURRENTLY is used inside a transaction during drop', async () => {
@@ -521,21 +526,21 @@ describe('generateDropIndexSQL — option branches', () => {
 			}
 		).indexes.drop('my_index', { ifExists: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('DROP INDEX IF EXISTS "my_index"');
+		expect(sql).toBe('DROP INDEX IF EXISTS "public"."my_index"');
 	});
 
-	it('should include schema prefix when schema option is provided', async () => {
+	it('should include schema prefix when ORM schema scope is set', async () => {
 		const executeDDL = vi.fn().mockResolvedValue(undefined);
 		const ddlAdapter = makeDDLAdapter({ executeDDL });
 		const orm = createOrm({
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
+		}).withSchema('myns');
 		await (
 			orm.tables.users as unknown as {
-				indexes: { drop(name: string, opts: object): Promise<void> };
+				indexes: { drop(name: string): Promise<void> };
 			}
-		).indexes.drop('my_index', { schema: 'myns' });
+		).indexes.drop('my_index');
 		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX "myns"."my_index"');
 	});
@@ -553,7 +558,7 @@ describe('generateDropIndexSQL — option branches', () => {
 			}
 		).indexes.drop('my_index', { cascade: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('DROP INDEX "my_index" CASCADE');
+		expect(sql).toBe('DROP INDEX "public"."my_index" CASCADE');
 	});
 
 	it('should use adapter-provided generateDropIndex when available', async () => {
@@ -569,7 +574,11 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string): Promise<void> };
 			}
 		).indexes.drop('my_index');
-		expect(generateDropIndex).toHaveBeenCalledOnce();
+		expect(generateDropIndex).toHaveBeenCalledWith(
+			'my_index',
+			'public',
+			undefined,
+		);
 	});
 });
 
@@ -738,7 +747,7 @@ describe('createOrmInstance — ddl.dropIndex branches', () => {
 		});
 		await orm.ddl.dropIndex('my_idx', { concurrently: true });
 		const sql = firstDDLStatement(executeDDL);
-		expect(sql).toBe('DROP INDEX CONCURRENTLY "my_idx"');
+		expect(sql).toBe('DROP INDEX CONCURRENTLY "public"."my_idx"');
 	});
 
 	it('should use adapter-provided generateDropIndex in ddl.dropIndex when available', async () => {

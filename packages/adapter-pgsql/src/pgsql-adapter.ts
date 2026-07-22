@@ -5902,10 +5902,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	generateTruncate(
 		table: string,
-		schema?: string,
+		schemaName: string,
 		options?: TruncateOptions,
 	): string {
-		return generateTruncateSQL(table, schema ?? this.schemaName, options);
+		return generateTruncateSQL(table, schemaName ?? this.schemaName, options);
 	}
 
 	/**
@@ -5914,10 +5914,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	generateVacuum(
 		table: string,
-		schema?: string,
+		schemaName: string,
 		options?: VacuumOptions,
 	): string {
-		return generateVacuumSQL(table, schema ?? this.schemaName, options);
+		return generateVacuumSQL(table, schemaName ?? this.schemaName, options);
 	}
 
 	/**
@@ -5926,15 +5926,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	generateAlterColumn(
 		table: string,
+		schemaName: string,
 		column: string,
 		options: AlterColumnOptions,
-		schema?: string,
 	): string {
 		return generateAlterColumnSQL(
 			table,
+			schemaName ?? this.schemaName,
 			column,
 			options,
-			schema ?? this.schemaName,
 		);
 	}
 
@@ -5944,23 +5944,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	generateCreateIndex(
 		table: string,
+		schemaName: string,
 		options: CreateIndexOptions,
-		schema?: string,
 	): string {
-		return generateCreateIndexSQL(table, options, schema ?? this.schemaName, {
-			caps: this.dialectCapabilities,
-			targetVersion: getPostgresqlCapabilitiesTargetVersion(
-				this.dialectCapabilities,
-			),
-		});
+		return generateCreateIndexSQL(
+			table,
+			schemaName ?? this.schemaName,
+			options,
+			{
+				caps: this.dialectCapabilities,
+				targetVersion: getPostgresqlCapabilitiesTargetVersion(
+					this.dialectCapabilities,
+				),
+			},
+		);
 	}
 
 	/**
 	 * Generate SQL for DROP INDEX.
 	 * Implements TableDDLGeneratorAdapter.generateDropIndex.
 	 */
-	generateDropIndex(name: string, options?: DropIndexOptions): string {
-		return generateDropIndexSQL(name, options);
+	generateDropIndex(
+		name: string,
+		schemaName: string,
+		options?: DropIndexOptions,
+	): string {
+		return generateDropIndexSQL(name, schemaName ?? this.schemaName, options);
 	}
 
 	// =========================================================================
