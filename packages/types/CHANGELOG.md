@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.2.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.1.0...types-v3.2.0) (2026-07-22)
+
+
+### Features
+
+* **adapter-pgsql:** Abort a pool-owned transaction via AbortSignal ([#363](https://github.com/oorabona/db-semantic-planner/issues/363)) ([#369](https://github.com/oorabona/db-semantic-planner/issues/369)) ([e61d4b5](https://github.com/oorabona/db-semantic-planner/commit/e61d4b58ec1790b86497fd8d8fb15e7ca1aabc07))
+* **adapter-pgsql:** Add transaction isolation, access mode & timeouts ([#360](https://github.com/oorabona/db-semantic-planner/issues/360), [#361](https://github.com/oorabona/db-semantic-planner/issues/361)) ([#368](https://github.com/oorabona/db-semantic-planner/issues/368)) ([74cc335](https://github.com/oorabona/db-semantic-planner/commit/74cc33511d7e501b7bea8915e68bf8955ec9efc4))
+* **adapter-pgsql:** Add withPinnedConnection for a bounded pinned-connection scope ([#341](https://github.com/oorabona/db-semantic-planner/issues/341)) ([#373](https://github.com/oorabona/db-semantic-planner/issues/373)) ([c1bdc7d](https://github.com/oorabona/db-semantic-planner/commit/c1bdc7d9e8a5e3388f86264b292a7849a61f659b))
+* **adapter-pgsql:** Apply isolation and timeout options to the streaming BEGIN ([#364](https://github.com/oorabona/db-semantic-planner/issues/364)) ([#372](https://github.com/oorabona/db-semantic-planner/issues/372)) ([6dbf579](https://github.com/oorabona/db-semantic-planner/commit/6dbf57970733848bf5689725040fa6888af940fd))
+* **adapter-pgsql:** Make schema a required argument on the DDL generator port ([#331](https://github.com/oorabona/db-semantic-planner/issues/331)) ([#375](https://github.com/oorabona/db-semantic-planner/issues/375)) ([d106f9e](https://github.com/oorabona/db-semantic-planner/commit/d106f9e0534cf0a70215f0f6d562f596ba64514b))
+* **core:** Expose mutation rowCount via affectedRows() and executeWithMeta ([#362](https://github.com/oorabona/db-semantic-planner/issues/362)) ([#366](https://github.com/oorabona/db-semantic-planner/issues/366)) ([3ee7575](https://github.com/oorabona/db-semantic-planner/commit/3ee75752ef15a8c90e01903c1ad57fa3a2979b54))
+
 ## [3.1.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.0.0...types-v3.1.0) (2026-07-20)
 
 
