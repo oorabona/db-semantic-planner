@@ -1,4 +1,7 @@
-import { convertBigintJsReadValue } from '@dbsp/types';
+import {
+	convertBigintJsReadValue,
+	type PinnedConnectionOptions,
+} from '@dbsp/types';
 import {
 	type Adapter,
 	supportsTransactions,
@@ -121,6 +124,15 @@ function createUnsupportedTransactionError(): ExecutionError {
 	});
 }
 
+function createUnsupportedPinnedConnectionError(): ExecutionError {
+	return new ExecutionError({
+		operation: 'withPinnedConnection()',
+		reason:
+			'The adapter does not declare capabilities.supportsPinnedConnections: true and implement withPinnedConnection() for this ORM instance.',
+		fix: 'Use an adapter that implements withPinnedConnection(), and declare adapter.capabilities.supportsPinnedConnections: true.',
+	});
+}
+
 function hasTransactionOptions(
 	options: TransactionOptions | undefined,
 ): boolean {
@@ -131,6 +143,20 @@ function hasTransactionOptions(
 			options.lockTimeoutMs !== undefined ||
 			options.statementTimeoutMs !== undefined ||
 			options.signal !== undefined)
+	);
+}
+
+function supportsPinnedConnections<DB>(
+	adapter: Adapter<DB>,
+): adapter is Adapter<DB> & {
+	withPinnedConnection<T>(
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+		options?: PinnedConnectionOptions,
+	): Promise<T>;
+} {
+	return (
+		adapter.capabilities.supportsPinnedConnections === true &&
+		typeof adapter.withPinnedConnection === 'function'
 	);
 }
 
@@ -884,6 +910,47 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						tablesProxy,
 					);
 					return fn(txOrm);
+				}, options);
+			} catch (error) {
+				return Promise.reject(error);
+			}
+		},
+
+		withPinnedConnection<T>(
+			fn: (pinned: OrmInstance<DB>) => Promise<T>,
+			options?: PinnedConnectionOptions,
+		): Promise<T> {
+			if (!adapter) {
+				return Promise.reject(
+					new Error(
+						'withPinnedConnection() requires an adapter. ' +
+							'Pass an adapter when creating the ORM.',
+					),
+				);
+			}
+
+			if (!supportsPinnedConnections<DB>(adapter)) {
+				return Promise.reject(createUnsupportedPinnedConnectionError());
+			}
+
+			try {
+				return adapter.withPinnedConnection(async (pinnedAdapter) => {
+					const pinnedOrm = createOrmInstance<DB>(
+						model,
+						strictMode,
+						relationHints,
+						pinnedAdapter as Adapter<DB>,
+						schemaName,
+						dialectCapabilities,
+						schemaDefinition,
+						globalPlanOptions,
+						defaultFilters,
+						hookStore,
+						onHookError,
+						pinnedAdapter.inTransaction,
+						tablesProxy,
+					);
+					return fn(pinnedOrm);
 				}, options);
 			} catch (error) {
 				return Promise.reject(error);

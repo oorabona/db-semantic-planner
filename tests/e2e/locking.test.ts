@@ -82,6 +82,49 @@ describe('E15 — Row-level locking', () => {
 		expect(jobs.length).toBe(5);
 	});
 
+	it('keeps session-level advisory locks on the pinned connection', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: jobSchema.model, adapter });
+		const pool = await getTestPool();
+		const key = [341, 1] as const;
+
+		await orm.withPinnedConnection(async (pinned) => {
+			let lockHeld = false;
+			try {
+				const [lock] = await pinned.raw<{ locked: boolean }>(
+					'SELECT pg_try_advisory_lock($1, $2) AS locked',
+					key,
+				);
+				lockHeld = lock?.locked === true;
+				expect(lockHeld).toBe(true);
+
+				const second = await pool.query<{ locked: boolean }>(
+					'SELECT pg_try_advisory_lock($1, $2) AS locked',
+					[...key],
+				);
+				expect(second.rows[0]?.locked).toBe(false);
+			} finally {
+				if (lockHeld) {
+					const [unlock] = await pinned.raw<{ unlocked: boolean }>(
+						'SELECT pg_advisory_unlock($1, $2) AS unlocked',
+						key,
+					);
+					expect(unlock?.unlocked).toBe(true);
+				}
+			}
+		});
+
+		const reacquired = await pool.query<{ locked: boolean }>(
+			'SELECT pg_try_advisory_lock($1, $2) AS locked',
+			[...key],
+		);
+		try {
+			expect(reacquired.rows[0]?.locked).toBe(true);
+		} finally {
+			await pool.query('SELECT pg_advisory_unlock($1, $2)', [...key]);
+		}
+	});
+
 	it('FOR SHARE executes without error', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: jobSchema.model, adapter });

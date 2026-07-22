@@ -8,7 +8,7 @@
  * @since R01
  */
 
-import type { ColumnJsReadType } from '@dbsp/types';
+import type { ColumnJsReadType, PinnedConnectionOptions } from '@dbsp/types';
 import type { Adapter, TransactionOptions } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
@@ -571,6 +571,20 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	transaction<T>(
 		fn: (tx: OrmInstance<DB>) => Promise<T>,
 		options?: TransactionOptions,
+	): Promise<T>;
+
+	/**
+	 * Execute a callback with all ORM work pinned to one physical database
+	 * connection for the callback lifetime, without opening a transaction.
+	 *
+	 * @typeParam T - The return type of the callback
+	 * @param fn - Async callback that receives a connection-pinned ORM instance
+	 * @param options - Optional pinned connection controls
+	 * @returns Promise resolving to the callback's return value
+	 */
+	withPinnedConnection<T>(
+		fn: (pinned: OrmInstance<DB>) => Promise<T>,
+		options?: PinnedConnectionOptions,
 	): Promise<T>;
 
 	// =========================================================================
