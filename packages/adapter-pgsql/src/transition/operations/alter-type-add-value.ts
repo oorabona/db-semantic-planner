@@ -15,6 +15,10 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 } from '@dbsp/types';
+import {
+	clampTransactionTimeoutMs,
+	setLocalTransactionTimeoutSql,
+} from '../../transaction-timeouts.js';
 import { assertString, validateIdentifier } from '../../validate.js';
 import { stampedClaimForRequest } from '../claim-stamping.js';
 import {
@@ -644,13 +648,6 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
 
-function boundedLockTimeout(maxWaitMs: number): number {
-	if (!Number.isFinite(maxWaitMs)) {
-		return 5000;
-	}
-	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
-}
-
 export function createAlterTypeAddValueOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
@@ -742,7 +739,10 @@ export function createAlterTypeAddValueOperationRuntime() {
 		},
 		async setLockTimeout(client: TransitionExecutionClient, maxWaitMs: number) {
 			await clientQuery(client).query(
-				`SET LOCAL lock_timeout = '${boundedLockTimeout(maxWaitMs)}ms'`,
+				setLocalTransactionTimeoutSql(
+					'lock_timeout',
+					`${clampTransactionTimeoutMs(maxWaitMs)}ms`,
+				),
 			);
 		},
 		async acquireLocks(

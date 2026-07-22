@@ -17,6 +17,10 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 } from '@dbsp/types';
+import {
+	clampTransactionTimeoutMs,
+	setTransactionTimeoutSql,
+} from '../../transaction-timeouts.js';
 import { validateIdentifier } from '../../validate.js';
 import {
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
@@ -702,17 +706,6 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
 
-function boundedLockTimeout(maxWaitMs: number): number {
-	if (!Number.isFinite(maxWaitMs)) {
-		return DEFAULT_LOCK_TIMEOUT_MS;
-	}
-	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
-}
-
-function quoteLiteral(value: string): string {
-	return `'${value.replaceAll("'", "''")}'`;
-}
-
 async function readCurrentLockTimeout(executor: Queryable): Promise<string> {
 	const result = await executor.query('SHOW lock_timeout');
 	const value = result.rows[0]?.lock_timeout;
@@ -720,10 +713,6 @@ async function readCurrentLockTimeout(executor: Queryable): Promise<string> {
 		throw new Error('SHOW lock_timeout did not return a string value');
 	}
 	return value;
-}
-
-function setLockTimeoutSql(value: string): string {
-	return `SET lock_timeout = ${quoteLiteral(value)}`;
 }
 
 function guardTargetsPayload(
@@ -1153,7 +1142,11 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			const previousLockTimeout = await readCurrentLockTimeout(executor);
 			let lockTimeoutChanged = false;
 			await executor.query(
-				`SET lock_timeout = '${boundedLockTimeout(DEFAULT_LOCK_TIMEOUT_MS)}ms'`,
+				setTransactionTimeoutSql(
+					'lock_timeout',
+					`${clampTransactionTimeoutMs(DEFAULT_LOCK_TIMEOUT_MS)}ms`,
+					{ local: false },
+				),
 			);
 			lockTimeoutChanged = true;
 			try {
@@ -1180,7 +1173,11 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 				};
 			} finally {
 				if (lockTimeoutChanged) {
-					await executor.query(setLockTimeoutSql(previousLockTimeout));
+					await executor.query(
+						setTransactionTimeoutSql('lock_timeout', previousLockTimeout, {
+							local: false,
+						}),
+					);
 				}
 			}
 		},

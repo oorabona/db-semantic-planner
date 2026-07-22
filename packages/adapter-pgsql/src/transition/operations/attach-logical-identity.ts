@@ -15,6 +15,11 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 } from '@dbsp/types';
+import {
+	clampTransactionTimeoutMs,
+	quotePgLiteral,
+	setLocalTransactionTimeoutSql,
+} from '../../transaction-timeouts.js';
 import { validateIdentifier } from '../../validate.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
@@ -150,10 +155,6 @@ function qualifiedSideTable(): string {
 	)}`;
 }
 
-function quoteLiteral(value: string): string {
-	return `'${value.replaceAll("'", "''")}'`;
-}
-
 function tableResource(
 	payload: Pick<AttachLogicalIdentityPayload, 'schema' | 'table'>,
 	context?: ObservationContext,
@@ -262,7 +263,7 @@ export function renderCreateLogicalIdentitySideTableSql(
 		`${quoteIdent(
 			DBSP_LOGICAL_IDENTITY_MARKER_COLUMN,
 			'column',
-		)} text NOT NULL DEFAULT ${quoteLiteral(
+		)} text NOT NULL DEFAULT ${quotePgLiteral(
 			DBSP_LOGICAL_IDENTITY_MARKER_VALUE,
 		)}, ` +
 		'attached_at timestamptz NOT NULL DEFAULT clock_timestamp(), ' +
@@ -271,7 +272,7 @@ export function renderCreateLogicalIdentitySideTableSql(
 		`CHECK (${quoteIdent(
 			DBSP_LOGICAL_IDENTITY_MARKER_COLUMN,
 			'column',
-		)} = ${quoteLiteral(DBSP_LOGICAL_IDENTITY_MARKER_VALUE)})` +
+		)} = ${quotePgLiteral(DBSP_LOGICAL_IDENTITY_MARKER_VALUE)})` +
 		')'
 	);
 }
@@ -619,13 +620,6 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
 
-function boundedLockTimeout(maxWaitMs: number): number {
-	if (!Number.isFinite(maxWaitMs)) {
-		return 5000;
-	}
-	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
-}
-
 function observationRequest(
 	payload: AttachLogicalIdentityPayload,
 	context: ObservationContext,
@@ -757,7 +751,10 @@ export function createAttachLogicalIdentityOperationRuntime() {
 		},
 		async setLockTimeout(client: TransitionExecutionClient, maxWaitMs: number) {
 			await clientQuery(client).query(
-				`SET LOCAL lock_timeout = '${boundedLockTimeout(maxWaitMs)}ms'`,
+				setLocalTransactionTimeoutSql(
+					'lock_timeout',
+					`${clampTransactionTimeoutMs(maxWaitMs)}ms`,
+				),
 			);
 		},
 		async acquireLocks(

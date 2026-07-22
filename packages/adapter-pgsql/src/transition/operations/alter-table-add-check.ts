@@ -17,6 +17,10 @@ import type {
 	TransactionalCompletionRecord,
 	VendorValidatedExpression,
 } from '@dbsp/types';
+import {
+	clampTransactionTimeoutMs,
+	setLocalTransactionTimeoutSql,
+} from '../../transaction-timeouts.js';
 import { validateCheckExpression, validateIdentifier } from '../../validate.js';
 import {
 	ALTER_TABLE_ADD_CHECK_CAPABILITY,
@@ -763,20 +767,6 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
 
-function boundedLockTimeout(maxWaitMs: number): number {
-	if (!Number.isFinite(maxWaitMs)) {
-		return 5000;
-	}
-	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
-}
-
-function boundedStatementTimeout(maxWaitMs: number): number {
-	if (!Number.isFinite(maxWaitMs)) {
-		return GUARD_STATEMENT_TIMEOUT_MS;
-	}
-	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
-}
-
 function guardTargetsPayload(
 	guard: ApplyGuard,
 	payload: AlterTableAddCheckPayload,
@@ -936,7 +926,10 @@ export function createAlterTableAddCheckOperationRuntime() {
 		},
 		async setLockTimeout(client: TransitionExecutionClient, maxWaitMs: number) {
 			await clientQuery(client).query(
-				`SET LOCAL lock_timeout = '${boundedLockTimeout(maxWaitMs)}ms'`,
+				setLocalTransactionTimeoutSql(
+					'lock_timeout',
+					`${clampTransactionTimeoutMs(maxWaitMs)}ms`,
+				),
 			);
 		},
 		async acquireLocks(
@@ -1005,9 +998,10 @@ export function createAlterTableAddCheckOperationRuntime() {
 			}
 			const executor = clientQuery(client);
 			await executor.query(
-				`SET LOCAL statement_timeout = '${boundedStatementTimeout(
-					GUARD_STATEMENT_TIMEOUT_MS,
-				)}ms'`,
+				setLocalTransactionTimeoutSql(
+					'statement_timeout',
+					`${clampTransactionTimeoutMs(GUARD_STATEMENT_TIMEOUT_MS)}ms`,
+				),
 			);
 			let result: QueryResultLike;
 			try {
