@@ -1,7 +1,7 @@
 <!--
 doc-meta:
   id: 245-index-caps-gating
-  status: draft
+  status: canonical
   issue: 245
   related: [323, 348]
   adversarial_applied: true

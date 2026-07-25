@@ -1,7 +1,7 @@
 <!--
 doc-meta:
   id: 310-bigint-js-read-type
-  status: draft
+  status: canonical
   issue: 310
   related: [350, 351]
   adversarial_applied: false
