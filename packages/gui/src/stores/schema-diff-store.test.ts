@@ -27,7 +27,8 @@ const mockDiff: SchemaDiffResult = {
 		indexes: { added: 0, dropped: 0 },
 		constraints: { added: 0, dropped: 0, altered: 0 },
 	},
-	upSQL: [
+	autocommitSQL: [],
+	mainSQL: [
 		'ALTER TABLE "users" ADD COLUMN "email" text;',
 		'DROP TABLE "legacy_logs";',
 	],
@@ -53,7 +54,8 @@ const mockDiffSafe: SchemaDiffResult = {
 		indexes: { added: 1, dropped: 0 },
 		constraints: { added: 0, dropped: 0, altered: 0 },
 	},
-	upSQL: ['CREATE INDEX "idx_orders_date" ON "orders" ("created_at");'],
+	autocommitSQL: [],
+	mainSQL: ['CREATE INDEX "idx_orders_date" ON "orders" ("created_at");'],
 	downSQL: ['DROP INDEX "idx_orders_date";'],
 };
 

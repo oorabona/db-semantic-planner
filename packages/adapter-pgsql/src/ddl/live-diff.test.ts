@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
-	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
@@ -366,12 +365,17 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const client = new FakeEnumValueLiveDiffClient();
 		const pool = new FakeLiveDiffPool(client);
 
-		await expect(
-			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
+		const diff = await comparePgsqlDatabaseSchema(
+			adapterForPool(pool),
+			desired,
+			{
 				schema: 'tenant_1',
 				onWarning: vi.fn(),
-			}),
-		).rejects.toThrow(CheckConstraintNewEnumValueError);
+			},
+		);
+		expect(diff.changes.map((change) => change.kind)).toContain(
+			'alter_enum_add_value',
+		);
 		expect(
 			client.queries.some(
 				(query) =>
@@ -416,14 +420,17 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 		const onWarning = vi.fn();
 
-		await expect(
-			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
+		const diff = await comparePgsqlDatabaseSchema(
+			adapterForPool(pool),
+			desired,
+			{
 				schema: 'tenant_1',
 				onWarning,
-			}),
-		).rejects.toMatchObject({
-			constraint: 'jobs_state_check',
-		});
+			},
+		);
+		expect(diff.changes.map((change) => change.kind)).toContain(
+			'add_check_constraint',
+		);
 		expect(onWarning).toHaveBeenCalledOnce();
 		expect(onWarning.mock.calls[0]![0]).toContain(
 			'Could not canonicalize CHECK constraint "jobs"."jobs_state_check"',

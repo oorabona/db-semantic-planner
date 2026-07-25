@@ -2,12 +2,38 @@
  * Tests for Migration File — filename generation, checksums, file I/O.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+const fsMock = vi.hoisted(() => ({
+	renameSync: vi.fn(),
+	actualRenameSync: undefined as
+		| ((oldPath: string, newPath: string) => void)
+		| undefined,
+	fsyncSync: vi.fn(),
+	actualFsyncSync: undefined as ((fd: number) => void) | undefined,
+}));
+
+vi.mock('node:fs', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('node:fs')>();
+	fsMock.actualRenameSync = actual.renameSync;
+	fsMock.renameSync.mockImplementation(actual.renameSync);
+	fsMock.actualFsyncSync = actual.fsyncSync;
+	fsMock.fsyncSync.mockImplementation(actual.fsyncSync);
+	return {
+		...actual,
+		renameSync: fsMock.renameSync,
+		fsyncSync: fsMock.fsyncSync,
+	};
+});
+
 import {
 	computeChecksum,
+	computeMigrationChecksum,
 	generateMigrationFilename,
+	getPreMigrationFilename,
+	OrphanPreMigrationFileError,
 	scanMigrationFiles,
 	writeMigrationFile,
 } from './migration-file.js';
@@ -33,6 +59,21 @@ describe('computeChecksum', () => {
 	it('should handle empty string', () => {
 		const result = computeChecksum('');
 		expect(result).toHaveLength(64);
+	});
+});
+
+describe('computeMigrationChecksum', () => {
+	it('binds a pre-phase file to its main migration checksum', () => {
+		const main = 'CREATE TABLE "jobs" (id integer);\n';
+		const pre = "ALTER TYPE status ADD VALUE IF NOT EXISTS 'pending';\n";
+
+		expect(computeMigrationChecksum(main, pre)).not.toBe(
+			computeMigrationChecksum(main, `${pre}-- edited\n`),
+		);
+		expect(computeMigrationChecksum(main, pre)).not.toBe(
+			computeMigrationChecksum(`${main}-- edited\n`, pre),
+		);
+		expect(computeMigrationChecksum(main)).toBe(computeChecksum(main));
 	});
 });
 
@@ -170,5 +211,115 @@ describe('writeMigrationFile + scanMigrationFiles', () => {
 		expect(names.every((n) => n.endsWith('.sql'))).toBe(true);
 		expect(names).not.toContain('README.md');
 		expect(names).not.toContain('.gitkeep');
+	});
+
+	it('keeps pre files out of discovery while binding them to the main file', () => {
+		const main = 'CREATE TABLE "enum_jobs" (id integer);\n';
+		const pre = "ALTER TYPE status ADD VALUE IF NOT EXISTS '$tag$';\n";
+		const file = writeMigrationFile(tmpDir, '0004_enum_jobs.sql', main, pre);
+
+		expect(existsSync(join(tmpDir, getPreMigrationFilename(file.name)))).toBe(
+			true,
+		);
+		const scanned = scanMigrationFiles(tmpDir);
+		expect(scanned.map((migration) => migration.name)).not.toContain(
+			'0004_enum_jobs.pre.sql',
+		);
+		expect(
+			scanned.find((migration) => migration.name === file.name),
+		).toMatchObject({
+			preContent: pre,
+			checksum: file.checksum,
+		});
+	});
+
+	it('fails closed when a pre file has no main sibling', () => {
+		writeFileSync(join(tmpDir, '0005_orphan.pre.sql'), 'SELECT 1;\n');
+		expect(() => scanMigrationFiles(tmpDir)).toThrow(
+			OrphanPreMigrationFileError,
+		);
+	});
+
+	it('replaces phased and unphased siblings as one recoverable publication set', () => {
+		unlinkSync(join(tmpDir, '0005_orphan.pre.sql'));
+		const filename = '0006_rewrite.sql';
+		writeMigrationFile(tmpDir, filename, 'SELECT 1;\n', 'SELECT 2;\n');
+		writeMigrationFile(tmpDir, filename, 'SELECT 3;\n');
+
+		let scanned = scanMigrationFiles(tmpDir);
+		const unphased = scanned.find((file) => file.name === filename);
+		expect(unphased).toMatchObject({
+			name: filename,
+			content: 'SELECT 3;\n',
+		});
+		expect(unphased).not.toHaveProperty('preContent');
+
+		writeMigrationFile(tmpDir, filename, 'SELECT 4;\n', 'SELECT 5;\n');
+		scanned = scanMigrationFiles(tmpDir);
+		expect(scanned.find((file) => file.name === filename)).toMatchObject({
+			content: 'SELECT 4;\n',
+			preContent: 'SELECT 5;\n',
+		});
+	});
+
+	it('restores the old sidecar when publishing the replacement main file fails', () => {
+		const filename = '0007_restore_sidecar.sql';
+		const mainPath = join(tmpDir, filename);
+		const prePath = join(tmpDir, getPreMigrationFilename(filename));
+		writeMigrationFile(
+			tmpDir,
+			filename,
+			'SELECT old_main;\n',
+			'SELECT old_pre;\n',
+		);
+		fsMock.renameSync.mockImplementation((from, to) => {
+			if (to === mainPath) throw new Error('main rename failed');
+			return fsMock.actualRenameSync!(from, to);
+		});
+
+		expect(() =>
+			writeMigrationFile(
+				tmpDir,
+				filename,
+				'SELECT new_main;\n',
+				'SELECT new_pre;\n',
+			),
+		).toThrow('main rename failed');
+		expect(readFileSync(mainPath, 'utf-8')).toBe('SELECT old_main;\n');
+		expect(readFileSync(prePath, 'utf-8')).toBe('SELECT old_pre;\n');
+		// The mock is module-wide: leave it delegating so a test added below
+		// does not inherit a failing renameSync.
+		fsMock.renameSync.mockImplementation(fsMock.actualRenameSync!);
+	});
+
+	it('keeps the new sidecar when the final directory fsync fails after main publication', () => {
+		const filename = '0008_keep_published_pair.sql';
+		const mainPath = join(tmpDir, filename);
+		const prePath = join(tmpDir, getPreMigrationFilename(filename));
+		writeMigrationFile(
+			tmpDir,
+			filename,
+			'SELECT old_main;\n',
+			'SELECT old_pre;\n',
+		);
+
+		let fsyncCalls = 0;
+		fsMock.fsyncSync.mockImplementation((fd: number) => {
+			fsyncCalls++;
+			if (fsyncCalls === 4) throw new Error('final directory fsync failed');
+			return fsMock.actualFsyncSync!(fd);
+		});
+
+		expect(() =>
+			writeMigrationFile(
+				tmpDir,
+				filename,
+				'SELECT new_main;\n',
+				'SELECT new_pre;\n',
+			),
+		).toThrow('final directory fsync failed');
+		expect(readFileSync(mainPath, 'utf-8')).toBe('SELECT new_main;\n');
+		expect(readFileSync(prePath, 'utf-8')).toBe('SELECT new_pre;\n');
+		fsMock.fsyncSync.mockImplementation(fsMock.actualFsyncSync!);
 	});
 });

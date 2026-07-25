@@ -19,11 +19,16 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 		generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
 		generateMigrationSQL: (...args: unknown[]) =>
 			mockGenerateMigrationSQL(...args),
+		generateMigrationPlan: (...args: unknown[]) => ({
+			autocommit: [],
+			main: mockGenerateMigrationSQL(...args),
+		}),
 	};
 });
 
 vi.mock('../ddl-executor.js', () => ({
 	executeDdl: (...args: unknown[]) => mockExecuteDdl(...args),
+	executeDdlPlan: (...args: unknown[]) => mockExecuteDdl(...args),
 }));
 
 vi.mock('../utils/db-utils.js', () => ({

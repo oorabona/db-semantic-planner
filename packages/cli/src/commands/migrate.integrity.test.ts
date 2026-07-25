@@ -243,12 +243,16 @@ DROP TABLE users;
 		);
 
 		const client = {
+			_txStatus: 'I' as const,
 			query: vi.fn(async (sql: string) => {
 				if (sql.includes('SELECT "name"')) {
 					return { rows: [] };
 				}
 				if (sql.includes('SELECT MAX')) {
 					return { rows: [{ max_version: 0 }] };
+				}
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }] };
 				}
 				return { rows: [] };
 			}),
@@ -322,6 +326,7 @@ DROP TABLE users;
 		const insertFailure = new Error('insert failed');
 
 		const client = {
+			_txStatus: 'I' as const,
 			query: vi.fn(async (sql: string) => {
 				if (sql.includes('SELECT "name"')) {
 					return { rows: [] };
@@ -331,6 +336,9 @@ DROP TABLE users;
 				}
 				if (sql.includes('INSERT INTO "_dbsp_migrations"')) {
 					throw insertFailure;
+				}
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }] };
 				}
 				return { rows: [] };
 			}),
@@ -405,6 +413,9 @@ DROP TABLE users;
 				}
 				if (sql.includes('DELETE FROM "_dbsp_migrations"')) {
 					throw deleteFailure;
+				}
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }] };
 				}
 				return { rows: [] };
 			}),
@@ -530,10 +541,17 @@ describe('Lock API — migrate.ts source scan', () => {
 		expect(source).toContain('withMigrationLock');
 	});
 
-	it('should not contain executeDdl (removed split-transaction path)', async () => {
+	it('uses the shared phased executor rather than a local implementation', async () => {
 		const source = await readMigrateSource();
 
-		expect(source).not.toContain('executeDdl');
+		expect(source).toContain('executeDdlPlanWithClient');
+		// The legacy flat executor is still live and still correct for
+		// `push --drop`, which never emits ALTER TYPE ... ADD VALUE. Applying a
+		// migration through it would put enum additions back inside the main
+		// transaction, which is the bug this file guards against (#321). The
+		// call form is checked, not the bare name: `executeDdlPlanWithClient`
+		// contains the name but not `executeDdl(`.
+		expect(source).not.toContain('executeDdl(');
 	});
 
 	it('should contain withMigratePool used by migrate command paths', async () => {

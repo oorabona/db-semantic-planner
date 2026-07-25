@@ -108,7 +108,8 @@ const SchemaDiffParams = v.object({
 
 const SchemaApplyParams = v.object({
 	connectionId: v.string(),
-	statements: v.array(v.string()),
+	autocommit: v.array(v.string()),
+	main: v.array(v.string()),
 });
 
 const SchemaReloadParams = v.object({

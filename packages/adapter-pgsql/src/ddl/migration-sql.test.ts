@@ -24,9 +24,18 @@ import { describe, expect, it } from 'vitest';
 import { camelCaseNaming } from '../naming-plugin.js';
 import { generateDDL } from './ddl-generator.js';
 import {
+	generatePhasedMigrationFiles,
+	parseEnumAdditionSidecar,
+} from './migration-file.js';
+import {
+	compileMigration,
+	EnumAddAndDropConflictError,
 	generateDownMigrationSQL,
 	generateDownSQL,
+	generateMigrationPlan,
 	generateMigrationSQL,
+	InconsistentEnumChangeSetError,
+	InvalidEnumMigrationMetadataError,
 } from './migration-sql.js';
 import {
 	compareSchemata,
@@ -85,6 +94,330 @@ function makeModel(tables: readonly TableIR[]): ModelIRImpl {
 // ============================================================================
 
 describe('generateMigrationSQL', () => {
+	it('snapshots enum metadata before phase collection and rendering', () => {
+		let reads = 0;
+		const enumDef = {
+			get name() {
+				reads++;
+				return reads === 1 ? 'victim_a' : 'victim_b';
+			},
+			values: ['active', 'pending'],
+		};
+		expect(() =>
+			generateMigrationPlan(
+				makeDiff([
+					{
+						kind: 'alter_enum_add_value',
+						table: '',
+						destructive: false,
+						details: '',
+						meta: { enum: enumDef, value: 'pending' },
+					},
+					{
+						kind: 'drop_enum',
+						table: '',
+						destructive: true,
+						details: '',
+						meta: { enum: enumDef },
+					},
+				]),
+			),
+		).toThrow(EnumAddAndDropConflictError);
+	});
+
+	it('rejects non-string snapshotted enum metadata with a typed error', () => {
+		expect(() =>
+			generateMigrationPlan(
+				makeDiff([
+					{
+						kind: 'alter_enum_add_value',
+						table: '',
+						destructive: false,
+						details: '',
+						meta: { enum: { name: 42, values: ['active'] }, value: 'pending' },
+					},
+				]),
+			),
+		).toThrow(InvalidEnumMigrationMetadataError);
+	});
+
+	it('elides only an enum addition already included by CREATE TYPE', () => {
+		const create = { name: 'status', values: ['active', 'pending'] };
+		const plan = generateMigrationPlan(
+			makeDiff([
+				{
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: create },
+				},
+				{
+					kind: 'alter_enum_add_value',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: create, value: 'pending' },
+				},
+			]),
+		);
+		expect(plan).toEqual({
+			autocommit: [],
+			main: ["CREATE TYPE \"status\" AS ENUM ('active', 'pending');"],
+		});
+		expect(() =>
+			generateMigrationPlan(
+				makeDiff([
+					{
+						kind: 'create_enum',
+						table: '',
+						destructive: false,
+						details: '',
+						meta: { enum: { name: 'status', values: ['active'] } },
+					},
+					{
+						kind: 'alter_enum_add_value',
+						table: '',
+						destructive: false,
+						details: '',
+						meta: {
+							enum: { name: 'status', values: ['active'] },
+							value: 'pending',
+						},
+					},
+				]),
+			),
+		).toThrow(InconsistentEnumChangeSetError);
+	});
+	it('rejects same-enum additions and drops from both UP entry points', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['active', 'pending'],
+					},
+					value: 'pending',
+				},
+			},
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: {
+					enum: { name: 'status', schema: 'tenant_1', values: ['active'] },
+				},
+			},
+		]);
+
+		for (const generate of [generateMigrationSQL, generateMigrationPlan]) {
+			expect(() => generate(diff)).toThrow(EnumAddAndDropConflictError);
+			expect(() => generate(diff)).toThrow(
+				'Cannot add a value to enum "tenant_1"."status" in the same migration that drops it: the label may commit before the type is dropped.',
+			);
+		}
+	});
+
+	it('allows unrelated enum additions and drops, including same names in different schemas', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['active', 'pending'],
+					},
+					value: 'pending',
+				},
+			},
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: {
+					enum: { name: 'status', schema: 'tenant_2', values: ['active'] },
+				},
+			},
+		]);
+
+		expect(generateMigrationPlan(diff)).toEqual({
+			autocommit: [
+				`ALTER TYPE "tenant_1"."status" ADD VALUE IF NOT EXISTS 'pending';`,
+			],
+			main: ['DROP TYPE IF EXISTS "tenant_2"."status" CASCADE;'],
+		});
+		expect(() => generateMigrationSQL(diff)).toThrow(
+			'Use generateMigrationPlan()',
+		);
+	});
+
+	it('does not expose control characters from conflicting enum identities', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					enum: { name: 'status\nspoof', values: ['active'] },
+					value: 'pending',
+				},
+			},
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { enum: { name: 'status\nspoof', values: ['active'] } },
+			},
+		]);
+
+		try {
+			generateMigrationPlan(diff);
+			expect.unreachable('expected enum conflict');
+		} catch (error) {
+			expect((error as Error).message).not.toContain('\n');
+			expect((error as Error).message).toContain('status?spoof');
+		}
+	});
+
+	it('keeps isolated enum additions and drops renderable', () => {
+		const add = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					enum: { name: 'status', values: ['active', 'pending'] },
+					value: 'pending',
+				},
+			},
+		]);
+		const drop = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: '',
+				meta: { enum: { name: 'status', values: ['active'] } },
+			},
+		]);
+
+		expect(generateMigrationPlan(add).autocommit).toEqual([
+			`ALTER TYPE "status" ADD VALUE IF NOT EXISTS 'pending';`,
+		]);
+		expect(generateMigrationSQL(drop)).toEqual([
+			'DROP TYPE IF EXISTS "status" CASCADE;',
+		]);
+	});
+
+	it('keeps enum additions in the autocommit phase and rejects flat rendering', () => {
+		const enumDef: EnumIR = { name: 'status', values: ['active', 'pending'] };
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: enumDef, value: 'pending' },
+			},
+			{
+				kind: 'alter_column_default',
+				table: 'jobs',
+				column: 'status',
+				destructive: false,
+				details: '',
+				meta: { default: 'pending' },
+			},
+		]);
+		const plan = generateMigrationPlan(diff);
+		expect(plan.autocommit).toEqual([
+			`ALTER TYPE "status" ADD VALUE IF NOT EXISTS 'pending';`,
+		]);
+		expect(plan.main).toEqual([
+			`ALTER TABLE "jobs" ALTER COLUMN "status" SET DEFAULT 'pending';`,
+		]);
+		expect(() => generateMigrationSQL(diff)).toThrow(
+			'Use generateMigrationPlan()',
+		);
+	});
+
+	it('round-trips generated enum sidecars through the canonical whitelist', () => {
+		const enumDef: EnumIR = { name: 'status', values: ['active'] };
+		const diff = makeDiff(
+			['pending', '$tag$', "O'Reilly"].map((value) => ({
+				kind: 'alter_enum_add_value' as const,
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { enum: enumDef, value },
+			})),
+		);
+
+		const plan = generateMigrationPlan(diff);
+		const files = generatePhasedMigrationFiles(diff);
+
+		expect(files.preContent).toBe(`${plan.autocommit.join('\n')}\n`);
+		expect(parseEnumAdditionSidecar(files.preContent!)).toEqual(
+			plan.autocommit,
+		);
+	});
+
+	it('rejects backslashes before rendering an enum sidecar', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: {
+					enum: { name: 'status', values: ['active'] },
+					value: 'pending\\\'; DROP TABLE "victim"; --',
+				},
+			},
+		]);
+
+		expect(() => generateMigrationPlan(diff)).toThrow(/backslashes/);
+		expect(() =>
+			parseEnumAdditionSidecar(
+				'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\\\'; DROP TABLE "victim"; --\';',
+			),
+		).toThrow('Invalid enum sidecar');
+	});
+
+	it('renders both directions from one non-enum snapshot', () => {
+		let tableReads = 0;
+		const change = {
+			kind: 'drop_table' as const,
+			get table() {
+				tableReads++;
+				return tableReads === 1 ? 'victim' : 'jobs';
+			},
+			destructive: true,
+			details: '',
+		};
+		const compiled = compileMigration(makeDiff([change]));
+
+		expect(compiled.plan.main).toEqual([
+			'DROP TABLE IF EXISTS "victim" CASCADE;',
+		]);
+		expect(compiled.down.statements).toEqual([
+			'-- WARNING: Cannot reverse drop_table "victim" -- table data was lost',
+		]);
+	});
+
 	describe('CREATE TABLE', () => {
 		it('should generate CREATE TABLE with columns and PK', () => {
 			const table = makeTable(
@@ -2041,14 +2374,12 @@ describe('generateDownSQL', () => {
 					},
 				]),
 			);
-
 			const dropTableWarning = sql.find((statement) =>
 				statement.includes('drop_table'),
 			);
 			const dropColumnWarning = sql.find((statement) =>
 				statement.includes('drop_column'),
 			);
-
 			expect(dropTableWarning).toContain('x"DROP TABLE pwn;--');
 			expect(dropColumnWarning).toContain(
 				'"x"DROP TABLE pwn;--"."x"DROP TABLE pwn;--"',
@@ -2972,7 +3303,7 @@ describe('ENUM types', () => {
 		);
 	});
 
-	it('should let schemaName win over EnumIR.schema for schema-qualified enum operations', () => {
+	it('should let schemaName win over EnumIR.schema and omit redundant additions to a created enum', () => {
 		const diff = makeDiff([
 			{
 				kind: 'create_enum',
@@ -2983,7 +3314,7 @@ describe('ENUM types', () => {
 					enum: {
 						name: 'status',
 						schema: 'select',
-						values: ['active', 'inactive'],
+						values: ['active', 'inactive', 'pending'],
 					},
 				},
 			},
@@ -3009,7 +3340,7 @@ describe('ENUM types', () => {
 				details: 'Drop enum',
 				meta: {
 					enum: {
-						name: 'status',
+						name: 'obsolete_status',
 						schema: 'select',
 						values: ['active', 'inactive'],
 					},
@@ -3017,11 +3348,9 @@ describe('ENUM types', () => {
 			},
 		]);
 
-		const sql = generateMigrationSQL(diff, { schemaName: 'ignored' });
-		expect(sql).toEqual([
-			'DROP TYPE IF EXISTS "ignored"."status" CASCADE;',
-			'CREATE TYPE "ignored"."status" AS ENUM (\'active\', \'inactive\');',
-			'ALTER TYPE "ignored"."status" ADD VALUE IF NOT EXISTS \'pending\' AFTER \'inactive\';',
+		expect(generateMigrationSQL(diff, { schemaName: 'ignored' })).toEqual([
+			'DROP TYPE IF EXISTS "ignored"."obsolete_status" CASCADE;',
+			"CREATE TYPE \"ignored\".\"status\" AS ENUM ('active', 'inactive', 'pending');",
 		]);
 	});
 
@@ -3075,8 +3404,8 @@ describe('ENUM types', () => {
 				},
 			},
 		]);
-		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe(
+		const plan = generateMigrationPlan(diff);
+		expect(plan.autocommit[0]).toBe(
 			"ALTER TYPE \"status\" ADD VALUE IF NOT EXISTS 'pending' AFTER 'inactive';",
 		);
 	});
@@ -3095,8 +3424,8 @@ describe('ENUM types', () => {
 				},
 			},
 		]);
-		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe(
+		const plan = generateMigrationPlan(diff);
+		expect(plan.autocommit[0]).toBe(
 			'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
 		);
 	});
@@ -3260,11 +3589,9 @@ describe('ENUM types', () => {
 				},
 			},
 		]);
-		const sql = generateMigrationSQL(diff);
-		const indexIdx = sql.findIndex((s) => s.includes('INDEX'));
-		const addValueIdx = sql.findIndex((s) => s.includes('ADD VALUE'));
-		expect(indexIdx).toBeGreaterThanOrEqual(0);
-		expect(addValueIdx).toBeGreaterThan(indexIdx);
+		const plan = generateMigrationPlan(diff);
+		expect(plan.main.some((s) => s.includes('INDEX'))).toBe(true);
+		expect(plan.autocommit.some((s) => s.includes('ADD VALUE'))).toBe(true);
 	});
 
 	it('should order drop_enum BEFORE create_enum in same diff', () => {

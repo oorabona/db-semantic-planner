@@ -8,7 +8,7 @@
 
 import type { SchemaDiff } from '@dbsp/adapter-pgsql';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hasExecutableSql, migrateCommand } from './migrate.js';
+import { migrateCommand, runApply } from './migrate.js';
 
 // ============================================================================
 // Mock adapter
@@ -31,6 +31,41 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 		mockComparePgsqlDatabaseSchema(...args),
 	generateMigrationSQL: (...args: unknown[]) =>
 		mockGenerateMigrationSQL(...args),
+	generateMigrationPlan: (...args: unknown[]) => ({
+		autocommit: [],
+		main: mockGenerateMigrationSQL(...args),
+	}),
+	compileMigration: (...args: unknown[]) => ({
+		normalizedChanges: [],
+		plan: { autocommit: [], main: mockGenerateMigrationSQL(...args) },
+		down: { statements: [], destructive: false },
+	}),
+	renderPhasedMigrationFiles: (compiled: { plan: { main: string[] } }) => ({
+		content: compiled.plan.main.join('\n'),
+	}),
+	parseEnumAdditionSidecar: (content: string) =>
+		content.split(/\r?\n/).filter(Boolean),
+	DdlExecutionError: class DdlExecutionError extends Error {},
+	executeDdlPlanWithClient: async (
+		client: {
+			query: (sql: string) => Promise<unknown>;
+		},
+		plan: { autocommit: string[]; main: string[] },
+		options?: {
+			onMain?: (client: {
+				query: (sql: string) => Promise<unknown>;
+			}) => Promise<void>;
+		},
+	) => {
+		for (const sql of plan.autocommit) await client.query(sql);
+		if (plan.main.length > 0 || options?.onMain) {
+			await client.query('BEGIN');
+			for (const sql of plan.main) await client.query(sql);
+			await options?.onMain?.(client);
+			await client.query('COMMIT');
+		}
+		return { statementsExecuted: plan.autocommit.length + plan.main.length };
+	},
 	generateMigrationFile: (...args: unknown[]) =>
 		mockGenerateMigrationFile(...args),
 	ensureMigrationsTable: (...args: unknown[]) =>
@@ -45,6 +80,10 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	withMigrationLock: (...args: unknown[]) => mockWithMigrationLock(...args),
 	parseMigrationFile: (...args: unknown[]) => mockParseMigrationFile(...args),
 	isDestructiveDown: (...args: unknown[]) => mockIsDestructiveDown(...args),
+	hasExecutableSqlStatements: (statements: readonly string[]) =>
+		statements.some(
+			(statement) => !/^(?:\s*--[^\n]*(?:\n|$))*\s*$/.test(statement),
+		),
 }));
 
 // ============================================================================
@@ -293,39 +332,6 @@ describe('migrate apply — statement splitting', () => {
 
 		expect(statements).toEqual([]);
 	});
-
-	// hasExecutableSql regression: a statement that STARTS with a comment header
-	// but contains real SQL must be KEPT (the old `!s.startsWith('-- ')` predicate
-	// dropped the entire statement, silently skipping the DDL while still recording
-	// the migration as applied).
-	//
-	// These tests import the PRODUCTION hasExecutableSql from migrate.ts — reverting
-	// the function or its callers in migrate.ts turns these RED immediately.
-	it('hasExecutableSql: keeps a statement that begins with a comment header followed by real SQL', () => {
-		// Shape produced by generateMigrationFile: comment header on the same
-		// element as the DDL (splitter splits on /;\s*\n/, not on comment lines).
-		const stmt = '-- Migration: create users\nCREATE TABLE users (id integer)';
-		expect(hasExecutableSql(stmt)).toBe(true);
-	});
-
-	it('hasExecutableSql: drops a statement that contains only blank lines and comments', () => {
-		const stmt = '-- only a comment\n-- another comment\n';
-		expect(hasExecutableSql(stmt)).toBe(false);
-	});
-
-	// Mutation guard: documents that the old startsWith predicate drops the same
-	// input that hasExecutableSql correctly keeps.  If the production function is
-	// reverted to `!s.startsWith('-- ')`, the first assertion below turns RED.
-	it('hasExecutableSql: production predicate keeps comment-headed DDL; old startsWith predicate would drop it (mutation guard)', () => {
-		const stmt = '-- Migration: create users\nCREATE TABLE users (id integer)';
-
-		// Production function (imported from migrate.ts) must keep the statement:
-		expect(hasExecutableSql(stmt)).toBe(true);
-
-		// The old broken predicate (reverting the fix) would drop it:
-		const oldPredicate = (s: string) => s.length > 0 && !s.startsWith('-- ');
-		expect(oldPredicate(stmt)).toBe(false);
-	});
 });
 
 // ============================================================================
@@ -333,8 +339,7 @@ describe('migrate apply — statement splitting', () => {
 // ============================================================================
 //
 // These tests drive migrateCommand.parseAsync('apply ...') end-to-end through
-// the mocked adapter + pool so that reverting hasExecutableSql (or its callers
-// in applyCommand) turns THIS suite RED — not just the unit predicate tests above.
+// the mocked adapter and pool.
 //
 // The critical assertion: the mocked client.query must be called with the
 // CREATE TABLE statement even when it is preceded by a `-- comment` header
@@ -418,29 +423,26 @@ describe('migrate apply — comment-headed DDL reaches DB client (e2e regression
 		);
 
 		// The CREATE TABLE must have been sent to client.query.
-		// If hasExecutableSql is reverted to `!s.startsWith('-- ')`, the
-		// comment-headed statement is dropped and this assertion fails.
 		const ddlCall = executedSql.find((sql) =>
 			sql.includes('CREATE TABLE "users"'),
 		);
 		expect(ddlCall).toBeDefined();
 	});
 
-	it('pure-comment statement (no DDL) is NOT sent to DB client', async () => {
-		// A statement that is entirely a comment — must be filtered out.
-		const commentOnlyStatement = '-- This migration is intentionally a no-op';
-
+	it('runs enum additions in autocommit before main DDL and records in the main transaction', async () => {
 		mockParseMigrationFile.mockReturnValue({
-			upStatements: [commentOnlyStatement],
+			upStatements: [
+				`ALTER TABLE "jobs" ALTER COLUMN "status" SET DEFAULT 'pending'`,
+			],
 			downStatements: [],
-			hasDown: false,
+			hasDown: true,
 		});
-
 		mockScanMigrationFiles.mockReturnValue([
 			{
-				name: '0001_noop.sql',
+				name: '0001_enum.sql',
 				content: 'irrelevant',
-				checksum: 'def456',
+				preContent: `ALTER TYPE "status" ADD VALUE IF NOT EXISTS 'pending';\n`,
+				checksum: 'enum',
 			},
 		]);
 
@@ -449,11 +451,133 @@ describe('migrate apply — comment-headed DDL reaches DB client (e2e regression
 			{ from: 'user' },
 		);
 
-		// The comment-only string must NOT have reached client.query as a statement.
-		const commentCall = executedSql.find((sql) =>
-			sql.startsWith('-- This migration'),
-		);
-		expect(commentCall).toBeUndefined();
+		expect(executedSql).toEqual([
+			`ALTER TYPE "status" ADD VALUE IF NOT EXISTS 'pending';`,
+			'BEGIN',
+			`ALTER TABLE "jobs" ALTER COLUMN "status" SET DEFAULT 'pending'`,
+			'COMMIT',
+		]);
+		expect(mockRecordMigration).toHaveBeenCalledOnce();
+		const recordPosition = mockRecordMigration.mock.invocationCallOrder[0]!;
+		const beginPosition = mockClient.query.mock.invocationCallOrder[1]!;
+		expect(recordPosition).toBeGreaterThan(beginPosition);
+	});
+
+	it('hands the phased plan and recording callback to the executor when main DDL fails', async () => {
+		const error = new Error('main failure');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === 'INVALID MAIN SQL') throw error;
+				return { rows: [] };
+			}),
+		};
+		const record = vi.fn();
+		await expect(
+			runApply(
+				{ db: 'postgres://localhost/test', dir: 'migrations' },
+				{
+					withMigratePool: async (_db, fn) => fn({} as never),
+					ensureMigrationsTable: async () => {},
+					withMigrationLock: async (_pool, fn) => fn(client as never),
+					getAppliedMigrations: async () => [],
+					scanMigrationFiles: () => [
+						{
+							name: '0001_enum.sql',
+							content: '',
+							preContent: "ALTER TYPE status ADD VALUE 'pending';\n",
+							checksum: 'enum',
+						},
+					],
+					parseMigrationFile: () => ({
+						upStatements: ['INVALID MAIN SQL'],
+						downStatements: [],
+						hasDown: true,
+					}),
+					getNextSchemaVersion: async () => 1,
+					recordMigration: record,
+				},
+			),
+		).rejects.toThrow('main failure');
+		expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+			"ALTER TYPE status ADD VALUE 'pending';",
+			'BEGIN',
+			'INVALID MAIN SQL',
+		]);
+		expect(record).not.toHaveBeenCalled();
+	});
+
+	it('reports an unknown outcome when the main COMMIT response fails', async () => {
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === 'COMMIT') {
+					throw new Error('connection lost during COMMIT');
+				}
+				return { rows: [] };
+			}),
+		};
+
+		await expect(
+			runApply(
+				{ db: 'postgres://localhost/test', dir: 'migrations' },
+				{
+					withMigratePool: async (_db, fn) => fn({} as never),
+					ensureMigrationsTable: async () => {},
+					withMigrationLock: async (_pool, fn) => fn(client as never),
+					getAppliedMigrations: async () => [],
+					scanMigrationFiles: () => [
+						{
+							name: '0001_enum.sql',
+							content: '',
+							preContent: "ALTER TYPE status ADD VALUE 'pending';\n",
+							checksum: 'enum',
+						},
+					],
+					parseMigrationFile: () => ({
+						upStatements: ['SELECT 1'],
+						downStatements: [],
+						hasDown: true,
+					}),
+					getNextSchemaVersion: async () => 1,
+					recordMigration: async () => {},
+				},
+			),
+		).rejects.toThrow('connection lost during COMMIT');
+	});
+
+	it('reports partial progress when an autocommit enum addition fails', async () => {
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.startsWith('ALTER TYPE')) throw new Error('enum failure');
+				return { rows: [] };
+			}),
+		};
+
+		await expect(
+			runApply(
+				{ db: 'postgres://localhost/test', dir: 'migrations' },
+				{
+					withMigratePool: async (_db, fn) => fn({} as never),
+					ensureMigrationsTable: async (_pool) => {},
+					withMigrationLock: async (_pool, fn) => fn(client as never),
+					getAppliedMigrations: async () => [],
+					scanMigrationFiles: () => [
+						{
+							name: '0001_enum.sql',
+							content: '',
+							preContent: "ALTER TYPE status ADD VALUE 'pending';\n",
+							checksum: 'enum',
+						},
+					],
+					parseMigrationFile: () => ({
+						upStatements: ['SELECT 1'],
+						downStatements: [],
+						hasDown: true,
+					}),
+					getNextSchemaVersion: async () => 1,
+					recordMigration: async () => {},
+				},
+			),
+		).rejects.toThrow('enum failure');
 	});
 
 	it('records destructive from parsed metadata instead of scanning DOWN SQL', async () => {

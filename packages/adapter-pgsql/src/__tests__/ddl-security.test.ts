@@ -140,10 +140,10 @@ describe('FIX-12: non-string type-confusion guards for SQL-splice helpers', () =
 	it('migration enum literal escaping rejects a forged non-string value', () => {
 		expect(() =>
 			generateMigrationSQL(makeCreateEnumDiff(forgedNonString())),
-		).toThrow(/Invalid enum value: expected a string, received object/);
+		).toThrow(/enum value must be a primitive string, got object/);
 		expect(() =>
 			generateMigrationSQL(makeAlterEnumAddValueDiff(forgedNonString())),
-		).toThrow(/Invalid enum value: expected a string, received object/);
+		).toThrow(/enum added value must be a primitive string, got object/);
 	});
 
 	it('DDL enum phase literal escaping rejects a forged non-string value', () => {

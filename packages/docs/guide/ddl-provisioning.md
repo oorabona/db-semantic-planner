@@ -200,6 +200,63 @@ SELECT pg_advisory_unlock(hashtext('dbsp_migrate'));
 
 This is a session-level lock released automatically if the connection drops.
 
+## Enum additions and transaction boundaries
+
+When an additive schema change adds an enum label and then uses it, dbsp runs
+each enum addition as its own autocommit query, then runs all other DDL in one
+transaction. PostgreSQL requires that boundary before a default, partial index,
+RLS policy, or CHECK constraint can reference the new label.
+
+The second transaction is still atomic. If it fails, dbsp rolls back only that
+transaction; every enum label whose autocommit query succeeded stays committed,
+the migration has no tracking record, and the unchanged migration file can be
+retried safely. Custom appliers must use the shared executor and record the
+migration inside its main transaction:
+
+```typescript
+import {
+  ensureMigrationsTable,
+  executeDdlPlanWithClient,
+  generateMigrationPlan,
+  getNextSchemaVersion,
+  recordMigration,
+  withMigrationLock,
+  type SchemaDiff,
+} from '@dbsp/adapter-pgsql';
+import type { Pool } from 'pg';
+
+async function applyProvisioningPlan(pool: Pool, diff: SchemaDiff): Promise<void> {
+  const migrationName = 'custom_001.sql';
+  const checksum = 'replace-with-the-migration-sha256';
+  const destructive = diff.hasDestructive;
+
+  await ensureMigrationsTable(pool);
+  const plan = generateMigrationPlan(diff, { schemaName: 'public' });
+
+  await withMigrationLock(pool, async (client) => {
+    const schemaVersion = await getNextSchemaVersion(client);
+    await executeDdlPlanWithClient(client, plan, {
+      onMain: async (transactionClient) => {
+        await recordMigration(
+          transactionClient,
+          migrationName,
+          checksum,
+          schemaVersion,
+          destructive,
+        );
+      },
+    });
+  });
+}
+```
+
+`migrate dev` writes enum additions to a sibling `.pre.sql` file rather than
+encoding phase markers inside SQL text. For a manual apply, run the generated
+`.pre.sql` file first as dbsp-rendered enum additions only, then extract and run
+only the matching `.sql` file's UP section in a transaction (stop before
+`-- DOWN`). Never pipe the whole `.sql` file to `psql` or merge the two files:
+the DOWN section contains executable rollback SQL.
+
 ## Typical Workflows
 
 ### Development (fast iteration)

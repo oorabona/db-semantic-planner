@@ -5,6 +5,17 @@
  */
 
 export {
+	DdlExecutionError,
+	type DdlExecutionOutcome,
+	type DdlExecutionPhase,
+	type DdlExecutionPlan,
+	type DdlExecutionResult,
+	describeCompletedAutocommitOperations,
+	type ExecuteDdlPlanOptions,
+	executeDdlPlan,
+	executeDdlPlanWithClient,
+} from './ddl-executor.js';
+export {
 	canGenerateCreateIndex,
 	type GenerateDDLOptions,
 	generateCreateIndex,
@@ -28,14 +39,28 @@ export {
 } from './live-diff.js';
 export {
 	generateMigrationFile,
+	generatePhasedMigrationFiles,
+	hasExecutableSqlStatements,
 	isDestructiveDown,
 	type ParsedMigrationFile,
+	type PhasedMigrationFiles,
+	parseEnumAdditionSidecar,
 	parseMigrationFile,
+	renderPhasedMigrationFiles,
 } from './migration-file.js';
 export {
+	type CompiledMigration,
+	compileMigration,
+	EnumAddAndDropConflictError,
+	generateDownMigrationSQL,
 	generateDownSQL,
+	generateMigrationPlan,
 	generateMigrationSQL,
+	InconsistentEnumChangeSetError,
+	InvalidEnumMigrationMetadataError,
+	MigrationPhaseBoundaryError,
 	type MigrationSQLOptions,
+	type MigrationSQLPlan,
 } from './migration-sql.js';
 export {
 	ensureMigrationsTable,
@@ -43,6 +68,7 @@ export {
 	getNextSchemaVersion,
 	isMigrationApplied,
 	type MigrationRecord,
+	type MigrationTrackerQueryable,
 	recordMigration,
 	removeMigrationRecord,
 	withMigrationLock,

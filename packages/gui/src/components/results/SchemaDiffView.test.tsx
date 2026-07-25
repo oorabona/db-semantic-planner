@@ -34,14 +34,14 @@ vi.mock('./SchemaDiffSummary', () => ({
 
 vi.mock('./SqlPreviewPanel', () => ({
 	SqlPreviewPanel: ({
-		upSQL,
+		plan,
 		downSQL,
 	}: {
-		upSQL: readonly string[];
+		plan: { autocommit: readonly string[]; main: readonly string[] };
 		downSQL: readonly string[];
 	}) => (
 		<div data-testid="sql-preview-panel">
-			UP: {upSQL.length}, DOWN: {downSQL.length}
+			UP: {plan.autocommit.length + plan.main.length}, DOWN: {downSQL.length}
 		</div>
 	),
 }));
@@ -57,7 +57,7 @@ vi.mock('./ApplyConfirmDialog', () => ({
 		open: boolean;
 		onConfirm: () => void;
 		onCancel: () => void;
-		statements: readonly string[];
+		plan: { autocommit: readonly string[]; main: readonly string[] };
 		hasDestructive: boolean;
 		applying: boolean;
 	}) =>
@@ -171,9 +171,10 @@ const mockDiff: SchemaDiffResult = {
 		indexes: { added: 1, dropped: 0 },
 		constraints: { added: 1, dropped: 0, altered: 0 },
 	},
-	upSQL: [
-		'CREATE TABLE "orders" ("id" serial PRIMARY KEY);',
-		'ALTER TABLE "users" ADD COLUMN "email" text;',
+	autocommitSQL: [],
+	mainSQL: [
+		'ALTER TABLE "users" ADD COLUMN "email" varchar(255);',
+		'DROP TABLE "legacy";',
 	],
 	downSQL: ['DROP TABLE "orders";', 'ALTER TABLE "users" DROP COLUMN "email";'],
 };

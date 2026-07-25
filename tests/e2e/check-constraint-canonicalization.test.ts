@@ -9,11 +9,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
 	generateDDL,
-	generateMigrationSQL,
+	generateMigrationPlan,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl, schema } from '@dbsp/core';
 import type { ColumnIR, TableIR } from '@dbsp/types';
@@ -27,8 +26,12 @@ import {
 	it,
 	vi,
 } from 'vitest';
+import { generateMigrationSQL } from '../../packages/adapter-pgsql/src/ddl/migration-sql.js';
 import { verifyCommand } from '../../packages/cli/src/commands/verify.js';
-import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
+import {
+	executeDdl,
+	executeDdlPlan,
+} from '../../packages/cli/src/ddl-executor.js';
 import { loadSchema } from '../../packages/cli/src/utils/schema-loader.js';
 import {
 	closeTestDb,
@@ -1459,10 +1462,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 	describe('a CHECK that cannot be canonicalised while the diff adds enum values', () => {
 		/**
-		 * PostgreSQL cannot use an enum value in the transaction that adds it, and
-		 * dbsp applies each migration in one transaction. The refusal must not depend
-		 * on how the value is *spelled* in the expression: PostgreSQL refusing to
-		 * canonicalise the constraint is the whole signal.
+		 * PostgreSQL cannot use an enum value in the transaction that adds it, so
+		 * the generated plan commits enum additions before its dependent CHECK DDL.
+		 * Each PostgreSQL literal spelling must therefore produce an applicable plan.
 		 */
 		beforeEach(async () => {
 			await pool.query(
@@ -1514,13 +1516,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			);
 		}
 
-		// Every spelling PostgreSQL accepts for the literal. The refusal must not
-		// depend on any of them: a scan for the exact text `'pending'` sees the first
-		// and misses the rest, which is precisely why there is no scan any more.
-		it('refuses only the constraint PostgreSQL rejected, not its innocent sibling', async () => {
-			// Two CHECKs on one table: PostgreSQL refuses the first (the enum value does
-			// not exist yet) and accepts the second. Canonicalisation is per constraint,
-			// so the sibling must keep its canonical form and stay out of the refusal.
+		it('plans and applies both an added-value CHECK and an existing-value sibling', async () => {
+			// Canonicalisation is per constraint, and the generated two-phase plan must
+			// apply both checks after the enum label becomes visible.
 			const desired = new ModelIRImpl(
 				new Map<string, TableIR>([
 					[
@@ -1560,44 +1558,53 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				]),
 			);
 
-			const error = await comparePgsqlDatabaseSchema(adapter, desired, {
+			const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
-			}).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+			});
 
-			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
-			expect(error.constraint).toBe('jobs_state_pending_check');
+			expect(changeKinds(diff)).toContain('alter_enum_add_value');
+			expect(changeKinds(diff)).toContain('add_check_constraint');
+			await executeDdlPlan(
+				pool,
+				generateMigrationPlan(diff, { schemaName: SCHEMA }),
+			);
 		});
 
 		it.each([
 			['single-quoted', "state = 'pending'"],
 			['dollar-quoted', 'state = $$pending$$'],
 			['tagged dollar-quoted', 'state = $lit$pending$lit$'],
-		])('refuses a %s reference to the added enum value', async (_kind, expr) => {
-			await expect(
-				comparePgsqlDatabaseSchema(adapter, desiredWithPendingValue(expr), {
-					schema: SCHEMA,
-					ignoreUnmanagedExtensions: true,
-				}),
-			).rejects.toThrow(CheckConstraintNewEnumValueError);
+		])('applies a %s reference to the added enum value', async (_kind, expr) => {
+			const diff = await comparePgsqlDatabaseSchema(
+				adapter,
+				desiredWithPendingValue(expr),
+				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
+			);
+			expect(changeKinds(diff)).toContain('alter_enum_add_value');
+			expect(changeKinds(diff)).toContain('add_check_constraint');
+			await executeDdlPlan(
+				pool,
+				generateMigrationPlan(diff, { schemaName: SCHEMA }),
+			);
 		});
 
-		it('names the added enum values as candidates, without asserting a cause', async () => {
-			const error = await comparePgsqlDatabaseSchema(
+		it('includes an added enum value and applies its dependent CHECK', async () => {
+			const diff = await comparePgsqlDatabaseSchema(
 				adapter,
 				desiredWithPendingValue('state = $$pending$$'),
 				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
-			).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+			);
 
-			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
-			expect(error.table).toBe('jobs');
-			expect(error.constraint).toBe('jobs_state_check');
-			expect(error.addedEnumValues).toEqual([
-				{ enumName: `${SCHEMA}.status`, value: 'pending' },
-			]);
+			expect(changeKinds(diff)).toContain('alter_enum_add_value');
+			expect(changeKinds(diff)).toContain('add_check_constraint');
+			await executeDdlPlan(
+				pool,
+				generateMigrationPlan(diff, { schemaName: SCHEMA }),
+			);
 		});
 
-		it('does not refuse a CHECK that PostgreSQL canonicalises fine', async () => {
+		it('applies a CHECK that references an existing enum value', async () => {
 			// The same diff still adds 'pending' to the enum, but this constraint uses
 			// only values the database already knows, so it canonicalises and applies.
 			const diff = await comparePgsqlDatabaseSchema(
@@ -1608,10 +1615,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 			expect(changeKinds(diff)).toContain('alter_enum_add_value');
 			expect(changeKinds(diff)).toContain('add_check_constraint');
-			await executeDdl(
-				pool,
-				generateMigrationSQL(diff, { schemaName: SCHEMA }) as string[],
-			);
+			const plan = generateMigrationPlan(diff, { schemaName: SCHEMA });
+			expect(plan.autocommit).toHaveLength(1);
+			await executeDdlPlan(pool, plan);
 		});
 	});
 });

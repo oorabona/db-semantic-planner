@@ -133,6 +133,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import { poolClientTransactionOpen } from './pg-client-state.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
 	finalizeEnvelope,
@@ -514,13 +515,6 @@ function isPoolClientLike(
 		'release' in connection &&
 		typeof connection.release === 'function'
 	);
-}
-
-function poolClientTransactionOpen(client: PoolClient): boolean | undefined {
-	const status = (client as { readonly _txStatus?: unknown })._txStatus;
-	if (status === 'T' || status === 'E') return true;
-	if (status === 'I') return false;
-	return undefined;
 }
 
 function isPgErrorWithCode(error: unknown, code: string): boolean {

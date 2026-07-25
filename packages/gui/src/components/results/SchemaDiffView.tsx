@@ -21,6 +21,10 @@ import { SchemaDiffSummary } from './SchemaDiffSummary';
 import { SideBySideChange } from './SideBySideChange';
 import { SqlPreviewPanel } from './SqlPreviewPanel';
 
+function formatUnknownApplyOutcome(detail: string): string {
+	return `Apply outcome is unknown. Reconcile the database on a fresh connection before retrying: ${detail}`;
+}
+
 export function SchemaDiffView() {
 	const diff = useSchemaDiffStore((s) => s.diff);
 	const loading = useSchemaDiffStore((s) => s.loading);
@@ -36,7 +40,7 @@ export function SchemaDiffView() {
 	const [showSideBySide, setShowSideBySide] = useState(false);
 
 	const handleApply = useCallback(async () => {
-		if (!diff || diff.upSQL.length === 0) return;
+		if (!diff || diff.autocommitSQL.length + diff.mainSQL.length === 0) return;
 		setApplying();
 		try {
 			const connectionId = (window as unknown as Record<string, unknown>)
@@ -46,18 +50,31 @@ export function SchemaDiffView() {
 				setShowConfirm(false);
 				return;
 			}
-			const result = await sidecarApi.schemaApply(connectionId, [
-				...diff.upSQL,
-			]);
+			const result = await sidecarApi.schemaApply(connectionId, {
+				autocommit: diff.autocommitSQL,
+				main: diff.mainSQL,
+			});
 			if (result.success) {
 				setApplyDone(result.applied);
 				setShowConfirm(false);
 			} else {
-				setApplyError(result.error ?? 'Apply failed');
+				setApplyError(
+					result.outcome === 'unknown'
+						? formatUnknownApplyOutcome(result.error ?? 'Apply failed')
+						: result.partial
+							? `Apply partially completed (${result.applied} durable autocommit operation${result.applied === 1 ? '' : 's'}): ${result.error ?? 'Apply failed'}`
+							: (result.error ?? 'Apply failed'),
+				);
 				setShowConfirm(false);
 			}
 		} catch (err) {
-			setApplyError(err instanceof Error ? err.message : String(err));
+			setApplyError(
+				formatUnknownApplyOutcome(
+					`the sidecar response was lost${
+						err instanceof Error && err.message ? ` (${err.message})` : ''
+					}`,
+				),
+			);
 			setShowConfirm(false);
 		}
 	}, [diff, setApplying, setApplyDone, setApplyError]);
@@ -159,7 +176,12 @@ export function SchemaDiffView() {
 			)}
 
 			{/* SQL Preview */}
-			{showSql && <SqlPreviewPanel upSQL={diff.upSQL} downSQL={diff.downSQL} />}
+			{showSql && (
+				<SqlPreviewPanel
+					plan={{ autocommit: diff.autocommitSQL, main: diff.mainSQL }}
+					downSQL={diff.downSQL}
+				/>
+			)}
 
 			{/* Change list grouped by table */}
 			<div className="flex-1 overflow-auto">
@@ -177,7 +199,7 @@ export function SchemaDiffView() {
 				open={showConfirm}
 				onConfirm={handleApply}
 				onCancel={() => setShowConfirm(false)}
-				statements={diff.upSQL}
+				plan={{ autocommit: diff.autocommitSQL, main: diff.mainSQL }}
 				hasDestructive={diff.hasDestructive}
 				applying={applying}
 			/>

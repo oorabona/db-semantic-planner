@@ -9,7 +9,10 @@ interface ApplyConfirmDialogProps {
 	open: boolean;
 	onConfirm: () => void;
 	onCancel: () => void;
-	statements: readonly string[];
+	plan: {
+		readonly autocommit: readonly string[];
+		readonly main: readonly string[];
+	};
 	hasDestructive: boolean;
 	applying: boolean;
 }
@@ -18,7 +21,7 @@ export function ApplyConfirmDialog({
 	open,
 	onConfirm,
 	onCancel,
-	statements,
+	plan,
 	hasDestructive,
 	applying,
 }: ApplyConfirmDialogProps) {
@@ -27,6 +30,7 @@ export function ApplyConfirmDialog({
 	if (!open) return null;
 
 	const canConfirm = hasDestructive ? reviewed : true;
+	const statements = [...plan.autocommit, ...plan.main];
 
 	return (
 		<div
@@ -63,7 +67,9 @@ export function ApplyConfirmDialog({
 						className="whitespace-pre-wrap font-mono text-xs leading-relaxed"
 						data-testid="apply-sql-preview"
 					>
-						{statements.join('\n\n')}
+						{plan.autocommit.length > 0
+							? `-- AUTOCOMMIT (durable before the main transaction)\n${plan.autocommit.join('\n\n')}\n\n-- MAIN TRANSACTION\n${plan.main.join('\n\n')}`
+							: `-- MAIN TRANSACTION\n${plan.main.join('\n\n')}`}
 					</pre>
 				</div>
 

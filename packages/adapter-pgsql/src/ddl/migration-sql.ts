@@ -24,6 +24,7 @@ import {
 	assertNumericLiteral,
 	assertString,
 	sanitizeCommentText,
+	sanitizeForDisplay,
 	validateCheckExpression,
 	validateDbTypeName,
 	validateIdentifier,
@@ -290,6 +291,79 @@ export interface MigrationSQLOptions {
 	readonly dialectCapabilities?: DialectCapabilities;
 }
 
+/**
+ * Transaction-safe migration execution plan.
+ *
+ * PostgreSQL 10/11 forbid enum-label additions inside a transaction entirely.
+ * `autocommit` therefore contains only enum-label additions; callers must run
+ * each one in autocommit before executing `main`.
+ */
+export interface MigrationSQLPlan {
+	readonly autocommit: readonly string[];
+	readonly main: readonly string[];
+}
+
+/**
+ * A fully compiled migration. The normalized change set is captured once, while
+ * UP and DOWN are rendered lazily from that immutable snapshot. This is
+ * intentional: validating a requested direction must never require the other
+ * direction to be supported by the target server.
+ */
+export interface CompiledMigration {
+	readonly plan: MigrationSQLPlan;
+	readonly down: DownMigrationSQL;
+}
+
+type MigrationSQLSnapshotOptions = MigrationSQLOptions & {
+	readonly capabilityTargetVersion?: string;
+};
+
+/** Raised when a flat API would lose PostgreSQL's autocommit boundary. */
+export class MigrationPhaseBoundaryError extends Error {
+	constructor(api: 'generateMigrationSQL' | 'generateMigrationFile') {
+		super(
+			`${api} cannot represent enum additions that require an autocommit boundary. ` +
+				'Use generateMigrationPlan() (or the phased migration-file API) instead.',
+		);
+		this.name = 'MigrationPhaseBoundaryError';
+	}
+}
+
+/** Raised for forged or inconsistent enum change metadata before it is rendered. */
+export class InvalidEnumMigrationMetadataError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'InvalidEnumMigrationMetadataError';
+	}
+}
+
+/** A create plus add pair must agree on the label already present in CREATE TYPE. */
+export class InconsistentEnumChangeSetError extends Error {
+	constructor(enumName: string, enumSchema: string, value: string) {
+		super(
+			`Enum ${formatEnumIdentity(enumName, enumSchema)} is created without requested label ${JSON.stringify(value)}.`,
+		);
+		this.name = 'InconsistentEnumChangeSetError';
+	}
+}
+
+/**
+ * An enum label addition cannot safely share a migration with a drop of that
+ * same enum: PostgreSQL requires the label addition to commit first.
+ */
+export class EnumAddAndDropConflictError extends Error {
+	constructor(
+		readonly enumName: string,
+		readonly enumSchema: string,
+	) {
+		super(
+			`Cannot add a value to enum ${formatEnumIdentity(enumName, enumSchema)} ` +
+				'in the same migration that drops it: the label may commit before the type is dropped.',
+		);
+		this.name = 'EnumAddAndDropConflictError';
+	}
+}
+
 export interface DownMigrationSQL {
 	readonly statements: readonly string[];
 	readonly destructive: boolean;
@@ -391,9 +465,9 @@ function indexContextFromOptions(
 	return options?.dialectCapabilities
 		? {
 				caps: options.dialectCapabilities,
-				targetVersion: getPostgresqlCapabilitiesTargetVersion(
-					options.dialectCapabilities,
-				),
+				targetVersion:
+					(options as MigrationSQLSnapshotOptions).capabilityTargetVersion ??
+					getPostgresqlCapabilitiesTargetVersion(options.dialectCapabilities),
 			}
 		: undefined;
 }
@@ -520,63 +594,238 @@ function collectDownCreateIndexSpecs(
  * 14. ALTER ENUM ADD VALUE (must be last — has transaction visibility caveats in PG)
  * 15. COMMENT ON TABLE / COLUMN (very last)
  */
+// v4 (#389): remove — kept exported only because deleting a public export is a
+// major. Callers want generateMigrationPlan(), which carries the phase boundary.
 export function generateMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): readonly string[] {
-	const schemaName = options?.schemaName;
-	const changes = changesAppliedByUp(diff, options);
-	const indexContext = indexContextFromOptions(options);
+	const compiled = compileMigration(diff, options);
+	if (compiled.plan.autocommit.length > 0) {
+		throw new MigrationPhaseBoundaryError('generateMigrationSQL');
+	}
+	return compiled.plan.main;
+}
+
+/**
+ * Generate a transaction-safe execution plan for a schema migration.
+ *
+ * Enum label additions are selected from structured change kinds before SQL is
+ * rendered, rather than by inspecting SQL text. This leaves every other DDL
+ * statement in `main`, including defaults, indexes, policies, and checks that
+ * may use the new label.
+ */
+export function generateMigrationPlan(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): MigrationSQLPlan {
+	return compileMigration(diff, options).plan;
+}
+
+/**
+ * Compile a SchemaDiff exactly once from a snapshot before rendering either
+ * direction. Capability validation remains lazy for the requested direction.
+ */
+export function compileMigration(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): CompiledMigration {
+	const snapshotOptions = snapshotMigrationOptions(options);
+	const normalizedChanges = normalizeEnumChanges(
+		changesAppliedByUp(
+			{
+				...diff,
+				changes: snapshotEnumChanges(snapshotMigrationChanges(diff.changes)),
+			},
+			snapshotOptions,
+		),
+		snapshotOptions?.schemaName,
+	);
+	let renderedPlan: Rendered<MigrationSQLPlan> | undefined;
+	let renderedDown: Rendered<DownMigrationSQL> | undefined;
+	const getRenderedPlan = (): MigrationSQLPlan => {
+		renderedPlan ??= captureRender(() =>
+			renderMigration(normalizedChanges, snapshotOptions),
+		);
+		return unwrapRendered(renderedPlan);
+	};
+	const getRenderedDown = (): DownMigrationSQL => {
+		renderedDown ??= captureRender(() =>
+			renderDownMigration(normalizedChanges, snapshotOptions),
+		);
+		return unwrapRendered(renderedDown);
+	};
+	let upValidated = false;
+	let downValidated = false;
+	return {
+		get plan(): MigrationSQLPlan {
+			const plan = getRenderedPlan();
+			if (!upValidated) {
+				validateUpCapabilities(normalizedChanges, snapshotOptions);
+				upValidated = true;
+			}
+			return plan;
+		},
+		get down(): DownMigrationSQL {
+			const down = getRenderedDown();
+			if (!downValidated) {
+				validateDownCapabilities(normalizedChanges, snapshotOptions);
+				downValidated = true;
+			}
+			return down;
+		},
+	};
+}
+
+function snapshotMigrationChanges(
+	changes: readonly SchemaChange[],
+): readonly SchemaChange[] {
+	const snapshots = new WeakMap<object, unknown>();
+	const snapshot = (value: unknown): unknown => {
+		if (value === null || typeof value !== 'object') return value;
+		const existing = snapshots.get(value);
+		if (existing !== undefined) return existing;
+		if (Array.isArray(value)) {
+			const copy: unknown[] = [];
+			snapshots.set(value, copy);
+			copy.push(...value.map(snapshot));
+			return copy;
+		}
+		const copy = Object.create(Object.getPrototypeOf(value)) as Record<
+			string,
+			unknown
+		>;
+		snapshots.set(value, copy);
+		for (const key of Object.keys(value)) {
+			copy[key] = snapshot((value as Record<string, unknown>)[key]);
+		}
+		return copy;
+	};
+	return changes.map((change) => snapshot(change) as SchemaChange);
+}
+
+function snapshotMigrationOptions(
+	options: MigrationSQLOptions | undefined,
+): MigrationSQLSnapshotOptions | undefined {
+	if (options === undefined) return undefined;
+	const caps = options.dialectCapabilities;
+	const capabilityTargetVersion =
+		caps === undefined
+			? undefined
+			: getPostgresqlCapabilitiesTargetVersion(caps);
+	return {
+		...(options.schemaName === undefined
+			? {}
+			: { schemaName: options.schemaName }),
+		...(options.includeDestructive === undefined
+			? {}
+			: { includeDestructive: options.includeDestructive }),
+		...(options.fkAutoIndex === undefined
+			? {}
+			: { fkAutoIndex: options.fkAutoIndex }),
+		...(caps === undefined
+			? {}
+			: {
+					dialectCapabilities: { ...caps },
+					...(capabilityTargetVersion === undefined
+						? {}
+						: {
+								capabilityTargetVersion,
+							}),
+				}),
+	};
+}
+
+type Rendered<T> = { readonly value: T } | { readonly error: unknown };
+
+function captureRender<T>(render: () => T): Rendered<T> {
+	try {
+		return { value: render() };
+	} catch (error) {
+		return { error };
+	}
+}
+
+function unwrapRendered<T>(rendered: Rendered<T>): T {
+	if ('error' in rendered) throw rendered.error;
+	return rendered.value;
+}
+
+/**
+ * Capability validation is deliberately separate from lazy rendering: a
+ * caller requesting UP must not fail on a DOWN-only version gate.
+ */
+function validateUpCapabilities(
+	changes: readonly SchemaChange[],
+	options?: MigrationSQLOptions,
+): void {
 	assertCreateIndexesSupported(
 		collectUpCreateIndexSpecs(
 			changes,
-			schemaName,
+			options?.schemaName,
 			options?.fkAutoIndex !== false,
 		),
-		indexContext,
+		indexContextFromOptions(options),
 	);
+}
 
-	// Group changes by phase for topological ordering
+function validateDownCapabilities(
+	changes: readonly SchemaChange[],
+	options?: MigrationSQLOptions,
+): void {
+	assertCreateIndexesSupported(
+		collectDownCreateIndexSpecs(changes, options?.schemaName),
+		indexContextFromOptions(options),
+	);
+}
+
+function renderMigration(
+	changes: readonly SchemaChange[],
+	options?: MigrationSQLOptions,
+): { autocommit: string[]; main: string[] } {
+	const schemaName = options?.schemaName;
+
+	// Group changes by phase for topological ordering.
 	const phases: SchemaChange[][] = [
-		[], // 0: drop FK, drop CHECK
-		[], // 1: drop index
-		[], // 2: drop column
-		[], // 3: drop PK
-		[], // 4: drop table, drop ENUM
-		[], // 5: create ENUM
-		[], // 6: create table
-		[], // 7: add column
-		[], // 8: alter column
-		[], // 9: add PK / column UNIQUE constraint
-		[], // 10: add FK
-		[], // 11: alter FK (drop + re-add)
-		[], // 12: create index
-		[], // 13: add CHECK constraint
-		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
-		[], // 15: COMMENT ON TABLE / COLUMN
-		[], // 16: VALIDATE CONSTRAINT (after FK/CHECK added with NOT VALID)
-		[], // 17: ENABLE/DISABLE ROW LEVEL SECURITY
-		[], // 18: CREATE/DROP POLICY
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
+		[],
 	];
-
 	for (const change of changes) {
-		const phase = getPhase(change.kind);
-		phases[phase]!.push(change);
+		phases[getPhase(change.kind)]!.push(change);
 	}
 
-	// Generate SQL in phase order
-	const statements: string[] = [];
+	const autocommit: string[] = [];
+	const main: string[] = [];
 	const scope = createSchemaScopeAccumulator();
 	for (const phase of phases) {
 		for (const change of phase) {
-			const sql = changeToUpSQL(change, schemaName, indexContext);
-			if (sql) {
-				statements.push(sql);
-				collectChangeScopeEvidence(change, scope);
+			const sql = changeToUpSQL(change, schemaName);
+			if (!sql) continue;
+			if (change.kind === 'alter_enum_add_value') {
+				autocommit.push(sql);
+			} else {
+				main.push(sql);
 			}
+			collectChangeScopeEvidence(change, scope);
 		}
 	}
-	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
 	// FK auto-indexes for new tables (single-column FKs without explicit index)
 	if (options?.fkAutoIndex !== false) {
@@ -596,19 +845,201 @@ export function generateMigrationSQL(
 						fkCol &&
 						!explicitIndexColumns.has(fkCol)
 					) {
-						statements.push(
-							`${renderCreateIndex(
-								buildFkAutoIndexSpec(table, fkCol, schemaName),
-								indexContext,
-							)};`,
-						);
+						const sql = `${renderCreateIndex(
+							buildFkAutoIndexSpec(table, fkCol, schemaName),
+						)};`;
+						main.push(sql);
 					}
 				}
 			}
 		}
 	}
 
-	return statements;
+	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
+	return { autocommit, main };
+}
+
+/**
+ * Validate hazards that only exist when the complete migration is considered.
+ * This runs before any rendering or phase partitioning, so neither public UP
+ * view can expose an unsafe add-then-drop enum plan.
+ */
+function normalizeEnumChanges(
+	changes: readonly SchemaChange[],
+	schemaName: string | undefined,
+): readonly SchemaChange[] {
+	const operations = new Map<
+		string,
+		{
+			identity: EnumIdentity;
+			kinds: Set<SchemaChange['kind']>;
+			createValues?: readonly string[];
+		}
+	>();
+
+	for (const change of changes) {
+		if (
+			change.kind !== 'create_enum' &&
+			change.kind !== 'alter_enum_add_value' &&
+			change.kind !== 'drop_enum'
+		) {
+			continue;
+		}
+		const identity = enumIdentity(change, schemaName);
+		if (!identity) continue;
+		const key = enumIdentityKey(identity);
+		const operation = operations.get(key) ?? {
+			identity,
+			kinds: new Set<SchemaChange['kind']>(),
+		};
+		operation.kinds.add(change.kind);
+		if (change.kind === 'create_enum') {
+			operation.createValues = enumValues(change);
+		}
+		operations.set(key, operation);
+	}
+
+	for (const { identity, kinds } of operations.values()) {
+		if (kinds.has('drop_enum') && kinds.has('alter_enum_add_value')) {
+			throw new EnumAddAndDropConflictError(identity.name, identity.schema);
+		}
+	}
+
+	// A CREATE TYPE carries its complete label list, so an add for the same
+	// type is redundant. Keeping it would instead put ALTER TYPE in autocommit
+	// before the type exists.
+	return changes.filter((change) => {
+		if (change.kind !== 'alter_enum_add_value') return true;
+		const identity = enumIdentity(change, schemaName);
+		if (identity === undefined) return true;
+		const operation = operations.get(enumIdentityKey(identity));
+		if (!operation?.kinds.has('create_enum')) return true;
+		const value = enumAddedValue(change);
+		if (!operation.createValues?.includes(value)) {
+			throw new InconsistentEnumChangeSetError(
+				identity.name,
+				identity.schema,
+				value,
+			);
+		}
+		return false;
+	});
+}
+
+function snapshotEnumChanges(
+	changes: readonly SchemaChange[],
+): readonly SchemaChange[] {
+	const enumSnapshots = new WeakMap<object, EnumIR>();
+	return changes.map((change) => {
+		if (
+			change.kind !== 'create_enum' &&
+			change.kind !== 'alter_enum_add_value' &&
+			change.kind !== 'drop_enum'
+		) {
+			return change;
+		}
+		const meta = change.meta;
+		const rawEnum = meta?.enum;
+		if (!rawEnum || typeof rawEnum !== 'object') {
+			throw new InvalidEnumMigrationMetadataError(
+				`${change.kind} requires enum metadata.`,
+			);
+		}
+		let snappedEnum = enumSnapshots.get(rawEnum);
+		if (!snappedEnum) {
+			const enumDef = rawEnum as EnumIR;
+			const name = enumDef.name;
+			const schema = enumDef.schema;
+			const values = enumDef.values;
+			assertEnumString(name, 'enum name');
+			if (schema !== undefined) assertEnumString(schema, 'enum schema');
+			if (!Array.isArray(values)) {
+				throw new InvalidEnumMigrationMetadataError(
+					'Enum values must be an array of strings.',
+				);
+			}
+			const snappedValues = values.map((value) => {
+				assertEnumString(value, 'enum value');
+				return value;
+			});
+			snappedEnum = {
+				name,
+				...(schema === undefined ? {} : { schema }),
+				values: snappedValues,
+			};
+			enumSnapshots.set(rawEnum, snappedEnum);
+		}
+		// Do not spread meta here: spreading would invoke a getter-backed `enum`
+		// a second time after we deliberately captured it above.
+		const snappedMeta: Record<string, unknown> = {
+			enum: snappedEnum,
+		};
+		if (change.kind === 'alter_enum_add_value') {
+			const value = meta?.value;
+			const after = meta?.after;
+			assertEnumString(value, 'enum added value');
+			if (after !== undefined) assertEnumString(after, 'enum AFTER value');
+			snappedMeta.value = value;
+			if (after !== undefined) snappedMeta.after = after;
+		}
+		if (change.kind === 'drop_enum') {
+			const referencingColumns = meta?.referencingColumns;
+			if (referencingColumns !== undefined) {
+				snappedMeta.referencingColumns = referencingColumns;
+			}
+		}
+		return { ...change, meta: snappedMeta };
+	});
+}
+
+function assertEnumString(
+	value: unknown,
+	subject: string,
+): asserts value is string {
+	if (typeof value !== 'string') {
+		throw new InvalidEnumMigrationMetadataError(
+			`${subject} must be a primitive string, got ${typeof value}.`,
+		);
+	}
+}
+
+function enumValues(change: SchemaChange): readonly string[] {
+	return (change.meta?.enum as EnumIR).values;
+}
+
+function enumAddedValue(change: SchemaChange): string {
+	return change.meta?.value as string;
+}
+
+interface EnumIdentity {
+	readonly name: string;
+	readonly schema: string;
+}
+
+function enumIdentity(
+	change: SchemaChange,
+	schemaName: string | undefined,
+): EnumIdentity | undefined {
+	const enumDef = change.meta?.enum as EnumIR | undefined;
+	if (!enumDef) return undefined;
+	return {
+		name: enumDef.name,
+		// EnumIR omits the default schema, while explicit public names the same
+		// PostgreSQL namespace. An explicit schemaName retargets every enum SQL.
+		schema: schemaName ?? enumDef.schema ?? 'public',
+	};
+}
+
+function enumIdentityKey(identity: EnumIdentity): string {
+	return `${identity.schema}\u0000${identity.name}`;
+}
+
+function formatEnumIdentity(name: string, schema: string): string {
+	const safeName = sanitizeForDisplay(name);
+	const safeSchema = sanitizeForDisplay(schema);
+	return safeSchema === 'public'
+		? `"${safeName}"`
+		: `"${safeSchema}"."${safeName}"`;
 }
 
 // ============================================================================
@@ -1134,8 +1565,9 @@ function changeToDownSQL(
 			};
 
 		case 'add_column':
+			if (!change.column) return { sql: undefined, destructive: true };
 			return {
-				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column!, 'alias')} CASCADE;`,
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column, 'alias')} CASCADE;`,
 				destructive: true,
 			};
 
@@ -1669,6 +2101,14 @@ export function generateDownMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): DownMigrationSQL {
+	return compileMigration(diff, options).down;
+}
+
+/** Render DOWN from the normalized change set selected by compileMigration(). */
+function renderDownMigration(
+	changes: readonly SchemaChange[],
+	options?: MigrationSQLOptions,
+): DownMigrationSQL {
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
@@ -1695,16 +2135,6 @@ export function generateDownMigrationSQL(
 		[], // 18: CREATE/DROP POLICY
 	];
 
-	// DOWN mirrors UP's filter first: rollback may only reverse changes the
-	// forward migration actually applied. It still applies its own rollback-side
-	// destructiveness filter below.
-	const changes = changesAppliedByUp(diff, options);
-	const indexContext = indexContextFromOptions(options);
-	assertCreateIndexesSupported(
-		collectDownCreateIndexSpecs(changes, schemaName),
-		indexContext,
-	);
-
 	for (const change of changes) {
 		const phase = getPhase(change.kind);
 		phases[phase]!.push(change);
@@ -1725,7 +2155,7 @@ export function generateDownMigrationSQL(
 		const phaseChanges =
 			i === policyPhase ? [...phases[i]!].reverse() : phases[i]!;
 		for (const change of phaseChanges) {
-			const down = changeToDownSQL(change, schemaName, indexContext);
+			const down = changeToDownSQL(change, schemaName);
 			if (!includeDestructive && down.destructive) continue;
 			destructive = down.destructive || destructive;
 			if (down.sql) {

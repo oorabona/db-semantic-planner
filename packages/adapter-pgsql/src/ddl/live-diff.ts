@@ -1,4 +1,4 @@
-import type { CheckConstraintIR, EnumIR, ModelIR } from '@dbsp/types';
+import type { CheckConstraintIR, ModelIR } from '@dbsp/types';
 import {
 	type CanonicalizeCheckConstraintsOptions,
 	type CheckConstraintCanonicalizationWarning,
@@ -65,12 +65,17 @@ export class NonConvergentSchemaDiffError extends Error {
 	}
 }
 
-/** An enum value this diff adds, reported as a candidate cause — never asserted. */
+// v4 (#389): remove — retained only for source compatibility; dbsp no longer
+// produces this condition.
+/** @deprecated Retained only for source compatibility; dbsp no longer produces this condition. */
 export interface AddedEnumValue {
 	readonly enumName: string;
 	readonly value: string;
 }
 
+// v4 (#389): remove — retained only for source compatibility; dbsp no longer
+// produces this condition.
+/** @deprecated Retained only for source compatibility; dbsp no longer produces this condition. */
 export class CheckConstraintNewEnumValueError extends Error {
 	constructor(
 		public readonly table: string,
@@ -82,11 +87,9 @@ export class CheckConstraintNewEnumValueError extends Error {
 			.join(', ');
 		super(
 			`PostgreSQL could not canonicalise CHECK constraint "${table}"."${constraint}", ` +
-				`and this migration also adds enum value(s): ${candidates}. PostgreSQL ` +
-				'cannot use an enum value in the transaction that adds it, and dbsp applies ' +
-				'each migration in one transaction, so this constraint cannot be proven ' +
-				'applicable. Apply the enum change on its own first, then add or update the ' +
-				'constraint.',
+				`and the migration adds enum value(s): ${candidates}. This legacy error ` +
+				'does not describe a condition dbsp now produces; reconcile the enum and ' +
+				'constraint changes before applying them.',
 		);
 		this.name = 'CheckConstraintNewEnumValueError';
 	}
@@ -96,13 +99,6 @@ export class CheckConstraintNewEnumValueError extends Error {
  * Live PostgreSQL schema diff: introspect, canonicalise desired CHECK
  * constraint expressions through PostgreSQL, then call the pure synchronous
  * schema comparator.
- *
- * If CHECK canonicalisation falls back while the same diff adds a plausibly
- * referenced enum value, the diff is refused. dbsp currently applies each
- * migration in one transaction, and PostgreSQL forbids using a newly added enum
- * value in that same transaction; emitting the CHECK would produce a migration
- * that cannot run. Apply the enum addition by itself first, then add or update
- * the CHECK constraint in a later migration.
  *
  * Partial-index predicates and index expressions are intentionally not
  * canonicalised here; non-strict diffs compare them by raw string, and strict
@@ -143,10 +139,6 @@ export async function comparePgsqlDatabaseSchema(
 				compareCheckConstraints,
 		}),
 	);
-
-	if (useCanonicalizer && rawCheckExpressionSurfaces.size > 0) {
-		assertNoCheckFallbackUsesAddedEnumValue(diff, rawCheckExpressionSurfaces);
-	}
 
 	if (options?.previouslyAppliedDiff !== undefined) {
 		if (!useCanonicalizer) {
@@ -303,64 +295,6 @@ function checkFromChange(change: SchemaChange): CheckConstraintIR | undefined {
 
 function driftKey(table: string, constraint: string): string {
 	return JSON.stringify([table, constraint]);
-}
-
-/**
- * Refuse a CHECK constraint the diff intends to ADD when PostgreSQL itself
- * refused to canonicalise it while the same diff adds enum values.
- *
- * The trigger is the engine's own verdict: `rawCheckExpressionSurfaces` holds
- * exactly the constraints PostgreSQL would not accept against a scratch table
- * carrying the desired columns and types. Reading the expression text to work
- * out *which* added enum value is to blame would be a heuristic, and every
- * literal spelling PostgreSQL accepts — single-quoted, dollar-quoted,
- * Unicode-escaped, concatenated — would be another way past it. So the text is
- * not read at all.
- *
- * Declared bound: a CHECK that failed canonicalisation for an unrelated reason,
- * in a diff that happens to also add an enum value elsewhere, is refused too.
- * That is deliberate — an expression PostgreSQL rejected in the scratch table is
- * not one this layer can prove executable — and it is why the added values are
- * reported as candidates rather than as an asserted cause.
- */
-function assertNoCheckFallbackUsesAddedEnumValue(
-	diff: SchemaDiff,
-	rawCheckExpressionSurfaces: ReadonlySet<string>,
-): void {
-	const addedEnumValues = collectAddedEnumValues(diff);
-	if (addedEnumValues.length === 0) return;
-
-	for (const change of diff.changes) {
-		if (change.kind !== 'add_check_constraint') continue;
-		const check = checkFromChange(change);
-		if (check === undefined) continue;
-		if (!rawCheckExpressionSurfaces.has(driftKey(change.table, check.name))) {
-			continue;
-		}
-		throw new CheckConstraintNewEnumValueError(
-			change.table,
-			check.name,
-			addedEnumValues,
-		);
-	}
-}
-
-function collectAddedEnumValues(diff: SchemaDiff): AddedEnumValue[] {
-	const added: AddedEnumValue[] = [];
-	for (const change of diff.changes) {
-		if (change.kind !== 'alter_enum_add_value') continue;
-		const enumDef = change.meta?.enum as EnumIR | undefined;
-		const value = change.meta?.value;
-		if (enumDef === undefined || typeof value !== 'string') continue;
-		added.push({ enumName: formatEnumName(enumDef), value });
-	}
-	return added;
-}
-
-function formatEnumName(enumDef: EnumIR): string {
-	return enumDef.schema !== undefined
-		? `${enumDef.schema}.${enumDef.name}`
-		: enumDef.name;
 }
 
 function toIntrospectionOptions(

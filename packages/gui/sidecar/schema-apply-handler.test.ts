@@ -6,6 +6,7 @@ const { handleSchemaApply } = await import('./schema-apply-handler.js');
 
 function createMockClient() {
 	return {
+		_txStatus: 'I' as const,
 		query: vi.fn().mockResolvedValue({ rows: [] }),
 		release: vi.fn(),
 	};
@@ -18,33 +19,43 @@ function createMockPool(client = createMockClient()) {
 }
 
 describe('handleSchemaApply', () => {
-	it('should return success with 0 applied for empty statements', async () => {
+	it('should return success with an empty phased plan', async () => {
 		const pool = createMockPool();
 		const result = await handleSchemaApply(
-			{ connectionId: 'c1', statements: [] },
+			{ connectionId: 'c1', autocommit: [], main: [] },
 			() => pool as never,
 		);
 		expect(result).toEqual({ applied: 0, success: true });
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
-	it('should execute statements within a transaction', async () => {
+	it('executes autocommit and main phases separately', async () => {
 		const client = createMockClient();
 		const pool = createMockPool(client);
-		const statements = [
+		const main = [
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
 			'CREATE INDEX "idx_users_email" ON "users" ("email");',
 		];
 
 		const result = await handleSchemaApply(
-			{ connectionId: 'c1', statements },
+			{
+				connectionId: 'c1',
+				autocommit: [
+					'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+				],
+				main,
+			},
 			() => pool as never,
 		);
 
-		expect(result).toEqual({ applied: 2, success: true });
+		expect(result).toEqual({ applied: 3, success: true });
+		expect(client.query).toHaveBeenNthCalledWith(
+			1,
+			'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+		);
 		expect(client.query).toHaveBeenCalledWith('BEGIN');
-		expect(client.query).toHaveBeenCalledWith(statements[0]);
-		expect(client.query).toHaveBeenCalledWith(statements[1]);
+		expect(client.query).toHaveBeenCalledWith(main[0]);
+		expect(client.query).toHaveBeenCalledWith(main[1]);
 		expect(client.query).toHaveBeenCalledWith('COMMIT');
 		expect(client.release).toHaveBeenCalledOnce();
 	});
@@ -65,7 +76,8 @@ describe('handleSchemaApply', () => {
 		const result = await handleSchemaApply(
 			{
 				connectionId: 'c1',
-				statements: ['ALTER TABLE "users" ADD COLUMN "email" text;'],
+				autocommit: [],
+				main: ['ALTER TABLE "users" ADD COLUMN "email" text;'],
 			},
 			() => pool as never,
 		);
@@ -88,11 +100,53 @@ describe('handleSchemaApply', () => {
 		const pool = createMockPool(client);
 
 		const result = await handleSchemaApply(
-			{ connectionId: 'c1', statements: ['BAD SQL;'] },
+			{ connectionId: 'c1', autocommit: [], main: ['BAD SQL;'] },
 			() => pool as never,
 		);
 
 		expect(result.success).toBe(false);
 		expect(client.release).toHaveBeenCalledOnce();
+	});
+
+	it('rejects non-canonical autocommit SQL instead of trusting renderer phase labels', async () => {
+		const client = createMockClient();
+		const result = await handleSchemaApply(
+			{
+				connectionId: 'c1',
+				autocommit: ['DROP TABLE "users";'],
+				main: [],
+			},
+			() => createMockPool(client) as never,
+		);
+
+		expect(result).toMatchObject({ applied: 0, success: false });
+		expect(result.error).toContain('Invalid enum sidecar');
+		expect(client.query).not.toHaveBeenCalled();
+	});
+
+	it('reports durable autocommit work when the main phase fails', async () => {
+		const client = createMockClient();
+		client.query
+			.mockResolvedValueOnce({ rows: [] }) // autocommit
+			.mockResolvedValueOnce({ rows: [] }) // BEGIN
+			.mockRejectedValueOnce(new Error('main failure')) // main SQL
+			.mockResolvedValueOnce({ rows: [] }); // ROLLBACK
+		const result = await handleSchemaApply(
+			{
+				connectionId: 'c1',
+				autocommit: [
+					'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+				],
+				main: ['ALTER TABLE "jobs" ADD COLUMN "status" text;'],
+			},
+			() => createMockPool(client) as never,
+		);
+
+		expect(result).toMatchObject({
+			applied: 1,
+			success: false,
+			partial: true,
+			error: 'main failure',
+		});
 	});
 });

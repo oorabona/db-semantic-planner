@@ -32,8 +32,8 @@ schema diff → migration file (UP + DOWN) → apply → schema_version incremen
 | File | Role |
 |------|------|
 | `packages/adapter-pgsql/src/ddl/schema-diff.ts` | `compareSchemata(schema, db)` — diff two ModelIR instances |
-| `packages/adapter-pgsql/src/ddl/migration-sql.ts` | `generateMigrationSQL()` / `generateDownSQL()` — UP/DOWN SQL from diff |
-| `packages/adapter-pgsql/src/ddl/migration-file.ts` | `generateMigrationFile()` / `parseMigrationFile()` — file format |
+| `packages/adapter-pgsql/src/ddl/migration-sql.ts` | `generateMigrationPlan()` / `generateDownSQL()` — executable UP plan and DOWN SQL from diff |
+| `packages/adapter-pgsql/src/ddl/migration-file.ts` | `generatePhasedMigrationFiles()` / `renderPhasedMigrationFiles()` / `parseMigrationFile()` — file format |
 | `packages/adapter-pgsql/src/ddl/migration-tracker.ts` | `_dbsp_migrations` table: version tracking, advisory lock |
 | `packages/cli/src/commands/migrate.ts` | `migrate dev` / `apply` / `rollback` / `status` CLI commands |
 
@@ -48,7 +48,7 @@ dbsp migrate dev -s dbsp.schema.ts -d postgresql://localhost/mydb -n add_email_c
 This:
 1. Introspects the live database into a `ModelIR`
 2. Calls `compareSchemata(schemaModel, dbModel)` to produce a `SchemaDiff`
-3. Generates UP SQL via `generateMigrationSQL(diff)`
+3. Generates and writes phased files with `generatePhasedMigrationFiles(diff)` (or `renderPhasedMigrationFiles(compileMigration(diff))`); enum additions become a sibling `.pre.sql` sidecar
 4. Generates DOWN SQL via `generateDownSQL(diff)` — automatically reversed, topologically ordered
 5. Writes `migrations/0004_add_email_column.sql` with both sections
 
@@ -158,27 +158,71 @@ dbsp migrate rollback 1 -d postgresql://... --force
 The versioning infrastructure is also available as a library for custom tooling:
 
 ```typescript
-// doctest: skip — requires real PostgreSQL connection (getAppliedMigrations, getNextSchemaVersion, recordMigration use pool)
-import { compareSchemata, generateDownSQL, generateMigrationSQL, getAppliedMigrations, getNextSchemaVersion, recordMigration } from '@dbsp/adapter-pgsql';
+import {
+  ensureMigrationsTable,
+  executeDdlPlanWithClient,
+  generateMigrationPlan,
+  getNextSchemaVersion,
+  recordMigration,
+  withMigrationLock,
+  type SchemaDiff,
+} from '@dbsp/adapter-pgsql';
+import type { Pool } from 'pg';
 
-// Compare schema definition vs live DB
-const diff = compareSchemata(schemaModel, introspectedModel);
-console.log(`${diff.changes.length} changes, hasDestructive: ${diff.hasDestructive}`);
-console.log(diff.summary);
+async function applyCustomMigration(pool: Pool, diff: SchemaDiff): Promise<void> {
+  const migrationName = 'custom_001.sql';
+  const checksum = 'replace-with-the-migration-sha256';
+  const destructive = diff.hasDestructive;
 
-// Generate SQL
-const upSQL = generateMigrationSQL(diff, { schemaName: 'public' });
-const downSQL = generateDownSQL(diff, { schemaName: 'public' });
+  await ensureMigrationsTable(pool);
+  const plan = generateMigrationPlan(diff, { schemaName: 'public' });
 
-// Check migration history
-const applied = await getAppliedMigrations(pool);
-const currentVersion = applied.at(-1)?.schemaVersion ?? 0;
-console.log(`Current schema version: ${currentVersion}`);
-
-// Record a custom migration
-const nextVersion = await getNextSchemaVersion(pool);
-await recordMigration(pool, 'custom_001.sql', checksum, nextVersion, diff.hasDestructive);
+  await withMigrationLock(pool, async (client) => {
+    const schemaVersion = await getNextSchemaVersion(client);
+    await executeDdlPlanWithClient(client, plan, {
+      onMain: async (transactionClient) => {
+        await recordMigration(
+          transactionClient,
+          migrationName,
+          checksum,
+          schemaVersion,
+          destructive,
+        );
+      },
+    });
+  });
+}
 ```
+
+### Enum label additions use N autocommit operations plus one transaction
+
+PostgreSQL does not allow a transaction to use an enum label that it just added.
+`dbsp migrate apply` and additive `dbsp push` therefore run each `ALTER TYPE ... ADD
+VALUE IF NOT EXISTS ...` as one autocommit query, then execute all remaining DDL
+in one transaction. This permits defaults, index predicates and expressions,
+RLS policies, and CHECK constraints to use the new label.
+
+For custom appliers, `executeDdlPlanWithClient()` is the execution contract:
+under `withMigrationLock()`, it runs each `plan.autocommit` statement directly,
+then runs `plan.main` and the `onMain` tracking callback in one transaction.
+Read `getNextSchemaVersion(client)` under that same lock, and call
+`recordMigration(transactionClient, ...)` only inside `onMain`, so DDL and its
+durable record commit together. `migrate dev` writes autocommit statements to a
+sibling `0001_name.pre.sql` file and keeps the main migration in
+`0001_name.sql`.
+
+For a manual apply, execute the generated `.pre.sql` file first exactly as
+rendered. Then extract and execute **only the UP section** of its matching
+`.sql` file in a transaction — stop before the `-- DOWN` line. Do not pipe the
+whole `.sql` file to `psql`: its executable DOWN statements would undo the
+migration. Prefer `dbsp migrate apply` when possible. The sidecar is an
+allowlisted dbsp enum-addition format, not a general-purpose SQL script.
+
+This intentionally makes enum-adding migrations non-atomic. If the main
+transaction fails, it alone is rolled back: every successfully applied enum label remains durable, the
+migration is still pending and unrecorded, and retrying the unchanged file is
+safe because enum adds use `IF NOT EXISTS`. Rollback only considers recorded
+migrations, so it never attempts a partial DOWN for that recovery state.
 
 ### 6. Reversibility reference
 
@@ -251,4 +295,3 @@ const managed = compareSchemata(schemaModel, dbModel, { ignoreUnmanagedExtension
 - **Auto-migrate adds columns to existing `_dbsp_migrations`** — if the table was created by an
   older version without `schema_version` or `destructive` columns, `ensureMigrationsTable()` adds
   them and backfills `schema_version` by `ROW_NUMBER() OVER (ORDER BY applied_at)`.
-

@@ -52,7 +52,7 @@ const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 - **Identifier quoting** — All table/column/schema names are double-quoted automatically
 - **AST-based compiler** — SQL is built from the plan AST, never from string templates
 - **DDL provisioning** — `compareSchemata()` + `generateDDL()` with 12-phase topological sort
-- **Schema migrations** — `generateMigrationSQL()` with UP/DOWN sections and destructive-change safety gate
+- **Schema migrations** — `generateMigrationPlan()` / `generatePhasedMigrationFiles()` with enum-safe autocommit sidecars, UP/DOWN sections, and destructive-change safety gate
 - **Schema introspection** — Reflect live database structure back into `ModelIR`
 - **Row-Level Security** — `rlsEnabled` + `policies[]` on `TableIR`, compiled to `CREATE POLICY` DDL
 - **Streaming & cursors** — `orm.select(...).stream()` and server-side cursor support

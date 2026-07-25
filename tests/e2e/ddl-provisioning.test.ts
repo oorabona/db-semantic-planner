@@ -13,21 +13,34 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
 	camelCaseNaming,
+	comparePgsqlDatabaseSchema,
 	compareSchemata,
+	createPgsqlAdapter,
 	derivePostgresqlCapabilitiesForVersion,
+	executeDdlPlan,
+	executeDdlPlanWithClient,
 	generateDDL,
+	generateMigrationPlan,
 	generateMigrationSQL,
+	generatePhasedMigrationFiles,
 	introspect,
+	MigrationPhaseBoundaryError,
+	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import type { IndexIR, TableIR } from '@dbsp/core';
 import { ModelIRImpl, ref, schema } from '@dbsp/core';
+import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { runApply } from '../../packages/cli/src/commands/migrate.js';
 import { pushCommand } from '../../packages/cli/src/commands/push.js';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
 import {
 	computeChecksum,
 	generateMigrationFilename,
+	writeMigrationFile,
 } from '../../packages/cli/src/migration-file.js';
+import { loadSchema } from '../../packages/cli/src/utils/schema-loader.js';
+import { handleSchemaApply } from '../../packages/gui/sidecar/schema-apply-handler.js';
 import {
 	closeTestDb,
 	createSchema,
@@ -115,6 +128,27 @@ async function getTableOid(
 	return result.rows[0]?.oid;
 }
 
+async function deleteMigrationRecordIfPresent(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	migrationName: string,
+): Promise<void> {
+	try {
+		await pool.query(`DELETE FROM "_dbsp_migrations" WHERE "name" = $1`, [
+			migrationName,
+		]);
+	} catch (error: unknown) {
+		if (
+			typeof error === 'object' &&
+			error !== null &&
+			'code' in error &&
+			error.code === '42P01'
+		) {
+			return;
+		}
+		throw error;
+	}
+}
+
 function modelWithIndex(index: IndexIR): ModelIRImpl {
 	const table: TableIR = {
 		name: 'index_cap_users',
@@ -148,6 +182,161 @@ describe('DDL Provisioning E2E', () => {
 		await closeTestDb();
 	});
 
+	describe('shared executor client ownership', () => {
+		it('reports an unknown outcome after a real autocommit statement commits but its response is lost', async () => {
+			await pool.query(
+				`CREATE TYPE "${SCHEMA}"."lost_response_status" AS ENUM ('active')`,
+			);
+			const client = await pool.connect();
+			const statement = `ALTER TYPE "${SCHEMA}"."lost_response_status" ADD VALUE IF NOT EXISTS 'pending';`;
+			const query = client.query.bind(client);
+			(
+				client as unknown as { query: (sql: string) => Promise<unknown> }
+			).query = async (sql) => {
+				const result = await query(sql);
+				if (sql === statement) throw new Error('autocommit response lost');
+				return result;
+			};
+
+			try {
+				await expect(
+					executeDdlPlanWithClient(client, {
+						autocommit: [statement],
+						main: [],
+					}),
+				).rejects.toMatchObject({
+					phase: 'autocommit',
+					outcome: 'unknown',
+					transactionStateUnproven: true,
+				});
+				const labels = await client.query<{ enumlabel: string }>(
+					`SELECT enumlabel FROM pg_enum WHERE enumtypid = '"${SCHEMA}"."lost_response_status"'::regtype ORDER BY enumsortorder`,
+				);
+				expect(labels.rows.map((row) => row.enumlabel)).toEqual([
+					'active',
+					'pending',
+				]);
+			} finally {
+				// The wrapper is an own property shadowing Client.prototype.query,
+				// and it accepts only the SQL string. Returning the client to the
+				// shared pool with it still installed would silently drop the
+				// values of every later parameterized query on that connection.
+				delete (client as unknown as { query?: unknown }).query;
+				client.release();
+				await pool.query(
+					`DROP TYPE IF EXISTS "${SCHEMA}"."lost_response_status"`,
+				);
+			}
+		});
+
+		it('classifies a lost COMMIT response as an unknown outcome without rollback', async () => {
+			const client = {
+				_txStatus: 'I' as const,
+				query: vi.fn(async (sql: string) => {
+					if (sql === 'COMMIT')
+						throw new Error('connection lost during COMMIT');
+					return { rows: [] };
+				}),
+			};
+
+			await expect(
+				executeDdlPlanWithClient(client as never, {
+					autocommit: [],
+					main: ['SELECT 1'],
+				}),
+			).rejects.toMatchObject({
+				commitAttempted: true,
+				transactionStateUnproven: true,
+				outcome: 'unknown',
+				primaryError: expect.objectContaining({
+					message: 'connection lost during COMMIT',
+				}),
+			});
+			expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
+		});
+
+		it('releases only the client it acquires from a pool', async () => {
+			const executorPool = new Pool({
+				connectionString: process.env.DATABASE_URL!,
+				max: 1,
+			});
+			try {
+				await executeDdlPlan(executorPool, {
+					autocommit: [],
+					main: ['SELECT 1'],
+				});
+				expect(executorPool.idleCount).toBe(1);
+			} finally {
+				await executorPool.end();
+			}
+		});
+
+		it('labels a pooled non-idle client as not started and destroys it', async () => {
+			const executorPool = new Pool({
+				connectionString: process.env.DATABASE_URL!,
+				max: 1,
+			});
+			const borrowed = await executorPool.connect();
+			try {
+				await borrowed.query('BEGIN');
+				borrowed.release();
+
+				await expect(
+					executeDdlPlan(executorPool, {
+						autocommit: [],
+						main: ['SELECT 1'],
+					}),
+				).rejects.toMatchObject({
+					phase: 'precondition',
+					outcome: 'not_started',
+				});
+				expect(executorPool.totalCount).toBe(0);
+			} finally {
+				await executorPool.end();
+			}
+		});
+
+		it('leaves a caller-owned client connected and usable', async () => {
+			const executorPool = new Pool({
+				connectionString: process.env.DATABASE_URL!,
+				max: 1,
+			});
+			const client = await executorPool.connect();
+			try {
+				await executeDdlPlanWithClient(client, {
+					autocommit: [],
+					main: ['SELECT 1'],
+				});
+
+				expect((await client.query('SELECT 1')).rowCount).toBe(1);
+				expect(executorPool.idleCount).toBe(0);
+			} finally {
+				client.release();
+				await executorPool.end();
+			}
+		});
+
+		it('rejects GUI requests that label arbitrary SQL as autocommit', async () => {
+			const client = {
+				_txStatus: 'I' as const,
+				query: vi.fn(),
+				release: vi.fn(),
+			};
+			const result = await handleSchemaApply(
+				{
+					connectionId: 'e2e',
+					autocommit: ['DROP TABLE "must_not_run";'],
+					main: [],
+				},
+				() => ({ connect: vi.fn().mockResolvedValue(client) }) as never,
+			);
+
+			expect(result).toMatchObject({ applied: 0, success: false });
+			expect(result.error).toContain('Invalid enum sidecar');
+			expect(client.query).not.toHaveBeenCalled();
+		});
+	});
+
 	// ========================================================================
 	// Push Tests
 	// ========================================================================
@@ -167,6 +356,175 @@ describe('DDL Provisioning E2E', () => {
 			const result = await executeDdl(pool, statements);
 			expect(result.statementsExecuted).toBeGreaterThan(0);
 			expect(result.dryRun).toBe(false);
+		});
+
+		it('applies an enum label addition before additive DDL that uses the new label', async () => {
+			const tenantSchema = 'ddl_push_enum_phase';
+			const tempDir = mkdtempSync(
+				join(process.cwd(), 'tests/e2e/.tmp-enum-push-'),
+			);
+			const schemaPath = join(tempDir, 'dbsp.schema.ts');
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				await pool.query(
+					`CREATE TYPE "${tenantSchema}"."status" AS ENUM ('active')`,
+				);
+				await pool.query(
+					`CREATE TABLE "${tenantSchema}"."jobs" ("id" integer PRIMARY KEY, "status" "${tenantSchema}"."status")`,
+				);
+
+				// schema() supplies the loader-valid CHECK surface. The explicit ModelIR
+				// wrapper preserves the live enum type and declares the desired enum label,
+				// which the schema DSL cannot declare yet. Deliberately omit the enum
+				// default and partial index: PostgreSQL renders both with enum casts, while
+				// the current default/index comparisons use non-equivalent raw forms. They
+				// are unrelated to proving #321's enum-first push execution path.
+				writeFileSync(
+					schemaPath,
+					[
+						"import { schema as defineSchema, ModelIRImpl } from '@dbsp/core';",
+						'',
+						'const base = defineSchema(',
+						'\t{',
+						'\t\tjobs: {',
+						"\t\t\tid: { type: 'integer', primaryKey: true },",
+						"\t\t\tstatus: 'string',",
+						'\t\t},',
+						'\t},',
+						'\t{',
+						'\t\tjobs: {',
+						'\t\t\tcheckConstraints: [',
+						`\t\t\t\t{ name: 'jobs_pending_check', expression: "status = 'pending'" },`,
+						'\t\t\t],',
+						'\t\t},',
+						'\t},',
+						');',
+						'',
+						"const jobs = base.model.getTable('jobs');",
+						"if (!jobs) throw new Error('jobs model missing');",
+						'const model = new ModelIRImpl(',
+						'\tnew Map([',
+						'\t\t[',
+						"\t\t\t'jobs',",
+						'\t\t\t{',
+						'\t\t\t\t...jobs,',
+						'\t\t\t\tcolumns: jobs.columns.map((column) =>',
+						"\t\t\t\t\tcolumn.name === 'status'",
+						'\t\t\t\t\t\t? {',
+						'\t\t\t\t\t\t\t\t...column,',
+						"\t\t\t\t\t\t\t\toriginalDbType: 'status',",
+						`\t\t\t\t\t\t\t\toriginalDbTypeSchema: '${tenantSchema}',`,
+						"\t\t\t\t\t\t\t\toriginalDbTypeSchemaScope: 'target',",
+						'\t\t\t\t\t\t\t}',
+						'\t\t\t\t\t\t: column,',
+						'\t\t\t\t),',
+						'\t\t\t},',
+						'\t\t],',
+						'\t]),',
+						'\tnew Map(base.model.relations),',
+						'\tnew Map([',
+						'\t\t[',
+						"\t\t\t'status',",
+						'\t\t\t{',
+						"\t\t\t\tname: 'status',",
+						`\t\t\t\tschema: '${tenantSchema}',`,
+						"\t\t\t\tvalues: ['active', 'pending'],",
+						'\t\t\t},',
+						'\t\t],',
+						'\t]),',
+						');',
+						'',
+						'export const schema = { ...base, model };',
+						'',
+					].join('\n'),
+				);
+
+				const loaded = await loadSchema(schemaPath);
+				const diff = await comparePgsqlDatabaseSchema(
+					createPgsqlAdapter(pool),
+					loaded.model,
+					{ schema: tenantSchema },
+				);
+				const plan = generateMigrationPlan(diff, {
+					includeDestructive: false,
+					schemaName: tenantSchema,
+				});
+				expect(diff.changes.map((change) => change.kind)).toContain(
+					'alter_enum_add_value',
+				);
+				expect(plan.autocommit).toHaveLength(1);
+				expect(plan.autocommit[0]).toContain(
+					"ADD VALUE IF NOT EXISTS 'pending'",
+				);
+				expect(
+					plan.main.some(
+						(statement) =>
+							statement.includes('ADD CONSTRAINT') &&
+							statement.includes("'pending'"),
+					),
+				).toBe(true);
+
+				// The flat renderer stays exported so existing callers keep
+				// compiling, but it cannot silently hand back a statement list
+				// that is unsafe to run in one transaction. Asserted through the
+				// package barrel: reachability from a consumer's import is the
+				// property that matters here, not the module-internal binding.
+				expect(() =>
+					generateMigrationSQL(diff, {
+						includeDestructive: false,
+						schemaName: tenantSchema,
+					}),
+				).toThrow(MigrationPhaseBoundaryError);
+
+				await pushCommand.parseAsync(
+					[
+						'--schema',
+						schemaPath,
+						'--db',
+						process.env.DATABASE_URL!,
+						'--schema-name',
+						tenantSchema,
+						'--json',
+					],
+					{ from: 'user' },
+				);
+
+				const labels = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count
+					 FROM pg_enum e
+					 JOIN pg_type t ON t.oid = e.enumtypid
+					 JOIN pg_namespace n ON n.oid = t.typnamespace
+					 WHERE n.nspname = $1 AND t.typname = $2 AND e.enumlabel = $3`,
+					[tenantSchema, 'status', 'pending'],
+				);
+				expect(labels.rows[0]?.count).toBe('1');
+				const inserted = await pool.query<{ status: string }>(
+					`INSERT INTO "${tenantSchema}"."jobs" ("id", "status") VALUES (1, 'pending') RETURNING "status"::text AS "status"`,
+				);
+				expect(inserted.rows).toEqual([{ status: 'pending' }]);
+				const check = await pool.query<{
+					definition: string;
+					validated: boolean;
+				}>(
+					`SELECT pg_get_constraintdef(c.oid) AS definition, c.convalidated AS validated
+					 FROM pg_constraint c
+					 JOIN pg_namespace n ON n.oid = c.connamespace
+					 WHERE n.nspname = $1 AND c.conname = $2`,
+					[tenantSchema, 'jobs_pending_check'],
+				);
+				expect(check.rows[0]?.definition).toContain("status = 'pending'");
+				expect(check.rows[0]?.validated).toBe(true);
+				await expect(
+					pool.query(
+						`INSERT INTO "${tenantSchema}"."jobs" ("id", "status") VALUES (2, 'active')`,
+					),
+				).rejects.toThrow();
+			} finally {
+				// push never records migrations — nothing to clean in _dbsp_migrations.
+				await dropSchema(tenantSchema);
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 
 		it('emits byte-identical default and latest-capability index DDL and provisions it', async () => {
@@ -528,6 +886,169 @@ describe('DDL Provisioning E2E', () => {
 	// ========================================================================
 
 	describe('migrate — filename generation', () => {
+		it('round-trips generated sibling files with dollar and quoted enum labels', async () => {
+			const tenantSchema = 'ddl_migrate_enum_phase';
+			const migrationName = '0001_enum_pending.sql';
+			const tempDir = mkdtempSync(
+				join(process.cwd(), 'tests/e2e/.tmp-enum-migrate-'),
+			);
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				await pool.query(
+					`CREATE TYPE "${tenantSchema}"."status" AS ENUM ('active')`,
+				);
+				await pool.query(
+					`CREATE TABLE "${tenantSchema}"."alter_defaults" ("status" "${tenantSchema}"."status")`,
+				);
+				const generatedDiff: SchemaDiff = {
+					changes: [
+						{
+							kind: 'alter_enum_add_value',
+							table: '',
+							destructive: false,
+							details: 'Add dollar-quoted-looking status',
+							meta: {
+								enum: {
+									name: 'status',
+									schema: tenantSchema,
+									values: ['active', '$tag$'],
+								},
+								value: '$tag$',
+							},
+						},
+						{
+							kind: 'alter_enum_add_value',
+							table: '',
+							destructive: false,
+							details: 'Add quoted status',
+							meta: {
+								enum: {
+									name: 'status',
+									schema: tenantSchema,
+									values: ['active', '$tag$', "O'Reilly"],
+								},
+								value: "O'Reilly",
+							},
+						},
+						{
+							kind: 'alter_column_default',
+							table: 'alter_defaults',
+							column: 'status',
+							destructive: false,
+							details: 'Set dollar-quoted-looking default',
+							meta: { default: '$tag$' },
+						},
+					],
+					hasDestructive: false,
+					summary: {
+						tables: { added: 0, dropped: 0 },
+						columns: { added: 0, dropped: 0, altered: 1 },
+						indexes: { added: 0, dropped: 0 },
+						constraints: { added: 0, dropped: 0, altered: 0 },
+					},
+				};
+				const migration = generatePhasedMigrationFiles(generatedDiff, {
+					schemaName: tenantSchema,
+					name: migrationName,
+				});
+				writeMigrationFile(
+					tempDir,
+					migrationName,
+					migration.content,
+					migration.preContent,
+				);
+
+				await runApply({ db: process.env.DATABASE_URL!, dir: tempDir });
+				expect(
+					await pool.query(`SELECT '$tag$'::"${tenantSchema}"."status"`),
+				).toHaveProperty('rowCount', 1);
+				const defaults = await pool.query<{ status: string }>(
+					`INSERT INTO "${tenantSchema}"."alter_defaults" DEFAULT VALUES RETURNING "status"::text AS "status"`,
+				);
+				expect(defaults.rows).toEqual([{ status: '$tag$' }]);
+				expect(
+					await pool.query(`SELECT 'O''Reilly'::"${tenantSchema}"."status"`),
+				).toHaveProperty('rowCount', 1);
+			} finally {
+				await deleteMigrationRecordIfPresent(pool, migrationName);
+				await dropSchema(tenantSchema);
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
+		it('keeps a committed enum phase retryable when the main phase fails', async () => {
+			const tenantSchema = 'ddl_migrate_enum_retry';
+			const migrationName = '0001_enum_pending_retry.sql';
+			const tempDir = mkdtempSync(
+				join(process.cwd(), 'tests/e2e/.tmp-enum-retry-'),
+			);
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				await pool.query(
+					`CREATE TYPE "${tenantSchema}"."status" AS ENUM ('active')`,
+				);
+				writeMigrationFile(
+					tempDir,
+					migrationName,
+					[
+						'-- dbsp:destructive: false',
+						`CREATE TABLE "${tenantSchema}"."main_created" ("status" "${tenantSchema}"."status" DEFAULT 'pending');`,
+						`ALTER TABLE "${tenantSchema}"."not_yet" ADD COLUMN "status" "${tenantSchema}"."status" DEFAULT 'pending';`,
+						'-- DOWN',
+					].join('\n'),
+					`ALTER TYPE "${tenantSchema}"."status" ADD VALUE IF NOT EXISTS 'pending';\n`,
+				);
+
+				// The recovery message must name completed durable operations without
+				// claiming that IF NOT EXISTS added labels, and retain retry guidance.
+				await expect(
+					runApply({ db: process.env.DATABASE_URL!, dir: tempDir }),
+				).rejects.toThrow(
+					'1 autocommit operation completed before the failure; the migration remains pending and no migration record was written. Retry the unchanged file.',
+				);
+				expect(
+					await pool.query(`SELECT 'pending'::"${tenantSchema}"."status"`),
+				).toHaveProperty('rowCount', 1);
+				expect(
+					await getTableOid(pool, tenantSchema, 'main_created'),
+				).toBeUndefined();
+				const pendingRecord = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM "_dbsp_migrations" WHERE "name" = $1`,
+					[migrationName],
+				);
+				expect(pendingRecord.rows[0]?.count).toBe('0');
+
+				await pool.query(
+					`CREATE TABLE "${tenantSchema}"."not_yet" ("id" integer PRIMARY KEY)`,
+				);
+				await runApply({ db: process.env.DATABASE_URL!, dir: tempDir });
+
+				const appliedRecord = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM "_dbsp_migrations" WHERE "name" = $1`,
+					[migrationName],
+				);
+				expect(appliedRecord.rows[0]?.count).toBe('1');
+				expect(
+					await getTableOid(pool, tenantSchema, 'main_created'),
+				).toBeDefined();
+				const labels = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count
+					 FROM pg_enum e
+					 JOIN pg_type t ON t.oid = e.enumtypid
+					 JOIN pg_namespace n ON n.oid = t.typnamespace
+					 WHERE n.nspname = $1 AND t.typname = $2 AND e.enumlabel = $3`,
+					[tenantSchema, 'status', 'pending'],
+				);
+				expect(labels.rows[0]?.count).toBe('1');
+			} finally {
+				await deleteMigrationRecordIfPresent(pool, migrationName);
+				await dropSchema(tenantSchema);
+				rmSync(tempDir, { recursive: true, force: true });
+			}
+		});
+
 		it('should generate sequential filenames', () => {
 			const f1 = generateMigrationFilename([], 'init');
 			expect(f1).toBe('0001_init.sql');

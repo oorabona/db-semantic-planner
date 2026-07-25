@@ -8,13 +8,11 @@
  * not needed for `pg_get_constraintdef()` rendering and must not be allowed to
  * block expression canonicalisation.
  *
- * Deliberate bound: a CHECK that references an enum value being added to an
- * existing enum by the same migration cannot produce an executable PostgreSQL
- * migration in dbsp's current single-transaction runner. PostgreSQL forbids
- * using an enum value added by `ALTER TYPE ... ADD VALUE` in the same
- * transaction that added it. The live diff layer refuses that combination with
- * an actionable error instead of letting this helper's non-strict fallback emit
- * a migration that would fail at apply time.
+ * Deliberate bound: PostgreSQL forbids using an enum value added by `ALTER TYPE
+ * ... ADD VALUE` in that same transaction. This scratch-table path creates
+ * missing enum types with `generateEnumTypesPhase()` inside its own transaction;
+ * it does not execute migration plans. Migration callers use the separate
+ * phased plan/executor contract for enum label additions.
  */
 import { randomUUID } from 'node:crypto';
 import { ModelIRImpl } from '@dbsp/core';
@@ -158,11 +156,9 @@ export function fallbackToRawCheckConstraintComparison(
  * predicates are accepted and become full CHECK clauses.
  *
  * PostgreSQL does not allow an enum value added by `ALTER TYPE ... ADD VALUE`
- * to be used in the same transaction that added it. Because dbsp currently
- * emits and applies each migration in one transaction, the live diff layer
- * deliberately refuses CHECK constraints that fall back while the same diff adds
- * a plausibly referenced enum value. Splitting that into multiple transaction
- * phases is a separate migration-runner feature.
+ * to be used in the same transaction that added it. Migration execution handles
+ * this with a committed enum-add phase before the main transaction; callers that
+ * only render flat SQL must not execute that output as one transaction.
  *
  * This does not canonicalise partial-index predicates or index expressions, so
  * those surfaces may still compare by raw text in non-strict diffs.

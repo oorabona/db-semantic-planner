@@ -5,6 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	generateMigrationFile,
+	hasExecutableSqlStatements,
 	isDestructiveDown,
 	parseMigrationFile,
 } from './migration-file.js';
@@ -34,7 +35,16 @@ function makeDiff(hasDestructive = false): SchemaDiff {
 // ============================================================================
 
 vi.mock('./migration-sql.js', () => ({
+	compileMigration: vi.fn((...args: unknown[]) => ({
+		normalizedChanges: [],
+		plan: { autocommit: [], main: mockGenerateMigrationSQL(...args) },
+		down: mockGenerateDownMigrationSQL(...args),
+	})),
 	generateMigrationSQL: vi.fn(),
+	generateMigrationPlan: vi.fn((...args: unknown[]) => ({
+		autocommit: [],
+		main: mockGenerateMigrationSQL(...args),
+	})),
 	generateDownSQL: vi.fn(),
 	generateDownMigrationSQL: vi.fn(),
 }));
@@ -231,6 +241,20 @@ describe('parseMigrationFile', () => {
 		expect(result.downStatements).toHaveLength(2);
 		expect(result.downStatements[0]).toContain('DROP COLUMN "name"');
 		expect(result.downStatements[1]).toContain('DROP TABLE IF EXISTS "users"');
+	});
+
+	it('preserves comment-only fragments while distinguishing executable SQL', () => {
+		const parsed = parseMigrationFile(
+			'CREATE TABLE "users" (id integer);\n-- DOWN\n\n-- WARNING: Cannot reverse drop_table "users"\n',
+		);
+
+		expect(parsed.downStatements).toEqual([
+			'-- WARNING: Cannot reverse drop_table "users"',
+		]);
+		expect(hasExecutableSqlStatements(parsed.downStatements)).toBe(false);
+		expect(hasExecutableSqlStatements(['-- context\nDROP TABLE "users"'])).toBe(
+			true,
+		);
 	});
 
 	it('SC-10: should return hasDown=false when no separator exists', () => {

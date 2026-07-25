@@ -19,14 +19,8 @@ vi.mock('../expression-canonicalizer.js', async (importOriginal) => {
 	};
 });
 
-const {
-	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema,
-	NonConvergentSchemaDiffError,
-} = await import('./live-diff.js');
-const {
-	CheckConstraintNewEnumValueError: RootCheckConstraintNewEnumValueError,
-} = await import('../index.js');
+const { comparePgsqlDatabaseSchema, NonConvergentSchemaDiffError } =
+	await import('./live-diff.js');
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
 	return {
@@ -329,72 +323,6 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			}),
 		).rejects.toThrow(ExpressionCanonicalizationUnavailableError);
 		expect(mockCanonicalizeCheckConstraints).not.toHaveBeenCalled();
-	});
-
-	it('refuses a CHECK fallback that references an enum value added by the same diff', async () => {
-		const desired = makeModel(
-			[
-				makeTable({
-					name: 'jobs',
-					columns: [
-						makeCol('id'),
-						makeCol('status', {
-							type: 'string',
-							originalDbType: 'status',
-						}),
-					],
-					checkConstraints: [
-						{ name: 'jobs_status_check', expression: "status = 'pending'" },
-					],
-				}),
-			],
-			[{ name: 'status', values: ['active', 'pending'] }],
-		);
-		const dbModel = makeModel(
-			[
-				makeTable({
-					name: 'jobs',
-					columns: [
-						makeCol('id'),
-						makeCol('status', {
-							type: 'string',
-							originalDbType: 'status',
-						}),
-					],
-				}),
-			],
-			[{ name: 'status', values: ['active'] }],
-		);
-		mockCanonicalizeCheckConstraints.mockImplementation(
-			async (_adapter, desiredModel, _dbModel, options) => {
-				options?.onWarning?.({
-					table: 'jobs',
-					constraint: 'jobs_status_check',
-					message:
-						'Could not canonicalize CHECK constraint "jobs"."jobs_status_check" with PostgreSQL; falling back to best-effort raw string comparison. Reason: unsafe use of new value "pending" of enum type status',
-					cause: new Error(
-						'unsafe use of new value "pending" of enum type status',
-					),
-				});
-				return desiredModel;
-			},
-		);
-		const adapter = makeAdapter(dbModel);
-
-		let caught: unknown;
-		try {
-			await comparePgsqlDatabaseSchema(adapter, desired, {
-				onWarning: vi.fn(),
-			});
-		} catch (error) {
-			caught = error;
-		}
-
-		expect(caught).toBeInstanceOf(CheckConstraintNewEnumValueError);
-		expect(caught).toBeInstanceOf(RootCheckConstraintNewEnumValueError);
-		expect((caught as Error).message).toMatch(
-			/CHECK constraint "jobs"\."jobs_status_check".*enum "status".*Apply the enum change on its own first/su,
-		);
 	});
 
 	it('throws on repeated CHECK drift when canonicalization falls back to raw comparison', async () => {

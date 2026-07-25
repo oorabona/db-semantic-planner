@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
 	compareSchemata: vi.fn(),
-	generateMigrationSQL: vi.fn(),
+	generateMigrationPlan: vi.fn(),
 	generateDownSQL: vi.fn(),
 }));
 
@@ -27,9 +27,8 @@ vi.mock('./schema-loader.js', () => ({
 }));
 
 // Import after mocks are set up
-const { compareSchemata, generateMigrationSQL, generateDownSQL } = await import(
-	'@dbsp/adapter-pgsql'
-);
+const { compareSchemata, generateMigrationPlan, generateDownSQL } =
+	await import('@dbsp/adapter-pgsql');
 const { introspectConnection, getConnectionInfo } = await import(
 	'./connection-manager.js'
 );
@@ -130,7 +129,8 @@ describe('handleSchemaDiff', () => {
 			expect(result.changes).toEqual([]);
 			expect(result.hasDestructive).toBe(false);
 			expect(result.summary.tables.added).toBe(0);
-			expect(result.upSQL).toEqual([]);
+			expect(result.autocommitSQL).toEqual([]);
+			expect(result.mainSQL).toEqual([]);
 			expect(result.downSQL).toEqual([]);
 			expect(compareSchemata).toHaveBeenCalledWith(
 				minimalModel,
@@ -147,9 +147,10 @@ describe('handleSchemaDiff', () => {
 			});
 			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
 			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
-			vi.mocked(generateMigrationSQL).mockReturnValue([
-				'ALTER TABLE "users" ADD COLUMN "email" text;',
-			]);
+			vi.mocked(generateMigrationPlan).mockReturnValue({
+				autocommit: [],
+				main: ['ALTER TABLE "users" ADD COLUMN "email" text;'],
+			});
 			vi.mocked(generateDownSQL).mockReturnValue([
 				'ALTER TABLE "users" DROP COLUMN "email";',
 			]);
@@ -188,7 +189,10 @@ describe('handleSchemaDiff', () => {
 			});
 			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
 			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
-			vi.mocked(generateMigrationSQL).mockReturnValue([]);
+			vi.mocked(generateMigrationPlan).mockReturnValue({
+				autocommit: [],
+				main: [],
+			});
 			vi.mocked(generateDownSQL).mockReturnValue([]);
 
 			const result = await handleSchemaDiff({
@@ -280,7 +284,7 @@ describe('handleSchemaDiff', () => {
 	});
 
 	describe('SQL preview', () => {
-		it('includes upSQL and downSQL in result', async () => {
+		it('returns the phased execution plan and down SQL without a flattened UP copy', async () => {
 			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
 			vi.mocked(loadSchema).mockResolvedValue({
 				definition: {},
@@ -289,10 +293,15 @@ describe('handleSchemaDiff', () => {
 			});
 			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
 			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
-			vi.mocked(generateMigrationSQL).mockReturnValue([
-				'ALTER TABLE "users" ADD COLUMN "email" text;',
-				'ALTER TABLE "users" DROP COLUMN "legacy";',
-			]);
+			vi.mocked(generateMigrationPlan).mockReturnValue({
+				autocommit: [
+					'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+				],
+				main: [
+					'ALTER TABLE "users" ADD COLUMN "email" text;',
+					'ALTER TABLE "users" DROP COLUMN "legacy";',
+				],
+			});
 			vi.mocked(generateDownSQL).mockReturnValue([
 				'ALTER TABLE "users" ADD COLUMN "legacy" text;',
 				'ALTER TABLE "users" DROP COLUMN "email";',
@@ -303,7 +312,11 @@ describe('handleSchemaDiff', () => {
 				schemaPath: '/project',
 			});
 
-			expect(result.upSQL).toEqual([
+			expect(result).not.toHaveProperty('upSQL');
+			expect(result.autocommitSQL).toEqual([
+				'ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';',
+			]);
+			expect(result.mainSQL).toEqual([
 				'ALTER TABLE "users" ADD COLUMN "email" text;',
 				'ALTER TABLE "users" DROP COLUMN "legacy";',
 			]);
@@ -311,7 +324,7 @@ describe('handleSchemaDiff', () => {
 				'ALTER TABLE "users" ADD COLUMN "legacy" text;',
 				'ALTER TABLE "users" DROP COLUMN "email";',
 			]);
-			expect(generateMigrationSQL).toHaveBeenCalledWith(
+			expect(generateMigrationPlan).toHaveBeenCalledWith(
 				diffWithChanges,
 				undefined,
 			);
@@ -340,7 +353,7 @@ describe('handleSchemaDiff', () => {
 				schemaPath: '/project',
 			});
 
-			expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
+			expect(generateMigrationPlan).toHaveBeenCalledWith(diffWithChanges, {
 				schemaName: 'tenant_1',
 			});
 			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
@@ -370,7 +383,7 @@ describe('handleSchemaDiff', () => {
 				schemaPath: '/project',
 			});
 
-			expect(generateMigrationSQL).toHaveBeenCalledWith(
+			expect(generateMigrationPlan).toHaveBeenCalledWith(
 				diffWithChanges,
 				undefined,
 			);
@@ -392,9 +405,10 @@ describe('handleSchemaDiff', () => {
 				schemaPath: '/project',
 			});
 
-			expect(result.upSQL).toEqual([]);
+			expect(result.autocommitSQL).toEqual([]);
+			expect(result.mainSQL).toEqual([]);
 			expect(result.downSQL).toEqual([]);
-			expect(generateMigrationSQL).not.toHaveBeenCalled();
+			expect(generateMigrationPlan).not.toHaveBeenCalled();
 			expect(generateDownSQL).not.toHaveBeenCalled();
 		});
 	});

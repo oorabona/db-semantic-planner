@@ -80,6 +80,13 @@ export function validateIndexMethod(
  */
 export function validateEnumLabel(value: string, context = 'enum label'): void {
 	assertString(value, `Invalid ${context}`);
+	if (isRenderableEnumLabel(value)) return;
+
+	if (/[\\\n\r]/.test(value)) {
+		throw new Error(
+			`Invalid ${context}: backslashes and line breaks cannot be rendered safely in PostgreSQL enum literals`,
+		);
+	}
 
 	// Reject NUL bytes — PostgreSQL truncates strings at the first NUL silently
 	if (/\x00/.test(value)) {
@@ -93,6 +100,12 @@ export function validateEnumLabel(value: string, context = 'enum label'): void {
 			`Invalid ${context}: contains control characters (only printable characters allowed)`,
 		);
 	}
+	throw new Error(`Invalid ${context}: cannot be rendered safely`);
+}
+
+/** Whether a logical enum label has a spelling safe for dbsp's SQL renderer. */
+export function isRenderableEnumLabel(value: unknown): value is string {
+	return typeof value === 'string' && !/[\\\n\r\x00-\x1f\x7f]/.test(value);
 }
 
 /**

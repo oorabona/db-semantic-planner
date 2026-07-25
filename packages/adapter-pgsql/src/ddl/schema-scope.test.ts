@@ -2,7 +2,11 @@ import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateDDL } from './ddl-generator.js';
-import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
+import {
+	generateDownSQL,
+	generateMigrationPlan,
+	generateMigrationSQL,
+} from './migration-sql.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 
 function makeColumn(overrides: Partial<ColumnIR> & { name: string }): ColumnIR {
@@ -225,7 +229,7 @@ describe('schema-scoped DDL guard', () => {
 			},
 		]);
 
-		expect(generateMigrationSQL(diff)).toEqual([
+		expect(generateMigrationPlan(diff).main).toEqual([
 			`CREATE TYPE "tenant_1"."status" AS ENUM ('active');`,
 		]);
 	});
@@ -249,7 +253,7 @@ describe('schema-scoped DDL guard', () => {
 			},
 		]);
 
-		expect(generateMigrationSQL(diff)).toEqual([
+		expect(generateMigrationPlan(diff).autocommit).toEqual([
 			`ALTER TYPE "tenant_1"."status" ADD VALUE IF NOT EXISTS 'suspended' AFTER 'active';`,
 		]);
 	});
@@ -277,6 +281,37 @@ describe('schema-scoped DDL guard', () => {
 		]);
 
 		expect(() => generateMigrationSQL(diff)).toThrowError(
+			expectedDiffMessage(['tenant_1']),
+		);
+	});
+
+	it('rejects a scoped enum addition plus unqualified table SQL before partitioning', () => {
+		const diff = makeDiff([
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: 'Add pending status',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['active', 'pending'],
+					},
+					value: 'pending',
+				},
+			},
+			{
+				kind: 'alter_column_default',
+				table: 'jobs',
+				column: 'status',
+				destructive: false,
+				details: 'Set default',
+				meta: { default: 'pending' },
+			},
+		]);
+
+		expect(() => generateMigrationPlan(diff)).toThrowError(
 			expectedDiffMessage(['tenant_1']),
 		);
 	});

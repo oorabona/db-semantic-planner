@@ -9,17 +9,23 @@
 
 import {
 	comparePgsqlDatabaseSchema,
+	compileMigration,
 	createPgsqlAdapter,
+	DdlExecutionError,
+	describeCompletedAutocommitOperations,
 	ensureMigrationsTable,
-	generateMigrationFile,
-	generateMigrationSQL,
+	executeDdlPlanWithClient,
 	getAppliedMigrations,
 	getNextSchemaVersion,
+	hasExecutableSqlStatements,
 	isDestructiveDown,
 	type MigrationRecord,
+	type MigrationTrackerQueryable,
+	parseEnumAdditionSidecar,
 	parseMigrationFile,
 	recordMigration,
 	removeMigrationRecord,
+	renderPhasedMigrationFiles,
 	withMigrationLock,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
@@ -32,6 +38,11 @@ import {
 	writeMigrationFile,
 } from '../migration-file.js';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
+
+import {
+	formatDdlExecutionFailure,
+	sanitizePgError,
+} from '../utils/ddl-execution-error.js';
 import { loadSchema } from '../utils/schema-loader.js';
 
 // ============================================================================
@@ -49,30 +60,7 @@ export class MigrationError extends Error {
 	}
 }
 
-/**
- * Sanitize a pg error for user-facing output.
- *
- * PostgreSQL errors may carry schema/table/row details in their message text.
- * For pg errors (identifiable by SQLSTATE `.code`), we emit a sanitized message
- * keyed only by the SQLSTATE code. The raw message is available via DEBUG=dbsp.
- *
- * @param err - Any caught value
- * @returns An Error instance safe to display to the user
- */
-export function sanitizePgError(err: unknown): Error {
-	if (err instanceof Error) {
-		// pg errors carry a SQLSTATE `.code` property
-		const code = (err as Error & { code?: string }).code;
-		if (typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code)) {
-			if (process.env.DEBUG?.includes('dbsp')) {
-				console.error(`[DEBUG] pg error detail: ${err.message}`);
-			}
-			return new MigrationError(`Migration failed: database error ${code}`);
-		}
-		return err;
-	}
-	return new Error(String(err));
-}
+export { sanitizePgError } from '../utils/ddl-execution-error.js';
 
 /**
  * DRY lifecycle wrapper: create pool → run fn → end pool on success or error.
@@ -121,20 +109,6 @@ async function runMigrateAction(fn: () => Promise<void>): Promise<void> {
 	}
 }
 
-/**
- * Returns true if a migration statement contains at least one executable SQL
- * line (non-empty, not a comment). Statements that consist entirely of blank
- * lines and `--` comment lines are skipped; statements that begin with a
- * comment header but also contain real SQL are kept (PostgreSQL ignores the
- * comment, so the header is harmless and preserves intent).
- */
-export function hasExecutableSql(stmt: string): boolean {
-	return stmt.split('\n').some((line) => {
-		const t = line.trim();
-		return t.length > 0 && !t.startsWith('--');
-	});
-}
-
 export interface ApplyOptions {
 	db: string;
 	dir: string;
@@ -161,9 +135,9 @@ export interface MigrateDeps {
 	getAppliedMigrations?: (pool: Pool) => Promise<readonly MigrationRecord[]>;
 	scanMigrationFiles?: (dir: string) => readonly MigrationFile[];
 	parseMigrationFile?: typeof parseMigrationFile;
-	getNextSchemaVersion?: (pool: Pool) => Promise<number>;
+	getNextSchemaVersion?: (pool: MigrationTrackerQueryable) => Promise<number>;
 	recordMigration?: (
-		pool: Pool,
+		pool: MigrationTrackerQueryable,
 		name: string,
 		checksum: string,
 		schemaVersion: number,
@@ -257,44 +231,55 @@ export async function runApply(
 
 				// Parse UP section from file
 				const parsed = d.parseMigrationFile(file.content);
-				const statements = parsed.upStatements.filter(hasExecutableSql);
+				const autocommitStatements = file.preContent
+					? parseEnumAdditionSidecar(file.preContent)
+					: [];
+				const mainStatements = parsed.upStatements;
 
 				// Determine version and destructive flag before the transaction
 				// (read from the lock-held client so we see a consistent view)
-				const version = await d.getNextSchemaVersion(client as unknown as Pool);
+				const version = await d.getNextSchemaVersion(client);
 				const destructive = parsed.destructive === true;
 
-				// Atomic: DDL + record in ONE transaction on the lock-holding client
 				try {
-					await client.query('BEGIN');
-
-					for (const stmt of statements) {
-						await client.query(stmt);
-					}
-
-					await d.recordMigration(
-						client as unknown as Pool,
-						file.name,
-						file.checksum,
-						version,
-						destructive,
+					await executeDdlPlanWithClient(
+						client,
+						{
+							autocommit: autocommitStatements,
+							main: mainStatements,
+						},
+						{
+							onMain: async (transactionClient) => {
+								await d.recordMigration(
+									transactionClient,
+									file.name,
+									file.checksum,
+									version,
+									destructive,
+								);
+							},
+						},
 					);
-
-					await client.query('COMMIT');
-				} catch (applyError) {
-					let rollbackError: unknown;
-					try {
-						await client.query('ROLLBACK');
-					} catch (e) {
-						rollbackError = e;
+				} catch (error) {
+					if (error instanceof DdlExecutionError) {
+						const message = formatDdlExecutionFailure(error);
+						if (error.outcome === 'unknown') {
+							throw new MigrationError(
+								`${message}\n\n${
+									error.commitAttempted
+										? 'COMMIT outcome is unknown: the server may have committed before the connection failed.'
+										: 'DDL outcome is unknown: a durable autocommit statement may have completed before the connection failed.'
+								} Reconcile migration state on a fresh connection before retrying.`,
+							);
+						}
+						if (error.autocommitCompleted > 0) {
+							throw new MigrationError(
+								`${message}\n\n${describeCompletedAutocommitOperations(error.autocommitCompleted)} before the failure; the migration remains pending and no migration record was written. Retry the unchanged file.`,
+							);
+						}
+						throw sanitizePgError(error.primaryError);
 					}
-					const primary = sanitizePgError(applyError);
-					if (rollbackError !== undefined) {
-						console.error(
-							`   Note: rollback also failed: ${sanitizePgError(rollbackError).message}`,
-						);
-					}
-					throw primary;
+					throw error;
 				}
 
 				appliedCount++;
@@ -371,10 +356,17 @@ export async function runRollback(
 				}
 
 				// SC-11/ERR-04: Empty DOWN section
-				const downStmts = parsed.downStatements.filter(hasExecutableSql);
-				if (downStmts.length === 0 && !options.force) {
+				const downStmts = parsed.downStatements;
+				if (!hasExecutableSqlStatements(downStmts) && !options.force) {
+					// downStmts may still hold the generator's WARNING comments, which say
+					// why the rollback is incomplete. Print them rather than only the count.
+					const reason = downStmts
+						.flatMap((statement) => statement.split('\n'))
+						.map((line) => `   ${line.trim()}\n`)
+						.join('');
 					throw new MigrationError(
-						`Migration ${record.name} has an empty DOWN section\n` +
+						`Migration ${record.name} has no executable DOWN statements\n` +
+							reason +
 							'   Use --force to roll back anyway.',
 					);
 				}
@@ -521,16 +513,19 @@ const devCommand = new Command('dev')
 						...(options.schemaName ? { schemaName: options.schemaName } : {}),
 					};
 
-					const statements = generateMigrationSQL(diff, sqlOptions);
+					const compiled = compileMigration(diff, sqlOptions);
+					const statementCount =
+						compiled.plan.autocommit.length + compiled.plan.main.length;
 
-					if (statements.length === 0) {
+					if (statementCount === 0) {
 						console.log(
 							'✅ No migration needed — all changes are non-actionable.',
 						);
 						return;
 					}
 
-					// Generate migration file with UP + DOWN sections
+					// Generate the main UP/DOWN file and, when needed, a sibling enum
+					// autocommit file. Phase membership is carried by the filename.
 					const existingFiles = scanMigrationFiles(options.dir).map(
 						(f) => f.name,
 					);
@@ -538,15 +533,24 @@ const devCommand = new Command('dev')
 						existingFiles,
 						options.name,
 					);
-					const content = generateMigrationFile(diff, {
+					const files = renderPhasedMigrationFiles(compiled, {
 						...sqlOptions,
 						name: filename,
 					});
-
-					const file = writeMigrationFile(options.dir, filename, content);
+					const file = writeMigrationFile(
+						options.dir,
+						filename,
+						files.content,
+						files.preContent,
+					);
 
 					console.log(`✅ Migration created: ${file.path}`);
-					console.log(`   Statements: ${statements.length}`);
+					if (files.preContent !== undefined) {
+						console.log(
+							`   Enum additions: ${filename.replace(/\.sql$/, '.pre.sql')}`,
+						);
+					}
+					console.log(`   Statements: ${statementCount}`);
 					console.log(`   Checksum: ${file.checksum.slice(0, 12)}...`);
 				});
 			}),

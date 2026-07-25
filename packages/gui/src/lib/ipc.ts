@@ -175,18 +175,22 @@ export interface SchemaDiffResult {
 	readonly changes: readonly SchemaDiffChange[];
 	readonly hasDestructive: boolean;
 	readonly summary: DiffSummary;
-	readonly upSQL: readonly string[];
+	readonly autocommitSQL: readonly string[];
+	readonly mainSQL: readonly string[];
 	readonly downSQL: readonly string[];
 }
 
 export interface SchemaApplyParams {
 	connectionId: string;
-	statements: readonly string[];
+	autocommit: readonly string[];
+	main: readonly string[];
 }
 
 export interface SchemaApplyResult {
 	readonly applied: number;
 	readonly success: boolean;
+	readonly partial?: boolean;
+	readonly outcome?: 'unknown';
 	readonly error?: string;
 }
 
@@ -277,10 +281,14 @@ export function createSidecarApi(client: IpcClient) {
 			});
 		},
 
-		schemaApply(connectionId: string, statements: readonly string[]) {
+		schemaApply(
+			connectionId: string,
+			plan: { autocommit: readonly string[]; main: readonly string[] },
+		) {
 			return client.call<SchemaApplyResult>('schemaApply', {
 				connectionId,
-				statements,
+				autocommit: plan.autocommit,
+				main: plan.main,
 			});
 		},
 

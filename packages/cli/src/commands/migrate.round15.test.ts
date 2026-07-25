@@ -22,6 +22,14 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			mockGenerateMigrationFile(...args),
 		generateMigrationSQL: (...args: unknown[]) =>
 			mockGenerateMigrationSQL(...args),
+		compileMigration: (...args: unknown[]) => ({
+			normalizedChanges: [],
+			plan: { autocommit: [], main: mockGenerateMigrationSQL(...args) },
+			down: { statements: [], destructive: false },
+		}),
+		renderPhasedMigrationFiles: (compiled: { plan: { main: string[] } }) => ({
+			content: compiled.plan.main.join('\n'),
+		}),
 	};
 });
 

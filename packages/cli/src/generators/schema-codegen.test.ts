@@ -10,7 +10,7 @@ import {
 	compareSchemata,
 	generateCreateIndex,
 	generateDDL,
-	generateMigrationSQL,
+	generateMigrationPlan,
 	identityNaming,
 } from '@dbsp/adapter-pgsql';
 import type { ModelIR, TableIR } from '@dbsp/core';
@@ -828,9 +828,12 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
 			expect(diff.changes).toEqual([]);
-			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
-				[],
-			);
+			expect(
+				generateMigrationPlan(diff, { includeDestructive: false }),
+			).toEqual({
+				autocommit: [],
+				main: [],
+			});
 		});
 
 		it('deliberately emits FK-column indexes with database auto-index names', () => {

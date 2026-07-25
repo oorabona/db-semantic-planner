@@ -25,6 +25,11 @@ export interface MigrationRecord {
 	readonly destructive: boolean;
 }
 
+/** The query capability shared by a pg Pool and a checked-out PoolClient. */
+export interface MigrationTrackerQueryable {
+	query: PoolClient['query'];
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -141,7 +146,7 @@ export async function getAppliedMigrations(
  * Record a migration as applied.
  */
 export async function recordMigration(
-	pool: Pool,
+	pool: MigrationTrackerQueryable,
 	name: string,
 	checksum: string,
 	schemaVersion: number,
@@ -171,7 +176,9 @@ export async function isMigrationApplied(
 /**
  * Get the next schema version number (max + 1, or 1 if no migrations).
  */
-export async function getNextSchemaVersion(pool: Pool): Promise<number> {
+export async function getNextSchemaVersion(
+	pool: MigrationTrackerQueryable,
+): Promise<number> {
 	const result = await pool.query<{ max_version: number | null }>(
 		`SELECT MAX("schema_version") as max_version FROM "${MIGRATIONS_TABLE}"`,
 	);

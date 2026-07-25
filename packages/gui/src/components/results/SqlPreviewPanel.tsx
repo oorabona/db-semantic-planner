@@ -4,13 +4,18 @@
 import { useState } from 'react';
 
 interface SqlPreviewPanelProps {
-	upSQL: readonly string[];
+	plan: {
+		readonly autocommit: readonly string[];
+		readonly main: readonly string[];
+	};
 	downSQL: readonly string[];
 }
 
-export function SqlPreviewPanel({ upSQL, downSQL }: SqlPreviewPanelProps) {
+export function SqlPreviewPanel({ plan, downSQL }: SqlPreviewPanelProps) {
 	const [tab, setTab] = useState<'up' | 'down'>('up');
-	const statements = tab === 'up' ? upSQL : downSQL;
+	const statements = plan.autocommit.length + plan.main.length;
+	const selectedStatements =
+		tab === 'down' ? downSQL : [...plan.autocommit, ...plan.main];
 
 	return (
 		<div
@@ -21,7 +26,7 @@ export function SqlPreviewPanel({ upSQL, downSQL }: SqlPreviewPanelProps) {
 				<TabButton
 					active={tab === 'up'}
 					onClick={() => setTab('up')}
-					label={`UP (${upSQL.length})`}
+					label={`UP (${statements})`}
 					testId="sql-tab-up"
 				/>
 				<TabButton
@@ -35,13 +40,15 @@ export function SqlPreviewPanel({ upSQL, downSQL }: SqlPreviewPanelProps) {
 				className="max-h-48 overflow-auto bg-muted/10 p-2"
 				data-testid="sql-preview-content"
 			>
-				{statements.length === 0 ? (
+				{selectedStatements.length === 0 ? (
 					<p className="text-xs text-muted-foreground italic">
 						No SQL statements
 					</p>
 				) : (
 					<pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">
-						{statements.join('\n\n')}
+						{tab === 'down'
+							? downSQL.join('\n\n')
+							: `${plan.autocommit.length > 0 ? `-- AUTOCOMMIT (durable before the main transaction)\n${plan.autocommit.join('\n\n')}\n\n` : ''}-- MAIN TRANSACTION\n${plan.main.join('\n\n')}`}
 					</pre>
 				)}
 			</div>

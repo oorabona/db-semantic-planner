@@ -10,13 +10,19 @@ import type { SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 import {
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
+	DdlExecutionError,
+	describeCompletedAutocommitOperations,
 	generateDDL,
-	generateMigrationSQL,
+	generateMigrationPlan,
 	getNamingPluginForDbCasing,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
-import { executeDdl } from '../ddl-executor.js';
+import { executeDdl, executeDdlPlan } from '../ddl-executor.js';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
+import {
+	formatDdlExecutionFailure,
+	sanitizePgError,
+} from '../utils/ddl-execution-error.js';
 import { loadSchema } from '../utils/schema-loader.js';
 
 /** Table name reserved for migration history — never dropped by push. */
@@ -114,7 +120,7 @@ export const pushCommand = new Command('push')
 							);
 						}
 					} else {
-						// Additive mode: live diff -> generate migration SQL (additive only)
+						// Additive mode: live diff -> generate phased migration plan (additive only)
 						const adapter = createPgsqlAdapter(pool);
 						const compareOptions = {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
@@ -128,10 +134,11 @@ export const pushCommand = new Command('push')
 						);
 
 						// Generate SQL for additive changes only (no destructive)
-						const statements = generateMigrationSQL(diff, {
+						const plan = generateMigrationPlan(diff, {
 							includeDestructive: false,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});
+						const statements = [...plan.autocommit, ...plan.main];
 
 						// Collect warnings for skipped non-additive changes
 						const skippedChanges = diff.changes.filter((c) => c.destructive);
@@ -166,9 +173,9 @@ export const pushCommand = new Command('push')
 							return;
 						}
 
-						outputResult(statements, options);
+						outputPlanResult(plan, options);
 
-						const result = await executeDdl(pool, statements, {
+						const result = await executeDdlPlan(pool, plan, {
 							...(options.dryRun !== undefined
 								? { dryRun: options.dryRun }
 								: {}),
@@ -209,15 +216,50 @@ export const pushCommand = new Command('push')
 					await pool.end();
 				}
 			} catch (error) {
-				const message =
-					error instanceof Error ? error.message : 'Unknown error occurred';
+				const executionError =
+					error instanceof DdlExecutionError ? error : undefined;
+				const autocommitCompleted = executionError?.autocommitCompleted ?? 0;
+				const durablePartial = autocommitCompleted > 0;
+				const unknownOutcome = executionError?.outcome === 'unknown';
+				const message = executionError
+					? formatDdlExecutionFailure(executionError)
+					: sanitizePgError(error).message;
 				// CC-2+EH-7: If --json, error goes to stdout as JSON; otherwise stderr
 				if (options.json) {
 					console.log(
-						JSON.stringify({ status: 'error', error: message }, null, 2),
+						JSON.stringify(
+							{
+								status: 'error',
+								error: message,
+								...(durablePartial
+									? {
+											durablePartialApplication: {
+												autocommitOperationsCompleted: autocommitCompleted,
+											},
+										}
+									: {}),
+								...(unknownOutcome
+									? { outcome: 'unknown', reconcileOnFreshConnection: true }
+									: {}),
+							},
+							null,
+							2,
+						),
 					);
 				} else {
-					console.error(`❌ Error: ${message}`);
+					console.error(
+						`❌ Error: ${message}${
+							unknownOutcome
+								? `\n\n${
+										executionError?.commitAttempted
+											? 'COMMIT outcome is unknown: the server may have committed before the connection failed.'
+											: 'DDL outcome is unknown: a durable autocommit statement may have completed before the connection failed.'
+									} Reconcile the database on a fresh connection before retrying.`
+								: durablePartial
+									? `\n\n${describeCompletedAutocommitOperations(autocommitCompleted)} before the failure; reconcile the database before retrying.`
+									: ''
+						}`,
+					);
 				}
 				process.exit(1);
 			}
@@ -270,6 +312,26 @@ function outputResult(
 		for (const stmt of statements) {
 			console.log(`${stmt};\n`);
 		}
+	}
+}
+
+function outputPlanResult(
+	plan: {
+		readonly autocommit: readonly string[];
+		readonly main: readonly string[];
+	},
+	options: { dryRun?: boolean; json?: boolean },
+): void {
+	if (!options.dryRun || options.json) return;
+	const count = plan.autocommit.length + plan.main.length;
+	console.log(`-- Dry run: ${count} statement(s)\n`);
+	if (plan.autocommit.length > 0) {
+		console.log('-- AUTOCOMMIT (durable before the main transaction)');
+		for (const statement of plan.autocommit) console.log(`${statement}\n`);
+	}
+	if (plan.main.length > 0) {
+		console.log('-- MAIN TRANSACTION');
+		for (const statement of plan.main) console.log(`${statement}\n`);
 	}
 }
 

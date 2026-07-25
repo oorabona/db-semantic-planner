@@ -10,7 +10,7 @@ import {
 	compareSchemata,
 	type DiffSummary,
 	generateDownSQL,
-	generateMigrationSQL,
+	generateMigrationPlan,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -43,7 +43,9 @@ export interface SchemaDiffResult {
 	readonly changes: readonly SchemaDiffChange[];
 	readonly hasDestructive: boolean;
 	readonly summary: DiffSummary;
-	readonly upSQL: readonly string[];
+	/** Execution artifact; never flatten these phases for apply. */
+	readonly autocommitSQL: readonly string[];
+	readonly mainSQL: readonly string[];
 	readonly downSQL: readonly string[];
 }
 
@@ -96,8 +98,10 @@ export async function handleSchemaDiff(
 			: undefined;
 
 	// 5. Generate UP and DOWN SQL
-	const upSQL =
-		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
+	const plan =
+		diff.changes.length > 0
+			? generateMigrationPlan(diff, sqlOptions)
+			: { autocommit: [], main: [] };
 	const downSQL =
 		diff.changes.length > 0 ? generateDownSQL(diff, sqlOptions) : [];
 
@@ -113,7 +117,8 @@ export async function handleSchemaDiff(
 		})),
 		hasDestructive: diff.hasDestructive,
 		summary: diff.summary,
-		upSQL,
+		autocommitSQL: plan.autocommit,
+		mainSQL: plan.main,
 		downSQL,
 	};
 }

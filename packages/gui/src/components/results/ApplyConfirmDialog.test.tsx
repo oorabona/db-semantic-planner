@@ -11,7 +11,10 @@ const baseProps = {
 	open: true,
 	onConfirm: vi.fn(),
 	onCancel: vi.fn(),
-	statements: ['ALTER TABLE "users" DROP COLUMN "legacy"'],
+	plan: {
+		autocommit: ['ALTER TYPE "status" ADD VALUE IF NOT EXISTS \'pending\';'],
+		main: ['ALTER TABLE "users" DROP COLUMN "legacy"'],
+	},
 	hasDestructive: false,
 	applying: false,
 };
@@ -30,7 +33,10 @@ describe('ApplyConfirmDialog', () => {
 		expect(screen.getByTestId('apply-sql-preview').textContent).toContain(
 			'ALTER TABLE "users" DROP COLUMN "legacy"',
 		);
-		expect(screen.getByText(/1 statement/)).toBeDefined();
+		expect(screen.getByTestId('apply-sql-preview').textContent).toContain(
+			'-- AUTOCOMMIT (durable before the main transaction)',
+		);
+		expect(screen.getByText(/2 statements/)).toBeDefined();
 	});
 
 	describe('when not destructive', () => {
@@ -105,7 +111,7 @@ describe('ApplyConfirmDialog', () => {
 		render(
 			<ApplyConfirmDialog
 				{...baseProps}
-				statements={['stmt 1', 'stmt 2', 'stmt 3']}
+				plan={{ autocommit: [], main: ['stmt 1', 'stmt 2', 'stmt 3'] }}
 			/>,
 		);
 		expect(screen.getByText(/3 statements/)).toBeDefined();
