@@ -15,6 +15,7 @@ import type {
 	TransitionRule,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { withTransitionCompareCurrentModel } from './comparator.js';
 import { assumptionId, evidenceId, semanticArtifactId } from './ids.js';
 import { createProver } from './prover.js';
@@ -301,12 +302,10 @@ function registry(rules: readonly TransitionRule[]) {
 }
 
 function proofTarget() {
-	return {
-		connect: async () => ({
-			query: async () => ({ rows: [] }),
-			release: () => undefined,
-		}),
-	};
+	return createTestTransitionLessor(async () => ({
+		query: async () => ({ rows: [] }),
+		release: () => undefined,
+	}));
 }
 
 describe('staged composition preflight', () => {

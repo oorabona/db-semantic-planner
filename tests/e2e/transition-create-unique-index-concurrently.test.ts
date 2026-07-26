@@ -1,7 +1,7 @@
 import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
@@ -13,7 +13,12 @@ import {
 	type TableIR,
 } from '@dbsp/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_create_unique_index_concurrently';
 
@@ -99,19 +104,23 @@ async function proveUniqueIndex(desired: ModelIR, current: ModelIR) {
 	const registry = createPackRegistry([createPgTransitionPack()]);
 	const comparator = createComparator(registry);
 	const prover = createProver(registry);
-	const context = await readPgObservationContext(pool, schemaName);
+	const context = await readPgObservationContextFromLessor(target, schemaName);
 	const compare = comparator.compare(desired, current);
 	return {
 		pool,
+		target,
 		registry,
 		context,
 		compare,
-		outcome: await prover.prove(compare, pool, context),
+		outcome: await prover.prove(compare, target, context),
 	};
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition planner: CREATE UNIQUE INDEX CONCURRENTLY', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -161,7 +170,7 @@ describe('ADR-0003 transition planner: CREATE UNIQUE INDEX CONCURRENTLY', () => 
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			target,
 		);
 
 		expect(result.assessment.decision).toBe('applicable');
@@ -208,7 +217,7 @@ describe('ADR-0003 transition planner: CREATE UNIQUE INDEX CONCURRENTLY', () => 
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			target,
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe('guard-failed');

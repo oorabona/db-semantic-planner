@@ -1,7 +1,7 @@
 import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
@@ -13,7 +13,12 @@ import {
 	type TableIR,
 } from '@dbsp/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_add_check';
 
@@ -86,8 +91,11 @@ async function checkExists(): Promise<boolean> {
 	return result.rows.length > 0;
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition planner: ADD CHECK', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -110,13 +118,16 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const prover = createProver(registry);
-		const context = await readPgObservationContext(pool, schemaName);
+		const context = await readPgObservationContextFromLessor(
+			target,
+			schemaName,
+		);
 		const desired = model(usersTable('age > 0'));
 		const current = model(usersTable());
 		const compare = comparator.compare(desired, current);
 		expect(compare.kind).toBe('transitions');
 
-		const outcome = await prover.prove(compare, pool, context);
+		const outcome = await prover.prove(compare, target, context);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -124,7 +135,7 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			target,
 		);
 
 		expect(result.assessment.decision).toBe('applicable');
@@ -146,7 +157,7 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 			checkConstraints: [{ name: 'users_age_check', expression: 'age > 0' }],
 		});
 		const noDriftCompare = comparator.compare(desiredEquivalent, introspected);
-		const noDrift = await prover.prove(noDriftCompare, pool, context);
+		const noDrift = await prover.prove(noDriftCompare, target, context);
 		expect(noDrift.kind).toBe('no-drift');
 	});
 
@@ -156,12 +167,15 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const prover = createProver(registry);
-		const context = await readPgObservationContext(pool, schemaName);
+		const context = await readPgObservationContextFromLessor(
+			target,
+			schemaName,
+		);
 		const compare = comparator.compare(
 			model(usersTable('age > 0')),
 			model(usersTable()),
 		);
-		const outcome = await prover.prove(compare, pool, context);
+		const outcome = await prover.prove(compare, target, context);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -170,7 +184,7 @@ describe('ADR-0003 transition planner: ADD CHECK', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			target,
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe('guard-failed');

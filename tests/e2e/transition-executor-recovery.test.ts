@@ -13,13 +13,14 @@ import {
 	MANUAL_SQL_OPERATION_KIND,
 	normalizeManualSqlPayload,
 	PG_RULE_PACK_ARTIFACT,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 	readTransitionJournal,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplicableEvaluation,
 	type ApplyPolicy,
 	type Assumption,
+	acquireTransitionLease,
 	assumptionId,
 	type CheckConstraintIR,
 	type CompareOutcome,
@@ -38,12 +39,18 @@ import {
 	type RecognitionResult,
 	type ResourceAddress,
 	type TableIR,
+	type TransitionLeaseFailure,
 	type TransitionRule,
 	type TransitionRunMetadata,
 } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_executor_recovery';
 const basePolicy: ApplyPolicy = {
@@ -381,16 +388,20 @@ async function prove(desired: ModelIR, current: ModelIR) {
 	const pool = await getTestPool();
 	const registry = createPackRegistry([createPgTransitionPack()]);
 	const comparator = createComparator(registry);
-	const context = await readPgObservationContext(pool, schemaName);
+	const context = await readPgObservationContextFromLessor(target, schemaName);
 	const compare = comparator.compare(desired, current);
-	const outcome = await createProver(registry).prove(compare, pool, context);
+	const outcome = await createProver(registry).prove(compare, target, context);
 	return { pool, registry, comparator, context, compare, outcome };
 }
 
+/**
+ * Leave a durable intent journal with no outcome, the way a process killed
+ * mid-step does. Operations no longer take connections out themselves, so the
+ * lease is acquired and given back here, exactly as core would.
+ */
 async function writeIntentOnly(params: {
 	readonly registry: ReturnType<typeof createPackRegistry>;
 	readonly step: ProvenPlanStep;
-	readonly pool: Pool;
 	readonly run: TransitionRunMetadata;
 }): Promise<void> {
 	const resolution = params.registry.resolveOperation(params.step.operation);
@@ -398,17 +409,24 @@ async function writeIntentOnly(params: {
 		throw new Error('operation runtime missing for recovery e2e');
 	}
 	const runtime = resolution.semantics;
-	const client = await runtime.checkout(params.pool);
+	const lease = await acquireTransitionLease(target);
+	let releaseFailure: TransitionLeaseFailure | undefined;
 	try {
-		await runtime.writeIntentJournal(client, {
-			runId: params.run.runId,
-			run: params.run,
-			stepId: params.step.stepId,
-			operation: params.step.operation,
-			recordedAt: new Date().toISOString(),
-		});
+		await runtime.writeIntentJournal(
+			{ opaqueClient: lease.session },
+			{
+				runId: params.run.runId,
+				run: params.run,
+				stepId: params.step.stepId,
+				operation: params.step.operation,
+				recordedAt: new Date().toISOString(),
+			},
+		);
+	} catch (error) {
+		releaseFailure = { error };
+		throw error;
 	} finally {
-		await runtime.release(client);
+		await lease.release(releaseFailure);
 	}
 }
 
@@ -560,8 +578,8 @@ async function proveManual(operation: PhysicalOperation) {
 		obligations: [],
 	};
 	const pool = await getTestPool();
-	const context = await readPgObservationContext(pool, schemaName);
-	const outcome = await createProver(registry).prove(compare, pool, context);
+	const context = await readPgObservationContextFromLessor(target, schemaName);
+	const outcome = await createProver(registry).prove(compare, target, context);
 	return { pool, registry, outcome };
 }
 
@@ -575,8 +593,11 @@ async function columnExists(column: string): Promise<boolean> {
 	return result.rows.length > 0;
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition executor recovery', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -611,7 +632,8 @@ describe('ADR-0003 transition executor recovery', () => {
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const loadCurrent = () => adapter.introspect({ schema: schemaName });
-		const readContext = () => readPgObservationContext(pool, schemaName);
+		const readContext = () =>
+			readPgObservationContextFromLessor(target, schemaName);
 		const current = await loadCurrent();
 		const desired = desiredTasksFromCurrent(current, {
 			enumValues: ['active', 'pending'],
@@ -633,7 +655,7 @@ describe('ADR-0003 transition executor recovery', () => {
 			desired,
 			loadCurrent,
 			readContext,
-			target: pool,
+			target,
 			policy: basePolicy,
 			maxIterations: 1,
 		});
@@ -684,7 +706,7 @@ describe('ADR-0003 transition executor recovery', () => {
 		]);
 		const remainingProof = await createProver(registry).prove(
 			remainingCompare,
-			pool,
+			target,
 			await readContext(),
 		);
 		expect(remainingProof.kind).toBe('proven');
@@ -709,7 +731,7 @@ describe('ADR-0003 transition executor recovery', () => {
 			desired,
 			loadCurrent,
 			readContext,
-			target: pool,
+			target,
 			policy: basePolicy,
 		});
 
@@ -741,7 +763,7 @@ describe('ADR-0003 transition executor recovery', () => {
 			'CreateUniqueIndexConcurrently',
 		);
 		const run = runMetadata(outcome.plan, context, 'non-atomic-intent');
-		await writeIntentOnly({ registry, step: cicStep, pool, run });
+		await writeIntentOnly({ registry, step: cicStep, run });
 		await pool.query(
 			`CREATE INDEX ${quoteIdent('idx_users_email')} ON ${quoteIdent(
 				schemaName,
@@ -754,9 +776,9 @@ describe('ADR-0003 transition executor recovery', () => {
 				...(await readTransitionJournal(pool, runId)),
 				plan: outcome.plan,
 			}),
-			() => readPgObservationContext(pool, schemaName),
+			() => readPgObservationContextFromLessor(target, schemaName),
 			basePolicy,
-			pool,
+			target,
 		);
 
 		expect(resumed.assessment.decision).toBe('blocked');
@@ -778,7 +800,7 @@ describe('ADR-0003 transition executor recovery', () => {
 		const denied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			basePolicy,
-			pool,
+			target,
 		);
 		expect(denied.assessment.decision).toBe('blocked');
 		expect(await columnExists('manual_flag')).toBe(false);
@@ -796,7 +818,7 @@ describe('ADR-0003 transition executor recovery', () => {
 		const applied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			accepted,
-			pool,
+			target,
 		);
 
 		expect(applied.assessment.decision).toBe('applicable');

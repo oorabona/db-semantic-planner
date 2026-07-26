@@ -3,6 +3,7 @@ import {
 	createEvidenceView,
 	createPackRegistry,
 	createProver,
+	createTransitionLessor,
 } from '@dbsp/core';
 import type {
 	CheckConstraintIR,
@@ -12,7 +13,7 @@ import type {
 	ObservationIssuer,
 	ObservationRequest,
 	TableIR,
-	TransitionConnectionPool,
+	TransitionLessor,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -95,13 +96,11 @@ function exactReintrospectedModel(expression: string): ModelIR {
 	return model(exactReintrospectedTable(expression));
 }
 
-function proofTarget(): TransitionConnectionPool {
-	return {
-		connect: async () => ({
-			query: async () => ({ rows: [] }),
-			release: () => {},
-		}),
-	};
+function proofTarget(): TransitionLessor {
+	return createTransitionLessor(async () => ({
+		query: async () => ({ rows: [] }),
+		release: () => {},
+	}));
 }
 
 function normalizedRequest(request: ObservationRequest): ObservationRequest {

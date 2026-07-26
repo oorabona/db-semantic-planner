@@ -15,11 +15,13 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import type { OperationObservation, OperationRuntime } from './registry.js';
 import { createPackRegistry } from './registry.js';
 import { type ResumeTransitionInput, resumeTransitionRun } from './resume.js';
 import { stableJson } from './stable-json.js';
+import { TRANSITION_LESSOR_REJECTION } from './transition-lessor.js';
 
 const artifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.resume.operations'),
@@ -237,8 +239,8 @@ function runtime(options: {
 	readonly transaction?: 'joins-current' | 'forbids-transaction';
 	readonly observed?: StepJournal[];
 	readonly observeContext?: OperationRuntime['observeContext'];
+	readonly writeObservedJournal?: OperationRuntime['writeObservedJournal'];
 }): OperationRuntime {
-	const client = { opaqueClient: {} };
 	const observe = (
 		phase: 'before' | 'after',
 	): Promise<OperationObservation> => {
@@ -276,8 +278,6 @@ function runtime(options: {
 			expectedBefore: fingerprint('before'),
 			expectedAfter: fingerprint('after'),
 		}),
-		checkout: vi.fn(async () => client),
-		release: vi.fn(),
 		writeIntentJournal: vi.fn(),
 		begin: vi.fn(),
 		setLockTimeout: vi.fn(),
@@ -295,9 +295,11 @@ function runtime(options: {
 		writeCompletionJournal: vi.fn(),
 		commit: vi.fn(),
 		rollback: vi.fn(),
-		writeObservedJournal: vi.fn(async (_client, journal) => {
-			options.observed?.push(journal);
-		}),
+		writeObservedJournal:
+			options.writeObservedJournal ??
+			vi.fn(async (_client, journal) => {
+				options.observed?.push(journal);
+			}),
 		isLockTimeout: () => false,
 	};
 }
@@ -312,26 +314,123 @@ async function resumeWith(
 	rt: OperationRuntime,
 	options: {
 		readonly readContext?: ResumeTransitionInput['readContext'];
+		readonly loadCurrent?: ResumeTransitionInput['loadCurrent'];
+		readonly target?: ResumeTransitionInput['target'];
+		readonly registry?: ReturnType<typeof createPackRegistry>;
 	} = {},
 ) {
-	const registry = createPackRegistry([
-		{
-			rules: [],
-			operationSemantics: [rt],
-			issuer: { artifact, execute: vi.fn() },
-		},
-	]);
+	const registry =
+		options.registry ??
+		createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: { artifact, execute: vi.fn() },
+			},
+		]);
 	const runMetadata = run(plan);
+	const loadCurrent =
+		options.loadCurrent ?? (async () => ({ run: runMetadata, plan, events }));
 	return resumeTransitionRun(registry, {
 		runId: runMetadata.runId,
-		loadCurrent: async () => ({ run: runMetadata, plan, events }),
+		loadCurrent,
 		readContext: options.readContext ?? (async () => context),
 		policy,
-		target: { connect: vi.fn() },
+		target:
+			options.target ??
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release: vi.fn(),
+			})),
 	});
 }
 
 describe('resumeTransitionRun', () => {
+	it('reports an unstarted journal as planned when its target is unusable', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const result = await resumeWith(plan, [], runtime({}), {
+			loadCurrent: async () => ({
+				run: runMetadata,
+				plan,
+				events: [],
+			}),
+			target: { acquire: vi.fn() } as never,
+		});
+
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+	});
+
+	it('rejects a forged lessor whose acquisition has no release()', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const journal = completedJournal(step, runMetadata);
+		const target = {
+			acquire: vi.fn(async () => ({ query: vi.fn() })),
+		};
+		Object.defineProperty(target, Symbol.for('dbsp.transition.lessor'), {
+			value: { protocolVersion: 1 },
+		});
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, journal.intent),
+				event(2, 'observed', step, runMetadata, journal),
+			],
+			runtime({ after: 'after' }),
+			{ target: target as never },
+		);
+
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'must acquire a lease exposing query() and release()',
+		);
+		expect(target.acquire).toHaveBeenCalledOnce();
+	});
+
+	it('validates durable journals before reporting an unusable target as outcome-unknown', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const journal = completedJournal(step, runMetadata);
+		const loadCurrent = vi.fn(async () => ({
+			run: runMetadata,
+			plan,
+			events: [
+				event(1, 'intent', step, runMetadata, journal.intent),
+				event(2, 'observed', step, runMetadata, journal),
+			],
+		}));
+		const target = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+		const readContext = vi.fn();
+
+		const result = await resumeWith(plan, [], runtime({}), {
+			loadCurrent,
+			readContext,
+			target: target as never,
+		});
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+			fact: {
+				key: 'transition-lessor',
+				value: TRANSITION_LESSOR_REJECTION,
+			},
+		});
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(result.journals).toEqual([]);
+		expect(loadCurrent).toHaveBeenCalledWith(runMetadata.runId);
+		expect(readContext).not.toHaveBeenCalled();
+		expect(target.connect).not.toHaveBeenCalled();
+	});
+
 	it('re-observes an observed completed step before accepting completion', async () => {
 		const plan = planShape();
 		const runMetadata = run(plan);
@@ -374,6 +473,283 @@ describe('resumeTransitionRun', () => {
 
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
+	});
+
+	it('releases the completed-step observation when its journal write rejects', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+		const failure = new Error('journal unavailable');
+
+		await expect(
+			resumeWith(
+				plan,
+				[
+					event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+					event(
+						2,
+						'completion',
+						step,
+						runMetadata,
+						completion(step, runMetadata),
+					),
+				],
+				runtime({
+					writeObservedJournal: vi.fn(async () => {
+						throw failure;
+					}),
+				}),
+				{
+					target: createTestTransitionLessor(async () => ({
+						query: async () => ({ rows: [] }),
+						release,
+					})),
+				},
+			),
+		).rejects.toBe(failure);
+		expect(release).toHaveBeenCalledOnce();
+		expect(release.mock.calls[0]?.[0]).toBeTruthy();
+	});
+
+	it('releases the transactional completion observation when its journal write rejects', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+		const failure = new Error('journal unavailable');
+		let acquisitions = 0;
+
+		await expect(
+			resumeWith(
+				plan,
+				[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+				runtime({
+					before: 'drifted-before',
+					writeObservedJournal: vi.fn(async () => {
+						throw failure;
+					}),
+				}),
+				{
+					target: createTestTransitionLessor(async () => {
+						acquisitions += 1;
+						if (acquisitions === 1) {
+							throw new Error('before observation unavailable');
+						}
+						return { query: async () => ({ rows: [] }), release };
+					}),
+				},
+			),
+		).rejects.toBe(failure);
+		expect(release).toHaveBeenCalledOnce();
+		expect(release.mock.calls[0]?.[0]).toBeTruthy();
+	});
+
+	it('releases the non-atomic completion observation when its journal write rejects', async () => {
+		const base = planShape();
+		const plan: ProvenPlanShape = {
+			...base,
+			segments: [{ ...base.segments[0]!, transaction: 'forbids-transaction' }],
+		};
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+		const failure = new Error('journal unavailable');
+
+		await expect(
+			resumeWith(
+				plan,
+				[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+				runtime({
+					transaction: 'forbids-transaction',
+					writeObservedJournal: vi.fn(async () => {
+						throw failure;
+					}),
+				}),
+				{
+					target: createTestTransitionLessor(async () => ({
+						query: async () => ({ rows: [] }),
+						release,
+					})),
+				},
+			),
+		).rejects.toBe(failure);
+		expect(release).toHaveBeenCalledOnce();
+		expect(release.mock.calls[0]?.[0]).toBeTruthy();
+	});
+
+	it('releases a fingerprint mismatch once without an error', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+				event(
+					2,
+					'observed',
+					step,
+					runMetadata,
+					completedJournal(step, runMetadata),
+				),
+			],
+			runtime({ after: 'drifted-after' }),
+			{
+				target: createTestTransitionLessor(async () => ({
+					query: async () => ({ rows: [] }),
+					release,
+				})),
+			},
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(release).toHaveBeenCalledOnce();
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('releases a successful completion observation once without an error', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+				event(
+					2,
+					'completion',
+					step,
+					runMetadata,
+					completion(step, runMetadata),
+				),
+			],
+			runtime({}),
+			{
+				target: createTestTransitionLessor(async () => ({
+					query: async () => ({ rows: [] }),
+					release,
+				})),
+			},
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(release).toHaveBeenCalledOnce();
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('reports observation failures as unknown after releasing the lease with the error', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const release = vi.fn();
+		const failure = new Error('observation unavailable');
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+				event(
+					2,
+					'observed',
+					step,
+					runMetadata,
+					completedJournal(step, runMetadata),
+				),
+			],
+			runtime({ after: failure }),
+			{
+				target: createTestTransitionLessor(async () => ({
+					query: async () => ({ rows: [] }),
+					release,
+				})),
+			},
+		);
+
+		expect(result.assessment.reasons[0]?.detail).toBe(failure.message);
+		expect(release).toHaveBeenCalledOnce();
+		expect(release.mock.calls[0]?.[0]).toBe(failure);
+	});
+
+	it('does not acquire a lease when the operation runtime is missing', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		let acquisitions = 0;
+		const missingRuntime = { ...runtime({}), release: vi.fn() };
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+				event(
+					2,
+					'observed',
+					step,
+					runMetadata,
+					completedJournal(step, runMetadata),
+				),
+			],
+			missingRuntime,
+			{
+				target: createTestTransitionLessor(async () => {
+					acquisitions += 1;
+					return { query: async () => ({ rows: [] }), release: vi.fn() };
+				}),
+			},
+		);
+
+		expect(result.assessment.reasons[0]?.detail).toBe(
+			'operation runtime missing',
+		);
+		expect(acquisitions).toBe(0);
+	});
+
+	it('does not acquire a lease when the operation observation issuer is missing', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		let acquisitions = 0;
+		const rt = runtime({});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: { artifact, execute: vi.fn() },
+			},
+		]);
+		vi.spyOn(registry, 'resolveIssuer').mockReturnValue(undefined);
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, intent(step, runMetadata)),
+				event(
+					2,
+					'observed',
+					step,
+					runMetadata,
+					completedJournal(step, runMetadata),
+				),
+			],
+			rt,
+			{
+				registry,
+				target: createTestTransitionLessor(async () => {
+					acquisitions += 1;
+					return { query: async () => ({ rows: [] }), release: vi.fn() };
+				}),
+			},
+		);
+
+		expect(result.assessment.reasons[0]?.detail).toBe(
+			'operation observation issuer missing',
+		);
+		expect(acquisitions).toBe(0);
 	});
 
 	it('classifies a transactional intent without completion as not committed when expectedBefore still matches', async () => {

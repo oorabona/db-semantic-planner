@@ -27,10 +27,10 @@ import type {
 	RuleRef,
 	SemanticArtifactRef,
 	TransitionCandidate,
-	TransitionConnectionPool,
 	TransitionFragment,
-	TransitionQueryClient,
+	TransitionLessor,
 	TransitionRule,
+	TransitionSessionClient,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
 import { transitionCompareCurrentModel } from './comparator.js';
@@ -51,6 +51,13 @@ import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import type { PackRegistry, RegisteredOperationSemantics } from './registry.js';
 import { stableJson } from './stable-json.js';
+import {
+	acquireTransitionLease,
+	isTransitionLessor,
+	type TransitionLease,
+	type TransitionLeaseFailure,
+	transitionLessorRejectionAssessment,
+} from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
 const PROVER_ARTIFACT: SemanticArtifactRef = {
@@ -350,35 +357,10 @@ function validateIssuedObservation(
 	};
 }
 
-function transitionPool(
-	target: TransitionConnectionPool,
-): TransitionConnectionPool {
-	if (
-		isJsonObject(target) &&
-		typeof target.connect === 'function' &&
-		typeof (target as { release?: unknown }).release !== 'function'
-	) {
-		return target;
-	}
-	throw new Error(
-		'transition proof target must be a Pool-like object with connect(); checked-out clients are not accepted',
-	);
-}
-
 async function checkoutProofClient(
-	target: TransitionConnectionPool,
-): Promise<TransitionQueryClient> {
-	const client = await transitionPool(target).connect();
-	if (
-		!isJsonObject(client) ||
-		typeof client.query !== 'function' ||
-		typeof client.release !== 'function'
-	) {
-		throw new Error(
-			'transition proof pool returned a client without query() and release()',
-		);
-	}
-	return client;
+	target: TransitionLessor,
+): Promise<TransitionLease> {
+	return acquireTransitionLease(target);
 }
 
 type DurableConclusion = 'established' | 'undischarged' | 'refuted';
@@ -553,7 +535,7 @@ function refutedAssessment(claim: ProofClaim): InapplicableAssessment {
 async function issueObservations(
 	issuer: ObservationIssuer | undefined,
 	requests: readonly ObservationRequest[],
-	target: unknown,
+	target: TransitionSessionClient,
 	context: ObservationContext,
 	issuedRequestKeys: Set<string> = new Set(),
 ): Promise<{
@@ -679,7 +661,7 @@ function candidateFromRecognition(
 
 type ObservationIssueState = {
 	readonly issuer: ObservationIssuer;
-	readonly client: TransitionQueryClient;
+	readonly client: TransitionSessionClient;
 	readonly proofContext: ObservationContext;
 	readonly issuedRequestKeys: Set<string>;
 	readonly evidence: readonly EvidenceObservation[];
@@ -1235,7 +1217,7 @@ function compositionRequirementSatisfaction(
 async function proveTransitions(
 	registry: PackRegistry,
 	compare: Extract<CompareOutcome, { readonly kind: 'transitions' }>,
-	target: TransitionConnectionPool,
+	target: TransitionLessor,
 	context: ObservationContext,
 	initialState?: ObservationIssueState,
 ): Promise<ProveOutcome> {
@@ -1296,8 +1278,9 @@ async function proveTransitions(
 	let minServerVersionRequests = new Map<string, ObservationRequest>();
 	const obligationClaimByCanonicalKey = new Map<string, ProofClaim>();
 	const multiCandidateSnapshot = !initialState && compare.candidates.length > 1;
-	let sharedClient: TransitionQueryClient | undefined;
-	let sharedReleaseError: unknown;
+	let sharedLease: TransitionLease | undefined;
+	let sharedClient: TransitionSessionClient | undefined;
+	let sharedReleaseFailure: TransitionLeaseFailure | undefined;
 	const sharedIssuedRequestKeys = new Set<string>();
 	let sharedIssued: {
 		readonly evidence: readonly EvidenceObservation[];
@@ -1306,7 +1289,8 @@ async function proveTransitions(
 
 	try {
 		if (multiCandidateSnapshot) {
-			sharedClient = await checkoutProofClient(target);
+			sharedLease = await checkoutProofClient(target);
+			sharedClient = sharedLease.session;
 			const allRequiredObservations: ObservationRequest[] = [];
 			for (const candidate of compare.candidates) {
 				const rule = registry.resolveRule(candidate.rule);
@@ -1498,10 +1482,12 @@ async function proveTransitions(
 					issued = appendIssued(sharedIssued, additional);
 					sharedIssued = appendIssued(sharedIssued, additional);
 				} else {
-					let client: TransitionQueryClient | undefined;
-					let releaseError: unknown;
+					let lease: TransitionLease | undefined;
+					let client: TransitionSessionClient | undefined;
+					let releaseFailure: TransitionLeaseFailure | undefined;
 					try {
-						client = await checkoutProofClient(target);
+						lease = await checkoutProofClient(target);
+						client = lease.session;
 						proofContext = issuer.readContext
 							? await issuer.readContext(client, context, requiredObservations)
 							: context;
@@ -1526,7 +1512,7 @@ async function proveTransitions(
 							proofContext,
 						);
 					} catch (error) {
-						releaseError = error;
+						releaseFailure = { error };
 						return {
 							kind: 'blocked',
 							assessment: artifactMismatch(
@@ -1537,8 +1523,8 @@ async function proveTransitions(
 							),
 						};
 					} finally {
-						if (client) {
-							client.release(releaseError);
+						if (lease) {
+							await lease.release(releaseFailure);
 						}
 					}
 				}
@@ -1925,7 +1911,7 @@ async function proveTransitions(
 			planAssumptions.push(...assumptions);
 		}
 	} catch (error) {
-		sharedReleaseError = error;
+		sharedReleaseFailure = { error };
 		return {
 			kind: 'blocked',
 			assessment: artifactMismatch(
@@ -1934,8 +1920,8 @@ async function proveTransitions(
 			),
 		};
 	} finally {
-		if (sharedClient) {
-			sharedClient.release(sharedReleaseError);
+		if (sharedLease) {
+			await sharedLease.release(sharedReleaseFailure);
 		}
 	}
 
@@ -2049,7 +2035,7 @@ async function proveTransitions(
 async function retryUnknownRecognition(
 	registry: PackRegistry,
 	compare: Extract<CompareOutcome, { readonly kind: 'unknown' }>,
-	target: TransitionConnectionPool,
+	target: TransitionLessor,
 	context: ObservationContext,
 ): Promise<ProveOutcome> {
 	if (compare.recognitions.length !== 1) {
@@ -2092,11 +2078,13 @@ async function retryUnknownRecognition(
 	]);
 	const issuer = registry.resolveIssuer(recognition.rule.pack);
 	if (issuer) {
-		let client: TransitionQueryClient | undefined;
-		let releaseError: unknown;
+		let lease: TransitionLease | undefined;
+		let client: TransitionSessionClient | undefined;
+		let releaseFailure: TransitionLeaseFailure | undefined;
 		const issuedRequestKeys = new Set<string>();
 		try {
-			client = await checkoutProofClient(target);
+			lease = await checkoutProofClient(target);
+			client = lease.session;
 			let proofContext = issuer.readContext
 				? await issuer.readContext(client, context, recognitionRequests)
 				: context;
@@ -2207,7 +2195,7 @@ async function retryUnknownRecognition(
 				},
 			);
 		} catch (error) {
-			releaseError = error;
+			releaseFailure = { error };
 			return {
 				kind: 'blocked',
 				assessment: artifactMismatch(
@@ -2218,8 +2206,8 @@ async function retryUnknownRecognition(
 				),
 			};
 		} finally {
-			if (client) {
-				client.release(releaseError);
+			if (lease) {
+				await lease.release(releaseFailure);
 			}
 		}
 	}
@@ -2309,7 +2297,7 @@ export function createProver(registry: PackRegistry): Prover {
 		artifact: PROVER_ARTIFACT,
 		async prove(
 			compare: CompareOutcome,
-			target: TransitionConnectionPool,
+			target: TransitionLessor,
 			context: ObservationContext,
 		): Promise<ProveOutcome> {
 			switch (compare.kind) {
@@ -2324,7 +2312,7 @@ export function createProver(registry: PackRegistry): Prover {
 				case 'unsupported':
 					return { kind: 'blocked', assessment: unsupported(compare) };
 				case 'unknown':
-					return retryUnknownRecognition(registry, compare, target, context);
+					break;
 				case 'ambiguous':
 					return { kind: 'blocked', assessment: ambiguous(compare) };
 				case 'uncomposable':
@@ -2332,8 +2320,16 @@ export function createProver(registry: PackRegistry): Prover {
 				case 'transitions':
 					break;
 			}
+			if (!isTransitionLessor(target)) {
+				return {
+					kind: 'blocked',
+					assessment: transitionLessorRejectionAssessment(PROVER_ARTIFACT),
+				};
+			}
 
-			return proveTransitions(registry, compare, target, context);
+			return compare.kind === 'unknown'
+				? retryUnknownRecognition(registry, compare, target, context)
+				: proveTransitions(registry, compare, target, context);
 		},
 	};
 }

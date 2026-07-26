@@ -42,6 +42,7 @@ export {
 	getPgsqlAdapter,
 	getTestAdapter,
 	getTestPool,
+	getTestTransitionLessor,
 } from './db.js';
 // EXISTS-correctness (regression suite for fix/core-correctness-130)
 export {

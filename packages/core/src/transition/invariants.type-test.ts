@@ -9,7 +9,7 @@ import type {
 	PlanAssessment,
 	ProofClaim,
 	SemanticArtifactRef,
-	TransitionConnectionPool,
+	TransitionLessor,
 	TransitionQueryClient,
 } from '@dbsp/types';
 import type {
@@ -32,7 +32,7 @@ declare const observationIssuer: ObservationIssuer;
 declare const provenPlan: InProcessProvenPlan;
 declare const semanticArtifactRef: SemanticArtifactRef;
 declare const serializedPlan: SerializedProvenPlan;
-declare const executionTarget: TransitionConnectionPool;
+declare const executionTarget: TransitionLessor;
 declare const borrowedClient: TransitionQueryClient;
 
 declare const blockedOutcome: Extract<

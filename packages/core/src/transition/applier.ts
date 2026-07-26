@@ -19,7 +19,7 @@ import type {
 	RecoveryArtefact,
 	StepJournal,
 	TransactionalCompletionRecord,
-	TransitionConnectionPool,
+	TransitionLessor,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { matchLiveObservationContext } from './context-match.js';
@@ -31,10 +31,18 @@ import {
 	isOperationRuntime,
 	type OperationRuntime,
 	type PackRegistry,
+	type TransitionExecutionClient,
 } from './registry.js';
 import { assumptionAccepted } from './resource-scope.js';
 import { resumeTransitionRun } from './resume.js';
 import { stableJson } from './stable-json.js';
+import {
+	acquireTransitionLease,
+	isTransitionLessor,
+	type TransitionLease,
+	type TransitionLeaseFailure,
+	transitionLessorRejectionAssessment,
+} from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
 const APPLIER_ARTIFACT = {
@@ -434,7 +442,7 @@ function withJournalWriteWarning<T extends PlanAssessment>(
 
 async function writeObservedJournalOutcome(params: {
 	readonly semantics: OperationRuntime;
-	readonly client: Awaited<ReturnType<OperationRuntime['checkout']>>;
+	readonly client: TransitionExecutionClient;
 	readonly journal: StepJournal;
 }): Promise<
 	{ readonly ok: true } | { readonly ok: false; readonly error: unknown }
@@ -449,7 +457,7 @@ async function writeObservedJournalOutcome(params: {
 
 async function writeObservedJournalOrResult(params: {
 	readonly semantics: OperationRuntime;
-	readonly client: Awaited<ReturnType<OperationRuntime['checkout']>>;
+	readonly client: TransitionExecutionClient;
 	readonly journal: StepJournal;
 	readonly result: ApplyResult;
 	readonly outcomeDurable: boolean;
@@ -490,7 +498,7 @@ export function createApplier(registry: PackRegistry): Applier {
 				readonly assessment: ApplicableAssessment;
 			},
 			policy: ApplyPolicy,
-			target: TransitionConnectionPool,
+			target: TransitionLessor,
 		): Promise<ApplyResult> {
 			const plan =
 				typeof proven === 'object' && proven !== null
@@ -619,9 +627,7 @@ export function createApplier(registry: PackRegistry): Applier {
 			};
 			const resultWithObservedJournal = async (params: {
 				readonly semantics: OperationRuntime;
-				readonly client:
-					| Awaited<ReturnType<OperationRuntime['checkout']>>
-					| undefined;
+				readonly client: TransitionExecutionClient | undefined;
 				readonly journal: StepJournal;
 				readonly result: ApplyResult;
 				readonly outcomeDurable: boolean;
@@ -800,12 +806,11 @@ export function createApplier(registry: PackRegistry): Applier {
 					);
 				}
 
-				let client:
-					| Awaited<ReturnType<OperationRuntime['checkout']>>
-					| undefined;
+				let client: TransitionExecutionClient | undefined;
+				let lease: TransitionLease | undefined;
 				let committed = false;
 				let transactionStarted = false;
-				let releaseError: unknown;
+				let releaseFailure: TransitionLeaseFailure | undefined;
 				let active = first;
 				let activeContext = runtimeContext;
 				let activeOperationAttempted = false;
@@ -821,8 +826,16 @@ export function createApplier(registry: PackRegistry): Applier {
 					readonly completion: TransactionalCompletionRecord;
 					readonly journal?: StepJournal;
 				}[] = [];
+				if (!isTransitionLessor(target)) {
+					return resultWithCommittedJournals({
+						assessment: transitionLessorRejectionAssessment(APPLIER_ARTIFACT),
+						journals: [],
+						observations: [],
+					});
+				}
 				try {
-					client = await segmentCoordinator.checkout(target);
+					lease = await acquireTransitionLease(target);
+					client = { opaqueClient: lease.session };
 					const executionClient = client;
 					if (transactional) {
 						await segmentCoordinator.begin(executionClient);
@@ -1427,7 +1440,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						journals.push(journal);
 					}
 				} catch (error) {
-					releaseError = error;
+					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
 						if (client && transactionStarted) {
 							await segmentCoordinator.rollback(client).catch(() => undefined);
@@ -1707,12 +1720,8 @@ export function createApplier(registry: PackRegistry): Applier {
 						outcomeDurable: true,
 					});
 				} finally {
-					if (client) {
-						try {
-							await segmentCoordinator.release(client, releaseError);
-						} catch {
-							// A cleanup failure must not mask the known apply outcome.
-						}
+					if (lease) {
+						await lease.release(releaseFailure);
 					}
 				}
 			}

@@ -16,6 +16,7 @@ import type {
 	ResourceAddress,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionSessionClient,
 } from '@dbsp/types';
 import {
 	clampTransactionTimeoutMs,
@@ -41,7 +42,7 @@ import {
 } from '../journal.js';
 import {
 	normalizePgIndexCatalogRow,
-	readPgObservationContext,
+	readPgObservationContextFromClient,
 } from '../observation-issuer.js';
 import { isPgGuardTimeout } from '../pg-guard-timeout.js';
 import { pgPrivilegeValue } from '../privileges.js';
@@ -80,16 +81,8 @@ type Queryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
 };
 
-type ReleasableQueryable = Queryable & {
-	release(error?: unknown): void;
-};
-
-type PoolLike = {
-	connect(): Promise<ReleasableQueryable>;
-};
-
 type TransitionExecutionClient = {
-	readonly opaqueClient: unknown;
+	readonly opaqueClient: TransitionSessionClient;
 };
 
 type IndexCatalogValue = {
@@ -690,18 +683,6 @@ function queryable(target: unknown): Queryable {
 	);
 }
 
-function releasable(target: unknown): target is ReleasableQueryable {
-	return isRecord(target) && typeof target.release === 'function';
-}
-
-function poolLike(target: unknown): PoolLike | undefined {
-	return isRecord(target) &&
-		typeof target.connect === 'function' &&
-		!releasable(target)
-		? (target as PoolLike)
-		: undefined;
-}
-
 function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
@@ -1036,20 +1017,6 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			};
 		},
 		buildFingerprints: beforeAfterFingerprints,
-		async checkout(target: unknown): Promise<TransitionExecutionClient> {
-			const pool = poolLike(target);
-			if (!pool) {
-				throw new Error(
-					'PostgreSQL transition target must be a Pool-like object with connect(); checked-out clients are not accepted',
-				);
-			}
-			return { opaqueClient: await pool.connect() };
-		},
-		release(client: TransitionExecutionClient, error?: unknown) {
-			if (releasable(client.opaqueClient)) {
-				client.opaqueClient.release(error);
-			}
-		},
 		async writeIntentJournal(
 			client: TransitionExecutionClient,
 			record: DurableIntentRecord,
@@ -1077,11 +1044,15 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			_proofContext: ObservationContext,
 		) {
 			const payload = payloadOf(operation);
-			return readPgObservationContext(client.opaqueClient, payload.schema, {
-				schema: payload.schema,
-				table: payload.table,
-				index: payload.index,
-			});
+			return readPgObservationContextFromClient(
+				client.opaqueClient,
+				payload.schema,
+				{
+					schema: payload.schema,
+					table: payload.table,
+					index: payload.index,
+				},
+			);
 		},
 		async observeOperation(
 			client: TransitionExecutionClient,

@@ -3,7 +3,7 @@ import {
 	createPgTransitionPack,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
@@ -15,7 +15,12 @@ import {
 	type TableIR,
 } from '@dbsp/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_identity_adoption';
 const asserter = { kind: 'human' as const, identity: 'schema-owner' };
@@ -126,8 +131,11 @@ function transitionRegistry() {
 	]);
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition planner: logical identity adoption', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -176,11 +184,14 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		const registry = transitionRegistry();
 		const comparator = createComparator(registry);
 		const prover = createProver(registry);
-		const context = await readPgObservationContext(pool, schemaName);
+		const context = await readPgObservationContextFromLessor(
+			target,
+			schemaName,
+		);
 		const compare = comparator.compare(desired, current);
 		expect(compare.kind).toBe('transitions');
 
-		const outcome = await prover.prove(compare, pool, context);
+		const outcome = await prover.prove(compare, target, context);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -194,7 +205,7 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		const applied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy,
-			pool,
+			target,
 		);
 
 		expect(applied.assessment.decision).toBe('applicable');
@@ -225,7 +236,7 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		});
 		const noDrift = await prover.prove(
 			comparator.compare(desired, reintrospected),
-			pool,
+			target,
 			context,
 		);
 		expect(noDrift.kind).toBe('no-drift');
@@ -251,8 +262,8 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		expect(compare.kind).toBe('unsupported');
 		const outcome = await createProver(registry).prove(
 			compare,
-			pool,
-			await readPgObservationContext(pool, schemaName),
+			target,
+			await readPgObservationContextFromLessor(target, schemaName),
 		);
 
 		expect(outcome.kind).toBe('blocked');
@@ -279,10 +290,13 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		const registry = transitionRegistry();
 		const comparator = createComparator(registry);
 		const prover = createProver(registry);
-		const context = await readPgObservationContext(pool, schemaName);
+		const context = await readPgObservationContextFromLessor(
+			target,
+			schemaName,
+		);
 		const outcome = await prover.prove(
 			comparator.compare(desired, current),
-			pool,
+			target,
 			context,
 		);
 		expect(outcome.kind).toBe('proven');
@@ -293,7 +307,7 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		const applied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
-			pool,
+			target,
 		);
 
 		expect(applied.assessment.decision).toBe('blocked');

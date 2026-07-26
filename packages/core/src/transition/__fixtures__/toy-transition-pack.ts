@@ -2,7 +2,6 @@ import type {
 	GuardExecutionResult,
 	OperationObservation,
 	OperationRuntime,
-	TransitionExecutionClient,
 	TransitionPack,
 } from '@dbsp/core';
 import type {
@@ -939,17 +938,13 @@ function createRuntime(db: ToyDb): OperationRuntime {
 		supportsOperation: isToyOperation,
 		effectsOf: operationEffects,
 		buildFingerprints,
-		checkout: async (): Promise<TransitionExecutionClient> => ({
-			opaqueClient: db,
-		}),
-		release: () => undefined,
 		writeIntentJournal: async () => undefined,
 		begin: async () => undefined,
 		setLockTimeout: async () => undefined,
 		acquireLocks: async () => undefined,
 		observeContext: async (_client, _operation, context) => toyContext(context),
 		observeOperation: async (
-			_client,
+			client,
 			operation,
 			context,
 			_phase,
@@ -984,7 +979,11 @@ function createRuntime(db: ToyDb): OperationRuntime {
 			const observations: IssuedObservation[] = [];
 			for (const request of requests) {
 				observations.push(
-					await issuer.execute(request, db, toyContext(context)),
+					await issuer.execute(
+						request,
+						client.opaqueClient,
+						toyContext(context),
+					),
 				);
 			}
 			return {
@@ -993,7 +992,7 @@ function createRuntime(db: ToyDb): OperationRuntime {
 			};
 		},
 		checkGuard: async (
-			_client,
+			client,
 			_operation,
 			guard,
 			context,
@@ -1007,7 +1006,11 @@ function createRuntime(db: ToyDb): OperationRuntime {
 				guard.predicate.detail === undefined
 					? baseRequest
 					: { ...baseRequest, detail: guard.predicate.detail };
-			const observation = await issuer.execute(request, db, context);
+			const observation = await issuer.execute(
+				request,
+				client.opaqueClient,
+				context,
+			);
 			return {
 				passed: requestHolds(db, request),
 				observations: [observation],

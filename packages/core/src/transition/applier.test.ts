@@ -13,9 +13,10 @@ import type {
 	ResourceAddress,
 	SemanticArtifactRef,
 	StepJournal,
-	TransitionConnectionPool,
+	TransitionLessor,
 } from '@dbsp/types';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { createApplier } from './applier.js';
 import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import type { InProcessProvenPlan } from './index.js';
@@ -27,6 +28,7 @@ import type {
 	TransitionExecutionClient,
 } from './registry.js';
 import { createPackRegistry } from './registry.js';
+import { TRANSITION_LESSOR_REJECTION } from './transition-lessor.js';
 
 const operationArtifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.operations'),
@@ -114,13 +116,42 @@ function userAttestedNativeDefaultAssumption(
 	};
 }
 
-function executionTarget(): TransitionConnectionPool {
-	return {
-		connect: async () => ({
+/**
+ * Leases taken from every {@link executionTarget} since the last test began.
+ *
+ * Core acquires and releases the lease now, so "refused before touching the
+ * database" is a property of the target, not of the operation runtime.
+ */
+let acquisitions = 0;
+let nextSessionId = 0;
+const sessionIds = new WeakMap<object, number>();
+
+beforeEach(() => {
+	acquisitions = 0;
+	nextSessionId = 0;
+});
+
+function clientId(client: TransitionExecutionClient): number {
+	const session = client.opaqueClient as object;
+	const existing = sessionIds.get(session);
+	if (existing !== undefined) {
+		return existing;
+	}
+	const id = ++nextSessionId;
+	sessionIds.set(session, id);
+	return id;
+}
+
+function executionTarget(): TransitionLessor {
+	let clientId = 0;
+	return createTestTransitionLessor(async () => {
+		acquisitions += 1;
+		return {
+			id: ++clientId,
 			query: async () => ({ rows: [] }),
 			release: vi.fn(),
-		}),
-	};
+		};
+	});
 }
 
 function fingerprint(digest: string): FingerprintManifest {
@@ -477,7 +508,6 @@ function runtime(
 		readonly buildFingerprints?: OperationRuntime['buildFingerprints'];
 	} = {},
 ): OperationRuntime {
-	const client: TransitionExecutionClient = { opaqueClient: {} };
 	const record = (event: string) => {
 		options.log?.push(event);
 	};
@@ -502,11 +532,6 @@ function runtime(
 				expectedBefore: fingerprint('before'),
 				expectedAfter: fingerprint('after'),
 			})),
-		checkout: vi.fn(async () => {
-			record('checkout');
-			return client;
-		}),
-		release: vi.fn(),
 		writeIntentJournal: vi.fn(async (_client, _record: DurableIntentRecord) => {
 			record('intent');
 		}),
@@ -611,9 +636,6 @@ function multiSegmentRuntime(
 		readonly observeOperation?: OperationRuntime['observeOperation'];
 	},
 ): OperationRuntime {
-	let nextClientId = 0;
-	const clientId = (client: TransitionExecutionClient): number =>
-		(client.opaqueClient as { readonly id: number }).id;
 	const record = (event: string) => {
 		options.log.push(event);
 	};
@@ -670,14 +692,6 @@ function multiSegmentRuntime(
 		buildFingerprints: (candidate) => ({
 			expectedBefore: fingerprint(`${candidate.ref}:before`),
 			expectedAfter: fingerprint(`${candidate.ref}:after`),
-		}),
-		checkout: vi.fn(async () => {
-			nextClientId += 1;
-			record(`checkout:${nextClientId}`);
-			return { opaqueClient: { id: nextClientId } };
-		}),
-		release: vi.fn(async (client) => {
-			record(`release:${clientId(client)}`);
 		}),
 		writeIntentJournal: vi.fn(async (client, recordValue) => {
 			record(`intent:${recordValue.stepId}:${clientId(client)}`);
@@ -745,22 +759,11 @@ function multiSegmentRuntime(
 }
 
 function sharedCoordinator(log: string[]): ExecutionCoordinator {
-	let nextClientId = 0;
-	const clientId = (client: TransitionExecutionClient): number =>
-		(client.opaqueClient as { readonly id: number }).id;
 	const record = (event: string) => {
 		log.push(event);
 	};
 	return {
 		transactionDomain: 'mock.shared-transaction-domain',
-		checkout: vi.fn(async () => {
-			nextClientId += 1;
-			record(`coordinator:checkout:${nextClientId}`);
-			return { opaqueClient: { id: nextClientId } };
-		}),
-		release: vi.fn(async (client) => {
-			record(`coordinator:release:${clientId(client)}`);
-		}),
 		begin: vi.fn(async (client) => {
 			record(`coordinator:begin:${clientId(client)}`);
 		}),
@@ -799,7 +802,7 @@ function runtimeForOperation(
 }
 
 describe('createApplier', () => {
-	it('refuses an unminted plain plan before authorization, checkout, or DDL', async () => {
+	it('refuses an unminted plain plan before authorization, leasing, or DDL', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -815,14 +818,14 @@ describe('createApplier', () => {
 			query: async () => ({ rows: [] }),
 			release: vi.fn(),
 		}));
-		const target: TransitionConnectionPool = { connect };
+		const target = { connect, release: vi.fn() };
 
 		const result = await createApplier(registry).apply(
 			{ plan: planShape(), assessment: assessment() } as Parameters<
 				ReturnType<typeof createApplier>['apply']
 			>[0],
 			acceptsOperationPolicy(),
-			target,
+			target as never,
 		);
 
 		expect(result.assessment.reasons[0]).toMatchObject({
@@ -834,10 +837,120 @@ describe('createApplier', () => {
 			},
 		});
 		expect(connect).not.toHaveBeenCalled();
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
 		expect(rt.acquireLocks).not.toHaveBeenCalled();
 		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('rejects a checked-out client target before acquiring a lease', async () => {
+		const rt = runtime(() => undefined);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const target = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			target as never,
+		);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+			fact: {
+				key: 'transition-lessor',
+				value: TRANSITION_LESSOR_REJECTION,
+			},
+		});
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(target.connect).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
+	});
+
+	it('rejects a forged lessor whose acquisition has no release()', async () => {
+		const rt = runtime(() => undefined);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const target = {
+			acquire: vi.fn(async () => ({ query: vi.fn() })),
+		};
+		Object.defineProperty(target, Symbol.for('dbsp.transition.lessor'), {
+			value: { protocolVersion: 1 },
+		});
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			target as never,
+		);
+
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'must acquire a lease exposing query() and release()',
+		);
+		expect(target.acquire).toHaveBeenCalledOnce();
+	});
+
+	it('hands runtimes and coordinators a session without release', async () => {
+		const runtimeSawSession = vi.fn();
+		const coordinatorSawSession = vi.fn();
+		const rt = runtime(() => undefined, {
+			executeOperation: async () => ({ kind: 'completed' }),
+		});
+		const writeIntentJournal = rt.writeIntentJournal;
+		rt.writeIntentJournal = async (client, record) => {
+			runtimeSawSession('release' in client.opaqueClient);
+			return writeIntentJournal(client, record);
+		};
+		const coordinator: ExecutionCoordinator = {
+			transactionDomain: 'mock.session-only',
+			begin: async (client) =>
+				coordinatorSawSession('release' in client.opaqueClient),
+			setLockTimeout: async () => undefined,
+			commit: async () => undefined,
+			rollback: async () => undefined,
+			isLockTimeout: () => false,
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+				executionCoordinator: coordinator,
+				transactionDomain: coordinator.transactionDomain,
+			},
+		]);
+
+		await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(runtimeSawSession).toHaveBeenCalledWith(false);
+		expect(coordinatorSawSession).toHaveBeenCalledWith(false);
 	});
 
 	it('lets a genuinely minted plan pass the capability gate', async () => {
@@ -870,7 +983,6 @@ describe('createApplier', () => {
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(result.journals[0]?.outcome).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
-		expect(rt.checkout).toHaveBeenCalledOnce();
 	});
 
 	it('blocks apply when the live context database differs from the proof context', async () => {
@@ -995,10 +1107,6 @@ describe('createApplier', () => {
 			'completed',
 			'completed',
 		]);
-		expect(log.filter((entry) => entry.startsWith('checkout:'))).toEqual([
-			'checkout:1',
-			'checkout:2',
-		]);
 		expect(log.indexOf('commit:1')).toBeLessThan(log.indexOf('begin:2'));
 		expect(log).toContain('execute:op:a:1');
 		expect(log).toContain('execute:op:b:2');
@@ -1047,23 +1155,20 @@ describe('createApplier', () => {
 			'step:op:a',
 			'step:op:b',
 		]);
-		expect(
-			log.filter((entry) => entry.startsWith('coordinator:checkout')),
-		).toEqual(['coordinator:checkout:1']);
 		expect(log).toContain('coordinator:begin:1');
 		expect(log).toContain('execute:op:a:1');
 		expect(log).toContain('execute:op:b:1');
 		expect(log).toContain('coordinator:commit:1');
-		expect(log).not.toContain('checkout:1');
-		expect(rtA.checkout).not.toHaveBeenCalled();
-		expect(rtB.checkout).not.toHaveBeenCalled();
+		// One transaction, so one lease: core acquires for the whole coalesced
+		// segment rather than once per runtime.
+		expect(acquisitions).toBe(1);
 		expect(observed.map((journal) => journal.outcome)).toEqual([
 			'completed',
 			'completed',
 		]);
 	});
 
-	it('rejects cross-runtime transactional segments without a shared coordinator before checkout', async () => {
+	it('rejects cross-runtime transactional segments without a shared coordinator before acquiring a lease', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
 		const rtA = runtimeForOperation(
@@ -1104,9 +1209,7 @@ describe('createApplier', () => {
 		expect(result.assessment.reasons[0]?.detail).toMatch(
 			/shared transaction coordinator/,
 		);
-		expect(rtA.checkout).not.toHaveBeenCalled();
-		expect(rtB.checkout).not.toHaveBeenCalled();
-		expect(log).not.toContain('checkout:1');
+		expect(acquisitions).toBe(0);
 		expect(observed).toEqual([]);
 	});
 
@@ -1172,7 +1275,7 @@ describe('createApplier', () => {
 		const rt: OperationRuntime = {
 			...baseRuntime,
 			begin: vi.fn(async (client) => {
-				const id = (client.opaqueClient as { readonly id: number }).id;
+				const id = clientId(client);
 				log.push(`begin:${id}`);
 				if (id === 2) {
 					throw new Error('begin failed before op:b');
@@ -2084,11 +2187,11 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 		expect(observed).toEqual([]);
 	});
 
-	it('diagnoses a minted plan with broken guard references before checkout', async () => {
+	it('diagnoses a minted plan with broken guard references before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2114,10 +2217,10 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
-	it('diagnoses a minted plan that coalesces across a required commit boundary before checkout', async () => {
+	it('diagnoses a minted plan that coalesces across a required commit boundary before acquiring a lease', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
 		const baseRuntime = multiSegmentRuntime(
@@ -2166,14 +2269,14 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 		expect(observed).toEqual([]);
 	});
 
 	it.each([
 		'refuted',
 		'undischarged',
-	] as const)('diagnoses a minted plan with a %s required claim before checkout', async (conclusion) => {
+	] as const)('diagnoses a minted plan with a %s required claim before acquiring a lease', async (conclusion) => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2201,7 +2304,7 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
 	it.each([
@@ -2215,7 +2318,7 @@ describe('createApplier', () => {
 			claimWithConclusion('established', [operationAssumption().id]),
 			/must not assume/,
 		],
-	] as const)('diagnoses a minted plan with a malformed %s required claim before checkout', async (_label, forgedClaim, expectedDetail) => {
+	] as const)('diagnoses a minted plan with a malformed %s required claim before acquiring a lease', async (_label, forgedClaim, expectedDetail) => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2240,10 +2343,10 @@ describe('createApplier', () => {
 			),
 		).rejects.toThrow(expectedDetail);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
-	it('diagnoses a minted plan with a claim citing a missing observation before checkout', async () => {
+	it('diagnoses a minted plan with a claim citing a missing observation before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2271,10 +2374,10 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
-	it('diagnoses duplicate claim ids on an already-minted plan before checkout', async () => {
+	it('diagnoses duplicate claim ids on an already-minted plan before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2301,10 +2404,10 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
-	it('diagnoses duplicate observation ids on an already-minted plan before checkout', async () => {
+	it('diagnoses duplicate observation ids on an already-minted plan before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2331,10 +2434,10 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
-	it('diagnoses a minted plan missing the operation-pack assumption before checkout', async () => {
+	it('diagnoses a minted plan missing the operation-pack assumption before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -2362,7 +2465,7 @@ describe('createApplier', () => {
 			/internal error: minted proven plan violated relational invariants/,
 		);
 
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
 	it('default-denies a global assumption under a narrow scoped policy', async () => {
@@ -2398,7 +2501,7 @@ describe('createApplier', () => {
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe('uncomposable');
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 	});
 
 	it('matches a child column resource within its parent table scope', async () => {
@@ -2475,7 +2578,7 @@ describe('createApplier', () => {
 			code: 'uncomposable',
 			assumption: nativeDefault.id,
 		});
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 
 		const accepted = await createApplier(registry).apply(
 			{ plan: scopedPlan, assessment: assessment() },
@@ -2533,7 +2636,7 @@ describe('createApplier', () => {
 			assumption: blastRadius.id,
 			fragments: [scopedPlan.steps[0]?.selectionRationale.chosen],
 		});
-		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
 
 		const accepted = await createApplier(registry).apply(
 			{ plan: scopedPlan, assessment: assessment() },
@@ -2553,13 +2656,8 @@ describe('createApplier', () => {
 		expect(accepted.assessment.lifecycle).toBe('completed');
 	});
 
-	it('returns an ApplyResult when checkout fails', async () => {
-		const rt: OperationRuntime = {
-			...runtime(() => undefined),
-			checkout: vi.fn(async () => {
-				throw new Error('checkout failed');
-			}),
-		};
+	it('returns an ApplyResult when acquiring a lease fails', async () => {
+		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
 				rules: [],
@@ -2574,7 +2672,9 @@ describe('createApplier', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
-			executionTarget(),
+			createTestTransitionLessor(async () => {
+				throw new Error('pool exhausted');
+			}),
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe(
@@ -2583,24 +2683,20 @@ describe('createApplier', () => {
 		expect(result.assessment.lifecycle).toBe('planned');
 		expect(result.journals[0]?.intent.stepId).toBe('step:op');
 		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
-		expect(rt.release).not.toHaveBeenCalled();
+		// Nothing was leased, so nothing runs and nothing is given back.
+		expect(rt.begin).not.toHaveBeenCalled();
 	});
 
 	it('does not let release failure mask a completed result', async () => {
 		const observed: StepJournal[] = [];
-		const rt: OperationRuntime = {
-			...runtime(
-				(journal) => {
-					observed.push(journal);
-				},
-				{
-					executeOperation: vi.fn(async () => ({ kind: 'completed' })),
-				},
-			),
-			release: vi.fn(() => {
-				throw new Error('release failed');
-			}),
-		};
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+			},
+		);
 		const registry = createPackRegistry([
 			{
 				rules: [],
@@ -2615,12 +2711,48 @@ describe('createApplier', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
-			executionTarget(),
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release: () => {
+					throw new Error('release failed');
+				},
+			})),
 		);
 
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
-		expect(rt.release).toHaveBeenCalledOnce();
+	});
+
+	it('releases exactly once with the operation error', async () => {
+		const failure = new Error('operation failed');
+		const release = vi.fn();
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => {
+				throw failure;
+			}),
+		});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+		);
+
+		expect(release).toHaveBeenCalledTimes(1);
+		expect(release).toHaveBeenCalledWith(failure);
 	});
 
 	it('uses the operation pack issuer for apply-time observations', async () => {

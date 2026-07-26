@@ -4,6 +4,7 @@ import {
 	createEvidenceView,
 	createPackRegistry,
 	createProver,
+	createTransitionLessor,
 } from '@dbsp/core';
 import type {
 	ApplyPolicy,
@@ -370,7 +371,11 @@ describe('postgresql.enum.add-value rule', () => {
 			expect.not.objectContaining({ schema: expect.any(String) }),
 		);
 
-		const outcome = await createProver(registry).prove(compare, pool, context);
+		const outcome = await createProver(registry).prove(
+			compare,
+			createTransitionLessor(async () => pool.connect()),
+			context,
+		);
 
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
@@ -413,11 +418,15 @@ describe('postgresql.enum.add-value rule', () => {
 			label: 'pending',
 		});
 
-		const outcome = await createProver(registry).prove(compare, pool, {
-			...context,
-			targetSchema: 'tenant_a',
-			searchPath: ['tenant_a'],
-		});
+		const outcome = await createProver(registry).prove(
+			compare,
+			createTransitionLessor(async () => pool.connect()),
+			{
+				...context,
+				targetSchema: 'tenant_a',
+				searchPath: ['tenant_a'],
+			},
+		);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -449,11 +458,15 @@ describe('postgresql.enum.add-value rule', () => {
 				),
 		).toBe(true);
 
-		const applyOutcome = await createProver(registry).prove(compare, pool, {
-			...context,
-			targetSchema: 'tenant_a',
-			searchPath: ['tenant_a'],
-		});
+		const applyOutcome = await createProver(registry).prove(
+			compare,
+			createTransitionLessor(async () => pool.connect()),
+			{
+				...context,
+				targetSchema: 'tenant_a',
+				searchPath: ['tenant_a'],
+			},
+		);
 		expect(applyOutcome.kind).toBe('proven');
 		if (applyOutcome.kind !== 'proven') {
 			return;
@@ -461,7 +474,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: applyOutcome.plan, assessment: applyOutcome.assessment },
 			policy,
-			pool,
+			createTransitionLessor(async () => pool.connect()),
 		);
 
 		expect(result.assessment.decision).toBe('applicable');
@@ -484,11 +497,15 @@ describe('postgresql.enum.add-value rule', () => {
 			return;
 		}
 
-		const outcome = await createProver(registry).prove(compare, pool, {
-			...context,
-			targetSchema: 'tenant_b',
-			searchPath: ['tenant_b'],
-		});
+		const outcome = await createProver(registry).prove(
+			compare,
+			createTransitionLessor(async () => pool.connect()),
+			{
+				...context,
+				targetSchema: 'tenant_b',
+				searchPath: ['tenant_b'],
+			},
+		);
 
 		expect(outcome.kind).not.toBe('proven');
 		expect(pool.queries).not.toContain(
@@ -642,7 +659,11 @@ describe('postgresql.enum.add-value rule', () => {
 		}
 		expect(compare.candidates).toHaveLength(1);
 
-		const outcome = await createProver(registry).prove(compare, pool, context);
+		const outcome = await createProver(registry).prove(
+			compare,
+			createTransitionLessor(async () => pool.connect()),
+			context,
+		);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -655,7 +676,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			createTransitionLessor(async () => pool.connect()),
 		);
 
 		expect(result.assessment.decision).toBe('applicable');

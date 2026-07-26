@@ -13,9 +13,10 @@ import type {
 	SemanticArtifactRef,
 	StepJournal,
 	TransitionCandidate,
-	TransitionConnectionPool,
+	TransitionLessor,
 } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type { PackRegistry } from './registry.js';
 
@@ -76,12 +77,10 @@ const resource: ResourceAddress = {
 
 const desired = {} as ModelIR;
 
-const target: TransitionConnectionPool = {
-	connect: async () => ({
-		query: async () => ({ rows: [] }),
-		release: () => undefined,
-	}),
-};
+const target: TransitionLessor = createTestTransitionLessor(async () => ({
+	query: async () => ({ rows: [] }),
+	release: () => undefined,
+}));
 
 const policy: ApplyPolicy = { accepts: [] };
 
@@ -322,6 +321,54 @@ describe('staged transition orchestrator convergence', () => {
 				obligations: entry.candidate.obligations,
 			}),
 		);
+	});
+
+	it('reports convergence before validating an unused target', async () => {
+		const readContext = vi.fn(async () => context('converged'));
+		const loadCurrent = vi.fn(async () => desired);
+		const checkedOutClient = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+		mocks.compare.mockReturnValue({ kind: 'no-drift' });
+
+		const result = await createStagedTransitionOrchestrator(
+			{} as PackRegistry,
+		).applyStagedTransition({
+			desired,
+			loadCurrent,
+			readContext,
+			target: checkedOutClient as never,
+			policy,
+		});
+
+		expect(result.assessment).toMatchObject({
+			decision: 'applicable',
+			lifecycle: 'completed',
+			continuation: 'none',
+		});
+		expect(checkedOutClient.connect).not.toHaveBeenCalled();
+		expect(readContext).toHaveBeenCalledOnce();
+		expect(loadCurrent).toHaveBeenCalledOnce();
+	});
+
+	it('leaves unrelated prover failures as exceptions', async () => {
+		mocks.compare.mockReturnValue(transitionsFor('enum-add'));
+		const failure = new Error('prover failed');
+		mocks.prove.mockRejectedValue(failure);
+
+		await expect(
+			createStagedTransitionOrchestrator(
+				{} as PackRegistry,
+			).applyStagedTransition({
+				desired,
+				loadCurrent: async () => desired,
+				readContext: async () => context('prover-failure'),
+				target,
+				policy,
+			}),
+		).rejects.toBe(failure);
 	});
 
 	it('returns applicable when post-apply unknown convergence is proven no-drift', async () => {

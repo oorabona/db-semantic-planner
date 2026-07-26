@@ -1,7 +1,6 @@
 import type {
 	CapabilityDescriptor,
 	ExecutionCoordinator,
-	TransitionConnectionPool,
 	TransitionExecutionClient,
 } from '@dbsp/core';
 import type { DbCasing } from '@dbsp/types';
@@ -58,33 +57,10 @@ type Queryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
 };
 
-type ReleasableQueryable = Queryable & {
-	release(error?: unknown): void;
-};
-
-type PoolLike = {
-	connect(): Promise<ReleasableQueryable>;
-};
-
 const PG_TRANSACTION_DOMAIN = 'postgresql.transition.connection';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function poolLike(value: unknown): PoolLike | undefined {
-	if (isRecord(value) && typeof value.connect === 'function') {
-		return value as PoolLike;
-	}
-	return undefined;
-}
-
-function releasable(value: unknown): value is ReleasableQueryable {
-	return (
-		isRecord(value) &&
-		typeof value.query === 'function' &&
-		typeof value.release === 'function'
-	);
 }
 
 function clientQuery(client: TransitionExecutionClient): Queryable {
@@ -108,22 +84,6 @@ function boundedLockTimeout(maxWaitMs: number): number {
 function createPgExecutionCoordinator(): ExecutionCoordinator {
 	return {
 		transactionDomain: PG_TRANSACTION_DOMAIN,
-		async checkout(
-			target: TransitionConnectionPool,
-		): Promise<TransitionExecutionClient> {
-			const pool = poolLike(target);
-			if (!pool) {
-				throw new Error(
-					'PostgreSQL transition target must be a Pool-like object with connect(); checked-out clients are not accepted',
-				);
-			}
-			return { opaqueClient: await pool.connect() };
-		},
-		release(client: TransitionExecutionClient, error?: unknown) {
-			if (releasable(client.opaqueClient)) {
-				client.opaqueClient.release(error);
-			}
-		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
 		},

@@ -3,7 +3,7 @@ import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
 	ENUM_ADD_VALUE_RULE_ID,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
@@ -13,13 +13,19 @@ import {
 	createPackRegistry,
 	createProver,
 	createStagedTransitionOrchestrator,
+	createTransitionLessor,
 	type EnumIR,
 	type ModelIR,
 	type TableIR,
 } from '@dbsp/core';
-import type { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_enum_add_check_staged';
 
@@ -149,29 +155,36 @@ async function checkExists(): Promise<boolean> {
 	return result.rows.length > 0;
 }
 
+/**
+ * A lessor whose leases record the SQL they are asked to run, so a test can
+ * assert the transaction boundaries the engine actually emitted. It is minted
+ * through the same core factory a consumer would use — a hand-built object is
+ * not a target.
+ */
 function trackedTarget(pool: Pool) {
 	const queries: string[] = [];
 	return {
 		queries,
-		target: {
-			connect: async () => {
-				const client = await pool.connect();
-				return {
-					query: async (sql: string, params?: readonly unknown[]) => {
-						queries.push(sql);
-						return client.query(sql, params as unknown[]);
-					},
-					release: (error?: unknown) => {
-						client.release(error as Error | undefined);
-					},
-				};
-			},
-		},
+		target: createTransitionLessor(async () => {
+			const client = await pool.connect();
+			return {
+				query: async (sql: string, params?: readonly unknown[]) => {
+					queries.push(sql);
+					return client.query(sql, params as unknown[]);
+				},
+				release: (error?: unknown) => {
+					client.release(error as Error | undefined);
+				},
+			};
+		}),
 	};
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -205,7 +218,8 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		const registry = createPackRegistry([createPgTransitionPack()]);
 		const comparator = createComparator(registry);
 		const loadCurrent = () => adapter.introspect({ schema: schemaName });
-		const readContext = () => readPgObservationContext(pool, schemaName);
+		const readContext = () =>
+			readPgObservationContextFromLessor(target, schemaName);
 		const current = await loadCurrent();
 		const desired = desiredFromCurrent(current, {
 			enumValues: ['active', 'pending'],
@@ -226,7 +240,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 			desired,
 			loadCurrent,
 			readContext,
-			target: pool,
+			target,
 			policy,
 		});
 
@@ -249,10 +263,47 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		const noDriftCompare = comparator.compare(desiredEquivalent, finalCurrent);
 		const noDrift = await createProver(registry).prove(
 			noDriftCompare,
-			pool,
+			target,
 			await readContext(),
 		);
 		expect(noDrift.kind).toBe('no-drift');
+	});
+
+	it('rejects a real checked-out PoolClient as an undeclared target', async () => {
+		await createBaseTasks(['active']);
+		const connectionString = process.env.DATABASE_URL;
+		if (!connectionString) throw new Error('DATABASE_URL not set');
+		const pool = new Pool({ connectionString });
+		let client: PoolClient | undefined;
+		try {
+			client = await pool.connect();
+			const adapter = createPgsqlAdapter(pool, { schemaName });
+			const registry = createPackRegistry([createPgTransitionPack()]);
+			const comparator = createComparator(registry);
+			const current = await adapter.introspect({ schema: schemaName });
+			const desired = desiredFromCurrent(current, {
+				enumValues: ['active', 'pending'],
+				checkExpression: "status <> 'pending'",
+			});
+			const compare = comparator.compare(desired, current);
+			expect(compare.kind).toBe('transitions');
+
+			const outcome = await createProver(registry).prove(
+				compare,
+				client as never,
+				await readPgObservationContextFromLessor(target, schemaName),
+			);
+
+			expect(outcome.kind).toBe('blocked');
+			if (outcome.kind === 'blocked') {
+				expect(outcome.assessment.reasons[0]).toMatchObject({
+					fact: { value: expect.stringMatching(/core-minted lessor/i) },
+				});
+			}
+		} finally {
+			client?.release();
+			await pool.end();
+		}
 	});
 
 	it('applies independent enum ADD VALUE and CHECK in one atomic commit', async () => {
@@ -270,8 +321,8 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		const compare = comparator.compare(desired, current);
 		const proof = await createProver(registry).prove(
 			compare,
-			pool,
-			await readPgObservationContext(pool, schemaName),
+			target,
+			await readPgObservationContextFromLessor(target, schemaName),
 		);
 		expect(proof.kind).toBe('proven');
 		if (proof.kind !== 'proven') {
@@ -320,8 +371,8 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		const compare = comparator.compare(desired, current);
 		const proof = await createProver(registry).prove(
 			compare,
-			pool,
-			await readPgObservationContext(pool, schemaName),
+			target,
+			await readPgObservationContextFromLessor(target, schemaName),
 		);
 		expect(proof.kind).toBe('proven');
 		if (proof.kind !== 'proven') {
@@ -364,8 +415,8 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		).applyStagedTransition({
 			desired,
 			loadCurrent: () => adapter.introspect({ schema: schemaName }),
-			readContext: () => readPgObservationContext(pool, schemaName),
-			target: pool,
+			readContext: () => readPgObservationContextFromLessor(target, schemaName),
+			target,
 			policy,
 		});
 
@@ -391,8 +442,8 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		).applyStagedTransition({
 			desired,
 			loadCurrent: () => adapter.introspect({ schema: schemaName }),
-			readContext: () => readPgObservationContext(pool, schemaName),
-			target: pool,
+			readContext: () => readPgObservationContextFromLessor(target, schemaName),
+			target,
 			policy,
 		});
 

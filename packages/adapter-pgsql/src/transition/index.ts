@@ -49,9 +49,13 @@ export {
 	renderCreateTransitionRunTableSql,
 	type TransitionJournalQueryable,
 } from './journal.js';
+export { createPgTransitionLessor } from './lessor.js';
+// The …FromClient helpers stay internal: the supported entry points acquire and
+// release their own lease, so a caller never has to hold one to read context.
 export {
 	createPgObservationIssuer,
-	readPgObservationContext,
+	executePgObservationFromLessor,
+	readPgObservationContextFromLessor,
 } from './observation-issuer.js';
 export {
 	type AlterColumnSetNotNullPayload,

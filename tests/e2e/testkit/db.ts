@@ -4,8 +4,13 @@
  * Provides pg Pool and PgsqlAdapter for E2E tests.
  */
 
-import { createPgsqlAdapter, type PgsqlAdapter } from '@dbsp/adapter-pgsql';
+import {
+	createPgsqlAdapter,
+	createPgTransitionLessor,
+	type PgsqlAdapter,
+} from '@dbsp/adapter-pgsql';
 import type { Adapter } from '@dbsp/core';
+import type { TransitionLessor } from '@dbsp/types';
 import pg from 'pg';
 import { sql } from './sql.js';
 
@@ -44,6 +49,16 @@ export async function getTestPool(): Promise<pg.Pool> {
 	});
 
 	return pgPool;
+}
+
+/**
+ * Declare the shared pool as a source of transition leases.
+ *
+ * The transition engine takes a core-minted lessor, never a raw connection, so
+ * tests declare the pool exactly the way a consumer does.
+ */
+export async function getTestTransitionLessor(): Promise<TransitionLessor> {
+	return createPgTransitionLessor(await getTestPool());
 }
 
 // ============================================================================

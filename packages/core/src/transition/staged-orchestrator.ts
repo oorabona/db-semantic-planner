@@ -11,11 +11,11 @@ import type {
 	ResourceAddress,
 	StepJournal,
 	TransitionCandidate,
-	TransitionConnectionPool,
+	TransitionLessor,
 } from '@dbsp/types';
 import { createApplier } from './applier.js';
 import { createComparator } from './comparator.js';
-import { claimId } from './ids.js';
+import { claimId, semanticArtifactId } from './ids.js';
 import { createProver } from './prover.js';
 import type { PackRegistry } from './registry.js';
 import { stableJson } from './stable-json.js';
@@ -24,12 +24,16 @@ import {
 	preflightStagedComposition,
 	projectCompareToSingleCandidate,
 } from './staging.js';
+import {
+	isTransitionLessor,
+	transitionLessorRejectionAssessment,
+} from './transition-lessor.js';
 
 export interface StagedTransitionInput {
 	readonly desired: ModelIR;
 	readonly loadCurrent: () => Promise<ModelIR>;
 	readonly readContext: () => Promise<ObservationContext>;
-	readonly target: TransitionConnectionPool;
+	readonly target: TransitionLessor;
 	readonly policy: ApplyPolicy;
 	readonly maxIterations?: number;
 }
@@ -37,6 +41,11 @@ export interface StagedTransitionInput {
 export interface StagedTransitionOrchestrator {
 	applyStagedTransition(input: StagedTransitionInput): Promise<ApplyResult>;
 }
+
+const STAGED_ORCHESTRATOR_ARTIFACT = {
+	id: semanticArtifactId('dbsp.core.transition.staged-orchestrator'),
+	version: '0.1.0',
+};
 
 function uniqueResources(
 	resources: readonly ResourceAddress[],
@@ -246,6 +255,30 @@ export function createStagedTransitionOrchestrator(
 			const observations: IssuedObservation[] = [];
 			const completedProgress = new Set<string>();
 			const maxIterations = input.maxIterations ?? 32;
+			const targetRejectionResult = (): ApplyResult =>
+				resultWithAggregate(
+					transitionLessorRejectionAssessment(STAGED_ORCHESTRATOR_ARTIFACT),
+					journals,
+					observations,
+				);
+			const proveAtTargetBoundary = async (
+				compare: CompareOutcome,
+				context: ObservationContext,
+			): Promise<
+				| {
+						readonly kind: 'proof';
+						readonly proof: Awaited<ReturnType<typeof prover.prove>>;
+				  }
+				| { readonly kind: 'target-rejected' }
+			> => {
+				if (!isTransitionLessor(input.target)) {
+					return { kind: 'target-rejected' };
+				}
+				return {
+					kind: 'proof',
+					proof: await prover.prove(compare, input.target, context),
+				};
+			};
 
 			for (let iteration = 0; iteration < maxIterations; iteration += 1) {
 				const context = await input.readContext();
@@ -267,7 +300,14 @@ export function createStagedTransitionOrchestrator(
 				}
 				if (compare.kind !== 'transitions') {
 					if (compare.kind === 'unknown' && hasAppliedWork(journals)) {
-						const proof = await prover.prove(compare, input.target, context);
+						const proofAtBoundary = await proveAtTargetBoundary(
+							compare,
+							context,
+						);
+						if (proofAtBoundary.kind === 'target-rejected') {
+							return targetRejectionResult();
+						}
+						const { proof } = proofAtBoundary;
 						switch (proof.kind) {
 							case 'no-drift':
 								return {
@@ -324,7 +364,14 @@ export function createStagedTransitionOrchestrator(
 				}
 
 				const segmentCompare = projectCompareToSingleCandidate(compare, ready);
-				const proof = await prover.prove(segmentCompare, input.target, context);
+				const proofAtBoundary = await proveAtTargetBoundary(
+					segmentCompare,
+					context,
+				);
+				if (proofAtBoundary.kind === 'target-rejected') {
+					return targetRejectionResult();
+				}
+				const { proof } = proofAtBoundary;
 				if (proof.kind !== 'proven') {
 					return resultWithAggregate(proof.assessment, journals, observations);
 				}

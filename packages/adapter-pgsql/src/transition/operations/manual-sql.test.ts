@@ -1,4 +1,9 @@
-import { createApplier, createPackRegistry, createProver } from '@dbsp/core';
+import {
+	createApplier,
+	createPackRegistry,
+	createProver,
+	createTransitionLessor,
+} from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
 	ApplyPolicy,
@@ -371,7 +376,11 @@ async function prove(manualOperation: PhysicalOperation) {
 		obligations: [],
 	};
 	const pool = new ManualSqlPool();
-	const outcome = await createProver(registry).prove(compare, pool, context);
+	const outcome = await createProver(registry).prove(
+		compare,
+		createTransitionLessor(async () => pool.connect()),
+		context,
+	);
 	return { outcome, registry, pool };
 }
 
@@ -610,7 +619,7 @@ describe('ManualSql operation runtime', () => {
 		const denied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
-			pool,
+			createTransitionLessor(async () => pool.connect()),
 		);
 
 		expect(denied.assessment.decision).toBe('blocked');
@@ -636,7 +645,7 @@ describe('ManualSql operation runtime', () => {
 		const applied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy,
-			pool,
+			createTransitionLessor(async () => pool.connect()),
 		);
 
 		expect(applied.assessment.lifecycle).toBe('completed');

@@ -38,13 +38,36 @@ export interface TransitionQueryResult {
 	readonly rows: readonly Record<string, unknown>[];
 }
 
+declare const transitionSessionClientTypeBrand: unique symbol;
+
+export interface TransitionSessionClient {
+	/** Core mints this after acquiring a lease, preserving session affinity. */
+	readonly [transitionSessionClientTypeBrand]: never;
+	query(sql: string, params?: unknown): Promise<TransitionQueryResult>;
+}
+
 export interface TransitionQueryClient {
+	// Deliberately duplicated instead of extending TransitionSessionClient: adapters
+	// construct raw leases, while only core can mint an affinity-preserving session.
 	query(sql: string, params?: unknown): Promise<TransitionQueryResult>;
 	release(error?: unknown): void;
 }
 
-export interface TransitionConnectionPool {
-	connect(): Promise<TransitionQueryClient>;
+declare const transitionLessorTypeBrand: unique symbol;
+
+/**
+ * A core-minted source of transition leases.
+ *
+ * The unexported symbol makes this nominal in TypeScript: consumers can use a
+ * lessor but cannot construct one without the factory exported by @dbsp/core.
+ */
+export interface TransitionLessor {
+	readonly [transitionLessorTypeBrand]: never;
+	/**
+	 * Readonly because the minted lessor is frozen. Declaring it as a method
+	 * would let TypeScript accept an assignment that throws at runtime.
+	 */
+	readonly acquire: () => Promise<TransitionQueryClient>;
 }
 
 export interface OperationEffectAssessment {
@@ -67,13 +90,13 @@ export interface ObservationIssuer {
 		right: readonly string[],
 	): ObservationPrivilegeMergeResult;
 	readContext?(
-		target: unknown,
+		target: TransitionSessionClient,
 		context: ObservationContext,
 		requests?: readonly ObservationRequest[],
 	): Promise<ObservationContext>;
 	execute(
 		request: ObservationRequest,
-		target: unknown,
+		target: TransitionSessionClient,
 		context: ObservationContext,
 	): Promise<IssuedObservation>;
 }
