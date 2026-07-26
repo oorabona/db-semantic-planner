@@ -19,7 +19,7 @@ npm install -g @dbsp/cli
 
 `pg` and `tsx` are optional peers — install them only for the commands that need them.
 
-**`pg` must be `>=8.21.0`.** From 2.2.0 the declared range is `^8.21.0`, narrowed from `^8.16.0`.
+**`pg` must be `>=8.21.0`.** From 2.1.3 the declared range is `^8.21.0`, narrowed from `^8.16.0`.
 This is not a preference: `@dbsp/adapter-pgsql` reads a field that pg only started recording in
 8.21, and without it `orm.inTransaction` reports `true` for an idle borrowed connection. The old
 range promised support the code could not deliver on 8.16–8.20.
