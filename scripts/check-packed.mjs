@@ -6,11 +6,12 @@
  * deliberately reads the finished artifact instead.
  */
 import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { posix, resolve } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
 const ROOT = resolve(process.cwd());
-const TARBALLS = process.argv.slice(2);
+const TARBALL_PAIRS = process.argv.slice(2);
 
 function fail(message) {
 	console.error(`packed check: ${message}`);
@@ -20,27 +21,69 @@ function fail(message) {
 const { readManifest } = createManifestReader(ROOT, fail);
 
 function archiveEntries(tarball) {
+	let rawEntries;
 	try {
-		return execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+		rawEntries = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 			.split(/\r?\n/)
 			.filter(Boolean);
 	} catch (error) {
 		fail(`cannot read ${tarball} as a tarball: ${error.message}`);
 	}
+
+	const entries = [];
+	const normalized = new Set();
+	for (const raw of rawEntries) {
+		// Refuse a parent-directory segment on the spelling, before normalising it
+		// away. `package/nested/../side.js` lands inside package/ under this
+		// normaliser, but whether it does depends on whose normaliser runs — and
+		// pnpm does not write that spelling, so there is nothing to reason about.
+		if (raw.split('/').includes('..')) {
+			fail(`${tarball} contains archive path ${raw}, which is spelled with a parent-directory segment`);
+		}
+		// Absolute paths need no separate test: they normalise to themselves and
+		// fail the package/ prefix below.
+		const path = posix.normalize(raw).replace(/\/+$/, '');
+		if (path !== 'package' && !path.startsWith('package/')) {
+			fail(`${tarball} contains archive path ${raw}, which escapes package/`);
+		}
+		if (normalized.has(path)) {
+			fail(`${tarball} contains multiple spellings of archive path ${path}`);
+		}
+		normalized.add(path);
+		entries.push({ path, raw });
+	}
+	return entries;
+}
+
+function assertRegularArchiveEntries(tarball) {
+	let listing;
+	try {
+		listing = execFileSync('tar', ['-tvzf', tarball], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+	} catch (error) {
+		fail(`cannot inspect ${tarball} archive entry types: ${error.message}`);
+	}
+	for (const line of listing.split(/\r?\n/).filter(Boolean)) {
+		if (line.startsWith('l')) fail(`${tarball} contains a symbolic-link archive entry`);
+		if (line.startsWith('h')) fail(`${tarball} contains a hard-link archive entry`);
+		if (!line.startsWith('-') && !line.startsWith('d')) {
+			fail(`${tarball} contains unsupported archive entry type ${line[0]}`);
+		}
+	}
 }
 
 function packedManifest(tarball, entries) {
-	if (!entries.includes('package/package.json')) {
+	const entry = entries.find(({ path }) => path === 'package/package.json');
+	if (entry === undefined) {
 		fail(`${tarball} has no package/package.json`);
 	}
 	try {
-		return JSON.parse(execFileSync('tar', ['-xOzf', tarball, 'package/package.json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+		return JSON.parse(execFileSync('tar', ['-xOzf', tarball, '--', entry.raw], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
 	} catch (error) {
 		fail(`cannot read package/package.json from ${tarball}: ${error.message}`);
 	}
 }
 
-if (TARBALLS.length === 0) {
+if (TARBALL_PAIRS.length === 0) {
 	fail('no tarballs supplied — refusing to certify nothing');
 }
 
@@ -55,6 +98,7 @@ if (catalog === null || typeof catalog !== 'object' || Array.isArray(catalog)) {
 	fail('pnpm-lock.yaml has no usable default catalog');
 }
 
+const sourceByProject = new Map();
 const sourceByName = new Map();
 for (const project of Object.keys(importers)) {
 	const manifest = readManifest(project);
@@ -64,6 +108,7 @@ for (const project of Object.keys(importers)) {
 	if (sourceByName.has(manifest.name)) {
 		fail(`source manifests contain duplicate package name ${manifest.name}`);
 	}
+	sourceByProject.set(project, manifest);
 	sourceByName.set(manifest.name, manifest);
 }
 
@@ -114,13 +159,56 @@ function assertArtifactDependencies(tarball, source, packed) {
 	}
 }
 
-for (const tarballArgument of TARBALLS) {
-	const tarball = resolve(tarballArgument);
+function expectedPackedManifest(tarball, source) {
+	const expected = structuredClone(source);
+	for (const block of DEPENDENCY_BLOCKS) {
+		for (const [name, sourceRange] of Object.entries(source[block] ?? {})) {
+			if (sourceRange === 'catalog:') {
+				const range = catalog[name]?.specifier;
+				if (typeof range !== 'string') {
+					fail(`${tarball}: source ${source.name} ${block}.${name} says catalog:, but the default catalog has no recorded specifier`);
+				}
+				expected[block][name] = range;
+			} else if (sourceRange === 'workspace:*' || sourceRange === 'workspace:^') {
+				const workspace = sourceByName.get(name);
+				if (workspace === undefined) {
+					fail(`${tarball}: source ${source.name} ${block}.${name} names unknown workspace package ${name}`);
+				}
+				expected[block][name] = `${sourceRange === 'workspace:^' ? '^' : ''}${workspace.version}`;
+			}
+		}
+	}
+	return expected;
+}
+
+function parseTarballPair(argument, seenProjects, seenTarballs) {
+	const separator = argument.indexOf('=');
+	if (separator <= 0 || separator === argument.length - 1) {
+		fail(`tarball argument ${argument} must be <project>=<tarball>`);
+	}
+	const project = argument.slice(0, separator);
+	const tarball = resolve(argument.slice(separator + 1));
+	if (seenProjects.has(project)) fail(`project ${project} appears more than once`);
+	if (seenTarballs.has(tarball)) fail(`tarball ${tarball} appears more than once`);
+	seenProjects.add(project);
+	seenTarballs.add(tarball);
+	return { project, tarball };
+}
+
+const seenProjects = new Set();
+const seenTarballs = new Set();
+for (const argument of TARBALL_PAIRS) {
+	const { project, tarball } = parseTarballPair(argument, seenProjects, seenTarballs);
+	const source = sourceByProject.get(project);
+	if (source === undefined) {
+		fail(`${tarball}: project ${project} is not a workspace importer`);
+	}
 	const entries = archiveEntries(tarball);
-	if (entries.some((entry) => entry === 'package/node_modules' || entry.startsWith('package/node_modules/'))) {
+	assertRegularArchiveEntries(tarball);
+	if (entries.some(({ path }) => path === 'package/node_modules' || path.startsWith('package/node_modules/'))) {
 		fail(`${tarball} contains package/node_modules, so it ships bundled dependency copies`);
 	}
-	if (entries.includes('package/npm-shrinkwrap.json')) {
+	if (entries.some(({ path }) => path === 'package/npm-shrinkwrap.json')) {
 		fail(`${tarball} contains package/npm-shrinkwrap.json, which can dictate published resolutions outside the catalog`);
 	}
 
@@ -128,12 +216,11 @@ for (const tarballArgument of TARBALLS) {
 	if (typeof packed?.name !== 'string' || typeof packed?.version !== 'string') {
 		fail(`${tarball} package/package.json has no string name and version`);
 	}
-	const source = sourceByName.get(packed.name);
-	if (source === undefined) {
-		fail(`${tarball} packs ${packed.name}, which does not match any source workspace package`);
+	if (packed.name !== source.name) {
+		fail(`${tarball}: packed name ${packed.name} does not match source ${source.name} for project ${project}`);
 	}
 	if (packed.version !== source.version) {
-		fail(`${tarball}: packed version ${packed.version} does not match source ${source.version} for ${packed.name}`);
+		fail(`${tarball}: packed version ${packed.version} does not match source ${source.version} for project ${project}`);
 	}
 	for (const field of ['bundleDependencies', 'bundledDependencies']) {
 		if (Object.hasOwn(packed, field)) {
@@ -141,6 +228,10 @@ for (const tarballArgument of TARBALLS) {
 		}
 	}
 	assertArtifactDependencies(tarball, source, packed);
+	const expected = expectedPackedManifest(tarball, source);
+	if (!isDeepStrictEqual(packed, expected)) {
+		fail(`${tarball}: packed manifest does not exactly match source ${source.name} after catalog and workspace substitutions`);
+	}
 }
 
-console.log(`packed check: ${TARBALLS.length} tarball(s) match their source catalog and workspace contracts.`);
+console.log(`packed check: ${TARBALL_PAIRS.length} tarball(s) match their source catalog and workspace contracts.`);
