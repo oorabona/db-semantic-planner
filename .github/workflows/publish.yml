@@ -87,24 +87,59 @@ jobs:
       # Why not `pnpm publish --provenance`: pnpm forwards --no-git-checks to the
       # npm process it delegates provenance to, and npm rejects it (EUSAGE).
       #
-      # Idempotent: skip any package already on npm. release-please bumps only
-      # changed packages (types may stay put while core/cli advance). Publishing
-      # in dependency order, guarded by an existence check, makes partial
-      # releases and re-runs safe — never failing on "cannot publish over
-      # previously published version".
       - if: steps.check.outputs.need == '1'
-        name: Publish changed packages
+        id: pack
+        name: Pack changed packages
         run: |
+          set -euo pipefail
+          pack_dir="$GITHUB_WORKSPACE/.packed"
+          rm -rf "$pack_dir"
+          mkdir -p "$pack_dir"
+          : > "$pack_dir/tarballs.tsv"
+          packed=0
           for p in types nql core adapter-pgsql cli; do
             name=$(jq -r .name "packages/$p/package.json")
             ver=$(jq -r .version "packages/$p/package.json")
             if npm view "$name@$ver" version >/dev/null 2>&1; then
               echo "$name@$ver already on npm — skipping"
             else
-              echo "Publishing $name@$ver"
-              tgz=$(cd "packages/$p" && pnpm pack | tail -1)
-              npm publish "packages/$p/$tgz" --provenance --access public
+              before=$(mktemp)
+              after=$(mktemp)
+              find "$pack_dir" -maxdepth 1 -type f -name '*.tgz' -printf '%f\n' | sort > "$before"
+              pnpm -C "packages/$p" pack --pack-destination "$pack_dir"
+              find "$pack_dir" -maxdepth 1 -type f -name '*.tgz' -printf '%f\n' | sort > "$after"
+              mapfile -t tarballs < <(comm -13 "$before" "$after")
+              rm -f "$before" "$after"
+              if [ "${#tarballs[@]}" -ne 1 ]; then
+                echo "Expected pnpm pack for $name@$ver to create exactly one tarball" >&2
+                exit 1
+              fi
+              printf '%s\t%s\n' "$p" "${tarballs[0]}" >> "$pack_dir/tarballs.tsv"
+              packed=1
             fi
           done
+          echo "need=$packed" >> "$GITHUB_OUTPUT"
+      # All candidate tarballs must pass before the first registry PUT. A bad
+      # later package must never be discovered after an earlier package is
+      # immutable on npm.
+      - if: steps.check.outputs.need == '1' && steps.pack.outputs.need == '1'
+        name: Verify packed packages
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(cut -f2 .packed/tarballs.tsv | sed 's#^#.packed/#')
+          node scripts/check-packed.mjs "${tarballs[@]}"
+      # Pack records the exact artifacts that verification read, in dependency
+      # order. Publishing this list rather than packing again keeps the verified
+      # bytes and the uploaded bytes identical.
+      - if: steps.check.outputs.need == '1' && steps.pack.outputs.need == '1'
+        name: Publish verified packages
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r p tarball; do
+            name=$(jq -r .name "packages/$p/package.json")
+            ver=$(jq -r .version "packages/$p/package.json")
+            echo "Publishing $name@$ver"
+            npm publish ".packed/$tarball" --provenance --access public
+          done < .packed/tarballs.tsv
       # @dbsp/mcp-server publish skipped — scaffold only (no MCP tools yet,
       # see issue 112). Re-enable once the first tool ships.
