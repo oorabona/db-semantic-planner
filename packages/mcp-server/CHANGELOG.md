@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.4](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v2.0.3...mcp-server-v2.0.4) (2026-07-26)
+
+
+### Bug Fixes
+
+* **deps:** One catalog for every dependency range, enforced at source and in the tarball ([#398](https://github.com/oorabona/db-semantic-planner/issues/398)) ([7db9979](https://github.com/oorabona/db-semantic-planner/commit/7db9979b82315f1348024d1a9de71e5022a3c3c7))
+
 ## [2.0.3](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v2.0.2...mcp-server-v2.0.3) (2026-07-22)
 
 

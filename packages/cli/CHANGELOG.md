@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.1.3](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.1.2...cli-v2.1.3) (2026-07-26)
+
+
+### Bug Fixes
+
+* **deps:** One catalog for every dependency range, enforced at source and in the tarball ([#398](https://github.com/oorabona/db-semantic-planner/issues/398)) ([7db9979](https://github.com/oorabona/db-semantic-planner/commit/7db9979b82315f1348024d1a9de71e5022a3c3c7))
+
+
+### Peer requirements
+
+* **`pg` must now be `>=8.21.0`.** The declared peer range narrows from `^8.16.0`
+  to `^8.21.0`. On pg 8.16–8.20 you will see an unmet-peer warning, and an error
+  under `strict-peer-dependencies`.
+* The floor is not a preference: `@dbsp/adapter-pgsql` reads a field pg only
+  started recording in 8.21, and without it `orm.inTransaction` reports `true`
+  for an idle borrowed connection. The old range promised support the code could
+  not deliver.
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 3.2.2
+
 ## [2.1.2](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.1.1...cli-v2.1.2) (2026-07-22)
 
 
