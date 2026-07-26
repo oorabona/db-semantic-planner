@@ -15,6 +15,23 @@ pnpm add -D @dbsp/cli
 npm install -g @dbsp/cli
 ```
 
+### Peer requirements
+
+`pg` and `tsx` are optional peers — install them only for the commands that need them.
+
+**`pg` must be `>=8.21.0`.** From 2.2.0 the declared range is `^8.21.0`, narrowed from `^8.16.0`.
+This is not a preference: `@dbsp/adapter-pgsql` reads a field that pg only started recording in
+8.21, and without it `orm.inTransaction` reports `true` for an idle borrowed connection. The old
+range promised support the code could not deliver on 8.16–8.20.
+
+If you are on pg 8.16–8.20 you will now see an unmet-peer warning, and an error under
+`strict-peer-dependencies`. Upgrading pg to 8.21 or later is the fix; staying below it means
+`inTransaction` misreports, whether or not the peer range says so.
+
+Keeping one `pg` in your dependency tree matters for the same reason. If your own range and the
+one this package resolves cannot meet, npm and pnpm are both free to install two copies, and
+adapter code then reads a client it was not built against.
+
 ## Quick Start
 
 ```bash
