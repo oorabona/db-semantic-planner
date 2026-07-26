@@ -1,5 +1,9 @@
 packages:
   - "packages/*"
+# strict: `pnpm add` refuses a version outside the catalog instead of writing a
+# literal range into the manifest. It governs that path only — a hand-edited
+# manifest still needs scripts/check-catalog.mjs, which CI runs.
+catalogMode: strict
 allowBuilds:
   b: true
   d: true
@@ -58,7 +62,11 @@ catalog:
   lucide-react: ^1.23.0
   mermaid: ^11.16.0
   monaco-editor: ^0.55.1
-  pg: ^8.22.0
+  # Also the published peer range of @dbsp/cli: 8.21 is where pg records
+  # _txStatus, which the adapter reads. Do not raise this floor without a
+  # reason in the code — a consumer excluded from the range is a consumer
+  # forced into a second copy. Raising the major is a breaking change.
+  pg: ^8.21.0
   pgsql-deparser: 17.18.3
   pgsql-parser: 17.9.15
   radix-ui: ^1.6.1
@@ -71,7 +79,11 @@ catalog:
   tailwindcss: ^4.3.2
   testcontainers: ^12.0.4
   tsup: ^8.5.1
-  tsx: ^4.0.0
+  # Also the published peer range of @dbsp/cli: raising this major is a
+  # breaking change for consumers, not a routine bump.
+  # 4.9.0 is where tsx first exports ./esm/api; @dbsp/mcp-server's schema loader
+  # calls tsImport() from it, so anything below cannot load a .ts schema.
+  tsx: ^4.9.0
   typedoc: ^0.28.19
   typescript: ~6.0.3
   valibot: ^1.4.2
@@ -83,4 +95,5 @@ catalog:
   vitepress-plugin-og-image: ^0.1.1
   vitest: ^4.1.9
   vue: ^3.5.39
+  yaml: ^2.9.0
   zustand: ^5.0.14

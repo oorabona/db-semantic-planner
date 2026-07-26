@@ -15,7 +15,14 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # The frozen install fails on a manifest that has drifted from the lockfile.
+      # It does not see everything: a peer range shadowed by a dependency of the
+      # same name never reaches the lockfile, which is why the check reads the
+      # manifests directly rather than trusting the install. Keep both, in this
+      # order — the install is what makes the lockfile describe the manifests, and
+      # the check is what holds those manifests to the catalog.
       - run: pnpm install --frozen-lockfile
+      - run: node scripts/check-catalog.mjs
       - run: pnpm -C packages/types build
       - run: pnpm -C packages/nql build
       - run: pnpm -C packages/core build
@@ -26,6 +33,10 @@ jobs:
       # name core, adapter-pgsql and nql, so cli, gui, mcp-server and types were
       # never run here and could go red without CI noticing.
       - run: pnpm test:unit
+      # `pnpm -r` covers the nine projects but not the root's own tests, where the
+      # guards under scripts/ live. The glob is deliberate: a new guard's tests run
+      # here without anyone remembering to add a line.
+      - run: pnpm test:scripts
       - name: Verify documentation examples (compile-only)
         # Compile-only doctest path — fast, runs unconditionally.
         # The slower real-DB variant lives in .github/workflows/doctest-real-db.yml

@@ -21,12 +21,14 @@
 		"@codemirror/state": "catalog:",
 		"@codemirror/view": "catalog:",
 		"@lezer/highlight": "catalog:",
+		"happy-dom": "catalog:",
 		"mermaid": "catalog:",
 		"vite-plugin-robots-txt": "catalog:",
 		"vitepress": "catalog:",
 		"vitepress-plugin-llms": "catalog:",
 		"vitepress-plugin-mermaid": "catalog:",
 		"vitepress-plugin-og-image": "catalog:",
+		"vitest": "catalog:",
 		"vue": "catalog:"
 	}
 }
