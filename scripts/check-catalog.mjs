@@ -3,12 +3,10 @@
  * Checks that every dependency range in the workspace comes from the catalog,
  * and that the workspace's own dependencies resolve to one version each.
  *
- * Which projects form the workspace is the one question this does not answer
- * for itself: it takes the list from the `importers` section of pnpm-lock.yaml,
- * where pnpm records the projects it discovered. Reimplementing that discovery
- * would mean reproducing YAML escape semantics, pnpm's glob handling and its
- * manifest formats — copies that drift from the original to learn what the
- * original already recorded.
+ * Pnpm discovers the workspace projects; the lockfile records the projects it
+ * installed. This check compares those two sets rather than reimplementing
+ * workspace glob semantics, because reproducing YAML escapes and pnpm's glob
+ * handling would be a copy that drifts from the original.
  *
  * What pnpm records is not enough on its own, though. An importer collapses a
  * dependency declared in several blocks into one entry, so a peer range that is
@@ -23,17 +21,15 @@
  * Run it after `pnpm install --frozen-lockfile`, which is what keeps the
  * lockfile a faithful description of the manifests.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
+import { dirname, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parse } from 'yaml';
+import { createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
 /** Defaults to this repository; a path argument lets the tests point it at fixtures. */
 const ROOT = resolve(process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'));
 const LOCKFILE = resolve(ROOT, 'pnpm-lock.yaml');
-
-/** The four blocks a manifest can declare a dependency in. */
-const DEPENDENCY_BLOCKS = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'];
 
 /**
  * What a declaration may say is a closed set, not a prefix. Every widening is a
@@ -45,6 +41,11 @@ const DEPENDENCY_BLOCKS = ['dependencies', 'devDependencies', 'peerDependencies'
 const THIRD_PARTY_FORM = 'catalog:';
 const WORKSPACE_FORMS = new Set(['workspace:*', 'workspace:^']);
 
+/** A catalog's recorded specifier must begin like an npm version range, not a tag or source. */
+function isPlainCatalogRange(specifier) {
+	return /^[v=]?\d|^[*xX~^<>]/.test(specifier) && !specifier.includes(':');
+}
+
 /** Which form a name must use is decided by what the name IS, not by the caller. */
 function expectedForms(name, workspacePackages) {
 	return workspacePackages.has(name) ? WORKSPACE_FORMS : new Set([THIRD_PARTY_FORM]);
@@ -55,84 +56,7 @@ function fail(message) {
 	process.exit(1);
 }
 
-let REAL_ROOT;
-try {
-	REAL_ROOT = realpathSync(ROOT);
-} catch (error) {
-	fail(`cannot resolve ${ROOT}: ${error.message}`);
-}
-
-/**
- * `relative` rather than a `${root}/` prefix, because on Windows `resolve`
- * returns `C:\repo\packages\core` and that prefix never matches — every child
- * project would read as outside the repository.
- */
-function assertInside(root, path, describe) {
-	const rel = relative(root, path);
-	if (rel !== '' && (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))) {
-		fail(`${describe} resolves outside the repository (${path})`);
-	}
-}
-
-/**
- * A path out of the lockfile is untrusted input, and `resolve` strips `..` but
- * not a symlink: an importer directory, or the manifest inside it, can point
- * anywhere while its lexical path still sits under the root. Both forms are
- * checked — the lexical one because it works on a path that does not exist, the
- * canonical one because it is the path actually read. Returns undefined when
- * there is nothing there; what that means is the caller's decision.
- */
-function containedPath(path, describe) {
-	assertInside(ROOT, path, describe);
-	let real;
-	try {
-		real = realpathSync(path);
-	} catch {
-		return undefined;
-	}
-	assertInside(REAL_ROOT, real, describe);
-	return real;
-}
-
-/**
- * pnpm's own precedence, copied from its `MANIFEST_BASE_NAMES`: the first of
- * these that exists is the manifest, and the rest are inert files on disk.
- */
-const MANIFEST_BASE_NAMES = ['package.json', 'package.json5', 'package.yaml'];
-
-/**
- * Read the manifest pnpm would read. This does not parse JSON5, and reading a
- * file pnpm is not using would be worse than reading none — the check would
- * certify a manifest that governs nothing — so a project whose effective
- * manifest is JSON5 stops the check instead. No project here has one; if one
- * ever does, teach this to read it (pnpm's own reader is
- * `@pnpm/read-project-manifest`) rather than reordering around it.
- */
-function readManifest(project) {
-	const directory = resolve(ROOT, project);
-	containedPath(directory, `lockfile importer "${project}"`);
-	const found = new Map();
-	for (const file of MANIFEST_BASE_NAMES) {
-		const path = containedPath(resolve(directory, file), `${project}/${file}`);
-		if (path !== undefined) found.set(file, path);
-	}
-	// Only the first one pnpm would pick matters. A package.json5 sitting beside
-	// a package.json changes nothing, because pnpm reads the json.
-	const [file, path] = found.entries().next().value ?? [];
-	if (file === undefined) {
-		fail(`${project} has none of ${MANIFEST_BASE_NAMES.join(', ')} — the three manifests pnpm accepts.`);
-	}
-	if (file === 'package.json5') {
-		fail(
-			`${project}/package.json5 is the manifest pnpm reads here, and this check cannot parse JSON5. Refusing rather than certifying a manifest pnpm is not using.`,
-		);
-	}
-	try {
-		return (file === 'package.json' ? JSON.parse : parse)(readFileSync(path, 'utf8'));
-	} catch (error) {
-		fail(`cannot parse ${project}/${file}: ${error.message}`);
-	}
-}
+const { assertInside, readManifest, realRoot: REAL_ROOT } = createManifestReader(ROOT, fail);
 
 /**
  * What a declaration actually resolved to, as a package rather than as a key.
@@ -166,12 +90,66 @@ function resolvedPackage(project, key, version) {
 	return { name: key, version: bare };
 }
 
-let lock;
-try {
-	lock = parse(readFileSync(LOCKFILE, 'utf8'));
-} catch (error) {
-	fail(`cannot read ${LOCKFILE}: ${error.message}`);
+/**
+ * Discover projects from pnpm itself instead of reconstructing workspace globs.
+ * One bound remains: a repo-level setting that narrows both pnpm discovery and
+ * the install leaves these two pnpm views agreeing, and this check cannot see
+ * that narrowing.
+ */
+function discoveredProjects() {
+	let records;
+	try {
+		records = JSON.parse(
+			execFileSync('pnpm', ['list', '-r', '--depth', '-1', '--json'], {
+				cwd: ROOT,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+			}),
+		);
+	} catch (error) {
+		fail(
+			`cannot discover the complete workspace with \`pnpm list -r --depth -1 --json\`: ${error.message}. This guard needs a single shared lockfile covering the whole workspace.`,
+		);
+	}
+	if (!Array.isArray(records)) {
+		fail('pnpm project discovery did not return a JSON array. This guard needs a single shared lockfile covering the whole workspace.');
+	}
+
+	const projects = new Set();
+	for (const record of records) {
+		if (record === null || typeof record !== 'object' || typeof record.path !== 'string') {
+			fail('pnpm project discovery returned a project without a path. This guard needs a single shared lockfile covering the whole workspace.');
+		}
+		const path = resolve(record.path);
+		assertInside(ROOT, path, 'pnpm-discovered project');
+		let real;
+		try {
+			real = realpathSync(path);
+		} catch (error) {
+			fail(`cannot resolve pnpm-discovered project ${record.path}: ${error.message}`);
+		}
+		assertInside(REAL_ROOT, real, 'pnpm-discovered project');
+		const relativePath = relative(ROOT, path);
+		projects.add(relativePath === '' ? '.' : relativePath.split(sep).join(posix.sep));
+	}
+	return projects;
 }
+
+function assertSameProjectSet(lockfileProjects, pnpmProjects) {
+	const missingFromLockfile = [...pnpmProjects].filter((project) => !lockfileProjects.has(project));
+	const missingFromPnpm = [...lockfileProjects].filter((project) => !pnpmProjects.has(project));
+	if (missingFromLockfile.length > 0 || missingFromPnpm.length > 0) {
+		const details = [
+			missingFromLockfile.length > 0 && `pnpm listed but the lockfile lacks: ${missingFromLockfile.join(', ')}`,
+			missingFromPnpm.length > 0 && `lockfile carries but pnpm did not list: ${missingFromPnpm.join(', ')}`,
+		]
+			.filter(Boolean)
+			.join('; ');
+		fail(`project discovery and pnpm-lock.yaml importers differ (${details}). This guard needs a single shared lockfile covering the whole workspace; run a complete shared workspace install.`);
+	}
+}
+
+const lock = readLockfile(ROOT, fail);
 
 /**
  * Everything below trusts this file to describe the install. That is only true
@@ -198,18 +176,16 @@ if (installed !== readFileSync(LOCKFILE, 'utf8')) {
 }
 
 /**
- * A pnpmfile is arbitrary code that rewrites manifests, and `beforePacking`
- * runs after every check here, on its way into the tarball. Nothing this reads
- * would show it. There is none in this repository; adding one means deciding
- * how the published manifest gets verified, which is a larger question than
- * this check answers.
+ * `pnpmfileChecksum` is pnpm's record that a pnpmfile participated in the
+ * install, regardless of whether it was the conventional filename or the
+ * configured `pnpmfile:` path. Its absence is detection, not proof: a hook can
+ * appear after this install or only run while packing. CI's frozen install
+ * immediately before this check is what makes this refusal strong there.
  */
-for (const name of ['.pnpmfile.cjs', '.pnpmfile.js', 'pnpmfile.cjs']) {
-	if (containedPath(resolve(ROOT, name), name) !== undefined) {
-		fail(
-			`${name} exists. A pnpmfile can rewrite dependencies after this check runs — hooks.beforePacking edits the manifest on its way into the tarball — so what is verified here need not be what is published.`,
-		);
-	}
+if (lock?.pnpmfileChecksum !== undefined) {
+	fail(
+		'pnpm-lock.yaml records pnpmfileChecksum, so a pnpmfile participated in this install. This check refuses hook-rewritten resolutions; absence is not proof no hook can run while packing.',
+	);
 }
 
 // A check that certifies an empty or malformed workspace is worse than no check:
@@ -222,24 +198,27 @@ const projects = Object.keys(importers);
 if (projects.length === 0) {
 	fail('pnpm-lock.yaml lists no workspace projects — refusing to certify an empty workspace');
 }
+assertSameProjectSet(new Set(projects), discoveredProjects());
 
 /**
- * One catalog, and no aliases in it. A named catalog can hold a second range for
- * a package the default catalog already names, and an alias entry
- * (`pg-old: npm:pg@8.20.0`) is a second name for one package — both are the
- * duplicate this exists to prevent, wearing a spelling the rest of the check
- * would read as two unrelated dependencies. Needing either is a deliberate
- * decision that starts by editing this guard.
+ * Pnpm records every named catalog in this lockfile. Refuse every name but the
+ * default one: this is hardening, not a live bypass fix, because named catalogs
+ * are already visible in pnpm's recorded resolution graph.
  */
-const workspaceConfig = parse(readFileSync(resolve(ROOT, 'pnpm-workspace.yaml'), 'utf8'));
-if (workspaceConfig?.catalogs !== undefined) {
+const catalogNames = Object.keys(lock?.catalogs ?? {});
+if (catalogNames.some((name) => name !== 'default')) {
 	fail(
-		'pnpm-workspace.yaml declares named catalogs. This repository has one catalog on purpose: a second one can hold a different range for the same package, which is how a dependency ends up loaded twice.',
+		'pnpm-lock.yaml records named catalogs. This repository has one catalog on purpose: a second one can hold a different range for the same package, which is how a dependency ends up loaded twice.',
 	);
 }
 /**
  * What the catalog itself resolved to, as pnpm recorded it. Every `catalog:`
- * declaration is then held to exactly this version.
+ * declaration is then held to exactly this version. Its specifier must be a
+ * plain range too: this catches aliases and source protocols that a resolved
+ * name cannot prove (`link:`, `file:` and bare versions manufacture `name: key`
+ * in `resolvedPackage`). Conversely, the resolved-name comparison below catches
+ * an alias target under an ordinary-looking key. Neither rule alone is a
+ * general identity proof; together they cover the recorded shapes pnpm exposes.
  *
  * That one comparison is what makes the mechanisms below it irrelevant. An
  * override, a patch, a pnpmfile, a resolution mode — anything that moves a
@@ -249,6 +228,13 @@ if (workspaceConfig?.catalogs !== undefined) {
  * as current as the last person to read pnpm's changelog.
  */
 const catalogResolved = lock?.catalogs?.default ?? {};
+for (const [name, entry] of Object.entries(catalogResolved)) {
+	if (typeof entry?.specifier !== 'string' || !isPlainCatalogRange(entry.specifier)) {
+		fail(
+			`catalog entry ${name} has non-plain specifier ${String(entry?.specifier)}. Catalog entries must record a plain range, not an alias or source protocol.`,
+		);
+	}
+}
 
 /** Every project's own name, so a declaration's required form follows from what it names. */
 const manifests = new Map(projects.map((project) => [project, readManifest(project)]));
@@ -260,6 +246,13 @@ let declarations = 0;
 
 for (const project of projects) {
 	const manifest = manifests.get(project);
+	for (const field of ['bundleDependencies', 'bundledDependencies']) {
+		if (Object.hasOwn(manifest, field)) {
+			fail(
+				`${project}/${field} is present. Bundled dependencies ship a physical package/node_modules copy, so a range comparison cannot prevent a second copy from being published.`,
+			);
+		}
+	}
 	for (const block of DEPENDENCY_BLOCKS) {
 		for (const [name, range] of Object.entries(manifest[block] ?? {})) {
 			declarations += 1;
@@ -292,6 +285,11 @@ for (const project of projects) {
 				if (resolved.version !== expected) {
 					fail(
 						`${project} → ${block}.${key} resolved to ${resolved.version}, but the catalog resolved to ${expected}. Something between the catalog and this project re-decided the version — an override, a patch, a pnpmfile hook. The catalog is meant to be the only place that decides it.`,
+					);
+				}
+				if (resolved.name !== key) {
+					fail(
+						`${project} → ${block}.${key} says catalog:, but resolved package identity is ${resolved.name}. A catalog key must resolve to the package with the same name.`,
 					);
 				}
 			}

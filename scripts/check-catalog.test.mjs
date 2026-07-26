@@ -8,10 +8,10 @@
  * nothing about what this protects.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
@@ -59,6 +59,7 @@ function run(fixture) {
 			overrides: fixture.overrides ?? {},
 			catalogs: fixture.catalogs ?? {},
 			importers: fixture.lock,
+			...(fixture.pnpmfileChecksum === undefined ? {} : { pnpmfileChecksum: fixture.pnpmfileChecksum }),
 		});
 		writeFileSync(join(dir, 'pnpm-lock.yaml'), lockfile);
 		// The guard refuses a lockfile that is not the one pnpm installed from, so
@@ -73,8 +74,27 @@ function run(fixture) {
 		// Anything a fixture can only express against the materialised tree —
 		// a symlink, chiefly, which is the shape `resolve` alone does not see.
 		fixture.after?.(dir);
+		const projects = fixture.pnpmProjects ?? Object.keys(fixture.lock);
+		const pnpm = fixture.pnpm ?? {
+			output: JSON.stringify(projects.map((project) => ({ path: join(dir, project) }))),
+		};
+		const bin = join(dir, 'bin');
+		mkdirSync(bin);
+		const fakePnpm = join(bin, 'pnpm');
+		writeFileSync(
+			fakePnpm,
+			`#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(pnpm.output ?? '')});\nprocess.exit(${pnpm.status ?? 0});\n`,
+		);
+		chmodSync(fakePnpm, 0o755);
 		try {
-			const stdout = execFileSync('node', [SCRIPT, dir], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+			const stdout = execFileSync('node', [SCRIPT, dir], {
+				encoding: 'utf8',
+				stdio: ['pipe', 'pipe', 'pipe'],
+				env: {
+					...process.env,
+					PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+				},
+			});
 			return { code: 0, output: stdout };
 		} catch (error) {
 			return { code: error.status ?? 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` };
@@ -121,7 +141,7 @@ test('refuses a named catalog reference', () => {
 
 test('refuses a named catalogs block outright', () => {
 	const fixture = baseline();
-	fixture.workspace.catalogs = { legacy: { pg: '^8.16.0' } };
+	fixture.catalogs.legacy = { pg: { specifier: '^8.16.0', version: '8.16.0' } };
 	refuses(fixture, /named catalogs/);
 });
 
@@ -137,18 +157,26 @@ test('refuses a workspace protocol form outside the two this repo publishes', ()
 	refuses(fixture, /workspace:~/);
 });
 
-test('catches an alias by what it resolved to, not by how it was spelled', () => {
-	// `pg-old: npm:pg@8.20.0` in the catalog puts pg under a second key. pnpm
-	// records the real package in the resolution — `version: "pg@8.20.0"` — so
-	// keying identity there turns two keys into two versions of one package.
-	// Nothing here knows what `npm:` means, which is why `jsr:`, a git shorthand
-	// and whatever pnpm supports next are covered too.
+test('refuses a catalog alias recorded in the catalog specifier', () => {
 	const fixture = baseline();
-	fixture.workspace.catalog['pg-old'] = 'npm:pg@8.20.0';
 	fixture.catalogs.default['pg-old'] = { specifier: 'npm:pg@8.20.0', version: '8.20.0' };
 	fixture.projects['packages/cli'].dependencies['pg-old'] = 'catalog:';
 	fixture.lock['packages/cli'].dependencies['pg-old'] = { specifier: 'catalog:', version: 'pg@8.20.0' };
-	refuses(fixture, /more than one version/);
+	refuses(fixture, /non-plain specifier/);
+});
+
+test('refuses a catalog tag rather than a version range', () => {
+	const fixture = baseline();
+	fixture.catalogs.default.pg.specifier = 'latest';
+	refuses(fixture, /non-plain specifier/);
+});
+
+test('refuses a catalog declaration whose recorded package name differs from its key', () => {
+	// The catalog entry itself is a plain range. The importer record is the only
+	// place pnpm exposes that the key resolved to a differently named package.
+	const fixture = baseline();
+	fixture.lock['packages/core'].dependencies.pg = { specifier: 'catalog:', version: 'evil-pg@8.22.0' };
+	refuses(fixture, /resolved package identity is evil-pg/);
 });
 
 test('refuses a catalog declaration that resolved to something other than the catalog', () => {
@@ -186,10 +214,10 @@ test('refuses a lockfile that is not the one pnpm installed from', () => {
 	refuses(fixture, /not the lockfile pnpm installed from/);
 });
 
-test('refuses a pnpmfile, which can rewrite the manifest after every check', () => {
+test('refuses pnpmfile participation recorded by pnpmfileChecksum', () => {
 	const fixture = baseline();
-	fixture.after = (dir) => writeFileSync(join(dir, '.pnpmfile.cjs'), 'module.exports = {}');
-	refuses(fixture, /pnpmfile\.cjs exists/);
+	fixture.pnpmfileChecksum = 'sha256-hook-ran';
+	refuses(fixture, /pnpmfileChecksum/);
 });
 
 test('refuses an importer whose directory is a symlink out of the repository', () => {
@@ -255,6 +283,33 @@ test('refuses an empty importer map rather than certifying nothing', () => {
 	refuses(fixture, /no workspace projects/);
 });
 
+test('refuses when pnpm discovers a project the shared lockfile does not carry', () => {
+	const fixture = baseline();
+	fixture.projects['packages/extra'] = { name: '@acme/extra' };
+	fixture.pnpmProjects = [...Object.keys(fixture.lock), 'packages/extra'];
+	refuses(fixture, /single shared lockfile covering the whole workspace/);
+});
+
+test('refuses when the lockfile carries an importer pnpm did not discover', () => {
+	const fixture = baseline();
+	fixture.lock['packages/extra'] = { dependencies: {} };
+	fixture.projects['packages/extra'] = { name: '@acme/extra' };
+	fixture.pnpmProjects = ['.', 'packages/core', 'packages/cli'];
+	refuses(fixture, /single shared lockfile covering the whole workspace/);
+});
+
+test('refuses when pnpm project discovery exits non-zero', () => {
+	const fixture = baseline();
+	fixture.pnpm = { status: 23 };
+	refuses(fixture, /cannot discover the complete workspace/);
+});
+
+test('refuses pnpm project discovery output that is not a JSON array', () => {
+	const fixture = baseline();
+	fixture.pnpm = { output: JSON.stringify({ path: '/not-an-array' }) };
+	refuses(fixture, /did not return a JSON array/);
+});
+
 test('refuses an importers section that is not a map', () => {
 	const fixture = baseline();
 	fixture.lock = [];
@@ -276,5 +331,14 @@ test('refuses a lockfile entry with no resolved version', () => {
 test('refuses a project whose manifest it cannot read', () => {
 	const fixture = baseline();
 	fixture.lock['packages/ghost'] = { dependencies: {} };
+	fixture.after = (dir) => mkdirSync(join(dir, 'packages/ghost'), { recursive: true });
 	refuses(fixture, /has none of package\.json, package\.json5, package\.yaml/);
+});
+
+test('refuses either bundled-dependency spelling in a source manifest', () => {
+	for (const field of ['bundleDependencies', 'bundledDependencies']) {
+		const fixture = baseline();
+		fixture.projects['packages/core'][field] = true;
+		refuses(fixture, new RegExp(`/${field} is present`));
+	}
 });
