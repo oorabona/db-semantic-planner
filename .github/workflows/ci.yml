@@ -22,9 +22,10 @@ jobs:
       - run: pnpm -C packages/adapter-pgsql build
       - run: pnpm biome check
       - run: pnpm typecheck
-      - run: pnpm -C packages/core test
-      - run: pnpm -C packages/adapter-pgsql test
-      - run: pnpm -C packages/nql test
+      # Workspace-wide, never a hand-written list of packages: this step used to
+      # name core, adapter-pgsql and nql, so cli, gui, mcp-server and types were
+      # never run here and could go red without CI noticing.
+      - run: pnpm test:unit
       - name: Verify documentation examples (compile-only)
         # Compile-only doctest path — fast, runs unconditionally.
         # The slower real-DB variant lives in .github/workflows/doctest-real-db.yml
