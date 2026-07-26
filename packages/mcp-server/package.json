@@ -59,7 +59,7 @@
 		"@modelcontextprotocol/sdk": "catalog:"
 	},
 	"peerDependencies": {
-		"tsx": "^4.0.0"
+		"tsx": "catalog:"
 	},
 	"peerDependenciesMeta": {
 		"tsx": {

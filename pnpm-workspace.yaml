@@ -10,42 +10,77 @@ allowBuilds:
   u: true
 
 catalog:
-  # UI / CLI
-
-  # Build / Dev tools
   '@biomejs/biome': ^2.5.2
+  '@codemirror/commands': ^6.10.4
+  '@codemirror/lang-javascript': ^6.2.5
+  '@codemirror/language': ^6.12.4
+  '@codemirror/state': ^6.7.0
+  '@codemirror/view': ^6.43.4
+  '@commitlint/cli': ^21.2.0
+  '@commitlint/config-conventional': ^21.2.0
+  '@conventional-commits/parser': 0.4.1
   '@inkjs/ui': ^2.0.0
-
-  # Other
+  '@lezer/highlight': ^1.2.3
   '@modelcontextprotocol/sdk': ^1.29.0
-
-  # Testing
+  '@monaco-editor/react': ^4.7.0
+  '@oclif/table': ^0.5.9
+  '@pgsql/types': 17.6.2
+  '@tailwindcss/vite': ^4.3.2
+  '@tanstack/react-table': ^8.21.3
+  '@tanstack/react-virtual': ^3.14.5
+  '@tauri-apps/api': ^2.11.1
+  '@tauri-apps/cli': ^2.11.4
+  '@tauri-apps/plugin-dialog': ^2.7.1
+  '@tauri-apps/plugin-fs': ^2.5.1
+  '@tauri-apps/plugin-shell': ^2.3.5
+  '@tauri-apps/plugin-sql': ^2.4.0
+  '@tauri-apps/plugin-store': ^2.4.3
   '@testcontainers/postgresql': ^12.0.4
+  '@testing-library/react': ^16.3.2
   '@types/better-sqlite3': ^7.6.13
   '@types/node': ^26.1.0
   '@types/pg': ^8.20.0
   '@types/react': ^19.2.17
   '@types/react-dom': ^19.2.3
+  '@vitejs/plugin-react': ^6.0.3
+  '@vitest/coverage-v8': ^4.1.9
   better-sqlite3: ^12.6.0
-
-  # Parser
   chevrotain: ^12.0.0
+  class-variance-authority: ^0.7.1
+  clsx: ^2.1.1
+  cmdk: ^1.1.1
   commander: ^15.0.0
+  happy-dom: ^20.10.6
   hono: ^4.12.25
   ink: ^7.1.0
   ink-table: ^3.1.0
-
-  # Database
+  jsdom: ^29.1.1
+  lucide-react: ^1.23.0
+  mermaid: ^11.16.0
+  monaco-editor: ^0.55.1
   pg: ^8.22.0
+  pgsql-deparser: 17.18.3
+  pgsql-parser: 17.9.15
+  radix-ui: ^1.6.1
   react: ^19.2.7
   react-dom: ^19.2.7
+  react-resizable-panels: ^4.12.0
+  simple-git-hooks: ^2.13.1
+  sonner: ^2.0.7
+  tailwind-merge: ^3.6.0
+  tailwindcss: ^4.3.2
+  testcontainers: ^12.0.4
   tsup: ^8.5.1
-  tsx: ^4.22.5
-
-  # Documentation
+  tsx: ^4.0.0
   typedoc: ^0.28.19
   typescript: ~6.0.3
-
-  # Schema / Validation
   valibot: ^1.4.2
+  vite: ^8.1.3
+  vite-plugin-robots-txt: ^0.3.0
+  vitepress: ^1.6.4
+  vitepress-plugin-llms: ^1.13.2
+  vitepress-plugin-mermaid: ^2.0.17
+  vitepress-plugin-og-image: ^0.1.1
   vitest: ^4.1.9
+  vue: ^3.5.39
+  zustand: ^5.0.14

@@ -133,6 +133,22 @@ module.exports = {
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
 
+## Dependency Versions (BLOCKING)
+
+**Every third-party dependency is declared once, in the `catalog:` of `pnpm-workspace.yaml`, and every `package.json` references it as `"catalog:"`.** This holds for all four blocks — `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` — and for every package, including `peerDependencies` whose range is published to consumers. Workspace packages use `workspace:*`. A literal version range in a package manifest is a defect, not a preference.
+
+**Keep the catalog current.** `pnpm outdated -r` is expected to be empty; bump the catalog rather than letting a package pin an older range to avoid an upgrade.
+
+| Forbidden | Required |
+|-----------|----------|
+| `"pg": "^8.16.0"` in a package | `"pg": "catalog:"` |
+| A wider peer range than the catalog "to be permissive" | One range, in the catalog — if consumers need a wider one, widen the catalog |
+| The same dependency declared in two manifests with the same literal range | One catalog entry, two `"catalog:"` references |
+
+**Why this is BLOCKING and not hygiene.** pnpm resolves a package that pins its own range separately, so two copies of the same library load in one process, and code written against one version runs against the other. #387: `@dbsp/cli` declared `pg` as a peer at `^8.16.0` while the catalog was `^8.22.0`; the CLI resolved pg 8.20 and the adapter pg 8.22, so adapter code read `_txStatus` — a field added in 8.22 — off a client that never had it. The visible symptom was `inTransaction` answering `true` for an idle session on every CLI-created connection, and it went unnoticed because nothing compares manifests against the catalog.
+
+**When adding a dependency**: add it to the catalog first, then reference `"catalog:"`. When a dependency has exactly one consumer today, it still goes in the catalog — the second consumer is what creates the divergence, and by then nobody remembers to look.
+
 ## Adapter Rules (CRITICAL)
 
 **NEVER use raw SQL templates in adapter implementations.** Always use the adapter's native expression builders.

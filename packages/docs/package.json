@@ -15,18 +15,18 @@
 		"@dbsp/core": "workspace:*"
 	},
 	"devDependencies": {
-		"@codemirror/commands": "^6.10.4",
-		"@codemirror/lang-javascript": "^6.2.5",
-		"@codemirror/language": "^6.12.4",
-		"@codemirror/state": "^6.7.0",
-		"@codemirror/view": "^6.43.4",
-		"@lezer/highlight": "^1.2.3",
-		"mermaid": "^11.16.0",
-		"vite-plugin-robots-txt": "^0.3.0",
-		"vitepress": "^1.6.4",
-		"vitepress-plugin-llms": "^1.13.2",
-		"vitepress-plugin-mermaid": "^2.0.17",
-		"vitepress-plugin-og-image": "^0.1.1",
-		"vue": "^3.5.39"
+		"@codemirror/commands": "catalog:",
+		"@codemirror/lang-javascript": "catalog:",
+		"@codemirror/language": "catalog:",
+		"@codemirror/state": "catalog:",
+		"@codemirror/view": "catalog:",
+		"@lezer/highlight": "catalog:",
+		"mermaid": "catalog:",
+		"vite-plugin-robots-txt": "catalog:",
+		"vitepress": "catalog:",
+		"vitepress-plugin-llms": "catalog:",
+		"vitepress-plugin-mermaid": "catalog:",
+		"vitepress-plugin-og-image": "catalog:",
+		"vue": "catalog:"
 	}
 }

@@ -9,12 +9,81 @@ catalogs:
     '@biomejs/biome':
       specifier: ^2.5.2
       version: 2.5.2
+    '@codemirror/commands':
+      specifier: ^6.10.4
+      version: 6.10.4
+    '@codemirror/lang-javascript':
+      specifier: ^6.2.5
+      version: 6.2.5
+    '@codemirror/language':
+      specifier: ^6.12.4
+      version: 6.12.4
+    '@codemirror/state':
+      specifier: ^6.7.0
+      version: 6.7.0
+    '@codemirror/view':
+      specifier: ^6.43.4
+      version: 6.43.4
+    '@commitlint/cli':
+      specifier: ^21.2.0
+      version: 21.2.0
+    '@commitlint/config-conventional':
+      specifier: ^21.2.0
+      version: 21.2.0
+    '@conventional-commits/parser':
+      specifier: 0.4.1
+      version: 0.4.1
+    '@lezer/highlight':
+      specifier: ^1.2.3
+      version: 1.2.3
     '@modelcontextprotocol/sdk':
       specifier: ^1.29.0
       version: 1.29.0
+    '@monaco-editor/react':
+      specifier: ^4.7.0
+      version: 4.7.0
+    '@oclif/table':
+      specifier: ^0.5.9
+      version: 0.5.9
+    '@pgsql/types':
+      specifier: 17.6.2
+      version: 17.6.2
+    '@tailwindcss/vite':
+      specifier: ^4.3.2
+      version: 4.3.2
+    '@tanstack/react-table':
+      specifier: ^8.21.3
+      version: 8.21.3
+    '@tanstack/react-virtual':
+      specifier: ^3.14.5
+      version: 3.14.5
+    '@tauri-apps/api':
+      specifier: ^2.11.1
+      version: 2.11.1
+    '@tauri-apps/cli':
+      specifier: ^2.11.4
+      version: 2.11.4
+    '@tauri-apps/plugin-dialog':
+      specifier: ^2.7.1
+      version: 2.7.1
+    '@tauri-apps/plugin-fs':
+      specifier: ^2.5.1
+      version: 2.5.1
+    '@tauri-apps/plugin-shell':
+      specifier: ^2.3.5
+      version: 2.3.5
+    '@tauri-apps/plugin-sql':
+      specifier: ^2.4.0
+      version: 2.4.0
+    '@tauri-apps/plugin-store':
+      specifier: ^2.4.3
+      version: 2.4.3
     '@testcontainers/postgresql':
       specifier: ^12.0.4
       version: 12.0.4
+    '@testing-library/react':
+      specifier: ^16.3.2
+      version: 16.3.2
     '@types/node':
       specifier: ^26.1.0
       version: 26.1.0
@@ -27,29 +96,86 @@ catalogs:
     '@types/react-dom':
       specifier: ^19.2.3
       version: 19.2.3
+    '@vitejs/plugin-react':
+      specifier: ^6.0.3
+      version: 6.0.3
+    '@vitest/coverage-v8':
+      specifier: ^4.1.9
+      version: 4.1.9
     chevrotain:
       specifier: ^12.0.0
       version: 12.0.0
+    class-variance-authority:
+      specifier: ^0.7.1
+      version: 0.7.1
+    clsx:
+      specifier: ^2.1.1
+      version: 2.1.1
+    cmdk:
+      specifier: ^1.1.1
+      version: 1.1.1
     commander:
       specifier: ^15.0.0
       version: 15.0.0
+    happy-dom:
+      specifier: ^20.10.6
+      version: 20.10.6
     ink:
       specifier: ^7.1.0
       version: 7.1.0
+    jsdom:
+      specifier: ^29.1.1
+      version: 29.1.1
+    lucide-react:
+      specifier: ^1.23.0
+      version: 1.23.0
+    mermaid:
+      specifier: ^11.16.0
+      version: 11.16.0
+    monaco-editor:
+      specifier: ^0.55.1
+      version: 0.55.1
     pg:
       specifier: ^8.22.0
       version: 8.22.0
+    pgsql-deparser:
+      specifier: 17.18.3
+      version: 17.18.3
+    pgsql-parser:
+      specifier: 17.9.15
+      version: 17.9.15
+    radix-ui:
+      specifier: ^1.6.1
+      version: 1.6.1
     react:
       specifier: ^19.2.7
       version: 19.2.7
     react-dom:
       specifier: ^19.2.7
       version: 19.2.7
+    react-resizable-panels:
+      specifier: ^4.12.0
+      version: 4.12.0
+    simple-git-hooks:
+      specifier: ^2.13.1
+      version: 2.13.1
+    sonner:
+      specifier: ^2.0.7
+      version: 2.0.7
+    tailwind-merge:
+      specifier: ^3.6.0
+      version: 3.6.0
+    tailwindcss:
+      specifier: ^4.3.2
+      version: 4.3.2
+    testcontainers:
+      specifier: ^12.0.4
+      version: 12.0.4
     tsup:
       specifier: ^8.5.1
       version: 8.5.1
     tsx:
-      specifier: ^4.22.5
+      specifier: ^4.0.0
       version: 4.22.5
     typedoc:
       specifier: ^0.28.19
@@ -60,9 +186,33 @@ catalogs:
     valibot:
       specifier: ^1.4.2
       version: 1.4.2
+    vite:
+      specifier: ^8.1.3
+      version: 8.1.3
+    vite-plugin-robots-txt:
+      specifier: ^0.3.0
+      version: 0.3.0
+    vitepress:
+      specifier: ^1.6.4
+      version: 1.6.4
+    vitepress-plugin-llms:
+      specifier: ^1.13.2
+      version: 1.13.2
+    vitepress-plugin-mermaid:
+      specifier: ^2.0.17
+      version: 2.0.17
+    vitepress-plugin-og-image:
+      specifier: ^0.1.1
+      version: 0.1.1
     vitest:
       specifier: ^4.1.9
       version: 4.1.9
+    vue:
+      specifier: ^3.5.39
+      version: 3.5.39
+    zustand:
+      specifier: ^5.0.14
+      version: 5.0.14
 
 overrides:
   lodash@>=4.0.0 <4.17.23: '>=4.17.23'
@@ -77,13 +227,13 @@ importers:
         specifier: 'catalog:'
         version: 2.5.2
       '@commitlint/cli':
-        specifier: ^21.2.0
+        specifier: 'catalog:'
         version: 21.2.0(@types/node@26.1.0)(typescript@6.0.3)
       '@commitlint/config-conventional':
-        specifier: ^21.2.0
+        specifier: 'catalog:'
         version: 21.2.0
       '@conventional-commits/parser':
-        specifier: 0.4.1
+        specifier: 'catalog:'
         version: 0.4.1
       '@dbsp/adapter-pgsql':
         specifier: workspace:*
@@ -104,22 +254,22 @@ importers:
         specifier: 'catalog:'
         version: 8.20.0
       '@vitest/coverage-v8':
-        specifier: ^4.1.9
+        specifier: 'catalog:'
         version: 4.1.9(vitest@4.1.9)
       happy-dom:
-        specifier: ^20.10.6
+        specifier: 'catalog:'
         version: 20.10.6
       monaco-editor:
-        specifier: ^0.55.1
+        specifier: 'catalog:'
         version: 0.55.1
       pg:
         specifier: 'catalog:'
         version: 8.22.0
       simple-git-hooks:
-        specifier: ^2.13.1
+        specifier: 'catalog:'
         version: 2.13.1
       testcontainers:
-        specifier: ^12.0.4
+        specifier: 'catalog:'
         version: 12.0.4
       tsx:
         specifier: 'catalog:'
@@ -143,7 +293,7 @@ importers:
         specifier: workspace:^
         version: link:../types
       '@pgsql/types':
-        specifier: 17.6.2
+        specifier: 'catalog:'
         version: 17.6.2
       pg:
         specifier: 'catalog:'
@@ -156,10 +306,10 @@ importers:
         specifier: 'catalog:'
         version: 8.20.0
       pgsql-deparser:
-        specifier: 17.18.3
+        specifier: 'catalog:'
         version: 17.18.3
       pgsql-parser:
-        specifier: 17.9.15
+        specifier: 'catalog:'
         version: 17.9.15
       tsup:
         specifier: 'catalog:'
@@ -169,7 +319,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
 
   packages/cli:
     dependencies:
@@ -186,7 +336,7 @@ importers:
         specifier: workspace:*
         version: link:../types
       '@oclif/table':
-        specifier: ^0.5.9
+        specifier: 'catalog:'
         version: 0.5.9
       commander:
         specifier: 'catalog:'
@@ -195,8 +345,8 @@ importers:
         specifier: 'catalog:'
         version: 7.1.0(@types/react@19.2.17)(react@19.2.7)
       pg:
-        specifier: ^8.16.0
-        version: 8.20.0
+        specifier: 'catalog:'
+        version: 8.22.0
       react:
         specifier: 'catalog:'
         version: 19.2.7
@@ -218,7 +368,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
 
   packages/core:
     dependencies:
@@ -255,43 +405,43 @@ importers:
         version: link:../core
     devDependencies:
       '@codemirror/commands':
-        specifier: ^6.10.4
+        specifier: 'catalog:'
         version: 6.10.4
       '@codemirror/lang-javascript':
-        specifier: ^6.2.5
+        specifier: 'catalog:'
         version: 6.2.5
       '@codemirror/language':
-        specifier: ^6.12.4
+        specifier: 'catalog:'
         version: 6.12.4
       '@codemirror/state':
-        specifier: ^6.7.0
+        specifier: 'catalog:'
         version: 6.7.0
       '@codemirror/view':
-        specifier: ^6.43.4
+        specifier: 'catalog:'
         version: 6.43.4
       '@lezer/highlight':
-        specifier: ^1.2.3
+        specifier: 'catalog:'
         version: 1.2.3
       mermaid:
-        specifier: ^11.16.0
+        specifier: 'catalog:'
         version: 11.16.0
       vite-plugin-robots-txt:
-        specifier: ^0.3.0
+        specifier: 'catalog:'
         version: 0.3.0(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
       vitepress:
-        specifier: ^1.6.4
+        specifier: 'catalog:'
         version: 1.6.4(@algolia/client-search@5.55.1)(@types/node@26.1.0)(@types/react@18.3.31)(change-case@5.4.4)(lightningcss@1.32.0)(postcss@8.5.16)(react@19.2.7)(search-insights@2.17.3)(typescript@6.0.3)
       vitepress-plugin-llms:
-        specifier: ^1.13.2
+        specifier: 'catalog:'
         version: 1.13.2
       vitepress-plugin-mermaid:
-        specifier: ^2.0.17
+        specifier: 'catalog:'
         version: 2.0.17(mermaid@11.16.0)(vitepress@1.6.4(@algolia/client-search@5.55.1)(@types/node@26.1.0)(@types/react@18.3.31)(change-case@5.4.4)(lightningcss@1.32.0)(postcss@8.5.16)(react@19.2.7)(search-insights@2.17.3)(typescript@6.0.3))
       vitepress-plugin-og-image:
-        specifier: ^0.1.1
+        specifier: 'catalog:'
         version: 0.1.1(react@19.2.7)
       vue:
-        specifier: ^3.5.39
+        specifier: 'catalog:'
         version: 3.5.39(typescript@6.0.3)
 
   packages/gui:
@@ -309,52 +459,52 @@ importers:
         specifier: workspace:^
         version: link:../types
       '@monaco-editor/react':
-        specifier: ^4.7.0
+        specifier: 'catalog:'
         version: 4.7.0(monaco-editor@0.55.1)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-table':
-        specifier: ^8.21.3
+        specifier: 'catalog:'
         version: 8.21.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tanstack/react-virtual':
-        specifier: ^3.14.5
+        specifier: 'catalog:'
         version: 3.14.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@tauri-apps/api':
-        specifier: ^2.11.1
+        specifier: 'catalog:'
         version: 2.11.1
       '@tauri-apps/plugin-dialog':
-        specifier: ^2.7.1
+        specifier: 'catalog:'
         version: 2.7.1
       '@tauri-apps/plugin-fs':
-        specifier: ^2.5.1
+        specifier: 'catalog:'
         version: 2.5.1
       '@tauri-apps/plugin-shell':
-        specifier: ^2.3.5
+        specifier: 'catalog:'
         version: 2.3.5
       '@tauri-apps/plugin-sql':
-        specifier: ^2.4.0
+        specifier: 'catalog:'
         version: 2.4.0
       '@tauri-apps/plugin-store':
-        specifier: ^2.4.3
+        specifier: 'catalog:'
         version: 2.4.3
       class-variance-authority:
-        specifier: ^0.7.1
+        specifier: 'catalog:'
         version: 0.7.1
       clsx:
-        specifier: ^2.1.1
+        specifier: 'catalog:'
         version: 2.1.1
       cmdk:
-        specifier: ^1.1.1
+        specifier: 'catalog:'
         version: 1.1.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       lucide-react:
-        specifier: ^1.23.0
+        specifier: 'catalog:'
         version: 1.23.0(react@19.2.7)
       monaco-editor:
-        specifier: ^0.55.1
+        specifier: 'catalog:'
         version: 0.55.1
       pg:
         specifier: 'catalog:'
         version: 8.22.0
       radix-ui:
-        specifier: ^1.6.1
+        specifier: 'catalog:'
         version: 1.6.1(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
         specifier: 'catalog:'
@@ -363,29 +513,29 @@ importers:
         specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
       react-resizable-panels:
-        specifier: ^4.12.0
+        specifier: 'catalog:'
         version: 4.12.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       sonner:
-        specifier: ^2.0.7
+        specifier: 'catalog:'
         version: 2.0.7(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       tailwind-merge:
-        specifier: ^3.6.0
+        specifier: 'catalog:'
         version: 3.6.0
       valibot:
         specifier: 'catalog:'
         version: 1.4.2(typescript@6.0.3)
       zustand:
-        specifier: ^5.0.14
+        specifier: 'catalog:'
         version: 5.0.14(@types/react@19.2.17)(react@19.2.7)(use-sync-external-store@1.6.0(react@19.2.7))
     devDependencies:
       '@tailwindcss/vite':
-        specifier: ^4.3.2
+        specifier: 'catalog:'
         version: 4.3.2(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
       '@tauri-apps/cli':
-        specifier: ^2.11.4
+        specifier: 'catalog:'
         version: 2.11.4
       '@testing-library/react':
-        specifier: ^16.3.2
+        specifier: 'catalog:'
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@types/pg':
         specifier: 'catalog:'
@@ -397,19 +547,19 @@ importers:
         specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.17)
       '@vitejs/plugin-react':
-        specifier: ^6.0.3
+        specifier: 'catalog:'
         version: 6.0.3(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
       jsdom:
-        specifier: ^29.1.1
+        specifier: 'catalog:'
         version: 29.1.1
       tailwindcss:
-        specifier: ^4.3.2
+        specifier: 'catalog:'
         version: 4.3.2
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
       vite:
-        specifier: ^8.1.3
+        specifier: 'catalog:'
         version: 8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0)
       vitest:
         specifier: 'catalog:'
@@ -4830,14 +4980,8 @@ packages:
   perfect-debounce@1.0.0:
     resolution: {integrity: sha512-xCy9V055GLEqoFaHoC1SoLIaLmWctgCUaBaWxDZ7/Zx4CTyX7cJQLJOok/orfjZAh9kEYpjJa4d0KcJmCbctZA==}
 
-  pg-cloudflare@1.3.0:
-    resolution: {integrity: sha512-6lswVVSztmHiRtD6I8hw4qP/nDm1EJbKMRhf3HCYaqud7frGysPv7FYJ5noZQdhQtN2xJnimfMtvQq21pdbzyQ==}
-
   pg-cloudflare@1.4.0:
     resolution: {integrity: sha512-Vo7z/6rrQYxpNRylp4Tlob2elzbh+N/MOQbxFVWCxS7oEx6jF53GTJFxK2WWpKuBRkmiin4Mt+xofFDjx09R0A==}
-
-  pg-connection-string@2.12.0:
-    resolution: {integrity: sha512-U7qg+bpswf3Cs5xLzRqbXbQl85ng0mfSV/J0nnA31MCLgvEaAo7CIhmeyrmJpOr7o+zm0rXK+hNnT5l9RHkCkQ==}
 
   pg-connection-string@2.14.0:
     resolution: {integrity: sha512-XwWDGcLRGCXAR8F/AM5bG7Q+A3Wm2s6QeEjlOKZLlH3UYcguiqCWKyWXVag5TLTIjR7oOJUY8kcADaZgWPyLeg==}
@@ -4846,18 +4990,10 @@ packages:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
     engines: {node: '>=4.0.0'}
 
-  pg-pool@3.13.0:
-    resolution: {integrity: sha512-gB+R+Xud1gLFuRD/QgOIgGOBE2KCQPaPwkzBBGC9oG69pHTkhQeIuejVIk3/cnDyX39av2AxomQiyPT13WKHQA==}
-    peerDependencies:
-      pg: '>=8.0'
-
   pg-pool@3.14.0:
     resolution: {integrity: sha512-gKtPkFdQPU3DksooVLi9LsjZxrsBUZIpa+7aVx+LV5pNh0KzP4Zleud2po+ConrxbuXGBJ6Hfer6hdgpIBpBaw==}
     peerDependencies:
       pg: '>=8.0'
-
-  pg-protocol@1.13.0:
-    resolution: {integrity: sha512-zzdvXfS6v89r6v7OcFCHfHlyG/wvry1ALxZo4LqgUoy7W9xhBDMaqOuMiF3qEV45VqsN6rdlcehHrfDtlCPc8w==}
 
   pg-protocol@1.15.0:
     resolution: {integrity: sha512-cq9sECI5s0+uPUXjbz8ioyPJni6RzsRib0US67i5IoTZKw8fNeYlVE7u8F4dG7vEJJtc5wdD1K189lCCUwqWTQ==}
@@ -4865,15 +5001,6 @@ packages:
   pg-types@2.2.0:
     resolution: {integrity: sha512-qTAAlrEsl8s4OiEQY69wDvcMIdQN6wdz5ojQiOy6YRMuynxenON0O5oCpJI6lshc6scgAY8qvJ2On/p+CXY0GA==}
     engines: {node: '>=4'}
-
-  pg@8.20.0:
-    resolution: {integrity: sha512-ldhMxz2r8fl/6QkXnBD3CR9/xg694oT6DZQ2s6c/RI28OjtSOpxnPrUCGOBJ46RCUxcWdx3p6kw/xnDHjKvaRA==}
-    engines: {node: '>= 16.0.0'}
-    peerDependencies:
-      pg-native: '>=3.0.1'
-    peerDependenciesMeta:
-      pg-native:
-        optional: true
 
   pg@8.22.0:
     resolution: {integrity: sha512-8wih1vVIBMxoUM2oB4soJsD9tDnDpLv4OXBJ+EJzFsvycD+lfyIreC2gGHq78f8jbLLt+bvlPTFdFZfJkOuzAA==}
@@ -10343,27 +10470,16 @@ snapshots:
 
   perfect-debounce@1.0.0: {}
 
-  pg-cloudflare@1.3.0:
-    optional: true
-
   pg-cloudflare@1.4.0:
     optional: true
-
-  pg-connection-string@2.12.0: {}
 
   pg-connection-string@2.14.0: {}
 
   pg-int8@1.0.1: {}
 
-  pg-pool@3.13.0(pg@8.20.0):
-    dependencies:
-      pg: 8.20.0
-
   pg-pool@3.14.0(pg@8.22.0):
     dependencies:
       pg: 8.22.0
-
-  pg-protocol@1.13.0: {}
 
   pg-protocol@1.15.0: {}
 
@@ -10374,16 +10490,6 @@ snapshots:
       postgres-bytea: 1.0.1
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
-
-  pg@8.20.0:
-    dependencies:
-      pg-connection-string: 2.12.0
-      pg-pool: 3.13.0(pg@8.20.0)
-      pg-protocol: 1.13.0
-      pg-types: 2.2.0
-      pgpass: 1.0.5
-    optionalDependencies:
-      pg-cloudflare: 1.3.0
 
   pg@8.22.0:
     dependencies:
