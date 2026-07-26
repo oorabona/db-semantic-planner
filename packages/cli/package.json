@@ -66,14 +66,14 @@
 		"@dbsp/core": "workspace:*",
 		"@dbsp/nql": "workspace:*",
 		"@dbsp/types": "workspace:*",
-		"@oclif/table": "^0.5.9",
+		"@oclif/table": "catalog:",
 		"commander": "catalog:",
 		"ink": "catalog:",
 		"react": "catalog:"
 	},
 	"peerDependencies": {
-		"pg": "^8.16.0",
-		"tsx": "^4.21.0"
+		"pg": "catalog:",
+		"tsx": "catalog:"
 	},
 	"peerDependenciesMeta": {
 		"tsx": {

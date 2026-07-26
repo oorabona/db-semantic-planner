@@ -133,6 +133,48 @@ module.exports = {
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
 
+## Dependency Versions (BLOCKING)
+
+**Every third-party dependency is declared once, in the `catalog:` of `pnpm-workspace.yaml`, and every `package.json` references it as `"catalog:"`.** This holds for all four blocks — `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies` — and for every package, including `peerDependencies` whose range is published to consumers. A literal version range in a package manifest is a defect, not a preference.
+
+**Workspace packages use the workspace protocol, and its two forms are not interchangeable.** On publish, pnpm replaces `workspace:*` with the exact version and `workspace:^` with a caret range, so the form chosen *is* the published dependency contract. An exact version can be shared with a consumer's own copy only when that consumer's range accepts exactly it; a caret range meets a wider set. Neither form forbids or guarantees a single copy — the form decides how often one is reachable, and a consumer who cannot reach one gets the "two copies in one process" shape of #387, a level up.
+
+The repository is currently mixed and not by design: `@dbsp/cli` publishes exact pins on all four of its dbsp dependencies, while `@dbsp/core` and `@dbsp/nql` publish caret ranges, and `@dbsp/adapter-pgsql` does both in the same manifest (`@dbsp/core` exact, `@dbsp/types` caret). Do not "normalize" this in passing — changing either direction alters a published contract and is a semver decision, tracked in #396.
+
+**Keep the catalog current.** `pnpm outdated -r` is expected to be empty; bump the catalog rather than letting a package pin an older range to avoid an upgrade.
+
+| Forbidden | Required |
+|-----------|----------|
+| `"pg": "^8.16.0"` in a package | `"pg": "catalog:"` |
+| A wider peer range than the catalog "to be permissive" | One range, in the catalog — if consumers need a wider one, widen the catalog |
+| The same dependency declared in two manifests with the same literal range | One catalog entry, two `"catalog:"` references |
+
+**Why this is BLOCKING and not hygiene.** pnpm resolves a package that pins its own range separately from the catalog's, so the two can land on different versions and both load in one process, with code written against one running against the other. #387: `@dbsp/cli` declared `pg` as a peer at `^8.16.0` while the catalog was `^8.22.0`; the CLI resolved pg 8.20 and the adapter pg 8.22, so adapter code read `_txStatus` — a field pg records from 8.21 — off a client that never had it. `inTransaction` then answered `true` for an idle session on a borrowed or pinned client, and it went unnoticed because nothing compared manifests against the catalog.
+
+**A compatibility floor is a claim about upstream, so read upstream.** The catalog entry for `pg` was written as `^8.22.0` on the belief that 8.22 introduced `_txStatus`; the published tarballs say 8.21 does, identically. That one wrong minor, once published as `@dbsp/cli`'s peer range, would have excluded every working 8.21 consumer and forced them into a second copy — the defect the entry exists to prevent, caused by the fix. Check the artefact consumers install, not a changelog or a memory.
+
+**How it is enforced**, by two guards over different surfaces. `pnpm install --frozen-lockfile` reconciles manifests and lockfile, and CI runs it immediately before the guards; the guards do not duplicate that reconciliation. `scripts/check-catalog.mjs` (`pnpm check:catalog`) reads `pnpm-workspace.yaml` as the authority for every catalog entry, including unused ones. It reads every workspace manifest block by block, requiring every present dependency block to be a map and every declaration to use the exact form its identity requires: `catalog:` for third-party packages, `workspace:*` or `workspace:^` for workspace packages.
+
+Reading manifests block by block is load-bearing. The lockfile and `pnpm list` both collapse a name declared in multiple dependency blocks, so neither can see a peer range shadowed by a dev dependency of the same name. A published peer drifting from the catalog is #387's shape, so the source declarations remain the complete check for it.
+
+The resolution rule comes from `pnpm list -r --depth 0 --json`: each direct dependency name has one version across the workspace, and a workspace name resolves to the checked-out project bearing that name. This guard parses no version token at all. That is intentional: the list reports plain direct versions and a workspace target path, so peer contexts, nested peer contexts, and patch suffixes never become a grammar the guard must model. The lockfile importer set and pnpm's discovered project set must still agree in both directions, making a non-shared lockfile visible without reproducing pnpm's workspace-glob rules.
+
+There are honest bounds. An `overrides` entry or patch that moves every project off the catalog in unison is not detected; a divergence affecting only some projects still appears as two versions. `publish.yml` snapshots the lockfile and importer manifests after `check-catalog` but before builds; that snapshot, not the mutable post-pack worktree, is the authority for `scripts/check-packed.mjs`. The packed guard verifies the dependency contract and package identity, not a whole-manifest prediction: every dependency block is a map with the source key set; catalog and workspace markers have their exact published substitutions; no unresolved protocol remains; the packed name/version bind to its project; and source and packed candidates have exactly `publishConfig: {"access":"public"}`. It also refuses bundled dependencies, a shrinkwrap, and ambiguous normalised manifest entries. A lifecycle hook that rewrites an unrelated field such as `bin` or `exports` is outside that bound.
+
+**Both guards check for a wrong answer, not for a hostile one, and the difference decides what belongs in them.** The artefact check exists because this repository has already published a wrong manifest: 1.0.0 went out with `workspace:` markers still in it. That is the class it catches — a substitution that did not happen, a dependency that appeared or vanished, or the package identity that changed. It is not a defence against a compromised build step or a hostile committer, and it cannot be one: the guards are versioned in the repository they check, and the job that builds also verifies and publishes in one workspace. So a proposed rule earns its place by answering *what accident does this catch?* — refusing a symlink in a tarball our own CI produced answers nothing, while refusing `bundleDependencies` catches a real npm feature added without understanding it. Isolating the publish step from the build is a real improvement and a separate change; overclaiming it here would be worse than the gap.
+
+**The accepted declaration forms are a closed set, and every widening is a way back to two versions.** `catalog:legacy` can name a second range for a package the default catalog already names, so named catalogs are refused outright rather than at each reference. `workspace:~` publishes a different contract from `*` and `^`. Needing either is a deliberate decision that starts by editing the guard.
+
+That distinction was learned the hard way: four consecutive review rounds found a different pnpm spelling the guard read wrongly, and each patch admitted the next one. The code now follows the lesson: add rules about resolutions, do not add another parser.
+
+**And it refuses inputs it cannot reason about, rather than certifying around them.** A pnpmfile is refused on the `pnpmfileChecksum` pnpm records, which is written whatever the hook file is called or wherever `pnpmfile:` points it; absence is detection rather than proof, since a hook can appear after this install or only while packing. `bundleDependencies` and `bundledDependencies` are refused in any manifest, both spellings, because a bundled copy ships inside the tarball where no range comparison can see it. A project whose effective manifest is `package.json5` or `package.yaml` stops the check, since it cannot parse pnpm's effective semantics; either file beside a `package.json` is inert and accepted.
+
+Transitive duplication is out of scope and must stay so: 99 of this workspace's 1021 transitive packages legitimately resolve to more than one version, and 131 instances carry a peer context. That is the normal shape of a pnpm store, not a defect.
+
+`catalogMode: strict` complements these by making `pnpm add` refuse a version outside the catalog — that path only; an install that regenerates the lockfile is accepted. Do not add another mechanism: if something slips through, it slips through one of these, and the fix belongs in the one whose surface it slipped through.
+
+**When adding a dependency**: add it to the catalog first, then reference `"catalog:"`. When a dependency has exactly one consumer today, it still goes in the catalog — the second consumer is what creates the divergence, and by then nobody remembers to look.
+
 ## Adapter Rules (CRITICAL)
 
 **NEVER use raw SQL templates in adapter implementations.** Always use the adapter's native expression builders.

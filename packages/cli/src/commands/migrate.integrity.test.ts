@@ -244,6 +244,9 @@ DROP TABLE users;
 
 		const client = {
 			query: vi.fn(async (sql: string) => {
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }], rowCount: 1, command: 'SELECT' };
+				}
 				if (sql.includes('SELECT "name"')) {
 					return { rows: [] };
 				}
@@ -323,6 +326,9 @@ DROP TABLE users;
 
 		const client = {
 			query: vi.fn(async (sql: string) => {
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }], rowCount: 1, command: 'SELECT' };
+				}
 				if (sql.includes('SELECT "name"')) {
 					return { rows: [] };
 				}
@@ -390,6 +396,9 @@ DROP TABLE users;
 
 		const client = {
 			query: vi.fn(async (sql: string) => {
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }], rowCount: 1, command: 'SELECT' };
+				}
 				if (sql.includes('SELECT "name"')) {
 					return {
 						rows: [
@@ -473,6 +482,9 @@ DROP TABLE users;
 
 		const client = {
 			query: vi.fn(async (sql: string) => {
+				if (sql.includes('pg_advisory_unlock')) {
+					return { rows: [{ unlocked: true }], rowCount: 1, command: 'SELECT' };
+				}
 				if (sql.includes('SELECT "name"')) {
 					return {
 						rows: [

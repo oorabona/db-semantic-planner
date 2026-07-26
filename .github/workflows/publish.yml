@@ -17,7 +17,7 @@ concurrency:
   # Serialize publishes: never let two Publish runs (a workflow_run chained after
   # release-please AND a manual workflow_dispatch) race on the same npm PUT — that
   # yields "409 Conflict / Failed to save packument". Queue rather than cancel so
-  # an in-flight publish always finishes; the per-version `npm view` guard makes
+  # an in-flight publish always finishes; the per-version registry probe makes
   # the queued run a no-op if everything is already up.
   group: npm-publish
   cancel-in-progress: false
@@ -46,19 +46,58 @@ jobs:
       # 1.11.0 release onward. Bump deliberately after verifying provenance works.
       - run: npm install -g npm@11.18.0
       - run: pnpm install --frozen-lockfile
+      # A `catalog:` reference is replaced by its range at pack time, so this is
+      # the last moment a wrong range is still recallable. The frozen install
+      # above does not catch every shape on its own — a peer range shadowed by a
+      # dev dependency of the same name never reaches the lockfile — and this job
+      # is reachable without CI having run on the same commit.
+      - run: node scripts/check-catalog.mjs
+      # This is the authority from which the expected packed manifests are
+      # computed. It precedes every lifecycle hook that can rewrite a manifest.
+      - name: Snapshot release inputs
+        run: |
+          set -euo pipefail
+          snapshot="$RUNNER_TEMP/release-inputs"
+          rm -rf "$snapshot"
+          mkdir -p "$snapshot"
+          cp pnpm-lock.yaml "$snapshot/pnpm-lock.yaml"
+          node - "$snapshot" <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { parse } = require('yaml');
+          const snapshot = path.resolve(process.argv[2]);
+          const lock = parse(fs.readFileSync('pnpm-lock.yaml', 'utf8'));
+          for (const importer of Object.keys(lock.importers ?? {})) {
+            const directory = path.resolve(importer);
+            const relative = path.relative(process.cwd(), directory);
+            if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+              throw new Error(`lockfile importer ${importer} resolves outside the checkout`);
+            }
+            const manifest = ['package.json', 'package.json5', 'package.yaml'].find((name) => fs.existsSync(path.join(directory, name)));
+            if (manifest === undefined) throw new Error(`lockfile importer ${importer} has no manifest`);
+            const destination = path.join(snapshot, importer, manifest);
+            fs.mkdirSync(path.dirname(destination), { recursive: true });
+            fs.copyFileSync(path.join(directory, manifest), destination);
+          }
+          NODE
       # Decide whether anything needs publishing BEFORE building, so the common
       # case (a release-please run that only refreshes the release PR, no version
       # change) exits cheaply without a full build.
       - id: check
         run: |
+          set -euo pipefail
           need=0
           for p in types nql core adapter-pgsql cli; do
             name=$(jq -r .name "packages/$p/package.json")
             ver=$(jq -r .version "packages/$p/package.json")
-            if npm view "$name@$ver" version >/dev/null 2>&1; then
+            # An undetermined registry answer ends the job here: the script
+            # prints nothing and exits non-zero, and the assignment carries that
+            # status, so there is no boolean for this loop to get wrong.
+            state=$(scripts/npm-published-state.sh "$name@$ver")
+            if [ "$state" = published ]; then
               echo "$name@$ver already on npm"
             else
-              echo "$name@$ver needs publishing"
+              echo "$name@$ver not found; upload will decide authoritatively"
               need=1
             fi
           done
@@ -81,24 +120,65 @@ jobs:
       # Why not `pnpm publish --provenance`: pnpm forwards --no-git-checks to the
       # npm process it delegates provenance to, and npm rejects it (EUSAGE).
       #
-      # Idempotent: skip any package already on npm. release-please bumps only
-      # changed packages (types may stay put while core/cli advance). Publishing
-      # in dependency order, guarded by an existence check, makes partial
-      # releases and re-runs safe — never failing on "cannot publish over
-      # previously published version".
       - if: steps.check.outputs.need == '1'
-        name: Publish changed packages
+        id: pack
+        name: Pack changed packages
         run: |
+          set -euo pipefail
+          pack_dir="$GITHUB_WORKSPACE/.packed"
+          rm -rf "$pack_dir"
+          mkdir -p "$pack_dir"
+          : > "$pack_dir/tarballs.tsv"
+          packed=0
           for p in types nql core adapter-pgsql cli; do
             name=$(jq -r .name "packages/$p/package.json")
             ver=$(jq -r .version "packages/$p/package.json")
-            if npm view "$name@$ver" version >/dev/null 2>&1; then
+            state=$(scripts/npm-published-state.sh "$name@$ver")
+            if [ "$state" = published ]; then
               echo "$name@$ver already on npm — skipping"
             else
-              echo "Publishing $name@$ver"
-              tgz=$(cd "packages/$p" && pnpm pack | tail -1)
-              npm publish "packages/$p/$tgz" --provenance --access public
+              before=$(mktemp)
+              after=$(mktemp)
+              find "$pack_dir" -maxdepth 1 -type f -name '*.tgz' -printf '%f\n' | sort > "$before"
+              pnpm -C "packages/$p" pack --pack-destination "$pack_dir"
+              find "$pack_dir" -maxdepth 1 -type f -name '*.tgz' -printf '%f\n' | sort > "$after"
+              mapfile -t tarballs < <(comm -13 "$before" "$after")
+              rm -f "$before" "$after"
+              if [ "${#tarballs[@]}" -ne 1 ]; then
+                echo "Expected pnpm pack for $name@$ver to create exactly one tarball" >&2
+                exit 1
+              fi
+              printf '%s\t%s\n' "$p" "${tarballs[0]}" >> "$pack_dir/tarballs.tsv"
+              packed=1
             fi
           done
+          echo "need=$packed" >> "$GITHUB_OUTPUT"
+      # All candidate tarballs must pass before the first registry PUT. A bad
+      # later package must never be discovered after an earlier package is
+      # immutable on npm.
+      - if: steps.check.outputs.need == '1' && steps.pack.outputs.need == '1'
+        name: Verify packed packages
+        run: |
+          set -euo pipefail
+          pairs=()
+          while IFS=$'\t' read -r p tarball; do
+            pairs+=("packages/$p=.packed/$tarball")
+          done < .packed/tarballs.tsv
+          node scripts/check-packed.mjs --source-root "$RUNNER_TEMP/release-inputs" "${pairs[@]}"
+      # Pack records the exact artifacts that verification read, in dependency
+      # order. Publishing this list rather than packing again keeps the verified
+      # bytes and the uploaded bytes identical.
+      - if: steps.check.outputs.need == '1' && steps.pack.outputs.need == '1'
+        name: Publish verified packages
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r p tarball; do
+            name=$(jq -r .name "packages/$p/package.json")
+            ver=$(jq -r .version "packages/$p/package.json")
+            echo "Publishing $name@$ver"
+            # A concurrent manual npm publish can still land after our probe.
+            # npm rejects the duplicate version loudly; rerun and the probe skips it.
+            npm publish ".packed/$tarball" --provenance --access public
+          done < .packed/tarballs.tsv
       # @dbsp/mcp-server publish skipped — scaffold only (no MCP tools yet,
       # see issue 112). Re-enable once the first tool ships.
