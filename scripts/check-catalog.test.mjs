@@ -171,6 +171,19 @@ test('refuses a catalog tag rather than a version range', () => {
 	refuses(fixture, /non-plain specifier/);
 });
 
+test('refuses a git shorthand in a catalog specifier', () => {
+	const fixture = baseline();
+	fixture.catalogs.default.pg.specifier = 'x/repo';
+	refuses(fixture, /non-plain specifier/);
+});
+
+test('accepts a normal catalog range containing a space', () => {
+	const fixture = baseline();
+	fixture.catalogs.default.pg.specifier = '>=8.0.0 <9.0.0';
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
+});
+
 test('refuses a catalog declaration whose recorded package name differs from its key', () => {
 	// The catalog entry itself is a plain range. The importer record is the only
 	// place pnpm exposes that the key resolved to a differently named package.
@@ -185,6 +198,21 @@ test('refuses a catalog declaration that resolved to something other than the ca
 	const fixture = baseline();
 	fixture.lock['packages/core'].dependencies.pg.version = '8.20.0';
 	refuses(fixture, /catalog resolved to 8\.22\.0/);
+});
+
+test('refuses a workspace declaration that links to a different workspace project', () => {
+	const fixture = baseline();
+	fixture.projects['packages/other'] = { name: '@acme/other' };
+	fixture.lock['packages/other'] = {};
+	fixture.lock['packages/cli'].dependencies['@acme/core'].version = 'link:../other';
+	refuses(fixture, /workspace package @acme\/core is importer packages\/core/);
+});
+
+test('refuses a workspace declaration whose name has no workspace project', () => {
+	const fixture = baseline();
+	fixture.projects['packages/cli'].dependencies['@acme/missing'] = 'workspace:*';
+	fixture.lock['packages/cli'].dependencies['@acme/missing'] = { specifier: 'workspace:*', version: 'link:../core' };
+	refuses(fixture, /no workspace project is named @acme\/missing/);
 });
 
 test('accepts an override on a transitive package the catalog does not name', () => {

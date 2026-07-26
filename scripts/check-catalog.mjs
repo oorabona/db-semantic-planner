@@ -41,9 +41,9 @@ const LOCKFILE = resolve(ROOT, 'pnpm-lock.yaml');
 const THIRD_PARTY_FORM = 'catalog:';
 const WORKSPACE_FORMS = new Set(['workspace:*', 'workspace:^']);
 
-/** A catalog's recorded specifier must begin like an npm version range, not a tag or source. */
+/** A catalog's recorded specifier must begin like an npm version range, not a tag or source shorthand. */
 function isPlainCatalogRange(specifier) {
-	return /^[v=]?\d|^[*xX~^<>]/.test(specifier) && !specifier.includes(':');
+	return /^[v=]?\d|^[*xX~^<>]/.test(specifier) && !specifier.includes(':') && !specifier.includes('/');
 }
 
 /** Which form a name must use is decided by what the name IS, not by the caller. */
@@ -238,7 +238,15 @@ for (const [name, entry] of Object.entries(catalogResolved)) {
 
 /** Every project's own name, so a declaration's required form follows from what it names. */
 const manifests = new Map(projects.map((project) => [project, readManifest(project)]));
-const workspacePackages = new Set([...manifests.values()].map((manifest) => manifest?.name).filter(Boolean));
+const workspaceProjectsByName = new Map();
+for (const [project, manifest] of manifests) {
+	if (typeof manifest?.name !== 'string') continue;
+	if (workspaceProjectsByName.has(manifest.name)) {
+		fail(`workspace manifests contain duplicate package name ${manifest.name}`);
+	}
+	workspaceProjectsByName.set(manifest.name, project);
+}
+const workspacePackages = new Set(workspaceProjectsByName.keys());
 
 const offenders = [];
 const resolutions = new Map();
@@ -290,6 +298,23 @@ for (const project of projects) {
 				if (resolved.name !== key) {
 					fail(
 						`${project} → ${block}.${key} says catalog:, but resolved package identity is ${resolved.name}. A catalog key must resolve to the package with the same name.`,
+					);
+				}
+			}
+
+			// `workspace:*` and `workspace:^` say that this exact checked-out
+			// project is the dependency. pnpm records that target as a link relative
+			// to the importing project, so compare its normalized destination with
+			// the importer belonging to the dependency name rather than merely
+			// grouping every link under that name.
+			if (WORKSPACE_FORMS.has(declared.specifier)) {
+				const expectedProject = workspaceProjectsByName.get(key);
+				if (expectedProject === undefined) {
+					fail(`${project} → ${block}.${key} says ${declared.specifier}, but no workspace project is named ${key}`);
+				}
+				if (resolved.version !== `link:${expectedProject}`) {
+					fail(
+						`${project} → ${block}.${key} resolves to ${resolved.version}, but workspace package ${key} is importer ${expectedProject}. A workspace declaration must link to the project bearing its name.`,
 					);
 				}
 			}
