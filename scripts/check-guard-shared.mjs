@@ -9,6 +9,20 @@ export const DEPENDENCY_BLOCKS = ['dependencies', 'devDependencies', 'peerDepend
 /** pnpm's manifest precedence: later files are inert when an earlier one exists. */
 export const MANIFEST_BASE_NAMES = ['package.json', 'package.json5', 'package.yaml'];
 
+/** A present dependency block is a manifest map, never a value to coerce away. */
+export function assertDependencyBlocks(manifest, describe, fail) {
+	if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) {
+		fail(`${describe} is not a manifest map`);
+	}
+	for (const block of DEPENDENCY_BLOCKS) {
+		if (!Object.hasOwn(manifest, block)) continue;
+		const dependencies = manifest[block];
+		if (dependencies === null || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
+			fail(`${describe} ${block} is not a dependency map`);
+		}
+	}
+}
+
 /** Read the workspace lockfile through the same parser used by both guards. */
 export function readLockfile(root, fail) {
 	const lockfile = resolve(root, 'pnpm-lock.yaml');

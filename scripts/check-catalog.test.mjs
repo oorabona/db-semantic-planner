@@ -8,7 +8,7 @@
  * nothing about what this protects.
  */
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -145,6 +145,18 @@ test('refuses a named catalogs block outright', () => {
 	refuses(fixture, /named catalogs/);
 });
 
+test('refuses a named catalogs block declared in pnpm-workspace.yaml, even when no importer uses it', () => {
+	const fixture = baseline();
+	fixture.workspace.catalogs = { legacy: { pg: '^8.16.0' } };
+	refuses(fixture, /pnpm-workspace\.yaml declares named catalogs/);
+});
+
+test('refuses an unused source catalog entry whose specifier is not a plain range', () => {
+	const fixture = baseline();
+	fixture.workspace.catalog.unused = 'latest';
+	refuses(fixture, /pnpm-workspace\.yaml catalog entry unused has non-plain specifier/);
+});
+
 test('refuses a workspace package referenced through the catalog', () => {
 	const fixture = baseline();
 	fixture.projects['packages/cli'].dependencies['@acme/core'] = 'catalog:';
@@ -198,6 +210,57 @@ test('refuses a catalog declaration that resolved to something other than the ca
 	const fixture = baseline();
 	fixture.lock['packages/core'].dependencies.pg.version = '8.20.0';
 	refuses(fixture, /catalog resolved to 8\.22\.0/);
+});
+
+test('refuses a patched catalog resolution produced by pnpm as a different store identity', () => {
+	const fixture = baseline();
+	fixture.lock['packages/core'].dependencies.pg.version = '8.22.0(patch_hash=4cefb757d4)';
+	refuses(fixture, /patched build 8\.22\.0\(patch_hash=4cefb757d4\).*catalog resolved bare 8\.22\.0/);
+});
+
+test('strips a normal peer context without merging it into package identity', () => {
+	const fixture = baseline();
+	fixture.lock['packages/core'].dependencies.pg.version = '8.22.0(react@18.0.0)';
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
+});
+
+test('refuses the patch suffix that a real pnpm patchedDependencies install writes', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'catalog-patched-'));
+	try {
+		writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'patched-root', private: true }));
+		writeFileSync(join(dir, '.npmrc'), 'store-dir=.pnpm-store\n');
+		writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\ncatalog:\n  yaml: 2.9.0\n');
+		mkdirSync(join(dir, 'packages/child'), { recursive: true });
+		writeFileSync(join(dir, 'packages/child/package.json'), JSON.stringify({ name: '@acme/child', version: '1.0.0', dependencies: { yaml: 'catalog:' } }));
+		execFileSync('pnpm', ['install', '--ignore-scripts', '--package-import-method=copy'], { cwd: dir, stdio: 'pipe' });
+		const edit = join(dir, 'patch-edit');
+		execFileSync('pnpm', ['patch', 'yaml@2.9.0', '--edit-dir', edit], { cwd: dir, stdio: 'pipe' });
+		writeFileSync(join(edit, 'README.md'), `${readFileSync(join(edit, 'README.md'), 'utf8')}\npatched fixture\n`);
+		execFileSync('pnpm', ['patch-commit', edit, '--patches-dir', 'patches'], { cwd: dir, stdio: 'pipe' });
+		execFileSync('pnpm', ['install', '--ignore-scripts', '--package-import-method=copy'], { cwd: dir, stdio: 'pipe' });
+
+		const lockfile = readFileSync(join(dir, 'pnpm-lock.yaml'), 'utf8');
+		assert.match(lockfile, /patch_hash=/, 'pnpm did not write the patched resolution shape this guard protects');
+		let code = 0;
+		let output = '';
+		try {
+			execFileSync('node', [SCRIPT, dir], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+		} catch (error) {
+			code = error.status ?? 1;
+			output = `${error.stdout ?? ''}${error.stderr ?? ''}`;
+		}
+		assert.equal(code, 1, output);
+		assert.match(output, /patched build .*patch_hash=.*catalog resolved bare/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('refuses an unrecognised resolved-version suffix rather than stripping it', () => {
+	const fixture = baseline();
+	fixture.lock['packages/core'].dependencies.pg.version = '8.22.0(unknown_context)';
+	refuses(fixture, /unrecognised suffix/);
 });
 
 test('refuses a workspace declaration that links to a different workspace project', () => {
@@ -368,5 +431,15 @@ test('refuses either bundled-dependency spelling in a source manifest', () => {
 		const fixture = baseline();
 		fixture.projects['packages/core'][field] = true;
 		refuses(fixture, new RegExp(`/${field} is present`));
+	}
+});
+
+test('refuses every present source dependency block that is not a map', () => {
+	for (const block of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+		for (const value of [null, true, 5, 'pg', ['pg']]) {
+			const fixture = baseline();
+			fixture.projects['packages/core'][block] = value;
+			refuses(fixture, new RegExp(`source manifest ${block} is not a dependency map`));
+		}
 	}
 });

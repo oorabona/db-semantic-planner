@@ -35,23 +35,23 @@ function run(stub) {
 }
 
 test('reports a version the registry knows as published', () => {
-	const { code, stdout } = run('echo 3.2.0; exit 0');
+	const { code, stdout } = run(`echo '"3.2.0"'; exit 0`);
 	assert.equal(code, 0);
 	assert.equal(stdout.trim(), 'published');
 });
 
 test('reports an explicit E404 as unpublished', () => {
-	const { code, stdout } = run(`echo 'npm error code E404' >&2; exit 1`);
+	const { code, stdout } = run(`echo '{"error":{"code":"E404","summary":"not found"}}'; echo 'npm error code E404' >&2; exit 1`);
 	assert.equal(code, 0);
 	assert.equal(stdout.trim(), 'unpublished');
 });
 
 test('refuses to answer when the registry fails for any other reason', () => {
 	for (const stub of [
-		`echo 'npm error code E500' >&2; exit 1`,
-		`echo 'npm error code ENEEDAUTH' >&2; exit 1`,
-		`echo 'npm error network request to https://registry.npmjs.org failed' >&2; exit 1`,
-		`echo 'npm error code E429' >&2; exit 1`,
+		`echo '{"error":{"code":"E500"}}'; echo 'npm error code E500' >&2; exit 1`,
+		`echo '{"error":{"code":"ENEEDAUTH"}}'; echo 'npm error code ENEEDAUTH' >&2; exit 1`,
+		`echo 'not json'; echo 'npm error network request to https://registry.npmjs.org failed' >&2; exit 1`,
+		`echo '{"error":{"code":"E429"}}'; echo 'npm error code E429' >&2; exit 1`,
 	]) {
 		const { code, stdout, stderr } = run(stub);
 		assert.notEqual(code, 0, `expected a refusal for stub: ${stub}`);
@@ -60,14 +60,29 @@ test('refuses to answer when the registry fails for any other reason', () => {
 	}
 });
 
-test('does not read a version string that merely contains E404 as not found', () => {
-	const { code, stdout } = run('echo 1.0.0-E404beta; exit 0');
-	assert.equal(code, 0);
-	assert.equal(stdout.trim(), 'published');
+test('refuses an E401 whose prose happens to mention E404', () => {
+	const { code, stdout, stderr } = run(`echo '{"error":{"code":"E401"}}'; echo 'npm error code E401; see E404 docs' >&2; exit 1`);
+	assert.notEqual(code, 0);
+	assert.equal(stdout.trim(), '');
+	assert.match(stderr, /refusing to guess/);
 });
 
-test('refuses an error mentioning E404 only inside a longer token', () => {
-	const { code, stdout, stderr } = run(`echo 'npm error code XE404Y' >&2; exit 1`);
+test('refuses JSON that is not the single E404 error shape', () => {
+	for (const output of [
+		'[]',
+		'{"error":{"code":"E404"},"other":{"code":"E500"}}',
+		'{"error":[{"code":"E404"}]}',
+		'{"error":{"code":"E404"}}\n{"error":{"code":"E500"}}',
+	]) {
+		const { code, stdout, stderr } = run(`printf '%s\\n' '${output}'; echo diagnostic >&2; exit 1`);
+		assert.notEqual(code, 0, output);
+		assert.equal(stdout.trim(), '', output);
+		assert.match(stderr, /refusing to guess/, output);
+	}
+});
+
+test('refuses a successful call whose stdout is not a JSON version string', () => {
+	const { code, stdout, stderr } = run(`echo '{"version":"3.2.0"}'; exit 0`);
 	assert.notEqual(code, 0);
 	assert.equal(stdout.trim(), '');
 	assert.match(stderr, /refusing to guess/);

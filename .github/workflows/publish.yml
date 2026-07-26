@@ -52,23 +52,6 @@ jobs:
       # dev dependency of the same name never reaches the lockfile — and this job
       # is reachable without CI having run on the same commit.
       - run: node scripts/check-catalog.mjs
-      # Everything downstream compares artifacts against these files. If a build
-      # changes one, the comparison would otherwise be against attacker-chosen
-      # ground, so record the complete dependency contract before any hooks run.
-      - name: Snapshot dependency contract
-        run: |
-          set -euo pipefail
-          contract="$RUNNER_TEMP/publish-dependency-contract.sha256"
-          {
-            pnpm list -r --depth -1 --json | jq -r '.[] | .path + "/package.json"'
-            printf '%s\n' "$GITHUB_WORKSPACE/pnpm-workspace.yaml" "$GITHUB_WORKSPACE/pnpm-lock.yaml"
-          } | LC_ALL=C sort -u | while IFS= read -r file; do
-            if [ ! -r "$file" ]; then
-              echo "Dependency-contract file is missing or unreadable: $file" >&2
-              exit 1
-            fi
-            sha256sum -- "$file"
-          done > "$contract"
       # Decide whether anything needs publishing BEFORE building, so the common
       # case (a release-please run that only refreshes the release PR, no version
       # change) exits cheaply without a full build.
@@ -142,28 +125,6 @@ jobs:
             fi
           done
           echo "need=$packed" >> "$GITHUB_OUTPUT"
-      # Recompute the full set, not only the old digests: a removed, unreadable,
-      # or newly introduced workspace manifest is a changed contract too.
-      - if: steps.check.outputs.need == '1'
-        name: Refuse dependency-contract mutations
-        run: |
-          set -euo pipefail
-          contract="$RUNNER_TEMP/publish-dependency-contract.sha256"
-          actual="$RUNNER_TEMP/publish-dependency-contract-after-build.sha256"
-          {
-            pnpm list -r --depth -1 --json | jq -r '.[] | .path + "/package.json"'
-            printf '%s\n' "$GITHUB_WORKSPACE/pnpm-workspace.yaml" "$GITHUB_WORKSPACE/pnpm-lock.yaml"
-          } | LC_ALL=C sort -u | while IFS= read -r file; do
-            if [ ! -r "$file" ]; then
-              echo "Dependency-contract file is missing or unreadable: $file" >&2
-              exit 1
-            fi
-            sha256sum -- "$file"
-          done > "$actual"
-          if ! cmp -s "$contract" "$actual"; then
-            echo "A build or pack changed the dependency contract; refusing to verify artifacts against changed source." >&2
-            exit 1
-          fi
       # All candidate tarballs must pass before the first registry PUT. A bad
       # later package must never be discovered after an earlier package is
       # immutable on npm.

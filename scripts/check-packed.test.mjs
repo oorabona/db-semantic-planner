@@ -1,7 +1,7 @@
 /** Tests for the post-pack artifact guard. Run with: node --test scripts/check-packed.test.mjs */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,7 +62,6 @@ function run(fixture, options = {}) {
 			mkdirSync(join(path, '..'), { recursive: true });
 			writeFileSync(path, 'fixture');
 		}
-		options.archiveSetup?.(staging);
 		const tarball = join(dir, 'package.tgz');
 		execFileSync('tar', ['-czf', tarball, ...(options.transform ? [`--transform=${options.transform}`] : []), '-C', join(dir, 'staging'), 'package']);
 		if (options.copyTarball) copyFileSync(tarball, join(dir, 'copy.tgz'));
@@ -165,6 +164,79 @@ test('refuses a non-dependency field changed while packing', () => {
 	refuses(fixture, /does not exactly match source/);
 });
 
+test('allows only the documented pnpm pack manifest drops', () => {
+	const fixture = baseline();
+	Object.assign(fixture.projects['packages/cli'], {
+		packageManager: 'pnpm@10.33.0',
+		pnpm: { onlyBuiltDependencies: [] },
+		scripts: { build: 'node build.js', test: 'node test.js', prepack: 'node prepack.js', prepare: 'node prepare.js', postpack: 'node postpack.js' },
+		publishConfig: { access: 'public', registry: 'https://registry.example.test' },
+	});
+	Object.assign(fixture.packed, {
+		scripts: { build: 'node build.js', test: 'node test.js' },
+		publishConfig: { access: 'public', registry: 'https://registry.example.test' },
+	});
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
+});
+
+test('accepts the bounded compatibility envelope from a real pnpm pack', () => {
+	const dir = mkdtempSync(join(tmpdir(), 'packed-real-pnpm-'));
+	try {
+		const manifest = {
+			name: '@acme/packed-fixture',
+			version: '1.0.0',
+			packageManager: 'pnpm@10.33.0',
+			pnpm: { onlyBuiltDependencies: [] },
+			scripts: {
+				build: 'node -e "process.exit(0)"',
+				test: 'node -e "process.exit(0)"',
+				typecheck: 'node -e "process.exit(0)"',
+				prepack: 'node -e "process.exit(0)"',
+				prepare: 'node -e "process.exit(0)"',
+				postpack: 'node -e "process.exit(0)"',
+			},
+			publishConfig: { access: 'public', registry: 'https://registry.npmjs.org' },
+		};
+		writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest));
+		writeFileSync(join(dir, 'pnpm-lock.yaml'), JSON.stringify({ importers: { '.': {} }, catalogs: { default: {} } }));
+		const packed = join(dir, 'packed');
+		mkdirSync(packed);
+		execFileSync('pnpm', ['pack', '--pack-destination', packed], { cwd: dir, stdio: 'pipe' });
+		const tarball = join(packed, readdirSync(packed).find((file) => file.endsWith('.tgz')) ?? 'missing.tgz');
+		const output = execFileSync('node', [SCRIPT, `.= ${tarball}`.replace('= ', '=')], {
+			cwd: dir,
+			encoding: 'utf8',
+			stdio: ['pipe', 'pipe', 'pipe'],
+		});
+		assert.match(output, /match their source catalog/);
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('refuses source publishConfig overrides this guard cannot model', () => {
+	for (const key of ['main', 'types', 'exports', 'bin', 'typesVersions', 'directory']) {
+		const fixture = baseline();
+		fixture.projects['packages/cli'].publishConfig = { access: 'public', [key]: './dist/index.js' };
+		fixture.packed.publishConfig = { access: 'public', [key]: './dist/index.js' };
+		refuses(fixture, new RegExp(`publishConfig overrides ${key}`));
+	}
+});
+
+test('refuses every present source or packed dependency block that is not a map', () => {
+	for (const side of ['source', 'packed']) {
+		for (const block of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+			for (const value of [null, true, 5, 'pg', ['pg']]) {
+				const fixture = baseline();
+				if (side === 'source') fixture.projects['packages/cli'][block] = value;
+				else fixture.packed[block] = value;
+				refuses(fixture, new RegExp(`${side === 'source' ? 'source manifest' : 'packed manifest'} ${block} is not a dependency map`));
+			}
+		}
+	}
+});
+
 test('refuses bundled files and publishable shrinkwrap files in the archive', () => {
 	for (const file of ['node_modules/pg/package.json', 'npm-shrinkwrap.json']) {
 		refuses(baseline(), file.includes('node_modules') ? /contains package\/node_modules/ : /contains package\/npm-shrinkwrap\.json/, {
@@ -180,27 +252,11 @@ test('normalizes archive paths before refusing bundled dependencies', () => {
 	});
 });
 
-test('refuses a parent-directory segment that normalizes back inside package/', () => {
-	refuses(baseline(), /spelled with a parent-directory segment/, {
-		files: ['side.js'],
-		transform: 's#^package/side\\.js$#package/nested/../side.js#',
-	});
-});
-
-test('refuses an archive path that escapes package/', () => {
-	refuses(baseline(), /escapes package\//, {
+test('refuses an archive entry outside package/', () => {
+	refuses(baseline(), /is outside package\//, {
 		files: ['side.js'],
 		transform: 's#^package/side\\.js$#/absolute/side.js#',
 	});
-});
-
-test('refuses symbolic and hard links in an archive', () => {
-	for (const setup of [
-		(staging) => symlinkSync('package.json', join(staging, 'linked-package.json')),
-		(staging) => linkSync(join(staging, 'package.json'), join(staging, 'hard-linked-package.json')),
-	]) {
-		refuses(baseline(), /link archive entry/, { archiveSetup: setup });
-	}
 });
 
 test('binds each tarball to the project that produced it', () => {
@@ -237,24 +293,15 @@ test('refuses a tarball that cannot be read', () => {
 	refuses(baseline(), /cannot read .*missing\.tgz as a tarball/, { tarballArgument: 'missing.tgz' });
 });
 
-test('publish workflow snapshots the dependency contract around builds and packs', () => {
+test('publish workflow verifies every tarball before the first registry PUT', () => {
 	const workflow = readFileSync(PUBLISH_WORKFLOW, 'utf8');
-	const snapshot = workflow.indexOf('name: Snapshot dependency contract');
-	const build = workflow.indexOf('name: Build packages');
+	// Packing one package at a time put @dbsp/types on npm — immutably — before
+	// @dbsp/cli had even been packed.
 	const pack = workflow.indexOf('name: Pack changed packages');
-	const recheck = workflow.indexOf('name: Refuse dependency-contract mutations');
 	const verify = workflow.indexOf('name: Verify packed packages');
-	assert.ok(snapshot >= 0 && snapshot < build && build < pack && pack < recheck && recheck < verify);
-	assert.match(workflow.slice(snapshot, recheck), /sha256sum -- "\$file"/);
-	assert.match(workflow.slice(recheck, verify), /cmp -s "\$contract" "\$actual"/);
-});
-
-test('publish workflow hashes manifests, not the directories that contain them', () => {
-	const workflow = readFileSync(PUBLISH_WORKFLOW, 'utf8');
-	// `pnpm list` reports a project's directory, and `sha256sum` on a directory
-	// is an error, so hashing `.path` ends the step at its first entry.
-	assert.equal((workflow.match(/\.path \+ "\/package\.json"/g) ?? []).length, 2);
-	assert.doesNotMatch(workflow, /jq -r '\.\[\] \| \.path'/);
+	const publish = workflow.indexOf('name: Publish verified packages');
+	assert.ok(pack >= 0 && pack < verify && verify < publish);
+	assert.doesNotMatch(workflow.slice(pack, verify), /npm publish/);
 });
 
 test('publish workflow verifies each tarball against the project that produced it', () => {

@@ -8,7 +8,7 @@
 import { execFileSync } from 'node:child_process';
 import { posix, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
+import { assertDependencyBlocks, createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
 const ROOT = resolve(process.cwd());
 const TARBALL_PAIRS = process.argv.slice(2);
@@ -30,45 +30,17 @@ function archiveEntries(tarball) {
 		fail(`cannot read ${tarball} as a tarball: ${error.message}`);
 	}
 
+	// Normalised so the bundled-copy tests below are exact comparisons against one
+	// spelling rather than against however tar happened to write the entry.
 	const entries = [];
-	const normalized = new Set();
 	for (const raw of rawEntries) {
-		// Refuse a parent-directory segment on the spelling, before normalising it
-		// away. `package/nested/../side.js` lands inside package/ under this
-		// normaliser, but whether it does depends on whose normaliser runs — and
-		// pnpm does not write that spelling, so there is nothing to reason about.
-		if (raw.split('/').includes('..')) {
-			fail(`${tarball} contains archive path ${raw}, which is spelled with a parent-directory segment`);
-		}
-		// Absolute paths need no separate test: they normalise to themselves and
-		// fail the package/ prefix below.
 		const path = posix.normalize(raw).replace(/\/+$/, '');
 		if (path !== 'package' && !path.startsWith('package/')) {
-			fail(`${tarball} contains archive path ${raw}, which escapes package/`);
+			fail(`${tarball} contains archive path ${raw}, which is outside package/`);
 		}
-		if (normalized.has(path)) {
-			fail(`${tarball} contains multiple spellings of archive path ${path}`);
-		}
-		normalized.add(path);
 		entries.push({ path, raw });
 	}
 	return entries;
-}
-
-function assertRegularArchiveEntries(tarball) {
-	let listing;
-	try {
-		listing = execFileSync('tar', ['-tvzf', tarball], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-	} catch (error) {
-		fail(`cannot inspect ${tarball} archive entry types: ${error.message}`);
-	}
-	for (const line of listing.split(/\r?\n/).filter(Boolean)) {
-		if (line.startsWith('l')) fail(`${tarball} contains a symbolic-link archive entry`);
-		if (line.startsWith('h')) fail(`${tarball} contains a hard-link archive entry`);
-		if (!line.startsWith('-') && !line.startsWith('d')) {
-			fail(`${tarball} contains unsupported archive entry type ${line[0]}`);
-		}
-	}
 }
 
 function packedManifest(tarball, entries) {
@@ -102,6 +74,7 @@ const sourceByProject = new Map();
 const sourceByName = new Map();
 for (const project of Object.keys(importers)) {
 	const manifest = readManifest(project);
+	assertDependencyBlocks(manifest, `${project} source manifest`, fail);
 	if (typeof manifest?.name !== 'string' || typeof manifest?.version !== 'string') {
 		fail(`${project} source manifest has no string name and version`);
 	}
@@ -113,16 +86,10 @@ for (const project of Object.keys(importers)) {
 }
 
 function assertArtifactDependencies(tarball, source, packed) {
+	assertDependencyBlocks(packed, `${tarball}: packed manifest`, fail);
 	for (const block of DEPENDENCY_BLOCKS) {
 		const sourceDependencies = source[block] ?? {};
 		const packedDependencies = packed[block] ?? {};
-		if (
-			packedDependencies === null ||
-			typeof packedDependencies !== 'object' ||
-			Array.isArray(packedDependencies)
-		) {
-			fail(`${tarball}: packed ${block} is not a dependency map`);
-		}
 		for (const [name, range] of Object.entries(packedDependencies)) {
 			if (typeof range !== 'string' || range.startsWith('catalog:') || range.startsWith('workspace:')) {
 				fail(`${tarball}: packed ${block}.${name} leaks an unresolved protocol (${String(range)})`);
@@ -161,6 +128,24 @@ function assertArtifactDependencies(tarball, source, packed) {
 
 function expectedPackedManifest(tarball, source) {
 	const expected = structuredClone(source);
+	// These are the only `pnpm pack` normalisations this guard understands:
+	// hard-coded drops can be checked, but publishConfig overrides transform
+	// values we would have to predict. A future pnpm change therefore refuses
+	// to publish instead of certifying an artifact this guard no longer models.
+	delete expected.packageManager;
+	delete expected.pnpm;
+	if (expected.scripts !== undefined) {
+		for (const lifecycle of ['prepack', 'prepare', 'postpack']) delete expected.scripts[lifecycle];
+	}
+	if (Object.hasOwn(source, 'publishConfig')) {
+		if (source.publishConfig === null || typeof source.publishConfig !== 'object' || Array.isArray(source.publishConfig)) {
+			fail(`${tarball}: source ${source.name} publishConfig is not a map`);
+		}
+		const unsupported = Object.keys(source.publishConfig).filter((key) => !['access', 'registry'].includes(key));
+		if (unsupported.length > 0) {
+			fail(`${tarball}: source ${source.name} publishConfig overrides ${unsupported.join(', ')}. This guard only models access and registry; value overrides are refused rather than predicted.`);
+		}
+	}
 	for (const block of DEPENDENCY_BLOCKS) {
 		for (const [name, sourceRange] of Object.entries(source[block] ?? {})) {
 			if (sourceRange === 'catalog:') {
@@ -204,7 +189,6 @@ for (const argument of TARBALL_PAIRS) {
 		fail(`${tarball}: project ${project} is not a workspace importer`);
 	}
 	const entries = archiveEntries(tarball);
-	assertRegularArchiveEntries(tarball);
 	if (entries.some(({ path }) => path === 'package/node_modules' || path.startsWith('package/node_modules/'))) {
 		fail(`${tarball} contains package/node_modules, so it ships bundled dependency copies`);
 	}

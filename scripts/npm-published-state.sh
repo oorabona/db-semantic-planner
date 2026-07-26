@@ -18,23 +18,28 @@ if [ "$#" -ne 1 ]; then
 fi
 
 package_version="$1"
+diagnostic_file=$(mktemp "${TMPDIR:-/tmp}/npm-published-state.XXXXXX") || exit 3
+trap 'rm -f "$diagnostic_file"' EXIT
 
 # Deliberately not `if output=$(npm view …); then` — after that construct `$?`
 # is the `if` statement's status, which is 0 when the condition merely failed,
 # so the undetermined branch would exit 0 and certify the outage as success.
-output=$(npm view "$package_version" version 2>&1)
+output=$(npm view "$package_version" version --json 2>"$diagnostic_file")
 status=$?
+diagnostic=$(<"$diagnostic_file")
 
 if [ "$status" -eq 0 ]; then
-	echo published
-	exit 0
+	if node -e 'const fs = require("node:fs"); try { process.exit(typeof JSON.parse(fs.readFileSync(0, "utf8")) === "string" ? 0 : 1); } catch { process.exit(1); }' <<<"$output"; then
+		echo published
+		exit 0
+	fi
 fi
 
-if grep -Eq '(^|[^[:alnum:]_])E404([^[:alnum:]_]|$)' <<<"$output"; then
+if node -e 'const fs = require("node:fs"); try { const value = JSON.parse(fs.readFileSync(0, "utf8")); process.exit(value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1 && value.error !== null && typeof value.error === "object" && !Array.isArray(value.error) && value.error.code === "E404" ? 0 : 1); } catch { process.exit(1); }' <<<"$output"; then
 	echo unpublished
 	exit 0
 fi
 
-printf '%s\n' "$output" >&2
+printf '%s\n' "$diagnostic" >&2
 echo "Could not determine whether $package_version is published; refusing to guess." >&2
 exit 3

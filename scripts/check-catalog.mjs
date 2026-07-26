@@ -25,7 +25,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
 import { dirname, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
+import { parse } from 'yaml';
+import { assertDependencyBlocks, createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
 /** Defaults to this repository; a path argument lets the tests point it at fixtures. */
 const ROOT = resolve(process.argv[2] ?? resolve(dirname(fileURLToPath(import.meta.url)), '..'));
@@ -84,10 +85,70 @@ function resolvedPackage(project, key, version) {
 			return { name: key, version: `link:${posix.normalize(posix.join(project, raw.slice(protocol.length)))}` };
 		}
 	}
-	const bare = raw.split('(')[0];
+	const bare = resolvedRegistryVersion(raw);
 	const at = bare.lastIndexOf('@');
 	if (at > 0) return { name: bare.slice(0, at), version: bare.slice(at + 1) };
 	return { name: key, version: bare };
+}
+
+/**
+ * Peer contexts are not store identity, but `patch_hash=` is: the catalog
+ * records its version bare, so a patched declaration intentionally differs
+ * from that catalog resolution. A suffix pnpm has not identified as either is
+ * an unknown resolution shape and authorizes no comparison.
+ */
+function resolvedRegistryVersion(raw) {
+	const firstContext = raw.indexOf('(');
+	if (firstContext === -1) return raw;
+	const base = raw.slice(0, firstContext);
+	const patches = [];
+	assertKnownResolutionContexts(raw, raw.slice(firstContext), patches);
+	return `${base}${patches.join('')}`;
+}
+
+/** Pnpm nests peer contexts; only their leading package-at-version is identity-free. */
+function assertKnownResolutionContexts(raw, contexts, patches) {
+	let remaining = contexts;
+	while (remaining !== '') {
+		if (!remaining.startsWith('(')) {
+			fail(`resolved version ${raw} has an unrecognised suffix; refusing to treat an unknown resolution as a catalog match`);
+		}
+		let depth = 0;
+		let end = -1;
+		for (let index = 0; index < remaining.length; index += 1) {
+			if (remaining[index] === '(') depth += 1;
+			if (remaining[index] === ')') depth -= 1;
+			if (depth === 0) {
+				end = index;
+				break;
+			}
+			if (depth < 0) break;
+		}
+		if (end === -1) {
+			fail(`resolved version ${raw} has an unrecognised suffix; refusing to treat an unknown resolution as a catalog match`);
+		}
+		const suffix = remaining.slice(1, end);
+		if (suffix.startsWith('patch_hash=') && suffix.length > 'patch_hash='.length && !suffix.includes('(')) {
+			patches.push(remaining.slice(0, end + 1));
+		} else {
+			const nested = suffix.indexOf('(');
+			const peer = nested === -1 ? suffix : suffix.slice(0, nested);
+			if (!isPeerContext(peer)) {
+				fail(`resolved version ${raw} has unrecognised suffix (${suffix}); refusing to treat an unknown resolution as a catalog match`);
+			}
+			if (nested !== -1) assertKnownResolutionContexts(raw, suffix.slice(nested), patches);
+		}
+		remaining = remaining.slice(end + 1);
+	}
+}
+
+/** Pnpm peer contexts are one or more package-name-at-version records. */
+function isPeerContext(suffix) {
+	return suffix.split(',').every((peer) => /^(?:@[^/@()\s]+\/)?[^@()\s]+@[^()\s]+$/.test(peer));
+}
+
+function patchHash(version) {
+	return /\(patch_hash=([^()]+)\)/.exec(version)?.[1];
 }
 
 /**
@@ -150,6 +211,32 @@ function assertSameProjectSet(lockfileProjects, pnpmProjects) {
 }
 
 const lock = readLockfile(ROOT, fail);
+
+/**
+ * The workspace file is authority for what was declared; the lockfile is
+ * authority for what was resolved. Neither is a substitute for the other:
+ * pnpm omits unused catalog entries from the lockfile.
+ */
+let workspace;
+try {
+	workspace = parse(readFileSync(resolve(ROOT, 'pnpm-workspace.yaml'), 'utf8'));
+} catch (error) {
+	fail(`cannot read pnpm-workspace.yaml: ${error.message}`);
+}
+if (workspace === null || typeof workspace !== 'object' || Array.isArray(workspace)) {
+	fail('pnpm-workspace.yaml is not a map');
+}
+if (Object.hasOwn(workspace, 'catalogs')) {
+	fail('pnpm-workspace.yaml declares named catalogs. This repository has one catalog on purpose: a second one can hold a different range for the same package.');
+}
+if (workspace.catalog !== undefined && (workspace.catalog === null || typeof workspace.catalog !== 'object' || Array.isArray(workspace.catalog))) {
+	fail('pnpm-workspace.yaml catalog is not a map');
+}
+for (const [name, specifier] of Object.entries(workspace.catalog ?? {})) {
+	if (typeof specifier !== 'string' || !isPlainCatalogRange(specifier)) {
+		fail(`pnpm-workspace.yaml catalog entry ${name} has non-plain specifier ${String(specifier)}. Catalog entries must record a plain range, not an alias or source protocol.`);
+	}
+}
 
 /**
  * Everything below trusts this file to describe the install. That is only true
@@ -240,6 +327,7 @@ for (const [name, entry] of Object.entries(catalogResolved)) {
 const manifests = new Map(projects.map((project) => [project, readManifest(project)]));
 const workspaceProjectsByName = new Map();
 for (const [project, manifest] of manifests) {
+	assertDependencyBlocks(manifest, `${project} source manifest`, fail);
 	if (typeof manifest?.name !== 'string') continue;
 	if (workspaceProjectsByName.has(manifest.name)) {
 		fail(`workspace manifests contain duplicate package name ${manifest.name}`);
@@ -291,6 +379,12 @@ for (const project of projects) {
 					);
 				}
 				if (resolved.version !== expected) {
+					const patch = patchHash(resolved.version);
+					if (patch !== undefined) {
+						fail(
+							`${project} → ${block}.${key} resolved to patched build ${resolved.version} (patch_hash=${patch}), while the catalog resolved bare ${expected}. A patch changes store identity, so this project is intentionally off the catalog resolution.`,
+						);
+					}
 					fail(
 						`${project} → ${block}.${key} resolved to ${resolved.version}, but the catalog resolved to ${expected}. Something between the catalog and this project re-decided the version — an override, a patch, a pnpmfile hook. The catalog is meant to be the only place that decides it.`,
 					);
