@@ -33,9 +33,9 @@ jobs:
       # name core, adapter-pgsql and nql, so cli, gui, mcp-server and types were
       # never run here and could go red without CI noticing.
       - run: pnpm test:unit
-      # `pnpm -r` covers the nine projects but not the root's own tests, where the
-      # guards under scripts/ live. The glob is deliberate: a new guard's tests run
-      # here without anyone remembering to add a line.
+      # `pnpm -r` runs the eight packages but not the root, where the guards under
+      # scripts/ live. The glob is deliberate: a new guard's tests run here
+      # without anyone remembering to add a line.
       - run: pnpm test:scripts
       - name: Verify documentation examples (compile-only)
         # Compile-only doctest path — fast, runs unconditionally.

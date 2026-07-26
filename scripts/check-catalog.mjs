@@ -23,8 +23,8 @@
  * Run it after `pnpm install --frozen-lockfile`, which is what keeps the
  * lockfile a faithful description of the manifests.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, posix, resolve } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
 
@@ -55,24 +55,58 @@ function fail(message) {
 	process.exit(1);
 }
 
+let REAL_ROOT;
+try {
+	REAL_ROOT = realpathSync(ROOT);
+} catch (error) {
+	fail(`cannot resolve ${ROOT}: ${error.message}`);
+}
+
+/**
+ * `relative` rather than a `${root}/` prefix, because on Windows `resolve`
+ * returns `C:\repo\packages\core` and that prefix never matches — every child
+ * project would read as outside the repository.
+ */
+function assertInside(root, path, describe) {
+	const rel = relative(root, path);
+	if (rel !== '' && (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))) {
+		fail(`${describe} resolves outside the repository (${path})`);
+	}
+}
+
+/**
+ * A path out of the lockfile is untrusted input, and `resolve` strips `..` but
+ * not a symlink: an importer directory, or the manifest inside it, can point
+ * anywhere while its lexical path still sits under the root. Both forms are
+ * checked — the lexical one because it works on a path that does not exist, the
+ * canonical one because it is the path actually read. Returns undefined when
+ * there is nothing there; what that means is the caller's decision.
+ */
+function containedPath(path, describe) {
+	assertInside(ROOT, path, describe);
+	let real;
+	try {
+		real = realpathSync(path);
+	} catch {
+		return undefined;
+	}
+	assertInside(REAL_ROOT, real, describe);
+	return real;
+}
+
 /**
  * Read one project's manifest. pnpm also accepts package.json5, which this does
  * not parse — an unread manifest would be a silent hole, so it stops instead.
  */
 function readManifest(project) {
-	// A project path comes from the lockfile, and a lockfile is a file like any
-	// other. An absolute or `../`-bearing key would send the read outside the
-	// repository and put a foreign manifest's contents in the log.
 	const directory = resolve(ROOT, project);
-	if (directory !== ROOT && !directory.startsWith(`${ROOT}/`)) {
-		fail(`lockfile importer "${project}" resolves outside the repository (${directory})`);
-	}
+	containedPath(directory, `lockfile importer "${project}"`);
 	for (const [file, parseAs] of [
 		['package.json', JSON.parse],
 		['package.yaml', parse],
 	]) {
-		const path = resolve(directory, file);
-		if (!existsSync(path)) continue;
+		const path = containedPath(resolve(directory, file), `${project}/${file}`);
+		if (path === undefined) continue;
 		try {
 			return parseAs(readFileSync(path, 'utf8'));
 		} catch (error) {
@@ -134,16 +168,51 @@ if (workspaceConfig?.catalogs !== undefined) {
 		'pnpm-workspace.yaml declares named catalogs. This repository has one catalog on purpose: a second one can hold a different range for the same package, which is how a dependency ends up loaded twice.',
 	);
 }
-const rootManifest = readManifest('.');
-const substitutions = [
-	...Object.entries(workspaceConfig?.catalog ?? {}).map(([name, value]) => ['catalog entry', name, value]),
-	...Object.entries(rootManifest?.pnpm?.overrides ?? {}).map(([name, value]) => ['override', name, value]),
-];
-for (const [channel, name, value] of substitutions) {
+const catalog = workspaceConfig?.catalog ?? {};
+
+/**
+ * The overrides come from the lockfile rather than from a manifest. pnpm accepts
+ * them in `pnpm-workspace.yaml` and in `package.json#pnpm.overrides`, so reading
+ * the declaration sites means keeping a list of them in step with pnpm; the
+ * lockfile records the effective set whichever file declared it, and a frozen
+ * install is what keeps that record faithful. Same reason the project list comes
+ * from there.
+ */
+const overrides = lock?.overrides ?? {};
+
+/**
+ * Whether an override selector names a given package. Asked in that direction on
+ * purpose: an override key mixes a `parent>child` separator with ranges that
+ * contain the same character (`pg@>=8.0.0 <8.21.0`), so parsing a name out of it
+ * is ambiguous, while testing a known name against every `>`-separated segment
+ * is not. Splitting can only produce more segments to test, and a range fragment
+ * matches no package name — so the ambiguity errs toward asking, never toward
+ * missing.
+ */
+function selectorNames(selector, name) {
+	return selector.split('>').some((segment) => {
+		const candidate = segment.trim();
+		return candidate === name || candidate.startsWith(`${name}@`);
+	});
+}
+
+function assertNotAlias(channel, name, value) {
 	if (String(value).startsWith('npm:')) {
 		fail(
 			`${channel} ${name}: ${value} is an alias. Two names for one package defeat the one-version rule — every check below would read them as unrelated dependencies.`,
 		);
+	}
+}
+
+for (const [name, value] of Object.entries(catalog)) assertNotAlias('catalog entry', name, value);
+for (const [selector, value] of Object.entries(overrides)) {
+	assertNotAlias('override', selector, value);
+	for (const name of Object.keys(catalog)) {
+		if (selectorNames(selector, name)) {
+			fail(
+				`override ${selector}: ${value} decides the version of ${name}, which the catalog already governs. One package, two places deciding its version — and only one of them is where anyone looks. Change the catalog entry. Overrides are for transitive packages the catalog does not name.`,
+			);
+		}
 	}
 }
 

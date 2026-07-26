@@ -8,7 +8,7 @@
  * nothing about what this protects.
  */
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,11 +52,17 @@ function run(fixture) {
 	try {
 		writeFileSync(join(dir, 'pnpm-workspace.yaml'), JSON.stringify(fixture.workspace));
 		writeFileSync(join(dir, 'package.json'), JSON.stringify(fixture.root));
-		writeFileSync(join(dir, 'pnpm-lock.yaml'), JSON.stringify({ importers: fixture.lock }));
+		writeFileSync(
+			join(dir, 'pnpm-lock.yaml'),
+			JSON.stringify({ overrides: fixture.overrides ?? {}, importers: fixture.lock }),
+		);
 		for (const [project, manifest] of Object.entries(fixture.projects)) {
 			mkdirSync(join(dir, project), { recursive: true });
 			writeFileSync(join(dir, project, 'package.json'), JSON.stringify(manifest));
 		}
+		// Anything a fixture can only express against the materialised tree —
+		// a symlink, chiefly, which is the shape `resolve` alone does not see.
+		fixture.after?.(dir);
 		try {
 			const stdout = execFileSync('node', [SCRIPT, dir], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
 			return { code: 0, output: stdout };
@@ -127,10 +133,50 @@ test('refuses an alias in the catalog', () => {
 	refuses(fixture, /catalog entry pg-old.*is an alias/);
 });
 
-test('refuses an alias in pnpm.overrides — the other substitution channel', () => {
+test('refuses an alias in the overrides, whichever file declared it', () => {
+	// pnpm takes overrides from pnpm-workspace.yaml and from package.json#pnpm;
+	// the guard reads the effective set the lockfile records, so a new
+	// declaration site does not open a hole.
 	const fixture = baseline();
-	fixture.root.pnpm = { overrides: { 'pg-old': 'npm:pg@8.20.0' } };
+	fixture.overrides = { 'pg-old': 'npm:pg@8.20.0' };
 	refuses(fixture, /override pg-old.*is an alias/);
+});
+
+test('refuses an override on a package the catalog governs', () => {
+	// The version would be decided in two places, and the catalog is the one
+	// anybody reads — a compatibility floor could be silently undercut.
+	const fixture = baseline();
+	fixture.overrides = { 'pg@>=8.0.0 <8.21.0': '8.20.0' };
+	refuses(fixture, /catalog already governs/);
+});
+
+test('accepts an override on a transitive package the catalog does not name', () => {
+	// Security pins on transitive dependencies are what overrides are for.
+	const fixture = baseline();
+	fixture.overrides = { 'lodash@>=4.0.0 <4.17.23': '>=4.17.23' };
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
+});
+
+test('refuses an importer whose directory is a symlink out of the repository', () => {
+	// `resolve` strips `..` but follows nothing: the lexical path stays under
+	// the root while the read lands anywhere.
+	const fixture = baseline();
+	fixture.lock['packages/escape'] = { dependencies: {} };
+	fixture.after = (dir) => symlinkSync(tmpdir(), join(dir, 'packages/escape'), 'dir');
+	refuses(fixture, /resolves outside the repository/);
+});
+
+test('refuses an importer whose manifest file is a symlink out of the repository', () => {
+	const fixture = baseline();
+	const foreign = mkdtempSync(join(tmpdir(), 'catalog-foreign-'));
+	writeFileSync(join(foreign, 'package.json'), JSON.stringify({ name: 'foreign' }));
+	fixture.lock['packages/sneak'] = { dependencies: {} };
+	fixture.after = (dir) => {
+		mkdirSync(join(dir, 'packages/sneak'), { recursive: true });
+		symlinkSync(join(foreign, 'package.json'), join(dir, 'packages/sneak/package.json'));
+	};
+	refuses(fixture, /resolves outside the repository/);
 });
 
 test('refuses two projects resolving one dependency to different versions', () => {
