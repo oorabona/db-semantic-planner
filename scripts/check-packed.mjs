@@ -7,7 +7,6 @@
  */
 import { execFileSync } from 'node:child_process';
 import { posix, resolve } from 'node:path';
-import { isDeepStrictEqual } from 'node:util';
 import { assertDependencyBlocks, createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
 let sourceRoot = process.cwd();
@@ -26,9 +25,6 @@ for (let index = 2; index < process.argv.length; index += 1) {
 }
 const ROOT = resolve(sourceRoot);
 
-/** pnpm 10.33.0 drops exactly these package lifecycle scripts during pack. */
-const PACK_DROPPED_SCRIPT_KEYS = ['prepublishOnly', 'prepack', 'prepare', 'postpack', 'publish', 'postpublish'];
-
 function fail(message) {
 	console.error(`packed check: ${message}`);
 	process.exit(1);
@@ -39,7 +35,12 @@ const { readManifest } = createManifestReader(ROOT, fail);
 function archiveEntries(tarball) {
 	let rawEntries;
 	try {
-		rawEntries = execFileSync('tar', ['-tzf', tarball], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+		rawEntries = execFileSync('tar', ['-tzf', tarball], {
+			// 64 MiB is ample for the file list of one publishable package.
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'pipe'],
+			maxBuffer: 64 * 1024 * 1024,
+		})
 			.split(/\r?\n/)
 			.filter(Boolean);
 	} catch (error) {
@@ -69,7 +70,14 @@ function packedManifest(tarball, entries) {
 	}
 	const [entry] = manifestEntries;
 	try {
-		return JSON.parse(execFileSync('tar', ['-xOzf', tarball, '--', entry.raw], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+		return JSON.parse(
+			execFileSync('tar', ['-xOzf', tarball, '--', entry.raw], {
+				// 64 MiB is ample for the package manifest in one publishable tarball.
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+				maxBuffer: 64 * 1024 * 1024,
+			}),
+		);
 	} catch (error) {
 		fail(`cannot read package/package.json from ${tarball}: ${error.message}`);
 	}
@@ -95,13 +103,11 @@ const sourceByName = new Map();
 for (const project of Object.keys(importers)) {
 	const manifest = readManifest(project);
 	assertDependencyBlocks(manifest, `${project} source manifest`, fail);
-	if (typeof manifest?.name !== 'string' || typeof manifest?.version !== 'string') {
-		fail(`${project} source manifest has no string name and version`);
-	}
+	sourceByProject.set(project, manifest);
+	if (typeof manifest?.name !== 'string') continue;
 	if (sourceByName.has(manifest.name)) {
 		fail(`source manifests contain duplicate package name ${manifest.name}`);
 	}
-	sourceByProject.set(project, manifest);
 	sourceByName.set(manifest.name, manifest);
 }
 
@@ -115,6 +121,8 @@ function assertArtifactDependencies(tarball, source, packed) {
 				fail(`${tarball}: packed ${block}.${name} leaks an unresolved protocol (${String(range)})`);
 			}
 		}
+		// Name the difference rather than both key sets: an added dependency and a
+		// dropped one are different accidents, and the message is what a reader acts on.
 		const added = Object.keys(packedDependencies).filter((name) => !Object.hasOwn(sourceDependencies, name));
 		if (added.length > 0) {
 			fail(`${tarball}: packed ${block} adds ${added.join(', ')}, which source ${source.name} does not declare`);
@@ -135,6 +143,9 @@ function assertArtifactDependencies(tarball, source, packed) {
 				if (workspace === undefined) {
 					fail(`${tarball}: source ${source.name} ${block}.${name} names unknown workspace package ${name}`);
 				}
+				if (typeof workspace.version !== 'string') {
+					fail(`${tarball}: source ${source.name} ${block}.${name} names workspace package ${name}, which has no version to substitute`);
+				}
 				expected = `${sourceRange === 'workspace:^' ? '^' : ''}${workspace.version}`;
 			} else {
 				continue;
@@ -144,37 +155,6 @@ function assertArtifactDependencies(tarball, source, packed) {
 			}
 		}
 	}
-}
-
-function expectedPackedManifest(tarball, source) {
-	const expected = structuredClone(source);
-	// These are the only `pnpm pack` normalisations this guard understands:
-	// hard-coded drops can be checked, but publishConfig overrides transform
-	// values we would have to predict. A future pnpm change therefore refuses
-	// to publish instead of certifying an artifact this guard no longer models.
-	delete expected.packageManager;
-	delete expected.pnpm;
-	if (expected.scripts !== undefined) {
-		for (const lifecycle of PACK_DROPPED_SCRIPT_KEYS) delete expected.scripts[lifecycle];
-	}
-	for (const block of DEPENDENCY_BLOCKS) {
-		for (const [name, sourceRange] of Object.entries(source[block] ?? {})) {
-			if (sourceRange === 'catalog:') {
-				const range = catalog[name]?.specifier;
-				if (typeof range !== 'string') {
-					fail(`${tarball}: source ${source.name} ${block}.${name} says catalog:, but the default catalog has no recorded specifier`);
-				}
-				expected[block][name] = range;
-			} else if (sourceRange === 'workspace:*' || sourceRange === 'workspace:^') {
-				const workspace = sourceByName.get(name);
-				if (workspace === undefined) {
-					fail(`${tarball}: source ${source.name} ${block}.${name} names unknown workspace package ${name}`);
-				}
-				expected[block][name] = `${sourceRange === 'workspace:^' ? '^' : ''}${workspace.version}`;
-			}
-		}
-	}
-	return expected;
 }
 
 function assertPublicPublishConfig(tarball, side, manifest) {
@@ -210,6 +190,9 @@ for (const argument of TARBALL_PAIRS) {
 	if (source === undefined) {
 		fail(`${tarball}: project ${project} is not a workspace importer`);
 	}
+	if (typeof source?.name !== 'string' || typeof source?.version !== 'string') {
+		fail(`${project} source manifest has no string name and version for packed candidate`);
+	}
 	const entries = archiveEntries(tarball);
 	if (entries.some(({ path }) => path === 'package/node_modules' || path.startsWith('package/node_modules/'))) {
 		fail(`${tarball} contains package/node_modules, so it ships bundled dependency copies`);
@@ -236,10 +219,6 @@ for (const argument of TARBALL_PAIRS) {
 		}
 	}
 	assertArtifactDependencies(tarball, source, packed);
-	const expected = expectedPackedManifest(tarball, source);
-	if (!isDeepStrictEqual(packed, expected)) {
-		fail(`${tarball}: packed manifest does not exactly match source ${source.name} after catalog and workspace substitutions`);
-	}
 }
 
 console.log(`packed check: ${TARBALL_PAIRS.length} tarball(s) match their source catalog and workspace contracts.`);

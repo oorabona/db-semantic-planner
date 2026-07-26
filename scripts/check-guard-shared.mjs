@@ -78,13 +78,13 @@ export function createManifestReader(rootArgument, fail) {
 		if (file === undefined) {
 			fail(`${project} has none of ${MANIFEST_BASE_NAMES.join(', ')} — the three manifests pnpm accepts.`);
 		}
-		if (file === 'package.json5') {
+		if (file === 'package.json5' || file === 'package.yaml') {
 			fail(
-				`${project}/package.json5 is the manifest pnpm reads here, and this check cannot parse JSON5. Refusing rather than certifying a manifest pnpm is not using.`,
+				`${project}/${file} is the manifest pnpm reads here, and this check cannot parse it with pnpm's semantics. Refusing rather than certifying a manifest pnpm is not using.`,
 			);
 		}
 		try {
-			return (file === 'package.json' ? JSON.parse : parse)(readFileSync(path, 'utf8'));
+			return JSON.parse(readFileSync(path, 'utf8'));
 		} catch (error) {
 			fail(`cannot parse ${project}/${file}: ${error.message}`);
 		}

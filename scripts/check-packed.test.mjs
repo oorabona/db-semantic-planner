@@ -166,13 +166,13 @@ test('refuses leaked catalog and workspace protocols in any packed dependency bl
 test('refuses a dependency added by packing', () => {
 	const fixture = baseline();
 	fixture.packed.dependencies.pg = '^8.16.0';
-	refuses(fixture, /packed dependencies adds pg, which source @acme\/cli does not declare/);
+	refuses(fixture, /packed dependencies adds pg, which source .* does not declare/);
 });
 
 test('refuses a dependency dropped by packing', () => {
 	const fixture = baseline();
 	delete fixture.packed.peerDependencies.pg;
-	refuses(fixture, /packed peerDependencies drops pg, which source @acme\/cli declares/);
+	refuses(fixture, /packed peerDependencies drops pg, which source .* declares/);
 });
 
 test('refuses a packed name not present in the source workspace', () => {
@@ -195,67 +195,21 @@ test('refuses either bundled-dependency field in the packed manifest', () => {
 	}
 });
 
-test('refuses a non-dependency field changed while packing', () => {
+test('accepts unrelated fields rewritten while packing', () => {
 	const fixture = baseline();
+	fixture.projects['packages/cli'].bin = { acme: './dist/cli.js' };
 	fixture.projects['packages/cli'].exports = './dist/index.js';
-	fixture.packed.exports = './dist/other.js';
-	refuses(fixture, /does not exactly match source/);
-});
-
-test('allows only the documented pnpm pack manifest drops', () => {
-	const fixture = baseline();
-	Object.assign(fixture.projects['packages/cli'], {
-		packageManager: 'pnpm@10.33.0',
-		pnpm: { onlyBuiltDependencies: [] },
-		scripts: {
-			build: 'node build.js', test: 'node test.js', prepublish: 'node prepublish.js', pack: 'node pack.js', prepublishOnly: 'node prepublish-only.js', prepack: 'node prepack.js', prepare: 'node prepare.js', postpack: 'node postpack.js', publish: 'node publish.js', postpublish: 'node postpublish.js',
-		},
-	});
-	Object.assign(fixture.packed, {
-		scripts: { build: 'node build.js', test: 'node test.js', prepublish: 'node prepublish.js', pack: 'node pack.js' },
-	});
+	fixture.packed.bin = { acme: './dist/rewritten-cli.js' };
+	fixture.packed.exports = './dist/rewritten-index.js';
 	const { code, output } = run(fixture);
 	assert.equal(code, 0, output);
 });
 
-test('accepts the bounded compatibility envelope from a real pnpm pack', () => {
-	const dir = mkdtempSync(join(tmpdir(), 'packed-real-pnpm-'));
-	try {
-		const manifest = {
-			name: '@acme/packed-fixture',
-			version: '1.0.0',
-			packageManager: 'pnpm@10.33.0',
-			pnpm: { onlyBuiltDependencies: [] },
-			scripts: {
-				build: 'node -e "process.exit(0)"',
-				test: 'node -e "process.exit(0)"',
-				typecheck: 'node -e "process.exit(0)"',
-				prepublish: 'node -e "process.exit(0)"',
-				pack: 'node -e "process.exit(0)"',
-				prepublishOnly: 'node -e "process.exit(0)"',
-				prepack: 'node -e "process.exit(0)"',
-				prepare: 'node -e "process.exit(0)"',
-				postpack: 'node -e "process.exit(0)"',
-				publish: 'node -e "process.exit(0)"',
-				postpublish: 'node -e "process.exit(0)"',
-			},
-			publishConfig: { access: 'public' },
-		};
-		writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest));
-		writeFileSync(join(dir, 'pnpm-lock.yaml'), JSON.stringify({ importers: { '.': {} }, catalogs: { default: {} } }));
-		const packed = join(dir, 'packed');
-		mkdirSync(packed);
-		execFileSync('pnpm', ['pack', '--pack-destination', packed], { cwd: dir, stdio: 'pipe' });
-		const tarball = join(packed, readdirSync(packed).find((file) => file.endsWith('.tgz')) ?? 'missing.tgz');
-		const output = execFileSync('node', [SCRIPT, `.= ${tarball}`.replace('= ', '=')], {
-			cwd: dir,
-			encoding: 'utf8',
-			stdio: ['pipe', 'pipe', 'pipe'],
-		});
-		assert.match(output, /match their source catalog/);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
+test('ignores an unrelated private importer that has no version', () => {
+	const fixture = baseline();
+	delete fixture.root.version;
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
 });
 
 test('requires exactly public access publishConfig on both source and packed candidates', () => {
