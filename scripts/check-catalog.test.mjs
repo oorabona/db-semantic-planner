@@ -130,7 +130,15 @@ test('refuses a workspace protocol form outside the two this repo publishes', ()
 test('refuses an alias in the catalog', () => {
 	const fixture = baseline();
 	fixture.workspace.catalog['pg-old'] = 'npm:pg@8.20.0';
-	refuses(fixture, /catalog entry pg-old.*is an alias/);
+	refuses(fixture, /catalog entry pg-old.*source protocol/);
+});
+
+test('refuses a source protocol other than npm: — jsr, git, whatever comes next', () => {
+	// Two keys, one upstream package: `hono3: jsr:@hono/hono@3` beside
+	// `hono4: jsr:@hono/hono@4` is the duplicate wearing a different spelling.
+	const fixture = baseline();
+	fixture.workspace.catalog.hono3 = 'jsr:@hono/hono@3';
+	refuses(fixture, /catalog entry hono3.*source protocol/);
 });
 
 test('refuses an alias in the overrides, whichever file declared it', () => {
@@ -139,7 +147,7 @@ test('refuses an alias in the overrides, whichever file declared it', () => {
 	// declaration site does not open a hole.
 	const fixture = baseline();
 	fixture.overrides = { 'pg-old': 'npm:pg@8.20.0' };
-	refuses(fixture, /override pg-old.*is an alias/);
+	refuses(fixture, /override pg-old.*source protocol/);
 });
 
 test('refuses an override on a package the catalog governs', () => {
@@ -169,14 +177,34 @@ test('refuses an importer whose directory is a symlink out of the repository', (
 
 test('refuses an importer whose manifest file is a symlink out of the repository', () => {
 	const fixture = baseline();
+	// Outside the fixture root on purpose — that is the whole point — so it is
+	// this test's job to remove it. `run()` only cleans the workspace it made.
 	const foreign = mkdtempSync(join(tmpdir(), 'catalog-foreign-'));
-	writeFileSync(join(foreign, 'package.json'), JSON.stringify({ name: 'foreign' }));
-	fixture.lock['packages/sneak'] = { dependencies: {} };
+	try {
+		writeFileSync(join(foreign, 'package.json'), JSON.stringify({ name: 'foreign' }));
+		fixture.lock['packages/sneak'] = { dependencies: {} };
+		fixture.after = (dir) => {
+			mkdirSync(join(dir, 'packages/sneak'), { recursive: true });
+			symlinkSync(join(foreign, 'package.json'), join(dir, 'packages/sneak/package.json'));
+		};
+		refuses(fixture, /resolves outside the repository/);
+	} finally {
+		rmSync(foreign, { recursive: true, force: true });
+	}
+});
+
+test('refuses a project carrying a package.json5, which pnpm reads first', () => {
+	// pnpm's MANIFEST_BASE_NAMES is [package.json, package.json5, package.yaml].
+	// Reading the yaml while pnpm reads the json5 would certify a manifest that
+	// governs nothing.
+	const fixture = baseline();
+	fixture.lock['packages/five'] = { dependencies: {} };
 	fixture.after = (dir) => {
-		mkdirSync(join(dir, 'packages/sneak'), { recursive: true });
-		symlinkSync(join(foreign, 'package.json'), join(dir, 'packages/sneak/package.json'));
+		mkdirSync(join(dir, 'packages/five'), { recursive: true });
+		writeFileSync(join(dir, 'packages/five/package.json5'), '{ name: "@acme/five" }');
+		writeFileSync(join(dir, 'packages/five/package.yaml'), 'name: "@acme/five"\n');
 	};
-	refuses(fixture, /resolves outside the repository/);
+	refuses(fixture, /package\.json5/);
 });
 
 test('refuses two projects resolving one dependency to different versions', () => {
@@ -212,5 +240,5 @@ test('refuses a lockfile entry with no resolved version', () => {
 test('refuses a project whose manifest it cannot read', () => {
 	const fixture = baseline();
 	fixture.lock['packages/ghost'] = { dependencies: {} };
-	refuses(fixture, /neither package.json nor package.yaml/);
+	refuses(fixture, /none of package\.json, package\.json5 or package\.yaml/);
 });

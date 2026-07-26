@@ -46,6 +46,12 @@ jobs:
       # 1.11.0 release onward. Bump deliberately after verifying provenance works.
       - run: npm install -g npm@11.18.0
       - run: pnpm install --frozen-lockfile
+      # A `catalog:` reference is replaced by its range at pack time, so this is
+      # the last moment a wrong range is still recallable. The frozen install
+      # above does not catch every shape on its own — a peer range shadowed by a
+      # dev dependency of the same name never reaches the lockfile — and this job
+      # is reachable without CI having run on the same commit.
+      - run: node scripts/check-catalog.mjs
       # Decide whether anything needs publishing BEFORE building, so the common
       # case (a release-please run that only refreshes the release PR, no version
       # change) exits cheaply without a full build.

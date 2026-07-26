@@ -95,12 +95,23 @@ function containedPath(path, describe) {
 }
 
 /**
- * Read one project's manifest. pnpm also accepts package.json5, which this does
- * not parse — an unread manifest would be a silent hole, so it stops instead.
+ * Read one project's manifest, in pnpm's own order — `MANIFEST_BASE_NAMES` is
+ * `["package.json", "package.json5", "package.yaml"]`, so JSON5 outranks YAML.
+ * This does not parse JSON5, and reading the file below the one pnpm reads
+ * would be worse than reading none: the guard would certify a manifest that
+ * governs nothing. So a JSON5 manifest stops the check rather than being
+ * skipped past. No project here has one; if one ever does, teach this to read
+ * it — the pnpm reader is `@pnpm/read-project-manifest` — rather than reordering
+ * around it.
  */
 function readManifest(project) {
 	const directory = resolve(ROOT, project);
 	containedPath(directory, `lockfile importer "${project}"`);
+	if (containedPath(resolve(directory, 'package.json5'), `${project}/package.json5`) !== undefined) {
+		fail(
+			`${project} has a package.json5, which pnpm reads ahead of package.yaml and this check cannot parse. Refusing rather than certifying a manifest pnpm may not be using.`,
+		);
+	}
 	for (const [file, parseAs] of [
 		['package.json', JSON.parse],
 		['package.yaml', parse],
@@ -113,9 +124,7 @@ function readManifest(project) {
 			fail(`cannot parse ${project}/${file}: ${error.message}`);
 		}
 	}
-	fail(
-		`${project} has neither package.json nor package.yaml. pnpm also supports package.json5, which this check does not read — convert the manifest or teach the check to read it, rather than leaving it unchecked.`,
-	);
+	fail(`${project} has none of package.json, package.json5 or package.yaml — the three manifests pnpm accepts.`);
 }
 
 /**
@@ -196,17 +205,30 @@ function selectorNames(selector, name) {
 	});
 }
 
-function assertNotAlias(channel, name, value) {
-	if (String(value).startsWith('npm:')) {
+/**
+ * A version, and nothing that carries its own identity. `npm:pg@8.20.0` and
+ * `jsr:@hono/hono@3` both put a package under a key that is not its name, so two
+ * keys can name one package and every check below reads them as unrelated —
+ * which is the duplicate this exists to prevent, wearing a spelling that hides
+ * it. Banning the protocols known today would leave the next one open, so the
+ * rule is the other way round: a protocol at all is refused. `$name`, which pnpm
+ * accepts in an override to mean the root's declared version of that package, is
+ * not a second identity and is allowed.
+ */
+const PROTOCOL = /^[a-z][a-z0-9+.-]*:/i;
+
+function assertPlainRange(channel, name, value) {
+	const raw = String(value);
+	if (PROTOCOL.test(raw)) {
 		fail(
-			`${channel} ${name}: ${value} is an alias. Two names for one package defeat the one-version rule — every check below would read them as unrelated dependencies.`,
+			`${channel} ${name}: ${raw} carries a source protocol, not a version. Two keys can then name one package, and every check below would read them as unrelated dependencies. Name the package, and give it a range.`,
 		);
 	}
 }
 
-for (const [name, value] of Object.entries(catalog)) assertNotAlias('catalog entry', name, value);
+for (const [name, value] of Object.entries(catalog)) assertPlainRange('catalog entry', name, value);
 for (const [selector, value] of Object.entries(overrides)) {
-	assertNotAlias('override', selector, value);
+	assertPlainRange('override', selector, value);
 	for (const name of Object.keys(catalog)) {
 		if (selectorNames(selector, name)) {
 			fail(
