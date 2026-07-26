@@ -42,9 +42,14 @@ const LOCKFILE = resolve(ROOT, 'pnpm-lock.yaml');
 const THIRD_PARTY_FORM = 'catalog:';
 const WORKSPACE_FORMS = new Set(['workspace:*', 'workspace:^']);
 
-/** A catalog's recorded specifier must begin like an npm version range, not a tag or source shorthand. */
-function isPlainCatalogRange(specifier) {
-	return /^[v=]?\d|^[*xX~^<>]/.test(specifier) && !specifier.includes(':') && !specifier.includes('/');
+/**
+ * Release policy intentionally accepts this closed catalog-specifier language.
+ * A future legitimate comparator or prerelease is a deliberate guard edit:
+ * widening to general npm ranges would need semver parsing and would change the
+ * published-range policy, not merely recognise another spelling.
+ */
+function isAllowedCatalogSpecifier(specifier) {
+	return /^(?:\*|[~^]?\d+\.\d+\.\d+)$/.test(specifier);
 }
 
 /** Which form a name must use is decided by what the name IS, not by the caller. */
@@ -233,8 +238,8 @@ if (workspace.catalog !== undefined && (workspace.catalog === null || typeof wor
 	fail('pnpm-workspace.yaml catalog is not a map');
 }
 for (const [name, specifier] of Object.entries(workspace.catalog ?? {})) {
-	if (typeof specifier !== 'string' || !isPlainCatalogRange(specifier)) {
-		fail(`pnpm-workspace.yaml catalog entry ${name} has non-plain specifier ${String(specifier)}. Catalog entries must record a plain range, not an alias or source protocol.`);
+	if (typeof specifier !== 'string' || !isAllowedCatalogSpecifier(specifier)) {
+		fail(`pnpm-workspace.yaml catalog entry ${name} has disallowed specifier ${String(specifier)}. Catalog entries must use the release policy's closed range grammar.`);
 	}
 }
 
@@ -316,9 +321,9 @@ if (catalogNames.some((name) => name !== 'default')) {
  */
 const catalogResolved = lock?.catalogs?.default ?? {};
 for (const [name, entry] of Object.entries(catalogResolved)) {
-	if (typeof entry?.specifier !== 'string' || !isPlainCatalogRange(entry.specifier)) {
+	if (typeof entry?.specifier !== 'string' || !isAllowedCatalogSpecifier(entry.specifier)) {
 		fail(
-			`catalog entry ${name} has non-plain specifier ${String(entry?.specifier)}. Catalog entries must record a plain range, not an alias or source protocol.`,
+			`catalog entry ${name} has disallowed specifier ${String(entry?.specifier)}. Catalog entries must use the release policy's closed range grammar.`,
 		);
 	}
 }

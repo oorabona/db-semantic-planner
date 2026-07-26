@@ -8,7 +8,7 @@
  * nothing about what this protects.
  */
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const SCRIPT = fileURLToPath(new URL('./check-catalog.mjs', import.meta.url));
+const PATCHED_INSTALL_FIXTURE = fileURLToPath(new URL('./fixtures/catalog-patched-install/', import.meta.url));
 
 /** A workspace that passes, as the baseline every case below perturbs. */
 function baseline() {
@@ -154,7 +155,7 @@ test('refuses a named catalogs block declared in pnpm-workspace.yaml, even when 
 test('refuses an unused source catalog entry whose specifier is not a plain range', () => {
 	const fixture = baseline();
 	fixture.workspace.catalog.unused = 'latest';
-	refuses(fixture, /pnpm-workspace\.yaml catalog entry unused has non-plain specifier/);
+	refuses(fixture, /pnpm-workspace\.yaml catalog entry unused has disallowed specifier/);
 });
 
 test('refuses a workspace package referenced through the catalog', () => {
@@ -174,26 +175,37 @@ test('refuses a catalog alias recorded in the catalog specifier', () => {
 	fixture.catalogs.default['pg-old'] = { specifier: 'npm:pg@8.20.0', version: '8.20.0' };
 	fixture.projects['packages/cli'].dependencies['pg-old'] = 'catalog:';
 	fixture.lock['packages/cli'].dependencies['pg-old'] = { specifier: 'catalog:', version: 'pg@8.20.0' };
-	refuses(fixture, /non-plain specifier/);
+	refuses(fixture, /disallowed specifier/);
 });
 
 test('refuses a catalog tag rather than a version range', () => {
 	const fixture = baseline();
 	fixture.catalogs.default.pg.specifier = 'latest';
-	refuses(fixture, /non-plain specifier/);
+	refuses(fixture, /disallowed specifier/);
 });
 
 test('refuses a git shorthand in a catalog specifier', () => {
 	const fixture = baseline();
 	fixture.catalogs.default.pg.specifier = 'x/repo';
-	refuses(fixture, /non-plain specifier/);
+	refuses(fixture, /disallowed specifier/);
 });
 
-test('accepts a normal catalog range containing a space', () => {
-	const fixture = baseline();
-	fixture.catalogs.default.pg.specifier = '>=8.0.0 <9.0.0';
-	const { code, output } = run(fixture);
-	assert.equal(code, 0, output);
+test('accepts every catalog specifier admitted by the closed release policy', () => {
+	for (const specifier of ['*', '1.2.3', '~1.2.3', '^1.2.3']) {
+		const fixture = baseline();
+		fixture.workspace.catalog.pg = specifier;
+		fixture.catalogs.default.pg.specifier = specifier;
+		const { code, output } = run(fixture);
+		assert.equal(code, 0, `${specifier}: ${output}`);
+	}
+});
+
+test('refuses catalog specifiers outside the closed release policy', () => {
+	for (const specifier of ['1beta', 'latest', '1.2.3 || 2.0.0', 'npm:pg@1.2.3', '>=8.0.0 <9.0.0']) {
+		const fixture = baseline();
+		fixture.workspace.catalog.pg = specifier;
+		refuses(fixture, /disallowed specifier/);
+	}
 });
 
 test('refuses a catalog declaration whose recorded package name differs from its key', () => {
@@ -225,27 +237,27 @@ test('strips a normal peer context without merging it into package identity', ()
 	assert.equal(code, 0, output);
 });
 
-test('refuses the patch suffix that a real pnpm patchedDependencies install writes', () => {
+test('refuses the patch suffix from a captured pinned-pnpm patchedDependencies install', () => {
 	const dir = mkdtempSync(join(tmpdir(), 'catalog-patched-'));
 	try {
-		writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'patched-root', private: true }));
-		writeFileSync(join(dir, '.npmrc'), 'store-dir=.pnpm-store\n');
-		writeFileSync(join(dir, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\ncatalog:\n  yaml: 2.9.0\n');
-		mkdirSync(join(dir, 'packages/child'), { recursive: true });
-		writeFileSync(join(dir, 'packages/child/package.json'), JSON.stringify({ name: '@acme/child', version: '1.0.0', dependencies: { yaml: 'catalog:' } }));
-		execFileSync('pnpm', ['install', '--ignore-scripts', '--package-import-method=copy'], { cwd: dir, stdio: 'pipe' });
-		const edit = join(dir, 'patch-edit');
-		execFileSync('pnpm', ['patch', 'yaml@2.9.0', '--edit-dir', edit], { cwd: dir, stdio: 'pipe' });
-		writeFileSync(join(edit, 'README.md'), `${readFileSync(join(edit, 'README.md'), 'utf8')}\npatched fixture\n`);
-		execFileSync('pnpm', ['patch-commit', edit, '--patches-dir', 'patches'], { cwd: dir, stdio: 'pipe' });
-		execFileSync('pnpm', ['install', '--ignore-scripts', '--package-import-method=copy'], { cwd: dir, stdio: 'pipe' });
-
+		cpSync(PATCHED_INSTALL_FIXTURE, dir, { recursive: true });
 		const lockfile = readFileSync(join(dir, 'pnpm-lock.yaml'), 'utf8');
-		assert.match(lockfile, /patch_hash=/, 'pnpm did not write the patched resolution shape this guard protects');
+		assert.match(lockfile, /is-odd:\n\s+specifier: 3\.0\.1\n\s+version: 3\.0\.1/, 'fixture must retain the bare default-catalog resolution');
+		assert.match(lockfile, /version: 3\.0\.1\(patch_hash=[a-f0-9]+\)/, 'fixture must retain pnpm\'s patched importer resolution');
+		mkdirSync(join(dir, 'node_modules/.pnpm'), { recursive: true });
+		writeFileSync(join(dir, 'node_modules/.pnpm/lock.yaml'), lockfile);
+		const bin = join(dir, 'bin');
+		mkdirSync(bin);
+		writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(JSON.stringify(['.', 'packages/child'].map((project) => ({ path: join(dir, project) }))))});\n`);
+		chmodSync(join(bin, 'pnpm'), 0o755);
 		let code = 0;
 		let output = '';
 		try {
-			execFileSync('node', [SCRIPT, dir], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+			execFileSync('node', [SCRIPT, dir], {
+				encoding: 'utf8',
+				stdio: ['pipe', 'pipe', 'pipe'],
+				env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH ?? ''}` },
+			});
 		} catch (error) {
 			code = error.status ?? 1;
 			output = `${error.stdout ?? ''}${error.stderr ?? ''}`;

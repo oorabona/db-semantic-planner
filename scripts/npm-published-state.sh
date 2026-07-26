@@ -3,9 +3,11 @@
 # workflow's two decisions: whether anything needs building, and whether to pack
 # a given package.
 #
-# Prints exactly `published` or `unpublished`, and exits non-zero with an empty
+# Prints exactly `published` or `not-found`, and exits non-zero with an empty
 # stdout when the registry did not answer — auth failure, timeout, rate limit,
-# outage. That third case is why this is not a boolean: a caller writing
+# outage. `not-found` authorizes an upload attempt; it does not prove global
+# nonexistence or visibility, and the registry PUT remains authoritative. That
+# third case is why this is not a boolean: a caller writing
 # `if npm_is_published "$pkg"; then` reads every non-zero as "not published" and
 # publishes over an outage. Called as `state=$(npm-published-state.sh "$pkg")`
 # under `set -e`, an undetermined answer kills the step instead, because the
@@ -36,7 +38,7 @@ if [ "$status" -eq 0 ]; then
 fi
 
 if node -e 'const fs = require("node:fs"); try { const value = JSON.parse(fs.readFileSync(0, "utf8")); process.exit(value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1 && value.error !== null && typeof value.error === "object" && !Array.isArray(value.error) && value.error.code === "E404" ? 0 : 1); } catch { process.exit(1); }' <<<"$output"; then
-	echo unpublished
+	echo not-found
 	exit 0
 fi
 

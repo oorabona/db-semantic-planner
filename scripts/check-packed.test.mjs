@@ -14,10 +14,11 @@ function baseline() {
 	return {
 		root: { name: 'root', version: '1.0.0', private: true },
 		projects: {
-			'packages/core': { name: '@acme/core', version: '2.0.0' },
+			'packages/core': { name: '@acme/core', version: '2.0.0', publishConfig: { access: 'public' } },
 			'packages/cli': {
 				name: '@acme/cli',
 				version: '3.0.0',
+				publishConfig: { access: 'public' },
 				dependencies: { '@acme/core': 'workspace:*' },
 				devDependencies: { pg: 'catalog:' },
 				peerDependencies: { pg: 'catalog:' },
@@ -33,6 +34,7 @@ function baseline() {
 		packed: {
 			name: '@acme/cli',
 			version: '3.0.0',
+			publishConfig: { access: 'public' },
 			dependencies: { '@acme/core': '2.0.0' },
 			devDependencies: { pg: '^8.21.0' },
 			peerDependencies: { pg: '^8.21.0' },
@@ -54,20 +56,38 @@ function run(fixture, options = {}) {
 		mkdirSync(join(dir, 'node_modules/.pnpm'), { recursive: true });
 		writeFileSync(join(dir, 'node_modules/.pnpm/lock.yaml'), lockfile);
 
+		if (options.sourceSnapshot) {
+			const snapshot = join(dir, 'release-inputs');
+			mkdirSync(snapshot, { recursive: true });
+			writeFileSync(join(snapshot, 'package.json'), JSON.stringify(fixture.root));
+			for (const [project, manifest] of Object.entries(fixture.projects)) {
+				mkdirSync(join(snapshot, project), { recursive: true });
+				writeFileSync(join(snapshot, project, 'package.json'), JSON.stringify(manifest));
+			}
+			writeFileSync(join(snapshot, 'pnpm-lock.yaml'), lockfile);
+		}
+		options.mutateWorktree?.(dir);
+
 		const staging = join(dir, 'staging/package');
 		mkdirSync(staging, { recursive: true });
 		if (!options.noManifest) writeFileSync(join(staging, 'package.json'), JSON.stringify(fixture.packed));
+		if (options.duplicateManifest) {
+			mkdirSync(join(dir, 'staging/duplicate'), { recursive: true });
+			writeFileSync(join(dir, 'staging/duplicate/package.json'), JSON.stringify({ ...fixture.packed, name: '@acme/other' }));
+		}
 		for (const file of options.files ?? []) {
 			const path = join(staging, file);
 			mkdirSync(join(path, '..'), { recursive: true });
 			writeFileSync(path, 'fixture');
 		}
 		const tarball = join(dir, 'package.tgz');
-		execFileSync('tar', ['-czf', tarball, ...(options.transform ? [`--transform=${options.transform}`] : []), '-C', join(dir, 'staging'), 'package']);
+		const transforms = [...(options.transform ? [options.transform] : []), ...(options.duplicateManifest ? ['s#^duplicate/#package/./#'] : [])];
+		execFileSync('tar', ['-czf', tarball, ...transforms.map((transform) => `--transform=${transform}`), '-C', join(dir, 'staging'), 'package', ...(options.duplicateManifest ? ['duplicate/package.json'] : [])]);
 		if (options.copyTarball) copyFileSync(tarball, join(dir, 'copy.tgz'));
 		try {
 			const pairs = options.pairs?.map(({ project, tarball: selected = 'package' }) => `${project}=${selected === 'copy' ? join(dir, 'copy.tgz') : tarball}`);
-			const stdout = execFileSync('node', options.noTarballs ? [SCRIPT] : [SCRIPT, ...(pairs ?? [`${options.project ?? 'packages/cli'}=${options.tarballArgument ?? tarball}`])], {
+			const sourceArguments = options.sourceSnapshot ? ['--source-root', join(dir, 'release-inputs')] : [];
+			const stdout = execFileSync('node', options.noTarballs ? [SCRIPT] : [SCRIPT, ...sourceArguments, ...(pairs ?? [`${options.project ?? 'packages/cli'}=${options.tarballArgument ?? tarball}`])], {
 				cwd: dir,
 				encoding: 'utf8',
 				stdio: ['pipe', 'pipe', 'pipe'],
@@ -101,6 +121,24 @@ test('refuses a catalog declaration rewritten to a different packed range', () =
 	const fixture = baseline();
 	fixture.packed.peerDependencies.pg = '^8.16.0';
 	refuses(fixture, /packed peerDependencies\.pg is \^8\.16\.0, expected \^8\.21\.0/);
+});
+
+test('uses the pre-build source snapshot rather than a manifest rewritten while packing', () => {
+	const mutateWorktree = (dir, fixture) => {
+		fixture.packed.peerDependencies.pg = '^8.16.0';
+		const source = JSON.parse(readFileSync(join(dir, 'packages/cli/package.json'), 'utf8'));
+		source.peerDependencies.pg = '^8.16.0';
+		writeFileSync(join(dir, 'packages/cli/package.json'), JSON.stringify(source));
+	};
+
+	const rewrittenWorktree = baseline();
+	let result = run(rewrittenWorktree, { mutateWorktree: (dir) => mutateWorktree(dir, rewrittenWorktree) });
+	assert.equal(result.code, 0, result.output);
+
+	const snapshottedSource = baseline();
+	result = run(snapshottedSource, { sourceSnapshot: true, mutateWorktree: (dir) => mutateWorktree(dir, snapshottedSource) });
+	assert.equal(result.code, 1, result.output);
+	assert.match(result.output, /packed peerDependencies\.pg is \^8\.16\.0, expected \^8\.21\.0/);
 });
 
 test('refuses incorrect workspace substitutions for both workspace forms', () => {
@@ -169,12 +207,12 @@ test('allows only the documented pnpm pack manifest drops', () => {
 	Object.assign(fixture.projects['packages/cli'], {
 		packageManager: 'pnpm@10.33.0',
 		pnpm: { onlyBuiltDependencies: [] },
-		scripts: { build: 'node build.js', test: 'node test.js', prepack: 'node prepack.js', prepare: 'node prepare.js', postpack: 'node postpack.js' },
-		publishConfig: { access: 'public', registry: 'https://registry.example.test' },
+		scripts: {
+			build: 'node build.js', test: 'node test.js', prepublish: 'node prepublish.js', pack: 'node pack.js', prepublishOnly: 'node prepublish-only.js', prepack: 'node prepack.js', prepare: 'node prepare.js', postpack: 'node postpack.js', publish: 'node publish.js', postpublish: 'node postpublish.js',
+		},
 	});
 	Object.assign(fixture.packed, {
-		scripts: { build: 'node build.js', test: 'node test.js' },
-		publishConfig: { access: 'public', registry: 'https://registry.example.test' },
+		scripts: { build: 'node build.js', test: 'node test.js', prepublish: 'node prepublish.js', pack: 'node pack.js' },
 	});
 	const { code, output } = run(fixture);
 	assert.equal(code, 0, output);
@@ -192,11 +230,16 @@ test('accepts the bounded compatibility envelope from a real pnpm pack', () => {
 				build: 'node -e "process.exit(0)"',
 				test: 'node -e "process.exit(0)"',
 				typecheck: 'node -e "process.exit(0)"',
+				prepublish: 'node -e "process.exit(0)"',
+				pack: 'node -e "process.exit(0)"',
+				prepublishOnly: 'node -e "process.exit(0)"',
 				prepack: 'node -e "process.exit(0)"',
 				prepare: 'node -e "process.exit(0)"',
 				postpack: 'node -e "process.exit(0)"',
+				publish: 'node -e "process.exit(0)"',
+				postpublish: 'node -e "process.exit(0)"',
 			},
-			publishConfig: { access: 'public', registry: 'https://registry.npmjs.org' },
+			publishConfig: { access: 'public' },
 		};
 		writeFileSync(join(dir, 'package.json'), JSON.stringify(manifest));
 		writeFileSync(join(dir, 'pnpm-lock.yaml'), JSON.stringify({ importers: { '.': {} }, catalogs: { default: {} } }));
@@ -215,12 +258,21 @@ test('accepts the bounded compatibility envelope from a real pnpm pack', () => {
 	}
 });
 
-test('refuses source publishConfig overrides this guard cannot model', () => {
-	for (const key of ['main', 'types', 'exports', 'bin', 'typesVersions', 'directory']) {
+test('requires exactly public access publishConfig on both source and packed candidates', () => {
+	for (const [side, config] of [
+		['source', { access: 'public', registry: 'https://registry.example.test' }],
+		['source', { access: 'restricted' }],
+		['source', { access: 'public', tag: 'next' }],
+		['source', undefined],
+		['packed', { access: 'public', registry: 'https://registry.example.test' }],
+		['packed', { access: 'restricted' }],
+		['packed', { access: 'public', tag: 'next' }],
+		['packed', undefined],
+	]) {
 		const fixture = baseline();
-		fixture.projects['packages/cli'].publishConfig = { access: 'public', [key]: './dist/index.js' };
-		fixture.packed.publishConfig = { access: 'public', [key]: './dist/index.js' };
-		refuses(fixture, new RegExp(`publishConfig overrides ${key}`));
+		if (side === 'source') fixture.projects['packages/cli'].publishConfig = config;
+		else fixture.packed.publishConfig = config;
+		refuses(fixture, /publishConfig must be exactly \{"access":"public"\}/);
 	}
 });
 
@@ -289,6 +341,10 @@ test('refuses a tarball without package/package.json', () => {
 	refuses(baseline(), /has no package\/package\.json/, { noManifest: true });
 });
 
+test('refuses differently spelled package manifests that collide after path normalisation', () => {
+	refuses(baseline(), /ambiguous package\/package\.json entries after path normalisation/, { duplicateManifest: true });
+});
+
 test('refuses a tarball that cannot be read', () => {
 	refuses(baseline(), /cannot read .*missing\.tgz as a tarball/, { tarballArgument: 'missing.tgz' });
 });
@@ -309,6 +365,15 @@ test('publish workflow verifies each tarball against the project that produced i
 	// check-packed keys projects the way the lockfile does; the pack loop names
 	// them by directory leaf, and the two have to be reconciled somewhere.
 	assert.match(workflow, /pairs\+=\("packages\/\$p=\.packed\/\$tarball"\)/);
+});
+
+test('publish workflow snapshots release inputs before builds and verifies against that authority', () => {
+	const workflow = readFileSync(PUBLISH_WORKFLOW, 'utf8');
+	const catalog = workflow.indexOf('node scripts/check-catalog.mjs');
+	const snapshot = workflow.indexOf('name: Snapshot release inputs');
+	const build = workflow.indexOf('name: Build packages');
+	assert.ok(catalog >= 0 && catalog < snapshot && snapshot < build);
+	assert.match(workflow, /--source-root "\$RUNNER_TEMP\/release-inputs"/);
 });
 
 test('publish workflow asks one shared probe whether a version is on npm', () => {

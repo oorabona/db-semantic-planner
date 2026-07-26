@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -40,10 +40,12 @@ test('reports a version the registry knows as published', () => {
 	assert.equal(stdout.trim(), 'published');
 });
 
-test('reports an explicit E404 as unpublished', () => {
+test('reports an explicit E404 as not-found, authorizing only an upload attempt', () => {
 	const { code, stdout } = run(`echo '{"error":{"code":"E404","summary":"not found"}}'; echo 'npm error code E404' >&2; exit 1`);
 	assert.equal(code, 0);
-	assert.equal(stdout.trim(), 'unpublished');
+	assert.equal(stdout.trim(), 'not-found');
+	const source = readFileSync(SCRIPT, 'utf8');
+	assert.match(source, /`not-found` authorizes an upload attempt; it does not prove global\n# nonexistence or visibility, and the registry PUT remains authoritative/);
 });
 
 test('refuses to answer when the registry fails for any other reason', () => {

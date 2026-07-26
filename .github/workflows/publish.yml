@@ -52,6 +52,34 @@ jobs:
       # dev dependency of the same name never reaches the lockfile — and this job
       # is reachable without CI having run on the same commit.
       - run: node scripts/check-catalog.mjs
+      # This is the authority from which the expected packed manifests are
+      # computed. It precedes every lifecycle hook that can rewrite a manifest.
+      - name: Snapshot release inputs
+        run: |
+          set -euo pipefail
+          snapshot="$RUNNER_TEMP/release-inputs"
+          rm -rf "$snapshot"
+          mkdir -p "$snapshot"
+          cp pnpm-lock.yaml "$snapshot/pnpm-lock.yaml"
+          node - "$snapshot" <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const { parse } = require('yaml');
+          const snapshot = path.resolve(process.argv[2]);
+          const lock = parse(fs.readFileSync('pnpm-lock.yaml', 'utf8'));
+          for (const importer of Object.keys(lock.importers ?? {})) {
+            const directory = path.resolve(importer);
+            const relative = path.relative(process.cwd(), directory);
+            if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+              throw new Error(`lockfile importer ${importer} resolves outside the checkout`);
+            }
+            const manifest = ['package.json', 'package.json5', 'package.yaml'].find((name) => fs.existsSync(path.join(directory, name)));
+            if (manifest === undefined) throw new Error(`lockfile importer ${importer} has no manifest`);
+            const destination = path.join(snapshot, importer, manifest);
+            fs.mkdirSync(path.dirname(destination), { recursive: true });
+            fs.copyFileSync(path.join(directory, manifest), destination);
+          }
+          NODE
       # Decide whether anything needs publishing BEFORE building, so the common
       # case (a release-please run that only refreshes the release PR, no version
       # change) exits cheaply without a full build.
@@ -69,7 +97,7 @@ jobs:
             if [ "$state" = published ]; then
               echo "$name@$ver already on npm"
             else
-              echo "$name@$ver needs publishing"
+              echo "$name@$ver not found; upload will decide authoritatively"
               need=1
             fi
           done
@@ -136,7 +164,7 @@ jobs:
           while IFS=$'\t' read -r p tarball; do
             pairs+=("packages/$p=.packed/$tarball")
           done < .packed/tarballs.tsv
-          node scripts/check-packed.mjs "${pairs[@]}"
+          node scripts/check-packed.mjs --source-root "$RUNNER_TEMP/release-inputs" "${pairs[@]}"
       # Pack records the exact artifacts that verification read, in dependency
       # order. Publishing this list rather than packing again keeps the verified
       # bytes and the uploaded bytes identical.
@@ -148,6 +176,8 @@ jobs:
             name=$(jq -r .name "packages/$p/package.json")
             ver=$(jq -r .version "packages/$p/package.json")
             echo "Publishing $name@$ver"
+            # A concurrent manual npm publish can still land after our probe.
+            # npm rejects the duplicate version loudly; rerun and the probe skips it.
             npm publish ".packed/$tarball" --provenance --access public
           done < .packed/tarballs.tsv
       # @dbsp/mcp-server publish skipped — scaffold only (no MCP tools yet,

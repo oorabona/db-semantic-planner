@@ -10,8 +10,24 @@ import { posix, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { assertDependencyBlocks, createManifestReader, DEPENDENCY_BLOCKS, readLockfile } from './check-guard-shared.mjs';
 
-const ROOT = resolve(process.cwd());
-const TARBALL_PAIRS = process.argv.slice(2);
+let sourceRoot = process.cwd();
+const TARBALL_PAIRS = [];
+for (let index = 2; index < process.argv.length; index += 1) {
+	if (process.argv[index] === '--source-root') {
+		if (index + 1 === process.argv.length) {
+			console.error('packed check: --source-root requires a directory');
+			process.exit(1);
+		}
+		sourceRoot = process.argv[index + 1];
+		index += 1;
+	} else {
+		TARBALL_PAIRS.push(process.argv[index]);
+	}
+}
+const ROOT = resolve(sourceRoot);
+
+/** pnpm 10.33.0 drops exactly these package lifecycle scripts during pack. */
+const PACK_DROPPED_SCRIPT_KEYS = ['prepublishOnly', 'prepack', 'prepare', 'postpack', 'publish', 'postpublish'];
 
 function fail(message) {
 	console.error(`packed check: ${message}`);
@@ -44,10 +60,14 @@ function archiveEntries(tarball) {
 }
 
 function packedManifest(tarball, entries) {
-	const entry = entries.find(({ path }) => path === 'package/package.json');
-	if (entry === undefined) {
+	const manifestEntries = entries.filter(({ path }) => path === 'package/package.json');
+	if (manifestEntries.length === 0) {
 		fail(`${tarball} has no package/package.json`);
 	}
+	if (manifestEntries.length !== 1) {
+		fail(`${tarball} has ambiguous package/package.json entries after path normalisation`);
+	}
+	const [entry] = manifestEntries;
 	try {
 		return JSON.parse(execFileSync('tar', ['-xOzf', tarball, '--', entry.raw], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
 	} catch (error) {
@@ -135,16 +155,7 @@ function expectedPackedManifest(tarball, source) {
 	delete expected.packageManager;
 	delete expected.pnpm;
 	if (expected.scripts !== undefined) {
-		for (const lifecycle of ['prepack', 'prepare', 'postpack']) delete expected.scripts[lifecycle];
-	}
-	if (Object.hasOwn(source, 'publishConfig')) {
-		if (source.publishConfig === null || typeof source.publishConfig !== 'object' || Array.isArray(source.publishConfig)) {
-			fail(`${tarball}: source ${source.name} publishConfig is not a map`);
-		}
-		const unsupported = Object.keys(source.publishConfig).filter((key) => !['access', 'registry'].includes(key));
-		if (unsupported.length > 0) {
-			fail(`${tarball}: source ${source.name} publishConfig overrides ${unsupported.join(', ')}. This guard only models access and registry; value overrides are refused rather than predicted.`);
-		}
+		for (const lifecycle of PACK_DROPPED_SCRIPT_KEYS) delete expected.scripts[lifecycle];
 	}
 	for (const block of DEPENDENCY_BLOCKS) {
 		for (const [name, sourceRange] of Object.entries(source[block] ?? {})) {
@@ -164,6 +175,17 @@ function expectedPackedManifest(tarball, source) {
 		}
 	}
 	return expected;
+}
+
+function assertPublicPublishConfig(tarball, side, manifest) {
+	const config = manifest.publishConfig;
+	if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+		fail(`${tarball}: ${side} publishConfig must be exactly {"access":"public"}`);
+	}
+	const keys = Object.keys(config);
+	if (keys.length !== 1 || keys[0] !== 'access' || config.access !== 'public') {
+		fail(`${tarball}: ${side} publishConfig must be exactly {"access":"public"}`);
+	}
 }
 
 function parseTarballPair(argument, seenProjects, seenTarballs) {
@@ -206,6 +228,8 @@ for (const argument of TARBALL_PAIRS) {
 	if (packed.version !== source.version) {
 		fail(`${tarball}: packed version ${packed.version} does not match source ${source.version} for project ${project}`);
 	}
+	assertPublicPublishConfig(tarball, `source ${source.name}`, source);
+	assertPublicPublishConfig(tarball, 'packed manifest', packed);
 	for (const field of ['bundleDependencies', 'bundledDependencies']) {
 		if (Object.hasOwn(packed, field)) {
 			fail(`${tarball}: packed manifest has ${field}`);
