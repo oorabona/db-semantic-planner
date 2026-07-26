@@ -33,6 +33,9 @@ function baseline() {
 				peerDependencies: { pg: 'catalog:' },
 			},
 		},
+		// What pnpm records for the catalog itself; every `catalog:` declaration
+		// is held to this exact version.
+		catalogs: { default: { pg: { specifier: '^8.21.0', version: '8.22.0' } } },
 		lock: {
 			'.': { devDependencies: { pg: { specifier: 'catalog:', version: '8.22.0' } } },
 			'packages/core': { dependencies: { pg: { specifier: 'catalog:', version: '8.22.0' } } },
@@ -52,10 +55,17 @@ function run(fixture) {
 	try {
 		writeFileSync(join(dir, 'pnpm-workspace.yaml'), JSON.stringify(fixture.workspace));
 		writeFileSync(join(dir, 'package.json'), JSON.stringify(fixture.root));
-		writeFileSync(
-			join(dir, 'pnpm-lock.yaml'),
-			JSON.stringify({ overrides: fixture.overrides ?? {}, importers: fixture.lock }),
-		);
+		const lockfile = JSON.stringify({
+			overrides: fixture.overrides ?? {},
+			catalogs: fixture.catalogs ?? {},
+			importers: fixture.lock,
+		});
+		writeFileSync(join(dir, 'pnpm-lock.yaml'), lockfile);
+		// The guard refuses a lockfile that is not the one pnpm installed from, so
+		// a fixture has to look installed. `fixture.installed` lets a case make
+		// them differ on purpose.
+		mkdirSync(join(dir, 'node_modules/.pnpm'), { recursive: true });
+		writeFileSync(join(dir, 'node_modules/.pnpm/lock.yaml'), fixture.installed ?? lockfile);
 		for (const [project, manifest] of Object.entries(fixture.projects)) {
 			mkdirSync(join(dir, project), { recursive: true });
 			writeFileSync(join(dir, project, 'package.json'), JSON.stringify(manifest));
@@ -127,43 +137,59 @@ test('refuses a workspace protocol form outside the two this repo publishes', ()
 	refuses(fixture, /workspace:~/);
 });
 
-test('refuses an alias in the catalog', () => {
+test('catches an alias by what it resolved to, not by how it was spelled', () => {
+	// `pg-old: npm:pg@8.20.0` in the catalog puts pg under a second key. pnpm
+	// records the real package in the resolution — `version: "pg@8.20.0"` — so
+	// keying identity there turns two keys into two versions of one package.
+	// Nothing here knows what `npm:` means, which is why `jsr:`, a git shorthand
+	// and whatever pnpm supports next are covered too.
 	const fixture = baseline();
 	fixture.workspace.catalog['pg-old'] = 'npm:pg@8.20.0';
-	refuses(fixture, /catalog entry pg-old.*source protocol/);
+	fixture.catalogs.default['pg-old'] = { specifier: 'npm:pg@8.20.0', version: '8.20.0' };
+	fixture.projects['packages/cli'].dependencies['pg-old'] = 'catalog:';
+	fixture.lock['packages/cli'].dependencies['pg-old'] = { specifier: 'catalog:', version: 'pg@8.20.0' };
+	refuses(fixture, /more than one version/);
 });
 
-test('refuses a source protocol other than npm: — jsr, git, whatever comes next', () => {
-	// Two keys, one upstream package: `hono3: jsr:@hono/hono@3` beside
-	// `hono4: jsr:@hono/hono@4` is the duplicate wearing a different spelling.
+test('refuses a catalog declaration that resolved to something other than the catalog', () => {
+	// An override, a patch or a pnpmfile can re-decide a version after the
+	// catalog has. The mechanism does not matter; the divergence does.
 	const fixture = baseline();
-	fixture.workspace.catalog.hono3 = 'jsr:@hono/hono@3';
-	refuses(fixture, /catalog entry hono3.*source protocol/);
-});
-
-test('refuses an alias in the overrides, whichever file declared it', () => {
-	// pnpm takes overrides from pnpm-workspace.yaml and from package.json#pnpm;
-	// the guard reads the effective set the lockfile records, so a new
-	// declaration site does not open a hole.
-	const fixture = baseline();
-	fixture.overrides = { 'pg-old': 'npm:pg@8.20.0' };
-	refuses(fixture, /override pg-old.*source protocol/);
-});
-
-test('refuses an override on a package the catalog governs', () => {
-	// The version would be decided in two places, and the catalog is the one
-	// anybody reads — a compatibility floor could be silently undercut.
-	const fixture = baseline();
-	fixture.overrides = { 'pg@>=8.0.0 <8.21.0': '8.20.0' };
-	refuses(fixture, /catalog already governs/);
+	fixture.lock['packages/core'].dependencies.pg.version = '8.20.0';
+	refuses(fixture, /catalog resolved to 8\.22\.0/);
 });
 
 test('accepts an override on a transitive package the catalog does not name', () => {
-	// Security pins on transitive dependencies are what overrides are for.
+	// Security pins on transitive dependencies are what overrides are for, and
+	// parent-scoped selectors like `vite>esbuild` are the ordinary spelling.
 	const fixture = baseline();
-	fixture.overrides = { 'lodash@>=4.0.0 <4.17.23': '>=4.17.23' };
+	fixture.overrides = { 'lodash@>=4.0.0 <4.17.23': '>=4.17.23', 'vite>esbuild': '^0.25.12' };
 	const { code, output } = run(fixture);
 	assert.equal(code, 0, output);
+});
+
+test('accepts catalog: as an override value — pnpm’s own way to force one range', () => {
+	// This is how a package used directly and transitively is pinned to the
+	// catalog without naming the range twice. Refusing it would push the second
+	// copy of the range back into existence.
+	const fixture = baseline();
+	fixture.overrides = { pg: 'catalog:' };
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
+});
+
+test('refuses a lockfile that is not the one pnpm installed from', () => {
+	// `lockfile: false`, `gitBranchLockfile: true` and a stale checkout all end
+	// here, without the guard needing to know which of them happened.
+	const fixture = baseline();
+	fixture.installed = JSON.stringify({ importers: {} });
+	refuses(fixture, /not the lockfile pnpm installed from/);
+});
+
+test('refuses a pnpmfile, which can rewrite the manifest after every check', () => {
+	const fixture = baseline();
+	fixture.after = (dir) => writeFileSync(join(dir, '.pnpmfile.cjs'), 'module.exports = {}');
+	refuses(fixture, /pnpmfile\.cjs exists/);
 });
 
 test('refuses an importer whose directory is a symlink out of the repository', () => {
@@ -193,10 +219,10 @@ test('refuses an importer whose manifest file is a symlink out of the repository
 	}
 });
 
-test('refuses a project carrying a package.json5, which pnpm reads first', () => {
+test('refuses a project whose effective manifest is package.json5', () => {
 	// pnpm's MANIFEST_BASE_NAMES is [package.json, package.json5, package.yaml].
-	// Reading the yaml while pnpm reads the json5 would certify a manifest that
-	// governs nothing.
+	// With no package.json the json5 is what pnpm reads, so certifying the yaml
+	// would certify a manifest that governs nothing.
 	const fixture = baseline();
 	fixture.lock['packages/five'] = { dependencies: {} };
 	fixture.after = (dir) => {
@@ -207,11 +233,21 @@ test('refuses a project carrying a package.json5, which pnpm reads first', () =>
 	refuses(fixture, /package\.json5/);
 });
 
-test('refuses two projects resolving one dependency to different versions', () => {
+test('accepts a package.json5 that pnpm would not read, beside a package.json', () => {
+	// package.json outranks it, so it is an inert file on disk. Refusing it
+	// would block a project pnpm handles perfectly well.
 	const fixture = baseline();
-	fixture.lock['packages/core'].dependencies.pg.version = '8.20.0';
-	refuses(fixture, /more than one version/);
+	fixture.after = (dir) => writeFileSync(join(dir, 'packages/core/package.json5'), '{ name: "stale" }');
+	const { code, output } = run(fixture);
+	assert.equal(code, 0, output);
 });
+
+// Two projects on plainly different versions of one `catalog:` dependency is
+// covered above, by the catalog-resolution rule, which names the divergence more
+// precisely than the duplicate count can. What only the duplicate rule can catch
+// is a package reached under two different keys — the alias case at the top of
+// this file — because there the versions are consistent with their own catalog
+// entries and it is the identity that collides.
 
 test('refuses an empty importer map rather than certifying nothing', () => {
 	const fixture = baseline();
@@ -240,5 +276,5 @@ test('refuses a lockfile entry with no resolved version', () => {
 test('refuses a project whose manifest it cannot read', () => {
 	const fixture = baseline();
 	fixture.lock['packages/ghost'] = { dependencies: {} };
-	refuses(fixture, /none of package\.json, package\.json5 or package\.yaml/);
+	refuses(fixture, /has none of package\.json, package\.json5, package\.yaml/);
 });

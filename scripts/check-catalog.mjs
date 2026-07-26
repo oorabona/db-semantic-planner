@@ -95,54 +95,75 @@ function containedPath(path, describe) {
 }
 
 /**
- * Read one project's manifest, in pnpm's own order — `MANIFEST_BASE_NAMES` is
- * `["package.json", "package.json5", "package.yaml"]`, so JSON5 outranks YAML.
- * This does not parse JSON5, and reading the file below the one pnpm reads
- * would be worse than reading none: the guard would certify a manifest that
- * governs nothing. So a JSON5 manifest stops the check rather than being
- * skipped past. No project here has one; if one ever does, teach this to read
- * it — the pnpm reader is `@pnpm/read-project-manifest` — rather than reordering
- * around it.
+ * pnpm's own precedence, copied from its `MANIFEST_BASE_NAMES`: the first of
+ * these that exists is the manifest, and the rest are inert files on disk.
+ */
+const MANIFEST_BASE_NAMES = ['package.json', 'package.json5', 'package.yaml'];
+
+/**
+ * Read the manifest pnpm would read. This does not parse JSON5, and reading a
+ * file pnpm is not using would be worse than reading none — the check would
+ * certify a manifest that governs nothing — so a project whose effective
+ * manifest is JSON5 stops the check instead. No project here has one; if one
+ * ever does, teach this to read it (pnpm's own reader is
+ * `@pnpm/read-project-manifest`) rather than reordering around it.
  */
 function readManifest(project) {
 	const directory = resolve(ROOT, project);
 	containedPath(directory, `lockfile importer "${project}"`);
-	if (containedPath(resolve(directory, 'package.json5'), `${project}/package.json5`) !== undefined) {
+	const found = new Map();
+	for (const file of MANIFEST_BASE_NAMES) {
+		const path = containedPath(resolve(directory, file), `${project}/${file}`);
+		if (path !== undefined) found.set(file, path);
+	}
+	// Only the first one pnpm would pick matters. A package.json5 sitting beside
+	// a package.json changes nothing, because pnpm reads the json.
+	const [file, path] = found.entries().next().value ?? [];
+	if (file === undefined) {
+		fail(`${project} has none of ${MANIFEST_BASE_NAMES.join(', ')} — the three manifests pnpm accepts.`);
+	}
+	if (file === 'package.json5') {
 		fail(
-			`${project} has a package.json5, which pnpm reads ahead of package.yaml and this check cannot parse. Refusing rather than certifying a manifest pnpm may not be using.`,
+			`${project}/package.json5 is the manifest pnpm reads here, and this check cannot parse JSON5. Refusing rather than certifying a manifest pnpm is not using.`,
 		);
 	}
-	for (const [file, parseAs] of [
-		['package.json', JSON.parse],
-		['package.yaml', parse],
-	]) {
-		const path = containedPath(resolve(directory, file), `${project}/${file}`);
-		if (path === undefined) continue;
-		try {
-			return parseAs(readFileSync(path, 'utf8'));
-		} catch (error) {
-			fail(`cannot parse ${project}/${file}: ${error.message}`);
-		}
+	try {
+		return (file === 'package.json' ? JSON.parse : parse)(readFileSync(path, 'utf8'));
+	} catch (error) {
+		fail(`cannot parse ${project}/${file}: ${error.message}`);
 	}
-	fail(`${project} has none of package.json, package.json5 or package.yaml — the three manifests pnpm accepts.`);
 }
 
 /**
+ * What a declaration actually resolved to, as a package rather than as a key.
+ *
+ * The key is not the identity. pnpm writes an aliased dependency's real package
+ * into the resolution — declare `odd-alias: npm:is-odd@2.0.0` and the importer
+ * records `odd-alias: {version: "is-odd@2.0.0"}`, while an ordinary dependency
+ * records a bare `3.0.1`. Reading identity from there rather than from the key
+ * is what makes an alias visible at all: two keys naming one package become two
+ * versions of that package, which is the thing this looks for. It also needs no
+ * knowledge of how the alias was spelled, so `npm:`, `jsr:` and whatever pnpm
+ * supports next are covered without being listed.
+ *
  * Two importers reach the same workspace package by different relative paths —
- * `link:packages/core` from the root, `link:../core` from packages/mcp-server.
- * Resolve both against their importer so they compare equal. A registry version
- * carries a peer-context suffix that is not part of its identity: this
- * workspace has 131 such instances and they are the normal shape of a pnpm
- * store, not the duplicate this looks for.
+ * `link:packages/core` from the root, `link:../core` from packages/mcp-server —
+ * so those resolve against their importer to compare equal. A registry version
+ * carries a peer-context suffix that is not part of its identity: this workspace
+ * has 131 such instances and they are the normal shape of a pnpm store, not the
+ * duplicate this looks for.
  */
-function identity(project, version) {
+function resolvedPackage(project, key, version) {
 	const raw = String(version);
 	for (const protocol of ['link:', 'file:']) {
 		if (raw.startsWith(protocol)) {
-			return `link:${posix.normalize(posix.join(project, raw.slice(protocol.length)))}`;
+			return { name: key, version: `link:${posix.normalize(posix.join(project, raw.slice(protocol.length)))}` };
 		}
 	}
-	return raw.split('(')[0];
+	const bare = raw.split('(')[0];
+	const at = bare.lastIndexOf('@');
+	if (at > 0) return { name: bare.slice(0, at), version: bare.slice(at + 1) };
+	return { name: key, version: bare };
 }
 
 let lock;
@@ -150,6 +171,45 @@ try {
 	lock = parse(readFileSync(LOCKFILE, 'utf8'));
 } catch (error) {
 	fail(`cannot read ${LOCKFILE}: ${error.message}`);
+}
+
+/**
+ * Everything below trusts this file to describe the install. That is only true
+ * if it is the file the install used, and several settings make it not be —
+ * `lockfile: false` writes none, `gitBranchLockfile: true` writes a
+ * branch-specific one, and a stale checkout writes nothing at all. Rather than
+ * enumerate the settings, compare against the copy pnpm keeps of what it
+ * actually installed from. A mismatch means this check would be certifying a
+ * lockfile that governs nothing.
+ */
+const INSTALLED_LOCKFILE = resolve(ROOT, 'node_modules/.pnpm/lock.yaml');
+let installed;
+try {
+	installed = readFileSync(INSTALLED_LOCKFILE, 'utf8');
+} catch {
+	fail(
+		`no ${INSTALLED_LOCKFILE} — nothing has been installed here, so pnpm-lock.yaml is unverified. Run pnpm install --frozen-lockfile first; this check reads the result of an install, not a file on its own.`,
+	);
+}
+if (installed !== readFileSync(LOCKFILE, 'utf8')) {
+	fail(
+		'pnpm-lock.yaml is not the lockfile pnpm installed from. The install used a different one — a branch lockfile, no lockfile, or an out-of-date checkout — so this file describes something other than what is on disk.',
+	);
+}
+
+/**
+ * A pnpmfile is arbitrary code that rewrites manifests, and `beforePacking`
+ * runs after every check here, on its way into the tarball. Nothing this reads
+ * would show it. There is none in this repository; adding one means deciding
+ * how the published manifest gets verified, which is a larger question than
+ * this check answers.
+ */
+for (const name of ['.pnpmfile.cjs', '.pnpmfile.js', 'pnpmfile.cjs']) {
+	if (containedPath(resolve(ROOT, name), name) !== undefined) {
+		fail(
+			`${name} exists. A pnpmfile can rewrite dependencies after this check runs — hooks.beforePacking edits the manifest on its way into the tarball — so what is verified here need not be what is published.`,
+		);
+	}
 }
 
 // A check that certifies an empty or malformed workspace is worse than no check:
@@ -177,66 +237,18 @@ if (workspaceConfig?.catalogs !== undefined) {
 		'pnpm-workspace.yaml declares named catalogs. This repository has one catalog on purpose: a second one can hold a different range for the same package, which is how a dependency ends up loaded twice.',
 	);
 }
-const catalog = workspaceConfig?.catalog ?? {};
-
 /**
- * The overrides come from the lockfile rather than from a manifest. pnpm accepts
- * them in `pnpm-workspace.yaml` and in `package.json#pnpm.overrides`, so reading
- * the declaration sites means keeping a list of them in step with pnpm; the
- * lockfile records the effective set whichever file declared it, and a frozen
- * install is what keeps that record faithful. Same reason the project list comes
- * from there.
+ * What the catalog itself resolved to, as pnpm recorded it. Every `catalog:`
+ * declaration is then held to exactly this version.
+ *
+ * That one comparison is what makes the mechanisms below it irrelevant. An
+ * override, a patch, a pnpmfile, a resolution mode — anything that moves a
+ * project off the version the catalog produced shows up here as a mismatch,
+ * without this needing to know which of them did it, or how it was spelled.
+ * The alternative is a list of mechanisms to inspect, and that list is only ever
+ * as current as the last person to read pnpm's changelog.
  */
-const overrides = lock?.overrides ?? {};
-
-/**
- * Whether an override selector names a given package. Asked in that direction on
- * purpose: an override key mixes a `parent>child` separator with ranges that
- * contain the same character (`pg@>=8.0.0 <8.21.0`), so parsing a name out of it
- * is ambiguous, while testing a known name against every `>`-separated segment
- * is not. Splitting can only produce more segments to test, and a range fragment
- * matches no package name — so the ambiguity errs toward asking, never toward
- * missing.
- */
-function selectorNames(selector, name) {
-	return selector.split('>').some((segment) => {
-		const candidate = segment.trim();
-		return candidate === name || candidate.startsWith(`${name}@`);
-	});
-}
-
-/**
- * A version, and nothing that carries its own identity. `npm:pg@8.20.0` and
- * `jsr:@hono/hono@3` both put a package under a key that is not its name, so two
- * keys can name one package and every check below reads them as unrelated —
- * which is the duplicate this exists to prevent, wearing a spelling that hides
- * it. Banning the protocols known today would leave the next one open, so the
- * rule is the other way round: a protocol at all is refused. `$name`, which pnpm
- * accepts in an override to mean the root's declared version of that package, is
- * not a second identity and is allowed.
- */
-const PROTOCOL = /^[a-z][a-z0-9+.-]*:/i;
-
-function assertPlainRange(channel, name, value) {
-	const raw = String(value);
-	if (PROTOCOL.test(raw)) {
-		fail(
-			`${channel} ${name}: ${raw} carries a source protocol, not a version. Two keys can then name one package, and every check below would read them as unrelated dependencies. Name the package, and give it a range.`,
-		);
-	}
-}
-
-for (const [name, value] of Object.entries(catalog)) assertPlainRange('catalog entry', name, value);
-for (const [selector, value] of Object.entries(overrides)) {
-	assertPlainRange('override', selector, value);
-	for (const name of Object.keys(catalog)) {
-		if (selectorNames(selector, name)) {
-			fail(
-				`override ${selector}: ${value} decides the version of ${name}, which the catalog already governs. One package, two places deciding its version — and only one of them is where anyone looks. Change the catalog entry. Overrides are for transitive packages the catalog does not name.`,
-			);
-		}
-	}
-}
+const catalogResolved = lock?.catalogs?.default ?? {};
 
 /** Every project's own name, so a declaration's required form follows from what it names. */
 const manifests = new Map(projects.map((project) => [project, readManifest(project)]));
@@ -260,17 +272,34 @@ for (const project of projects) {
 
 	// Only the lockfile knows what a declaration resolved to.
 	for (const block of DEPENDENCY_BLOCKS) {
-		for (const [name, declared] of Object.entries(importers[project]?.[block] ?? {})) {
+		for (const [key, declared] of Object.entries(importers[project]?.[block] ?? {})) {
 			if (typeof declared?.version !== 'string') {
 				// Without a version there is no identity, and every such entry would
 				// collapse onto one — a silent way for two versions to compare equal.
-				fail(`lockfile entry ${project} → ${block}.${name} has no resolved version`);
+				fail(`lockfile entry ${project} → ${block}.${key} has no resolved version`);
 			}
-			if (!resolutions.has(name)) resolutions.set(name, new Map());
-			const versions = resolutions.get(name);
-			const version = identity(project, declared.version);
-			if (!versions.has(version)) versions.set(version, []);
-			versions.get(version).push(project);
+			const resolved = resolvedPackage(project, key, declared.version);
+
+			// A `catalog:` declaration must have got what the catalog got. This is
+			// where a mechanism that quietly re-resolves it becomes visible.
+			if (declared.specifier === THIRD_PARTY_FORM) {
+				const expected = catalogResolved[key]?.version;
+				if (expected === undefined) {
+					fail(
+						`${project} → ${block}.${key} says catalog:, but pnpm recorded no catalog resolution for it. Run pnpm install; if it persists, the catalog does not name ${key}.`,
+					);
+				}
+				if (resolved.version !== expected) {
+					fail(
+						`${project} → ${block}.${key} resolved to ${resolved.version}, but the catalog resolved to ${expected}. Something between the catalog and this project re-decided the version — an override, a patch, a pnpmfile hook. The catalog is meant to be the only place that decides it.`,
+					);
+				}
+			}
+
+			if (!resolutions.has(resolved.name)) resolutions.set(resolved.name, new Map());
+			const versions = resolutions.get(resolved.name);
+			if (!versions.has(resolved.version)) versions.set(resolved.version, []);
+			versions.get(resolved.version).push(project);
 		}
 	}
 }
