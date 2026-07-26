@@ -4,14 +4,23 @@ packages:
 # literal range into the manifest. It governs that path only — a hand-edited
 # manifest still needs scripts/check-catalog.mjs, which CI runs.
 catalogMode: strict
+# Which dependency build scripts may run. A name absent from this map is
+# undecided, and pnpm reports it on every install until someone decides.
+#
+# Both entries are deliberate refusals, not oversights:
+#   sharp             a transitive of vitepress-plugin-og-image, itself a docs
+#                     devDependency. It ships prebuilt binaries as optional
+#                     dependencies and its install script is only the
+#                     build-from-source fallback, which no supported platform
+#                     here needs.
+#   simple-git-hooks  its postinstall writes .git/hooks. The root `prepare`
+#                     script already runs the same tool explicitly, so the
+#                     postinstall is redundant — and it follows symlinks, so on
+#                     a checkout whose hooks are symlinked out of the repository
+#                     it overwrites the link target instead of the hook.
 allowBuilds:
-  b: true
-  d: true
-  e: true
-  i: true
-  l: true
-  s: true
-  u: true
+  sharp: false
+  simple-git-hooks: false
 
 catalog:
   '@biomejs/biome': ^2.5.2
