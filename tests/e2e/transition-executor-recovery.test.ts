@@ -5,8 +5,10 @@ import {
 	createPgObservationIssuer,
 	createPgsqlAdapter,
 	createPgTransitionPack,
+	createPgTransitionRunPersister,
 	DBSP_META_SCHEMA,
 	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_ADD_VALUE_RULE_ID,
@@ -35,6 +37,7 @@ import {
 	type ObservationContext,
 	type ObservationRequest,
 	type PhysicalOperation,
+	type ProvenPlanShape,
 	type ProvenPlanStep,
 	type RecognitionResult,
 	type ResourceAddress,
@@ -42,6 +45,7 @@ import {
 	type TransitionLeaseFailure,
 	type TransitionRule,
 	type TransitionRunMetadata,
+	type TransitionRunPersister,
 } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -348,34 +352,75 @@ async function checkExists(): Promise<boolean> {
 	return result.rows.length > 0;
 }
 
-async function cleanupMetaRows(pool: Pool): Promise<void> {
-	const journalExists = await pool.query(
+async function relationExists(pool: Pool, table: string): Promise<boolean> {
+	const result = await pool.query(
 		'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
-		[
-			`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
-				DBSP_TRANSITION_JOURNAL_TABLE,
-			)}`,
-		],
+		[`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`],
 	);
-	if (journalExists.rows[0]?.exists !== true) {
+	return result.rows[0]?.exists === true;
+}
+
+async function cleanupMetaRows(pool: Pool): Promise<void> {
+	// Each relation is checked and cleaned up independently when it exists.
+	const journalTableExists = await relationExists(
+		pool,
+		DBSP_TRANSITION_JOURNAL_TABLE,
+	);
+	const planTableExists = await relationExists(
+		pool,
+		DBSP_TRANSITION_RUN_PLAN_TABLE,
+	);
+	if (!journalTableExists && !planTableExists) {
 		return;
 	}
-	const runIds = await pool.query(
-		`SELECT DISTINCT run_id FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
-			DBSP_TRANSITION_JOURNAL_TABLE,
-		)} WHERE record::text LIKE $1`,
-		[`%${schemaName}%`],
-	);
-	const ids = runIds.rows.map((row) => String(row.run_id));
+	// `_` is a LIKE wildcard, and the schema name is full of them, so an
+	// unescaped pattern would select and delete rows belonging to other tests.
+	const namePattern = `%${schemaName.replaceAll('\\', '\\\\').replaceAll('_', '\\_').replaceAll('%', '\\%')}%`;
+	const runIds = journalTableExists
+		? await pool.query(
+				`SELECT DISTINCT run_id FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+					DBSP_TRANSITION_JOURNAL_TABLE,
+				)} WHERE record::text LIKE $1`,
+				[namePattern],
+			)
+		: { rows: [] as { run_id?: unknown }[] };
+	// A run is persisted with its plan before any intent is journaled, so a run
+	// that crashed in between has a plan row and no journal row at all. Looking
+	// only at the journal would leave those rows behind for the next test.
+	const planRunIds = planTableExists
+		? await pool.query(
+				`SELECT run_id FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+					DBSP_TRANSITION_RUN_PLAN_TABLE,
+				)} WHERE plan::text LIKE $1`,
+				[namePattern],
+			)
+		: { rows: [] as { run_id?: unknown }[] };
+	const ids = [
+		...new Set([
+			...runIds.rows.map((row) => String(row.run_id)),
+			...planRunIds.rows.map((row) => String(row.run_id)),
+		]),
+	];
 	if (ids.length === 0) {
 		return;
 	}
-	await pool.query(
-		`DELETE FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
-			DBSP_TRANSITION_JOURNAL_TABLE,
-		)} WHERE run_id = ANY($1::text[])`,
-		[ids],
-	);
+	if (journalTableExists) {
+		await pool.query(
+			`DELETE FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+				DBSP_TRANSITION_JOURNAL_TABLE,
+			)} WHERE run_id = ANY($1::text[])`,
+			[ids],
+		);
+	}
+	// The plan row references the run row, so it goes first.
+	if (planTableExists) {
+		await pool.query(
+			`DELETE FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+				DBSP_TRANSITION_RUN_PLAN_TABLE,
+			)} WHERE run_id = ANY($1::text[])`,
+			[ids],
+		);
+	}
 	await pool.query(
 		`DELETE FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
 			DBSP_TRANSITION_RUN_TABLE,
@@ -401,6 +446,8 @@ async function prove(desired: ModelIR, current: ModelIR) {
  */
 async function writeIntentOnly(params: {
 	readonly registry: ReturnType<typeof createPackRegistry>;
+	readonly persister: TransitionRunPersister;
+	readonly plan: ProvenPlanShape;
 	readonly step: ProvenPlanStep;
 	readonly run: TransitionRunMetadata;
 }): Promise<void> {
@@ -409,6 +456,7 @@ async function writeIntentOnly(params: {
 		throw new Error('operation runtime missing for recovery e2e');
 	}
 	const runtime = resolution.semantics;
+	await params.persister.persist(params.run, params.plan);
 	const lease = await acquireTransitionLease(target);
 	let releaseFailure: TransitionLeaseFailure | undefined;
 	try {
@@ -651,6 +699,7 @@ describe('ADR-0003 transition executor recovery', () => {
 
 		const firstPass = await createStagedTransitionOrchestrator(
 			registry,
+			createPgTransitionRunPersister(pool),
 		).applyStagedTransition({
 			desired,
 			loadCurrent,
@@ -727,6 +776,7 @@ describe('ADR-0003 transition executor recovery', () => {
 
 		const resumed = await createStagedTransitionOrchestrator(
 			registry,
+			createPgTransitionRunPersister(pool),
 		).applyStagedTransition({
 			desired,
 			loadCurrent,
@@ -763,19 +813,25 @@ describe('ADR-0003 transition executor recovery', () => {
 			'CreateUniqueIndexConcurrently',
 		);
 		const run = runMetadata(outcome.plan, context, 'non-atomic-intent');
-		await writeIntentOnly({ registry, step: cicStep, run });
+		await writeIntentOnly({
+			registry,
+			persister: createPgTransitionRunPersister(pool),
+			plan: outcome.plan,
+			step: cicStep,
+			run,
+		});
 		await pool.query(
 			`CREATE INDEX ${quoteIdent('idx_users_email')} ON ${quoteIdent(
 				schemaName,
 			)}.${quoteIdent('users')} (${quoteIdent('email')})`,
 		);
 
-		const resumed = await createApplier(registry).resume(
+		const resumed = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).resume(
 			run.runId,
-			async (runId) => ({
-				...(await readTransitionJournal(pool, runId)),
-				plan: outcome.plan,
-			}),
+			(runId) => readTransitionJournal(pool, runId),
 			() => readPgObservationContextFromLessor(target, schemaName),
 			basePolicy,
 			target,
@@ -797,7 +853,10 @@ describe('ADR-0003 transition executor recovery', () => {
 			return;
 		}
 
-		const denied = await createApplier(registry).apply(
+		const denied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			basePolicy,
 			target,
@@ -815,7 +874,10 @@ describe('ADR-0003 transition executor recovery', () => {
 				},
 			],
 		};
-		const applied = await createApplier(registry).apply(
+		const applied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			accepted,
 			target,

@@ -1,6 +1,8 @@
+import { type TransitionRunPersister, transitionPlanDigest } from '@dbsp/core';
 import type {
 	DurableIntentRecord,
 	PhysicalOperation,
+	ProvenPlanShape,
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionJournalEvent,
@@ -8,12 +10,15 @@ import type {
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import type { Pool } from 'pg';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_META_SCHEMA,
 	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
 } from './constants.js';
+import { stableJson } from './stable-json.js';
 
 type QueryResultLike = {
 	readonly rows: readonly Record<string, unknown>[];
@@ -25,6 +30,26 @@ export type TransitionJournalQueryable = {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Compared as instants, not as text: `startedAt` comes back in whatever spelling
+ * the configured node-postgres parser produces — a `Date` by default, raw
+ * PostgreSQL text under a custom parser — so requiring one canonical form here
+ * would reject a run against its own stored row.
+ *
+ * The bound this leaves: PostgreSQL keeps `timestamptz` to microseconds while
+ * both the default `Date` conversion and `Date.parse` truncate to milliseconds,
+ * so two runs whose start times differ only below a millisecond compare equal.
+ * That is a property of the driver, not of this comparison, and narrowing it
+ * here would only move the rejection to a legitimate retry.
+ */
+function sameInstant(left: string, right: string): boolean {
+	const leftMs = Date.parse(left);
+	const rightMs = Date.parse(right);
+	return (
+		Number.isFinite(leftMs) && Number.isFinite(rightMs) && leftMs === rightMs
+	);
 }
 
 function quoteIdent(
@@ -45,6 +70,10 @@ function transitionRunTable(): string {
 
 function transitionJournalTable(): string {
 	return qualified(DBSP_META_SCHEMA, DBSP_TRANSITION_JOURNAL_TABLE);
+}
+
+function transitionRunPlanTable(): string {
+	return qualified(DBSP_META_SCHEMA, DBSP_TRANSITION_RUN_PLAN_TABLE);
 }
 
 export function renderCreateDbspMetaSchemaSql(): string {
@@ -78,6 +107,16 @@ export function renderCreateTransitionJournalTableSql(): string {
 		`PRIMARY KEY (run_id, seq), ` +
 		`FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id), ` +
 		"CHECK (event IN ('intent', 'completion', 'observed'))" +
+		')'
+	);
+}
+
+export function renderCreateTransitionRunPlanTableSql(): string {
+	return (
+		`CREATE TABLE IF NOT EXISTS ${transitionRunPlanTable()} (` +
+		'run_id text PRIMARY KEY, ' +
+		'plan jsonb NOT NULL, ' +
+		`FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id)` +
 		')'
 	);
 }
@@ -265,6 +304,34 @@ function assertJournalTableShape(row: JournalTableShapeRow | undefined): void {
 	}
 }
 
+function assertRunPlanTableShape(row: JournalTableShapeRow | undefined): void {
+	if (row?.relkind !== 'r') {
+		throw new Error('dbsp transition run plan table has invalid shape');
+	}
+	const columns = jsonRecord(row.columns);
+	if (!columnsMatch(columns, { run_id: 'text', plan: 'jsonb' })) {
+		throw new Error('dbsp transition run plan table columns drifted');
+	}
+	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id"]') {
+		throw new Error('dbsp transition run plan table primary key drifted');
+	}
+	const foreignKeys = jsonArray(row.foreign_keys);
+	if (
+		foreignKeys.length !== 1 ||
+		!foreignKeyMatches(foreignKeys[0], {
+			columns: ['run_id'],
+			foreignSchema: DBSP_META_SCHEMA,
+			foreignTable: DBSP_TRANSITION_RUN_TABLE,
+			foreignColumns: ['run_id'],
+		})
+	) {
+		throw new Error('dbsp transition run plan table foreign key drifted');
+	}
+	if (jsonArray(row.checks).length !== 0) {
+		throw new Error('dbsp transition run plan table constraints drifted');
+	}
+}
+
 async function readJournalTableShape(
 	executor: TransitionJournalQueryable,
 	table: string,
@@ -328,6 +395,9 @@ async function verifyTransitionJournalShape(
 	assertJournalTableShape(
 		await readJournalTableShape(executor, DBSP_TRANSITION_JOURNAL_TABLE),
 	);
+	assertRunPlanTableShape(
+		await readJournalTableShape(executor, DBSP_TRANSITION_RUN_PLAN_TABLE),
+	);
 }
 
 export async function ensureTransitionJournal(
@@ -335,6 +405,7 @@ export async function ensureTransitionJournal(
 ): Promise<void> {
 	await executor.query(renderCreateDbspMetaSchemaSql());
 	await executor.query(renderCreateTransitionRunTableSql());
+	await executor.query(renderCreateTransitionRunPlanTableSql());
 	await executor.query(renderCreateTransitionJournalTableSql());
 	await verifyTransitionJournalShape(executor);
 }
@@ -371,20 +442,6 @@ async function ensureRun(
 	executor: TransitionJournalQueryable,
 	run: TransitionRunMetadata,
 ): Promise<void> {
-	await executor.query(
-		`INSERT INTO ${transitionRunTable()} ` +
-			'(run_id, plan_digest, target_context_digest, database_id, core_version, started_at) ' +
-			'VALUES ($1, $2, $3, $4, $5, $6::timestamptz) ' +
-			'ON CONFLICT (run_id) DO NOTHING',
-		[
-			run.runId,
-			run.planDigest,
-			run.targetContextDigest,
-			run.databaseId,
-			run.coreVersion,
-			run.startedAt,
-		],
-	);
 	const existing = await executor.query(
 		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
 			`FROM ${transitionRunTable()} WHERE run_id = $1`,
@@ -399,10 +456,20 @@ async function ensureRun(
 		current.planDigest !== run.planDigest ||
 		current.targetContextDigest !== run.targetContextDigest ||
 		current.databaseId !== run.databaseId ||
-		current.coreVersion !== run.coreVersion
+		current.coreVersion !== run.coreVersion ||
+		!sameInstant(current.startedAt, run.startedAt)
 	) {
 		throw new Error(
 			`dbsp transition run ${run.runId} already exists with different metadata`,
+		);
+	}
+	const plan = await executor.query(
+		`SELECT run_id FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+		[run.runId],
+	);
+	if (!plan.rows[0]) {
+		throw new Error(
+			`dbsp transition run ${run.runId} has no persisted proven plan`,
 		);
 	}
 }
@@ -440,6 +507,141 @@ async function appendJournalEvent(params: {
 	);
 }
 
+async function ensurePersistedRun(
+	executor: TransitionJournalQueryable,
+	runId: string,
+): Promise<void> {
+	const existing = await executor.query(
+		`SELECT run_id FROM ${transitionRunTable()} WHERE run_id = $1`,
+		[runId],
+	);
+	if (!existing.rows[0]) {
+		throw new Error(`dbsp transition run ${runId} was not persisted`);
+	}
+	const plan = await executor.query(
+		`SELECT run_id FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+		[runId],
+	);
+	if (!plan.rows[0]) {
+		throw new Error(
+			`dbsp transition run ${runId} has no persisted proven plan`,
+		);
+	}
+}
+
+function serializedPlan(plan: unknown): string {
+	let serialized: string | undefined;
+	try {
+		serialized = JSON.stringify(plan);
+	} catch (error) {
+		throw new Error(
+			`dbsp transition proven plan is not JSON serializable: ${error instanceof Error ? error.message : 'unknown error'}`,
+		);
+	}
+	if (serialized === undefined) {
+		throw new Error('dbsp transition proven plan is not JSON serializable');
+	}
+	try {
+		const roundTripped = JSON.parse(serialized) as unknown;
+		if (stableJson(roundTripped) !== stableJson(plan)) {
+			throw new Error(
+				'dbsp transition proven plan would lose information when stored as jsonb',
+			);
+		}
+	} catch (error) {
+		if (error instanceof Error) {
+			throw error;
+		}
+		throw new Error('dbsp transition proven plan is not JSON serializable');
+	}
+	return serialized;
+}
+
+function isResumablePlanShape(value: unknown): value is ProvenPlanShape {
+	if (!isRecord(value)) {
+		return false;
+	}
+	return [
+		'observations',
+		'claims',
+		'assumptions',
+		'preconditions',
+		'segments',
+		'steps',
+		'postconditions',
+	].every((field) => Array.isArray(value[field]));
+}
+
+function planFromRow(row: Record<string, unknown>): ProvenPlanShape {
+	const value = row.plan;
+	if (isResumablePlanShape(value)) {
+		return value;
+	}
+	if (typeof value === 'string') {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (isResumablePlanShape(parsed)) {
+				return parsed;
+			}
+		} catch {
+			// The error below names the durable row as non-resumable.
+		}
+	}
+	throw new Error('dbsp transition run plan row is invalid and non-resumable');
+}
+
+export function createPgTransitionRunPersister(
+	executor: Pool,
+): TransitionRunPersister {
+	return {
+		async persist(run, plan): Promise<void> {
+			if (transitionPlanDigest(plan) !== run.planDigest) {
+				throw new Error(
+					'dbsp transition proven plan digest does not match run metadata',
+				);
+			}
+			const serialized = serializedPlan(plan);
+			await ensureTransitionJournal(executor);
+			await executor.query(
+				`WITH ins_run AS (` +
+					`INSERT INTO ${transitionRunTable()} ` +
+					'(run_id, plan_digest, target_context_digest, database_id, core_version, started_at) ' +
+					'VALUES ($1, $2, $3, $4, $5, $6::timestamptz) ' +
+					'ON CONFLICT (run_id) DO NOTHING ' +
+					'RETURNING run_id' +
+					`) INSERT INTO ${transitionRunPlanTable()} (run_id, plan) ` +
+					'SELECT run_id, $7::jsonb FROM ins_run ' +
+					'ON CONFLICT (run_id) DO NOTHING',
+				[
+					run.runId,
+					run.planDigest,
+					run.targetContextDigest,
+					run.databaseId,
+					run.coreVersion,
+					run.startedAt,
+					serialized,
+				],
+			);
+			await ensureRun(executor, run);
+			const storedPlan = await executor.query(
+				`SELECT plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+				[run.runId],
+			);
+			const row = storedPlan.rows[0];
+			if (!row) {
+				throw new Error(
+					`dbsp transition run ${run.runId} proven plan was not persisted`,
+				);
+			}
+			if (stableJson(planFromRow(row)) !== stableJson(plan)) {
+				throw new Error(
+					`dbsp transition run ${run.runId} already exists with a different proven plan`,
+				);
+			}
+		},
+	};
+}
+
 export async function appendIntentJournal(
 	executor: TransitionJournalQueryable,
 	record: DurableIntentRecord,
@@ -463,6 +665,7 @@ export async function appendCompletionJournal(
 	record: TransactionalCompletionRecord,
 ): Promise<void> {
 	await ensureTransitionJournal(executor);
+	await ensurePersistedRun(executor, runIdFromRecord('completion', record));
 	await appendJournalEvent({
 		executor,
 		event: 'completion',
@@ -488,6 +691,8 @@ export async function appendObservedJournal(
 			);
 		}
 		await ensureRun(executor, journal.intent.run);
+	} else {
+		await ensurePersistedRun(executor, runIdFromRecord('observed', journal));
 	}
 	await appendJournalEvent({
 		executor,
@@ -579,7 +784,7 @@ function eventFromRow(row: Record<string, unknown>): TransitionJournalEvent {
 export async function readTransitionJournal(
 	executor: TransitionJournalQueryable,
 	runId: string,
-): Promise<TransitionRunJournal> {
+): Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }> {
 	await ensureTransitionJournal(executor);
 	const run = await executor.query(
 		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
@@ -590,6 +795,16 @@ export async function readTransitionJournal(
 	if (!runRow) {
 		throw new Error(`dbsp transition run ${runId} was not found`);
 	}
+	const plan = await executor.query(
+		`SELECT plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+		[runId],
+	);
+	const planRow = plan.rows[0];
+	if (!planRow) {
+		throw new Error(
+			`dbsp transition run ${runId} has no persisted proven plan and is non-resumable`,
+		);
+	}
 	const events = await executor.query(
 		`SELECT run_id, seq::text AS seq, event, step_id, operation_ref, operation_kind, recorded_at, record ` +
 			`FROM ${transitionJournalTable()} WHERE run_id = $1 ORDER BY seq`,
@@ -597,6 +812,7 @@ export async function readTransitionJournal(
 	);
 	return {
 		run: runMetadataFromRow(runRow),
+		plan: planFromRow(planRow),
 		events: events.rows.map(eventFromRow),
 	};
 }

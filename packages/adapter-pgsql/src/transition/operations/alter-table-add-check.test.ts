@@ -114,6 +114,25 @@ function journalTableShape(table: string) {
 			checks: [],
 		};
 	}
+	if (table === 'dbsp_transition_run_plan') {
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				plan: { type: 'jsonb', notNull: true },
+			},
+			primary_key: ['run_id'],
+			foreign_keys: [
+				{
+					columns: ['run_id'],
+					foreignSchema: 'dbsp_meta',
+					foreignTable: 'dbsp_transition_run',
+					foreignColumns: ['run_id'],
+				},
+			],
+			checks: [],
+		};
+	}
 	return {
 		relkind: 'r',
 		columns: {
@@ -481,6 +500,9 @@ describe('AlterTableAddCheck operation runtime', () => {
 					if (sql.includes('dbsp_transition_journal_shape')) {
 						return { rows: [journalTableShape(String(params?.[1]))] };
 					}
+					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
+						return { rows: [{ run_id: run.runId }] };
+					}
 					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 						return { rows: [journalRunRow(run)] };
 					}
@@ -498,7 +520,7 @@ describe('AlterTableAddCheck operation runtime', () => {
 			queries.some((sql) =>
 				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"'),
 			),
-		).toBe(true);
+		).toBe(false);
 		expect(
 			queries.filter((sql) =>
 				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"'),

@@ -23,6 +23,7 @@ import {
 	PG_RULE_PACK_ARTIFACT,
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
+import { createPgTransitionRunPersister } from '../journal.js';
 import { createPgObservationIssuer } from '../observation-issuer.js';
 import {
 	createManualSqlOperationRuntime,
@@ -230,6 +231,7 @@ function manualRule(manualOperation: PhysicalOperation): TransitionRule {
 class ManualSqlPool {
 	readonly queries: string[] = [];
 	readonly runs = new Map<string, Record<string, unknown>>();
+	readonly plans = new Map<string, Record<string, unknown>>();
 
 	tableShape(table: string): Record<string, unknown> {
 		if (table === 'dbsp_transition_run') {
@@ -245,6 +247,25 @@ class ManualSqlPool {
 				},
 				primary_key: ['run_id'],
 				foreign_keys: [],
+				checks: [],
+			};
+		}
+		if (table === 'dbsp_transition_run_plan') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan: { type: 'jsonb', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
 				checks: [],
 			};
 		}
@@ -289,6 +310,32 @@ class ManualSqlPool {
 		if (sql.includes('dbsp_transition_journal_shape')) {
 			return { rows: [this.tableShape(String(_params?.[1]))] };
 		}
+		if (sql.includes('WITH ins_run AS')) {
+			const [
+				run_id,
+				plan_digest,
+				target_context_digest,
+				database_id,
+				core_version,
+				started_at,
+				plan,
+			] = _params ?? [];
+			if (!this.runs.has(String(run_id))) {
+				this.runs.set(String(run_id), {
+					run_id,
+					plan_digest,
+					target_context_digest,
+					database_id,
+					core_version,
+					started_at,
+				});
+				this.plans.set(String(run_id), {
+					run_id,
+					plan: JSON.parse(String(plan)) as unknown,
+				});
+			}
+			return { rows: [] };
+		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
 			const [
 				run_id,
@@ -309,6 +356,19 @@ class ManualSqlPool {
 				});
 			}
 			return { rows: [] };
+		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
+			const [run_id, plan] = _params ?? [];
+			if (!this.plans.has(String(run_id))) {
+				this.plans.set(String(run_id), {
+					run_id,
+					plan: JSON.parse(String(plan)) as unknown,
+				});
+			}
+			return { rows: [] };
+		}
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
+			return { rows: [this.plans.get(String(_params?.[0]))].filter(Boolean) };
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 			return { rows: [this.runs.get(String(_params?.[0]))].filter(Boolean) };
@@ -616,7 +676,10 @@ describe('ManualSql operation runtime', () => {
 		if (outcome.kind !== 'proven') {
 			return;
 		}
-		const denied = await createApplier(registry).apply(
+		const denied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
 			createTransitionLessor(async () => pool.connect()),
@@ -642,7 +705,10 @@ describe('ManualSql operation runtime', () => {
 				},
 			],
 		};
-		const applied = await createApplier(registry).apply(
+		const applied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy,
 			createTransitionLessor(async () => pool.connect()),

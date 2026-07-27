@@ -1,16 +1,20 @@
+import { transitionPlanDigest } from '@dbsp/core';
 import type {
 	DurableIntentRecord,
 	PhysicalOperation,
+	ProvenPlanShape,
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import type { Pool } from 'pg';
 import { describe, expect, it } from 'vitest';
 import { semanticArtifactId } from './ids.js';
 import {
 	appendCompletionJournal,
 	appendIntentJournal,
 	appendObservedJournal,
+	createPgTransitionRunPersister,
 	readTransitionJournal,
 	type TransitionJournalQueryable,
 } from './journal.js';
@@ -27,10 +31,21 @@ const operation: PhysicalOperation = {
 	payload: {},
 };
 
+const plan = {
+	observations: [],
+	claims: [],
+	assumptions: [],
+	preconditions: [],
+	segments: [],
+	steps: [],
+	postconditions: [],
+	persisted: true,
+} as unknown as ProvenPlanShape;
+
 function run(): TransitionRunMetadata {
 	return {
 		runId: 'run:journal',
-		planDigest: 'plan-digest',
+		planDigest: transitionPlanDigest(plan),
 		targetContextDigest: 'context-digest',
 		databaseId: 'database-id',
 		coreVersion: '0.1.0',
@@ -40,6 +55,7 @@ function run(): TransitionRunMetadata {
 
 class FakeJournalExecutor implements TransitionJournalQueryable {
 	readonly runs = new Map<string, Record<string, unknown>>();
+	readonly plans = new Map<string, Record<string, unknown>>();
 	readonly events: Record<string, unknown>[] = [];
 	readonly sql: string[] = [];
 	readonly queryLog: {
@@ -70,6 +86,25 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 				},
 				primary_key: ['run_id'],
 				foreign_keys: [],
+				checks: [],
+			};
+		}
+		if (table === 'dbsp_transition_run_plan') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan: { type: 'jsonb', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
 				checks: [],
 			};
 		}
@@ -112,7 +147,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 		if (sql.includes('dbsp_transition_journal_shape')) {
 			return { rows: [this.tableShape(String(params[1]))] };
 		}
-		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
+		if (sql.includes('WITH ins_run AS')) {
 			this.runUpsertAttempts += 1;
 			const [
 				run_id,
@@ -131,8 +166,25 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					core_version,
 					started_at,
 				});
+				this.plans.set(String(run_id), {
+					run_id,
+					plan: JSON.parse(String(params[6])) as unknown,
+				});
 			}
 			return { rows: [] };
+		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
+			const [runId, plan] = params;
+			if (!this.plans.has(String(runId))) {
+				this.plans.set(String(runId), {
+					run_id: runId,
+					plan: JSON.parse(String(plan)) as unknown,
+				});
+			}
+			return { rows: [] };
+		}
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
+			return { rows: [this.plans.get(String(params[0]))].filter(Boolean) };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
 			const [runId, event, stepId, operationRef, operationKind, record] =
@@ -170,6 +222,20 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 	}
 }
 
+function asPool(executor: FakeJournalExecutor): Pool {
+	return executor as unknown as Pool;
+}
+
+async function persistRun(
+	executor: FakeJournalExecutor,
+	metadata: TransitionRunMetadata,
+): Promise<void> {
+	await createPgTransitionRunPersister(asPool(executor)).persist(
+		metadata,
+		plan,
+	);
+}
+
 describe('transition journal primitive', () => {
 	it('appends and reads intent, completion, and observed rows with run metadata', async () => {
 		const executor = new FakeJournalExecutor();
@@ -198,6 +264,7 @@ describe('transition journal primitive', () => {
 			},
 		};
 
+		await persistRun(executor, metadata);
 		await appendIntentJournal(executor, intent);
 		await appendCompletionJournal(executor, operation, completion);
 		await appendObservedJournal(executor, journal);
@@ -205,6 +272,7 @@ describe('transition journal primitive', () => {
 		const loaded = await readTransitionJournal(executor, metadata.runId);
 
 		expect(loaded.run).toEqual(metadata);
+		expect(loaded.plan).toEqual(plan);
 		expect(loaded.events.map((event) => event.event)).toEqual([
 			'intent',
 			'completion',
@@ -222,6 +290,137 @@ describe('transition journal primitive', () => {
 		).toBe(true);
 	});
 
+	it('persists an idempotent run/plan pair and rejects plan drift', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		const persister = createPgTransitionRunPersister(asPool(executor));
+
+		await persister.persist(metadata, plan);
+		await persister.persist(metadata, plan);
+		await expect(
+			persister.persist(metadata, { ...plan, persisted: false }),
+		).rejects.toThrow(/digest does not match/);
+		expect(executor.runs.get(metadata.runId)).toBeDefined();
+		expect(executor.plans.get(metadata.runId)?.plan).toEqual(plan);
+	});
+
+	it('writes the run and plan with one autocommit statement, never a transaction', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+
+		await createPgTransitionRunPersister(asPool(executor)).persist(
+			metadata,
+			plan,
+		);
+
+		expect(executor.runs.get(metadata.runId)).toBeDefined();
+		expect(executor.plans.get(metadata.runId)?.plan).toEqual(plan);
+		expect(executor.sql.some((sql) => sql.includes('WITH ins_run AS'))).toBe(
+			true,
+		);
+		// `executor.sql` holds whole statements, so an equality-based
+		// `not.toContain('BEGIN')` would only reject a statement that IS the word
+		// and would pass `BEGIN TRANSACTION`, a leading comment, or a combined
+		// statement — a test that reads as proof while proving nothing.
+		expect(
+			executor.sql.filter((sql) =>
+				/\b(BEGIN|COMMIT|ROLLBACK|SAVEPOINT)\b/i.test(sql),
+			),
+		).toEqual([]);
+	});
+
+	it('does not attach a plan to a legacy run and refuses to persist it', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		executor.runs.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan_digest: metadata.planDigest,
+			target_context_digest: metadata.targetContextDigest,
+			database_id: metadata.databaseId,
+			core_version: metadata.coreVersion,
+			started_at: metadata.startedAt,
+		});
+
+		await expect(
+			createPgTransitionRunPersister(asPool(executor)).persist(metadata, plan),
+		).rejects.toThrow(/no persisted proven plan/);
+		expect(executor.plans.get(metadata.runId)).toBeUndefined();
+	});
+
+	it('refuses retries with different metadata or plan', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		const persister = createPgTransitionRunPersister(asPool(executor));
+		await persister.persist(metadata, plan);
+
+		const changedPlan = { ...plan, persisted: false } as ProvenPlanShape;
+		await expect(
+			persister.persist(
+				{ ...metadata, planDigest: transitionPlanDigest(changedPlan) },
+				changedPlan,
+			),
+		).rejects.toThrow(/different metadata/);
+		await expect(
+			persister.persist(
+				{ ...metadata, startedAt: '2026-07-17T00:00:01.000Z' },
+				plan,
+			),
+		).rejects.toThrow(/different metadata/);
+	});
+
+	it('refuses a mismatched plan digest before writing either row', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = { ...run(), planDigest: 'not-the-plan-digest' };
+
+		await expect(
+			createPgTransitionRunPersister(asPool(executor)).persist(metadata, plan),
+		).rejects.toThrow(/digest does not match/);
+		expect(executor.runUpsertAttempts).toBe(0);
+		expect(executor.runs.size).toBe(0);
+		expect(executor.plans.size).toBe(0);
+	});
+
+	it('fails closed when a run has no persisted plan row', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		executor.runs.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan_digest: metadata.planDigest,
+			target_context_digest: metadata.targetContextDigest,
+			database_id: metadata.databaseId,
+			core_version: metadata.coreVersion,
+			started_at: metadata.startedAt,
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow(/no persisted proven plan and is non-resumable/);
+	});
+
+	it.each([
+		{},
+		{ observations: [] },
+	])('refuses a corrupt plan row before it can be resumed', async (corruptPlan) => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		executor.runs.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan_digest: metadata.planDigest,
+			target_context_digest: metadata.targetContextDigest,
+			database_id: metadata.databaseId,
+			core_version: metadata.coreVersion,
+			started_at: metadata.startedAt,
+		});
+		executor.plans.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan: corruptPlan,
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow(/invalid and non-resumable/);
+	});
+
 	it('allocates journal seq under a parameterized per-run advisory lock', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
@@ -233,6 +432,7 @@ describe('transition journal primitive', () => {
 			recordedAt: '2026-07-17T00:00:00.100Z',
 		};
 
+		await persistRun(executor, metadata);
 		await appendIntentJournal(executor, intent);
 
 		const appendQuery = executor.queryLog.find(({ sql }) =>
@@ -273,6 +473,7 @@ describe('transition journal primitive', () => {
 			recordedAt: '2026-07-17T00:00:00.300Z',
 		};
 
+		await persistRun(executor, metadata);
 		await appendIntentJournal(executor, intent);
 		await Promise.all([
 			appendCompletionJournal(executor, operation, firstCompletion),
@@ -284,7 +485,7 @@ describe('transition journal primitive', () => {
 		expect(new Set(executor.events.map((entry) => entry.seq)).size).toBe(3);
 	});
 
-	it('re-ensures the run row before appending observed output after a rolled-back intent transaction', async () => {
+	it('rejects observed output when the persisted run row was rolled back', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		const intent: DurableIntentRecord = {
@@ -305,22 +506,14 @@ describe('transition journal primitive', () => {
 			recovery: [],
 		};
 
+		await persistRun(executor, metadata);
 		await appendIntentJournal(executor, intent);
 		executor.runs.delete(metadata.runId);
 		executor.events.splice(0);
 
-		await appendObservedJournal(executor, journal);
-		const loaded = await readTransitionJournal(executor, metadata.runId);
-
-		expect(executor.runUpsertAttempts).toBe(2);
-		expect(loaded.run).toEqual(metadata);
-		expect(loaded.events).toHaveLength(1);
-		expect(loaded.events[0]).toMatchObject({
-			event: 'observed',
-			runId: metadata.runId,
-			stepId: 'step:mock',
-			record: { outcome: 'guard-failed' },
-		});
+		await expect(appendObservedJournal(executor, journal)).rejects.toThrow(
+			/dbsp transition run metadata was not persisted/,
+		);
 	});
 
 	it('keeps run-less observed journals working when the run row already exists', async () => {
@@ -349,6 +542,7 @@ describe('transition journal primitive', () => {
 			},
 		};
 
+		await persistRun(executor, metadata);
 		await appendIntentJournal(executor, intent);
 		await appendObservedJournal(executor, journal);
 

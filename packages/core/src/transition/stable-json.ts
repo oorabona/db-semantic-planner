@@ -81,7 +81,15 @@ function stableJsonInner(value: unknown, seen: WeakSet<object>): string {
 		}
 		const tag = objectTag(value);
 		const entries = Object.entries(value as Record<string, unknown>)
-			.sort(([left], [right]) => left.localeCompare(right))
+			// Code-unit order, never `localeCompare`: that one reads the host's
+			// default locale, and `sv-SE` sorts `ä` after `z` where `en-US` sorts it
+			// between `a` and `z`. This ordering decides the digest a durable
+			// transition run is resumed against, so a locale-sensitive comparison
+			// would make a plan persisted on one host unresumable on another.
+			// This file is duplicated between @dbsp/core and @dbsp/adapter-pgsql
+			// and the two must stay byte-identical: the digest core computes is
+			// compared against plans this package serializes.
+			.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
 			.map(
 				([key, item]) =>
 					`${JSON.stringify(key)}:${stableJsonInner(item, seen)}`,

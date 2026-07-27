@@ -12,6 +12,7 @@ import type {
 	TransitionLessor,
 	TransitionQueryClient,
 } from '@dbsp/types';
+import { createApplier } from './applier.js';
 import type {
 	Applier,
 	EstablishedProofClaim,
@@ -19,7 +20,9 @@ import type {
 	ProveOutcome,
 	Prover,
 	SerializedProvenPlan,
+	TransitionRunPersister,
 } from './index.js';
+import type { PackRegistry } from './registry.js';
 
 declare const applicableAssessment: ApplicableAssessment;
 declare const applyPolicy: ApplyPolicy;
@@ -34,6 +37,12 @@ declare const semanticArtifactRef: SemanticArtifactRef;
 declare const serializedPlan: SerializedProvenPlan;
 declare const executionTarget: TransitionLessor;
 declare const borrowedClient: TransitionQueryClient;
+declare const registry: PackRegistry;
+declare const persister: TransitionRunPersister;
+
+// @ts-expect-error Applying requires a durable run/plan persister.
+createApplier(registry);
+createApplier(registry, persister);
 
 declare const blockedOutcome: Extract<
 	ProveOutcome,

@@ -53,6 +53,23 @@ function plainDataError(kind: string, path: string): Error {
 	);
 }
 
+/**
+ * Whether `stableJson` will serialize this own key of an array. Its array branch
+ * walks `0 .. length - 1` and reads nothing else, so the bound is the array's own
+ * length rather than the language's array-index range: assigning `a[2 ** 32]`
+ * leaves `length` untouched, which is exactly how a property stays readable by
+ * the executor and absent from the digest.
+ */
+function isVisibleArrayIndex(value: readonly unknown[], key: string): boolean {
+	const index = Number(key);
+	return (
+		String(index) === key &&
+		Number.isInteger(index) &&
+		index >= 0 &&
+		index < value.length
+	);
+}
+
 function assertPlainDataAndFreeze(
 	value: unknown,
 	path: string,
@@ -127,6 +144,16 @@ function assertPlainDataAndFreeze(
 		}
 		if ('get' in descriptor || 'set' in descriptor) {
 			throw plainDataError('accessor', childPath(path, key));
+		}
+		if (isPlainObject && !descriptor.enumerable) {
+			// This property is readable by execution code but invisible to stableJson
+			// and JSON.stringify, so it could change the stored plan under one digest.
+			throw plainDataError('non-enumerable property', childPath(path, key));
+		}
+		if (isPlainArray && key !== 'length' && !isVisibleArrayIndex(value, key)) {
+			// This property is readable by execution code but invisible to stableJson
+			// and JSON.stringify, so it could change the stored plan under one digest.
+			throw plainDataError('named array property', childPath(path, key));
 		}
 		assertPlainDataAndFreeze(descriptor.value, childPath(path, key), seen);
 	}

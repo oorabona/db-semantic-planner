@@ -11,10 +11,20 @@ import type {
 	SemanticArtifactRef,
 	TransitionLessor,
 	TransitionRunJournal,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 
 export type InProcessProvenPlan = ProvenPlanShape & {
 	readonly __inProcessProvenPlan: unique symbol;
+};
+
+/**
+ * Makes a transition run and its proven plan durable before execution begins.
+ * Implementations must persist both rows atomically and accept retries only
+ * when the metadata and plan are identical.
+ */
+export type TransitionRunPersister = {
+	persist(run: TransitionRunMetadata, plan: ProvenPlanShape): Promise<void>;
 };
 
 export type EstablishedProofClaim = ProofClaim & {
@@ -152,6 +162,7 @@ export {
 	indexDelta,
 	normalizedIndex,
 } from './index-delta.js';
+export { transitionPlanDigest } from './plan-digest.js';
 export { createProver } from './prover.js';
 export {
 	type ComparatorNameNormalizer,

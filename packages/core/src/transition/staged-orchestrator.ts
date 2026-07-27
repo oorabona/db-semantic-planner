@@ -16,6 +16,7 @@ import type {
 import { createApplier } from './applier.js';
 import { createComparator } from './comparator.js';
 import { claimId, semanticArtifactId } from './ids.js';
+import type { TransitionRunPersister } from './index.js';
 import { createProver } from './prover.js';
 import type { PackRegistry } from './registry.js';
 import { stableJson } from './stable-json.js';
@@ -243,10 +244,11 @@ function completedJournalRefs(
 
 export function createStagedTransitionOrchestrator(
 	registry: PackRegistry,
+	persister: TransitionRunPersister,
 ): StagedTransitionOrchestrator {
 	const comparator = createComparator(registry);
 	const prover = createProver(registry);
-	const applier = createApplier(registry);
+	const applier = createApplier(registry, persister);
 	return {
 		async applyStagedTransition(
 			input: StagedTransitionInput,

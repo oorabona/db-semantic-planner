@@ -45,6 +45,8 @@ const context: ObservationContext = {
 	extensions: {},
 };
 
+const persister = { persist: async (): Promise<void> => undefined };
+
 const operation: PhysicalOperation = {
 	ref: 'op',
 	operationKind: {
@@ -802,6 +804,144 @@ function runtimeForOperation(
 }
 
 describe('createApplier', () => {
+	it('persists the run and plan before acquiring a lease or opening execution', async () => {
+		const rt = runtime(() => undefined);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const order: string[] = [];
+		const target = createTestTransitionLessor(async () => {
+			order.push('lease');
+			return { query: async () => ({ rows: [] }), release: vi.fn() };
+		});
+		const result = await createApplier(registry, {
+			persist: async () => {
+				order.push('persist');
+			},
+		}).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			target,
+		);
+
+		expect(result.assessment.decision).toBeDefined();
+		expect(order[0]).toBe('persist');
+		expect(order).toContain('lease');
+	});
+
+	it('fails closed when persistence rejects before leasing or writing a journal', async () => {
+		const rt = runtime(() => undefined);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const query = vi.fn(async () => ({ rows: [] }));
+		const acquire = vi.fn(async () => ({ query, release: vi.fn() }));
+		const target = createTestTransitionLessor(acquire);
+		const result = await createApplier(registry, {
+			persist: async () => {
+				throw new Error('durable store unavailable');
+			},
+		}).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			target,
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'persistence-failed',
+			fact: {
+				key: 'transition-run-id',
+				value: expect.stringMatching(/^dbsp-/),
+			},
+			detail: expect.stringContaining('persistence is indeterminate'),
+		});
+		expect(acquisitions).toBe(0);
+		expect(acquire).not.toHaveBeenCalled();
+		expect(query).not.toHaveBeenCalled();
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.begin).not.toHaveBeenCalled();
+		expect(rt.setLockTimeout).not.toHaveBeenCalled();
+		expect(rt.acquireLocks).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+		expect(rt.writeCompletionJournal).not.toHaveBeenCalled();
+		expect(rt.writeObservedJournal).not.toHaveBeenCalled();
+	});
+
+	it('does not persist a run when an operation cannot be resolved', async () => {
+		const persisted = vi.fn(async () => undefined);
+		const result = await createApplier(
+			createPackRegistry([
+				{
+					rules: [],
+					operationSemantics: [],
+					issuer: {
+						artifact: operationArtifact,
+						execute: async () => evidence(),
+					},
+				},
+			]),
+			{ persist: persisted },
+		).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(persisted).not.toHaveBeenCalled();
+	});
+
+	it('does not persist a run when a segment references a missing step', async () => {
+		const persisted = vi.fn(async () => undefined);
+		const shape = planShape();
+		const malformed = mintInProcessPlan({
+			...shape,
+			segments: [
+				{
+					...shape.segments[0]!,
+					stepIds: ['step:missing'],
+				},
+			],
+		});
+
+		await expect(
+			createApplier(
+				createPackRegistry([
+					{
+						rules: [],
+						operationSemantics: [runtime(() => undefined)],
+						issuer: {
+							artifact: operationArtifact,
+							execute: async () => evidence(),
+						},
+					},
+				]),
+				{ persist: persisted },
+			).apply(
+				{ plan: malformed, assessment: assessment() },
+				acceptsOperationPolicy(),
+				executionTarget(),
+			),
+		).rejects.toThrow('segment segment:0 references missing step step:missing');
+		expect(persisted).not.toHaveBeenCalled();
+	});
+
 	it('refuses an unminted plain plan before authorization, leasing, or DDL', async () => {
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
@@ -820,7 +960,7 @@ describe('createApplier', () => {
 		}));
 		const target = { connect, release: vi.fn() };
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: planShape(), assessment: assessment() } as Parameters<
 				ReturnType<typeof createApplier>['apply']
 			>[0],
@@ -844,6 +984,7 @@ describe('createApplier', () => {
 	});
 
 	it('rejects a checked-out client target before acquiring a lease', async () => {
+		const persisted = vi.fn(async () => undefined);
 		const rt = runtime(() => undefined);
 		const registry = createPackRegistry([
 			{
@@ -861,7 +1002,7 @@ describe('createApplier', () => {
 			release: vi.fn(),
 		};
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, { persist: persisted }).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			target as never,
@@ -877,6 +1018,35 @@ describe('createApplier', () => {
 		expect(result.assessment.continuation).toBe('human-intervention-required');
 		expect(target.connect).not.toHaveBeenCalled();
 		expect(acquisitions).toBe(0);
+		expect(persisted).not.toHaveBeenCalled();
+	});
+
+	it('rejects a zero-segment plan with a non-lessor target before persistence', async () => {
+		const persisted = vi.fn(async () => undefined);
+		const shape = planShape();
+		const zeroSegmentPlan = mintInProcessPlan({ ...shape, segments: [] });
+		const target = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+
+		const result = await createApplier(createPackRegistry([]), {
+			persist: persisted,
+		}).apply(
+			{ plan: zeroSegmentPlan, assessment: assessment() },
+			acceptsOperationPolicy(),
+			target as never,
+		);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+			fact: {
+				key: 'transition-lessor',
+				value: TRANSITION_LESSOR_REJECTION,
+			},
+		});
+		expect(persisted).not.toHaveBeenCalled();
 	});
 
 	it('rejects a forged lessor whose acquisition has no release()', async () => {
@@ -898,7 +1068,7 @@ describe('createApplier', () => {
 			value: { protocolVersion: 1 },
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			target as never,
@@ -943,7 +1113,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		await createApplier(registry).apply(
+		await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -974,7 +1144,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -983,6 +1153,38 @@ describe('createApplier', () => {
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(result.journals[0]?.outcome).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
+	});
+
+	// Persisting from inside the segment loop reads as correct on a one-segment
+	// plan and is wrong here: it repeats the write, and a failure on the second
+	// segment would report an empty journal list for DDL the first segment had
+	// already applied.
+	it('persists the run exactly once for a multi-segment plan', async () => {
+		const persisted = vi.fn(async () => undefined);
+		const rt = multiSegmentRuntime(() => undefined, { log: [] });
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const minted = multiSegmentPlan();
+
+		const result = await createApplier(registry, {
+			persist: persisted,
+		}).apply(
+			{ plan: minted, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(minted.segments.length).toBe(2);
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(persisted).toHaveBeenCalledTimes(1);
 	});
 
 	it('blocks apply when the live context database differs from the proof context', async () => {
@@ -1013,7 +1215,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1057,7 +1259,7 @@ describe('createApplier', () => {
 			],
 		};
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: forgedAssessment },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1092,7 +1294,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1144,7 +1346,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1169,6 +1371,7 @@ describe('createApplier', () => {
 	});
 
 	it('rejects cross-runtime transactional segments without a shared coordinator before acquiring a lease', async () => {
+		const persisted = vi.fn(async () => undefined);
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
 		const rtA = runtimeForOperation(
@@ -1196,7 +1399,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, { persist: persisted }).apply(
 			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1211,6 +1414,7 @@ describe('createApplier', () => {
 		);
 		expect(acquisitions).toBe(0);
 		expect(observed).toEqual([]);
+		expect(persisted).not.toHaveBeenCalled();
 	});
 
 	it('keeps an earlier committed segment when a later segment fails', async () => {
@@ -1233,7 +1437,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1293,7 +1497,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1390,7 +1594,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1438,7 +1642,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1507,7 +1711,7 @@ describe('createApplier', () => {
 			),
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1552,7 +1756,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: forbidsTransactionPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1624,7 +1828,7 @@ describe('createApplier', () => {
 			),
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1666,7 +1870,7 @@ describe('createApplier', () => {
 				},
 			},
 		]);
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1706,7 +1910,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1746,7 +1950,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1784,7 +1988,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1823,7 +2027,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1862,7 +2066,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1908,7 +2112,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: multiSegmentPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -1999,7 +2203,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: afterCommitSecondSegment, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2051,7 +2255,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: firstSegmentForbidsTransactionPlan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2128,7 +2332,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: afterCommitPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2178,7 +2382,7 @@ describe('createApplier', () => {
 		]);
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2208,7 +2412,7 @@ describe('createApplier', () => {
 		});
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2260,7 +2464,7 @@ describe('createApplier', () => {
 		]);
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2295,7 +2499,7 @@ describe('createApplier', () => {
 		);
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2336,7 +2540,7 @@ describe('createApplier', () => {
 		);
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2365,7 +2569,7 @@ describe('createApplier', () => {
 		);
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2395,7 +2599,7 @@ describe('createApplier', () => {
 		});
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2425,7 +2629,7 @@ describe('createApplier', () => {
 		});
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2456,7 +2660,7 @@ describe('createApplier', () => {
 		});
 
 		await expect(
-			createApplier(registry).apply(
+			createApplier(registry, persister).apply(
 				{ plan: tampered, assessment: assessment() },
 				acceptsOperationPolicy(),
 				executionTarget(),
@@ -2494,7 +2698,7 @@ describe('createApplier', () => {
 			{ assumptions: [globalAssumption] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			scopedPolicy,
 			executionTarget(),
@@ -2530,7 +2734,7 @@ describe('createApplier', () => {
 			{ assumptions: [scopedAssumption] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			{
 				accepts: [
@@ -2568,7 +2772,7 @@ describe('createApplier', () => {
 			{ assumptions: [operation, nativeDefault] },
 		);
 
-		const denied = await createApplier(registry).apply(
+		const denied = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2580,7 +2784,7 @@ describe('createApplier', () => {
 		});
 		expect(acquisitions).toBe(0);
 
-		const accepted = await createApplier(registry).apply(
+		const accepted = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			{
 				accepts: [
@@ -2625,7 +2829,7 @@ describe('createApplier', () => {
 			{ assumptions: [operation, blastRadius] },
 		);
 
-		const denied = await createApplier(registry).apply(
+		const denied = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2638,7 +2842,7 @@ describe('createApplier', () => {
 		});
 		expect(acquisitions).toBe(0);
 
-		const accepted = await createApplier(registry).apply(
+		const accepted = await createApplier(registry, persister).apply(
 			{ plan: scopedPlan, assessment: assessment() },
 			{
 				accepts: [
@@ -2669,7 +2873,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			createTestTransitionLessor(async () => {
@@ -2708,7 +2912,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			createTestTransitionLessor(async () => ({
@@ -2742,7 +2946,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		await createApplier(registry).apply(
+		await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			createTestTransitionLessor(async () => ({
@@ -2801,7 +3005,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2839,7 +3043,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: plan(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2881,7 +3085,7 @@ describe('createApplier', () => {
 			expectedBefore: fingerprintWithRelkind('relkind:r', 'r'),
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: relkindAnchoredPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2928,7 +3132,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -2995,7 +3199,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3046,7 +3250,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3089,7 +3293,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3132,7 +3336,7 @@ describe('createApplier', () => {
 			},
 		]);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3177,7 +3381,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3228,7 +3432,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: guarded, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3313,7 +3517,7 @@ describe('createApplier', () => {
 			],
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: nonTransactionalPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
@@ -3367,7 +3571,7 @@ describe('createApplier', () => {
 			{ claims: [identityClaim()] },
 		);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: phasedPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),

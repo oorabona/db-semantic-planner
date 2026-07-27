@@ -83,6 +83,7 @@ export const PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE =
 
 export const DBSP_META_SCHEMA = 'dbsp_meta';
 export const DBSP_TRANSITION_RUN_TABLE = 'dbsp_transition_run';
+export const DBSP_TRANSITION_RUN_PLAN_TABLE = 'dbsp_transition_run_plan';
 export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
 export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
 export const DBSP_LOGICAL_IDENTITY_MARKER_COLUMN = 'dbsp_managed_by';

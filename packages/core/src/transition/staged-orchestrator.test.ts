@@ -84,6 +84,8 @@ const target: TransitionLessor = createTestTransitionLessor(async () => ({
 
 const policy: ApplyPolicy = { accepts: [] };
 
+const persister = { persist: async (): Promise<void> => undefined };
+
 function context(label: string): ObservationContext {
 	return {
 		engine: 'postgresql',
@@ -272,6 +274,7 @@ async function runConvergenceScenario(convergenceProof: unknown) {
 
 	const result = await createStagedTransitionOrchestrator(
 		{} as PackRegistry,
+		persister,
 	).applyStagedTransition({
 		desired,
 		loadCurrent,
@@ -335,6 +338,7 @@ describe('staged transition orchestrator convergence', () => {
 
 		const result = await createStagedTransitionOrchestrator(
 			{} as PackRegistry,
+			persister,
 		).applyStagedTransition({
 			desired,
 			loadCurrent,
@@ -361,6 +365,7 @@ describe('staged transition orchestrator convergence', () => {
 		await expect(
 			createStagedTransitionOrchestrator(
 				{} as PackRegistry,
+				persister,
 			).applyStagedTransition({
 				desired,
 				loadCurrent: async () => desired,
