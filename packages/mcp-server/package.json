@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/mcp-server",
-	"version": "2.0.4",
+	"version": "2.0.5",
 	"private": true,
 	"description": "MCP Server for db-semantic-planner - expose schema and query planning to AI tools (scaffold; tools not yet implemented — see issue 112)",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",

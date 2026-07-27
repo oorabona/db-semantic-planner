@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.3.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.2.0...core-v3.3.0) (2026-07-27)
+
+
+### Features
+
+* **core:** Declare the transition target instead of guessing it ([#408](https://github.com/oorabona/db-semantic-planner/issues/408)) ([ea11e5b](https://github.com/oorabona/db-semantic-planner/commit/ea11e5b3b845b96512cf721eb6339cb902cd5911))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.10.2
+    * @dbsp/types bumped to 3.3.0
+
 ## [3.2.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.1.0...core-v3.2.0) (2026-07-22)
 
 

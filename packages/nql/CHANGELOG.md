@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.10.2](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.1...nql-v1.10.2) (2026-07-27)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 3.3.0
+
 ## [1.10.1](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.0...nql-v1.10.1) (2026-07-22)
 
 

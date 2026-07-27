@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.3.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.2.2...adapter-pgsql-v3.3.0) (2026-07-27)
+
+
+### Features
+
+* **core:** Declare the transition target instead of guessing it ([#408](https://github.com/oorabona/db-semantic-planner/issues/408)) ([ea11e5b](https://github.com/oorabona/db-semantic-planner/commit/ea11e5b3b845b96512cf721eb6339cb902cd5911))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 3.3.0
+    * @dbsp/types bumped to 3.3.0
+
 ## [3.2.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.2.1...adapter-pgsql-v3.2.2) (2026-07-26)
 
 

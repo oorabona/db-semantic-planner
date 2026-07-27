@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.3.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.2.0...types-v3.3.0) (2026-07-27)
+
+
+### Features
+
+* **core:** Declare the transition target instead of guessing it ([#408](https://github.com/oorabona/db-semantic-planner/issues/408)) ([ea11e5b](https://github.com/oorabona/db-semantic-planner/commit/ea11e5b3b845b96512cf721eb6339cb902cd5911))
+
 ## [3.2.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.1.0...types-v3.2.0) (2026-07-22)
 
 
