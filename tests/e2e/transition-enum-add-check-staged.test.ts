@@ -2,6 +2,7 @@ import {
 	ADD_CHECK_RULE_ID,
 	createPgsqlAdapter,
 	createPgTransitionPack,
+	createPgTransitionRunPersister,
 	ENUM_ADD_VALUE_RULE_ID,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
@@ -236,6 +237,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			createPgTransitionRunPersister(pool),
 		).applyStagedTransition({
 			desired,
 			loadCurrent,
@@ -338,7 +340,10 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		expect(proof.plan.segments[0]?.stepIds).toHaveLength(2);
 		const tracked = trackedTarget(pool);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: proof.plan, assessment: proof.assessment },
 			policy,
 			tracked.target,
@@ -382,7 +387,10 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		expect(proof.plan.segments[0]?.stepIds).toHaveLength(2);
 		const tracked = trackedTarget(pool);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: proof.plan, assessment: proof.assessment },
 			policy,
 			tracked.target,
@@ -412,6 +420,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			createPgTransitionRunPersister(pool),
 		).applyStagedTransition({
 			desired,
 			loadCurrent: () => adapter.introspect({ schema: schemaName }),
@@ -439,6 +448,7 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			createPgTransitionRunPersister(pool),
 		).applyStagedTransition({
 			desired,
 			loadCurrent: () => adapter.introspect({ schema: schemaName }),

@@ -22,6 +22,7 @@ import {
 	PG_INTROSPECTION_ARTIFACT,
 } from '../constants.js';
 import { evidenceId } from '../ids.js';
+import { createPgTransitionRunPersister } from '../journal.js';
 import { createPgTransitionPack } from '../pack.js';
 
 const asserter = { kind: 'human' as const, identity: 'schema-owner' };
@@ -229,6 +230,7 @@ function bindingValue(row: BindingRow) {
 function createFakePool(rows: BindingRow[]) {
 	const sideTableWrites = { count: 0 };
 	const runs = new Map<string, Record<string, unknown>>();
+	const plans = new Map<string, Record<string, unknown>>();
 	let logicalIdentitySideTableCreated = rows.length > 0;
 	const logicalIdentityShape = {
 		table_exists: true,
@@ -257,6 +259,25 @@ function createFakePool(rows: BindingRow[]) {
 				},
 				primary_key: ['run_id'],
 				foreign_keys: [],
+				checks: [],
+			};
+		}
+		if (table === 'dbsp_transition_run_plan') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan: { type: 'jsonb', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
 				checks: [],
 			};
 		}
@@ -311,6 +332,32 @@ function createFakePool(rows: BindingRow[]) {
 				return { rows: [{ invalid_marker_rows: '0' }] };
 			}
 			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
+				if (sql.includes('WITH ins_run AS')) {
+					const [
+						run_id,
+						plan_digest,
+						target_context_digest,
+						database_id,
+						core_version,
+						started_at,
+						plan,
+					] = params ?? [];
+					if (!runs.has(String(run_id))) {
+						runs.set(String(run_id), {
+							run_id,
+							plan_digest,
+							target_context_digest,
+							database_id,
+							core_version,
+							started_at,
+						});
+						plans.set(String(run_id), {
+							run_id,
+							plan: JSON.parse(String(plan)) as unknown,
+						});
+					}
+					return { rows: [] };
+				}
 				const [
 					run_id,
 					plan_digest,
@@ -330,6 +377,18 @@ function createFakePool(rows: BindingRow[]) {
 					});
 				}
 				return { rows: [] };
+			}
+			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
+				const [run_id, plan] = params ?? [];
+				if (!plans.has(String(run_id)))
+					plans.set(String(run_id), {
+						run_id,
+						plan: JSON.parse(String(plan)) as unknown,
+					});
+				return { rows: [] };
+			}
+			if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
+				return { rows: [plans.get(String(params?.[0]))].filter(Boolean) };
 			}
 			if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 				return { rows: [runs.get(String(params?.[0]))].filter(Boolean) };
@@ -517,7 +576,10 @@ describe('logical identity adoption rule', () => {
 		expect(identityClaim?.assumes).toEqual([baseline?.id]);
 
 		const rejectedPool = createFakePool(rows);
-		const rejected = await createApplier(registry).apply(
+		const rejected = await createApplier(
+			registry,
+			createPgTransitionRunPersister(rejectedPool.client),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
 			createTransitionLessor(async () => rejectedPool.pool.connect()),
@@ -530,7 +592,10 @@ describe('logical identity adoption rule', () => {
 		expect(rejectedPool.sideTableWrites.count).toBe(0);
 
 		const acceptedPool = createFakePool(rows);
-		const applied = await createApplier(registry).apply(
+		const applied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(acceptedPool.client),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy(),
 			createTransitionLessor(async () => acceptedPool.pool.connect()),

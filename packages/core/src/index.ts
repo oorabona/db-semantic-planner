@@ -347,6 +347,7 @@ export type {
 	TransitionRelationalValidationResult,
 	TransitionRule,
 	TransitionRunMetadata,
+	TransitionRunPersister,
 	TransitionSessionClient,
 } from './transition/index.js';
 export {
@@ -381,6 +382,7 @@ export {
 	serverVersionNum,
 	TRANSITION_LESSOR_REJECTION,
 	type TransitionLeaseFailure,
+	transitionPlanDigest,
 	validateTransitionRelationalInvariants,
 } from './transition/index.js';
 

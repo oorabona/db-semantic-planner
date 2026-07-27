@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type {
 	ApplyPolicy,
 	ApplyResult,
@@ -26,6 +25,7 @@ import {
 	matchRunObservationContext,
 } from './context-match.js';
 import { semanticArtifactId } from './ids.js';
+import { transitionPlanDigest } from './plan-digest.js';
 import {
 	isOperationRuntime,
 	type PackRegistry,
@@ -76,10 +76,27 @@ type GroupEventsResult =
 	  }
 	| { readonly ok: false; readonly detail: string };
 
-function digest(value: unknown): string {
-	return createHash('sha256').update(stableJson(value)).digest('hex');
+function deepFreeze<T>(value: T): T {
+	if (value !== null && typeof value === 'object') {
+		for (const child of Object.values(value)) {
+			deepFreeze(child);
+		}
+		Object.freeze(value);
+	}
+	return value;
 }
 
+function snapshotLoadedRun<T>(value: T): T {
+	const serialized = JSON.stringify(value);
+	if (serialized === undefined) {
+		throw new Error('loaded transition journal is not JSON serializable');
+	}
+	return deepFreeze(JSON.parse(serialized) as T);
+}
+
+function errorDetail(error: unknown): string {
+	return error instanceof Error ? error.message : 'unknown error';
+}
 function planEvidenceContext(
 	plan: ProvenPlanShape,
 ): ObservationContext | undefined {
@@ -118,7 +135,21 @@ function completedAssessment(): PlanAssessment {
 	};
 }
 
-function contextMismatch(detail: string): ApplyResult {
+/**
+ * Every refusal here concerns a run that was already durable, and none of them
+ * can read what that run did: the journal could not be loaded, or it was loaded
+ * and could not be interpreted, so its completion events — if any — were never
+ * validated. `planned` would assert that nothing happened, which is exactly what
+ * is unknown. Only a journal that validated and proved itself empty may claim
+ * that. The continuation stays `replan-required` rather than `resume-possible`:
+ * corrupt or unreadable durable data does not repair itself on retry, whereas
+ * replanning observes live state and is safe whatever the earlier run did.
+ */
+function contextMismatch(
+	detail: string,
+	journals: readonly StepJournal[] = [],
+	observations: readonly IssuedObservation[] = [],
+): ApplyResult {
 	return {
 		assessment: assessment(
 			{
@@ -128,11 +159,11 @@ function contextMismatch(detail: string): ApplyResult {
 				scope: [],
 				detail,
 			},
-			'planned',
+			'outcome-unknown',
 			'replan-required',
 		),
-		journals: [],
-		observations: [],
+		journals,
+		observations,
 	};
 }
 
@@ -641,7 +672,7 @@ async function withObservedStep<T>(
 			failure = error;
 			observation = {
 				ok: false,
-				detail: error instanceof Error ? error.message : 'observation failed',
+				detail: errorDetail(error),
 			};
 		}
 		try {
@@ -679,23 +710,52 @@ function validatePolicyForStep(
 	return undefined;
 }
 
-export async function resumeTransitionRun(
+async function resumeTransitionRunInternal(
 	registry: PackRegistry,
 	input: ResumeTransitionInput,
+	runId: string,
+	completed: StepJournal[],
+	observations: IssuedObservation[],
 ): Promise<ApplyResult> {
-	const loaded = await input.loadCurrent(input.runId);
-	if (loaded.run.runId !== input.runId) {
+	// A loader that refuses — because the durable plan row is corrupt, or the
+	// database is unreachable — must block recovery, never escape as an
+	// exception. It is reported apart from the snapshot failure below so an
+	// operator reading this during a recovery knows which one happened.
+	let supplied: TransitionRunJournal & { readonly plan: ProvenPlanShape };
+	try {
+		supplied = await input.loadCurrent(runId);
+	} catch (error) {
+		return contextMismatch(
+			`transition run ${runId} could not be loaded: ${errorDetail(error)}`,
+		);
+	}
+	let loaded: TransitionRunJournal & { readonly plan: ProvenPlanShape };
+	try {
+		loaded = snapshotLoadedRun(supplied);
+	} catch (error) {
+		return contextMismatch(
+			`loaded journal could not be snapshotted safely: ${errorDetail(error)}`,
+		);
+	}
+	if (loaded.run.runId !== runId) {
 		return contextMismatch(
 			'loaded journal run id does not match requested run id',
 		);
 	}
-	if (loaded.run.planDigest !== digest(loaded.plan)) {
-		return contextMismatch('loaded plan digest does not match run metadata');
+	let diagnostic: ReturnType<typeof validateTransitionRelationalInvariants>;
+	try {
+		if (loaded.run.planDigest !== transitionPlanDigest(loaded.plan)) {
+			return contextMismatch('loaded plan digest does not match run metadata');
+		}
+		diagnostic = validateTransitionRelationalInvariants({
+			kind: 'plan',
+			plan: loaded.plan,
+		});
+	} catch (error) {
+		return contextMismatch(
+			`loaded plan could not be validated: ${errorDetail(error)}`,
+		);
 	}
-	const diagnostic = validateTransitionRelationalInvariants({
-		kind: 'plan',
-		plan: loaded.plan,
-	});
 	if (!diagnostic.ok) {
 		return contextMismatch(
 			`loaded plan failed invariant validation: ${diagnostic.detail}`,
@@ -748,7 +808,18 @@ export async function resumeTransitionRun(
 			observations: [],
 		};
 	}
-	const baseContext = await input.readContext(input.target, loaded.run);
+	// Same contract as the loader above, and for the same reason: a resume that
+	// cannot read the live database must return a blocked assessment, not reject
+	// its promise. Wrapping only the loader made "database unreachable" behave
+	// differently depending on which call the outage landed on.
+	let baseContext: ObservationContext;
+	try {
+		baseContext = await input.readContext(input.target, loaded.run);
+	} catch (error) {
+		return contextMismatch(
+			`transition run ${runId} target context could not be read: ${errorDetail(error)}`,
+		);
+	}
 	const runContextMatch = matchRunObservationContext({
 		run: loaded.run,
 		actual: baseContext,
@@ -772,24 +843,39 @@ export async function resumeTransitionRun(
 		if (!effectsResolution.ok) {
 			return contextMismatch(effectsResolution.detail);
 		}
-		operationEffectsByRef.set(
-			step.operation.ref,
-			effectsResolution.semantics.effectsOf(step.operation, baseContext),
+		// `effectsOf` belongs to a pack, so it is third-party code reached with a
+		// plan and a context this process did not mint. It gets the same treatment.
+		try {
+			operationEffectsByRef.set(
+				step.operation.ref,
+				effectsResolution.semantics.effectsOf(step.operation, baseContext),
+			);
+		} catch (error) {
+			return contextMismatch(
+				`operation ${step.operation.ref} effects could not be resolved: ${errorDetail(error)}`,
+			);
+		}
+	}
+	let semanticDiagnostic: ReturnType<
+		typeof validateTransitionRelationalInvariants
+	>;
+	try {
+		semanticDiagnostic = validateTransitionRelationalInvariants({
+			kind: 'plan',
+			plan: loaded.plan,
+			operationEffectsByRef,
+		});
+	} catch (error) {
+		return contextMismatch(
+			`loaded plan could not be semantically validated: ${errorDetail(error)}`,
 		);
 	}
-	const semanticDiagnostic = validateTransitionRelationalInvariants({
-		kind: 'plan',
-		plan: loaded.plan,
-		operationEffectsByRef,
-	});
 	if (!semanticDiagnostic.ok) {
 		return contextMismatch(
 			`loaded plan failed semantic invariant validation: ${semanticDiagnostic.detail}`,
 		);
 	}
 	const orderedSteps = orderedPlanSteps(loaded.plan, stepById);
-	const completed: StepJournal[] = [];
-	const observations: IssuedObservation[] = [];
 
 	for (const step of orderedSteps) {
 		const events = grouped.get(step.stepId);
@@ -1003,4 +1089,32 @@ export async function resumeTransitionRun(
 		journals: completed,
 		observations,
 	};
+}
+
+export async function resumeTransitionRun(
+	registry: PackRegistry,
+	input: ResumeTransitionInput,
+): Promise<ApplyResult> {
+	const completed: StepJournal[] = [];
+	const observations: IssuedObservation[] = [];
+	const runId = input.runId;
+	// For ordinary failures--an unreachable database, a throwing pack, or a rejected
+	// journal write--this boundary returns a blocked assessment with steps reconciled
+	// so far rather than rejecting. Inputs engineered to throw from caller-owned
+	// accessors are outside this contract: that caller already executes in-process.
+	try {
+		return await resumeTransitionRunInternal(
+			registry,
+			input,
+			runId,
+			completed,
+			observations,
+		);
+	} catch (error) {
+		return contextMismatch(
+			`transition run ${runId} could not be resumed: ${errorDetail(error)}`,
+			completed,
+			observations,
+		);
+	}
 }

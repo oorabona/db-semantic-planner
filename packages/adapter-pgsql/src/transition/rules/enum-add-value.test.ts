@@ -23,6 +23,7 @@ import {
 	PG_INTROSPECTION_ARTIFACT,
 } from '../constants.js';
 import { evidenceId } from '../ids.js';
+import { createPgTransitionRunPersister } from '../journal.js';
 import { createPgTransitionPack } from '../pack.js';
 import {
 	createEnumAddValueRule,
@@ -122,6 +123,7 @@ function evidenceView(
 class FakeEnumPool {
 	readonly queries: string[] = [];
 	readonly runs = new Map<string, Record<string, unknown>>();
+	readonly plans = new Map<string, Record<string, unknown>>();
 	labels: string[];
 	readonly schema: string;
 
@@ -152,6 +154,25 @@ class FakeEnumPool {
 				},
 				primary_key: ['run_id'],
 				foreign_keys: [],
+				checks: [],
+			};
+		}
+		if (table === 'dbsp_transition_run_plan') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan: { type: 'jsonb', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
 				checks: [],
 			};
 		}
@@ -188,6 +209,32 @@ class FakeEnumPool {
 		if (sql.includes('dbsp_transition_journal_shape')) {
 			return { rows: [this.tableShape(String(params?.[1]))] };
 		}
+		if (sql.includes('WITH ins_run AS')) {
+			const [
+				run_id,
+				plan_digest,
+				target_context_digest,
+				database_id,
+				core_version,
+				started_at,
+				plan,
+			] = params ?? [];
+			if (!this.runs.has(String(run_id))) {
+				this.runs.set(String(run_id), {
+					run_id,
+					plan_digest,
+					target_context_digest,
+					database_id,
+					core_version,
+					started_at,
+				});
+				this.plans.set(String(run_id), {
+					run_id,
+					plan: JSON.parse(String(plan)) as unknown,
+				});
+			}
+			return { rows: [] };
+		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
 			const [
 				run_id,
@@ -208,6 +255,19 @@ class FakeEnumPool {
 				});
 			}
 			return { rows: [] };
+		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
+			const [run_id, plan] = params ?? [];
+			if (!this.plans.has(String(run_id))) {
+				this.plans.set(String(run_id), {
+					run_id,
+					plan: JSON.parse(String(plan)) as unknown,
+				});
+			}
+			return { rows: [] };
+		}
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
+			return { rows: [this.plans.get(String(params?.[0]))].filter(Boolean) };
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 			return { rows: [this.runs.get(String(params?.[0]))].filter(Boolean) };
@@ -471,7 +531,10 @@ describe('postgresql.enum.add-value rule', () => {
 		if (applyOutcome.kind !== 'proven') {
 			return;
 		}
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: applyOutcome.plan, assessment: applyOutcome.assessment },
 			policy,
 			createTransitionLessor(async () => pool.connect()),
@@ -673,7 +736,10 @@ describe('postgresql.enum.add-value rule', () => {
 			commitBoundaryAfter: false,
 		});
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			createTransitionLessor(async () => pool.connect()),

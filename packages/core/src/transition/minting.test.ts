@@ -118,6 +118,56 @@ describe('transition plan minting', () => {
 		).toBe(false);
 	});
 
+	it('rejects a nested non-enumerable property', () => {
+		const shape = planShape();
+		Object.defineProperty(shape.steps[0]!.selectionRationale, 'sql', {
+			value: 'DROP TABLE important',
+			enumerable: false,
+		});
+
+		expect(() => mintInProcessPlan(shape)).toThrow(
+			/found non-enumerable property.*\.selectionRationale\.sql/,
+		);
+	});
+
+	it('rejects a named array property', () => {
+		const shape = planShape();
+		Object.defineProperty(shape.observations, 'sql', {
+			value: 'DROP TABLE important',
+		});
+
+		expect(() => mintInProcessPlan(shape)).toThrow(
+			/found named array property.*\.observations\.sql/,
+		);
+	});
+
+	// Assigning an index at or past `2 ** 32 - 1` is not an array index, so it
+	// leaves `length` untouched: the value reads back from the array and
+	// `stableJson`, which walks `0 .. length - 1`, emits nothing for it. Testing a
+	// canonical integer key rather than a word is the point — a check that only
+	// asked "does this parse as a non-negative integer?" would accept it.
+	it.each([
+		'4294967295',
+		'4294967296',
+	])('rejects an array index past the serialized range (%s)', (key) => {
+		const shape = planShape();
+		Object.defineProperty(shape.observations, key, {
+			value: 'DROP TABLE important',
+			enumerable: true,
+		});
+
+		expect(() => mintInProcessPlan(shape)).toThrow(
+			new RegExp(`found named array property.*\\.observations\\[${key}\\]`),
+		);
+	});
+
+	it('accepts an ordinary plain array', () => {
+		const plan = mintInProcessPlan(planShape());
+
+		expect(plan.observations).toEqual([]);
+		expect(Object.isFrozen(plan.observations)).toBe(true);
+	});
+
 	it.each([
 		['Map', new Map([['key', 'value']]), /found Map/],
 		['Date', new Date('2026-01-01T00:00:00.000Z'), /found Date/],

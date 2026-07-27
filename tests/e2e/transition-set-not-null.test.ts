@@ -1,6 +1,7 @@
 import {
 	createPgObservationIssuer,
 	createPgTransitionPack,
+	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -192,7 +193,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,
@@ -219,7 +223,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 				'users',
 			)} (age) VALUES (NULL)`,
 		);
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,
@@ -238,7 +245,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,
@@ -280,7 +290,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,
@@ -322,7 +335,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,
@@ -426,7 +442,10 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 		}
 		expect(outcome.plan.steps[0]?.restsOnAssumptions).toContain(assumption.id);
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policyWithNativeDefaultAttestation,
 			target,

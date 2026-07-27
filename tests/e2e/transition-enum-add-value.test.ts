@@ -1,6 +1,7 @@
 import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
+	createPgTransitionRunPersister,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -116,7 +117,10 @@ describe('ADR-0003 transition planner: ALTER TYPE ADD VALUE', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
 			target,

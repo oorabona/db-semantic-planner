@@ -33,6 +33,8 @@ const context = {
 	extensions: {},
 };
 
+const persister = { persist: async (): Promise<void> => undefined };
+
 function table(columns: readonly ColumnIR[]): TableIR {
 	return {
 		name: 'tasks',
@@ -122,7 +124,7 @@ describe('toy transition pack', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: proof.plan, assessment: proof.assessment },
 			policy,
 			target(),
@@ -141,6 +143,7 @@ describe('toy transition pack', () => {
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			persister,
 		).applyStagedTransition({
 			desired,
 			loadCurrent: async () => db.model,
@@ -178,6 +181,7 @@ describe('toy transition pack', () => {
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			persister,
 		).applyStagedTransition({
 			desired,
 			loadCurrent: async () => db.model,
@@ -221,7 +225,7 @@ describe('toy transition pack', () => {
 			return;
 		}
 
-		const result = await createApplier(registry).apply(
+		const result = await createApplier(registry, persister).apply(
 			{ plan: proof.plan, assessment: proof.assessment },
 			policy,
 			target(),
@@ -253,6 +257,7 @@ describe('toy transition pack', () => {
 
 		const result = await createStagedTransitionOrchestrator(
 			registry,
+			persister,
 		).applyStagedTransition({
 			desired,
 			loadCurrent: async () => db.model,

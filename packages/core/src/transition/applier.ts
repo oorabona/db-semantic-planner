@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -22,10 +22,18 @@ import type {
 	TransitionLessor,
 	TransitionRunMetadata,
 } from '@dbsp/types';
-import { matchLiveObservationContext } from './context-match.js';
+import {
+	matchLiveObservationContext,
+	observationContextDigest,
+} from './context-match.js';
 import { claimId, semanticArtifactId } from './ids.js';
-import type { Applier, InProcessProvenPlan } from './index.js';
+import type {
+	Applier,
+	InProcessProvenPlan,
+	TransitionRunPersister,
+} from './index.js';
 import { isMintedInProcessPlan } from './minting.js';
+import { transitionPlanDigest } from './plan-digest.js';
 import {
 	type ExecutionCoordinator,
 	isOperationRuntime,
@@ -77,6 +85,14 @@ function completedAssessment(
 	};
 }
 
+function transitionLessorRejectionResult(): ApplyResult {
+	return {
+		assessment: transitionLessorRejectionAssessment(APPLIER_ARTIFACT),
+		journals: [],
+		observations: [],
+	};
+}
+
 function primaryClaimFromPlan(plan: InProcessProvenPlan): ClaimId {
 	return (
 		plan.claims[0]?.id ??
@@ -120,10 +136,6 @@ function evidenceIds(
 
 function recordedAt(): string {
 	return new Date().toISOString();
-}
-
-function digest(value: unknown): string {
-	return createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
 function lockTimeoutMs(
@@ -170,8 +182,8 @@ function transitionRunMetadata(
 ): TransitionRunMetadata {
 	return {
 		runId: `dbsp-${randomUUID()}`,
-		planDigest: digest(plan),
-		targetContextDigest: digest(context),
+		planDigest: transitionPlanDigest(plan),
+		targetContextDigest: observationContextDigest(context),
 		databaseId: context.databaseId,
 		coreVersion: APPLIER_ARTIFACT.version,
 		startedAt: recordedAt(),
@@ -341,6 +353,26 @@ function invalidPlanResult(detail: string): ApplyResult {
 	};
 }
 
+function persistenceFailureResult(
+	run: TransitionRunMetadata,
+	error: unknown,
+): ApplyResult {
+	return {
+		assessment: assessment({
+			code: 'persistence-failed',
+			artifact: APPLIER_ARTIFACT,
+			fact: {
+				key: 'transition-run-id',
+				value: run.runId,
+			},
+			detail: `transition-run persistence is indeterminate; load run ${run.runId} before retrying: ${errorDetail(error)}`,
+			scope: [],
+		}),
+		journals: [],
+		observations: [],
+	};
+}
+
 function unknownJournal(intent: DurableIntentRecord): StepJournal {
 	return {
 		intent,
@@ -489,7 +521,10 @@ function durableEvidence(
 	);
 }
 
-export function createApplier(registry: PackRegistry): Applier {
+export function createApplier(
+	registry: PackRegistry,
+	persister: TransitionRunPersister,
+): Applier {
 	return {
 		artifact: APPLIER_ARTIFACT,
 		async apply(
@@ -507,7 +542,16 @@ export function createApplier(registry: PackRegistry): Applier {
 			if (!isMintedInProcessPlan(plan)) {
 				return invalidPlanResult(UNMINTED_PLAN_DETAIL);
 			}
-			if (plan.steps.length === 0 || plan.segments.length === 0) {
+			if (plan.segments.length === 0) {
+				if (!isTransitionLessor(target)) {
+					return transitionLessorRejectionResult();
+				}
+				return uncomposablePlanResult(
+					plan,
+					'plan contains no executable steps',
+				);
+			}
+			if (plan.steps.length === 0) {
 				return uncomposablePlanResult(
 					plan,
 					'plan contains no executable steps',
@@ -647,9 +691,25 @@ export function createApplier(registry: PackRegistry): Applier {
 					journalWriteFailure ?? params.result,
 				);
 			};
-			let runtimeContext = proofContext;
-
 			const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
+			type ResolvedStep = {
+				readonly step: ProvenPlanStep;
+				readonly semantics: OperationRuntime;
+				readonly operationIssuer: NonNullable<
+					ReturnType<PackRegistry['resolveIssuer']>
+				>;
+				readonly intent: DurableIntentRecord;
+				readonly coordinatorBinding: ReturnType<
+					PackRegistry['transactionCoordinatorFor']
+				>;
+			};
+			const preflightSegments: {
+				readonly segment: InProcessProvenPlan['segments'][number];
+				readonly resolvedSteps: readonly ResolvedStep[];
+				readonly first: ResolvedStep;
+				readonly transactional: boolean;
+				readonly segmentCoordinator: ExecutionCoordinator | OperationRuntime;
+			}[] = [];
 			for (const segment of plan.segments) {
 				const segmentSteps = segment.stepIds.map((stepId) =>
 					stepById.get(stepId),
@@ -662,7 +722,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						),
 					);
 				}
-				const resolvedSteps = [];
+				const resolvedSteps: ResolvedStep[] = [];
 				for (const step of segmentSteps as ProvenPlanStep[]) {
 					const operationResolution = registry.resolveOperation(step.operation);
 					if (!operationResolution.ok) {
@@ -805,7 +865,34 @@ export function createApplier(registry: PackRegistry): Applier {
 						),
 					);
 				}
-
+				preflightSegments.push({
+					segment,
+					resolvedSteps,
+					first,
+					transactional,
+					segmentCoordinator,
+				});
+			}
+			if (!isTransitionLessor(target)) {
+				return resultWithCommittedJournals(transitionLessorRejectionResult());
+			}
+			// Once, and here: every check above is pure and in-memory, and nothing
+			// below this line is unobservable — the first segment takes a lease,
+			// opens a transaction and runs DDL. Persisting inside the loop instead
+			// would re-persist per segment and, on a later segment, discard the
+			// journals the earlier ones already committed.
+			try {
+				await persister.persist(run, plan);
+			} catch (error) {
+				return persistenceFailureResult(run, error);
+			}
+			let runtimeContext = proofContext;
+			for (const {
+				resolvedSteps,
+				first,
+				transactional,
+				segmentCoordinator,
+			} of preflightSegments) {
 				let client: TransitionExecutionClient | undefined;
 				let lease: TransitionLease | undefined;
 				let committed = false;
@@ -826,13 +913,6 @@ export function createApplier(registry: PackRegistry): Applier {
 					readonly completion: TransactionalCompletionRecord;
 					readonly journal?: StepJournal;
 				}[] = [];
-				if (!isTransitionLessor(target)) {
-					return resultWithCommittedJournals({
-						assessment: transitionLessorRejectionAssessment(APPLIER_ARTIFACT),
-						journals: [],
-						observations: [],
-					});
-				}
 				try {
 					lease = await acquireTransitionLease(target);
 					client = { opaqueClient: lease.session };

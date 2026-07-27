@@ -9,6 +9,7 @@ export type OutcomeReasonCode =
 	| 'proven-applicable'
 	| 'proven-inapplicable'
 	| 'context-mismatch'
+	| 'persistence-failed'
 	| 'insufficient-evidence'
 	| 'unsupported-transition'
 	| 'ambiguous-rule'
@@ -37,6 +38,11 @@ export type OutcomeReason =
 	  })
 	| (OutcomeReasonBase & {
 			readonly code: 'context-mismatch';
+			readonly artifact: SemanticArtifactRef;
+			readonly fact: ContextFact;
+	  })
+	| (OutcomeReasonBase & {
+			readonly code: 'persistence-failed';
 			readonly artifact: SemanticArtifactRef;
 			readonly fact: ContextFact;
 	  })

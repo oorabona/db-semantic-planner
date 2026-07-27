@@ -1,6 +1,7 @@
 import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
+	createPgTransitionRunPersister,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
 	readPgObservationContextFromLessor,
@@ -202,7 +203,10 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 			),
 		).toBe(true);
 
-		const applied = await createApplier(registry).apply(
+		const applied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy,
 			target,
@@ -304,7 +308,10 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 			return;
 		}
 
-		const applied = await createApplier(registry).apply(
+		const applied = await createApplier(
+			registry,
+			createPgTransitionRunPersister(pool),
+		).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
 			target,
