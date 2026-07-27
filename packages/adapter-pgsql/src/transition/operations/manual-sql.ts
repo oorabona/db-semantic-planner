@@ -14,6 +14,7 @@ import type {
 	ResourceSelector,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionSessionClient,
 	UnsafeNativeFragment,
 } from '@dbsp/types';
 import {
@@ -27,7 +28,7 @@ import {
 	appendIntentJournal,
 	appendObservedJournal,
 } from '../journal.js';
-import { readPgObservationContext } from '../observation-issuer.js';
+import { readPgObservationContextFromClient } from '../observation-issuer.js';
 import { isPgGuardTimeout } from '../pg-guard-timeout.js';
 import { stableJson } from '../stable-json.js';
 
@@ -46,16 +47,8 @@ type Queryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
 };
 
-type ReleasableQueryable = Queryable & {
-	release(error?: unknown): void;
-};
-
-type PoolLike = {
-	connect(): Promise<ReleasableQueryable>;
-};
-
 type TransitionExecutionClient = {
-	readonly opaqueClient: unknown;
+	readonly opaqueClient: TransitionSessionClient;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -69,18 +62,6 @@ function queryable(target: unknown): Queryable {
 	throw new Error(
 		'PostgreSQL transition target must expose query(sql, params)',
 	);
-}
-
-function releasable(target: unknown): target is ReleasableQueryable {
-	return isRecord(target) && typeof target.release === 'function';
-}
-
-function poolLike(target: unknown): PoolLike | undefined {
-	return isRecord(target) &&
-		typeof target.connect === 'function' &&
-		!releasable(target)
-		? (target as PoolLike)
-		: undefined;
 }
 
 function clientQuery(client: TransitionExecutionClient): Queryable {
@@ -823,20 +804,6 @@ export function createManualSqlOperationRuntime() {
 			};
 		},
 		buildFingerprints: beforeAfterFingerprints,
-		async checkout(target: unknown): Promise<TransitionExecutionClient> {
-			const pool = poolLike(target);
-			if (!pool) {
-				throw new Error(
-					'PostgreSQL transition target must be a Pool-like object with connect(); checked-out clients are not accepted',
-				);
-			}
-			return { opaqueClient: await pool.connect() };
-		},
-		release(client: TransitionExecutionClient, error?: unknown) {
-			if (releasable(client.opaqueClient)) {
-				client.opaqueClient.release(error);
-			}
-		},
 		async writeIntentJournal(
 			client: TransitionExecutionClient,
 			record: DurableIntentRecord,
@@ -860,7 +827,7 @@ export function createManualSqlOperationRuntime() {
 			_operation: PhysicalOperation,
 			proofContext: ObservationContext,
 		) {
-			return readPgObservationContext(
+			return readPgObservationContextFromClient(
 				client.opaqueClient,
 				proofContext.targetSchema ?? proofContext.searchPath?.[0] ?? 'public',
 			);

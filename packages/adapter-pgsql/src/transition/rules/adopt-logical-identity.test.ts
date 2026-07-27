@@ -4,6 +4,7 @@ import {
 	createComparator,
 	createPackRegistry,
 	createProver,
+	createTransitionLessor,
 } from '@dbsp/core';
 import type {
 	EvidenceObservation,
@@ -487,7 +488,7 @@ describe('logical identity adoption rule', () => {
 		);
 		const outcome = await createProver(registry).prove(
 			compare,
-			createFakePool(rows).pool,
+			createTransitionLessor(async () => createFakePool(rows).pool.connect()),
 			context,
 		);
 
@@ -519,7 +520,7 @@ describe('logical identity adoption rule', () => {
 		const rejected = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			{ accepts: [{ class: 'operation-pack-semantics' }] },
-			rejectedPool.pool,
+			createTransitionLessor(async () => rejectedPool.pool.connect()),
 		);
 		expect(rejected.assessment.decision).toBe('blocked');
 		expect(rejected.assessment.reasons[0]).toMatchObject({
@@ -532,7 +533,7 @@ describe('logical identity adoption rule', () => {
 		const applied = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			acceptedPolicy(),
-			acceptedPool.pool,
+			createTransitionLessor(async () => acceptedPool.pool.connect()),
 		);
 
 		expect(applied.assessment.decision).toBe('applicable');

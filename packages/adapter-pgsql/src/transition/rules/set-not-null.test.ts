@@ -3,6 +3,7 @@ import {
 	createEvidenceView,
 	createPackRegistry,
 	createProver,
+	createTransitionLessor,
 } from '@dbsp/core';
 import type {
 	ColumnIR,
@@ -336,12 +337,10 @@ function deparseEvidence(
 }
 
 function proofTarget() {
-	return {
-		connect: vi.fn(async () => ({
-			query: async () => ({ rows: [] }),
-			release: vi.fn(),
-		})),
-	};
+	return createTransitionLessor(async () => ({
+		query: async () => ({ rows: [] }),
+		release: vi.fn(),
+	}));
 }
 
 function registryWithColumnObservation(
@@ -1444,7 +1443,6 @@ describe('postgresql.column.set-not-null rule', () => {
 		expect(outcome).not.toHaveProperty('plan');
 		expect(readContext).not.toHaveBeenCalled();
 		expect(execute).not.toHaveBeenCalled();
-		expect(target.connect).not.toHaveBeenCalled();
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('ambiguous-rule');
 			expect(outcome.assessment.reasons[0]?.detail).toMatch(
@@ -1544,7 +1542,6 @@ describe('postgresql.column.set-not-null rule', () => {
 		}
 		expect(readContext).toHaveBeenCalledOnce();
 		expect(execute).toHaveBeenCalledOnce();
-		expect(target.connect).toHaveBeenCalledOnce();
 	});
 
 	it('does not retarget absolute custom type schema differences', () => {

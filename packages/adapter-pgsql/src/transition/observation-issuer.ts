@@ -1,3 +1,9 @@
+import {
+	acquireTransitionLease,
+	isTransitionLessor,
+	TRANSITION_LESSOR_REJECTION,
+	type TransitionLeaseFailure,
+} from '@dbsp/core';
 import type {
 	EvidenceObservation,
 	JsonValue,
@@ -6,6 +12,8 @@ import type {
 	ObservationRequest,
 	ObservationStability,
 	ResourceAddress,
+	TransitionLessor,
+	TransitionSessionClient,
 	VendorValidatedExpression,
 } from '@dbsp/types';
 import {
@@ -51,14 +59,6 @@ type QueryResultLike = {
 
 type Queryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
-};
-
-type ReleasableQueryable = Queryable & {
-	release(error?: unknown): void;
-};
-
-type PoolLike = {
-	connect(): Promise<ReleasableQueryable>;
 };
 
 type ObservationTarget = {
@@ -119,18 +119,6 @@ function queryable(target: unknown): Queryable {
 	throw new Error(
 		'PostgreSQL observation target must expose query(sql, params)',
 	);
-}
-
-function poolLike(target: unknown): PoolLike | undefined {
-	// A pg.Pool exposes connect() but not release(). A checked-out PoolClient also
-	// inherits connect() but adds release() — calling connect() on it throws
-	// "Client has already been connected". Treat anything with release() as an
-	// already-connected client (a queryable), never a pool to connect() again.
-	return isRecord(target) &&
-		typeof target.connect === 'function' &&
-		typeof target.release !== 'function'
-		? (target as PoolLike)
-		: undefined;
 }
 
 function nextEvidenceId(kind: string): ReturnType<typeof evidenceId> {
@@ -2124,87 +2112,142 @@ async function observeEngineVersion(
 	});
 }
 
-export function createPgObservationIssuer(): ObservationIssuer {
-	return {
-		artifact: PG_INTROSPECTION_ARTIFACT,
-		mergeObservationPrivileges: mergePgObservationPrivileges,
-		async readContext(target, context, requests) {
-			return readPgObservationContext(
-				target,
-				explicitSchemaFromContext(context),
-				targetFromRequests(requests, context),
-			);
-		},
-		async execute(request, target, context) {
-			const executor = queryable(target);
-			switch (request.kind) {
-				case COLUMN_EXISTS_OBSERVATION:
-					return observeColumn(executor, request, context);
-				case TABLE_CHECK_CONSTRAINTS_OBSERVATION:
-					return observeTableChecks(executor, request, context);
-				case TABLE_INDEXES_OBSERVATION:
-					return observeTableIndexes(executor, request, context);
-				case LOGICAL_IDENTITY_CARRIER_OBSERVATION:
-					return observeLogicalIdentityCarrier(executor, request, context);
-				case ENUM_TYPE_EXISTS_OBSERVATION:
-				case ENUM_LABEL_VISIBLE_OBSERVATION:
-					return observeEnumLabels(executor, request, context);
-				case ALTER_AUTHORITY_OBSERVATION:
-				case ALTER_TYPE_AUTHORITY_OBSERVATION:
-					return observeAlterAuthority(executor, request, context);
-				case ENGINE_VERSION_OBSERVATION:
-					return observeEngineVersion(executor, request, context);
-				case EXPRESSION_DEPARSE_OBSERVATION: {
-					// The deparse round-trip creates a session-scoped TEMP TABLE and then
-					// ALTERs/reads it across several statements. On a pool each query
-					// would run on a different connection, so the temp table would vanish
-					// between statements. Run the whole round-trip on ONE checked-out
-					// client (mirroring readPgObservationContext); a pre-checked-out
-					// client is already session-scoped and used directly.
-					const deparsePool = poolLike(target);
-					if (deparsePool) {
-						const client = await deparsePool.connect();
-						try {
-							return await observeExpressionDeparse(client, request, context);
-						} finally {
-							client.release();
-						}
-					}
-					return observeExpressionDeparse(executor, request, context);
-				}
-				default:
-					throw new Error(`unsupported PostgreSQL observation ${request.kind}`);
-			}
-		},
-	};
+/**
+ * Issue an observation on a lease whose lifecycle belongs to the caller.
+ *
+ * The parameter is a lease, not merely something with `query()`, because a
+ * `pg.Pool` satisfies the latter and would spread these statements across
+ * connections — losing the temporary table the deparse round-trip depends on,
+ * and the `search_path` and role the rest of them read. That is the same
+ * mistake this module used to make when it guessed at its target. Requiring
+ * `release()` does not prove a stable session, but it makes the ordinary
+ * accident of passing a pool inexpressible.
+ *
+ * Internal: the supported entry point is
+ * {@link executePgObservationFromLessor}, or the issuer built by
+ * {@link createPgObservationIssuer}.
+ */
+export async function executePgObservationFromClient(
+	request: ObservationRequest,
+	target: TransitionSessionClient,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	const executor = queryable(target);
+	switch (request.kind) {
+		case COLUMN_EXISTS_OBSERVATION:
+			return observeColumn(executor, request, context);
+		case TABLE_CHECK_CONSTRAINTS_OBSERVATION:
+			return observeTableChecks(executor, request, context);
+		case TABLE_INDEXES_OBSERVATION:
+			return observeTableIndexes(executor, request, context);
+		case LOGICAL_IDENTITY_CARRIER_OBSERVATION:
+			return observeLogicalIdentityCarrier(executor, request, context);
+		case ENUM_TYPE_EXISTS_OBSERVATION:
+		case ENUM_LABEL_VISIBLE_OBSERVATION:
+			return observeEnumLabels(executor, request, context);
+		case ALTER_AUTHORITY_OBSERVATION:
+		case ALTER_TYPE_AUTHORITY_OBSERVATION:
+			return observeAlterAuthority(executor, request, context);
+		case ENGINE_VERSION_OBSERVATION:
+			return observeEngineVersion(executor, request, context);
+		case EXPRESSION_DEPARSE_OBSERVATION:
+			// `target` is one caller-owned lease for the complete TEMP-table
+			// round-trip, so the session remains stable across every statement.
+			return observeExpressionDeparse(executor, request, context);
+		default:
+			throw new Error(`unsupported PostgreSQL observation ${request.kind}`);
+	}
 }
 
-export async function readPgObservationContext(
-	target: unknown,
+/**
+ * Refuse a target that is not a core-minted lessor.
+ *
+ * `TransitionLessor` is nominal, so TypeScript already rejects anything else —
+ * but the erased type protects no JavaScript caller, and a forged
+ * `{ acquire: async () => pool }` would otherwise reach `queryable()`, which
+ * only looks for `query()`. `prove()`, `apply()`, `resume()` and the staged
+ * orchestrator all refuse an unminted target; these two entry points are the
+ * remaining ones that take a lessor, and they throw rather than report because
+ * they answer with an observation and have no assessment to carry a refusal.
+ */
+function assertTransitionLessor(
+	value: unknown,
+): asserts value is TransitionLessor {
+	if (!isTransitionLessor(value)) {
+		throw new Error(TRANSITION_LESSOR_REJECTION);
+	}
+}
+
+/** Acquire one lease, issue the observation, then release that lease. */
+export async function executePgObservationFromLessor(
+	lessor: TransitionLessor,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	assertTransitionLessor(lessor);
+	const lease = await acquireTransitionLease(lessor);
+	let releaseFailure: TransitionLeaseFailure | undefined;
+	try {
+		return await executePgObservationFromClient(
+			request,
+			lease.session,
+			context,
+		);
+	} catch (error) {
+		releaseFailure = { error };
+		throw error;
+	} finally {
+		await lease.release(releaseFailure);
+	}
+}
+
+/**
+ * Read context through a caller-owned lease.
+ *
+ * A lease rather than anything with `query()`, for the reason given on
+ * {@link executePgObservationFromClient}: this reads the server version,
+ * database, role and `search_path` in sequence, and a pool would answer each
+ * from a different connection.
+ *
+ * Internal: the supported entry point is
+ * {@link readPgObservationContextFromLessor}.
+ */
+export async function readPgObservationContextFromClient(
+	target: TransitionSessionClient,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
 ): Promise<ObservationContext> {
-	const pool = poolLike(target);
-	if (pool) {
-		const client = await pool.connect();
-		try {
-			return await readPgObservationContextFromClient(
-				client,
-				schema,
-				observationTarget,
-			);
-		} finally {
-			client.release();
-		}
-	}
-	return readPgObservationContextFromClient(
+	return readPgObservationContextFromQueryable(
 		queryable(target),
 		schema,
 		observationTarget,
 	);
 }
 
-async function readPgObservationContextFromClient(
+/** Acquire one lease, read context, then release that lease. */
+export async function readPgObservationContextFromLessor(
+	lessor: TransitionLessor,
+	schema?: string,
+	observationTarget?: ObservationTarget | EnumObservationTarget,
+): Promise<ObservationContext> {
+	assertTransitionLessor(lessor);
+	const lease = await acquireTransitionLease(lessor);
+	let releaseFailure: TransitionLeaseFailure | undefined;
+	try {
+		return await readPgObservationContextFromClient(
+			lease.session,
+			schema,
+			observationTarget,
+		);
+	} catch (error) {
+		releaseFailure = { error };
+		throw error;
+	} finally {
+		await lease.release(releaseFailure);
+	}
+}
+
+async function readPgObservationContextFromQueryable(
 	executor: Queryable,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
@@ -2291,5 +2334,20 @@ async function readPgObservationContextFromClient(
 		extensions: extensionMap,
 		...(collationProvider ? { collationProvider } : {}),
 		...(collationVersion ? { collationVersion } : {}),
+	};
+}
+
+export function createPgObservationIssuer(): ObservationIssuer {
+	return {
+		artifact: PG_INTROSPECTION_ARTIFACT,
+		mergeObservationPrivileges: mergePgObservationPrivileges,
+		async readContext(target, context, requests) {
+			return readPgObservationContextFromClient(
+				target,
+				explicitSchemaFromContext(context),
+				targetFromRequests(requests, context),
+			);
+		},
+		execute: executePgObservationFromClient,
 	};
 }

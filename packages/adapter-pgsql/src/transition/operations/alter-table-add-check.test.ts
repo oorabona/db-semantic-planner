@@ -10,6 +10,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionSession } from '../__fixtures__/transition-session.js';
 import {
 	ALTER_TABLE_ADD_CHECK_CAPABILITY,
 	ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
@@ -327,9 +328,9 @@ describe('AlterTableAddCheck operation runtime', () => {
 		};
 		const after = await runtime.observeOperation(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async () => ({ rows: [] }),
-				},
+				}),
 			},
 			operation,
 			context,
@@ -359,9 +360,9 @@ describe('AlterTableAddCheck operation runtime', () => {
 	it('rejects real CHECK set drift after canonicalizing observation shape', async () => {
 		const runtime = createAlterTableAddCheckOperationRuntime();
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: async () => ({ rows: [] }),
-			},
+			}),
 		};
 		const driftCases: Array<{
 			readonly label: string;
@@ -398,14 +399,14 @@ describe('AlterTableAddCheck operation runtime', () => {
 		const queries: string[] = [];
 		const result = await runtime.checkGuard(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async (sql: string) => {
 						queries.push(sql);
 						return sql.startsWith('SELECT 1 FROM')
 							? { rows: [{ '?column?': 1 }] }
 							: { rows: [] };
 					},
-				},
+				}),
 			},
 			operation,
 			guard(),
@@ -424,14 +425,14 @@ describe('AlterTableAddCheck operation runtime', () => {
 		await expect(
 			runtime.checkGuard(
 				{
-					opaqueClient: {
+					opaqueClient: createTestTransitionSession({
 						query: async (sql: string) => {
 							if (sql.startsWith('SELECT 1 FROM')) {
 								throw { code: '57014' };
 							}
 							return { rows: [] };
 						},
-					},
+					}),
 				},
 				operation,
 				guard(),
@@ -474,7 +475,7 @@ describe('AlterTableAddCheck operation runtime', () => {
 			transactionalCompletion: completion,
 		};
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: async (sql: string, params?: readonly unknown[]) => {
 					queries.push(sql);
 					if (sql.includes('dbsp_transition_journal_shape')) {
@@ -485,7 +486,7 @@ describe('AlterTableAddCheck operation runtime', () => {
 					}
 					return { rows: [] };
 				},
-			},
+			}),
 		};
 
 		await runtime.writeIntentJournal(client, intent);

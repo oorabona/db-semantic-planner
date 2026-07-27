@@ -9,7 +9,7 @@ import type {
 	ProofClaim,
 	ProvenPlanShape,
 	SemanticArtifactRef,
-	TransitionConnectionPool,
+	TransitionLessor,
 	TransitionRunJournal,
 } from '@dbsp/types';
 
@@ -47,7 +47,7 @@ export interface Prover {
 	readonly artifact: SemanticArtifactRef;
 	prove(
 		compare: CompareOutcome,
-		target: TransitionConnectionPool,
+		target: TransitionLessor,
 		context: ObservationContext,
 	): Promise<ProveOutcome>;
 }
@@ -60,14 +60,14 @@ export interface Applier {
 			readonly assessment: ApplicableAssessment;
 		},
 		policy: ApplyPolicy,
-		target: TransitionConnectionPool,
+		target: TransitionLessor,
 	): Promise<ApplyResult>;
 	resume(
 		runId: string,
 		loadCurrent: TransitionResumeJournalLoader,
 		readContext: TransitionResumeContextReader,
 		policy: ApplyPolicy,
-		target: TransitionConnectionPool,
+		target: TransitionLessor,
 	): Promise<ApplyResult>;
 }
 
@@ -76,7 +76,7 @@ export type TransitionResumeJournalLoader = (
 ) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
 
 export type TransitionResumeContextReader = (
-	target: TransitionConnectionPool,
+	target: TransitionLessor,
 	run: TransitionRunJournal['run'],
 ) => Promise<ObservationContext>;
 
@@ -169,10 +169,11 @@ export {
 	type RulePrecedenceFact,
 	serverVersionNum,
 	type TransactionCoordinatorBinding,
-	type TransitionConnectionPool,
 	type TransitionExecutionClient,
+	type TransitionLessor,
 	type TransitionPack,
 	type TransitionQueryClient,
+	type TransitionSessionClient,
 } from './registry.js';
 export {
 	assumptionAccepted,
@@ -199,6 +200,13 @@ export {
 	type StagedCompositionPreflight,
 	type StagedCompositionPreflightInput,
 } from './staging.js';
+export {
+	acquireTransitionLease,
+	createTransitionLessor,
+	isTransitionLessor,
+	TRANSITION_LESSOR_REJECTION,
+	type TransitionLeaseFailure,
+} from './transition-lessor.js';
 export {
 	type TransitionRelationalValidationInput,
 	type TransitionRelationalValidationResult,

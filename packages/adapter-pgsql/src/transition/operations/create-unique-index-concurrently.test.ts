@@ -6,6 +6,7 @@ import type {
 	PhysicalOperation,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionSession } from '../__fixtures__/transition-session.js';
 import {
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
@@ -178,9 +179,9 @@ function tableIndexesEvidence(
 async function observeAfter(row: Record<string, unknown> = targetRow()) {
 	const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
 	const client = {
-		opaqueClient: {
+		opaqueClient: createTestTransitionSession({
 			query: vi.fn(async () => ({ rows: [row] })),
-		},
+		}),
 	};
 	return runtime.observeOperation(
 		client,
@@ -252,11 +253,11 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 	it('requires indisvalid and indisready in the after fingerprint', async () => {
 		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async () => ({
 					rows: [targetRow({ indisvalid: false })],
 				})),
-			},
+			}),
 		};
 
 		await expect(
@@ -340,7 +341,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const queries: string[] = [];
 		let catalogReads = 0;
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
 					if (sql === 'SHOW lock_timeout') {
@@ -360,7 +361,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 					}
 					return { rows: [] };
 				}),
-			},
+			}),
 		};
 		let marked = false;
 
@@ -395,7 +396,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
 		let catalogReads = 0;
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async (sql: string) => {
 					if (sql === 'SHOW lock_timeout') {
 						return { rows: [{ lock_timeout: '7s' }] };
@@ -414,7 +415,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 					}
 					return { rows: [] };
 				}),
-			},
+			}),
 		};
 
 		const result = await runtime.executeOperation(client, operation, context, [
@@ -441,7 +442,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const queries: string[] = [];
 		let catalogReads = 0;
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
 					if (sql === 'SHOW lock_timeout') {
@@ -466,7 +467,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 					}
 					return { rows: [] };
 				}),
-			},
+			}),
 		};
 
 		await expect(
@@ -483,7 +484,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
 		const queries: string[] = [];
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
 					if (sql === 'SHOW lock_timeout') {
@@ -494,7 +495,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 					}
 					throw new Error(`unexpected query: ${sql}`);
 				}),
-			},
+			}),
 		};
 		let marked = false;
 
@@ -517,7 +518,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
 		const queries: string[] = [];
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
 					if (sql === 'SHOW lock_timeout') {
@@ -528,7 +529,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 					}
 					return { rows: [] };
 				}),
-			},
+			}),
 		};
 		let marked = false;
 

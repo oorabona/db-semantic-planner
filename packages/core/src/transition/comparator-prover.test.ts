@@ -26,11 +26,12 @@ import type {
 	SequenceIR,
 	TableIR,
 	TransitionCandidate,
-	TransitionConnectionPool,
 	TransitionFragment,
+	TransitionLessor,
 	TransitionRule,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { checkDelta } from './check-delta.js';
 import { createComparator } from './comparator.js';
 import {
@@ -44,6 +45,7 @@ import { createProver } from './prover.js';
 import type { RegisteredOperationSemantics } from './registry.js';
 import { createPackRegistry } from './registry.js';
 import { preflightStagedComposition } from './staging.js';
+import { TRANSITION_LESSOR_REJECTION } from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
 const ruleArtifact: SemanticArtifactRef = {
@@ -94,13 +96,11 @@ type ProverOutcome = Awaited<
 	ReturnType<ReturnType<typeof createProver>['prove']>
 >;
 
-function proofTarget(): TransitionConnectionPool {
-	return {
-		connect: async () => ({
-			query: async () => ({ rows: [] }),
-			release: vi.fn(),
-		}),
-	};
+function proofTarget(): TransitionLessor {
+	return createTestTransitionLessor(async () => ({
+		query: async () => ({ rows: [] }),
+		release: vi.fn(),
+	}));
 }
 
 function expectBlockedReason(outcome: ProverOutcome, code: string) {
@@ -2810,8 +2810,8 @@ describe('createComparator', () => {
 		expect(compare.candidates).toHaveLength(1);
 		expect(compare.recognitions).toHaveLength(1);
 		expect(compare.detail).toMatch(/whole diff/i);
-		const connect = vi.fn(proofTarget().connect);
-		const target: TransitionConnectionPool = { connect };
+		const acquire = vi.fn(proofTarget().acquire);
+		const target = createTestTransitionLessor(acquire);
 		const outcome = await createProver(customRegistry).prove(
 			compare,
 			target,
@@ -2822,7 +2822,7 @@ describe('createComparator', () => {
 		expect(outcome).not.toHaveProperty('plan');
 		expect(readContext).not.toHaveBeenCalled();
 		expect(execute).not.toHaveBeenCalled();
-		expect(connect).not.toHaveBeenCalled();
+		expect(acquire).not.toHaveBeenCalled();
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
 		}
@@ -2830,6 +2830,84 @@ describe('createComparator', () => {
 });
 
 describe('createProver', () => {
+	it('rejects a checked-out client target before connecting', async () => {
+		const target = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+
+		const outcome = await createProver(registry()).prove(
+			validCompare(),
+			target as never,
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'context-mismatch',
+				fact: {
+					key: 'transition-lessor',
+					value: TRANSITION_LESSOR_REJECTION,
+				},
+			});
+			expect(outcome.assessment.continuation).toBe(
+				'human-intervention-required',
+			);
+		}
+		expect(target.connect).not.toHaveBeenCalled();
+	});
+
+	it('rejects a forged lessor whose acquisition has no release()', async () => {
+		const target = {
+			acquire: vi.fn(async () => ({ query: vi.fn() })),
+		};
+		Object.defineProperty(target, Symbol.for('dbsp.transition.lessor'), {
+			value: { protocolVersion: 1 },
+		});
+
+		const outcome = await createProver(registry()).prove(
+			validCompare(),
+			target as never,
+			context,
+		);
+
+		expectBlockedReason(outcome, 'context-mismatch');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				fact: {
+					key: 'semantic-artifact',
+					value: expect.stringContaining(
+						'must acquire a lease exposing query() and release()',
+					),
+				},
+			});
+		}
+		expect(target.acquire).toHaveBeenCalledOnce();
+	});
+
+	it('returns no-drift before validating an unused target', async () => {
+		const target = {
+			connect: vi.fn(),
+			query: vi.fn(),
+			release: vi.fn(),
+		};
+		const noDrift = createComparator(registry()).compare(
+			model(false),
+			model(false),
+		);
+
+		const outcome = await createProver(registry()).prove(
+			noDrift,
+			target as never,
+			context,
+		);
+
+		expect(outcome.kind).toBe('no-drift');
+		expect(target.connect).not.toHaveBeenCalled();
+	});
+
 	it('resolves two operations in one pack by operation name', () => {
 		const setNotNullOperation = operation();
 		const validateOperation: PhysicalOperation = {
@@ -3063,18 +3141,18 @@ describe('createProver', () => {
 	it('fails closed on direct proof of same-plan after-commit dependencies', async () => {
 		const { registry: customRegistry, ruleA, ruleB } = compositionRegistry();
 		const release = vi.fn();
-		const connect = vi.fn(async () => ({
+		const acquire = vi.fn(async () => ({
 			query: async () => ({ rows: [] }),
 			release,
 		}));
 		const outcome = await createProver(customRegistry).prove(
 			compositionCompare(ruleA, ruleB),
-			{ connect },
+			createTestTransitionLessor(acquire),
 			context,
 		);
 
 		expect(outcome.kind).toBe('blocked');
-		expect(connect).toHaveBeenCalledOnce();
+		expect(acquire).toHaveBeenCalledOnce();
 		expect(release).toHaveBeenCalledOnce();
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]).toMatchObject({
@@ -3430,16 +3508,16 @@ describe('createProver', () => {
 				},
 			},
 		]);
-		const connect = vi.fn(proofTarget().connect);
+		const acquire = vi.fn(proofTarget().acquire);
 
 		const outcome = await createProver(customRegistry).prove(
 			compositionCompare(ruleA, ruleB),
-			{ connect },
+			createTestTransitionLessor(acquire),
 			context,
 		);
 
 		expectBlockedReason(outcome, 'context-mismatch');
-		expect(connect).toHaveBeenCalledOnce();
+		expect(acquire).toHaveBeenCalledOnce();
 		expect(execute).toHaveBeenCalledTimes(2);
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]).toMatchObject({
@@ -4144,16 +4222,16 @@ describe('createProver', () => {
 			query: async () => ({ rows: [] }),
 			release,
 		};
-		const target: TransitionConnectionPool = {
-			connect: vi.fn(async () => client),
-		};
+		const acquire = vi.fn(async () => client);
+		const target = createTestTransitionLessor(acquire);
 		const execute = vi.fn(
 			async (
 				request: ObservationRequest,
 				issuedTarget: unknown,
 				ctx: ObservationContext,
 			): Promise<EvidenceObservation> => {
-				expect(issuedTarget).toBe(client);
+				expect(issuedTarget).not.toBe(client);
+				expect('release' in (issuedTarget as object)).toBe(false);
 				inFlight += 1;
 				maxInFlight = Math.max(maxInFlight, inFlight);
 				await new Promise((resolve) => setTimeout(resolve, 0));
@@ -4200,7 +4278,8 @@ describe('createProver', () => {
 			issuer: {
 				artifact: issuerArtifact,
 				readContext: async (contextTarget, ctx) => {
-					expect(contextTarget).toBe(client);
+					expect(contextTarget).not.toBe(client);
+					expect('release' in contextTarget).toBe(false);
 					return { ...ctx, effectiveRole: 'proof_role' };
 				},
 				execute,
@@ -4220,7 +4299,7 @@ describe('createProver', () => {
 		);
 
 		expect(outcome.kind).toBe('proven');
-		expect(target.connect).toHaveBeenCalledOnce();
+		expect(acquire).toHaveBeenCalledOnce();
 		expect(release).toHaveBeenCalledOnce();
 		expect(maxInFlight).toBe(1);
 		expect(execute.mock.calls.map(([request]) => request.kind)).toEqual(

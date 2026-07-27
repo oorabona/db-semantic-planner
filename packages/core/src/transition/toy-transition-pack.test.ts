@@ -4,7 +4,7 @@ import type {
 	EnumIR,
 	ModelIR,
 	TableIR,
-	TransitionConnectionPool,
+	TransitionLessor,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -12,6 +12,7 @@ import {
 	type ToyDb,
 	toyChoiceDbType,
 } from './__fixtures__/toy-transition-pack.js';
+import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { createApplier } from './applier.js';
 import { createComparator } from './comparator.js';
 import { createProver } from './prover.js';
@@ -81,13 +82,11 @@ function dbWith(column: ColumnIR): ToyDb {
 	};
 }
 
-function target(): TransitionConnectionPool {
-	return {
-		connect: async () => ({
-			query: async () => ({ rows: [] }),
-			release: () => undefined,
-		}),
-	};
+function target(): TransitionLessor {
+	return createTestTransitionLessor(async () => ({
+		query: async () => ({ rows: [] }),
+		release: () => undefined,
+	}));
 }
 
 function currentStatus(db: ToyDb): ColumnIR {

@@ -1,7 +1,7 @@
 import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
-	readPgObservationContext,
+	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
@@ -12,7 +12,12 @@ import {
 	type ModelIR,
 } from '@dbsp/core';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import {
+	createSchema,
+	dropSchema,
+	getTestPool,
+	getTestTransitionLessor,
+} from './testkit/index.js';
 
 const schemaName = 'transition_enum_add_value';
 
@@ -57,8 +62,11 @@ async function enumLabels(): Promise<readonly string[]> {
 	return result.rows.map((row) => String(row.label));
 }
 
+let target: Awaited<ReturnType<typeof getTestTransitionLessor>>;
+
 describe('ADR-0003 transition planner: ALTER TYPE ADD VALUE', () => {
 	beforeAll(async () => {
+		target = await getTestTransitionLessor();
 		await createSchema(schemaName);
 	});
 
@@ -94,8 +102,15 @@ describe('ADR-0003 transition planner: ALTER TYPE ADD VALUE', () => {
 		const compare = comparator.compare(desired, current);
 		expect(compare.kind).toBe('transitions');
 
-		const context = await readPgObservationContext(pool, schemaName);
-		const outcome = await createProver(registry).prove(compare, pool, context);
+		const context = await readPgObservationContextFromLessor(
+			target,
+			schemaName,
+		);
+		const outcome = await createProver(registry).prove(
+			compare,
+			target,
+			context,
+		);
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
 			return;
@@ -104,7 +119,7 @@ describe('ADR-0003 transition planner: ALTER TYPE ADD VALUE', () => {
 		const result = await createApplier(registry).apply(
 			{ plan: outcome.plan, assessment: outcome.assessment },
 			policy,
-			pool,
+			target,
 		);
 
 		expect(result.assessment.decision).toBe('applicable');

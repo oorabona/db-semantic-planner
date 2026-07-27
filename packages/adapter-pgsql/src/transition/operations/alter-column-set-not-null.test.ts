@@ -12,6 +12,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createTestTransitionSession } from '../__fixtures__/transition-session.js';
 import {
 	expectedColumnShapeFor,
 	type SetNotNullColumnShapeExpectation,
@@ -29,11 +30,15 @@ import {
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
 import { assumptionId, evidenceId } from '../ids.js';
+import { createPgTransitionPack } from '../pack.js';
 import { pgPrivilegeFact } from '../privileges.js';
 import {
 	createAlterColumnSetNotNullOperationRuntime,
 	renderAlterColumnSetNotNullSql,
 } from './alter-column-set-not-null.js';
+import { createAlterTypeAddValueOperationRuntime } from './alter-type-add-value.js';
+import { createAttachLogicalIdentityOperationRuntime } from './attach-logical-identity.js';
+import { createManualSqlOperationRuntime } from './manual-sql.js';
 
 const context: ObservationContext = {
 	engine: 'postgresql',
@@ -319,6 +324,47 @@ function defaultDeparseEvidence(
 }
 
 describe('AlterColumnSetNotNull operation runtime', () => {
+	it('refuses checked-out clients at every publicly reachable checkout', async () => {
+		const pack = createPgTransitionPack();
+		const packOnlyRuntimes = pack.operationSemantics.filter((runtime) => {
+			const operationKind = (
+				runtime as { readonly operationKind?: { readonly name: string } }
+			).operationKind;
+			return (
+				operationKind !== undefined &&
+				['AlterTableAddCheck', 'CreateUniqueIndexConcurrently'].includes(
+					operationKind.name,
+				)
+			);
+		});
+		expect(packOnlyRuntimes).toHaveLength(2);
+		const runtimes = [
+			{
+				name: 'alter-column-set-not-null factory',
+				runtime: createAlterColumnSetNotNullOperationRuntime(),
+			},
+			{
+				name: 'alter-type-add-value factory',
+				runtime: createAlterTypeAddValueOperationRuntime(),
+			},
+			{
+				name: 'attach-logical-identity factory',
+				runtime: createAttachLogicalIdentityOperationRuntime(),
+			},
+			{
+				name: 'manual-sql factory',
+				runtime: createManualSqlOperationRuntime(),
+			},
+			...packOnlyRuntimes.map((runtime) => ({
+				name: `pack operation semantics ${runtime.artifact.id}`,
+				runtime,
+			})),
+		];
+		expect(
+			runtimes.every(({ runtime }) => !Reflect.has(runtime, 'checkout')),
+		).toBe(true);
+	});
+
 	it('renders DDL with an explicit schema', () => {
 		expect(
 			renderAlterColumnSetNotNullSql(
@@ -374,7 +420,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			},
 		};
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: async (sql: string, params?: readonly unknown[]) => {
 					queries.push(sql);
 					if (sql.includes('dbsp_transition_journal_shape')) {
@@ -385,7 +431,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					}
 					return { rows: [] };
 				},
-			},
+			}),
 		};
 
 		await runtime.writeIntentJournal(client, intent);
@@ -406,28 +452,17 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		expect(queries.some((sql) => sql.includes('"tenant"'))).toBe(false);
 	});
 
-	it('rejects a checked-out client as an execution target', async () => {
-		const runtime = createAlterColumnSetNotNullOperationRuntime();
-
-		await expect(
-			runtime.checkout({
-				query: async () => ({ rows: [] }),
-				release: () => undefined,
-			} as never),
-		).rejects.toThrow(/connect\(\).*checked-out clients/i);
-	});
-
 	it('sets a statement timeout around the NO_NULLS guard scan', async () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
 		const queries: string[] = [];
 		const result = await runtime.checkGuard(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async (sql: string) => {
 						queries.push(sql);
 						return { rows: [] };
 					},
-				},
+				}),
 			},
 			operation,
 			guard(),
@@ -474,12 +509,12 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		await expect(
 			runtime.checkGuard(
 				{
-					opaqueClient: {
+					opaqueClient: createTestTransitionSession({
 						query: async (sql: string) => {
 							queries.push(sql);
 							return { rows: [] };
 						},
-					},
+					}),
 				},
 				operation,
 				mismatchedGuard,
@@ -493,12 +528,12 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
 		const queries: string[] = [];
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					return { rows: [] };
 				},
-			},
+			}),
 		};
 
 		await runtime.checkGuard(client, operation, guard(), context);
@@ -517,14 +552,14 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		await expect(
 			runtime.checkGuard(
 				{
-					opaqueClient: {
+					opaqueClient: createTestTransitionSession({
 						query: async (sql: string) => {
 							if (sql.startsWith('SET LOCAL')) {
 								return { rows: [] };
 							}
 							throw { code: '57014' };
 						},
-					},
+					}),
 				},
 				operation,
 				guard(),

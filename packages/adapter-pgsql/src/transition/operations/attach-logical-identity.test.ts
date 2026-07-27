@@ -5,6 +5,7 @@ import type {
 	PhysicalOperation,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionSession } from '../__fixtures__/transition-session.js';
 import { stampedClaimForRequest } from '../claim-stamping.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
@@ -135,7 +136,10 @@ describe('AttachLogicalIdentity operation runtime', () => {
 		});
 
 		await expect(
-			runtime.executeOperation({ opaqueClient: { query } }, operation),
+			runtime.executeOperation(
+				{ opaqueClient: createTestTransitionSession({ query }) },
+				operation,
+			),
 		).rejects.toThrow(/not the dbsp-managed carrier shape/);
 		expect(
 			query.mock.calls.some(([sql]) =>
@@ -221,7 +225,11 @@ describe('AttachLogicalIdentity operation runtime', () => {
 
 		await expect(
 			runtime.observeOperation(
-				{ opaqueClient: { query: async () => ({ rows: [] }) } },
+				{
+					opaqueClient: createTestTransitionSession({
+						query: async () => ({ rows: [] }),
+					}),
+				},
 				operation,
 				context,
 				'after',

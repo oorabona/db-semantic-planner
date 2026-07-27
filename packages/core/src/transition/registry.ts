@@ -20,9 +20,8 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionCompositionFact,
-	TransitionConnectionPool,
-	TransitionQueryClient,
 	TransitionRule,
+	TransitionSessionClient,
 } from '@dbsp/types';
 import {
 	mergeCompatibleObservationContexts,
@@ -79,7 +78,7 @@ export interface GuardExecutionResult {
 }
 
 export interface TransitionExecutionClient {
-	readonly opaqueClient: unknown;
+	readonly opaqueClient: TransitionSessionClient;
 }
 
 export interface NonRollbackableExecutionTracker {
@@ -88,13 +87,6 @@ export interface NonRollbackableExecutionTracker {
 
 export interface ExecutionCoordinator {
 	readonly transactionDomain: string;
-	checkout(
-		target: TransitionConnectionPool,
-	): Promise<TransitionExecutionClient>;
-	release(
-		client: TransitionExecutionClient,
-		error?: unknown,
-	): Promise<void> | void;
 	begin(client: TransitionExecutionClient): Promise<void>;
 	setLockTimeout(
 		client: TransitionExecutionClient,
@@ -111,13 +103,6 @@ export interface TransactionCoordinatorBinding {
 }
 
 export interface OperationRuntime extends RegisteredOperationSemantics {
-	checkout(
-		target: TransitionConnectionPool,
-	): Promise<TransitionExecutionClient>;
-	release(
-		client: TransitionExecutionClient,
-		error?: unknown,
-	): Promise<void> | void;
 	writeIntentJournal(
 		client: TransitionExecutionClient,
 		record: DurableIntentRecord,
@@ -258,12 +243,26 @@ function capabilityAvailable(
 	}
 }
 
+/**
+ * Members an operation runtime used to carry when it took connections out of a
+ * pool itself. Core owns acquisition and release now, so a pack still declaring
+ * them was built against a contract that no longer holds: core would never call
+ * them, and the pack would believe it was managing a connection nobody hands it.
+ * Recognising such a pack would make that silent, so it is refused instead.
+ */
+const RETIRED_CONNECTION_OWNERSHIP_MEMBERS = ['checkout', 'release'] as const;
+
+function retiredConnectionOwnershipMember(value: object): string | undefined {
+	return RETIRED_CONNECTION_OWNERSHIP_MEMBERS.find((member) => member in value);
+}
+
 export function isOperationRuntime(
 	semantics: RegisteredOperationSemantics,
 ): semantics is OperationRuntime {
+	if (retiredConnectionOwnershipMember(semantics) !== undefined) {
+		return false;
+	}
 	return (
-		'checkout' in semantics &&
-		'release' in semantics &&
 		'writeIntentJournal' in semantics &&
 		'begin' in semantics &&
 		'setLockTimeout' in semantics &&
@@ -467,6 +466,14 @@ export class PackRegistry {
 			compositionFactOwnerByKind.set(kind, owner);
 		};
 		for (const pack of packs) {
+			const retiredMember = pack.executionCoordinator
+				? retiredConnectionOwnershipMember(pack.executionCoordinator)
+				: undefined;
+			if (retiredMember !== undefined) {
+				throw new Error(
+					`transition pack executionCoordinator declares retired connection ownership member ${retiredMember}`,
+				);
+			}
 			const transactionDomain =
 				pack.transactionDomain ?? pack.executionCoordinator?.transactionDomain;
 			if (pack.executionCoordinator && !transactionDomain) {
@@ -775,4 +782,8 @@ export function createPackRegistry(
 	return new PackRegistry(packs);
 }
 
-export type { TransitionConnectionPool, TransitionQueryClient };
+export type {
+	TransitionLessor,
+	TransitionQueryClient,
+	TransitionSessionClient,
+} from '@dbsp/types';

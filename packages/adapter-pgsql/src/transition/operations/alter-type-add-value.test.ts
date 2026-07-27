@@ -10,6 +10,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createTestTransitionSession } from '../__fixtures__/transition-session.js';
 import {
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
@@ -503,12 +504,12 @@ describe('AlterTypeAddValue operation runtime', () => {
 		const queries: string[] = [];
 		await runtime.executeOperation(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async (sql: string) => {
 						queries.push(sql);
 						return { rows: [] };
 					},
-				},
+				}),
 			},
 			operation,
 			context,
@@ -547,7 +548,7 @@ describe('AlterTypeAddValue operation runtime', () => {
 			},
 		};
 		const client = {
-			opaqueClient: {
+			opaqueClient: createTestTransitionSession({
 				query: async (sql: string, params?: readonly unknown[]) => {
 					queries.push(sql);
 					if (sql.includes('dbsp_transition_journal_shape')) {
@@ -558,7 +559,7 @@ describe('AlterTypeAddValue operation runtime', () => {
 					}
 					return { rows: [] };
 				},
-			},
+			}),
 		};
 
 		await runtime.writeIntentJournal(client, intent);
@@ -584,12 +585,12 @@ describe('AlterTypeAddValue operation runtime', () => {
 		const queries: { sql: string; params?: readonly unknown[] }[] = [];
 		await runtime.acquireLocks(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async (sql: string, params?: readonly unknown[]) => {
 						queries.push({ sql, params });
 						return { rows: [] };
 					},
-				},
+				}),
 			},
 			operation,
 		);
@@ -606,9 +607,9 @@ describe('AlterTypeAddValue operation runtime', () => {
 		const runtime = createAlterTypeAddValueOperationRuntime();
 		const result = await runtime.checkGuard(
 			{
-				opaqueClient: {
+				opaqueClient: createTestTransitionSession({
 					query: async () => ({ rows: [] }),
-				},
+				}),
 			},
 			operation,
 			typeExistsGuard(),

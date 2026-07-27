@@ -16,8 +16,8 @@ import type {
 	RecoveryArtefact,
 	StepJournal,
 	TransactionalCompletionRecord,
-	TransitionConnectionPool,
 	TransitionJournalEvent,
+	TransitionLessor,
 	TransitionRunJournal,
 } from '@dbsp/types';
 import {
@@ -28,11 +28,17 @@ import {
 import { semanticArtifactId } from './ids.js';
 import {
 	isOperationRuntime,
-	type OperationRuntime,
 	type PackRegistry,
+	type TransitionExecutionClient,
 } from './registry.js';
 import { assumptionAccepted } from './resource-scope.js';
 import { stableJson } from './stable-json.js';
+import {
+	acquireTransitionLease,
+	isTransitionLessor,
+	type TransitionLease,
+	transitionLessorRejectionAssessment,
+} from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
 const RESUMER_ARTIFACT = {
@@ -46,11 +52,11 @@ export interface ResumeTransitionInput {
 		runId: string,
 	) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
 	readonly readContext: (
-		target: TransitionConnectionPool,
+		target: TransitionLessor,
 		run: TransitionRunJournal['run'],
 	) => Promise<ObservationContext>;
 	readonly policy: ApplyPolicy;
-	readonly target: TransitionConnectionPool;
+	readonly target: TransitionLessor;
 }
 
 type StepEvents = {
@@ -381,6 +387,17 @@ function latestIntent(
 	);
 }
 
+function orderedPlanSteps(
+	plan: ProvenPlanShape,
+	stepById: ReadonlyMap<string, ProvenPlanStep>,
+): readonly ProvenPlanStep[] {
+	return plan.segments.flatMap((segment) =>
+		segment.stepIds
+			.map((stepId) => stepById.get(stepId))
+			.filter((step): step is ProvenPlanStep => step !== undefined),
+	);
+}
+
 function resumeRequiredResult(params: {
 	readonly step: ProvenPlanStep;
 	readonly completed: readonly StepJournal[];
@@ -553,115 +570,92 @@ function completedJournal(
 			};
 }
 
-type ObservationAttempt =
+type StepObservation =
 	| {
 			readonly ok: true;
 			readonly observations: readonly IssuedObservation[];
 			readonly fingerprint: FingerprintManifest;
-			readonly client: Awaited<ReturnType<OperationRuntime['checkout']>>;
-			readonly runtime: OperationRuntime;
+			/** Journal this observation on the same session it was observed from. */
+			readonly writeJournal: (journal: StepJournal) => Promise<void>;
 	  }
 	| {
 			readonly ok: false;
 			readonly detail: string;
 	  };
 
-async function observeStep(
+async function withObservedStep<T>(
 	registry: PackRegistry,
 	step: ProvenPlanStep,
-	target: TransitionConnectionPool,
+	target: TransitionLessor,
 	baseContext: ObservationContext,
 	phase: 'before' | 'after',
-): Promise<ObservationAttempt> {
+	use: (observation: StepObservation) => Promise<T>,
+): Promise<T> {
 	const resolution = registry.resolveOperation(step.operation);
 	if (!resolution.ok || !isOperationRuntime(resolution.semantics)) {
-		return { ok: false, detail: 'operation runtime missing' };
+		return use({ ok: false, detail: 'operation runtime missing' });
 	}
 	const runtime = resolution.semantics;
 	const issuer = registry.resolveIssuer(step.operation.operationKind.artifact);
 	if (!issuer) {
-		return { ok: false, detail: 'operation observation issuer missing' };
+		return use({ ok: false, detail: 'operation observation issuer missing' });
 	}
-	let client: Awaited<ReturnType<OperationRuntime['checkout']>> | undefined;
+	let lease: TransitionLease | undefined;
+	let failed = false;
+	let failure: unknown;
 	try {
-		client = await runtime.checkout(target);
-		let context = await runtime.observeContext(
-			client,
-			step.operation,
-			baseContext,
-		);
-		context = registry.contextWithDerivedCapabilities(context);
-		const liveContextMatch = matchLiveObservationContext({
-			expected: baseContext,
-			actual: context,
-		});
-		if (!liveContextMatch.ok) {
-			await runtimeSafeRelease(runtime, client);
-			return { ok: false, detail: liveContextMatch.detail };
-		}
-		const observed = await runtime.observeOperation(
-			client,
-			step.operation,
-			context,
-			phase,
-			issuer,
-		);
-		return {
-			ok: true,
-			observations: observed.observations,
-			fingerprint: observed.fingerprint,
-			client,
-			runtime,
-		};
-	} catch (error) {
-		if (client) {
-			await runtimeSafeRelease(
-				resolution.ok && isOperationRuntime(resolution.semantics)
-					? resolution.semantics
-					: undefined,
+		let observation: StepObservation;
+		try {
+			lease = await acquireTransitionLease(target);
+			const client: TransitionExecutionClient = { opaqueClient: lease.session };
+			let context = await runtime.observeContext(
 				client,
-				error,
+				step.operation,
+				baseContext,
 			);
+			context = registry.contextWithDerivedCapabilities(context);
+			const liveContextMatch = matchLiveObservationContext({
+				expected: baseContext,
+				actual: context,
+			});
+			if (!liveContextMatch.ok) {
+				observation = { ok: false, detail: liveContextMatch.detail };
+			} else {
+				const observed = await runtime.observeOperation(
+					client,
+					step.operation,
+					context,
+					phase,
+					issuer,
+				);
+				observation = {
+					ok: true,
+					observations: observed.observations,
+					fingerprint: observed.fingerprint,
+					writeJournal: async (journal) =>
+						runtime.writeObservedJournal(client, journal),
+				};
+			}
+		} catch (error) {
+			failed = true;
+			failure = error;
+			observation = {
+				ok: false,
+				detail: error instanceof Error ? error.message : 'observation failed',
+			};
 		}
-		return {
-			ok: false,
-			detail: error instanceof Error ? error.message : 'observation failed',
-		};
+		try {
+			return await use(observation);
+		} catch (error) {
+			failed = true;
+			failure = error;
+			throw error;
+		}
+	} finally {
+		if (lease) {
+			await lease.release(failed ? { error: failure } : undefined);
+		}
 	}
-}
-
-async function runtimeSafeRelease(
-	runtime: OperationRuntime | undefined,
-	client: Awaited<ReturnType<OperationRuntime['checkout']>>,
-	error?: unknown,
-): Promise<void> {
-	if (!runtime) {
-		return;
-	}
-	try {
-		await runtime.release(client, error);
-	} catch {
-		// Resume reconciliation outcome must not be masked by cleanup.
-	}
-}
-
-async function releaseObservedAttempt(
-	attempt: ObservationAttempt,
-	error?: unknown,
-): Promise<void> {
-	if (attempt.ok) {
-		await runtimeSafeRelease(attempt.runtime, attempt.client, error);
-	}
-}
-
-async function writeObserved(
-	attempt: ObservationAttempt,
-	journal: StepJournal,
-): Promise<void> {
-	if (!attempt.ok) {
-		return;
-	}
-	await attempt.runtime.writeObservedJournal(attempt.client, journal);
 }
 
 function stepAssumption(
@@ -711,6 +705,49 @@ export async function resumeTransitionRun(
 	if (!evidenceContext) {
 		return contextMismatch('loaded plan contains no durable evidence context');
 	}
+	const referencedAssumptions = new Set<string>();
+	for (const step of loaded.plan.steps) {
+		for (const assumptionId of step.restsOnAssumptions) {
+			referencedAssumptions.add(assumptionId);
+		}
+		const policyFailure = validatePolicyForStep(
+			loaded.plan,
+			step,
+			input.policy,
+		);
+		if (policyFailure) {
+			return policyFailure;
+		}
+	}
+	for (const assumption of loaded.plan.assumptions) {
+		if (
+			!referencedAssumptions.has(assumption.id) &&
+			!assumptionAccepted(assumption, input.policy)
+		) {
+			return unacceptedPlanAssumption(loaded.plan, assumption);
+		}
+	}
+
+	const stepById = new Map(
+		loaded.plan.steps.map((step) => [step.stepId, step]),
+	);
+	const groupedResult = groupEvents(loaded.events, loaded.run.runId, stepById);
+	if (!groupedResult.ok) {
+		return contextMismatch(groupedResult.detail);
+	}
+	const grouped = groupedResult.grouped;
+	if (!isTransitionLessor(input.target)) {
+		// Resume accepts journaled outcomes only after re-observing them through the
+		// target, so grouped records alone are not honest result journals here.
+		return {
+			assessment: transitionLessorRejectionAssessment(
+				RESUMER_ARTIFACT,
+				loaded.events.length === 0 ? 'planned' : 'outcome-unknown',
+			),
+			journals: [],
+			observations: [],
+		};
+	}
 	const baseContext = await input.readContext(input.target, loaded.run);
 	const runContextMatch = matchRunObservationContext({
 		run: loaded.run,
@@ -750,41 +787,7 @@ export async function resumeTransitionRun(
 			`loaded plan failed semantic invariant validation: ${semanticDiagnostic.detail}`,
 		);
 	}
-
-	const referencedAssumptions = new Set<string>();
-	for (const step of loaded.plan.steps) {
-		for (const assumptionId of step.restsOnAssumptions) {
-			referencedAssumptions.add(assumptionId);
-		}
-		const policyFailure = validatePolicyForStep(
-			loaded.plan,
-			step,
-			input.policy,
-		);
-		if (policyFailure) {
-			return policyFailure;
-		}
-	}
-	for (const assumption of loaded.plan.assumptions) {
-		if (
-			!referencedAssumptions.has(assumption.id) &&
-			!assumptionAccepted(assumption, input.policy)
-		) {
-			return unacceptedPlanAssumption(loaded.plan, assumption);
-		}
-	}
-
-	const stepById = new Map(
-		loaded.plan.steps.map((step) => [step.stepId, step]),
-	);
-	const groupedResult = groupEvents(loaded.events, loaded.run.runId, stepById);
-	if (!groupedResult.ok) {
-		return contextMismatch(groupedResult.detail);
-	}
-	const grouped = groupedResult.grouped;
-	const orderedSteps = loaded.plan.segments.flatMap((segment) =>
-		segment.stepIds.map((stepId) => stepById.get(stepId)).filter(Boolean),
-	) as ProvenPlanStep[];
+	const orderedSteps = orderedPlanSteps(loaded.plan, stepById);
 	const completed: StepJournal[] = [];
 	const observations: IssuedObservation[] = [];
 
@@ -823,80 +826,106 @@ export async function resumeTransitionRun(
 			effects.effects.execution.transaction !== 'forbids-transaction';
 
 		if (observedJournal?.outcome === 'completed' || completion) {
-			const after = await observeStep(
+			const after = await withObservedStep(
 				registry,
 				step,
 				input.target,
 				baseContext,
 				'after',
+				async (observation) => {
+					if (
+						!observation.ok ||
+						!fingerprintMatches(step.expectedAfter, observation.fingerprint)
+					) {
+						return {
+							kind: 'unmatched' as const,
+							detail: observation.ok
+								? 'current fingerprint no longer matches expectedAfter'
+								: observation.detail,
+						};
+					}
+					const journal =
+						observedJournal?.outcome === 'completed'
+							? observedJournal
+							: completedJournal(intent, completion, observation.observations);
+					if (!observedJournal) {
+						await observation.writeJournal(journal);
+					}
+					return {
+						kind: 'completed' as const,
+						observations: observation.observations,
+						journal,
+					};
+				},
 			);
-			if (
-				after.ok &&
-				fingerprintMatches(step.expectedAfter, after.fingerprint)
-			) {
+			if (after.kind === 'completed') {
 				observations.push(...after.observations);
-				const journal =
-					observedJournal?.outcome === 'completed'
-						? observedJournal
-						: completedJournal(intent, completion, after.observations);
-				if (!observedJournal) {
-					await writeObserved(after, journal);
-				}
-				await releaseObservedAttempt(after);
-				completed.push(journal);
+				completed.push(after.journal);
 				continue;
 			}
-			await releaseObservedAttempt(after);
 			return unknownResult({
 				step,
 				completed,
 				observations,
-				detail: after.ok
-					? 'current fingerprint no longer matches expectedAfter'
-					: after.detail,
+				detail: after.detail,
 			});
 		}
 
 		if (transactional) {
-			const before = await observeStep(
+			const before = await withObservedStep(
 				registry,
 				step,
 				input.target,
 				baseContext,
 				'before',
+				async (observation) => ({
+					kind:
+						observation.ok &&
+						fingerprintMatches(step.expectedBefore, observation.fingerprint)
+							? ('resume-required' as const)
+							: ('unmatched' as const),
+					observations: observation.ok ? observation.observations : [],
+				}),
 			);
-			if (
-				before.ok &&
-				fingerprintMatches(step.expectedBefore, before.fingerprint)
-			) {
+			if (before.kind === 'resume-required') {
 				observations.push(...before.observations);
-				await releaseObservedAttempt(before);
 				return resumeRequiredResult({
 					step,
 					completed,
 					observations,
 				});
 			}
-			await releaseObservedAttempt(before);
-			const after = await observeStep(
+			const after = await withObservedStep(
 				registry,
 				step,
 				input.target,
 				baseContext,
 				'after',
+				async (observation) => {
+					if (
+						!observation.ok ||
+						!fingerprintMatches(step.expectedAfter, observation.fingerprint)
+					) {
+						return { kind: 'unmatched' as const };
+					}
+					const journal = completedJournal(
+						intent,
+						undefined,
+						observation.observations,
+					);
+					await observation.writeJournal(journal);
+					return {
+						kind: 'completed' as const,
+						observations: observation.observations,
+						journal,
+					};
+				},
 			);
-			if (
-				after.ok &&
-				fingerprintMatches(step.expectedAfter, after.fingerprint)
-			) {
+			if (after.kind === 'completed') {
 				observations.push(...after.observations);
-				const journal = completedJournal(intent, undefined, after.observations);
-				await writeObserved(after, journal);
-				await releaseObservedAttempt(after);
-				completed.push(journal);
+				completed.push(after.journal);
 				continue;
 			}
-			await releaseObservedAttempt(after);
 			return unknownResult({
 				step,
 				completed,
@@ -906,42 +935,60 @@ export async function resumeTransitionRun(
 			});
 		}
 
-		const after = await observeStep(
+		const after = await withObservedStep(
 			registry,
 			step,
 			input.target,
 			baseContext,
 			'after',
+			async (observation) => {
+				if (
+					!observation.ok ||
+					!fingerprintMatches(step.expectedAfter, observation.fingerprint)
+				) {
+					return { kind: 'unmatched' as const };
+				}
+				const journal = completedJournal(
+					intent,
+					undefined,
+					observation.observations,
+				);
+				await observation.writeJournal(journal);
+				return {
+					kind: 'completed' as const,
+					observations: observation.observations,
+					journal,
+				};
+			},
 		);
-		if (after.ok && fingerprintMatches(step.expectedAfter, after.fingerprint)) {
+		if (after.kind === 'completed') {
 			observations.push(...after.observations);
-			const journal = completedJournal(intent, undefined, after.observations);
-			await writeObserved(after, journal);
-			await releaseObservedAttempt(after);
-			completed.push(journal);
+			completed.push(after.journal);
 			continue;
 		}
-		await releaseObservedAttempt(after);
-		const before = await observeStep(
+		const before = await withObservedStep(
 			registry,
 			step,
 			input.target,
 			baseContext,
 			'before',
+			async (observation) => ({
+				kind:
+					observation.ok &&
+					fingerprintMatches(step.expectedBefore, observation.fingerprint)
+						? ('resume-required' as const)
+						: ('unmatched' as const),
+				observations: observation.ok ? observation.observations : [],
+			}),
 		);
-		if (
-			before.ok &&
-			fingerprintMatches(step.expectedBefore, before.fingerprint)
-		) {
+		if (before.kind === 'resume-required') {
 			observations.push(...before.observations);
-			await releaseObservedAttempt(before);
 			return resumeRequiredResult({
 				step,
 				completed,
 				observations,
 			});
 		}
-		await releaseObservedAttempt(before);
 		return unknownResult({
 			step,
 			completed,

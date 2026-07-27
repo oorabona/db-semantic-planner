@@ -1,9 +1,14 @@
+import {
+	createTransitionLessor,
+	TRANSITION_LESSOR_REJECTION,
+} from '@dbsp/core';
 import type {
 	JsonValue,
 	ObservationContext,
 	ObservationRequest,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { createTestTransitionSession } from './__fixtures__/transition-session.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
@@ -25,7 +30,9 @@ import {
 } from './constants.js';
 import {
 	createPgObservationIssuer,
-	readPgObservationContext,
+	executePgObservationFromLessor,
+	readPgObservationContextFromClient,
+	readPgObservationContextFromLessor,
 } from './observation-issuer.js';
 import { pgPrivilegeFact } from './privileges.js';
 
@@ -70,7 +77,7 @@ async function enumLabelVisibleHolds(
 			scope: [],
 			detail,
 		},
-		{
+		createTestTransitionSession({
 			query: async () => ({
 				rows: [
 					{
@@ -81,7 +88,7 @@ async function enumLabelVisibleHolds(
 					},
 				],
 			}),
-		},
+		}),
 		context,
 	);
 	return (
@@ -92,6 +99,51 @@ async function enumLabelVisibleHolds(
 }
 
 describe('PostgreSQL transition observation issuer', () => {
+	it('refuses a forged lessor before acquiring for an observation', async () => {
+		const acquire = vi.fn(async () => ({ query: vi.fn() }));
+
+		await expect(
+			executePgObservationFromLessor(
+				{ acquire } as never,
+				engineRequest(180000),
+				context,
+			),
+		).rejects.toThrow(TRANSITION_LESSOR_REJECTION);
+		expect(acquire).not.toHaveBeenCalled();
+	});
+
+	it('refuses a forged lessor before acquiring for a context read', async () => {
+		const acquire = vi.fn(async () => ({ query: vi.fn() }));
+
+		await expect(
+			readPgObservationContextFromLessor({ acquire } as never, 'tenant'),
+		).rejects.toThrow(TRANSITION_LESSOR_REJECTION);
+		expect(acquire).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[
+			'an observation',
+			(lessor: never) =>
+				executePgObservationFromLessor(lessor, engineRequest(180000), context),
+		],
+		[
+			'a context read',
+			(lessor: never) => readPgObservationContextFromLessor(lessor, 'tenant'),
+		],
+	])('rejects a branded malformed acquisition for %s', async (_label, invoke) => {
+		const release = vi.fn();
+		const lessor = { acquire: vi.fn(async () => ({ release })) };
+		Object.defineProperty(lessor, Symbol.for('dbsp.transition.lessor'), {
+			value: { protocolVersion: 1 },
+		});
+
+		await expect(invoke(lessor as never)).rejects.toThrow(
+			'must acquire a lease exposing query() and release()',
+		);
+		expect(release).toHaveBeenCalledOnce();
+	});
+
 	it('fails closed before trusting logical identity rows from an unmanaged side table', async () => {
 		const issuer = createPgObservationIssuer();
 		const query = vi.fn(async (sql: string) => {
@@ -140,7 +192,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						expected: 'attached',
 					},
 				},
-				{ query },
+				createTestTransitionSession({ query }),
 				context,
 			),
 		).rejects.toThrow(/not the dbsp-managed carrier shape/);
@@ -160,7 +212,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				scope: [],
 				detail: { schema: 'tenant', table: 'users', column: 'age' },
 			},
-			{
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					return {
@@ -181,7 +233,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						],
 					};
 				},
-			},
+			}),
 			context,
 		);
 
@@ -203,9 +255,9 @@ describe('PostgreSQL transition observation issuer', () => {
 		const issuer = createPgObservationIssuer();
 		const observation = await issuer.execute(
 			engineRequest(190000),
-			{
+			createTestTransitionSession({
 				query: async () => ({ rows: [{ server_version_num: '180000' }] }),
-			},
+			}),
 			context,
 		);
 
@@ -228,7 +280,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				scope: [],
 				detail: { schema: 'tenant', table: 'users', column: 'age' },
 			},
-			{
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					return {
@@ -240,7 +292,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						],
 					};
 				},
-			},
+			}),
 			context,
 		);
 
@@ -260,7 +312,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					scope: [],
 					detail: { table: 'users', column: 'age' },
 				},
-				{ query },
+				createTestTransitionSession({ query }),
 				context,
 			),
 		).rejects.toThrow(/requires explicit schema detail/);
@@ -275,7 +327,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				scope: [],
 				detail: { schema: 'tenant', table: 'users', column: 'age' },
 			},
-			{
+			createTestTransitionSession({
 				query: async () => ({
 					rows: [
 						{
@@ -284,7 +336,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						},
 					],
 				}),
-			},
+			}),
 			context,
 		);
 
@@ -308,7 +360,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					constraint: 'users_age_check',
 				},
 			},
-			{
+			createTestTransitionSession({
 				query: async () => ({
 					rows: [
 						{
@@ -328,7 +380,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						},
 					],
 				}),
-			},
+			}),
 			context,
 		);
 
@@ -383,7 +435,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						constraint: 'users_age_check',
 					},
 				},
-				{
+				createTestTransitionSession({
 					query: async () => ({
 						rows: [
 							{
@@ -395,7 +447,7 @@ describe('PostgreSQL transition observation issuer', () => {
 							},
 						],
 					}),
-				},
+				}),
 				context,
 			),
 		).rejects.toThrow(/CHECK catalog JSON could not be parsed/);
@@ -415,7 +467,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						constraint: 'users_age_check',
 					},
 				},
-				{
+				createTestTransitionSession({
 					query: async () => ({
 						rows: [
 							{
@@ -427,7 +479,7 @@ describe('PostgreSQL transition observation issuer', () => {
 							},
 						],
 					}),
-				},
+				}),
 				context,
 			),
 		).rejects.toThrow(/CHECK catalog entry 0 has invalid shape/);
@@ -446,7 +498,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					index: 'idx_users_email',
 				},
 			},
-			{
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					if (sql.includes('FROM pg_catalog.pg_class c')) {
@@ -492,7 +544,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					throw new Error(`unexpected query: ${sql}`);
 				},
-			},
+			}),
 			context,
 		);
 
@@ -551,7 +603,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					expression: 'age > 0',
 				},
 			},
-			{
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					if (sql.includes('JOIN pg_catalog.pg_class')) {
@@ -570,7 +622,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					return { rows: [] };
 				},
-			},
+			}),
 			proofContext,
 		);
 
@@ -650,7 +702,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					expression: 'age > 0',
 				},
 			},
-			{
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					queries.push(sql);
 					if (sql.startsWith('SAVEPOINT')) {
@@ -677,7 +729,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					return { rows: [] };
 				},
-			},
+			}),
 			{
 				...context,
 				sessionConfiguration: { standard_conforming_strings: 'on' },
@@ -712,7 +764,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						expression: 'age > 0',
 					},
 				},
-				{ query },
+				createTestTransitionSession({ query }),
 				{
 					...context,
 					sessionConfiguration: { standard_conforming_strings: 'on' },
@@ -730,7 +782,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				scope: [],
 				detail: { schema: 'tenant', type: 'status' },
 			},
-			{
+			createTestTransitionSession({
 				query: async () => ({
 					rows: [
 						{
@@ -739,7 +791,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						},
 					],
 				}),
-			},
+			}),
 			context,
 		);
 
@@ -767,7 +819,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				scope: [],
 				detail: { schema: 'tenant', type: 'status' },
 			},
-			{
+			createTestTransitionSession({
 				query: async () => ({
 					rows: [
 						{
@@ -776,7 +828,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						},
 					],
 				}),
-			},
+			}),
 			context,
 		);
 
@@ -803,7 +855,7 @@ describe('PostgreSQL transition observation issuer', () => {
 				},
 			},
 		};
-		const target = {
+		const target = createTestTransitionSession({
 			query: async () => ({
 				rows: [
 					{
@@ -814,7 +866,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					},
 				],
 			}),
-		};
+		});
 
 		const observation = await issuer.execute(request, target, context);
 		const matchingObservation = await issuer.execute(
@@ -914,7 +966,7 @@ describe('PostgreSQL transition observation issuer', () => {
 						visibility: 'transaction-local',
 					},
 				},
-				{ query },
+				createTestTransitionSession({ query }),
 				context,
 			),
 		).rejects.toThrow(/unsupported field visibility/);
@@ -932,7 +984,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					scope: [],
 					detail: { schema: 'tenant', type: 'status' },
 				},
-				{ query },
+				createTestTransitionSession({ query }),
 				context,
 			),
 		).rejects.toThrow(/requires enum label detail/);
@@ -940,8 +992,8 @@ describe('PostgreSQL transition observation issuer', () => {
 	});
 
 	it('reads resolved schemas without splitting SHOW search_path', async () => {
-		const contextFromDb = await readPgObservationContext(
-			{
+		const contextFromDb = await readPgObservationContextFromClient(
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					if (sql === 'SHOW server_version_num') {
 						return { rows: [{ server_version_num: '180000' }] };
@@ -976,7 +1028,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					throw new Error(`unexpected query: ${sql}`);
 				},
-			},
+			}),
 			'tenant',
 		);
 
@@ -995,8 +1047,8 @@ describe('PostgreSQL transition observation issuer', () => {
 	});
 
 	it('reads target-scoped privilege facts into context when a target is known', async () => {
-		const contextFromDb = await readPgObservationContext(
-			{
+		const contextFromDb = await readPgObservationContextFromClient(
+			createTestTransitionSession({
 				query: async (sql: string) => {
 					if (sql === 'SHOW server_version_num') {
 						return { rows: [{ server_version_num: '180000' }] };
@@ -1038,7 +1090,7 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					throw new Error(`unexpected query: ${sql}`);
 				},
-			},
+			}),
 			'tenant',
 			{ schema: 'tenant', table: 'users', column: 'age' },
 		);
@@ -1106,9 +1158,12 @@ describe('PostgreSQL transition observation issuer', () => {
 			connect: vi.fn(async () => client),
 		};
 
-		const contextFromDb = await readPgObservationContext(pool, 'tenant');
+		const contextFromDb = await readPgObservationContextFromLessor(
+			createTransitionLessor(async () => client),
+			'tenant',
+		);
 
-		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.connect).not.toHaveBeenCalled();
 		expect(release).toHaveBeenCalledOnce();
 		expect(maxInFlight).toBe(1);
 		expect(queries).toEqual([
