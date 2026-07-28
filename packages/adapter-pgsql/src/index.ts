@@ -62,6 +62,7 @@ export {
 	mapColumnType,
 	mapOnDeleteAction,
 	NonConvergentSchemaDiffError,
+	type NonConvergentSchemaDiffSurface,
 	type ParsedMigrationFile,
 	parseMigrationFile,
 	recordMigration,
@@ -88,7 +89,10 @@ export {
 	type CanonicalizeCheckConstraintsOptions,
 	CheckConstraintCanonicalizationError,
 	type CheckConstraintCanonicalizationWarning,
+	ColumnDefaultCanonicalizationError,
+	type ColumnDefaultCanonicalizationWarning,
 	canonicalizeCheckConstraints,
+	type ExpressionCanonicalizationWarning,
 } from './expression-canonicalizer.js';
 // Extensions (pgvector, ParadeDB, PG builtins)
 export {
@@ -180,6 +184,7 @@ export {
 	PgsqlTransactionAbortSignalError,
 	PgsqlTransactionOptionsError,
 	PgsqlTransactionTimeoutError,
+	type RollbackOnlyPgsqlScope,
 } from './pgsql-adapter.js';
 export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)
@@ -282,6 +287,7 @@ export {
 } from './transition/index.js';
 // Validation
 export {
+	escapeDiagnosticText,
 	InvalidIdentifierError,
 	isReservedKeyword,
 	sanitizeForDisplay,

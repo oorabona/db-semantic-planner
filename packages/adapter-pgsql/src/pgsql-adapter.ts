@@ -261,6 +261,14 @@ const PREPARE_COMMAND_TAG = 'PREPARE';
 const pgsqlAdapterInternalOptionsKey: unique symbol = Symbol(
 	'dbsp-pgsql-adapter-internal-options',
 );
+const rollbackOnlyPgsqlScopeBrand: unique symbol = Symbol(
+	'dbsp.pgsql.rollback-only-scope',
+);
+
+/** A scope minted by withScratchScope and guaranteed to roll back on success. */
+export type RollbackOnlyPgsqlScope<DB = unknown> = PgsqlAdapter<DB> & {
+	readonly [rollbackOnlyPgsqlScopeBrand]: typeof rollbackOnlyPgsqlScopeBrand;
+};
 
 type DbspClientScopeKind =
 	| 'transaction'
@@ -338,7 +346,7 @@ type StatementExecutionOptions = {
 };
 
 type ClientTransactionSuccessAction = 'commit' | 'rollback';
-type SavepointTransactionSuccessAction = 'release' | 'rollback';
+type SavepointTransactionSuccessAction = 'release' | 'rollback' | 'keep';
 
 type MaybeMultipleQueryResults<T extends QueryResultRow = QueryResultRow> =
 	| QueryResult<T>
@@ -2049,6 +2057,7 @@ interface PgsqlAdapterInternalOptions
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	readonly adapterManagedTransaction?: true;
 	readonly adapterManagedPinnedConnection?: true;
+	readonly rollbackOnlyScope?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
 	readonly dbspScopeState?: DbspScopeState;
 }
@@ -2071,6 +2080,7 @@ type PgsqlAdapterInternalConstructionOverrides =
 	PgsqlAdapterConstructionOverrides & {
 		readonly adapterManagedTransaction?: true;
 		readonly adapterManagedPinnedConnection?: true;
+		readonly rollbackOnlyScope?: true;
 		readonly dbspScopeToken?: DbspScopeToken;
 		readonly dbspScopeState?: DbspScopeState;
 	};
@@ -2126,6 +2136,14 @@ function isAdapterManagedPinnedConnectionOption(
 	);
 }
 
+function isRollbackOnlyScopeOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		isPgsqlAdapterInternalOptions(options) && options.rollbackOnlyScope === true
+	);
+}
+
 function getDbspScopeTokenOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): DbspScopeToken | undefined {
@@ -2178,6 +2196,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly managedTransactions: boolean;
 	private readonly adapterManagedTransaction: boolean;
 	private readonly adapterManagedPinnedConnection: boolean;
+	private readonly rollbackOnlyScope: boolean;
 	private readonly scopeToken: DbspScopeToken | undefined;
 	private readonly scopeState: DbspScopeState | undefined;
 	private readonly schemaName: string | undefined;
@@ -2251,6 +2270,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.adapterManagedTransaction = isAdapterManagedTransactionOption(options);
 		this.adapterManagedPinnedConnection =
 			isAdapterManagedPinnedConnectionOption(options);
+		this.rollbackOnlyScope = isRollbackOnlyScopeOption(options);
 		this.scopeToken = getDbspScopeTokenOption(options);
 		this.scopeState = getDbspScopeStateOption(options);
 
@@ -2305,9 +2325,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					: undefined;
 		const scopeToken = overrides.dbspScopeToken ?? this.scopeToken;
 		const scopeState = overrides.dbspScopeState ?? this.scopeState;
+		const rollbackOnlyScope =
+			(overrides.rollbackOnlyScope ?? this.rollbackOnlyScope)
+				? true
+				: undefined;
 		const hasInternalOptions =
 			adapterManagedTransaction === true ||
 			adapterManagedPinnedConnection === true ||
+			rollbackOnlyScope === true ||
 			scopeToken !== undefined ||
 			scopeState !== undefined;
 		return {
@@ -2326,6 +2351,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(adapterManagedPinnedConnection === true && {
 				adapterManagedPinnedConnection,
 			}),
+			...(rollbackOnlyScope === true && { rollbackOnlyScope }),
 			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
 			...(scopeState !== undefined && { dbspScopeState: scopeState }),
 			...overrides,
@@ -4246,20 +4272,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Execute scratch PostgreSQL work in a scope that always rolls back on success.
 	 *
 	 * This is intentionally PostgreSQL-adapter-specific. It is used for catalog
-	 * shaped scratch DDL such as CHECK expression canonicalisation, where the
-	 * caller needs PostgreSQL's rendering but must not keep the scratch objects.
+	 * shaped scratch DDL such as expression canonicalisation, where the caller
+	 * needs PostgreSQL's rendering but must not keep the scratch objects. This
+	 * scope has exactly one successful exit: rollback. In a caller transaction,
+	 * only this outer savepoint is retained after rollback; nested work releases
+	 * normally, so a large canonicalisation run cannot retain one subtransaction
+	 * per expression.
 	 * Rollback here is cleanup of dbsp-created work, not a sandbox for arbitrary
 	 * session effects.
 	 */
 	withScratchScope<T>(
-		fn: (adapter: PgsqlAdapter<DB>) => Promise<T>,
+		fn: (adapter: RollbackOnlyPgsqlScope<DB>) => Promise<T>,
 	): Promise<T> {
 		const childObserver = this.createChildTransactionObserver();
 		if (this.client) {
 			return this.observeChildTransaction(
 				this.transactionWithManagedClient(
 					this.client,
-					fn,
+					fn as (adapter: PgsqlAdapter<DB>) => Promise<T>,
 					childObserver,
 					'rollback',
 				),
@@ -4280,7 +4310,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				try {
 					return await this.transactionWithClientTransaction(
 						client,
-						fn,
+						fn as (adapter: PgsqlAdapter<DB>) => Promise<T>,
 						childObserver,
 						'rollback',
 					);
@@ -4299,6 +4329,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
+		rollbackOnlyScope = false,
 	): PgsqlAdapter<DB> {
 		return createPgsqlAdapterFromConstructionOptions<DB>(
 			client,
@@ -4306,6 +4337,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				borrowedClient: true,
 				managedTransactions: true,
 				adapterManagedTransaction: true,
+				...(rollbackOnlyScope && { rollbackOnlyScope: true as const }),
 				dbspScopeToken: scopeToken,
 				dbspScopeState: scopeState,
 			}),
@@ -4439,6 +4471,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			client,
 			scopeToken,
 			scopeState,
+			successAction === 'rollback' || this.rollbackOnlyScope,
 		);
 		let releaseScope: (failure?: DbspScopeFailure) => void;
 		try {
@@ -4529,7 +4562,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						);
 					}
 					await this.drainScopeChildren(scopeState);
-					if (rolledBack) {
+					if (rolledBack && successAction === 'release') {
 						await this.releaseSavepoint(
 							client,
 							savepointName,
@@ -4572,7 +4605,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			try {
 				if (successAction === 'rollback') {
 					try {
-						await this.rollbackAndReleaseSavepoint(
+						await this.rollbackSavepoint(
 							client,
 							savepointName,
 							scopeToken,
@@ -4581,7 +4614,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						);
 					} catch (rollbackErr) {
 						const cleanupFailure = createCleanupOnlyError(
-							'PostgreSQL scratch scope cleanup failed: ROLLBACK TO SAVEPOINT/RELEASE SAVEPOINT failed after the scratch body returned',
+							'PostgreSQL scratch scope cleanup failed: ROLLBACK TO SAVEPOINT failed after the scratch body returned',
 							rollbackErr,
 						);
 						scopeFailure = { error: cleanupFailure };
@@ -4589,6 +4622,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					}
 					return result;
 				}
+				if (successAction === 'keep') return result;
 				try {
 					await this.restoreSavepointTimeouts(
 						client,
@@ -4751,6 +4785,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				client,
 				scopeToken,
 				scopeState,
+				successAction === 'rollback',
 			);
 			const result = await fn(txAdapter);
 			this.closeScopeAndAssertChildren(scopeState);

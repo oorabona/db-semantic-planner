@@ -15,6 +15,7 @@ import {
 	getCheckConstraintDatabaseName,
 } from '../../check-constraint-name.js';
 import { renderCheckConstraintClause } from '../../check-expression.js';
+import { isEngineCanonicalCheck } from '../../expression-provenance.js';
 import { validateCheckExpression } from '../../validate.js';
 import { generateAlterTableAddFK } from '../ddl-generator.js';
 import { type PhaseContext, sup } from './types.js';
@@ -52,7 +53,9 @@ export function generateConstraintsPhase(ctx: PhaseContext): string[] {
 					getCheckConstraintDatabaseName(check, naming),
 				);
 				const expression = renderCheckConstraintClause(check);
-				validateCheckExpression(expression, 'check constraint expression');
+				if (!isEngineCanonicalCheck(check)) {
+					validateCheckExpression(expression, 'check constraint expression');
+				}
 				statements.push(
 					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${expression};`,
 				);

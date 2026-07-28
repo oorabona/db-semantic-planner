@@ -1910,8 +1910,8 @@ describe('compareSchemata', () => {
 		});
 	});
 
-	describe('default normalization', () => {
-		it('should strip PostgreSQL type casts from string defaults', () => {
+	describe('default comparison', () => {
+		it('compares PostgreSQL casts verbatim on the pure path', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'tasks',
@@ -1935,10 +1935,10 @@ describe('compareSchemata', () => {
 
 			const diff = compareSchemata(schema, db);
 
-			expect(diff.changes).toHaveLength(0);
+			expect(diff.changes).toHaveLength(1);
 		});
 
-		it('should strip type casts from empty string defaults', () => {
+		it('compares empty-string casts verbatim on the pure path', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'items',
@@ -1962,7 +1962,7 @@ describe('compareSchemata', () => {
 
 			const diff = compareSchemata(schema, db);
 
-			expect(diff.changes).toHaveLength(0);
+			expect(diff.changes).toHaveLength(1);
 		});
 
 		it('should not strip casts from function calls', () => {

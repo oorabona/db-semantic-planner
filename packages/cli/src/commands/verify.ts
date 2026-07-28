@@ -8,6 +8,7 @@
 import {
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
+	escapeDiagnosticText,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
@@ -60,7 +61,10 @@ export const verifyCommand = new Command('verify')
 						...(loaded.dbCasing !== undefined
 							? { dbCasing: loaded.dbCasing }
 							: {}),
-						onWarning: (message) => console.warn(`⚠️  ${message}`),
+						onExpressionCanonicalizationWarning: (warning) =>
+							console.warn(
+								`⚠️  [${warning.kind} ${escapeDiagnosticText(warning.table)}.${escapeDiagnosticText(warning.name)}] ${warning.message}`,
+							),
 					});
 
 					// Convert to verify result

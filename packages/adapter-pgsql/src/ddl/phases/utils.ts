@@ -7,6 +7,7 @@
  * @module ddl/phases/utils
  */
 
+import { isEngineCanonicalSqlDefault } from '../../expression-provenance.js';
 import {
 	assertString,
 	validateCollationName,
@@ -233,14 +234,14 @@ export function qualifyTableIdent(
  *
  * Handles the following value types:
  * - `null` → `NULL`
- * - `{ sql: string }` → raw SQL expression (validated via validateSqlExpression)
+ * - `{ sql: string }` → raw SQL expression (validated via validateCheckExpression)
  * - `string` ending with `()` → emitted unquoted as a bare function call (e.g. `now()`)
  * - `string` (other) → single-quoted literal with `'` escaped as `''` (e.g. `'hello''world'`)
  * - `number` → numeric literal
  * - `boolean` → `true` / `false`
  * - other → single-quoted string representation
  *
- * @security The `{ sql }` escape hatch is validated via validateSqlExpression()
+ * @security The `{ sql }` escape hatch is validated via validateCheckExpression()
  * before interpolation to prevent injection of multi-statement or comment-bearing strings.
  *
  * @param value The default value from ModelIR
@@ -255,6 +256,9 @@ export function formatSqlDefault(
 
 	// { sql: string } escape hatch — emit verbatim after validation
 	if (typeof value === 'object' && 'sql' in (value as object)) {
+		if (isEngineCanonicalSqlDefault(value)) {
+			return value.sql;
+		}
 		const rawSql = (value as Record<string, unknown>).sql;
 		if (typeof rawSql !== 'string') {
 			throw new Error(

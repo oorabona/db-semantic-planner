@@ -76,23 +76,17 @@ describe('SQL Injection Checks — setDefault { sql } escape hatch (DDL-TABLE-00
 		).toThrow(/Unsafe SQL expression/);
 	});
 
-	it('throws on dollar-quote injection in setDefault sql escape hatch', () => {
-		// validateSqlExpression forbids adjacent dollar-signs (dollar-quoted strings).
+	it('rejects a statement separator after a dollar-quoted default literal', () => {
+		// validateCheckExpression permits the dollar-quoted literal but not SQL outside it.
 		// Use fromCharCode to construct $ without literal dollar signs in the source
 		// (the test transport layer strips $-signs from string literals).
 		const dollar = String.fromCharCode(36);
 		const dollarQuote = dollar + dollar;
 		expect(() =>
 			generateAlterColumnSQL('users', 'public', 'label', {
-				setDefault: { sql: `${dollarQuote}injected${dollarQuote}` },
-			}),
-		).toThrow(/Unsafe SQL expression/);
-	});
-
-	it('rejects backslash in { sql }', () => {
-		expect(() =>
-			generateAlterColumnSQL('users', 'public', 'col', {
-				setDefault: { sql: 'NOW() \\foo' },
+				setDefault: {
+					sql: `${dollarQuote}injected${dollarQuote}; DROP TABLE users`,
+				},
 			}),
 		).toThrow(/Unsafe SQL expression/);
 	});

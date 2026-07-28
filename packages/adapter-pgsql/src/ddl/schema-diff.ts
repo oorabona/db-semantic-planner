@@ -35,6 +35,10 @@ import {
 	stripDbTypeSchema,
 } from '../db-type.js';
 import {
+	isEngineCanonicalCheck,
+	markEngineCanonicalCheck,
+} from '../expression-provenance.js';
+import {
 	getNamingPluginForDbCasing,
 	identityNaming,
 	type NamingPlugin,
@@ -152,13 +156,16 @@ export interface CompareSchemataOptions {
 	 *
 	 * `compareSchemata()` is intentionally pure and cannot ask PostgreSQL to
 	 * canonicalise raw-SQL expression surfaces. By default it keeps the historic
-	 * best-effort raw string comparison for CHECK expressions, partial-index
-	 * predicates, and index expressions. Set this flag to throw when either model
+	 * best-effort verbatim comparison for column defaults, CHECK expressions,
+	 * partial-index predicates, and index expressions. Set this flag to throw when either model
 	 * contains one of those surfaces so a caller cannot accidentally rely on a
 	 * compile-only diff for a convergence-sensitive check.
 	 *
 	 * Live PostgreSQL callers should use `comparePgsqlDatabaseSchema()`, which
-	 * canonicalises CHECK constraint expressions before calling this function.
+	 * canonicalises CHECK constraint expressions and column defaults before calling this function.
+	 * Under that live mode, every default surface considered under this option is
+	 * either canonicalised as a pair or explicitly refused. This does not prove
+	 * that the resulting migration is executable.
 	 * Partial-index predicates and index expressions are not canonicalised by the
 	 * live helper and are rejected there when this strict flag is set.
 	 */
@@ -168,13 +175,15 @@ export interface CompareSchemataOptions {
 export class ExpressionCanonicalizationUnavailableError extends Error {
 	constructor(public readonly surfaces: readonly string[]) {
 		super(
-			'compareSchemata strict expression canonicalization was requested, ' +
-				'but this pure compile-only path cannot ask PostgreSQL to canonicalise ' +
-				'raw SQL expression surfaces. Use comparePgsqlDatabaseSchema() for live ' +
-				'CHECK constraint canonicalization; index predicates and index expressions ' +
-				'are not covered by the live canonicalizer. Omit ' +
+			`Strict expression canonicalization was requested, but ${surfaces.length} raw SQL ` +
+				'expression surfaces could not all be canonicalized. compareSchemata() is ' +
+				'compile-only and cannot ask PostgreSQL to canonicalise CHECK constraints or ' +
+				'column defaults. comparePgsqlDatabaseSchema() canonicalises both surfaces ' +
+				'live; under a live diff, this error means PostgreSQL could not canonicalise at least one ' +
+				'listed surface. Index predicates and index expressions are not covered by the ' +
+				'live canonicalizer. Omit ' +
 				'requireExpressionCanonicalization for best-effort raw string comparison. ' +
-				`Surfaces: ${surfaces.join(', ')}`,
+				'Inspect the surfaces field for their identities.',
 		);
 		this.name = 'ExpressionCanonicalizationUnavailableError';
 	}
@@ -374,6 +383,7 @@ function assertNoExpressionSurfaces(
 }
 
 export interface CollectExpressionSurfaceOptions {
+	readonly includeColumnDefaults?: boolean;
 	readonly includeCheckConstraints?: boolean;
 	readonly includeIndexPredicates?: boolean;
 	readonly includeIndexExpressions?: boolean;
@@ -384,11 +394,19 @@ export function collectExpressionSurfaces(
 	model: ModelIR,
 	options?: CollectExpressionSurfaceOptions,
 ): string[] {
+	const includeColumnDefaults = options?.includeColumnDefaults ?? true;
 	const includeCheckConstraints = options?.includeCheckConstraints ?? true;
 	const includeIndexPredicates = options?.includeIndexPredicates ?? true;
 	const includeIndexExpressions = options?.includeIndexExpressions ?? true;
 	const surfaces: string[] = [];
 	for (const table of model.tables.values()) {
+		if (includeColumnDefaults) {
+			for (const column of table.columns) {
+				if (column.default !== undefined && column.default !== null) {
+					surfaces.push(`${label}.${table.name}.${column.name}.DEFAULT`);
+				}
+			}
+		}
 		if (includeCheckConstraints) {
 			for (const check of table.checkConstraints ?? []) {
 				surfaces.push(
@@ -479,10 +497,15 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 		})),
 		...(table.checkConstraints !== undefined
 			? {
-					checkConstraints: table.checkConstraints.map((check) => ({
-						...check,
-						name: getCheckConstraintDatabaseName(check, plugin),
-					})),
+					checkConstraints: table.checkConstraints.map((check) => {
+						const normalized = {
+							...check,
+							name: getCheckConstraintDatabaseName(check, plugin),
+						};
+						return isEngineCanonicalCheck(check)
+							? markEngineCanonicalCheck(normalized)
+							: normalized;
+					}),
 				}
 			: {}),
 		...(table.partition
@@ -696,19 +719,18 @@ function areTypesEquivalent(a: string, b: string): boolean {
 // ============================================================================
 
 /**
- * Normalize default values for comparison.
+ * Return a default's comparable representation without interpreting SQL.
  *
- * PostgreSQL introspection returns defaults with type casts and quoting:
- *   'deploy'::character varying  →  deploy
- *   ''::text                     →  (empty string)
- *   42::integer                  →  42
- *   gen_random_uuid()            →  gen_random_uuid()
- *   now()                        →  now()
+ * The pure comparator unwraps `{ sql }` and stringifies scalar values, then
+ * compares the resulting strings verbatim. It no longer strips PostgreSQL
+ * casts or attempts to recognise PostgreSQL's deparser output: live PostgreSQL
+ * diffs canonicalise both sides through PostgreSQL first. A developer-authored
+ * `{ sql }` default has the same meaning as an introspected `{ sql }` default
+ * on this pure path.
  */
 function normalizeDefault(value: unknown): string | undefined {
 	if (value === undefined || value === null) return undefined;
 
-	let str: string;
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
 		const rawSql = (value as Record<string, unknown>).sql;
 		if (typeof rawSql !== 'string') {
@@ -716,22 +738,10 @@ function normalizeDefault(value: unknown): string | undefined {
 				`normalizeDefault({ sql }): expected string, got ${typeof rawSql}`,
 			);
 		}
-		str = rawSql;
-	} else {
-		str = String(value);
+		return rawSql;
 	}
 
-	// Strip PostgreSQL type casts: 'value'::type → value
-	// Handles: 'deploy'::character varying, ''::text, '{}'::text[]
-	str = str.replace(/^'(.*)'::[\w\s[\]]+$/, '$1');
-
-	// Also strip unquoted casts: 42::integer → 42
-	// But NOT function calls like gen_random_uuid()
-	if (!str.includes('(')) {
-		str = str.replace(/^(.+?)::[\w\s[\]]+$/, '$1');
-	}
-
-	return str;
+	return String(value);
 }
 
 // ============================================================================

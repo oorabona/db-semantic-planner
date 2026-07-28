@@ -412,7 +412,7 @@ describe('SEC-001: formatDefaultValue sql escape hatch injection', () => {
 		const model = buildModelWithDefault({ sql: 'now(); DROP TABLE users' });
 		expect(() =>
 			generateDDL(model, { dialectCapabilities: buildCaps() }),
-		).toThrow(/forbidden characters/);
+		).toThrow(/forbidden/);
 	});
 
 	it('rejects { sql: "now() -- comment" }', async () => {
@@ -420,7 +420,7 @@ describe('SEC-001: formatDefaultValue sql escape hatch injection', () => {
 		const model = buildModelWithDefault({ sql: 'now() -- injected' });
 		expect(() =>
 			generateDDL(model, { dialectCapabilities: buildCaps() }),
-		).toThrow(/forbidden characters/);
+		).toThrow(/forbidden/);
 	});
 
 	it('allows safe { sql: "now()" }', async () => {
@@ -1540,24 +1540,44 @@ describe('formatSqlDefault — bare function-call path injection (M-5)', () => {
 		expect(formatSqlDefault('uuid_generate_v4()')).toBe('uuid_generate_v4()');
 	});
 
+	it('rejects punctuation inside an authored raw default literal', () => {
+		expect(() => formatSqlDefault({ sql: "'a;b'::text" })).toThrow(
+			/forbidden characters/,
+		);
+	});
+
+	it('rejects an authored raw default containing a backslash', () => {
+		expect(() =>
+			formatSqlDefault({ sql: String.raw`'back\slash'::text` }),
+		).toThrow(/forbidden characters/);
+	});
+
+	it('rejects the escape-string differential payload as authored SQL', () => {
+		expect(() =>
+			formatSqlDefault({ sql: String.raw`E'foo\''; SELECT pg_sleep(10); --'` }),
+		).toThrow(/forbidden characters/);
+	});
+
 	// Negative: injection attempts that end with `()` and thus trigger the
-	// bare-function-call branch must be rejected by validateSqlExpression.
+	// bare-function-call branch must be rejected by validateCheckExpression.
 	it('throws on semicolon injection in bare function call (ends with ())', () => {
 		// Crafted to end with () so the endsWith('()') branch fires
 		expect(() => formatSqlDefault('now(); DROP TABLE users; --x()')).toThrow(
-			/forbidden characters/,
+			/forbidden/,
 		);
 	});
 
 	it('throws on line-comment injection in bare function call (ends with ())', () => {
-		expect(() => formatSqlDefault('now()-- injected()')).toThrow(
-			/forbidden characters/,
-		);
+		expect(() => formatSqlDefault('now()-- injected()')).toThrow(/forbidden/);
 	});
 
 	it('throws on block-comment injection in bare function call (ends with ())', () => {
-		expect(() => formatSqlDefault('now()/*injected*/()')).toThrow(
-			/forbidden characters/,
-		);
+		expect(() => formatSqlDefault('now()/*injected*/()')).toThrow(/forbidden/);
+	});
+
+	it('rejects an escape-string injection that reaches the bare-function default path', () => {
+		expect(() =>
+			formatSqlDefault(String.raw`E'foo\''; SELECT pg_sleep(10); --'()`),
+		).toThrow(/forbidden/);
 	});
 });

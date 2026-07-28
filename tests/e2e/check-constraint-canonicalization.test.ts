@@ -148,6 +148,46 @@ function quoteLiteral(value: string): string {
 	return `'${value.replace(/'/gu, "''")}'`;
 }
 
+/**
+ * Read a default exactly as the canonicaliser does: resolve under the target
+ * path, then deparse under `pg_catalog` only.
+ */
+async function readCanonicalColumnDefault(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	schemaName: string,
+	tableName: string,
+	columnName: string,
+): Promise<string> {
+	const client = await pool.connect();
+	try {
+		await client.query('BEGIN');
+		await client.query(
+			`SET LOCAL search_path TO pg_catalog, ${quoteIdent(schemaName)}`,
+		);
+		await client.query('SET LOCAL search_path TO pg_catalog');
+		const result = await client.query<{ expression: string }>(
+			`SELECT pg_get_expr(d.adbin, d.adrelid, false) AS expression
+			   FROM pg_attrdef d
+			   JOIN pg_attribute a
+			     ON a.attrelid = d.adrelid
+			    AND a.attnum = d.adnum
+			  WHERE d.adrelid = $1::regclass
+			    AND a.attname = $2`,
+			[`${quoteIdent(schemaName)}.${quoteIdent(tableName)}`, columnName],
+		);
+		const expression = result.rows[0]?.expression;
+		if (typeof expression !== 'string') {
+			throw new Error(
+				`PostgreSQL did not return a default for ${schemaName}.${tableName}.${columnName}`,
+			);
+		}
+		return expression;
+	} finally {
+		await client.query('ROLLBACK').catch(() => undefined);
+		client.release();
+	}
+}
+
 async function roleExists(
 	pool: Awaited<ReturnType<typeof getTestPool>>,
 	role: string,
@@ -462,6 +502,258 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 		expect(first.changes).toEqual([]);
 		expect(second.changes).toEqual([]);
+	});
+
+	it('canonicalizes column defaults through pg_attrdef under the target schema search_path', async () => {
+		await pool.query(`
+			CREATE TYPE ${quoteIdent(SCHEMA)}.status AS ENUM ('pending', 'active');
+			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.counter_seq;
+			CREATE TABLE ${quoteIdent(SCHEMA)}.jobs (
+				state ${quoteIdent(SCHEMA)}.status NOT NULL DEFAULT 'pending',
+				counter integer NOT NULL DEFAULT nextval(${quoteLiteral(`${SCHEMA}.counter_seq`)}::regclass),
+				ivl interval NOT NULL DEFAULT '1 day'::interval day to second,
+				ratio numeric(10, 2) NOT NULL DEFAULT 1.5,
+				label text NOT NULL DEFAULT 'O''Reilly'
+			)
+		`);
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					{
+						name: 'jobs',
+						columns: [
+							{
+								name: 'state',
+								type: 'string',
+								nullable: false,
+								originalDbType: 'status',
+								default: 'pending',
+							},
+							{
+								name: 'counter',
+								type: 'integer',
+								nullable: false,
+								default: { sql: "nextval('counter_seq'::regclass)" },
+							},
+							{
+								name: 'ivl',
+								type: 'string',
+								nullable: false,
+								default: { sql: "'1 day'::interval day to second" },
+							},
+							{ name: 'ratio', type: 'decimal', nullable: false, default: 1.5 },
+							{
+								name: 'label',
+								type: 'text',
+								nullable: false,
+								default: "O'Reilly",
+							},
+						],
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
+			]),
+			new Map(),
+			new Map([
+				[
+					'status',
+					{ name: 'status', schema: SCHEMA, values: ['pending', 'active'] },
+				],
+			]),
+			undefined,
+			new Map([
+				[
+					'counter_seq',
+					{
+						name: 'counter_seq',
+						schema: SCHEMA,
+						startWith: 1,
+						incrementBy: 1,
+						minValue: 1,
+						maxValue: 9_223_372_036_854_776_000,
+						cycle: false,
+					},
+				],
+			]),
+		);
+
+		// This proves the server's target-schema rendering differs from the
+		// desired scalar spelling.  An empty diff below can therefore only be
+		// produced by the pg_attrdef canonicalisation path, not raw comparison.
+		expect(
+			await readCanonicalColumnDefault(pool, SCHEMA, 'jobs', 'state'),
+		).toBe(`'pending'::${SCHEMA}.status`);
+		const warnings: string[] = [];
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+			onWarning: (message) => warnings.push(message),
+		});
+		expect(warnings).toEqual([]);
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('canonicalizes a default backed by an existing managed sequence', async () => {
+		// This setup runs through the pool's ambient search_path, so qualify both
+		// relations. The canonicaliser resolves the desired unqualified regclass
+		// reference through its pinned target path.
+		await pool.query(`
+			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.scratch_counter_seq;
+			CREATE TABLE ${quoteIdent(SCHEMA)}.jobs (
+				id integer NOT NULL,
+				counter integer NOT NULL DEFAULT nextval(${quoteLiteral(`${SCHEMA}.scratch_counter_seq`)}::regclass)
+			)
+		`);
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					{
+						name: 'jobs',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{
+								name: 'counter',
+								type: 'integer',
+								nullable: false,
+								default: { sql: "nextval('scratch_counter_seq'::regclass)" },
+							},
+						],
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
+			]),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([
+				[
+					'scratch_counter_seq',
+					{
+						name: 'scratch_counter_seq',
+						schema: SCHEMA,
+						startWith: 1,
+						incrementBy: 1,
+						minValue: 1,
+						maxValue: 9_223_372_036_854_776_000,
+						cycle: false,
+					},
+				],
+			]),
+		);
+
+		const warnings: string[] = [];
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+			requireExpressionCanonicalization: true,
+			onWarning: (message) => warnings.push(message),
+		});
+
+		expect(warnings).toEqual([]);
+		expect(changeKinds(diff)).toEqual([]);
+		const sequence = await pool.query<{ sequence: string | null }>(
+			'SELECT pg_catalog.to_regclass($1) AS sequence',
+			[`${SCHEMA}.scratch_counter_seq`],
+		);
+		expect(sequence.rows[0]?.sequence).toBe(`${SCHEMA}.scratch_counter_seq`);
+	});
+
+	it('falls back for one unresolved sequence default without losing peer canonicalization', async () => {
+		// As above, this is pool-session setup with no pinned search_path: qualify
+		// the fixture sequence in its regclass literal.  The desired model below
+		// deliberately keeps its references unqualified for the pinned scratch
+		// session used by the canonicaliser.
+		await pool.query(`
+			CREATE TYPE ${quoteIdent(SCHEMA)}.status AS ENUM ('pending', 'active');
+			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.counter_seq;
+			CREATE TABLE ${quoteIdent(SCHEMA)}.jobs (
+				state ${quoteIdent(SCHEMA)}.status NOT NULL DEFAULT 'pending',
+				counter integer NOT NULL DEFAULT nextval(${quoteLiteral(`${SCHEMA}.counter_seq`)}::regclass),
+				missing_counter integer NOT NULL DEFAULT 0
+			)
+		`);
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					{
+						name: 'jobs',
+						columns: [
+							{
+								name: 'state',
+								type: 'string',
+								nullable: false,
+								originalDbType: 'status',
+								default: 'pending',
+							},
+							{
+								name: 'counter',
+								type: 'integer',
+								nullable: false,
+								default: { sql: "nextval('counter_seq'::regclass)" },
+							},
+							{
+								name: 'missing_counter',
+								type: 'integer',
+								nullable: false,
+								default: {
+									sql: "nextval('missing_counter_seq'::regclass)",
+								},
+							},
+						],
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
+			]),
+			new Map(),
+			new Map([
+				[
+					'status',
+					{ name: 'status', schema: SCHEMA, values: ['pending', 'active'] },
+				],
+			]),
+			undefined,
+			new Map([
+				[
+					'counter_seq',
+					{
+						name: 'counter_seq',
+						schema: SCHEMA,
+						startWith: 1,
+						incrementBy: 1,
+						minValue: 1,
+						maxValue: 9_223_372_036_854_776_000,
+						cycle: false,
+					},
+				],
+			]),
+		);
+
+		const warnings: string[] = [];
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+			onWarning: (message) => warnings.push(message),
+		});
+
+		// The scalar enum default and the existing sequence default have different
+		// raw spellings from introspection, so a table-wide fallback would add
+		// drift here.  Only the nonexistent sequence may fall back.
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain(
+			'Reason: relation "missing_counter_seq" does not exist',
+		);
+		expect(diff.changes).toHaveLength(1);
+		expect(diff.changes[0]).toMatchObject({
+			kind: 'alter_column_default',
+			table: 'jobs',
+			column: 'missing_counter',
+		});
 	});
 
 	it('canonicalizes a CHECK on a column the same diff is about to add', async () => {
@@ -1298,9 +1590,11 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				const json = parseVerifyJson(result);
 
 				expect(result.stderr).toContain(
-					'Could not canonicalize CHECK constraint',
+					'Could not canonicalize one CHECK constraint',
 				);
-				expect(result.stderr).toContain('falling back');
+				expect(result.stderr).toContain(
+					'Reason: permission denied to create temporary tables',
+				);
 				expect(json).toMatchObject({
 					schemaTables: ['jobs'],
 					dbTables: ['jobs'],
@@ -1312,11 +1606,13 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 						severity: 'warning',
 						type: 'missing_check_in_db',
 						table: 'jobs',
+						message: expect.stringContaining('"jobs_status_skipped_check"'),
 					}),
 					expect.objectContaining({
 						severity: 'info',
 						type: 'missing_check_in_schema',
 						table: 'jobs',
+						message: expect.stringContaining('"jobs_status_skipped_check"'),
 					}),
 				]);
 			} finally {
@@ -1612,6 +1908,90 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				pool,
 				generateMigrationSQL(diff, { schemaName: SCHEMA }) as string[],
 			);
+		});
+
+		it('executes a canonicalized enum SET DEFAULT without the target schema in the executor path', async () => {
+			// Keep the same transaction shape as the preceding CHECK case: the diff
+			// adds an enum value while it also emits an expression that PostgreSQL
+			// canonicalized successfully. Unlike the CHECK test, this closes the
+			// previously unexecuted ALTER COLUMN ... SET DEFAULT path.
+			const desired = new ModelIRImpl(
+				new Map<string, TableIR>([
+					[
+						'jobs',
+						{
+							name: 'jobs',
+							columns: [
+								makeCol('id'),
+								{
+									name: 'state',
+									type: 'string',
+									nullable: false,
+									default: 'queued',
+								},
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+							checkConstraints: [
+								{
+									name: 'jobs_state_known_check',
+									expression: "state <> 'done'",
+								},
+							],
+						},
+					],
+				]),
+				new Map(),
+				new Map([
+					[
+						'status',
+						{
+							name: 'status',
+							values: ['queued', 'done', 'pending'],
+							schema: SCHEMA,
+						},
+					],
+				]),
+			);
+
+			const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+				schema: SCHEMA,
+				ignoreUnmanagedExtensions: true,
+			});
+			expect(changeKinds(diff)).toEqual(
+				expect.arrayContaining([
+					'alter_enum_add_value',
+					'alter_column_default',
+					'add_check_constraint',
+				]),
+			);
+			const defaultChange = diff.changes.find(
+				(change) => change.kind === 'alter_column_default',
+			);
+			expect(defaultChange?.meta?.default).toEqual({
+				sql: `'queued'::${SCHEMA}.status`,
+			});
+
+			const statements = generateMigrationSQL(diff, { schemaName: SCHEMA });
+			expect(statements.join('\n')).toContain(`::${SCHEMA}.status`);
+			const executorPool = new pg.Pool({
+				connectionString: process.env.DATABASE_URL!,
+				max: 1,
+			});
+			try {
+				await executorPool.query('SET search_path TO pg_catalog');
+				expect(
+					(
+						await executorPool.query<{ search_path: string }>(
+							'SHOW search_path',
+						)
+					).rows[0]?.search_path,
+				).toBe('pg_catalog');
+				await executeDdl(executorPool, statements);
+			} finally {
+				await executorPool.end();
+			}
 		});
 	});
 });

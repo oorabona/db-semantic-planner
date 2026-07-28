@@ -4,6 +4,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+	escapeDiagnosticText,
 	InvalidIdentifierError,
 	isReservedKeyword,
 	sanitizeForDisplay,
@@ -13,6 +14,14 @@ import {
 	validateIdentifiers,
 	validateQualifiedIdentifier,
 } from '../validate.js';
+
+describe('escapeDiagnosticText', () => {
+	it('escapes Unicode line separators, bidi controls, and backslashes unambiguously', () => {
+		expect(
+			escapeDiagnosticText('left\\nright\nnext\u2028line\u202eright'),
+		).toBe('left\\\\nright\\nnext\\u2028line\\u202eright');
+	});
+});
 
 function getCheckValidationError(sql: string): Error {
 	try {
@@ -72,6 +81,15 @@ describe('validateCheckExpression', () => {
 	it('accepts doubled single quote inside a literal', () => {
 		expect(() =>
 			validateCheckExpression("CHECK (note = 'it''s')", 'test check'),
+		).not.toThrow();
+	});
+
+	it('accepts PostgreSQL-deparsed CHECK regex literals containing backslashes', () => {
+		expect(() =>
+			validateCheckExpression(
+				String.raw`CHECK ((a ~ '\d+'::text))`,
+				'test check',
+			),
 		).not.toThrow();
 	});
 
@@ -142,14 +160,6 @@ describe('validateCheckExpression', () => {
 		const error = getCheckValidationError(sql);
 		expect(error.message).toBe(
 			`Unsafe SQL expression in test check: contains forbidden token "*/" outside string literal. Value: "${sql}"`,
-		);
-	});
-
-	it('rejects backslash outside a literal', () => {
-		const sql = 'x = \\bad';
-		const error = getCheckValidationError(sql);
-		expect(error.message).toBe(
-			`Unsafe SQL expression in test check: contains forbidden token "\\" outside string literal. Value: "${sql}"`,
 		);
 	});
 

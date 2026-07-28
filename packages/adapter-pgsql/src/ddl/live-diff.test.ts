@@ -48,6 +48,33 @@ function checkExpressionDiff(
 	};
 }
 
+function columnDefaultDiff(
+	table: string,
+	column: string,
+	databaseDefault: unknown,
+	desiredDefault: unknown,
+): SchemaDiff {
+	return {
+		changes: [
+			{
+				kind: 'alter_column_default',
+				table,
+				column,
+				destructive: false,
+				details: `Change default of "${column}"`,
+				meta: { default: desiredDefault, oldDefault: databaseDefault },
+			},
+		],
+		hasDestructive: false,
+		summary: {
+			tables: { added: 0, dropped: 0 },
+			columns: { added: 0, dropped: 0, altered: 1 },
+			indexes: { added: 0, dropped: 0 },
+			constraints: { added: 0, dropped: 0, altered: 0 },
+		},
+	};
+}
+
 function makeCol(name: string): ColumnIR {
 	return {
 		name,
@@ -105,7 +132,10 @@ class FakeLiveDiffClient {
 
 		if (normalized.startsWith('CREATE TEMP TABLE')) {
 			if (this.failCanonicalization) {
-				throw new Error('scratch DDL failed');
+				throw Object.assign(
+					new Error('permission denied to create temporary tables'),
+					{ code: '42501' },
+				);
 			}
 			return { rows: [], rowCount: 0 } as QueryResult<T>;
 		}
@@ -195,9 +225,7 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 			normalized.startsWith('ALTER TABLE') &&
 			normalized.includes("CHECK (state = 'pending')")
 		) {
-			throw new Error(
-				'unsafe use of new value "pending" of enum type tenant_1.status',
-			);
+			throw Object.assign(new Error('undefined function'), { code: '42883' });
 		}
 
 		if (normalized.startsWith('SELECT conname AS name,')) {
@@ -333,6 +361,73 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 			assertNoRepeatedExpressionSurfaceDrift(previous, current),
 		).not.toThrow();
 	});
+
+	it('throws when the same raw column-default drift repeats after apply and re-introspect', () => {
+		const previous = columnDefaultDiff(
+			'jobs',
+			'state',
+			{ sql: "'pending'::tenant_1.status" },
+			'pending',
+		);
+		const current = columnDefaultDiff(
+			'jobs',
+			'state',
+			{ sql: "'pending'::tenant_1.status" },
+			'pending',
+		);
+
+		expect(() =>
+			assertNoRepeatedExpressionSurfaceDrift(previous, current),
+		).toThrow(NonConvergentSchemaDiffError);
+	});
+
+	it('distinguishes a SQL-fragment default from a scalar with the same text', () => {
+		const fragment = columnDefaultDiff('jobs', 'total', '0', { sql: '1 + 1' });
+		const scalar = columnDefaultDiff('jobs', 'total', '0', '1 + 1');
+
+		expect(() =>
+			assertNoRepeatedExpressionSurfaceDrift(fragment, scalar),
+		).not.toThrow();
+	});
+
+	it.each([
+		[
+			'CHECK constraints',
+			() =>
+				checkExpressionDiff(
+					'jobs',
+					'jobs_status_check',
+					"CHECK ((state = 'db-secret\\nforged log'))",
+					"CHECK ((state = 'desired-secret\\nforged log'))",
+				),
+		],
+		[
+			'column defaults',
+			() =>
+				columnDefaultDiff(
+					'jobs',
+					'state',
+					{ sql: "'db-secret\\nforged log'" },
+					{ sql: "'desired-secret\\nforged log'" },
+				),
+		],
+	] as const)('redacts %s from non-convergence diagnostics', (_surface, makeDiff) => {
+		const diff = makeDiff();
+		let caught: unknown;
+		try {
+			assertNoRepeatedExpressionSurfaceDrift(diff, diff);
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBeInstanceOf(NonConvergentSchemaDiffError);
+		expect((caught as Error).message).not.toContain('secret');
+		expect((caught as Error).message).not.toContain('forged log');
+		expect(caught).toMatchObject({
+			desiredExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+			databaseExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+		});
+	});
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
@@ -381,6 +476,46 @@ describe('comparePgsqlDatabaseSchema', () => {
 		).toBe(true);
 	});
 
+	it('does not refuse a CHECK PostgreSQL canonicalizes while the diff adds an enum value', async () => {
+		const desired = makeModelWithEnums(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						{
+							name: 'state',
+							type: 'string',
+							nullable: false,
+						},
+					],
+					primaryKey: 'id',
+					checkConstraints: [
+						{ name: 'jobs_state_check', expression: "state <> 'done'" },
+					],
+				}),
+			],
+			[
+				{
+					name: 'status',
+					schema: 'tenant_1',
+					values: ['queued', 'done', 'pending'],
+				},
+			],
+		);
+		const client = new FakeEnumValueLiveDiffClient();
+
+		const diff = await comparePgsqlDatabaseSchema(
+			adapterForPool(new FakeLiveDiffPool(client)),
+			desired,
+			{ schema: 'tenant_1', onWarning: vi.fn() },
+		);
+
+		expect(diff.changes.map((change) => change.kind)).toEqual(
+			expect.arrayContaining(['alter_enum_add_value', 'add_check_constraint']),
+		);
+	});
+
 	it('attributes new-enum-value refusal to the CHECK PostgreSQL refused, not its sibling', async () => {
 		const desired = makeModelWithEnums(
 			[
@@ -415,21 +550,26 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const client = new FakeEnumValueLiveDiffClient();
 		const pool = new FakeLiveDiffPool(client);
 		const onWarning = vi.fn();
+		const onExpressionCanonicalizationWarning = vi.fn();
 
 		await expect(
 			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
 				schema: 'tenant_1',
 				onWarning,
+				onExpressionCanonicalizationWarning,
 			}),
 		).rejects.toMatchObject({
+			table: 'jobs',
 			constraint: 'jobs_state_check',
 		});
 		expect(onWarning).toHaveBeenCalledOnce();
-		expect(onWarning.mock.calls[0]![0]).toContain(
-			'Could not canonicalize CHECK constraint "jobs"."jobs_state_check"',
-		);
-		expect(onWarning.mock.calls[0]![0]).not.toContain(
-			'jobs_state_sibling_check',
+		expect(onWarning.mock.calls[0]![0]).toContain('Reason: undefined function');
+		expect(onExpressionCanonicalizationWarning).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: 'check_constraint',
+				table: 'jobs',
+				name: 'jobs_state_check',
+			}),
 		);
 	});
 

@@ -19,6 +19,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
+import { isEngineCanonicalCheck } from '../expression-provenance.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertNumericLiteral,
@@ -832,7 +833,12 @@ function upAddCheckConstraint(
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
 	const expression = renderCheckConstraintClause(check);
-	validateCheckExpression(expression, 'migration check constraint expression');
+	if (!isEngineCanonicalCheck(check)) {
+		validateCheckExpression(
+			expression,
+			'migration check constraint expression',
+		);
+	}
 	return buildDoBlock(
 		'BEGIN ALTER TABLE ' +
 			qualifyTable(change.table, schemaName) +
@@ -1347,7 +1353,12 @@ function changeToDownSQL(
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
 			const expression = renderCheckConstraintClause(check);
-			validateCheckExpression(expression, 'migration check constraint (down)');
+			if (!isEngineCanonicalCheck(check)) {
+				validateCheckExpression(
+					expression,
+					'migration check constraint (down)',
+				);
+			}
 			return {
 				sql: buildDoBlock(
 					'BEGIN ALTER TABLE ' +
