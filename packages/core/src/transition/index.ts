@@ -198,6 +198,7 @@ export {
 	type ResumeTransitionInput,
 	resumeTransitionRun,
 } from './resume.js';
+export { createTransitionRunMetadata } from './run-metadata.js';
 export {
 	createStagedTransitionOrchestrator,
 	type StagedTransitionInput,

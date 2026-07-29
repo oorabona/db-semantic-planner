@@ -36,6 +36,14 @@ export interface OperationFingerprints {
 export interface RegisteredOperationSemantics extends OperationSemantics {
 	readonly operationKind?: OperationKindRef;
 	supportsOperation?(operation: PhysicalOperation): boolean;
+	/**
+	 * Optional non-executable SQL view for a proven operation. Packs opt in per
+	 * operation; consumers must refuse to render operations without this view.
+	 */
+	renderPlanSql?(
+		operation: PhysicalOperation,
+		context: ObservationContext,
+	): string;
 	buildFingerprints(
 		operation: PhysicalOperation,
 		evidence: readonly EvidenceObservation[],

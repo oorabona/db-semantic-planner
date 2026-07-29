@@ -814,6 +814,9 @@ export function createAlterTableAddCheckOperationRuntime() {
 					ALTER_TABLE_ADD_CHECK_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation, context: ObservationContext) {
+			return renderAlterTableAddCheckSql(payloadOf(operation), context);
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,
