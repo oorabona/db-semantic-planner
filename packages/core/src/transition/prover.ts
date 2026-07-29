@@ -305,6 +305,21 @@ class ObservationContextMismatchError extends Error {
 	}
 }
 
+function verifyCapturedTargetIdentity(
+	expected: ObservationContext,
+	actual: ObservationContext,
+): void {
+	if (expected.postgresqlTargetIdentity === undefined) return;
+	if (
+		stableJson(expected.postgresqlTargetIdentity) !==
+		stableJson(actual.postgresqlTargetIdentity)
+	) {
+		throw new ObservationContextMismatchError(
+			'proof observation target identity does not match the target captured before evidence collection',
+		);
+	}
+}
+
 type IssuedObservationValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly detail: string };
@@ -1344,6 +1359,7 @@ async function proveTransitions(
 							)
 						: context,
 				);
+				verifyCapturedTargetIdentity(context, candidateContext);
 				if (!sharedProofContext) {
 					sharedProofContext = candidateContext;
 				} else {
@@ -1491,6 +1507,7 @@ async function proveTransitions(
 						proofContext = issuer.readContext
 							? await issuer.readContext(client, context, requiredObservations)
 							: context;
+						verifyCapturedTargetIdentity(context, proofContext);
 						proofContext =
 							registry.contextWithDerivedCapabilities(proofContext);
 
@@ -2088,6 +2105,7 @@ async function retryUnknownRecognition(
 			let proofContext = issuer.readContext
 				? await issuer.readContext(client, context, recognitionRequests)
 				: context;
+			verifyCapturedTargetIdentity(context, proofContext);
 			proofContext = registry.contextWithDerivedCapabilities(proofContext);
 			const supportMismatch = ruleSupportMismatch(rule, proofContext);
 			if (supportMismatch) {

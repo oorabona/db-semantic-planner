@@ -1,14 +1,25 @@
 import type { InProcessProvenPlan, TransitionPack } from '@dbsp/core';
-import { createPackRegistry, observationContextDigest } from '@dbsp/core';
+import {
+	createPackRegistry,
+	observationContextDigest,
+	transitionPlanDigest,
+} from '@dbsp/core';
 import type {
 	CompareOutcome,
 	ModelIR,
 	ObservationContext,
+	OperationKindRef,
 	PlanAssessment,
 } from '@dbsp/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+	MANUAL_SQL_OPERATION_KIND,
+} from '../../../adapter-pgsql/src/transition/constants.js';
 import { renderAlterTableAddCheckSql } from '../../../adapter-pgsql/src/transition/operations/alter-table-add-check.js';
 import {
+	buildPgExecutionContract,
+	executionTargetNamespaces,
 	exitCodeForPlanResult,
 	formatPlanFailureJson,
 	formatPlanHuman,
@@ -63,7 +74,12 @@ const blocked: PlanAssessment = {
 	reasons: [],
 };
 
-function provenPlan(): InProcessProvenPlan {
+function provenPlan(operation?: {
+	readonly ref: string;
+	readonly name: string;
+	readonly operationKind?: OperationKindRef;
+	readonly payload?: unknown;
+}): InProcessProvenPlan {
 	return {
 		observations: [
 			{
@@ -78,7 +94,22 @@ function provenPlan(): InProcessProvenPlan {
 		assumptions: [],
 		preconditions: [],
 		segments: [],
-		steps: [],
+		steps:
+			operation === undefined
+				? []
+				: [
+						{
+							stepId: `step:${operation.name}`,
+							operation: {
+								ref: operation.ref,
+								operationKind: operation.operationKind ?? {
+									artifact: { id: 'postgresql.test', version: '1.0.0' },
+									name: operation.name,
+								},
+								payload: operation.payload ?? {},
+							},
+						},
+					],
 		postconditions: [],
 	} as unknown as InProcessProvenPlan;
 }
@@ -119,7 +150,24 @@ function dependencies(
 		ensureTransitionJournal: vi.fn().mockResolvedValue(undefined),
 		loadCurrent: vi.fn().mockResolvedValue(model),
 		readContext: vi.fn().mockResolvedValue(initialContext),
+		captureTargetIdentity: vi.fn().mockResolvedValue({
+			systemIdentifier: 'test-system',
+			databaseOid: '1',
+			namespaces: [{ name: 'public', oid: '2200' }],
+		}),
 		persist,
+		buildExecutionContract: vi.fn().mockResolvedValue({
+			version: 1,
+			requirements: [
+				{
+					kind: 'postgresql.physical-target',
+					mode: 'must-match',
+					systemIdentifier: 'test-system',
+					databaseOid: '1',
+					namespaces: [{ name: 'public', oid: '2200' }],
+				},
+			],
+		}),
 		planner,
 		render,
 	};
@@ -142,6 +190,40 @@ async function run(
 afterEach(() => vi.restoreAllMocks());
 
 describe('dbsp plan outcomes', () => {
+	it('mutation: capturing identity after introspection can bind evidence to a replacement target', async () => {
+		const deps = dependencies(
+			{ kind: 'no-drift', claimedInvariant: { kind: 'test', scope: [] } },
+			{ kind: 'no-drift', claim: {}, assessment: applicable },
+		);
+		const events: string[] = [];
+		deps.captureTargetIdentity.mockImplementation(async () => {
+			events.push('capture');
+			return {
+				systemIdentifier: 'test-system',
+				databaseOid: '1',
+				namespaces: [{ name: 'public', oid: '2200' }],
+			};
+		});
+		deps.loadCurrent.mockImplementation(async () => {
+			events.push('introspect');
+			return model;
+		});
+		deps.readContext.mockImplementation(async () => {
+			events.push('context');
+			return initialContext;
+		});
+		await runPlan(
+			{ db: 'postgres://localhost/test', schemaFile: 'schema.ts' },
+			deps,
+		);
+		expect(events).toEqual(['capture', 'introspect', 'context']);
+	});
+	it('mutation: omitting the requested schema when a plan has no step-derived namespace changes the persisted target', () => {
+		expect(executionTargetNamespaces(provenPlan(), 'tenant')).toEqual([
+			'tenant',
+		]);
+	});
+
 	it.each([
 		[
 			'unsupported',
@@ -229,6 +311,18 @@ describe('dbsp plan outcomes', () => {
 		);
 	});
 
+	it('mutation: printing a digest other than the one durable apply recomputes disconnects review from execution', async () => {
+		const { result } = await run(
+			{ kind: 'transitions', candidates: [], obligations: [] },
+			{ kind: 'proven', plan: provenPlan(), assessment: applicable },
+		);
+		expect(result.plan).toBeDefined();
+		expect(result.planDigest).toBe(transitionPlanDigest(result.plan!));
+		expect(formatPlanHuman(result, false)).toContain(
+			`Plan digest: ${result.planDigest}`,
+		);
+	});
+
 	it('uses one planner seam for compare, prove, and render', async () => {
 		const { deps } = await run(
 			{ kind: 'transitions', candidates: [], obligations: [] },
@@ -276,6 +370,108 @@ describe('dbsp plan outcomes', () => {
 		expect(result.runId).toBeNull();
 		expect(result.planDigest).not.toBeNull();
 		expect(formatPlanHuman(result, true)).toContain('non-executable');
+	});
+
+	it.each([
+		[
+			'ManualSql',
+			'postgresql:manual-sql:users',
+			MANUAL_SQL_OPERATION_KIND,
+			{
+				statement: { text: 'ALTER TABLE public.users ADD COLUMN flag boolean' },
+			},
+			false,
+		],
+		[
+			'ManualSql',
+			'postgresql:manual-sql:users',
+			MANUAL_SQL_OPERATION_KIND,
+			{
+				statement: { text: 'ALTER TABLE public.users ADD COLUMN flag boolean' },
+			},
+			true,
+		],
+		[
+			'AttachLogicalIdentity',
+			'postgresql:logical-identity-adopt:users',
+			ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+			{ schema: 'public', table: 'users', logicalId: 'logical.table.users' },
+			false,
+		],
+		[
+			'AttachLogicalIdentity',
+			'postgresql:logical-identity-adopt:users',
+			ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+			{ schema: 'public', table: 'users', logicalId: 'logical.table.users' },
+			true,
+		],
+	] as const)('mutation: resolving an ineligible %s namespace before the typed contract refusal makes plan fail uncaught (dry-run: %s)', async (operationName, operationRef, operationKind, payload, dryRun) => {
+		const plan = provenPlan({
+			ref: operationRef,
+			name: operationName,
+			operationKind,
+			payload,
+		});
+		const deps = dependencies(
+			{ kind: 'transitions', candidates: [], obligations: [] },
+			{ kind: 'proven', plan, assessment: applicable },
+		);
+		const release = vi.fn();
+		const client = {
+			release,
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+					return { rows: [{ system_identifier: 'test-system' }] };
+				if (sql.startsWith('SELECT d.oid::text'))
+					return { rows: [{ database_oid: '1' }] };
+				if (sql.startsWith('SELECT n.nspname'))
+					return { rows: [{ name: 'public', oid: '2200' }] };
+				if (sql.startsWith("SELECT current_setting('search_path')"))
+					return {
+						rows: [
+							{
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								timezone: 'UTC',
+							},
+						],
+					};
+				throw new Error(`unexpected query ${sql}`);
+			}),
+		};
+		const pool = { connect: vi.fn().mockResolvedValue(client) };
+		deps.createDbConnection.mockResolvedValue({
+			pool: pool as never,
+			release: vi.fn().mockResolvedValue(undefined),
+		});
+		deps.buildExecutionContract = buildPgExecutionContract;
+		const result = await runPlan(
+			{
+				db: 'postgres://localhost/test',
+				schemaFile: 'schema.ts',
+				dryRun,
+			},
+			deps,
+		);
+
+		expect(result).toMatchObject({
+			proveKind: 'blocked',
+			persisted: false,
+			runId: null,
+			planDigest: null,
+		});
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'unsupported-transition',
+			detail: expect.stringContaining(operationName),
+		});
+		expect(formatPlanHuman(result, dryRun)).toContain(operationName);
+		expect(exitCodeForPlanResult(result)).toBe(1);
+		expect(deps.planner.render).not.toHaveBeenCalled();
+		expect(deps.persist).not.toHaveBeenCalled();
+		expect(release).toHaveBeenCalledOnce();
 	});
 
 	it('a rendering failure happens before persistence and leaves no run behind', async () => {

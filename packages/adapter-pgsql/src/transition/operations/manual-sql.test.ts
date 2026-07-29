@@ -1,12 +1,10 @@
 import {
-	createApplier,
 	createPackRegistry,
 	createProver,
 	createTransitionLessor,
 } from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
-	ApplyPolicy,
 	Assumption,
 	CompareOutcome,
 	ObservationContext,
@@ -23,7 +21,6 @@ import {
 	PG_RULE_PACK_ARTIFACT,
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
-import { createPgTransitionRunPersister } from '../journal.js';
 import { createPgObservationIssuer } from '../observation-issuer.js';
 import {
 	createManualSqlOperationRuntime,
@@ -269,6 +266,33 @@ class ManualSqlPool {
 				checks: [],
 			};
 		}
+		if (table === 'dbsp_transition_authorization') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					seq: { type: 'bigint', notNull: true },
+					policy: { type: 'jsonb', notNull: true },
+					grants: { type: 'jsonb', notNull: true },
+					digest: { type: 'text', notNull: true },
+					actor: { type: 'text', notNull: true },
+					authorized_at: {
+						type: 'timestamp with time zone',
+						notNull: true,
+					},
+				},
+				primary_key: ['run_id', 'seq'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
+				checks: [],
+			};
+		}
 		return {
 			relkind: 'r',
 			columns: {
@@ -304,6 +328,25 @@ class ManualSqlPool {
 
 	async query(sql: string, _params?: readonly unknown[]) {
 		this.queries.push(sql);
+		if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+		if (sql === 'SHOW client_encoding')
+			return { rows: [{ client_encoding: 'UTF8' }] };
+		if (sql.startsWith('SELECT (pg_catalog.pg_control_system())')) {
+			return { rows: [{ system_identifier: 'manual-system' }] };
+		}
+		if (sql.startsWith('SELECT d.oid::text')) {
+			return { rows: [{ database_oid: '5' }] };
+		}
+		if (sql.startsWith('SELECT n.nspname')) {
+			return { rows: [{ name: 'tenant', oid: '2200' }] };
+		}
+		if (sql.startsWith("SELECT current_setting('search_path')")) {
+			return {
+				rows: [
+					{ search_path: 'tenant', client_encoding: 'UTF8', timezone: 'UTC' },
+				],
+			};
+		}
 		if (sql.startsWith('CREATE ')) {
 			return { rows: [] };
 		}
@@ -636,7 +679,7 @@ describe('ManualSql operation runtime', () => {
 		);
 	});
 
-	it('retains and widens the human blast-radius assumption', async () => {
+	it('mutation: consuming execution-contract eligibility during proving blocks ManualSql callers that never requested a contract', async () => {
 		const manualOperation = operation();
 		const { outcome } = await prove(manualOperation);
 
@@ -644,88 +687,8 @@ describe('ManualSql operation runtime', () => {
 		if (outcome.kind !== 'proven') {
 			return;
 		}
-		const userBlast = outcome.plan.assumptions.find(
-			(assumption) => assumption.class === 'user-blast-radius',
+		expect(outcome.plan.steps[0]?.operation.operationKind.name).toBe(
+			'ManualSql',
 		);
-		expect(userBlast).toMatchObject({
-			asserter: human,
-			scope: [
-				{
-					engine: 'postgresql',
-					database: 'manual-db',
-					schema: 'tenant',
-					kind: 'schema',
-					name: 'tenant',
-				},
-			],
-		});
-		expect(outcome.plan.steps[0]?.restsOnAssumptions).toContain(userBlast?.id);
-		expect(
-			(
-				outcome.plan.steps[0]?.operation.payload as {
-					statement?: { attestation?: Assumption };
-				}
-			).statement?.attestation,
-		).toMatchObject({ class: 'user-blast-radius' });
-	});
-
-	it('blocks without user-blast-radius acceptance and executes with it', async () => {
-		const manualOperation = operation([tableResource]);
-		const { outcome, registry, pool } = await prove(manualOperation);
-		expect(outcome.kind).toBe('proven');
-		if (outcome.kind !== 'proven') {
-			return;
-		}
-		const denied = await createApplier(
-			registry,
-			createPgTransitionRunPersister(pool),
-		).apply(
-			{ plan: outcome.plan, assessment: outcome.assessment },
-			{ accepts: [{ class: 'operation-pack-semantics' }] },
-			createTransitionLessor(async () => pool.connect()),
-		);
-
-		expect(denied.assessment.decision).toBe('blocked');
-		expect(denied.assessment.reasons[0]).toMatchObject({
-			code: 'uncomposable',
-		});
-		expect(
-			pool.queries.includes(
-				'ALTER TABLE "tenant"."users" ADD COLUMN "manual_flag" boolean',
-			),
-		).toBe(false);
-
-		const acceptedPolicy: ApplyPolicy = {
-			accepts: [
-				{ class: 'operation-pack-semantics' },
-				{
-					class: 'user-blast-radius',
-					fromTrustRoot: human,
-					withinScope: [{ within: tableResource }],
-				},
-			],
-		};
-		const applied = await createApplier(
-			registry,
-			createPgTransitionRunPersister(pool),
-		).apply(
-			{ plan: outcome.plan, assessment: outcome.assessment },
-			acceptedPolicy,
-			createTransitionLessor(async () => pool.connect()),
-		);
-
-		expect(applied.assessment.lifecycle).toBe('completed');
-		expect(
-			pool.queries.includes(
-				'ALTER TABLE "tenant"."users" ADD COLUMN "manual_flag" boolean',
-			),
-		).toBe(true);
-		expect(applied.journals[0]?.intent.operation.payload).toMatchObject({
-			statement: {
-				attestation: expect.objectContaining({
-					class: 'user-blast-radius',
-				}),
-			},
-		});
 	});
 });

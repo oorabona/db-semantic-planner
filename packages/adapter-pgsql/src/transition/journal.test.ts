@@ -108,6 +108,33 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 				checks: [],
 			};
 		}
+		if (table === 'dbsp_transition_authorization') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					seq: { type: 'bigint', notNull: true },
+					policy: { type: 'jsonb', notNull: true },
+					grants: { type: 'jsonb', notNull: true },
+					digest: { type: 'text', notNull: true },
+					actor: { type: 'text', notNull: true },
+					authorized_at: {
+						type: 'timestamp with time zone',
+						notNull: true,
+					},
+				},
+				primary_key: ['run_id', 'seq'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
+				checks: [],
+			};
+		}
 		return {
 			relkind: 'r',
 			columns: {
@@ -208,6 +235,15 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 			});
 			return { rows: [] };
 		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_authorization"'))
+			return {
+				rows: this.events.some((event) => event.run_id === params[0])
+					? []
+					: [{ run_id: params[0] }],
+			};
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_authorization"')) {
+			return { rows: [] };
+		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 			return { rows: [this.runs.get(String(params[0]))].filter(Boolean) };
 		}
@@ -265,9 +301,15 @@ describe('transition journal primitive', () => {
 		};
 
 		await persistRun(executor, metadata);
+		const writesAfterPlanning = executor.sql.length;
 		await appendIntentJournal(executor, intent);
 		await appendCompletionJournal(executor, operation, completion);
 		await appendObservedJournal(executor, journal);
+		expect(
+			executor.sql
+				.slice(writesAfterPlanning)
+				.some((sql) => sql.includes('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"')),
+		).toBe(false);
 
 		const loaded = await readTransitionJournal(executor, metadata.runId);
 
@@ -421,7 +463,7 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/invalid and non-resumable/);
 	});
 
-	it('allocates journal seq under a parameterized per-run advisory lock', async () => {
+	it('allocates journal seq while holding the persisted run row lock', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		const intent: DurableIntentRecord = {
@@ -441,8 +483,9 @@ describe('transition journal primitive', () => {
 		expect(appendQuery?.params[0]).toBe(metadata.runId);
 		expect(appendQuery?.sql).toContain('WITH run_lock AS MATERIALIZED');
 		expect(appendQuery?.sql).toContain(
-			'pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext($1)::bigint)',
+			'FROM "dbsp_meta"."dbsp_transition_run" r',
 		);
+		expect(appendQuery?.sql).toContain('FOR UPDATE');
 		expect(appendQuery?.sql).toContain(
 			'SELECT COALESCE(max(j.seq), 0) + 1 AS seq',
 		);
@@ -593,7 +636,7 @@ describe('transition journal primitive', () => {
 			recordedAt: '2026-07-17T00:00:00.100Z',
 		};
 
-		await expect(appendIntentJournal(executor, intent)).rejects.toThrow(
+		await expect(persistRun(executor, metadata)).rejects.toThrow(
 			/foreign key drifted/,
 		);
 		expect(executor.events).toHaveLength(0);

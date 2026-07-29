@@ -99,6 +99,41 @@ async function enumLabelVisibleHolds(
 }
 
 describe('PostgreSQL transition observation issuer', () => {
+	it('mutation: a later observation lease on a different target is refused before evidence queries', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+			if (sql === 'SHOW client_encoding')
+				return { rows: [{ client_encoding: 'UTF8' }] };
+			if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+				return { rows: [{ system_identifier: 'replacement-system' }] };
+			if (sql.startsWith('SELECT d.oid::text'))
+				return { rows: [{ database_oid: '5' }] };
+			if (sql.startsWith('SELECT n.nspname'))
+				return { rows: [{ name: 'tenant', oid: '2200' }] };
+			if (sql.startsWith("SELECT current_setting('search_path')"))
+				return {
+					rows: [
+						{ search_path: 'tenant', client_encoding: 'UTF8', timezone: 'UTC' },
+					],
+				};
+			throw new Error(`unexpected query: ${sql}`);
+		});
+		await expect(
+			readPgObservationContextFromClient(
+				createTestTransitionSession({ query }),
+				'tenant',
+				undefined,
+				{
+					systemIdentifier: 'system-1',
+					databaseOid: '5',
+					namespaces: [{ name: 'tenant', oid: '2200' }],
+				},
+			),
+		).rejects.toThrow(/does not match the captured target/);
+		expect(query.mock.calls.map(([sql]) => sql)).not.toContain(
+			'SHOW server_version_num',
+		);
+	});
 	it('refuses a forged lessor before acquiring for an observation', async () => {
 		const acquire = vi.fn(async () => ({ query: vi.fn() }));
 
@@ -214,6 +249,26 @@ describe('PostgreSQL transition observation issuer', () => {
 			},
 			createTestTransitionSession({
 				query: async (sql: string) => {
+					if (sql.startsWith('SELECT (pg_catalog.pg_control_system())')) {
+						return { rows: [{ system_identifier: 'system-1' }] };
+					}
+					if (sql.startsWith('SELECT d.oid::text')) {
+						return { rows: [{ database_oid: '5' }] };
+					}
+					if (sql.startsWith('SELECT n.nspname')) {
+						return { rows: [{ name: 'tenant', oid: '2200' }] };
+					}
+					if (sql.startsWith("SELECT current_setting('search_path')")) {
+						return {
+							rows: [
+								{
+									search_path: 'tenant',
+									client_encoding: 'UTF8',
+									timezone: 'UTC',
+								},
+							],
+						};
+					}
 					queries.push(sql);
 					return {
 						rows: [
@@ -282,6 +337,26 @@ describe('PostgreSQL transition observation issuer', () => {
 			},
 			createTestTransitionSession({
 				query: async (sql: string) => {
+					if (sql.startsWith('SELECT (pg_catalog.pg_control_system())')) {
+						return { rows: [{ system_identifier: 'system-1' }] };
+					}
+					if (sql.startsWith('SELECT d.oid::text')) {
+						return { rows: [{ database_oid: '5' }] };
+					}
+					if (sql.startsWith('SELECT n.nspname')) {
+						return { rows: [{ name: 'tenant', oid: '2200' }] };
+					}
+					if (sql.startsWith("SELECT current_setting('search_path')")) {
+						return {
+							rows: [
+								{
+									search_path: 'tenant',
+									client_encoding: 'UTF8',
+									timezone: 'UTC',
+								},
+							],
+						};
+					}
 					queries.push(sql);
 					return {
 						rows: [
@@ -995,6 +1070,22 @@ describe('PostgreSQL transition observation issuer', () => {
 		const contextFromDb = await readPgObservationContextFromClient(
 			createTestTransitionSession({
 				query: async (sql: string) => {
+					if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+						return { rows: [{ system_identifier: 'system-1' }] };
+					if (sql.startsWith('SELECT d.oid::text'))
+						return { rows: [{ database_oid: '5' }] };
+					if (sql.startsWith('SELECT n.nspname'))
+						return { rows: [{ name: 'tenant', oid: '2200' }] };
+					if (sql.startsWith("SELECT current_setting('search_path')"))
+						return {
+							rows: [
+								{
+									search_path: 'tenant',
+									client_encoding: 'UTF8',
+									timezone: 'UTC',
+								},
+							],
+						};
 					if (sql === 'SHOW server_version_num') {
 						return { rows: [{ server_version_num: '180000' }] };
 					}
@@ -1050,6 +1141,22 @@ describe('PostgreSQL transition observation issuer', () => {
 		const contextFromDb = await readPgObservationContextFromClient(
 			createTestTransitionSession({
 				query: async (sql: string) => {
+					if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+						return { rows: [{ system_identifier: 'system-1' }] };
+					if (sql.startsWith('SELECT d.oid::text'))
+						return { rows: [{ database_oid: '5' }] };
+					if (sql.startsWith('SELECT n.nspname'))
+						return { rows: [{ name: 'tenant', oid: '2200' }] };
+					if (sql.startsWith("SELECT current_setting('search_path')"))
+						return {
+							rows: [
+								{
+									search_path: 'tenant',
+									client_encoding: 'UTF8',
+									timezone: 'UTC',
+								},
+							],
+						};
 					if (sql === 'SHOW server_version_num') {
 						return { rows: [{ server_version_num: '180000' }] };
 					}
@@ -1124,6 +1231,32 @@ describe('PostgreSQL transition observation issuer', () => {
 				await new Promise((resolve) => setTimeout(resolve, 0));
 				queries.push(sql);
 				inFlight -= 1;
+				if (sql === "SET client_encoding TO 'UTF8'") {
+					return { rows: [] };
+				}
+				if (sql === 'SHOW client_encoding') {
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				}
+				if (sql.startsWith('SELECT (pg_catalog.pg_control_system())')) {
+					return { rows: [{ system_identifier: 'system-1' }] };
+				}
+				if (sql.startsWith('SELECT d.oid::text')) {
+					return { rows: [{ database_oid: '5' }] };
+				}
+				if (sql.startsWith('SELECT n.nspname')) {
+					return { rows: [{ name: 'tenant', oid: '2200' }] };
+				}
+				if (sql.startsWith("SELECT current_setting('search_path')")) {
+					return {
+						rows: [
+							{
+								search_path: 'tenant',
+								client_encoding: 'UTF8',
+								timezone: 'UTC',
+							},
+						],
+					};
+				}
 				if (sql === 'SHOW server_version_num') {
 					return { rows: [{ server_version_num: '180000' }] };
 				}
@@ -1167,6 +1300,12 @@ describe('PostgreSQL transition observation issuer', () => {
 		expect(release).toHaveBeenCalledOnce();
 		expect(maxInFlight).toBe(1);
 		expect(queries).toEqual([
+			"SET client_encoding TO 'UTF8'",
+			'SHOW client_encoding',
+			'SELECT (pg_catalog.pg_control_system()).system_identifier::text AS system_identifier',
+			'SELECT d.oid::text AS database_oid FROM pg_catalog.pg_database d WHERE d.datname = pg_catalog.current_database()',
+			'SELECT n.nspname AS name, n.oid::text AS oid FROM pg_catalog.pg_namespace n WHERE n.nspname = ANY($1::text[]) ORDER BY n.nspname, n.oid',
+			"SELECT current_setting('search_path') AS search_path, current_setting('client_encoding') AS client_encoding, current_setting('TimeZone') AS timezone",
 			'SHOW server_version_num',
 			'SELECT current_database() AS database_id',
 			'SELECT current_user AS current_user',

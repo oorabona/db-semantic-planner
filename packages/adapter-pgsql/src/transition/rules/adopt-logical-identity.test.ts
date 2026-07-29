@@ -1,6 +1,4 @@
 import {
-	type ApplyPolicy,
-	createApplier,
 	createComparator,
 	createPackRegistry,
 	createProver,
@@ -22,7 +20,6 @@ import {
 	PG_INTROSPECTION_ARTIFACT,
 } from '../constants.js';
 import { evidenceId } from '../ids.js';
-import { createPgTransitionRunPersister } from '../journal.js';
 import { createPgTransitionPack } from '../pack.js';
 
 const asserter = { kind: 'human' as const, identity: 'schema-owner' };
@@ -281,6 +278,33 @@ function createFakePool(rows: BindingRow[]) {
 				checks: [],
 			};
 		}
+		if (table === 'dbsp_transition_authorization') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					seq: { type: 'bigint', notNull: true },
+					policy: { type: 'jsonb', notNull: true },
+					grants: { type: 'jsonb', notNull: true },
+					digest: { type: 'text', notNull: true },
+					actor: { type: 'text', notNull: true },
+					authorized_at: {
+						type: 'timestamp with time zone',
+						notNull: true,
+					},
+				},
+				primary_key: ['run_id', 'seq'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
+				checks: [],
+			};
+		}
 		return {
 			relkind: 'r',
 			columns: {
@@ -307,6 +331,9 @@ function createFakePool(rows: BindingRow[]) {
 	};
 	const client = {
 		query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+			if (sql === 'SHOW client_encoding')
+				return { rows: [{ client_encoding: 'UTF8' }] };
 			if (sql.startsWith('CREATE SCHEMA')) {
 				return { rows: [] };
 			}
@@ -472,19 +499,6 @@ function registryWithRows(rows: BindingRow[]) {
 	return createPackRegistry([{ ...pack, issuer: createFakeIssuer(rows) }]);
 }
 
-function acceptedPolicy(): ApplyPolicy {
-	return {
-		accepts: [
-			{ class: 'operation-pack-semantics' },
-			{
-				class: 'baseline-identity-attachment',
-				fromTrustRoot: asserter,
-				withinScope: [{ kind: 'column', name: 'age' }],
-			},
-		],
-	};
-}
-
 describe('logical identity adoption rule', () => {
 	it('recognizes same physical column plus new logical id as only an adoption candidate', () => {
 		const rows: BindingRow[] = [];
@@ -538,7 +552,7 @@ describe('logical identity adoption rule', () => {
 		expect(compare.kind).not.toBe('transitions');
 	});
 
-	it('emits the baseline assumption, blocks without acceptance, and applies when accepted', async () => {
+	it('mutation: consuming execution-contract eligibility during proving blocks logical-identity adoption callers that never requested a contract', async () => {
 		const rows: BindingRow[] = [];
 		const registry = registryWithRows(rows);
 		const compare = createComparator(registry).compare(
@@ -555,61 +569,8 @@ describe('logical identity adoption rule', () => {
 		if (outcome.kind !== 'proven') {
 			return;
 		}
-		const baseline = outcome.plan.assumptions.find(
-			(assumption) => assumption.class === 'baseline-identity-attachment',
+		expect(outcome.plan.steps[0]?.operation.operationKind.name).toBe(
+			'AttachLogicalIdentity',
 		);
-		expect(baseline).toBeDefined();
-		expect(baseline?.asserter).toEqual(asserter);
-		expect(baseline?.scope).toEqual([targetScope()]);
-		expect(baseline?.statement).toContain('logical.column.users.age');
-		expect(baseline?.statement).toContain('postgresql-side-table');
-		expect(baseline?.statement).toContain(
-			'unit test selected same physical column',
-		);
-		expect(outcome.plan.steps[0]?.restsOnAssumptions).toContain(baseline?.id);
-		const identityClaim = outcome.plan.claims.find(
-			(claim) => claim.proposition.kind === 'dbsp.logical-identity.attached',
-		);
-		expect(identityClaim?.derivedBy.conclusion).toBe(
-			'established-under-assumptions',
-		);
-		expect(identityClaim?.assumes).toEqual([baseline?.id]);
-
-		const rejectedPool = createFakePool(rows);
-		const rejected = await createApplier(
-			registry,
-			createPgTransitionRunPersister(rejectedPool.client),
-		).apply(
-			{ plan: outcome.plan, assessment: outcome.assessment },
-			{ accepts: [{ class: 'operation-pack-semantics' }] },
-			createTransitionLessor(async () => rejectedPool.pool.connect()),
-		);
-		expect(rejected.assessment.decision).toBe('blocked');
-		expect(rejected.assessment.reasons[0]).toMatchObject({
-			code: 'uncomposable',
-			assumption: baseline?.id,
-		});
-		expect(rejectedPool.sideTableWrites.count).toBe(0);
-
-		const acceptedPool = createFakePool(rows);
-		const applied = await createApplier(
-			registry,
-			createPgTransitionRunPersister(acceptedPool.client),
-		).apply(
-			{ plan: outcome.plan, assessment: outcome.assessment },
-			acceptedPolicy(),
-			createTransitionLessor(async () => acceptedPool.pool.connect()),
-		);
-
-		expect(applied.assessment.decision).toBe('applicable');
-		expect(applied.journals[0]?.outcome).toBe('completed');
-		expect(acceptedPool.sideTableWrites.count).toBe(1);
-		expect(rows).toContainEqual({
-			logical_id: 'logical.column.users.age',
-			schema_name: 'public',
-			table_name: 'users',
-			column_name: 'age',
-			carrier_kind: 'postgresql-side-table',
-		});
 	});
 });

@@ -35,6 +35,24 @@ export interface OperationFingerprints {
 
 export interface RegisteredOperationSemantics extends OperationSemantics {
 	readonly operationKind?: OperationKindRef;
+	/**
+	 * Execution-contract-aware packs declare whether reviewed requirements can be
+	 * derived for this operation. Contract-construction consumers may use the
+	 * declaration; proving remains available to callers that do not require a
+	 * contract.
+	 */
+	readonly executionContractEligibility?:
+		| { readonly eligible: true }
+		| { readonly eligible: false; readonly detail: string };
+	/**
+	 * Session settings that this operation's SQL renderer requires. Execution
+	 * contract construction reads these from the resolved operation runtime, so
+	 * the durable contract cannot drift from renderer prerequisites.
+	 */
+	readonly rendererSessionRequirements?: readonly {
+		readonly setting: 'standard_conforming_strings';
+		readonly value: 'on';
+	}[];
 	supportsOperation?(operation: PhysicalOperation): boolean;
 	/**
 	 * Optional non-executable SQL view for a proven operation. Packs opt in per

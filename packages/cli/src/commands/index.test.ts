@@ -162,7 +162,7 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 			{
 				cwd: repositoryRoot,
 				encoding: 'utf8',
-				env: { ...process.env, NO_COLOR: '' },
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
 			},
 		);
 
@@ -194,7 +194,7 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 			{
 				cwd: repositoryRoot,
 				encoding: 'utf8',
-				env: { ...process.env, NO_COLOR: '' },
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
 			},
 		);
 

@@ -353,13 +353,16 @@ export type {
 export {
 	acquireTransitionLease,
 	advisoryObservationId,
+	assumptionAccepted,
 	assumptionId,
+	bindExecutionContract,
 	checkDelta,
 	chooseReadyCandidate,
 	claimId,
 	createApplier,
 	createComparator,
 	createEvidenceView,
+	createExecutionContract,
 	createPackRegistry,
 	createProver,
 	createStagedTransitionOrchestrator,
@@ -385,6 +388,7 @@ export {
 	TRANSITION_LESSOR_REJECTION,
 	type TransitionLeaseFailure,
 	transitionPlanDigest,
+	validateExecutionContract,
 	validateTransitionRelationalInvariants,
 } from './transition/index.js';
 

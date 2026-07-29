@@ -36,6 +36,15 @@ export {
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 export {
+	createPgExecutionContract,
+	evaluatePgExecutionContract,
+	forcePgUtf8Session,
+	PgExecutionContractDerivationError,
+	pgTargetIdentityMismatch,
+	readPgExecutionTargetFromClient,
+	validatePgExecutionContractDerivation,
+} from './execution-contract.js';
+export {
 	INDEX_INCLUDE_CAPABILITY,
 	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 } from './index-feature-capabilities.js';
@@ -52,7 +61,11 @@ export {
 	renderCreateTransitionRunTableSql,
 	type TransitionJournalQueryable,
 } from './journal.js';
-export { createPgTransitionLessor } from './lessor.js';
+export {
+	acquirePgTransitionClient,
+	createPgTransitionLessor,
+	type PgTransitionClientLease,
+} from './lessor.js';
 // The …FromClient helpers stay internal: the supported entry points acquire and
 // release their own lease, so a caller never has to hold one to read context.
 export {

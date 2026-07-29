@@ -10,7 +10,6 @@ import type {
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
-import type { Pool } from 'pg';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_META_SCHEMA,
@@ -487,7 +486,7 @@ async function appendJournalEvent(params: {
 }): Promise<void> {
 	await params.executor.query(
 		`WITH run_lock AS MATERIALIZED (` +
-			`SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext($1)::bigint)` +
+			`SELECT r.run_id FROM ${transitionRunTable()} r WHERE r.run_id = $1 FOR UPDATE` +
 			`), next_seq AS (` +
 			`SELECT COALESCE(max(j.seq), 0) + 1 AS seq ` +
 			`FROM run_lock ` +
@@ -591,7 +590,7 @@ function planFromRow(row: Record<string, unknown>): ProvenPlanShape {
 }
 
 export function createPgTransitionRunPersister(
-	executor: Pool,
+	executor: TransitionJournalQueryable,
 ): TransitionRunPersister {
 	return {
 		async persist(run, plan): Promise<void> {
@@ -646,7 +645,6 @@ export async function appendIntentJournal(
 	executor: TransitionJournalQueryable,
 	record: DurableIntentRecord,
 ): Promise<void> {
-	await ensureTransitionJournal(executor);
 	const run = requireRun(record);
 	await ensureRun(executor, run);
 	await appendJournalEvent({
@@ -664,7 +662,6 @@ export async function appendCompletionJournal(
 	operation: PhysicalOperation,
 	record: TransactionalCompletionRecord,
 ): Promise<void> {
-	await ensureTransitionJournal(executor);
 	await ensurePersistedRun(executor, runIdFromRecord('completion', record));
 	await appendJournalEvent({
 		executor,
@@ -680,7 +677,6 @@ export async function appendObservedJournal(
 	executor: TransitionJournalQueryable,
 	journal: StepJournal,
 ): Promise<void> {
-	await ensureTransitionJournal(executor);
 	if (journal.intent.run) {
 		if (
 			journal.intent.runId !== undefined &&

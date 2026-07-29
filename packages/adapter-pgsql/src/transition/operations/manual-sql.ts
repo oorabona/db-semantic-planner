@@ -767,6 +767,11 @@ export function createManualSqlOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
 		operationKind: MANUAL_SQL_OPERATION_KIND,
+		executionContractEligibility: {
+			eligible: false,
+			detail:
+				'PostgreSQL ManualSql has no derivable execution requirements because its statement has no declared schema target',
+		} as const,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

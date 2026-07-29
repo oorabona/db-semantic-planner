@@ -943,6 +943,8 @@ function guardTargetsPayload(
 export function createAlterColumnSetNotNullOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
+		operationKind: ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
+		executionContractEligibility: { eligible: true } as const,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

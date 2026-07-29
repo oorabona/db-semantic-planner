@@ -8,5 +8,13 @@ import type { TransitionSessionClient } from '@dbsp/types';
 export function createTestTransitionSession(
 	client: Pick<TransitionSessionClient, 'query'>,
 ): TransitionSessionClient {
-	return client as TransitionSessionClient;
+	return {
+		query(sql: string, params?: unknown) {
+			if (sql === "SET client_encoding TO 'UTF8'")
+				return Promise.resolve({ rows: [] });
+			if (sql === 'SHOW client_encoding')
+				return Promise.resolve({ rows: [{ client_encoding: 'UTF8' }] });
+			return client.query(sql, params);
+		},
+	} as TransitionSessionClient;
 }

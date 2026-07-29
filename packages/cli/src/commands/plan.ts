@@ -4,15 +4,22 @@
  */
 
 import {
+	acquirePgTransitionClient,
+	createPgExecutionContract,
 	createPgsqlAdapter,
 	createPgTransitionLessor,
 	createPgTransitionPack,
 	createPgTransitionRunPersister,
 	ensureTransitionJournal,
 	escapeDiagnosticText,
+	PgExecutionContractDerivationError,
+	pgTargetIdentityMismatch,
+	readPgExecutionTargetFromClient,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
+	acquireTransitionLease,
+	bindExecutionContract,
 	createComparator,
 	createPackRegistry,
 	createProver,
@@ -22,10 +29,13 @@ import {
 } from '@dbsp/core';
 import type {
 	CompareOutcome,
+	ExecutionContract,
 	ModelIR,
 	ObservationContext,
 	PlanAssessment,
+	PostgreSqlObservationTargetIdentity,
 	TransitionRunMetadata,
+	TransitionSessionClient,
 } from '@dbsp/types';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
@@ -138,10 +148,19 @@ export interface PlanDeps {
 	readonly createDbConnection: (db: string) => Promise<PlanConnection>;
 	readonly loadSchema: (path: string) => Promise<LoadedSchema>;
 	readonly ensureTransitionJournal: (pool: PlanPool) => Promise<void>;
-	readonly loadCurrent: (pool: PlanPool, schema?: string) => Promise<ModelIR>;
+	readonly captureTargetIdentity: (
+		pool: PlanPool,
+		schema: string | undefined,
+	) => Promise<PostgreSqlObservationTargetIdentity>;
+	readonly loadCurrent: (
+		pool: PlanPool,
+		schema: string | undefined,
+		expectedTargetIdentity: PostgreSqlObservationTargetIdentity,
+	) => Promise<ModelIR>;
 	readonly readContext: (
 		pool: PlanPool,
 		schema?: string,
+		expectedTargetIdentity?: PostgreSqlObservationTargetIdentity,
 	) => Promise<ObservationContext>;
 	readonly createPlanner: (loaded: LoadedSchema) => PlanPlanner;
 	readonly persist: (
@@ -149,6 +168,12 @@ export interface PlanDeps {
 		run: TransitionRunMetadata,
 		plan: InProcessProvenPlan,
 	) => Promise<void>;
+	readonly buildExecutionContract: (
+		pool: PlanPool,
+		schema: string | undefined,
+		plan: InProcessProvenPlan,
+		expectedTargetIdentity: PostgreSqlObservationTargetIdentity,
+	) => Promise<ExecutionContract>;
 }
 
 export interface PlanPlanner {
@@ -178,22 +203,122 @@ function equivalenceContext(context: ObservationContext) {
 	};
 }
 
+/** The only planning-time namespace derivation; apply uses the stored clause. */
+export function executionTargetNamespaces(
+	plan: InProcessProvenPlan,
+	fallbackSchema: string | undefined,
+): readonly string[] {
+	const namespaces = [
+		...new Set(
+			plan.steps.map((step) => {
+				const payload = step.operation.payload;
+				if (
+					payload === null ||
+					typeof payload !== 'object' ||
+					Array.isArray(payload) ||
+					typeof (payload as Record<string, unknown>).schema !== 'string'
+				)
+					throw new PgExecutionContractDerivationError(
+						step.operation.ref,
+						step.operation.operationKind.name,
+						'has no derivable target namespace',
+					);
+				return (payload as Record<string, unknown>).schema as string;
+			}),
+		),
+	];
+	if (namespaces.length === 0 && fallbackSchema !== undefined)
+		namespaces.push(fallbackSchema);
+	return namespaces;
+}
+
+/** Build the PostgreSQL contract after resolving the plan's physical target. */
+export async function buildPgExecutionContract(
+	pool: PlanPool,
+	schema: string | undefined,
+	plan: InProcessProvenPlan,
+	expectedTargetIdentity: PostgreSqlObservationTargetIdentity,
+): Promise<ExecutionContract> {
+	const lease = await acquireTransitionLease(createPgTransitionLessor(pool));
+	try {
+		const target = await readPgExecutionTargetFromClient(
+			lease.session,
+			executionTargetNamespaces(plan, schema),
+		);
+		const mismatch = pgTargetIdentityMismatch(
+			expectedTargetIdentity,
+			target.identity,
+		);
+		if (mismatch) {
+			throw new Error(
+				`PostgreSQL target identity changed before plan persistence: ${mismatch}`,
+			);
+		}
+		return createPgExecutionContract(
+			plan,
+			target.identity,
+			target.sessionProvenance,
+		);
+	} finally {
+		await lease.release();
+	}
+}
+
 const defaultPlanDeps: PlanDeps = {
 	async createDbConnection(db) {
 		const { pool } = await createDbConnection(db);
 		return { pool, release: () => pool.end() };
 	},
 	loadSchema,
-	ensureTransitionJournal,
-	async loadCurrent(pool, schema) {
-		return createPgsqlAdapter(pool).introspect(
-			schema === undefined ? {} : { schema },
-		);
+	async ensureTransitionJournal(pool) {
+		const lease = await acquireTransitionLease(createPgTransitionLessor(pool));
+		try {
+			await ensureTransitionJournal(lease.session);
+		} finally {
+			await lease.release();
+		}
 	},
-	async readContext(pool, schema) {
+	async captureTargetIdentity(pool, schema) {
+		const lease = await acquireTransitionLease(createPgTransitionLessor(pool));
+		try {
+			return (
+				await readPgExecutionTargetFromClient(lease.session, [
+					schema ?? 'public',
+				])
+			).identity;
+		} finally {
+			await lease.release();
+		}
+	},
+	async loadCurrent(pool, schema, expectedTargetIdentity) {
+		const lease = await acquirePgTransitionClient(pool);
+		try {
+			const observed = await readPgExecutionTargetFromClient(
+				lease.client as unknown as TransitionSessionClient,
+				[schema ?? 'public'],
+			);
+			const mismatch = pgTargetIdentityMismatch(
+				expectedTargetIdentity,
+				observed.identity,
+			);
+			if (mismatch) {
+				throw new Error(
+					`PostgreSQL introspection target identity does not match the captured target: ${mismatch}`,
+				);
+			}
+			return await createPgsqlAdapter(lease.client, {
+				borrowedClient: true,
+			}).introspect(schema === undefined ? {} : { schema });
+		} finally {
+			lease.release();
+		}
+	},
+	async readContext(pool, schema, expectedTargetIdentity) {
 		return readPgObservationContextFromLessor(
 			createPgTransitionLessor(pool),
 			schema,
+			undefined,
+			expectedTargetIdentity,
 		);
 	},
 	createPlanner(loaded) {
@@ -213,8 +338,14 @@ const defaultPlanDeps: PlanDeps = {
 		};
 	},
 	async persist(pool, run, plan) {
-		await createPgTransitionRunPersister(pool).persist(run, plan);
+		const lease = await acquireTransitionLease(createPgTransitionLessor(pool));
+		try {
+			await createPgTransitionRunPersister(lease.session).persist(run, plan);
+		} finally {
+			await lease.release();
+		}
 	},
+	buildExecutionContract: buildPgExecutionContract,
 };
 
 function resolvedDeps(overrides?: Partial<PlanDeps>): PlanDeps {
@@ -223,6 +354,25 @@ function resolvedDeps(overrides?: Partial<PlanDeps>): PlanDeps {
 
 function describeThrown(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function executionContractBlockedAssessment(
+	error: PgExecutionContractDerivationError,
+): PlanAssessment {
+	return {
+		decision: 'blocked',
+		assurance: 'unproven',
+		lifecycle: 'planned',
+		continuation: 'replan-required',
+		reasons: [
+			{
+				code: 'unsupported-transition',
+				changes: [],
+				scope: [],
+				detail: error.message,
+			},
+		],
+	};
 }
 
 /** Render only a complete proven plan. This is an inspection view, never apply input. */
@@ -262,53 +412,92 @@ export async function runPlan(
 	let operationError: unknown;
 	let failed = false;
 	try {
+		// This binding is deliberately first: every subsequent introspection and
+		// proof lease must describe the same physical PostgreSQL target.
+		const targetIdentity = await deps.captureTargetIdentity(
+			pool,
+			options.schema,
+		);
 		await deps.ensureTransitionJournal(pool);
-		const current = await deps.loadCurrent(pool, options.schema);
-		const context = await deps.readContext(pool, options.schema);
+		const current = await deps.loadCurrent(
+			pool,
+			options.schema,
+			targetIdentity,
+		);
+		const context = await deps.readContext(
+			pool,
+			options.schema,
+			targetIdentity,
+		);
 		const planner = deps.createPlanner(loaded);
 		const compare = planner.compare(loaded.model, current, context);
 		const prove = await planner.prove(compare, pool, context);
 
 		if (prove.kind === 'proven') {
-			// Order is intentional: an id exists before an indeterminate write, while
-			// rendering happens before a durable record can be stranded unseen.
-			const run = createTransitionRunMetadata(prove.plan);
-			const proofContext = prove.plan.observations.find(
-				(observation) => observation.role === 'evidence',
-			)?.context;
-			if (!proofContext) {
-				throw new Error(
-					'internal error: minted proven plan has no evidence observation context',
+			let executionContract: ExecutionContract | undefined;
+			try {
+				executionContract = await deps.buildExecutionContract(
+					pool,
+					options.schema,
+					prove.plan,
+					targetIdentity,
 				);
+			} catch (error) {
+				if (!(error instanceof PgExecutionContractDerivationError)) throw error;
+				result = {
+					compareKind: compare.kind,
+					proveKind: 'blocked',
+					assessment: executionContractBlockedAssessment(error),
+					persisted: false,
+					runId: null,
+					planDigest: null,
+				};
 			}
-			const sql = planner.render(prove.plan, proofContext);
-			if (!options.dryRun) {
-				try {
-					await deps.persist(pool, run, prove.plan);
-				} catch (error) {
-					throw new PlanPersistenceIndeterminateError(
-						{
-							compareKind: compare.kind,
-							proveKind: prove.kind,
-							assessment: prove.assessment,
-							persisted: 'indeterminate',
-							runId: run.runId,
-							planDigest: run.planDigest,
-						},
-						error,
+			if (executionContract !== undefined) {
+				// Order is intentional: an id exists before an indeterminate write, while
+				// rendering happens before a durable record can be stranded unseen.
+				const durablePlan = bindExecutionContract(
+					prove.plan,
+					executionContract,
+				);
+				const run = createTransitionRunMetadata(durablePlan);
+				const proofContext = prove.plan.observations.find(
+					(observation) => observation.role === 'evidence',
+				)?.context;
+				if (!proofContext) {
+					throw new Error(
+						'internal error: minted proven plan has no evidence observation context',
 					);
 				}
+				const sql = planner.render(durablePlan, proofContext);
+				if (!options.dryRun) {
+					try {
+						await deps.persist(pool, run, durablePlan);
+					} catch (error) {
+						throw new PlanPersistenceIndeterminateError(
+							{
+								compareKind: compare.kind,
+								proveKind: prove.kind,
+								assessment: prove.assessment,
+								persisted: 'indeterminate',
+								runId: run.runId,
+								planDigest: run.planDigest,
+							},
+							error,
+						);
+					}
+				}
+				result = {
+					compareKind: compare.kind,
+					proveKind: prove.kind,
+					assessment: prove.assessment,
+					persisted: !options.dryRun,
+					runId: options.dryRun ? null : run.runId,
+					planDigest: run.planDigest,
+					plan: durablePlan,
+					sql,
+				};
 			}
-			result = {
-				compareKind: compare.kind,
-				proveKind: prove.kind,
-				assessment: prove.assessment,
-				persisted: !options.dryRun,
-				runId: options.dryRun ? null : run.runId,
-				planDigest: run.planDigest,
-				plan: prove.plan,
-				sql,
-			};
 		}
 
 		if (prove.kind === 'no-drift') {
@@ -386,6 +575,15 @@ export function formatPlanHuman(result: PlanResult, dryRun: boolean): string {
 			// Every operation renderer converges on result.sql before this human-only
 			// view, so database-sourced SQL cannot bypass terminal escaping here.
 			...(result.sql === undefined ? [] : [escapeDiagnosticText(result.sql)]),
+			...(result.plan?.executionContract
+				? [
+						'Execution contract:',
+						...result.plan.executionContract.requirements.map(
+							(requirement) =>
+								`  ${escapeDiagnosticText(JSON.stringify(requirement))}`,
+						),
+					]
+				: []),
 			dryRun
 				? `Preview digest: ${result.planDigest}`
 				: `Run id: ${result.runId}\nPlan digest: ${result.planDigest}`,

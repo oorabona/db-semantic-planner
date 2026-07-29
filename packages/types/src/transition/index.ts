@@ -4,6 +4,7 @@ export * from './assessment.js';
 export * from './contracts.js';
 export * from './equivalence.js';
 export * from './evidence-access.js';
+export * from './execution-contract.js';
 export * from './expression.js';
 export * from './fingerprint.js';
 export * from './fragment.js';
