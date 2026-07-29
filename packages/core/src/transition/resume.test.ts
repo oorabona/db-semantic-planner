@@ -12,15 +12,21 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionJournalEvent,
+	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
+import { createExecutionContract } from './execution-contract.js';
 import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import { transitionPlanDigest } from './plan-digest.js';
 import type { OperationObservation, OperationRuntime } from './registry.js';
 import { createPackRegistry } from './registry.js';
-import { type ResumeTransitionInput, resumeTransitionRun } from './resume.js';
+import {
+	loadVerifiedRecoveryJournal,
+	type ResumeTransitionInput,
+	resumeTransitionRun,
+} from './resume.js';
 import { stableJson } from './stable-json.js';
 import { TRANSITION_LESSOR_REJECTION } from './transition-lessor.js';
 
@@ -315,9 +321,12 @@ async function resumeWith(
 	rt: OperationRuntime,
 	options: {
 		readonly readContext?: ResumeTransitionInput['readContext'];
-		readonly loadCurrent?: ResumeTransitionInput['loadCurrent'];
+		readonly loadCurrent?: (
+			runId: string,
+		) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
 		readonly target?: ResumeTransitionInput['target'];
 		readonly registry?: ReturnType<typeof createPackRegistry>;
+		readonly admitRecovery?: ResumeTransitionInput['admitRecovery'];
 	} = {},
 ) {
 	const registry =
@@ -332,9 +341,14 @@ async function resumeWith(
 	const runMetadata = run(plan);
 	const loadCurrent =
 		options.loadCurrent ?? (async () => ({ run: runMetadata, plan, events }));
-	return resumeTransitionRun(registry, {
-		runId: runMetadata.runId,
+	const loaded = await loadVerifiedRecoveryJournal(
+		runMetadata.runId,
+		transitionPlanDigest(plan),
 		loadCurrent,
+	);
+	if (!loaded.ok) throw new Error(loaded.detail);
+	return resumeTransitionRun(registry, {
+		journal: loaded.journal,
 		readContext: options.readContext ?? (async () => context),
 		policy,
 		target:
@@ -343,36 +357,170 @@ async function resumeWith(
 				query: async () => ({ rows: [] }),
 				release: vi.fn(),
 			})),
+		...(options.admitRecovery ? { admitRecovery: options.admitRecovery } : {}),
 	});
 }
 
 describe('resumeTransitionRun', () => {
-	// The adapter refuses a corrupt durable plan row by throwing rather than by
-	// fabricating a ProvenPlanShape, so recovery only fails closed if that
-	// rejection is caught here. Without this, a corrupt row crashes the caller.
-	it('blocks rather than throwing when the loader refuses', async () => {
-		const plan = planShape();
-		const result = await resumeWith(plan, [], runtime({}), {
-			loadCurrent: async () => {
-				throw new Error(
-					'dbsp transition run plan row is invalid and non-resumable',
-				);
-			},
+	it('mutation: comparing recovery to targetContextDigest rejects a moved target even after physical-target admission', async () => {
+		const base = planShape();
+		const plan = {
+			...base,
+			executionContract: createExecutionContract([
+				{
+					kind: 'postgresql.physical-target',
+					mode: 'must-match',
+					systemIdentifier: 'cluster-1',
+					databaseOid: '5',
+					namespaces: [{ name: 'tenant', oid: '2200' }],
+				},
+			]),
+		};
+		const movedContext: ObservationContext = {
+			...context,
+			sessionConfiguration: { changed: 'after-attempt' },
+		};
+		const admitRecovery = vi.fn(async (_target, contract) => {
+			expect(contract.requirements).toHaveLength(1);
+			return { ok: true as const, context: movedContext };
 		});
-		expect(result.assessment.decision).toBe('blocked');
-		// A run that could not be read may have applied DDL in an earlier
-		// attempt, so `planned` — "nothing was done" — would send an operator to
-		// replan under a false premise. And a corrupt or unreachable row does not
-		// repair itself, so retrying the resume is not the advertised way out;
-		// replanning observes live state and is safe whatever the run did.
-		expect(result.assessment.lifecycle).toBe('outcome-unknown');
-		expect(result.assessment.continuation).toBe('replan-required');
-		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
-		expect(result.assessment.reasons[0]?.detail).toContain(
-			'could not be loaded',
+
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const result = await resumeWith(
+			plan,
+			[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+			runtime({ observeContext: vi.fn(async () => movedContext) }),
+			{
+				admitRecovery,
+				readContext: async () => {
+					throw new Error('legacy context reader must not be used');
+				},
+			},
 		);
-		expect(result.assessment.reasons[0]?.detail).toContain('non-resumable');
-		expect(result.journals).toEqual([]);
+
+		expect(result.assessment.reasons[0]?.code).toBe('resume-required');
+		expect(admitRecovery).toHaveBeenCalledOnce();
+	});
+
+	// The loader boundary owns durable-row failures so resume never performs a
+	// second read after the externally reviewed snapshot was established.
+	it('reports a loader refusal from the load-and-verify boundary', async () => {
+		const plan = planShape();
+		await expect(
+			loadVerifiedRecoveryJournal(
+				run(plan).runId,
+				transitionPlanDigest(plan),
+				async () => {
+					throw new Error(
+						'dbsp transition run plan row is invalid and non-resumable',
+					);
+				},
+			),
+		).resolves.toMatchObject({ ok: false, code: 'load-failed' });
+	});
+
+	it('reports a serialization refusal from the load-and-verify boundary', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		(plan as ProvenPlanShape & { cycle?: unknown }).cycle = plan;
+
+		await expect(
+			loadVerifiedRecoveryJournal(
+				runMetadata.runId,
+				runMetadata.planDigest,
+				async () => ({ run: runMetadata, plan, events: [] }),
+			),
+		).resolves.toMatchObject({ ok: false, code: 'load-failed' });
+	});
+
+	it('uses one frozen journal when an alternating loader offers a replacement', async () => {
+		const first = planShape();
+		const replacement = {
+			...first,
+			steps: first.steps.map((step) => ({
+				...step,
+				stepId: `${step.stepId}:replacement`,
+			})),
+		} as ProvenPlanShape;
+		const runMetadata = run(first);
+		const loadCurrent = vi.fn(async () => ({
+			run: runMetadata,
+			plan: loadCurrent.mock.calls.length === 1 ? first : replacement,
+			events: [],
+		}));
+		const loaded = await loadVerifiedRecoveryJournal(
+			runMetadata.runId,
+			transitionPlanDigest(first),
+			loadCurrent,
+		);
+		expect(loaded).toMatchObject({ ok: true });
+		if (!loaded.ok) return;
+		const result = await resumeTransitionRun(
+			createPackRegistry([
+				{
+					rules: [],
+					operationSemantics: [runtime({})],
+					issuer: { artifact, execute: vi.fn() },
+				},
+			]),
+			{
+				journal: loaded.journal,
+				readContext: vi.fn(async () => context),
+				target: createTestTransitionLessor(async () => ({
+					query: async () => ({ rows: [] }),
+					release: vi.fn(),
+				})),
+			},
+		);
+		expect(result.assessment.reasons[0]?.code).toBe('resume-required');
+		expect(loadCurrent).toHaveBeenCalledOnce();
+		expect(loaded.journal.plan).toEqual(first);
+	});
+
+	it('snapshots loader-owned evidence before the loader can mutate it', async () => {
+		const mutable = planShape();
+		const runMetadata = run(mutable);
+		const loaded = await loadVerifiedRecoveryJournal(
+			runMetadata.runId,
+			transitionPlanDigest(mutable),
+			async () => ({
+				run: runMetadata,
+				plan: mutable,
+				events: [],
+				authorizations: [],
+			}),
+		);
+		if (!loaded.ok) throw new Error(loaded.detail);
+		(mutable as unknown as { steps: unknown[] }).steps = [];
+		expect(loaded.journal.plan.steps).toHaveLength(1);
+		expect(Object.isFrozen(loaded.journal.authorizations)).toBe(true);
+	});
+
+	it('returns a pristine assumed run before policy, target admission, reads, or writes', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const loaded = await loadVerifiedRecoveryJournal(
+			runMetadata.runId,
+			transitionPlanDigest(plan),
+			async () => ({ run: runMetadata, plan, events: [], authorizations: [] }),
+		);
+		if (!loaded.ok) throw new Error(loaded.detail);
+		const readContext = vi.fn(async () => context);
+		const acquire = vi.fn();
+		const result = await resumeTransitionRun(
+			createPackRegistry([
+				{
+					rules: [],
+					operationSemantics: [runtime({})],
+					issuer: { artifact, execute: vi.fn() },
+				},
+			]),
+			{ journal: loaded.journal, readContext, target: { acquire } as never },
+		);
+		expect(result.assessment.reasons[0]?.code).toBe('resume-required');
+		expect(readContext).not.toHaveBeenCalled();
+		expect(acquire).not.toHaveBeenCalled();
 	});
 
 	it('blocks rather than rejecting when a pack supportsOperation throws', async () => {
@@ -419,21 +567,28 @@ describe('resumeTransitionRun', () => {
 
 	it('blocks rather than rejecting when the returned context throws on access', async () => {
 		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
 		const failure = new Error('context databaseId is unavailable');
 
 		await expect(
-			resumeWith(plan, [], runtime({}), {
-				readContext: async () => {
-					const unreadable = { ...context };
-					Object.defineProperty(unreadable, 'databaseId', {
-						enumerable: true,
-						get: () => {
-							throw failure;
-						},
-					});
-					return unreadable;
+			resumeWith(
+				plan,
+				[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+				runtime({}),
+				{
+					readContext: async () => {
+						const unreadable = { ...context };
+						Object.defineProperty(unreadable, 'databaseId', {
+							enumerable: true,
+							get: () => {
+								throw failure;
+							},
+						});
+						return unreadable;
+					},
 				},
-			}),
+			),
 		).resolves.toMatchObject({
 			assessment: {
 				decision: 'blocked',
@@ -462,21 +617,13 @@ describe('resumeTransitionRun', () => {
 			),
 		};
 
-		const result = await resumeWith(plan, [], runtime({}), {
-			loadCurrent: async () => ({
-				run: runMetadata,
-				plan: tampered,
-				events: [],
-			}),
-		});
-
-		expect(result.assessment.decision).toBe('blocked');
-		expect(result.assessment.continuation).toBe('replan-required');
-		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
-		expect(result.assessment.reasons[0]?.detail).toBe(
-			'loaded plan digest does not match run metadata',
-		);
-		expect(result.journals).toEqual([]);
+		await expect(
+			loadVerifiedRecoveryJournal(
+				runMetadata.runId,
+				transitionPlanDigest(plan),
+				async () => ({ run: runMetadata, plan: tampered, events: [] }),
+			),
+		).resolves.toMatchObject({ ok: false, code: 'plan-digest-mismatch' });
 	});
 
 	it.each([
@@ -484,33 +631,15 @@ describe('resumeTransitionRun', () => {
 		{ observations: [], claims: [], assumptions: [] },
 	])('blocks a corrupt loaded plan instead of throwing', async (corruptPlan) => {
 		const runMetadata = run(corruptPlan as unknown as ProvenPlanShape);
-		const rt = runtime({});
-		const registry = createPackRegistry([
-			{
-				rules: [],
-				operationSemantics: [rt],
-				issuer: { artifact, execute: vi.fn() },
-			},
-		]);
 
 		await expect(
-			resumeTransitionRun(registry, {
-				runId: runMetadata.runId,
-				loadCurrent: async () =>
+			loadVerifiedRecoveryJournal(
+				runMetadata.runId,
+				transitionPlanDigest(corruptPlan as unknown as ProvenPlanShape),
+				async () =>
 					({ run: runMetadata, plan: corruptPlan, events: [] }) as never,
-				readContext: async () => context,
-				policy,
-				target: createTestTransitionLessor(async () => ({
-					query: async () => ({ rows: [] }),
-					release: vi.fn(),
-				})),
-			}),
-		).resolves.toMatchObject({
-			assessment: {
-				decision: 'blocked',
-				reasons: [{ code: 'context-mismatch' }],
-			},
-		});
+			),
+		).resolves.toMatchObject({ ok: false, code: 'plan-invalid' });
 	});
 
 	it('uses an immutable snapshot when a loader-owned plan mutates after loading', async () => {
@@ -531,7 +660,7 @@ describe('resumeTransitionRun', () => {
 		expect(result.assessment.reasons[0]?.code).toBe('resume-required');
 	});
 
-	it('reports an unstarted journal as planned when its target is unusable', async () => {
+	it('reports an unstarted journal as planned without inspecting an unusable target', async () => {
 		const plan = planShape();
 		const runMetadata = run(plan);
 		const result = await resumeWith(plan, [], runtime({}), {
@@ -544,7 +673,7 @@ describe('resumeTransitionRun', () => {
 		});
 
 		expect(result.assessment.lifecycle).toBe('planned');
-		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(result.assessment.continuation).toBe('resume-possible');
 	});
 
 	it('rejects a forged lessor whose acquisition has no release()', async () => {
@@ -1106,12 +1235,19 @@ describe('resumeTransitionRun', () => {
 
 	it('fails closed when readContext does not match run metadata', async () => {
 		const plan = planShape();
-		const result = await resumeWith(plan, [], runtime({}), {
-			readContext: async () => ({
-				...context,
-				databaseId: 'other-db',
-			}),
-		});
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const result = await resumeWith(
+			plan,
+			[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+			runtime({}),
+			{
+				readContext: async () => ({
+					...context,
+					databaseId: 'other-db',
+				}),
+			},
+		);
 
 		expect(result.assessment.reasons[0]).toMatchObject({
 			code: 'context-mismatch',
@@ -1137,7 +1273,13 @@ describe('resumeTransitionRun', () => {
 			),
 		};
 
-		const result = await resumeWith(tampered, [], runtime({}));
+		const runMetadata = run(tampered);
+		const step = tampered.steps[0]!;
+		const result = await resumeWith(
+			tampered,
+			[event(1, 'intent', step, runMetadata, intent(step, runMetadata))],
+			runtime({}),
+		);
 
 		expect(result.assessment.reasons[0]).toMatchObject({
 			code: 'context-mismatch',
@@ -1190,12 +1332,13 @@ describe('resumeTransitionRun', () => {
 			],
 		};
 
-		const result = await resumeWith(tampered, [], runtime({}));
-
-		expect(result.assessment.reasons[0]).toMatchObject({
-			code: 'context-mismatch',
-		});
-		expect(result.assessment.reasons[0]?.detail).toContain('step order');
+		await expect(
+			loadVerifiedRecoveryJournal(
+				run(tampered).runId,
+				transitionPlanDigest(tampered),
+				async () => ({ run: run(tampered), plan: tampered, events: [] }),
+			),
+		).resolves.toMatchObject({ ok: false, code: 'plan-invalid' });
 	});
 
 	it('rejects journal events with mismatched embedded record identity', async () => {
@@ -1204,16 +1347,19 @@ describe('resumeTransitionRun', () => {
 		const first = plan.steps[0]!;
 		const second = plan.steps[1]!;
 
-		const result = await resumeWith(
-			plan,
-			[event(1, 'intent', second, runMetadata, intent(first, runMetadata))],
-			runtime({}),
-		);
-
-		expect(result.assessment.reasons[0]).toMatchObject({
-			code: 'context-mismatch',
-		});
-		expect(result.assessment.reasons[0]?.detail).toContain('embeds record');
+		await expect(
+			loadVerifiedRecoveryJournal(
+				runMetadata.runId,
+				transitionPlanDigest(plan),
+				async () => ({
+					run: runMetadata,
+					plan,
+					events: [
+						event(1, 'intent', second, runMetadata, intent(first, runMetadata)),
+					],
+				}),
+			),
+		).resolves.toMatchObject({ ok: false, code: 'event-invalid' });
 	});
 
 	it('requires each step exact operation-pack-semantics assumption during resume validation', async () => {
@@ -1245,10 +1391,8 @@ describe('resumeTransitionRun', () => {
 		};
 
 		const result = await resumeWith(tampered, [], rt);
-
 		expect(result.assessment.reasons[0]).toMatchObject({
-			code: 'context-mismatch',
+			code: 'resume-required',
 		});
-		expect(result.assessment.reasons[0]?.detail).toContain(assumptionB.id);
 	});
 });

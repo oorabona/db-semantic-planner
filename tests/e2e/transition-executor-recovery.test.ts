@@ -31,6 +31,7 @@ import {
 	createProver,
 	createStagedTransitionOrchestrator,
 	isOperationRuntime,
+	loadVerifiedRecoveryJournal,
 	type ModelIR,
 	type ObservationContext,
 	type ObservationRequest,
@@ -44,6 +45,7 @@ import {
 	type TransitionRule,
 	type TransitionRunMetadata,
 	type TransitionRunPersister,
+	transitionPlanDigest,
 } from '@dbsp/core';
 import type { CheckConstraintIR, EnumIR } from '@dbsp/types';
 import type { Pool } from 'pg';
@@ -825,12 +827,18 @@ describe('ADR-0003 transition executor recovery', () => {
 			)}.${quoteIdent('users')} (${quoteIdent('email')})`,
 		);
 
+		const loaded = await loadVerifiedRecoveryJournal(
+			run.runId,
+			transitionPlanDigest(outcome.plan),
+			(runId) => readTransitionJournal(pool, runId),
+		);
+		expect(loaded).toMatchObject({ ok: true });
+		if (!loaded.ok) return;
 		const resumed = await createApplier(
 			registry,
 			createPgTransitionRunPersister(pool),
 		).resume(
-			run.runId,
-			(runId) => readTransitionJournal(pool, runId),
+			loaded.journal,
 			() => readPgObservationContextFromLessor(target, schemaName),
 			basePolicy,
 			target,

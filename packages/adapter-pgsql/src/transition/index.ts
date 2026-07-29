@@ -13,6 +13,7 @@ export {
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	DBSP_TRANSITION_RUN_PLAN_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
@@ -41,6 +42,8 @@ export {
 	forcePgUtf8Session,
 	PgExecutionContractDerivationError,
 	pgTargetIdentityMismatch,
+	preparePgExecutionSession,
+	preparePgRecoveryAdmission,
 	readPgExecutionTargetFromClient,
 	validatePgExecutionContractDerivation,
 } from './execution-contract.js';
@@ -52,10 +55,12 @@ export {
 	appendCompletionJournal,
 	appendIntentJournal,
 	appendObservedJournal,
+	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	ensureTransitionJournal,
 	readTransitionJournal,
 	renderCreateDbspMetaSchemaSql,
+	renderCreateTransitionAuthorizationTableSql,
 	renderCreateTransitionJournalTableSql,
 	renderCreateTransitionRunPlanTableSql,
 	renderCreateTransitionRunTableSql,
@@ -65,6 +70,8 @@ export {
 	acquirePgTransitionClient,
 	createPgTransitionLessor,
 	type PgTransitionClientLease,
+	type PgTransitionRunLockResult,
+	withPgTransitionRunLock,
 } from './lessor.js';
 // The …FromClient helpers stay internal: the supported entry points acquire and
 // release their own lease, so a caller never has to hold one to read context.

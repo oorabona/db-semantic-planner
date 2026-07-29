@@ -7,12 +7,14 @@ import type {
 	TransactionalCompletionRecord,
 	TransitionJournalEvent,
 	TransitionJournalEventName,
+	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import {
 	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	DBSP_TRANSITION_RUN_PLAN_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
@@ -75,6 +77,10 @@ function transitionRunPlanTable(): string {
 	return qualified(DBSP_META_SCHEMA, DBSP_TRANSITION_RUN_PLAN_TABLE);
 }
 
+function transitionAuthorizationTable(): string {
+	return qualified(DBSP_META_SCHEMA, DBSP_TRANSITION_AUTHORIZATION_TABLE);
+}
+
 export function renderCreateDbspMetaSchemaSql(): string {
 	return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(DBSP_META_SCHEMA, 'schema')}`;
 }
@@ -120,6 +126,14 @@ export function renderCreateTransitionRunPlanTableSql(): string {
 	);
 }
 
+export function renderCreateTransitionAuthorizationTableSql(): string {
+	return (
+		`CREATE TABLE IF NOT EXISTS ${transitionAuthorizationTable()} (` +
+		'run_id text NOT NULL, seq bigint NOT NULL, policy jsonb NOT NULL, grants jsonb NOT NULL, digest text NOT NULL, actor text NOT NULL, authorized_at timestamptz NOT NULL DEFAULT now(), ' +
+		`PRIMARY KEY (run_id, seq), FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id))`
+	);
+}
+
 type JournalTableShapeRow = {
 	readonly relkind: string | null;
 	readonly columns: unknown;
@@ -156,6 +170,23 @@ function jsonArray(value: unknown): readonly unknown[] {
 	} catch {
 		return [];
 	}
+}
+
+/** Authorization lists are signed data: malformed is never equivalent to empty. */
+function authorizationJsonArray(
+	value: unknown,
+	field: 'policy' | 'grants',
+): readonly unknown[] {
+	if (Array.isArray(value)) return value;
+	if (typeof value === 'string') {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (Array.isArray(parsed)) return parsed;
+		} catch {
+			// Fall through to the single malformed-row error below.
+		}
+	}
+	throw new Error(`dbsp transition authorization row has an invalid ${field}`);
 }
 
 function jsonStringArray(value: unknown): readonly string[] {
@@ -331,6 +362,46 @@ function assertRunPlanTableShape(row: JournalTableShapeRow | undefined): void {
 	}
 }
 
+function assertAuthorizationTableShape(
+	row: JournalTableShapeRow | undefined,
+): void {
+	if (row?.relkind !== 'r') {
+		throw new Error('dbsp transition authorization table has invalid shape');
+	}
+	const columns = jsonRecord(row.columns);
+	if (
+		!columnsMatch(columns, {
+			run_id: 'text',
+			seq: 'bigint',
+			policy: 'jsonb',
+			grants: 'jsonb',
+			digest: 'text',
+			actor: 'text',
+			authorized_at: 'timestamp with time zone',
+		})
+	) {
+		throw new Error('dbsp transition authorization table columns drifted');
+	}
+	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id","seq"]') {
+		throw new Error('dbsp transition authorization table primary key drifted');
+	}
+	const foreignKeys = jsonArray(row.foreign_keys);
+	if (
+		foreignKeys.length !== 1 ||
+		!foreignKeyMatches(foreignKeys[0], {
+			columns: ['run_id'],
+			foreignSchema: DBSP_META_SCHEMA,
+			foreignTable: DBSP_TRANSITION_RUN_TABLE,
+			foreignColumns: ['run_id'],
+		})
+	) {
+		throw new Error('dbsp transition authorization table foreign key drifted');
+	}
+	if (jsonArray(row.checks).length !== 0) {
+		throw new Error('dbsp transition authorization table constraints drifted');
+	}
+}
+
 async function readJournalTableShape(
 	executor: TransitionJournalQueryable,
 	table: string,
@@ -397,6 +468,9 @@ async function verifyTransitionJournalShape(
 	assertRunPlanTableShape(
 		await readJournalTableShape(executor, DBSP_TRANSITION_RUN_PLAN_TABLE),
 	);
+	assertAuthorizationTableShape(
+		await readJournalTableShape(executor, DBSP_TRANSITION_AUTHORIZATION_TABLE),
+	);
 }
 
 export async function ensureTransitionJournal(
@@ -406,6 +480,7 @@ export async function ensureTransitionJournal(
 	await executor.query(renderCreateTransitionRunTableSql());
 	await executor.query(renderCreateTransitionRunPlanTableSql());
 	await executor.query(renderCreateTransitionJournalTableSql());
+	await executor.query(renderCreateTransitionAuthorizationTableSql());
 	await verifyTransitionJournalShape(executor);
 }
 
@@ -700,6 +775,36 @@ export async function appendObservedJournal(
 	});
 }
 
+/** Append-only run approval, intentionally separate from step attempts. */
+export async function appendTransitionAuthorization(
+	executor: TransitionJournalQueryable,
+	record: TransitionRunAuthorization,
+): Promise<void> {
+	await ensurePersistedRun(executor, record.runId);
+	const inserted = await executor.query(
+		`WITH run_lock AS MATERIALIZED (` +
+			`SELECT r.run_id FROM ${transitionRunTable()} r WHERE r.run_id = $1 FOR UPDATE` +
+			`), no_step_events AS (` +
+			`SELECT run_id FROM run_lock WHERE NOT EXISTS (SELECT 1 FROM ${transitionJournalTable()} j WHERE j.run_id = $1)` +
+			`), next_seq AS (SELECT COALESCE(max(seq), 0) + 1 AS seq FROM ${transitionAuthorizationTable()} WHERE run_id = $1) ` +
+			`INSERT INTO ${transitionAuthorizationTable()} (run_id, seq, policy, grants, digest, actor, authorized_at) ` +
+			'SELECT run_id, (SELECT seq FROM next_seq), $2::jsonb, $3::jsonb, $4, $5, $6::timestamptz FROM no_step_events RETURNING run_id',
+		[
+			record.runId,
+			JSON.stringify(record.policy),
+			JSON.stringify(record.grants),
+			record.digest,
+			record.actor,
+			record.authorizedAt,
+		],
+	);
+	if (!inserted.rows[0]) {
+		throw new Error(
+			`dbsp transition run ${record.runId} already has step-attempt events and cannot be authorized`,
+		);
+	}
+}
+
 function runMetadataFromRow(
 	row: Record<string, unknown>,
 ): TransitionRunMetadata {
@@ -780,8 +885,12 @@ function eventFromRow(row: Record<string, unknown>): TransitionJournalEvent {
 export async function readTransitionJournal(
 	executor: TransitionJournalQueryable,
 	runId: string,
+	options: { readonly ensure?: boolean } = {},
 ): Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }> {
-	await ensureTransitionJournal(executor);
+	// Apply/recover load an already-planned run with `ensure: false`: creation
+	// remains exclusive to planning, while verification is mandatory everywhere.
+	if (options.ensure !== false) await ensureTransitionJournal(executor);
+	else await verifyTransitionJournalShape(executor);
 	const run = await executor.query(
 		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
 			`FROM ${transitionRunTable()} WHERE run_id = $1`,
@@ -806,9 +915,40 @@ export async function readTransitionJournal(
 			`FROM ${transitionJournalTable()} WHERE run_id = $1 ORDER BY seq`,
 		[runId],
 	);
+	const authorizations = await executor.query(
+		`SELECT run_id, policy, grants, digest, actor, authorized_at FROM ${transitionAuthorizationTable()} WHERE run_id = $1 ORDER BY seq`,
+		[runId],
+	);
 	return {
 		run: runMetadataFromRow(runRow),
 		plan: planFromRow(planRow),
 		events: events.rows.map(eventFromRow),
+		authorizations: authorizations.rows.map((row) => {
+			const policy = authorizationJsonArray(
+				row.policy,
+				'policy',
+			) as TransitionRunAuthorization['policy'];
+			const grants = authorizationJsonArray(
+				row.grants,
+				'grants',
+			) as TransitionRunAuthorization['grants'];
+			if (typeof row.digest !== 'string' || typeof row.actor !== 'string') {
+				throw new Error(
+					'dbsp transition authorization row has an invalid shape',
+				);
+			}
+			const authorizedAt =
+				row.authorized_at instanceof Date
+					? row.authorized_at.toISOString()
+					: String(row.authorized_at);
+			return {
+				runId,
+				policy,
+				grants,
+				digest: row.digest,
+				actor: row.actor,
+				authorizedAt,
+			};
+		}),
 	};
 }

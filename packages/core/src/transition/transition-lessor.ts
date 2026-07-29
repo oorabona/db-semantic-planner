@@ -1,4 +1,5 @@
 import type {
+	ExclusiveTransitionTarget,
 	PlanAssessment,
 	SemanticArtifactRef,
 	TransitionLessor,
@@ -30,11 +31,14 @@ type LessorBrand = {
 type CapturedLease = {
 	readonly raw: unknown;
 	readonly query: (...args: readonly unknown[]) => unknown;
+	readonly queryPlanOperation:
+		| ((...args: readonly unknown[]) => unknown)
+		| undefined;
 	readonly release: (...args: readonly unknown[]) => unknown;
 };
 
 async function captureLease(value: unknown): Promise<CapturedLease> {
-	const { query, release } = leaseMembers(value);
+	const { query, queryPlanOperation, release } = leaseMembers(value);
 	if (typeof query !== 'function' || typeof release !== 'function') {
 		const rejection = new Error(
 			'A transition lessor must acquire a lease exposing query() and release(). ' +
@@ -46,6 +50,12 @@ async function captureLease(value: unknown): Promise<CapturedLease> {
 	return {
 		raw: value,
 		query: query as CapturedLease['query'],
+		queryPlanOperation:
+			typeof queryPlanOperation === 'function'
+				? (queryPlanOperation as NonNullable<
+						CapturedLease['queryPlanOperation']
+					>)
+				: undefined,
 		release: release as CapturedLease['release'],
 	};
 }
@@ -56,6 +66,102 @@ export type TransitionLease = {
 	readonly release: (failure?: TransitionLeaseFailure) => Promise<void>;
 };
 
+const planOperationQueries = new WeakMap<
+	object,
+	(sql: string, params?: unknown) => Promise<unknown>
+>();
+
+/**
+ * Mint the session passed to an operation's executeOperation() method.
+ *
+ * The returned client has the same narrow query surface as a normal session,
+ * but its provenance is carried by the lease channel selected here, not by
+ * recognizing the SQL text.  A pack never receives the unwrapped session.
+ */
+export function planOperationSession(
+	session: TransitionSessionClient,
+): TransitionSessionClient {
+	const query = planOperationQueries.get(session as object);
+	if (!query) return session;
+	return Object.freeze({
+		query: (sql: string, params?: unknown) => query(sql, params),
+	}) as TransitionSessionClient;
+}
+
+type ExclusiveTargetState = {
+	readonly target: TransitionLessor;
+	readonly isLive: () => boolean;
+};
+
+const exclusiveTargets = new WeakMap<object, ExclusiveTargetState>();
+
+/**
+ * Mint a durable target from an adapter-held exclusive lease.
+ *
+ * The adapter owns the liveness closure.  Core retains the only lookup table,
+ * so a durable caller cannot substitute a generic lessor or retain a target
+ * after the adapter callback has finished.
+ */
+export function createExclusiveTransitionTarget(
+	target: TransitionLessor,
+	isLive: () => boolean,
+): ExclusiveTransitionTarget {
+	if (!isTransitionLessor(target)) {
+		throw new Error(
+			'exclusive transition target requires a core-minted lessor',
+		);
+	}
+	const exclusive = Object.freeze({});
+	exclusiveTargets.set(exclusive, { target, isLive });
+	return exclusive as ExclusiveTransitionTarget;
+}
+
+/** Recognize a core-minted exclusive durable target. */
+export function isExclusiveTransitionTarget(
+	value: unknown,
+): value is ExclusiveTransitionTarget {
+	return (
+		value != null &&
+		(typeof value === 'object' || typeof value === 'function') &&
+		exclusiveTargets.has(value as object)
+	);
+}
+
+/** Acquire the callback-live lease underlying a durable execution target. */
+export async function acquireExclusiveTransitionLease(
+	target: ExclusiveTransitionTarget,
+): Promise<TransitionLease> {
+	const state = exclusiveTargets.get(target as object);
+	if (!state?.isLive()) {
+		throw new Error(
+			'exclusive transition target is only valid while its adapter lock callback is running',
+		);
+	}
+	const lease = await acquireTransitionLease(state.target);
+	if (!state.isLive()) {
+		await lease.release({
+			error: new Error(
+				'exclusive transition target ended while acquiring its lease',
+			),
+		});
+		throw new Error(
+			'exclusive transition target ended while acquiring its lease',
+		);
+	}
+	return lease;
+}
+
+/** A non-executing transition read may use either normal or exclusive access. */
+export type TransitionReadTarget = TransitionLessor | ExclusiveTransitionTarget;
+
+export function acquireTransitionTargetLease(
+	target: TransitionReadTarget,
+): Promise<TransitionLease> {
+	return isTransitionLessor(target)
+		? acquireTransitionLease(target)
+		: acquireExclusiveTransitionLease(target);
+}
+
 /**
  * Cross the engine's acquisition boundary.
  *
@@ -65,7 +171,8 @@ export type TransitionLease = {
 export async function acquireTransitionLease(
 	target: TransitionLessor,
 ): Promise<TransitionLease> {
-	const { raw, query, release } = await captureLease(await target.acquire());
+	const captured = await captureLease(await target.acquire());
+	const { raw, query, release } = captured;
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
@@ -85,6 +192,13 @@ export async function acquireTransitionLease(
 			return query.call(raw, sql, params);
 		},
 	}) as TransitionSessionClient;
+	if (captured.queryPlanOperation) {
+		planOperationQueries.set(session as object, (sql, params) =>
+			Promise.resolve(
+				captured.queryPlanOperation?.call(captured.raw, sql, params),
+			),
+		);
+	}
 	/**
 	 * Give this lease back. pg destroys a session released with an error instead
 	 * of pooling it, so the failure is passed through rather than dropped.
@@ -139,22 +253,34 @@ export async function acquireTransitionLease(
  */
 function leaseMembers(value: unknown): {
 	readonly query: unknown;
+	readonly queryPlanOperation: unknown;
 	readonly release: unknown;
 } {
 	if (
 		value == null ||
 		(typeof value !== 'object' && typeof value !== 'function')
 	) {
-		return { query: undefined, release: undefined };
+		return {
+			query: undefined,
+			queryPlanOperation: undefined,
+			release: undefined,
+		};
 	}
 	// Capture the way back before reading anything else: a getter is caller code,
 	// and one that runs first could remove the member this boundary needs to give
 	// the lease back.
 	const release = readMember(value, 'release');
-	return { query: readMember(value, 'query'), release };
+	return {
+		query: readMember(value, 'query'),
+		queryPlanOperation: readMember(value, 'queryPlanOperation'),
+		release,
+	};
 }
 
-function readMember(value: object, member: 'query' | 'release'): unknown {
+function readMember(
+	value: object,
+	member: 'query' | 'queryPlanOperation' | 'release',
+): unknown {
 	try {
 		return (value as Record<string, unknown>)[member];
 	} catch {

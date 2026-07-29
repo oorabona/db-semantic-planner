@@ -48,7 +48,7 @@ describe('transition run metadata', () => {
 			observationContextDigest(firstContext),
 		);
 		expect(metadata.databaseId).toBe('proof-evidence');
-		expect(metadata.coreVersion).toBe('0.1.0');
+		expect(metadata.coreVersion).toBe('0.3.0');
 	});
 
 	it('refuses to mint a run when the plan evidence contexts disagree', () => {

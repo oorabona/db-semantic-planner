@@ -234,6 +234,7 @@ export {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	type AttachLogicalIdentityPayload,
 	acquirePgTransitionClient,
+	appendTransitionAuthorization,
 	COLUMN_EXISTS_OBSERVATION,
 	createAlterColumnSetNotNullOperationRuntime,
 	createAlterTypeAddValueOperationRuntime,
@@ -249,6 +250,7 @@ export {
 	createSetNotNullRule,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	DBSP_TRANSITION_RUN_PLAN_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
@@ -277,6 +279,8 @@ export {
 	type PgTransitionClientLease,
 	type PgTransitionPackOptions,
 	pgTargetIdentityMismatch,
+	preparePgExecutionSession,
+	preparePgRecoveryAdmission,
 	readPgExecutionTargetFromClient,
 	readPgObservationContextFromLessor,
 	readTransitionJournal,
@@ -286,6 +290,7 @@ export {
 	renderCreateDbspMetaSchemaSql,
 	renderCreateLogicalIdentityIndexesSql,
 	renderCreateLogicalIdentitySideTableSql,
+	renderCreateTransitionAuthorizationTableSql,
 	renderCreateTransitionJournalTableSql,
 	renderCreateTransitionRunPlanTableSql,
 	renderCreateTransitionRunTableSql,
@@ -295,6 +300,7 @@ export {
 	SET_NOT_NULL_RULE_ID,
 	type SetNotNullMatch,
 	type SetNotNullRuleOptions,
+	withPgTransitionRunLock,
 } from './transition/index.js';
 // Validation
 export {

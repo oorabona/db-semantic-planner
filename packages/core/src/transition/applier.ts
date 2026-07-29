@@ -5,6 +5,7 @@ import type {
 	ApplyResult,
 	Assumption,
 	ClaimId,
+	DurableApplyOutcome,
 	DurableIntentRecord,
 	EvidenceId,
 	EvidenceObservation,
@@ -14,21 +15,28 @@ import type {
 	OperationEffectAssessment,
 	OutcomeReason,
 	PlanAssessment,
+	ProvenPlanShape,
 	ProvenPlanStep,
 	RecoveryArtefact,
+	RecoveryOutcome,
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionLessor,
+	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { matchLiveObservationContext } from './context-match.js';
+import { validateExecutionContract } from './execution-contract.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type {
 	Applier,
+	DurableApplyInput,
+	DurableApplyResult,
 	InProcessProvenPlan,
 	TransitionRunPersister,
 } from './index.js';
-import { isMintedInProcessPlan } from './minting.js';
+import { isMintedInProcessPlan, mintInProcessPlan } from './minting.js';
+import { transitionPlanDigest } from './plan-digest.js';
 import {
 	type ExecutionCoordinator,
 	isOperationRuntime,
@@ -40,8 +48,11 @@ import { assumptionAccepted } from './resource-scope.js';
 import { resumeTransitionRun } from './resume.js';
 import { createTransitionRunMetadata } from './run-metadata.js';
 import {
+	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
+	createTransitionLessor,
 	isTransitionLessor,
+	planOperationSession,
 	type TransitionLease,
 	type TransitionLeaseFailure,
 	transitionLessorRejectionAssessment,
@@ -55,6 +66,132 @@ const APPLIER_ARTIFACT = {
 
 const UNMINTED_PLAN_DETAIL =
 	'plan was not minted by prove() in this process; applying a serialized plan is a separate, not-yet-available API (roadmap: identity & adoption)';
+
+/**
+ * An execution path is strict at exactly one of these boundaries.  Public
+ * `apply()` has no durable preflight input, so it defaults to the in-process
+ * boundary.  Only `applyDurable()` can construct the durable-contract branch
+ * after it has loaded and verified the persisted contract.
+ */
+type ExecutionContextBoundary =
+	| {
+			readonly kind: 'in-process';
+			readonly expectedContext: ObservationContext;
+	  }
+	| {
+			readonly kind: 'durable-contract';
+			readonly context: ObservationContext;
+	  };
+
+type DurableExecutionCarrier = {
+	readonly plan: InProcessProvenPlan;
+	readonly assessment: ApplicableAssessment;
+	readonly __durableRun?: TransitionRunMetadata;
+	readonly __executionBoundary?: Extract<
+		ExecutionContextBoundary,
+		{ readonly kind: 'durable-contract' }
+	>;
+};
+
+function contextMatchAtExecutionBoundary(
+	boundary: ExecutionContextBoundary,
+	actual: ObservationContext,
+) {
+	if (boundary.kind === 'durable-contract') return { ok: true } as const;
+	return matchLiveObservationContext({
+		expected: boundary.expectedContext,
+		actual,
+	});
+}
+
+function snapshotDurablePlan(plan: ProvenPlanShape): InProcessProvenPlan {
+	const text = JSON.stringify(plan);
+	if (text === undefined)
+		throw new Error('durable plan is not JSON serializable');
+	return mintInProcessPlan(JSON.parse(text) as ProvenPlanShape);
+}
+
+/**
+ * Stable durable-apply refusal names.  The assessment remains a
+ * `context-mismatch`: no target operation has begun.  The fact value gives
+ * the CLI a lossless, public result contract without teaching core execution
+ * a second result type.
+ */
+export type DurableApplyRefusalCode =
+	| 'load-failed'
+	| 'run-id-mismatch'
+	| 'compatibility-refusal'
+	| 'plan-digest-mismatch'
+	| 'digest-mismatch'
+	| 'plan-validation-failed'
+	| 'execution-contract-refused'
+	| 'execution-preflight-failed'
+	| 'execution-failed'
+	| 'context-mismatch'
+	| 'prior-step-events-refusal'
+	| 'transactional-only-refusal'
+	| 'operation-unavailable'
+	| 'assumption-not-accepted'
+	| 'authorization-write-failed';
+
+function durableRefusal(
+	code: DurableApplyRefusalCode,
+	detail: string,
+): DurableApplyResult {
+	return {
+		durableOutcome: code,
+		assessment: assessment({
+			code: 'context-mismatch',
+			artifact: APPLIER_ARTIFACT,
+			fact: { key: 'durable-apply-outcome', value: code },
+			detail,
+			scope: [],
+		}),
+		journals: [],
+		observations: [],
+	};
+}
+
+function durableExecutionOutcome(result: ApplyResult): DurableApplyOutcome {
+	if (result.assessment.lifecycle === 'completed') return 'completed';
+	if (result.assessment.lifecycle === 'partially-applied')
+		return 'partially-applied';
+	switch (result.assessment.reasons[0]?.code) {
+		case 'unknown-step-result':
+			return 'unknown-step-result';
+		case 'operation-failed-not-applied':
+			return 'operation-failed-not-applied';
+		case 'guard-failed':
+			return 'guard-failed';
+		case 'guard-timeout':
+			return 'guard-timeout';
+		default:
+			return result.assessment.lifecycle === 'outcome-unknown'
+				? 'outcome-unknown'
+				: 'context-mismatch';
+	}
+}
+
+function recoveryOutcome(result: ApplyResult): RecoveryOutcome {
+	if (result.recoveryOutcome) return result.recoveryOutcome;
+	if (result.assessment.lifecycle === 'completed') return 'completed';
+	if (result.assessment.lifecycle === 'partially-applied')
+		return 'recovery-partially-applied';
+	switch (result.assessment.reasons[0]?.code) {
+		case 'resume-required':
+			return 'recovery-resume-required';
+		case 'unknown-step-result':
+			return 'recovery-unknown-step-result';
+		case 'guard-failed':
+			return 'recovery-guard-failed';
+		case 'guard-timeout':
+			return 'recovery-guard-timeout';
+		case 'operation-failed-not-applied':
+			return 'recovery-operation-failed-not-applied';
+		default:
+			return 'recovery-context-mismatch';
+	}
+}
 
 function assessment(
 	reason: OutcomeReason,
@@ -497,6 +634,7 @@ export function createApplier(
 			policy: ApplyPolicy,
 			target: TransitionLessor,
 		): Promise<ApplyResult> {
+			const carrier = proven as DurableExecutionCarrier;
 			const plan =
 				typeof proven === 'object' && proven !== null
 					? (proven as { readonly plan?: unknown }).plan
@@ -538,6 +676,11 @@ export function createApplier(
 					'internal error: minted proven plan has no evidence observation context',
 				);
 			}
+			const executionBoundary: ExecutionContextBoundary =
+				carrier.__executionBoundary ?? {
+					kind: 'in-process',
+					expectedContext: proofContext,
+				};
 			const assumptionById = new Map(
 				plan.assumptions.map((assumption) => [assumption.id, assumption]),
 			);
@@ -559,7 +702,7 @@ export function createApplier(
 					return unacceptedAssumptionResult(plan, assumption);
 				}
 			}
-			const run = createTransitionRunMetadata(plan);
+			const run = carrier.__durableRun ?? createTransitionRunMetadata(plan);
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
@@ -607,7 +750,19 @@ export function createApplier(
 					? result
 					: {
 							...result,
-							assessment: assessmentWithJournalWriteWarnings(result.assessment),
+							assessment: {
+								...assessmentWithJournalWriteWarnings(result.assessment),
+								// At the durable boundary, effects may be committed without an
+								// observed journal. Its durable proof is incomplete, so never
+								// report that as a completed run.
+								...(executionBoundary.kind === 'durable-contract' &&
+								result.assessment.lifecycle === 'completed'
+									? {
+											lifecycle: 'outcome-unknown' as const,
+											continuation: 'human-intervention-required' as const,
+										}
+									: {}),
+							},
 						};
 			const resultWithCommittedJournals = (
 				result: ApplyResult,
@@ -850,7 +1005,10 @@ export function createApplier(
 			} catch (error) {
 				return persistenceFailureResult(run, error);
 			}
-			let runtimeContext = proofContext;
+			let runtimeContext =
+				executionBoundary.kind === 'durable-contract'
+					? executionBoundary.context
+					: proofContext;
 			for (const {
 				resolvedSteps,
 				first,
@@ -881,6 +1039,8 @@ export function createApplier(
 					lease = await acquireTransitionLease(target);
 					client = { opaqueClient: lease.session };
 					const executionClient = client;
+					if (executionBoundary.kind === 'durable-contract')
+						activeContext = executionBoundary.context;
 					if (transactional) {
 						await segmentCoordinator.begin(executionClient);
 						transactionStarted = true;
@@ -914,10 +1074,10 @@ export function createApplier(
 							registry.contextWithDerivedCapabilities(runtimeContext);
 						const stepContext = runtimeContext;
 						activeContext = stepContext;
-						const liveContextMatch = matchLiveObservationContext({
-							expected: proofContext,
-							actual: stepContext,
-						});
+						const liveContextMatch = contextMatchAtExecutionBoundary(
+							executionBoundary,
+							stepContext,
+						);
 						if (!liveContextMatch.ok) {
 							if (transactionStarted && !committed) {
 								await segmentCoordinator.rollback(executionClient);
@@ -1082,7 +1242,11 @@ export function createApplier(
 							},
 						};
 						const executionOutcome = await entry.semantics.executeOperation(
-							executionClient,
+							{
+								opaqueClient: planOperationSession(
+									executionClient.opaqueClient,
+								),
+							},
 							entry.step.operation,
 							stepContext,
 							entry.step.guards.filter(
@@ -1769,22 +1933,254 @@ export function createApplier(
 					}
 				}
 			}
-			return {
-				assessment: assessmentWithJournalWriteWarnings(
-					completedAssessment(reportedAssessment),
-				),
+			return resultWithJournalWriteWarnings({
+				assessment: completedAssessment(reportedAssessment),
 				journals,
 				observations,
-			};
-		},
-		async resume(runId, loadCurrent, readContext, policy, target) {
-			return resumeTransitionRun(registry, {
-				runId,
-				loadCurrent,
-				readContext,
-				policy,
-				target,
 			});
+		},
+		async applyDurable(input: DurableApplyInput): Promise<DurableApplyResult> {
+			let loaded: TransitionRunJournal & { readonly plan: ProvenPlanShape };
+			try {
+				const supplied = await input.loadCurrent(input.runId);
+				loaded = JSON.parse(JSON.stringify(supplied)) as typeof supplied;
+			} catch (error) {
+				return durableRefusal(
+					'load-failed',
+					`run could not be loaded: ${errorDetail(error)}`,
+				);
+			}
+			if (loaded.run.runId !== input.runId) {
+				return durableRefusal(
+					'run-id-mismatch',
+					'loaded run id does not match requested run id',
+				);
+			}
+			if (loaded.run.coreVersion !== '0.3.0') {
+				return durableRefusal(
+					'compatibility-refusal',
+					`run is execution-ineligible; re-plan (execution compatibility epoch ${loaded.run.coreVersion} is not supported; expected 0.3.0)`,
+				);
+			}
+			let plan: InProcessProvenPlan;
+			try {
+				// The durable evidence is immutable before any adapter extension can
+				// inspect it. Callbacks receive this same verified snapshot.
+				plan = snapshotDurablePlan(loaded.plan);
+			} catch (error) {
+				return durableRefusal(
+					'plan-validation-failed',
+					`loaded plan could not be snapshotted safely: ${errorDetail(error)}`,
+				);
+			}
+			let observedPlanDigest: string;
+			try {
+				observedPlanDigest = transitionPlanDigest(plan);
+			} catch (error) {
+				return durableRefusal(
+					'plan-validation-failed',
+					`loaded plan could not be digested: ${errorDetail(error)}`,
+				);
+			}
+			if (input.expectedPlanDigest !== observedPlanDigest) {
+				return durableRefusal(
+					'plan-digest-mismatch',
+					`reviewed plan digest does not match the stored plan: expected ${input.expectedPlanDigest}; observed ${observedPlanDigest}`,
+				);
+			}
+			if (loaded.run.planDigest !== observedPlanDigest) {
+				return durableRefusal(
+					'digest-mismatch',
+					'loaded plan digest does not match run metadata',
+				);
+			}
+			const contract = validateExecutionContract(plan.executionContract);
+			if (!contract.ok)
+				return durableRefusal('execution-contract-refused', contract.detail);
+			let structural: ReturnType<typeof validateTransitionRelationalInvariants>;
+			try {
+				structural = validateTransitionRelationalInvariants({
+					kind: 'plan',
+					plan,
+				});
+			} catch (error) {
+				return durableRefusal(
+					'plan-validation-failed',
+					`loaded plan could not be structurally validated: ${errorDetail(error)}`,
+				);
+			}
+			if (!structural.ok)
+				return durableRefusal('plan-validation-failed', structural.detail);
+			if (loaded.events.length > 0) {
+				return durableRefusal(
+					'prior-step-events-refusal',
+					'run has prior step-attempt events; run dbsp recover instead',
+				);
+			}
+			if (
+				plan.segments.some(
+					(segment) => segment.transaction === 'forbids-transaction',
+				)
+			) {
+				return durableRefusal(
+					'transactional-only-refusal',
+					'durable apply executes transactional segments and refuses operations that forbid a transaction block; run was not attempted',
+				);
+			}
+			const context = plan.observations.find(
+				(observation) => observation.role === 'evidence',
+			)?.context;
+			if (!context)
+				return durableRefusal(
+					'plan-validation-failed',
+					'loaded plan has no evidence observation context',
+				);
+			const effects = new Map<string, OperationEffectAssessment>();
+			for (const step of plan.steps) {
+				let resolution: ReturnType<typeof registry.resolveOperation>;
+				try {
+					resolution = registry.resolveOperation(step.operation);
+				} catch (error) {
+					return durableRefusal(
+						'plan-validation-failed',
+						`operation ${step.operation.ref} could not be resolved: ${errorDetail(error)}`,
+					);
+				}
+				if (
+					!resolution.ok ||
+					resolution.semantics.artifact.id !==
+						step.operation.operationKind.artifact.id ||
+					resolution.semantics.artifact.version !==
+						step.operation.operationKind.artifact.version
+				) {
+					return durableRefusal(
+						'operation-unavailable',
+						`required operation artifact ${step.operation.operationKind.artifact.id}@${step.operation.operationKind.artifact.version} is unavailable`,
+					);
+				}
+				try {
+					effects.set(
+						step.operation.ref,
+						resolution.semantics.effectsOf(step.operation, context),
+					);
+				} catch (error) {
+					return durableRefusal(
+						'plan-validation-failed',
+						`operation ${step.operation.ref} could not be validated: ${errorDetail(error)}`,
+					);
+				}
+			}
+			let semantic: ReturnType<typeof validateTransitionRelationalInvariants>;
+			try {
+				semantic = validateTransitionRelationalInvariants({
+					kind: 'plan',
+					plan,
+					operationEffectsByRef: effects,
+				});
+			} catch (error) {
+				return durableRefusal(
+					'plan-validation-failed',
+					`loaded plan could not be semantically validated: ${errorDetail(error)}`,
+				);
+			}
+			if (!semantic.ok)
+				return durableRefusal('plan-validation-failed', semantic.detail);
+			for (const assumption of plan.assumptions) {
+				if (!assumptionAccepted(assumption, input.policy)) {
+					return durableRefusal(
+						'assumption-not-accepted',
+						`assumption ${assumption.id} (${assumption.class}) is not accepted for its trust root and scope`,
+					);
+				}
+			}
+			let lease: TransitionLease | undefined;
+			try {
+				lease = await acquireExclusiveTransitionLease(input.target);
+			} catch (error) {
+				return durableRefusal(
+					'execution-preflight-failed',
+					`execution preflight lease could not be acquired: ${errorDetail(error)}`,
+				);
+			}
+			try {
+				const preflightLease = lease;
+				let prepared: Awaited<ReturnType<typeof input.prepareExecutionSession>>;
+				try {
+					prepared = await input.prepareExecutionSession(
+						preflightLease.session,
+						contract.contract,
+						plan,
+					);
+				} catch (error) {
+					return durableRefusal(
+						'execution-preflight-failed',
+						`execution preflight query failed: ${errorDetail(error)}`,
+					);
+				}
+				if (!prepared.ok)
+					return durableRefusal(
+						prepared.kind === 'failed'
+							? 'execution-preflight-failed'
+							: 'execution-contract-refused',
+						prepared.detail,
+					);
+				try {
+					await input.authorize(loaded.run, plan, preflightLease.session);
+				} catch (error) {
+					return durableRefusal(
+						'authorization-write-failed',
+						`authorization could not be committed: ${errorDetail(error)}`,
+					);
+				}
+				const pinnedTarget = createTransitionLessor(async () => ({
+					query: (sql: string, params?: unknown) =>
+						preflightLease.session.query(sql, params),
+					// Re-minting the logical lease must retain the operation origin.
+					// The ordinary channel remains available to durable infrastructure.
+					queryPlanOperation: (sql: string, params?: unknown) =>
+						planOperationSession(preflightLease.session).query(sql, params),
+					// apply() owns logical segment leases, but this outer durable
+					// boundary owns the physical connection until apply() has settled:
+					// post-step observed-journal writes still use this session.
+					release: () => undefined,
+				}));
+				// Await before this try's finally returns the physical lease. A bare
+				// return would run finally while apply() still owns its logical leases
+				// and can still owe an observed-journal write.
+				try {
+					const result = await this.apply(
+						{
+							plan,
+							assessment: derivedApplicableAssessment(plan),
+							__durableRun: loaded.run,
+							__executionBoundary: {
+								kind: 'durable-contract',
+								context: prepared.context,
+							},
+						} as DurableExecutionCarrier,
+						input.policy,
+						pinnedTarget,
+					);
+					return { ...result, durableOutcome: durableExecutionOutcome(result) };
+				} catch (error) {
+					return durableRefusal(
+						'execution-failed',
+						`execution phase failed: ${errorDetail(error)}`,
+					);
+				}
+			} finally {
+				if (lease) await lease.release();
+			}
+		},
+		async resume(journal, readContext, policy, target, admitRecovery) {
+			const result = await resumeTransitionRun(registry, {
+				journal,
+				readContext,
+				target,
+				...(policy ? { policy } : {}),
+				...(admitRecovery ? { admitRecovery } : {}),
+			});
+			return { ...result, recoveryOutcome: recoveryOutcome(result) };
 		},
 	};
 }

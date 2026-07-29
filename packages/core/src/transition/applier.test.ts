@@ -19,9 +19,11 @@ import type {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTestTransitionLessor } from './__fixtures__/transition-lessor.js';
 import { createApplier } from './applier.js';
+import { createExecutionContract } from './execution-contract.js';
 import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
+import { transitionPlanDigest } from './plan-digest.js';
 import type {
 	ExecutionCoordinator,
 	OperationObservation,
@@ -29,7 +31,11 @@ import type {
 	TransitionExecutionClient,
 } from './registry.js';
 import { createPackRegistry } from './registry.js';
-import { TRANSITION_LESSOR_REJECTION } from './transition-lessor.js';
+import { createTransitionRunMetadata } from './run-metadata.js';
+import {
+	createExclusiveTransitionTarget,
+	TRANSITION_LESSOR_REJECTION,
+} from './transition-lessor.js';
 
 const operationArtifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.operations'),
@@ -157,6 +163,10 @@ function executionTarget(): TransitionLessor {
 	});
 }
 
+function durableExecutionTarget() {
+	return createExclusiveTransitionTarget(executionTarget(), () => true);
+}
+
 function fingerprint(digest: string): FingerprintManifest {
 	return {
 		algorithm: 'mock',
@@ -280,6 +290,23 @@ function planShape(overrides: Partial<ProvenPlanShape> = {}): ProvenPlanShape {
 		postconditions: [],
 		...overrides,
 	};
+}
+
+function durablePlanShape(
+	overrides: Partial<ProvenPlanShape> = {},
+): ProvenPlanShape {
+	return planShape({
+		executionContract: createExecutionContract([
+			{
+				kind: 'postgresql.physical-target',
+				mode: 'must-match',
+				systemIdentifier: 'test-system',
+				databaseOid: '1',
+				namespaces: [{ name: 'public', oid: '2200' }],
+			},
+		]),
+		...overrides,
+	});
 }
 
 function plan(overrides: Partial<ProvenPlanShape> = {}): InProcessProvenPlan {
@@ -422,6 +449,38 @@ function acceptsOperationPolicy(): ApplyPolicy {
 	return {
 		accepts: [{ class: 'operation-pack-semantics' }],
 	};
+}
+
+function durableJournal(
+	overrides: {
+		readonly plan?: ProvenPlanShape;
+		readonly events?: readonly import('@dbsp/types').TransitionJournalEvent[];
+		readonly coreVersion?: string;
+		readonly planDigest?: string;
+	} = {},
+) {
+	const shape = overrides.plan ?? durablePlanShape();
+	const run = createTransitionRunMetadata(mintInProcessPlan(shape));
+	return {
+		run: {
+			...run,
+			...(overrides.coreVersion ? { coreVersion: overrides.coreVersion } : {}),
+			...(overrides.planDigest ? { planDigest: overrides.planDigest } : {}),
+		},
+		plan: shape,
+		events: overrides.events ?? [],
+		authorizations: [],
+	};
+}
+
+function durableRegistry(rt: OperationRuntime) {
+	return createPackRegistry([
+		{
+			rules: [],
+			operationSemantics: [rt],
+			issuer: { artifact: operationArtifact, execute: async () => evidence() },
+		},
+	]);
 }
 
 function guard(phase: ApplyGuard['phase']): ProvenApplyGuard {
@@ -2046,6 +2105,38 @@ describe('createApplier', () => {
 		expect(result.journals[0]?.outcome).toBe('completed');
 	});
 
+	it('mutation: reporting completed after a durable post-commit observed journal write failure hides incomplete proof', async () => {
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
+			}),
+			writeObservedJournal: vi.fn(async () => {
+				throw new Error('journal unavailable');
+			}),
+		};
+		const journal = durableJournal();
+
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(result.durableOutcome).toBe('outcome-unknown');
+	});
+
 	it('keeps all journals for a committed multi-step segment when a post-commit observed journal write fails', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
@@ -3595,5 +3686,649 @@ describe('createApplier', () => {
 		expect(log.indexOf('guard:after-operation')).toBeGreaterThan(
 			log.indexOf('execute'),
 		);
+	});
+
+	it('mutation: authorizing a digest-mismatched durable run must not lease, write intent, or execute', async () => {
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
+		});
+		const authorize = vi.fn(async () => undefined);
+		const journal = durableJournal({ planDigest: 'not-the-plan-digest' });
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('digest-mismatch');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: omitting the reviewed digest from the exported durable API cannot reach authorization or DDL', async () => {
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
+		});
+		const journal = durableJournal();
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		} as never);
+		expect(result.durableOutcome).toBe('plan-digest-mismatch');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: replacing a stored plan and its row digest under one run id is caught by the reviewed digest before authorization or DDL', async () => {
+		const reviewed = durablePlanShape();
+		const mutated = {
+			...reviewed,
+			mutationMarker: 'replacement under the same run id',
+		} as ProvenPlanShape;
+		const journal = durableJournal({ plan: mutated });
+		const authorize = vi.fn(async () => undefined);
+		const prepareExecutionSession = vi.fn(async () => ({
+			ok: true as const,
+			context,
+		}));
+		const rt = runtime(() => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(reviewed),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession,
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('plan-digest-mismatch');
+		expect(prepareExecutionSession).not.toHaveBeenCalled();
+		expect(authorize).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: accepting a supplied digest that differs from an unmodified stored plan loses the review anchor', async () => {
+		const journal = durableJournal();
+		const authorize = vi.fn(async () => undefined);
+		const prepareExecutionSession = vi.fn(async () => ({
+			ok: true as const,
+			context,
+		}));
+		const rt = runtime(() => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: 'operator-reviewed-but-wrong-digest',
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession,
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('plan-digest-mismatch');
+		expect(prepareExecutionSession).not.toHaveBeenCalled();
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: accepting a persisted contract with reordered requirements must not authorize, lease, or execute', async () => {
+		const base = durablePlanShape();
+		const physicalTarget = base.executionContract!.requirements[0]!;
+		const journal = durableJournal({
+			plan: {
+				...base,
+				executionContract: {
+					...base.executionContract!,
+					requirements: [
+						{
+							kind: 'postgresql.session-setting',
+							mode: 'provenance',
+							setting: 'search_path',
+							value: 'public',
+						},
+						physicalTarget,
+					],
+				},
+			},
+		});
+		const rt = runtime(() => undefined);
+		const authorize = vi.fn(async () => undefined);
+		const prepareExecutionSession = vi.fn(async () => ({
+			ok: true as const,
+			context,
+		}));
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession,
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('execution-contract-refused');
+		expect(prepareExecutionSession).not.toHaveBeenCalled();
+		expect(authorize).not.toHaveBeenCalled();
+		expect(acquisitions).toBe(0);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: rechecking planning provenance after durable preflight rejects a valid cross-session apply', async () => {
+		const crossSessionContext = {
+			...context,
+			sessionConfiguration: { search_path: 'other_session' },
+		};
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
+		const rt = runtime(() => undefined, {
+			executeOperation,
+			observeContext: vi.fn(async () => crossSessionContext),
+		});
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context: crossSessionContext,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(executeOperation).toHaveBeenCalledOnce();
+	});
+
+	it('mutation: releasing the pinned session before the post-step observed journal write loses the completed journal', async () => {
+		const order: string[] = [];
+		let released = false;
+		let observedJournalWritten = false;
+		const rt = runtime(() => undefined, {
+			executeOperation: async () => ({ kind: 'completed' }),
+		});
+		rt.writeObservedJournal = async (client) => {
+			order.push('observed-journal');
+			await (
+				client.opaqueClient as { query(sql: string): Promise<unknown> }
+			).query('INSERT observed journal');
+			observedJournalWritten = true;
+		};
+		const target = createExclusiveTransitionTarget(
+			createTestTransitionLessor(async () => {
+				acquisitions += 1;
+				return {
+					query: async () => {
+						if (released) throw new Error('query after release');
+						return { rows: [] };
+					},
+					release: () => {
+						order.push('release');
+						released = true;
+					},
+				};
+			}),
+			() => true,
+		);
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target,
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(observedJournalWritten).toBe(true);
+		expect(order).toEqual(['observed-journal', 'release']);
+		expect(acquisitions).toBe(1);
+	});
+
+	it('mutation: rebuilding the durable pinned target without the operation channel bypasses plan SQL checks', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const queryPlanOperation = vi.fn(async () => ({ rows: [] }));
+		const target = createExclusiveTransitionTarget(
+			createTestTransitionLessor(async () => {
+				acquisitions += 1;
+				return {
+					query,
+					queryPlanOperation,
+					release: vi.fn(),
+				};
+			}),
+			() => true,
+		);
+		const executeOperation = vi.fn(
+			async (client: TransitionExecutionClient) => {
+				await client.opaqueClient.query('ALTER TABLE users ADD COLUMN age int');
+				return { kind: 'completed' } as const;
+			},
+		);
+		const journal = durableJournal();
+
+		const result = await createApplier(
+			durableRegistry(runtime(() => undefined, { executeOperation })),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target,
+			authorize: vi.fn(async () => undefined),
+		});
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(queryPlanOperation).toHaveBeenCalledWith(
+			'ALTER TABLE users ADD COLUMN age int',
+			undefined,
+		);
+		expect(query).not.toHaveBeenCalledWith(
+			'ALTER TABLE users ADD COLUMN age int',
+			undefined,
+		);
+	});
+
+	it('mutation: dropping expectedBefore after selecting the durable boundary executes with a changed step fingerprint', async () => {
+		const crossSessionContext = {
+			...context,
+			sessionConfiguration: { search_path: 'other_session' },
+		};
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
+		const rt = runtime(() => undefined, {
+			executeOperation,
+			observeContext: vi.fn(async () => crossSessionContext),
+			buildFingerprints: () => ({
+				expectedBefore: fingerprint('changed-before'),
+				expectedAfter: fingerprint('after'),
+			}),
+		});
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context: crossSessionContext,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: authorizing a failed durable preflight writes an authorization or step attempt before retry-safe refusal', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal();
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: false as const,
+				detail: 'postgresql.physical-target differs',
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('execution-contract-refused');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: treating a preflight query failure as a step attempt loses retry safety', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal();
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: false as const,
+				kind: 'failed' as const,
+				detail: 'read connection reset',
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('execution-preflight-failed');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: treating authorization records as step attempts would refuse a pristine retry', async () => {
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
+		});
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => ({
+				...journal,
+				authorizations: [
+					{
+						runId: journal.run.runId,
+						policy: acceptsOperationPolicy().accepts,
+						grants: [],
+						digest: 'prior-authorization',
+						actor: 'operator',
+						authorizedAt: new Date().toISOString(),
+					},
+				],
+			})),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(rt.executeOperation).toHaveBeenCalledOnce();
+	});
+
+	it('mutation: allowing an attempted run to apply again must point operators to recover', async () => {
+		const rt = runtime(() => undefined);
+		const planValue = durablePlanShape();
+		const run = createTransitionRunMetadata(mintInProcessPlan(planValue));
+		const journal = durableJournal({
+			events: [
+				{
+					runId: run.runId,
+					seq: 1,
+					event: 'intent',
+					stepId: 'step:op',
+					operationRef: operation.ref,
+					operationKind: operation.operationKind,
+					recordedAt: new Date().toISOString(),
+					record: {
+						run,
+						stepId: 'step:op',
+						operation,
+						recordedAt: new Date().toISOString(),
+					},
+				},
+			],
+		});
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.durableOutcome).toBe('prior-step-events-refusal');
+		expect(result.assessment.reasons[0]?.detail).toContain('dbsp recover');
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: accepting the wrong trust root or scope must not authorize a durable apply', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal();
+		for (const policy of [
+			{
+				accepts: [
+					{
+						class: 'operation-pack-semantics',
+						fromTrustRoot: { kind: 'human' as const, identity: 'operator' },
+					},
+				],
+			},
+			{
+				accepts: [
+					{
+						class: 'operation-pack-semantics',
+						withinScope: [{ schema: 'other' }],
+					},
+				],
+			},
+		] satisfies readonly ApplyPolicy[]) {
+			const authorize = vi.fn(async () => undefined);
+			const result = await createApplier(
+				durableRegistry(rt),
+				persister,
+			).applyDurable({
+				runId: journal.run.runId,
+				expectedPlanDigest: transitionPlanDigest(journal.plan),
+				loadCurrent: vi.fn(async () => journal),
+				prepareExecutionSession: vi.fn(async () => ({
+					ok: true as const,
+					context,
+				})),
+				policy,
+				target: durableExecutionTarget(),
+				authorize,
+			});
+			expect(result.durableOutcome).toBe('assumption-not-accepted');
+			expect(authorize).not.toHaveBeenCalled();
+		}
+	});
+
+	it('mutation: continuing after an authorization write failure must not lease, write intent, or execute', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => {
+				throw new Error('authorization storage unavailable');
+			}),
+		});
+		expect(result.durableOutcome).toBe('authorization-write-failed');
+		expect(acquisitions).toBe(1);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(rt.acquireLocks).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('reports operation-specific validation failures without rejecting durable apply', async () => {
+		const failure = new Error('AlterTypeAddValue label is required');
+		const rt: OperationRuntime = {
+			...runtime(() => undefined),
+			supportsOperation: () => {
+				throw failure;
+			},
+		};
+		const journal = durableJournal();
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async () => undefined),
+		});
+		expect(result.durableOutcome).toBe('plan-validation-failed');
+		expect(result.assessment.reasons[0]?.detail).toContain(failure.message);
+	});
+
+	it('freezes the verified durable plan before extension callbacks observe it', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal();
+		const preparedPlans: ProvenPlanShape[] = [];
+		const authorizedPlans: ProvenPlanShape[] = [];
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async (_session, _contract, plan) => {
+				preparedPlans.push(plan);
+				return { ok: true as const, context };
+			}),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize: vi.fn(async (_run, plan) => {
+				authorizedPlans.push(plan);
+			}),
+		});
+		expect(result.durableOutcome).not.toBe('plan-validation-failed');
+		expect(Object.isFrozen(preparedPlans[0])).toBe(true);
+		expect(Object.isFrozen(preparedPlans[0]?.steps)).toBe(true);
+		expect(authorizedPlans[0]).toBe(preparedPlans[0]);
+	});
+
+	it('mutation: treating a transactional-only refusal as executable must not authorize or execute', async () => {
+		const base = durablePlanShape();
+		const journal = durableJournal({
+			plan: {
+				...base,
+				segments: [
+					{
+						...base.segments[0]!,
+						transaction: 'forbids-transaction',
+						commitBoundaryAfter: true,
+					},
+				],
+			},
+		});
+		const rt = runtime(() => undefined);
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('transactional-only-refusal');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('mutation: accepting an unsupported execution epoch must refuse before authorization', async () => {
+		const rt = runtime(() => undefined);
+		const journal = durableJournal({ coreVersion: '9.9.9' });
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('compatibility-refusal');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
 	});
 });
