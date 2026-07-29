@@ -642,6 +642,9 @@ export function createAlterTypeAddValueOperationRuntime() {
 					ALTER_TYPE_ADD_VALUE_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation, context: ObservationContext) {
+			return renderAlterTypeAddValueSql(payloadOf(operation), context);
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,

@@ -775,6 +775,9 @@ export function createManualSqlOperationRuntime() {
 				operation.operationKind.name === MANUAL_SQL_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation, context: ObservationContext) {
+			return payloadOf(operation, context).statement.text;
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,

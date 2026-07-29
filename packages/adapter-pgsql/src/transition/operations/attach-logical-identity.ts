@@ -633,6 +633,22 @@ export function createAttachLogicalIdentityOperationRuntime() {
 					ATTACH_LOGICAL_IDENTITY_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation) {
+			const payload = payloadOf(operation);
+			return [
+				renderCreateLogicalIdentitySideTableSql(payload.schema),
+				...renderCreateLogicalIdentityIndexesSql(payload.schema),
+				`${renderInsertLogicalIdentitySql(payload.schema)} -- bound values: ${JSON.stringify(
+					[
+						payload.logicalId,
+						payload.schema,
+						payload.table,
+						payload.column ?? null,
+						payload.carrierKind,
+					],
+				)}`,
+			].join(';\n');
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,

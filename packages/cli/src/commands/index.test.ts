@@ -23,6 +23,8 @@
  * for follow-up.
  */
 
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateCommand } from './generate.js';
@@ -147,5 +149,76 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(caughtErr).toBeInstanceOf(CommanderError);
 		const ce = caughtErr as CommanderError;
 		expect(ce.exitCode).toBe(1);
+	});
+
+	it('emits JSON for plan required-option failures with --format json [mutation: recognize only --json]', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, 'plan', 'schema.ts', '--format', 'json'],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, NO_COLOR: '' },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("required option '-d, --db <url>'"),
+		});
+		expect(completed.stderr).toBe('');
+	});
+
+	it('emits one JSON document without root stderr for plan JSON selected after an unknown root option [mutation: let root Commander write stderr]', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				'--bogus',
+				'plan',
+				'schema.ts',
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, NO_COLOR: '' },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("unknown option '--bogus'"),
+		});
+		expect(completed.stderr).toBe('');
+	});
+
+	it('does not emit JSON for an unknown command that merely carries plan format arguments [mutation: scan every raw argument]', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, 'plna', 'schema.ts', '--format', 'json'],
+			{ cwd: repositoryRoot, encoding: 'utf8' },
+		);
+
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).toBe('');
+		expect(completed.stderr).toContain("unknown command 'plna'");
 	});
 });

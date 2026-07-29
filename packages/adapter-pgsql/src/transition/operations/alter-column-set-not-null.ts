@@ -952,6 +952,9 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 					ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation, context: ObservationContext) {
+			return renderAlterColumnSetNotNullSql(payloadOf(operation), context);
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,

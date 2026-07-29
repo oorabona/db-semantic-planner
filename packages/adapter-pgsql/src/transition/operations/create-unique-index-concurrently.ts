@@ -949,6 +949,9 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 					CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND.name
 			);
 		},
+		renderPlanSql(operation: PhysicalOperation) {
+			return renderCreateUniqueIndexConcurrentlySql(payloadOf(operation));
+		},
 		effectsOf(
 			operation: PhysicalOperation,
 			context: ObservationContext,

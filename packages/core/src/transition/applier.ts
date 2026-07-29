@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -22,10 +21,7 @@ import type {
 	TransitionLessor,
 	TransitionRunMetadata,
 } from '@dbsp/types';
-import {
-	matchLiveObservationContext,
-	observationContextDigest,
-} from './context-match.js';
+import { matchLiveObservationContext } from './context-match.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type {
 	Applier,
@@ -33,7 +29,6 @@ import type {
 	TransitionRunPersister,
 } from './index.js';
 import { isMintedInProcessPlan } from './minting.js';
-import { transitionPlanDigest } from './plan-digest.js';
 import {
 	type ExecutionCoordinator,
 	isOperationRuntime,
@@ -43,7 +38,7 @@ import {
 } from './registry.js';
 import { assumptionAccepted } from './resource-scope.js';
 import { resumeTransitionRun } from './resume.js';
-import { stableJson } from './stable-json.js';
+import { createTransitionRunMetadata } from './run-metadata.js';
 import {
 	acquireTransitionLease,
 	isTransitionLessor,
@@ -150,44 +145,11 @@ function lockTimeoutMs(
 	return waits.length > 0 ? Math.max(...waits) : 5000;
 }
 
-function contextFromPlanObservations(
-	observations: readonly IssuedObservation[],
-): ObservationContext | undefined {
-	const evidence = observations.filter(
-		(observation) => observation.role === 'evidence',
-	);
-	const first = evidence[0]?.context;
-	if (!first) {
-		return undefined;
-	}
-	const expected = stableJson(first);
-	for (const observation of evidence.slice(1)) {
-		if (stableJson(observation.context) !== expected) {
-			return undefined;
-		}
-	}
-	return first;
-}
-
 function fingerprintMatches(
 	expected: FingerprintManifest,
 	actual: FingerprintManifest,
 ): boolean {
 	return expected.digest === actual.digest;
-}
-
-function transitionRunMetadata(
-	plan: InProcessProvenPlan,
-	context: ObservationContext,
-): TransitionRunMetadata {
-	return {
-		runId: `dbsp-${randomUUID()}`,
-		planDigest: transitionPlanDigest(plan),
-		targetContextDigest: observationContextDigest(context),
-		databaseId: context.databaseId,
-		coreVersion: APPLIER_ARTIFACT.version,
-		startedAt: recordedAt(),
-	};
 }
 
 function intentRecord(
@@ -568,10 +530,12 @@ export function createApplier(
 			}
 			const reportedAssessment = derivedApplicableAssessment(plan);
 
-			const proofContext = contextFromPlanObservations(plan.observations);
+			const proofContext = plan.observations.find(
+				(observation) => observation.role === 'evidence',
+			)?.context;
 			if (!proofContext) {
 				throw new Error(
-					'internal error: minted proven plan evidence observations do not share one context',
+					'internal error: minted proven plan has no evidence observation context',
 				);
 			}
 			const assumptionById = new Map(
@@ -595,7 +559,7 @@ export function createApplier(
 					return unacceptedAssumptionResult(plan, assumption);
 				}
 			}
-			const run = transitionRunMetadata(plan, proofContext);
+			const run = createTransitionRunMetadata(plan);
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
