@@ -11,6 +11,7 @@ import {
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
 	ensureMigrationsTable,
+	escapeDiagnosticText,
 	generateMigrationFile,
 	generateMigrationSQL,
 	getAppliedMigrations,
@@ -498,7 +499,10 @@ const devCommand = new Command('dev')
 					const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
 						...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
-						onWarning: (message) => console.warn(`⚠️  ${message}`),
+						onExpressionCanonicalizationWarning: (warning) =>
+							console.warn(
+								`⚠️  [${warning.kind} ${escapeDiagnosticText(warning.table)}.${escapeDiagnosticText(warning.name)}] ${warning.message}`,
+							),
 					});
 
 					if (diff.changes.length === 0) {

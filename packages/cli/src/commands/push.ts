@@ -6,10 +6,15 @@
  * With --drop: recreates from scratch (preserves _dbsp_migrations).
  */
 
-import type { SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
+import type {
+	ExpressionCanonicalizationWarning,
+	SchemaChange,
+	SchemaDiff,
+} from '@dbsp/adapter-pgsql';
 import {
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
+	escapeDiagnosticText,
 	generateDDL,
 	generateMigrationSQL,
 	getNamingPluginForDbCasing,
@@ -119,7 +124,12 @@ export const pushCommand = new Command('push')
 						const compareOptions = {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
 							...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
-							onWarning: (message: string) => console.warn(`⚠️  ${message}`),
+							onExpressionCanonicalizationWarning: (
+								warning: ExpressionCanonicalizationWarning,
+							) =>
+								console.warn(
+									`⚠️  [${warning.kind} ${escapeDiagnosticText(warning.table)}.${escapeDiagnosticText(warning.name)}] ${warning.message}`,
+								),
 						};
 						const diff = await comparePgsqlDatabaseSchema(
 							adapter,

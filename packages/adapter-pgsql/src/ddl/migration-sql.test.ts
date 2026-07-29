@@ -2792,7 +2792,7 @@ describe('CHECK constraints migration SQL', () => {
 		);
 	});
 
-	it('should generate ADD CHECK CONSTRAINT with escaped semicolon and comment literals', () => {
+	it('generates ADD CHECK CONSTRAINT with escaped semicolon and comment literals', () => {
 		const diff = makeDiff([
 			{
 				kind: 'add_check_constraint',
@@ -2813,7 +2813,7 @@ describe('CHECK constraints migration SQL', () => {
 		]);
 	});
 
-	it('should generate ADD CHECK CONSTRAINT with canonical ANY array string literals', () => {
+	it('generates ADD CHECK CONSTRAINT with canonical ANY array string literals', () => {
 		const diff = makeDiff([
 			{
 				kind: 'add_check_constraint',
@@ -2856,7 +2856,7 @@ describe('CHECK constraints migration SQL', () => {
 		]);
 	});
 
-	it('should generate ADD CHECK CONSTRAINT with safe dollar-quoted literal', () => {
+	it('generates ADD CHECK CONSTRAINT with safe dollar-quoted literal', () => {
 		const diff = makeDiff([
 			{
 				kind: 'add_check_constraint',

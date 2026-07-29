@@ -23,6 +23,7 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
 	generateMigrationSQL: (...args: unknown[]) =>
 		mockGenerateMigrationSQL(...args),
+	escapeDiagnosticText: (value: string) => value,
 }));
 
 // ============================================================================

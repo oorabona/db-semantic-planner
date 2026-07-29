@@ -246,9 +246,15 @@ describe('verify command live diff integration', () => {
 				_desired: unknown,
 				options?: ComparePgsqlDatabaseSchemaOptions,
 			) => {
-				options?.onWarning?.(
-					'Could not canonicalize CHECK constraint "user_profiles"."age_check"; falling back to best-effort raw string comparison.',
-				);
+				options?.onExpressionCanonicalizationWarning?.({
+					kind: 'check_constraint',
+					table: 'user_profiles\n\u001b[2J',
+					name: 'age_check',
+					constraint: 'age_check',
+					message:
+						'Could not canonicalize CHECK constraint "user_profiles"."age_check"; falling back to best-effort raw string comparison.',
+					cause: new Error('scratch DDL failed'),
+				});
 				return makeDiff();
 			},
 		);
@@ -257,6 +263,9 @@ describe('verify command live diff integration', () => {
 
 		expect(warnSpy).toHaveBeenCalledWith(
 			expect.stringContaining('Could not canonicalize CHECK constraint'),
+		);
+		expect(warnSpy).toHaveBeenCalledWith(
+			expect.stringContaining('user_profiles\\n\\u001b[2J.age_check'),
 		);
 		const json = JSON.parse(readStdout(logSpy));
 		expect(json).toMatchObject({

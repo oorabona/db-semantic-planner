@@ -25,6 +25,7 @@ export {
 	type ComparePgsqlDatabaseSchemaOptions,
 	comparePgsqlDatabaseSchema,
 	NonConvergentSchemaDiffError,
+	type NonConvergentSchemaDiffSurface,
 } from './live-diff.js';
 export {
 	generateMigrationFile,

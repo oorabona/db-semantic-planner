@@ -45,6 +45,7 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	withMigrationLock: (...args: unknown[]) => mockWithMigrationLock(...args),
 	parseMigrationFile: (...args: unknown[]) => mockParseMigrationFile(...args),
 	isDestructiveDown: (...args: unknown[]) => mockIsDestructiveDown(...args),
+	escapeDiagnosticText: (value: string) => value,
 }));
 
 // ============================================================================

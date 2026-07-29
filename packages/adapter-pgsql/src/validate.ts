@@ -385,6 +385,27 @@ export function sanitizeForDisplay(value: string): string {
 }
 
 /**
+ * Preserve hostile diagnostic text as one printable line without losing which
+ * control character was supplied. This is for diagnostics only, never SQL.
+ */
+export function escapeDiagnosticText(value: string): string {
+	return value.replace(/[\\\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => {
+		switch (character) {
+			case '\\':
+				return '\\\\';
+			case '\n':
+				return '\\n';
+			case '\r':
+				return '\\r';
+			case '\t':
+				return '\\t';
+			default:
+				return `\\u${character.codePointAt(0)?.toString(16).padStart(4, '0')}`;
+		}
+	});
+}
+
+/**
  * Sanitize display text before interpolating it into a single-line SQL comment.
  *
  * PostgreSQL `--` comments end at a line break, so any control character could
@@ -687,11 +708,15 @@ export function validateSqlExpression(sql: string, context: string): void {
  * inside PostgreSQL string literals while still rejecting them outside literals.
  *
  * This intentionally does not parse CHECK semantics. It only tracks enough
- * PostgreSQL literal context to prevent false positives for inert quoted text.
- * Escape strings such as E'...' and U&'...' are treated as ordinary single-
- * quoted strings; backslash-escaped quote cases may fail closed.
+ * PostgreSQL literal context to catch accidental or malformed unsafe tokens in
+ * machine-produced strings without false positives for inert quoted text.
+ * Escape-string syntax (`E'...'`, `U&'...'`) is outside this scanner's literal
+ * model; PostgreSQL's deparser does not emit it.
  *
- * @security Used only for CHECK constraint text sourced from ModelIR.
+ * @security This is not a trust boundary against an author who controls the
+ * schema definition. A comma is legal inside an expression, so that boundary
+ * cannot be established lexically; #425 tracks this remaining authored-CHECK
+ * surface.
  * @param sql The raw CHECK expression string to validate.
  * @param context Human-readable context label for the error message.
  * @throws Error if the expression contains unsafe tokens outside literals or an
@@ -769,7 +794,7 @@ export function validateCheckExpression(sql: string, context: string): void {
 
 function forbiddenCheckTokenAt(sql: string, index: number): string | undefined {
 	const ch = sql[index];
-	if (ch === ';' || ch === '\\') return ch;
+	if (ch === ';') return ch;
 
 	const pair = sql.slice(index, index + 2);
 	if (pair === '--' || pair === '/*' || pair === '*/') return pair;

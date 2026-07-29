@@ -47,7 +47,7 @@ dbsp migrate dev -s dbsp.schema.ts -d postgresql://localhost/mydb -n add_email_c
 
 This:
 1. Introspects the live database into a `ModelIR`
-2. Calls `compareSchemata(schemaModel, dbModel)` to produce a `SchemaDiff`
+2. Calls `comparePgsqlDatabaseSchema(adapter, schemaModel)` to introspect and produce a `SchemaDiff`
 3. Generates UP SQL via `generateMigrationSQL(diff)`
 4. Generates DOWN SQL via `generateDownSQL(diff)` — automatically reversed, topologically ordered
 5. Writes `migrations/0004_add_email_column.sql` with both sections
@@ -159,10 +159,10 @@ The versioning infrastructure is also available as a library for custom tooling:
 
 ```typescript
 // doctest: skip — requires real PostgreSQL connection (getAppliedMigrations, getNextSchemaVersion, recordMigration use pool)
-import { compareSchemata, generateDownSQL, generateMigrationSQL, getAppliedMigrations, getNextSchemaVersion, recordMigration } from '@dbsp/adapter-pgsql';
+import { comparePgsqlDatabaseSchema, generateDownSQL, generateMigrationSQL, getAppliedMigrations, getNextSchemaVersion, recordMigration } from '@dbsp/adapter-pgsql';
 
 // Compare schema definition vs live DB
-const diff = compareSchemata(schemaModel, introspectedModel);
+const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel);
 console.log(`${diff.changes.length} changes, hasDestructive: ${diff.hasDestructive}`);
 console.log(diff.summary);
 
@@ -251,4 +251,3 @@ const managed = compareSchemata(schemaModel, dbModel, { ignoreUnmanagedExtension
 - **Auto-migrate adds columns to existing `_dbsp_migrations`** — if the table was created by an
   older version without `schema_version` or `destructive` columns, `ensureMigrationsTable()` adds
   them and backfills `schema_version` by `ROW_NUMBER() OVER (ORDER BY applied_at)`.
-

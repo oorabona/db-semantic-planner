@@ -51,7 +51,7 @@ const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 - **Parameterized queries** — All user values use `$N` positional parameters; no SQL injection surface
 - **Identifier quoting** — All table/column/schema names are double-quoted automatically
 - **AST-based compiler** — SQL is built from the plan AST, never from string templates
-- **DDL provisioning** — `compareSchemata()` + `generateDDL()` with 12-phase topological sort
+- **DDL provisioning** — pure model-to-model `compareSchemata()` + `generateDDL()` with 12-phase topological sort; use live `comparePgsqlDatabaseSchema()` when provisioning from an introspected PostgreSQL database
 - **Schema migrations** — `generateMigrationSQL()` with UP/DOWN sections and destructive-change safety gate
 - **Schema introspection** — Reflect live database structure back into `ModelIR`
 - **Row-Level Security** — `rlsEnabled` + `policies[]` on `TableIR`, compiled to `CREATE POLICY` DDL
