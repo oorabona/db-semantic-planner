@@ -11,6 +11,13 @@ import type { MutationDump } from '../mutation-builders.js';
 import { createNqlTag } from '../nql.js';
 import { schema } from '../schema.js';
 
+function markExecutionAvailable(adapter: Adapter): void {
+	Object.defineProperty(adapter, 'connectionAvailability', {
+		value: { status: 'available' },
+		configurable: true,
+	});
+}
+
 function createMutationTag(executeResult: readonly unknown[] = []) {
 	const db = schema({
 		users: {
@@ -28,6 +35,7 @@ function createMutationTag(executeResult: readonly unknown[] = []) {
 		rows: [...executeResult],
 		rowCount: executeResult.length,
 	}));
+	markExecutionAvailable(adapter);
 
 	return {
 		adapter,
@@ -50,6 +58,7 @@ function createExecuteOnlyMutationTag(executeResult: readonly unknown[] = []) {
 
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
+	markExecutionAvailable(adapter);
 	Object.defineProperty(adapter, 'executeWithMeta', {
 		value: undefined,
 		configurable: true,

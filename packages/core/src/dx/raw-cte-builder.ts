@@ -27,6 +27,7 @@ import type {
 	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { executeCompiledQuery } from '../adapter.js';
 import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
@@ -203,7 +204,7 @@ export class RawCteQueryBuilder<TResult = unknown> {
 					}
 				: undefined;
 		const compiled = adapter.compileCteQuery<TResult>(intent, compileOptions);
-		return adapter.execute(compiled);
+		return executeCompiledQuery(adapter, compiled, 'recursive().all()');
 	}
 
 	/**

@@ -96,7 +96,7 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 	it('requireConnection throws when no pool given (compile-only adapter)', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		expect(() => adapter.getPoolInstance()).toThrow(
-			'PgsqlAdapter is in compile-only mode',
+			'Cannot getPoolInstance(): this PgsqlAdapter was constructed without a connection',
 		);
 	});
 
@@ -198,7 +198,7 @@ describe('PgsqlAdapter.introspect', () => {
 	it('throws on compile-only adapter', async () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		await expect(adapter.introspect()).rejects.toThrow(
-			'Cannot introspect without a database connection',
+			'Cannot introspect: this PgsqlAdapter was constructed without a connection',
 		);
 	});
 });
@@ -247,7 +247,7 @@ describe('PgsqlAdapter.executeDDL', () => {
 	it('throws on compile-only adapter', async () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		await expect(adapter.executeDDL('CREATE TABLE x (id INT)')).rejects.toThrow(
-			'Cannot execute DDL on compile-only adapter',
+			'Cannot executeDDL: this PgsqlAdapter was constructed without a connection',
 		);
 	});
 });

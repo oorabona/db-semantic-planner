@@ -37,11 +37,14 @@ import {
 } from '@dbsp/types/internal';
 import {
 	type Adapter,
+	assertConnectionAvailable,
 	type CompileOptions,
 	type DbCasing,
 	type Dump,
 	type DumpMeta,
 	type DumpSequenceStep,
+	executeCompiledQuery,
+	executeCompiledQueryWithMeta,
 	type NqlRuntimeBinding,
 	supportsTransactions,
 } from '../adapter.js';
@@ -1692,7 +1695,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					parameters: compiled.parameters,
 					execute: async () => {
 						if (typeof adapter.executeWithMeta === 'function') {
-							const metadata = await adapter.executeWithMeta(compiled);
+							const metadata = await executeCompiledQueryWithMeta(
+								adapter,
+								compiled,
+								'nql().all()',
+							);
 							const hookRows = metadata.rows as unknown[];
 							const rawRows = snapshotMutationRows(hookRows);
 							return {
@@ -1704,7 +1711,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 								affectedRows: metadata.rowCount,
 							};
 						}
-						const hookRows = (await adapter.execute(compiled)) as unknown[];
+						const hookRows = (await executeCompiledQuery(
+							adapter,
+							compiled,
+							'nql().all()',
+						)) as unknown[];
 						const rawRows = snapshotMutationRows(hookRows);
 						return {
 							result: {
@@ -1731,6 +1742,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		compiledIntent: CompiledNqlIntent,
 		adapter: Adapter<unknown>,
 	): Promise<T[]> {
+		assertConnectionAvailable(adapter, 'nql().all()');
 		if (!supportsTransactions(adapter)) {
 			throw new ExecutionError({
 				operation: 'nql',
@@ -2039,6 +2051,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (hasExecutableNqlProgramSequence(compiledIntent.bundle)) {
 			return this.executeNqlProgramSequence(compiledIntent, adapter);
 		}
+		assertConnectionAvailable(adapter, 'nql().all()');
 		if (compiledIntent.kind === 'mutation') {
 			return (
 				await this.runMutationStatement(
@@ -2066,7 +2079,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				),
 				this.nqlBundleCompileOptions(),
 			);
-			const rows = await adapter.execute(compiled);
+			const rows = await executeCompiledQuery(adapter, compiled, 'nql().all()');
 			if (bindingFinalPlanHasJsonAggIncludes(planReport)) {
 				hydrateJsonAggIncludes(
 					rows,
@@ -2082,7 +2095,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const compiled = hasNqlBindings(finalBundle)
 			? adapter.compile<T>(finalBundle, this.nqlBundleCompileOptions())
 			: adapter.compile<T>(planReport);
-		return adapter.execute(compiled);
+		return executeCompiledQuery(adapter, compiled, 'nql().all()');
 	}
 
 	async run(): Promise<void> {

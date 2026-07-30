@@ -433,12 +433,12 @@ For anything that must happen only after a successful commit — publishing an e
 
 ## Compile-only mode
 
-`createPgsqlCompileOnlyAdapter()` is an adapter, but it declares `capabilities.supportsTransactions: false`. Calling `orm.transaction()` with it rejects with `ExecutionError`:
+`createPgsqlCompileOnlyAdapter()` constructs a connectionless adapter. Calling `orm.transaction()` with it returns a rejected promise before scheduling database work:
 
 ```
-Cannot execute transaction(): The adapter does not declare capabilities.supportsTransactions: true for this ORM instance.
+Cannot execute transaction(): this PgsqlAdapter was constructed without a connection.
 
-To fix: Use an adapter that implements transaction() and withSchema(), and declare adapter.capabilities.supportsTransactions: true.
+To fix: Use createPgsqlAdapter(pool) to execute database operations.
 ```
 
 To inspect the SQL of the statements a transaction would run, call `.dump()` on the individual builders.

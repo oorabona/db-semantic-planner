@@ -1,6 +1,6 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
-import type { Adapter, Dump } from '../adapter.js';
+import { type Adapter, type Dump, executeCompiledQuery } from '../adapter.js';
 import type {
 	AggregateIntent,
 	ColumnExpressionIntent,
@@ -724,8 +724,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			planReport,
 			compileOptions,
 		);
-		const mainResults = (await adapter.execute(
+		const mainResults = (await executeCompiledQuery(
+			adapter,
 			compiledWithIncludes.main,
+			'all()',
 		)) as TResult[];
 
 		// Create hydrator for result transformation (AUD-005)
@@ -953,7 +955,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		}
 
 		const compiled = adapter.compile(planReport, compileOptions);
-		const rows = await adapter.execute(compiled);
+		const rows = await executeCompiledQuery(adapter, compiled, 'exists()');
 		return (
 			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true
 		);
@@ -1023,7 +1025,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			compileOptions.schemaName = this.ctx.schemaName;
 		}
 		const compiled = adapter.compile(planReport, compileOptions);
-		const rows = await adapter.execute(compiled);
+		const rows = await executeCompiledQuery(adapter, compiled, 'exists()');
 		const result =
 			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true;
 
@@ -1389,8 +1391,10 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		let mainResults: TResult[];
 		try {
-			mainResults = (await adapter.execute(
+			mainResults = (await executeCompiledQuery(
+				adapter,
 				compiledWithIncludes.main,
+				'all()',
 			)) as TResult[];
 		} catch (error) {
 			if (store.onError.length > 0) {

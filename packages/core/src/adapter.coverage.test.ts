@@ -5,11 +5,15 @@
  * and the assertCapability function.
  */
 
-import type { Adapter, BaseAdapter } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Adapter, BaseAdapter, CompiledQuery } from '@dbsp/types';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	AdapterRequiredError,
 	assertCapability,
+	executeCompiledQuery,
+	executeCompiledQueryWithMeta,
 	supportsDDLGeneration,
 	supportsExecution,
 	supportsIntrospection,
@@ -334,5 +338,66 @@ describe('assertCapability', () => {
 			const adapter = makeAdapter({ [cap]: true });
 			expect(() => assertCapability(adapter, cap, `test-${cap}`)).not.toThrow();
 		}
+	});
+});
+
+// ============================================================================
+// Compiled query execution funnel
+// ============================================================================
+
+describe('compiled query execution funnel', () => {
+	const query: CompiledQuery = { sql: 'SELECT 1', parameters: [] };
+
+	function unavailableAdapter(): Adapter {
+		return {
+			connectionAvailability: {
+				status: 'unavailable',
+				reason: 'the test adapter has no connection',
+				fix: 'Provide a connection.',
+			},
+			execute: vi.fn(),
+			executeWithMeta: vi.fn(),
+		} as unknown as Adapter;
+	}
+
+	it('rejects before either adapter execution method is reached', () => {
+		const adapter = unavailableAdapter();
+
+		expect(() =>
+			executeCompiledQuery(adapter, query, 'funnel execute'),
+		).toThrow(
+			'Cannot execute funnel execute: the test adapter has no connection\n\nTo fix: Provide a connection.',
+		);
+		expect(() =>
+			executeCompiledQueryWithMeta(adapter, query, 'funnel metadata execute'),
+		).toThrow(
+			'Cannot execute funnel metadata execute: the test adapter has no connection\n\nTo fix: Provide a connection.',
+		);
+		expect(adapter.execute).not.toHaveBeenCalled();
+		expect(adapter.executeWithMeta).not.toHaveBeenCalled();
+	});
+
+	it('keeps direct compiled-query execution inside the guarded funnel', () => {
+		const sourceDirectory = new URL('.', import.meta.url);
+		const sourceFiles = readdirSync(sourceDirectory, {
+			recursive: true,
+		})
+			.filter(
+				(file): file is string =>
+					typeof file === 'string' &&
+					file.endsWith('.ts') &&
+					!file.endsWith('.test.ts'),
+			)
+			.filter((file) => {
+				const source = readFileSync(
+					join(sourceDirectory.pathname, file),
+					'utf8',
+				);
+				return /(?:this\.)?adapter\.execute(?:WithMeta)?\(/.test(source);
+			});
+
+		// A terminal added later must delegate to executeCompiledQuery() or
+		// executeCompiledQueryWithMeta(); otherwise this invariant fails.
+		expect(sourceFiles).toEqual(['adapter.ts']);
 	});
 });

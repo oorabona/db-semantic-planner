@@ -8,7 +8,12 @@
  * `adapter.compileSetOperation()` so that `@dbsp/core` remains DB-agnostic.
  */
 
-import type { Adapter, Dump, DumpMeta } from '../adapter.js';
+import {
+	type Adapter,
+	type Dump,
+	type DumpMeta,
+	executeCompiledQuery,
+} from '../adapter.js';
 import type {
 	QueryIntent,
 	SetOperationIntent,
@@ -172,8 +177,11 @@ export class SetOperationBuilderImpl<TResult = unknown>
 
 	async all(): Promise<TResult[]> {
 		const adapter = this.requireAdapter();
-		const compiled = adapter.compileSetOperation(this.intent, this.model);
-		return adapter.execute(compiled) as Promise<TResult[]>;
+		const compiled = adapter.compileSetOperation<TResult>(
+			this.intent,
+			this.model,
+		);
+		return executeCompiledQuery(adapter, compiled, 'set operation all()');
 	}
 
 	async first(): Promise<TResult | undefined> {

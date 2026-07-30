@@ -21,6 +21,7 @@ import type {
 	ModelIR,
 	UnnestCteIntent,
 } from '@dbsp/types';
+import { executeCompiledQuery } from '../adapter.js';
 import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
 import { InvalidOperationError } from './errors.js';
 import type { QueryBuilderImpl } from './query-builder.js';
@@ -214,7 +215,7 @@ export class CteQueryBuilder<TResult = unknown> {
 
 		const compiled = adapter.compileCteQuery<TResult>(intent, compileOptions);
 
-		return adapter.execute(compiled);
+		return executeCompiledQuery(adapter, compiled, 'withCte().all()');
 	}
 
 	/**

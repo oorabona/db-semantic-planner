@@ -9,11 +9,12 @@
 
 import { toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
-import type {
-	Adapter,
-	CompiledQuery,
-	CompileOptions,
-	SubqueryIncludeInfo,
+import {
+	type Adapter,
+	type CompiledQuery,
+	type CompileOptions,
+	executeCompiledQuery,
+	type SubqueryIncludeInfo,
 } from '../adapter.js';
 import type { RecursiveIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -270,7 +271,11 @@ export class ResultHydrator<TResult = unknown> {
 				parentIds,
 				compileOptions,
 			);
-			const childResults = await adapter.execute(includeQuery);
+			const childResults = await executeCompiledQuery(
+				adapter,
+				includeQuery,
+				'all()',
+			);
 
 			// Group children by foreign key
 			const childrenByParentId = new Map<unknown, unknown[]>();
@@ -487,10 +492,11 @@ export class ResultHydrator<TResult = unknown> {
 		);
 
 		// Execute
-		const recursiveRows = (await adapter.execute(compiledRecursive)) as Record<
-			string,
-			unknown
-		>[];
+		const recursiveRows = (await executeCompiledQuery(
+			adapter,
+			compiledRecursive,
+			'all()',
+		)) as Record<string, unknown>[];
 
 		// Merge results back into main results
 		this.mergeRecursiveResults(

@@ -36,6 +36,8 @@ Compile SQL without a database connection — useful for CLI tooling, CI plan in
 import { createOrm, eq } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
+// This is a connectionless PgsqlAdapter: dump() works; database operations
+// refuse at runtime until you instead construct createPgsqlAdapter(pool).
 const adapter = createPgsqlCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 const { sql, params } = orm.select('users').where(eq('active', true)).dump();

@@ -5211,7 +5211,9 @@ describe('PgsqlAdapter.streamRaw', () => {
 	it('throws on streamRaw in compile-only mode', async () => {
 		const adapter = new PgsqlAdapter(undefined, {});
 		const iter = adapter.streamRaw('SELECT 1');
-		await expect(iter.next()).rejects.toThrow('compile-only mode');
+		await expect(iter.next()).rejects.toThrow(
+			'constructed without a connection',
+		);
 	});
 });
 

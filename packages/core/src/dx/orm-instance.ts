@@ -4,6 +4,7 @@ import {
 } from '@dbsp/types';
 import {
 	type Adapter,
+	assertConnectionAvailable,
 	supportsTransactions,
 	type TransactionOptions,
 } from '../adapter.js';
@@ -891,6 +892,12 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				);
 			}
 
+			try {
+				assertConnectionAvailable(adapter, 'transaction()');
+			} catch (error) {
+				return Promise.reject(error);
+			}
+
 			if (!supportsTransactions<DB>(adapter)) {
 				return Promise.reject(createUnsupportedTransactionError());
 			}
@@ -953,6 +960,12 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 							'Pass an adapter when creating the ORM.',
 					),
 				);
+			}
+
+			try {
+				assertConnectionAvailable(adapter, 'withPinnedConnection()');
+			} catch (error) {
+				return Promise.reject(error);
 			}
 
 			if (!supportsPinnedConnections<DB>(adapter)) {

@@ -4,12 +4,14 @@
  * Part of DX-010: Mutations.
  */
 
-import type {
-	Adapter,
-	CompiledQuery,
-	CompileOptions,
-	DumpMeta,
-	DumpSequenceStep,
+import {
+	type Adapter,
+	type CompiledQuery,
+	type CompileOptions,
+	type DumpMeta,
+	type DumpSequenceStep,
+	executeCompiledQuery,
+	executeCompiledQueryWithMeta,
 } from '../adapter.js';
 import type {
 	BatchUpdateIntent,
@@ -409,9 +411,10 @@ abstract class MutationBuilderBase<
 	async affectedRows(): Promise<number> {
 		const adapter = this.requireAdapter(this.operationName);
 		const intent = this.buildIntent();
+		const operation = `${this.operationName}.affectedRows()`;
 		if (typeof adapter.executeWithMeta !== 'function') {
 			throw new ExecutionError({
-				operation: `${this.operationName}.affectedRows`,
+				operation,
 				reason:
 					'this adapter does not support affectedRows(); it does not implement executeWithMeta',
 				fix: 'Use an adapter that implements executeWithMeta, or call execute() when row count metadata is not required.',
@@ -425,11 +428,11 @@ abstract class MutationBuilderBase<
 			schemaName: this.schemaName,
 			inTransaction: this.inTransaction,
 			prepare: (preparedIntent) =>
-				this.prepareMutationExecution(adapter, preparedIntent),
+				this.prepareMutationExecution(adapter, preparedIntent, operation),
 		});
 		if (execution.affectedRows === undefined) {
 			throw new ExecutionError({
-				operation: `${this.operationName}.affectedRows`,
+				operation,
 				reason:
 					'this adapter does not support affectedRows(); it did not return executeWithMeta metadata',
 				fix: 'Use an adapter that implements executeWithMeta and returns rowCount metadata.',
@@ -441,6 +444,7 @@ abstract class MutationBuilderBase<
 	private prepareMutationExecution(
 		adapter: Adapter,
 		intent: TIntent,
+		operation = `${this.operationName}()`,
 	): PreparedMutationExecution<T> {
 		const compileOptions: CompileOptions = {
 			model: this.model,
@@ -454,13 +458,21 @@ abstract class MutationBuilderBase<
 				parameters: compiled.parameters,
 				execute: async () => {
 					if (typeof adapter.executeWithMeta === 'function') {
-						const result = await adapter.executeWithMeta(compiled);
+						const result = await executeCompiledQueryWithMeta(
+							adapter,
+							compiled,
+							operation,
+						);
 						return {
 							result: result.rows as T,
 							affectedRows: result.rowCount,
 						};
 					}
-					const result = await adapter.execute(compiled);
+					const result = await executeCompiledQuery(
+						adapter,
+						compiled,
+						operation,
+					);
 					return {
 						result: result as T,
 					};
@@ -475,13 +487,17 @@ abstract class MutationBuilderBase<
 			parameters: compiled.parameters,
 			execute: async () => {
 				if (typeof adapter.executeWithMeta === 'function') {
-					const result = await adapter.executeWithMeta(compiled);
+					const result = await executeCompiledQueryWithMeta(
+						adapter,
+						compiled,
+						operation,
+					);
 					return {
 						result: undefined as T,
 						affectedRows: result.rowCount,
 					};
 				}
-				await adapter.execute(compiled);
+				await executeCompiledQuery(adapter, compiled, operation);
 				return {
 					result: undefined as T,
 				};

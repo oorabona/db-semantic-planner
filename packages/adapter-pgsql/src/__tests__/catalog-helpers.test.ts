@@ -182,7 +182,7 @@ describe('PgsqlAdapter.storageSize()', () => {
 	it('throws on compile-only adapter', async () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		await expect(adapter.storageSize('users')).rejects.toThrow(
-			'compile-only mode',
+			'constructed without a connection',
 		);
 	});
 });

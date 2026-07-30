@@ -21,6 +21,7 @@ export type {
 	CompileOptions,
 	CompileResultWithIncludes,
 	CompilingAdapter,
+	ConnectionAvailability,
 	CreateIndexOptions,
 	DbCasing,
 	DDLGeneratingAdapter,
@@ -50,6 +51,7 @@ import type {
 	Adapter,
 	AdapterCapabilities,
 	BaseAdapter,
+	CompiledQuery,
 	DDLGeneratingAdapter,
 	ExecutingAdapter,
 	IntrospectingAdapter,
@@ -57,6 +59,7 @@ import type {
 	StreamingAdapter,
 	TransactionalAdapter,
 } from '@dbsp/types';
+import { ExecutionError } from './dx/errors.js';
 
 // ============================================================================
 // Feature Detection Helpers (DX-104)
@@ -68,11 +71,80 @@ import type {
 export function supportsExecution(
 	adapter: BaseAdapter,
 ): adapter is ExecutingAdapter {
+	const connectionProvider = adapter as BaseAdapter & {
+		getPoolInstance?: () => unknown;
+	};
+	if (typeof connectionProvider.getPoolInstance === 'function') {
+		try {
+			connectionProvider.getPoolInstance();
+		} catch {
+			return false;
+		}
+	}
 	return (
 		typeof (adapter as ExecutingAdapter).execute === 'function' &&
 		typeof (adapter as ExecutingAdapter).executeOne === 'function' &&
 		typeof (adapter as ExecutingAdapter).executeOneOrThrow === 'function'
 	);
+}
+
+/**
+ * Refuse execution for adapters that explicitly report no connection.
+ *
+ * The availability declaration is optional so existing third-party adapters
+ * continue through the established capability checks unchanged.
+ */
+export function assertConnectionAvailable(
+	adapter: BaseAdapter,
+	operation: string,
+): void {
+	const availability = adapter.connectionAvailability;
+	if (availability?.status === 'unavailable') {
+		throw new ExecutionError({
+			operation,
+			reason: availability.reason,
+			fix: availability.fix,
+		});
+	}
+}
+
+/**
+ * The execution funnel for compiled queries.
+ *
+ * Every core terminal delegates to this function immediately before it reaches
+ * an adapter's execute() method, so connectionless adapters are refused
+ * consistently without each terminal owning an availability check.
+ */
+export function executeCompiledQuery<T>(
+	adapter: Adapter,
+	query: CompiledQuery<T>,
+	operation: string,
+): Promise<T[]> {
+	assertConnectionAvailable(adapter, operation);
+	return adapter.execute(query);
+}
+
+/**
+ * Metadata-returning branch of the compiled-query execution funnel.
+ */
+export function executeCompiledQueryWithMeta<T>(
+	adapter: Adapter,
+	query: CompiledQuery<T>,
+	operation: string,
+): Promise<{
+	readonly rows: T[];
+	readonly rowCount: number;
+	readonly command?: string;
+}> {
+	assertConnectionAvailable(adapter, operation);
+	if (typeof adapter.executeWithMeta !== 'function') {
+		throw new ExecutionError({
+			operation,
+			reason: 'this adapter does not implement executeWithMeta',
+			fix: 'Use an adapter that implements executeWithMeta.',
+		});
+	}
+	return adapter.executeWithMeta(query);
 }
 
 /**

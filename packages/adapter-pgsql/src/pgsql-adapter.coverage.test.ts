@@ -1882,46 +1882,52 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		it('throws on execute', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
-				/compile-only mode/,
+				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeOne', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			await expect(adapter.executeOne(testQuery('SELECT 1'))).rejects.toThrow(
-				/compile-only mode/,
+				/constructed without a connection/,
 			);
 		});
 
 		it('throws on executeRaw', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
-				/compile-only mode/,
+				/constructed without a connection/,
 			);
 		});
 
 		it('throws on getPoolInstance', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			expect(() => adapter.getPoolInstance()).toThrow(/compile-only mode/);
+			expect(() => adapter.getPoolInstance()).toThrow(
+				/constructed without a connection/,
+			);
 		});
 
 		it('throws on introspect', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
-			await expect(adapter.introspect()).rejects.toThrow(/compile-only/);
+			await expect(adapter.introspect()).rejects.toThrow(
+				/constructed without a connection/,
+			);
 		});
 
 		it('throws on transaction', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			await expect(adapter.transaction(async () => 'x')).rejects.toThrow(
-				/compile-only mode/,
+				/constructed without a connection/,
 			);
 		});
 
-		it('stream throws on compile-only adapter', () => {
+		it('stream throws on a connectionless adapter', async () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const iter = adapter.stream(testQuery('SELECT 1'));
 			// The generator should throw when iterated
-			expect(iter.next()).rejects.toThrow(/compile-only mode/);
+			await expect(iter.next()).rejects.toThrow(
+				/constructed without a connection/,
+			);
 		});
 	});
 
