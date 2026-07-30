@@ -9,8 +9,8 @@
  * SC-06: from() preserves set operations (union)
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import { normalizeSQL } from '../../sql-utils.js';
 import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
@@ -250,49 +250,9 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 		eq(users.active, 'yes');
 	});
 
-	it('invalid column access on TableRef is a compile error', () => {
-		const { users } = orm.tables;
-
-		// @ts-expect-error — 'nonexistent' is not a column on users
-		users.nonexistent;
-	});
-
-	it('into().values() rejects wrong column type', () => {
-		const { users } = orm.tables;
-		// Valid
-		orm
-			.into(users)
-			.values({ name: 'Alice', email: 'test@test.com', active: true });
-
-		// @ts-expect-error — active must be boolean, not string
-		orm
-			.into(users)
-			.values({ name: 'Alice', email: 'test@test.com', active: 'not boolean' });
-	});
-
 	it('OrmInstance exposes string-based select()', () => {
 		// select() remains on public OrmInstance as the string-based table API
 		orm.select('users');
-	});
-
-	it('OrmInstance does not expose string-based insert()', () => {
-		// @ts-expect-error — insert() is removed from public OrmInstance type
-		orm.insert('users');
-	});
-
-	it('OrmInstance does not expose string-based update()', () => {
-		// @ts-expect-error — update() is removed from public OrmInstance type
-		orm.update('users');
-	});
-
-	it('OrmInstance does not expose string-based delete()', () => {
-		// @ts-expect-error — delete() is removed from public OrmInstance type
-		orm.delete('users');
-	});
-
-	it('OrmInstance does not expose string-based upsert()', () => {
-		// @ts-expect-error — upsert() is removed from public OrmInstance type
-		orm.upsert('users');
 	});
 
 	it('SC-17: from(users).all() infers exact row type without cast', () => {

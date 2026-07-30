@@ -9,8 +9,8 @@
  * 5. No adapter → ExecutionError on dump() / all()
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import { ExecutionError } from '../errors.js';
 import { createOrm } from '../orm.js';
 import { QueryBuilderImpl } from '../query-builder.js';
@@ -57,8 +57,8 @@ const compilableOrm = createOrm({
 
 describe('QueryBuilder set operations — intent shape', () => {
 	it('union() produces setOperation intent with op=union, all=false', () => {
-		const q1 = orm.select('employees');
-		const q2 = orm.select('contractors');
+		const q1 = orm.select('employees').columns(['id', 'name', 'active']);
+		const q2 = orm.select('contractors').columns(['id', 'name', 'active']);
 		const builder = q1.union(q2);
 
 		const intent = builder.intent;
@@ -70,7 +70,10 @@ describe('QueryBuilder set operations — intent shape', () => {
 	});
 
 	it('unionAll() produces setOperation intent with all=true', () => {
-		const builder = orm.select('employees').unionAll(orm.select('contractors'));
+		const builder = orm
+			.select('employees')
+			.columns(['id', 'name', 'active'])
+			.unionAll(orm.select('contractors').columns(['id', 'name', 'active']));
 		expect(builder.intent.op).toBe('union');
 		expect(builder.intent.all).toBe(true);
 	});
@@ -78,7 +81,8 @@ describe('QueryBuilder set operations — intent shape', () => {
 	it('intersect() produces setOperation intent with op=intersect, all=false', () => {
 		const builder = orm
 			.select('employees')
-			.intersect(orm.select('contractors'));
+			.columns(['id', 'name', 'active'])
+			.intersect(orm.select('contractors').columns(['id', 'name', 'active']));
 		expect(builder.intent.op).toBe('intersect');
 		expect(builder.intent.all).toBe(false);
 	});
@@ -86,13 +90,19 @@ describe('QueryBuilder set operations — intent shape', () => {
 	it('intersectAll() produces setOperation intent with op=intersect, all=true', () => {
 		const builder = orm
 			.select('employees')
-			.intersectAll(orm.select('contractors'));
+			.columns(['id', 'name', 'active'])
+			.intersectAll(
+				orm.select('contractors').columns(['id', 'name', 'active']),
+			);
 		expect(builder.intent.op).toBe('intersect');
 		expect(builder.intent.all).toBe(true);
 	});
 
 	it('except() produces setOperation intent with op=except, all=false', () => {
-		const builder = orm.select('employees').except(orm.select('contractors'));
+		const builder = orm
+			.select('employees')
+			.columns(['id', 'name', 'active'])
+			.except(orm.select('contractors').columns(['id', 'name', 'active']));
 		expect(builder.intent.op).toBe('except');
 		expect(builder.intent.all).toBe(false);
 	});
@@ -100,7 +110,8 @@ describe('QueryBuilder set operations — intent shape', () => {
 	it('exceptAll() produces setOperation intent with op=except, all=true', () => {
 		const builder = orm
 			.select('employees')
-			.exceptAll(orm.select('contractors'));
+			.columns(['id', 'name', 'active'])
+			.exceptAll(orm.select('contractors').columns(['id', 'name', 'active']));
 		expect(builder.intent.op).toBe('except');
 		expect(builder.intent.all).toBe(true);
 	});
@@ -112,9 +123,9 @@ describe('QueryBuilder set operations — intent shape', () => {
 
 describe('QueryBuilder set operations — chaining', () => {
 	it('chain union().intersect() nests correctly: (left UNION right) INTERSECT other', () => {
-		const q1 = orm.select('employees');
-		const q2 = orm.select('contractors');
-		const q3 = orm.select('departments');
+		const q1 = orm.select('employees').columns(['id', 'name']);
+		const q2 = orm.select('contractors').columns(['id', 'name']);
+		const q3 = orm.select('departments').columns(['id', 'name']);
 
 		const chained = q1.union(q2).intersect(q3);
 		const intent = chained.intent;
@@ -135,8 +146,9 @@ describe('QueryBuilder set operations — chaining', () => {
 	it('chain union().except() nests correctly', () => {
 		const chained = orm
 			.select('employees')
-			.union(orm.select('contractors'))
-			.except(orm.select('departments'));
+			.columns(['id', 'name'])
+			.union(orm.select('contractors').columns(['id', 'name']))
+			.except(orm.select('departments').columns(['id', 'name']));
 
 		expect(chained.intent.op).toBe('except');
 		expect(chained.intent.left).toMatchObject({
@@ -146,9 +158,9 @@ describe('QueryBuilder set operations — chaining', () => {
 	});
 
 	it('SetOperationBuilder.union() further combines correctly', () => {
-		const q1 = orm.select('employees');
-		const q2 = orm.select('contractors');
-		const q3 = orm.select('departments');
+		const q1 = orm.select('employees').columns(['id', 'name']);
+		const q2 = orm.select('contractors').columns(['id', 'name']);
+		const q3 = orm.select('departments').columns(['id', 'name']);
 
 		const step1 = q1.union(q2);
 		const step2 = step1.union(q3);

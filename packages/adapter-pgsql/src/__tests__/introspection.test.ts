@@ -16,6 +16,18 @@ import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 type QueryRows = Record<string, unknown>[];
 
+function queryResult<T extends Record<string, unknown>>(
+	rows: readonly T[],
+): QueryResult<T> {
+	return {
+		command: 'SELECT',
+		oid: 0,
+		fields: [],
+		rows: [...rows],
+		rowCount: rows.length,
+	};
+}
+
 function createMockPool(queries: QueryRows[]): Pool {
 	let callIndex = 0;
 	return {
@@ -179,7 +191,7 @@ describe('introspect', () => {
 
 		expect(result.tables.has('users')).toBe(true);
 		expect(result.tables.has(journalTableName)).toBe(true);
-		expect(result.externalTables.has(journalTableName)).toBe(false);
+		expect(result.externalTables?.has(journalTableName) ?? false).toBe(false);
 	});
 
 	it('excludes dbsp_meta metadata tables from managed introspection', async () => {
@@ -206,7 +218,7 @@ describe('introspect', () => {
 		const result = await introspect(pool, { schema: 'dbsp_meta' });
 
 		expect(result.tables.size).toBe(0);
-		expect(result.externalTables.size).toBe(0);
+		expect(result.externalTables?.size ?? 0).toBe(0);
 	});
 
 	it('recovers logical identities only from a managed carrier shape', async () => {
@@ -878,16 +890,12 @@ describe('introspect', () => {
 							column_default: null,
 						},
 					];
-					return { rows, rowCount: rows.length } as QueryResult<
-						Record<string, unknown>
-					>;
+					return queryResult(rows);
 				}
 
 				if (normalized.includes('FROM information_schema.table_constraints')) {
 					const rows = [{ table_name: 'jobQueue', column_name: 'id' }];
-					return { rows, rowCount: rows.length } as QueryResult<
-						Record<string, unknown>
-					>;
+					return queryResult(rows);
 				}
 
 				if (normalized.includes("c.contype = 'c'")) {
@@ -902,14 +910,10 @@ describe('introspect', () => {
 							raw_table: readsBareRelname ? 'jobQueue' : 'tenant."jobQueue"',
 						},
 					];
-					return { rows, rowCount: rows.length } as QueryResult<
-						Record<string, unknown>
-					>;
+					return queryResult(rows);
 				}
 
-				return { rows: [], rowCount: 0 } as QueryResult<
-					Record<string, unknown>
-				>;
+				return queryResult([]);
 			},
 		);
 		const pool = { query } as unknown as Pool;

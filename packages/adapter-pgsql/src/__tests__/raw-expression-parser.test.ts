@@ -39,7 +39,7 @@ function parseViaLibpg(sql: string): Node {
  * Deparse a node back to SQL by embedding it in a minimal SELECT statement.
  */
 function deparseNode(node: Node): string {
-	const stmt = {
+	const stmt: Node = {
 		SelectStmt: {
 			targetList: [
 				{

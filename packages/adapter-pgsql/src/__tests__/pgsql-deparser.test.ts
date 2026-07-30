@@ -622,12 +622,15 @@ describe('SelectStmt', () => {
 			targetList: [resTarget(columnRef('id'))],
 			from: [rangeVar('admins')],
 		});
+		if (!('SelectStmt' in s1) || !('SelectStmt' in s2)) {
+			throw new Error('expected SELECT AST nodes');
+		}
 		compare({
 			SelectStmt: {
 				op: 'SETOP_UNION',
 				all: true,
-				larg: (s1 as { SelectStmt: unknown }).SelectStmt,
-				rarg: (s2 as { SelectStmt: unknown }).SelectStmt,
+				larg: s1.SelectStmt,
+				rarg: s2.SelectStmt,
 			},
 		});
 	});
@@ -1055,7 +1058,7 @@ describe('DeclareCursorStmt', () => {
 				portalname: 'c',
 				options: 0,
 				query: selectStmt({
-					columns: [integerNode(1)],
+					targetList: [resTarget(integerNode(1))],
 				}),
 			},
 		} as unknown as Node;

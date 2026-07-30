@@ -33,7 +33,7 @@ function makeQueryCtx(overrides?: Partial<QueryHookContext>): QueryHookContext {
 		table: 'users',
 		operation: 'select',
 		intent: { type: 'select', from: 'users' } as QueryIntent,
-		resultType: 'rows',
+		resultType: 'all',
 		...overrides,
 	};
 }
@@ -87,7 +87,7 @@ describe('composeBeforeQueryHooks — undefined return path', () => {
 		// h2 runs first (reversed), returns undefined → ctx unchanged
 		// h1 runs next, gets unchanged ctx
 		expect(visited).toEqual(['h2-undefined', 'h1:original']);
-		expect(result.correlationId).toBe('original');
+		expect(result?.correlationId).toBe('original');
 	});
 });
 
@@ -97,7 +97,8 @@ describe('composeBeforeQueryHooks — undefined return path', () => {
 
 describe('composeAfterQueryHooks — undefined return path', () => {
 	it('preserves current result when hook returns undefined', async () => {
-		const h1: AfterQueryHook = (_ctx, r) => `${String(r)}-h1`;
+		const h1: AfterQueryHook = <R>(_ctx: QueryHookContext, result: R) =>
+			(typeof result === 'string' ? `${result}-h1` : result) as R;
 		const h2: AfterQueryHook = () => undefined; // uncovered: result = undefined
 		// Compose: h2 runs first, h1 runs second
 		const composed = composeAfterQueryHooks(h1, h2);
@@ -128,7 +129,7 @@ describe('composeBeforeMutationHooks — undefined return path', () => {
 			makeMutationCtx({ correlationId: 'mut-orig' }),
 		);
 		expect(visited).toEqual(['h2-undefined', 'h1:mut-orig']);
-		expect(result.correlationId).toBe('mut-orig');
+		expect(result?.correlationId).toBe('mut-orig');
 	});
 });
 
@@ -138,17 +139,17 @@ describe('composeBeforeMutationHooks — undefined return path', () => {
 
 describe('composeAfterMutationHooks — undefined return path', () => {
 	it('preserves current rows when hook returns undefined', async () => {
-		const h1: AfterMutationHook = (_ctx, rows) => [
-			...(rows as unknown[]),
-			'h1',
-		];
+		const h1: AfterMutationHook = <T>(
+			_ctx: MutationHookContext<T>,
+			rows: T[],
+		) => (rows.length < 2 ? rows : [...rows.slice(1), rows[0]!]);
 		const h2: AfterMutationHook = () => undefined; // uncovered path
 		// Compose: h2 runs first, h1 runs second
 		const composed = composeAfterMutationHooks(h1, h2);
-		const result = await composed(makeMutationCtx(), ['start']);
+		const result = await composed(makeMutationCtx(), ['start', 'h1']);
 		// h2 runs first, returns undefined → ['start'] unchanged
 		// h1 runs next, appends 'h1'
-		expect(result).toEqual(['start', 'h1']);
+		expect(result).toEqual(['h1', 'start']);
 	});
 });
 

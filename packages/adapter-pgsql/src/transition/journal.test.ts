@@ -211,7 +211,11 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 			return { rows: [] };
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
-			return { rows: [this.plans.get(String(params[0]))].filter(Boolean) };
+			return {
+				rows: [this.plans.get(String(params[0]))].filter(
+					(row): row is Record<string, unknown> => row !== undefined,
+				),
+			};
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
 			const [runId, event, stepId, operationRef, operationKind, record] =
@@ -245,7 +249,11 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 			return { rows: [] };
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
-			return { rows: [this.runs.get(String(params[0]))].filter(Boolean) };
+			return {
+				rows: [this.runs.get(String(params[0]))].filter(
+					(row): row is Record<string, unknown> => row !== undefined,
+				),
+			};
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_journal"')) {
 			return {
@@ -339,9 +347,11 @@ describe('transition journal primitive', () => {
 
 		await persister.persist(metadata, plan);
 		await persister.persist(metadata, plan);
-		await expect(
-			persister.persist(metadata, { ...plan, persisted: false }),
-		).rejects.toThrow(/digest does not match/);
+		const driftedPlan = { ...plan };
+		Object.assign(driftedPlan, { persisted: false });
+		await expect(persister.persist(metadata, driftedPlan)).rejects.toThrow(
+			/digest does not match/,
+		);
 		expect(executor.runs.get(metadata.runId)).toBeDefined();
 		expect(executor.plans.get(metadata.runId)?.plan).toEqual(plan);
 	});
@@ -570,7 +580,7 @@ describe('transition journal primitive', () => {
 			recordedAt: '2026-07-17T00:00:00.100Z',
 		};
 		const runlessIntent: DurableIntentRecord = {
-			runId: intent.runId,
+			...(intent.runId === undefined ? {} : { runId: intent.runId }),
 			stepId: intent.stepId,
 			operation: intent.operation,
 			recordedAt: intent.recordedAt,

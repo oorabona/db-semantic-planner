@@ -634,6 +634,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
+				// @ts-expect-error: runtime allowlist accepts SP-GiST, but IndexMethod omits it
 				method: 'spgist',
 			}),
 		).not.toThrow();
@@ -656,6 +657,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
+				// @ts-expect-error: deliberately malformed runtime input
 				method: 'btree); DROP TABLE users --',
 			}),
 		).toThrow(/Invalid index method/);
@@ -666,6 +668,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
+				// @ts-expect-error: deliberately malformed runtime input
 				method: 'btree\x00',
 			}),
 		).toThrow(/Invalid index method/);
@@ -676,6 +679,7 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
+				// @ts-expect-error: deliberately malformed runtime input
 				method: 'spgist_unknown',
 			}),
 		).toThrow(/Invalid index method/);

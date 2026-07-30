@@ -16,6 +16,7 @@ import {
 	schema,
 	schemaToModelIR,
 } from './schema.js';
+import { stringMutationOrm } from './test-compat/issue-441.js';
 import { createMockAdapter } from './test-utils.js';
 
 describe('ref()', () => {
@@ -700,7 +701,9 @@ describe('createOrm() integration', () => {
 			});
 
 			// Act - should not throw, should return OrmInstance
-			const orm = createOrm({ adapter: createMockAdapter(), schema: mySchema });
+			const orm = stringMutationOrm(
+				createOrm({ adapter: createMockAdapter(), schema: mySchema }),
+			);
 
 			// Assert - ORM should have select method
 			expect(typeof orm.select).toBe('function');

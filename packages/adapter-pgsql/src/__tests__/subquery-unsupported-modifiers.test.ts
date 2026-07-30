@@ -55,7 +55,7 @@ const testSchema = schema({
 	},
 	products: {
 		id: { type: 'integer', primaryKey: true },
-		price: { type: 'numeric' },
+		price: { type: 'number' },
 	},
 });
 

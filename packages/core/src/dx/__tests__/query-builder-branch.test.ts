@@ -22,6 +22,7 @@ import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { QueryBuilderImpl } from '../query-builder.js';
 import { ref, schema } from '../schema.js';
+import { whereExpression } from '../test-compat/issue-442.js';
 import { createMockAdapter } from '../test-utils.js';
 
 // ============================================================================
@@ -200,15 +201,15 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 
 	it('lock + groupBy → throws InvalidOperationError', () => {
 		expect(() =>
-			orm.select('users').groupBy(['active']).lock('update').plan(),
+			orm.select('users').groupBy(['active']).lock('forUpdate').plan(),
 		).toThrow(InvalidOperationError);
 	});
 
 	it('lock without groupBy → intent.lock is set', () => {
-		const report = orm.select('users').lock('update').plan();
+		const report = orm.select('users').lock('forUpdate').plan();
 		expect(report.intent.lock).toBeDefined();
 		expect((report.intent.lock as { strength: string }).strength).toBe(
-			'update',
+			'forUpdate',
 		);
 	});
 
@@ -347,7 +348,10 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 
 describe('QueryBuilderImpl.where branches', () => {
 	it('where(ExpressionRef) → wraps as expression kind intent', () => {
-		const report = orm.select('users').where(exprRef('active')).plan();
+		const report = whereExpression(
+			orm.select('users'),
+			exprRef('active'),
+		).plan();
 		const w = report.intent.where as { kind: string };
 		expect(w?.kind).toBe('expression');
 	});

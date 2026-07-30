@@ -4,8 +4,8 @@
  * Tracks: https://github.com/oorabona/db-semantic-planner/issues/113
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it, vi } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter } from '../../adapter.js';
 import type { MutationDump } from '../mutation-builders.js';
 import { createNqlTag } from '../nql.js';
@@ -31,10 +31,15 @@ function createMutationTag(executeResult: readonly unknown[] = []) {
 	}) as unknown as Adapter;
 
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.executeWithMeta = vi.fn(async () => ({
-		rows: [...executeResult],
-		rowCount: executeResult.length,
-	}));
+	const executeWithMeta = vi.fn<NonNullable<Adapter['executeWithMeta']>>(
+		async <T>(_query: import('../../adapter.js').CompiledQuery<T>) => ({
+			rows: [...executeResult] as T[],
+			rowCount: executeResult.length,
+		}),
+	);
+	adapter.executeWithMeta = executeWithMeta as unknown as NonNullable<
+		Adapter['executeWithMeta']
+	>;
 	markExecutionAvailable(adapter);
 
 	return {
@@ -57,7 +62,11 @@ function createExecuteOnlyMutationTag(executeResult: readonly unknown[] = []) {
 	}) as unknown as Adapter;
 
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.execute = vi.fn(async () => [...executeResult]);
+	const execute = vi.fn<NonNullable<Adapter['execute']>>(
+		async <T>(_query: import('../../adapter.js').CompiledQuery<T>) =>
+			[...executeResult] as T[],
+	);
+	adapter.execute = execute as unknown as NonNullable<Adapter['execute']>;
 	markExecutionAvailable(adapter);
 	Object.defineProperty(adapter, 'executeWithMeta', {
 		value: undefined,

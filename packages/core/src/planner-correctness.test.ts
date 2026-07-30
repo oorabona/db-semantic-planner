@@ -36,7 +36,7 @@ const NO_CTE_CAPS = createDialectCapabilities({
 	identifierQuote: '"',
 	parameterStyle: 'dollar',
 	limitStyle: 'limit-offset',
-	booleanStyle: 'boolean',
+	booleanStyle: 'native',
 	recursivePathStyle: 'string',
 	stringConcatStyle: 'operator',
 	supportsLateralJoin: false,
@@ -465,7 +465,6 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -505,7 +504,6 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 		const originalWhere = {
 			kind: 'in' as const,
 			field: 'id',
-			values: [] as unknown[],
 			subquery: {
 				type: 'select' as const,
 				from: 'productImages',
@@ -534,7 +532,6 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'unknownTable',
@@ -577,7 +574,6 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 				condition: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					subquery: {
 						type: 'select',
 						from: 'posts_nn',
@@ -643,7 +639,6 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 				condition: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					subquery: {
 						type: 'select',
 						from: 'posts',
@@ -699,7 +694,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -732,7 +726,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -759,7 +752,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -781,7 +773,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -803,7 +794,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -840,7 +830,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 					{
 						kind: 'in',
 						field: 'id',
-						values: [],
 						subquery: {
 							type: 'select',
 							from: 'productImages',
@@ -870,10 +859,10 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 
 		// executableIntent carries the optimized OR (with exists inside)
 		expect(report.executableIntent?.where?.kind).toBe('or');
-		const orWhere = report.executableIntent?.where as {
-			kind: 'or';
-			conditions: { kind: string }[];
-		};
+		const orWhere = report.executableIntent?.where;
+		if (orWhere?.kind !== 'or') {
+			throw new Error('Expected the optimized where clause to be an OR');
+		}
 		expect(orWhere.conditions[1]?.kind).toBe('exists');
 	});
 
@@ -885,7 +874,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -924,7 +912,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 					{
 						kind: 'in',
 						field: 'id',
-						values: [],
 						subquery: {
 							type: 'select',
 							from: 'productImages',
@@ -942,17 +929,17 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		);
 		expect(filterDecision?.choice).toBe('exists');
 		// report.intent stays original — the AND's second condition keeps kind='in'
-		const originalAndWhere = report.intent.where as {
-			kind: 'and';
-			conditions: { kind: string }[];
-		};
+		const originalAndWhere = report.intent.where;
+		if (originalAndWhere?.kind !== 'and') {
+			throw new Error('Expected the original where clause to be an AND');
+		}
 		expect(originalAndWhere.conditions[1]?.kind).toBe('in');
 		// report.executableIntent carries the rewritten AND — second condition is kind='exists'
-		const execAndWhere = report.executableIntent?.where as {
-			kind: 'and';
-			conditions: { kind: string }[];
-		};
-		expect(execAndWhere?.conditions[1]?.kind).toBe('exists');
+		const execAndWhere = report.executableIntent?.where;
+		if (execAndWhere?.kind !== 'and') {
+			throw new Error('Expected the optimized where clause to be an AND');
+		}
+		expect(execAndWhere.conditions[1]?.kind).toBe('exists');
 	});
 
 	it('IN with lock subquery: report.intent.where stays kind=in (lock guard)', () => {
@@ -965,7 +952,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -995,7 +981,6 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',

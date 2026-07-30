@@ -5,14 +5,15 @@
  * Regression: https://github.com/oorabona/db-semantic-planner/issues/173
  */
 
-import type { ModelIR, RelationIR } from '@dbsp/types';
-import { describe, expect, it, vi } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import type {
-	Adapter,
 	CompiledNqlQuery,
-	CompiledQuery,
-} from '../../adapter.js';
+	ModelIR,
+	NqlBindingOutputSchema,
+	RelationIR,
+} from '@dbsp/types';
+import { describe, expect, it, vi } from 'vitest';
+import type { Adapter, CompiledQuery, Dump } from '../../adapter.js';
 import type { IncludeIntent, QueryIntent } from '../../intent-ast.js';
 import { createHookManager, getHookStore, type HookStore } from '../hooks.js';
 import type { MutationDump } from '../mutation-builders.js';
@@ -37,13 +38,33 @@ function markSupportsTransactions(adapter: Adapter): void {
 	markExecutionAvailable(adapter);
 }
 
-function executeWithMetaFromRows(
-	execute: Adapter['execute'],
-): Adapter['executeWithMeta'] {
+type TestExecute = (
+	query: CompiledQuery<unknown>,
+) => Promise<readonly unknown[]>;
+type Execute = NonNullable<Adapter['execute']>;
+type ExecuteWithMeta = NonNullable<Adapter['executeWithMeta']>;
+
+function executeRows(execute: TestExecute): Execute {
+	return vi.fn<Execute>(
+		async <T>(query: CompiledQuery<T>) => [...(await execute(query))] as T[],
+	) as unknown as Execute;
+}
+
+function executeWithMetaFromRows(execute: TestExecute): ExecuteWithMeta {
+	const typedExecute = executeRows(execute);
 	return async <T>(query: CompiledQuery<T>) => {
-		const rows = await execute<T>(query);
+		const rows = await typedExecute<T>(query);
 		return { rows, rowCount: rows.length };
 	};
+}
+
+function expectQueryDump(dump: Dump | MutationDump): Dump & {
+	readonly plan: NonNullable<Dump['plan']>;
+} {
+	if (!('plan' in dump) || dump.plan === undefined) {
+		throw new Error('Expected a query dump, received a mutation dump');
+	}
+	return dump as Dump & { readonly plan: NonNullable<Dump['plan']> };
 }
 
 function createBindingTag(executeResult: readonly unknown[] = []) {
@@ -67,8 +88,9 @@ function createBindingTag(executeResult: readonly unknown[] = []) {
 	} as const);
 	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.execute = vi.fn(async () => [...executeResult]);
-	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	const execute = vi.fn(async () => [...executeResult]);
+	adapter.execute = executeRows(execute);
+	adapter.executeWithMeta = executeWithMetaFromRows(execute);
 	markExecutionAvailable(adapter);
 
 	return {
@@ -104,8 +126,9 @@ function createBlogBindingTag(executeResult: readonly unknown[] = []) {
 	} as const);
 	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.execute = vi.fn(async () => [...executeResult]);
-	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	const execute = vi.fn(async () => [...executeResult]);
+	adapter.execute = executeRows(execute);
+	adapter.executeWithMeta = executeWithMetaFromRows(execute);
 	markExecutionAvailable(adapter);
 
 	return {
@@ -185,14 +208,16 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 			return db.model.getRelation(qualifiedName);
 		},
 		getRelationsTo: db.model.getRelationsTo.bind(db.model),
-	} as ModelIR;
+		isAmbiguous: db.model.isAmbiguous.bind(db.model),
+	} satisfies ModelIR;
 	const adapter = createPgsqlCompileOnlyAdapter({
 		model,
 		dbCasing: 'snake_case',
 	}) as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.execute = vi.fn(async () => [...executeResult]);
-	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	const execute = vi.fn(async () => [...executeResult]);
+	adapter.execute = executeRows(execute);
+	adapter.executeWithMeta = executeWithMetaFromRows(execute);
 	markExecutionAvailable(adapter);
 
 	return {
@@ -204,7 +229,7 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 }
 
 function createMutationBindingTag(
-	execute: Adapter['execute'],
+	execute: TestExecute,
 	transaction?: Adapter['transaction'],
 	hookStore?: HookStore,
 	options: { readonly dbCasing?: Adapter['dbCasing'] } = {},
@@ -229,7 +254,7 @@ function createMutationBindingTag(
 		...(options.dbCasing !== undefined && { dbCasing: options.dbCasing }),
 	}) as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
-	adapter.execute = execute;
+	adapter.execute = executeRows(execute);
 	adapter.executeWithMeta = executeWithMetaFromRows(execute);
 	adapter.transaction =
 		transaction ??
@@ -268,7 +293,7 @@ function createBindingFinalBundle(include: IncludeIntent): CompiledNqlQuery {
 	return {
 		query: finalQuery,
 		bindings: new Map([['active_users', bindingSource]]),
-		bindingOutputSchemas: new Map([
+		bindingOutputSchemas: new Map<string, NqlBindingOutputSchema>([
 			[
 				'active_users',
 				{
@@ -281,8 +306,8 @@ function createBindingFinalBundle(include: IncludeIntent): CompiledNqlQuery {
 								relation: 'posts',
 								sourceTable: 'users',
 								targetTable: 'posts',
-								sourceColumn: 'id',
-								targetColumn: 'userId',
+								sourceColumn: ['id'],
+								targetColumn: ['userId'],
 								hops: [],
 								cardinality: 'many',
 								relationType: 'hasMany',
@@ -346,11 +371,13 @@ describe('nql`...` bind handling', () => {
 	it('compiles referenced query-final read-only bindings through the NQL bundle for WITH CTE emission', () => {
 		const { compile, nql } = createBindingTag();
 
-		const dump = nql<{ id: number }>`users
+		const dump = expectQueryDump(
+			nql<{ id: number }>`users
 			| where active = ${true}
 			| select id
 			| bind active_users
-users | where id in (active_users) | select id`.dump();
+	users | where id in (active_users) | select id`.dump(),
+		);
 
 		expect(compile).toHaveBeenCalledOnce();
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
@@ -367,11 +394,13 @@ users | where id in (active_users) | select id`.dump();
 	it('compiles binding-final read-only queries through the NQL bundle without planner decisions', () => {
 		const { compile, nql } = createBindingTag();
 
-		const dump = nql<{ id: number }>`users
+		const dump = expectQueryDump(
+			nql<{ id: number }>`users
 			| where active = ${true}
 			| select id
 			| bind active_users
-active_users | select id`.dump();
+	active_users | select id`.dump(),
+		);
 
 		expect(compile).toHaveBeenCalledOnce();
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
@@ -387,11 +416,13 @@ active_users | select id`.dump();
 	it('compiles unreferenced query-final read-only bindings through WITH CTEs (#173)', () => {
 		const { compile, nql } = createBindingTag();
 
-		const dump = nql<{ id: number }>`posts
+		const dump = expectQueryDump(
+			nql<{ id: number }>`posts
 			| where id >= ${3}
 			| select id
 			| bind recent_posts
-posts | where published = ${true} | select id`.dump();
+	posts | where published = ${true} | select id`.dump(),
+		);
 
 		expect(compile).toHaveBeenCalledOnce();
 		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
@@ -814,11 +845,12 @@ b | select id`.dump();
 				model,
 			}) as unknown as Adapter;
 			const compile = vi.spyOn(adapter, 'compile');
-			adapter.execute = vi
+			const execute = vi
 				.fn()
 				.mockResolvedValueOnce([{ name: 'Alice' }])
 				.mockResolvedValueOnce([{ name: 'Alice' }]);
-			adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+			adapter.execute = executeRows(execute);
+			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = vi.fn(async (fn) => fn(adapter));
 			markSupportsTransactions(adapter);
 			const nql = createNqlTag(db.definition, model, adapter);
@@ -947,6 +979,7 @@ b | select __proto__`.dump();
 			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
 			const columnTypes = bundle.bindingOutputSchemas?.get('b')?.columnTypes;
 			expect(columnTypes).toBeDefined();
+			if (!columnTypes) throw new Error('Expected binding output column types');
 			expect(Object.hasOwn(columnTypes, '__proto__')).toBe(true);
 			// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — asserts the value under an own __proto__ key, not Object.prototype
 			expect((columnTypes as Record<string, unknown>).__proto__).toEqual({
@@ -1299,7 +1332,7 @@ projected_posts | select id, user.name`.dump();
 			| select id, name
 			| bind active_users
 active_users | select *, posts.*`;
-		const dump = query.dump();
+		const dump = expectQueryDump(query.dump());
 		const rows = await query.all();
 
 		const decision = dump.plan.decisions.find(
@@ -1367,7 +1400,7 @@ active_users | select *, posts.*`;
 			| select id, name
 			| bind active_users
 active_users | select *, posts.comments.*`;
-		const dump = query.dump();
+		const dump = expectQueryDump(query.dump());
 		const rows = await query.all();
 		const decisions = dump.plan.decisions.filter(
 			(decision) => decision.type === 'include-strategy',
@@ -1468,7 +1501,7 @@ active_users | select *, posts.comments.*`;
 			| select id, name, post_comments_json
 			| bind active_authors
 active_authors | select *, author_posts.post_comments.*`;
-		const dump = query.dump();
+		const dump = expectQueryDump(query.dump());
 		const rows = await query.all();
 		const decisions = dump.plan.decisions.filter(
 			(decision) => decision.type === 'include-strategy',
@@ -1528,19 +1561,21 @@ active_authors | select *, author_posts.post_comments.*`;
 	it('forces binding-final hasMany tail belongsTo includes through nested json_agg', () => {
 		const { nql } = createBindingTag();
 
-		const dump = nql<{
-			id: number;
-			name: string;
-			posts: Array<{
+		const dump = expectQueryDump(
+			nql<{
 				id: number;
-				title: string;
-				userId: number;
-				user: { id: number; name: string } | null;
-			}>;
-		}>`users
+				name: string;
+				posts: Array<{
+					id: number;
+					title: string;
+					userId: number;
+					user: { id: number; name: string } | null;
+				}>;
+			}>`users
 			| select id, name
 			| bind active_users
-active_users | select *, posts.user.*`.dump();
+	active_users | select *, posts.user.*`.dump(),
+		);
 
 		const decisions = dump.plan.decisions.filter(
 			(decision) => decision.type === 'include-strategy',
@@ -1631,7 +1666,7 @@ active_users | select id | limit posts 5`.dump();
 				where: {
 					kind: 'comparison',
 					field: 'published',
-					operator: '=',
+					operator: 'eq',
 					value: true,
 				},
 			},
@@ -1768,7 +1803,7 @@ active_users | select id`.all();
 	});
 
 	it('executes mutation bindings before a query-final statement in one transaction', async () => {
-		const execute = vi.fn(async () => [{ id: 11 }]);
+		const execute = vi.fn<TestExecute>(async () => [{ id: 11 }]);
 		const { adapter, compile, nql } = createMutationBindingTag(execute);
 
 		const rows = await nql<{
@@ -1789,13 +1824,15 @@ users | where id in (new_user) | select id`.all();
 	});
 
 	it('dump() globally renumbers top-level params for a query-final mutation binding sequence', () => {
-		const execute = vi.fn(async () => [{ id: 11 }]);
+		const execute = vi.fn<TestExecute>(async () => [{ id: 11 }]);
 		const { adapter, nql } = createMutationBindingTag(execute);
 
-		const dump = nql<{
-			id: number;
-		}>`insert into users set name = ${'Alice'} | select id | bind new_user
-users | where active = ${true} and id in (new_user) | select id`.dump();
+		const dump = expectQueryDump(
+			nql<{
+				id: number;
+			}>`insert into users set name = ${'Alice'} | select id | bind new_user
+	users | where active = ${true} and id in (new_user) | select id`.dump(),
+		);
 
 		expect(adapter.execute).not.toHaveBeenCalled();
 		expect(dump.sequence).toHaveLength(2);
@@ -2258,7 +2295,7 @@ posts | where authorId in (touched) | select authorId`.all(),
 		transaction.mockImplementation(async (fn) => {
 			events.push('begin');
 			const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
-			adapter.execute = execute;
+			adapter.execute = executeRows(execute);
 			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = transaction as Adapter['transaction'];
 			markExecutionAvailable(adapter);

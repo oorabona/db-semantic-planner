@@ -292,7 +292,7 @@ function runtime(options: {
 			observations: [],
 			recovery: [],
 		})),
-		executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+		executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 		writeCompletionJournal: vi.fn(),
 		commit: vi.fn(),
 		rollback: vi.fn(),
@@ -483,7 +483,7 @@ describe('resumeTransitionRun', () => {
 		{},
 		{ observations: [], claims: [], assumptions: [] },
 	])('blocks a corrupt loaded plan instead of throwing', async (corruptPlan) => {
-		const runMetadata = run(corruptPlan as ProvenPlanShape);
+		const runMetadata = run(corruptPlan as unknown as ProvenPlanShape);
 		const rt = runtime({});
 		const registry = createPackRegistry([
 			{

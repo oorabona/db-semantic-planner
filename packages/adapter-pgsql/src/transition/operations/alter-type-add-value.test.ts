@@ -609,7 +609,7 @@ describe('AlterTypeAddValue operation runtime', () => {
 			{
 				opaqueClient: createTestTransitionSession({
 					query: async (sql: string, params?: readonly unknown[]) => {
-						queries.push({ sql, params });
+						queries.push(params === undefined ? { sql } : { sql, params });
 						return { rows: [] };
 					},
 				}),

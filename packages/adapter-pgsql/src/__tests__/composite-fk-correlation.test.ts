@@ -60,8 +60,8 @@ const relations = new Map([
 const model = {
 	tables,
 	relations,
-	getTable: (name: string) => tables.get(name),
-	getRelation: (qualifiedName: string) => relations.get(qualifiedName),
+	getTable: (name: 'orders' | 'order_items') => tables.get(name),
+	getRelation: (qualifiedName: 'orders.items') => relations.get(qualifiedName),
 	getRelationsFrom: (source: string) =>
 		[...relations.values()].filter((relation) => relation.source === source),
 	getRelationsTo: (target: string) =>

@@ -23,7 +23,7 @@ function compileCustomExpr(
 			{
 				type: 'selectCustomExpression',
 				expressionIntent,
-				alias,
+				...(alias === undefined ? {} : { alias }),
 			},
 		],
 	};

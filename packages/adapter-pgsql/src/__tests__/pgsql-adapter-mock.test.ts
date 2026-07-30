@@ -18,7 +18,7 @@
 import { type Adapter, createOrm, schema } from '@dbsp/core';
 import type { TransactionOptions } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
-import type { Pool, PoolClient, QueryResult } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	introspect,
@@ -63,6 +63,12 @@ const ownershipOrmSchema = schema({
 
 type MockQueryInput = string;
 
+type MockQueryResult<T = unknown> = {
+	readonly rows: readonly T[];
+	readonly rowCount: number | null;
+	readonly command?: string;
+};
+
 function queryText(input: unknown): string {
 	if (typeof input === 'string') return input;
 	if (
@@ -88,7 +94,7 @@ function makeClient(
 	queryImpl?: (
 		sql: string,
 		parameters: readonly unknown[] | undefined,
-	) => Promise<QueryResult>,
+	) => Promise<MockQueryResult>,
 ): PoolClient {
 	return {
 		query: queryImpl
@@ -123,7 +129,7 @@ function noActiveTransactionError(): Error & { code: string } {
 
 function makePrepareTagClient(prepareEndsTransaction: boolean): {
 	readonly client: PoolClient;
-	readonly prepareResult: QueryResult;
+	readonly prepareResult: MockQueryResult;
 } {
 	let transactionOpen = true;
 	let prepareTagReturned = false;
@@ -131,27 +137,43 @@ function makePrepareTagClient(prepareEndsTransaction: boolean): {
 		rows: [],
 		rowCount: 0,
 		command: 'PREPARE',
-	} as QueryResult;
+	} satisfies MockQueryResult;
 	const query = vi.fn(async (input: MockQueryInput) => {
 		const sql = queryText(input);
 		if (/^SAVEPOINT /.test(sql)) {
 			if (!transactionOpen) throw noActiveTransactionError();
-			return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SAVEPOINT',
+			} satisfies MockQueryResult;
 		}
 		if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 			if (!transactionOpen) throw noActiveTransactionError();
-			return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'ROLLBACK',
+			} satisfies MockQueryResult;
 		}
 		if (/^RELEASE SAVEPOINT /.test(sql)) {
 			if (!transactionOpen) throw noActiveTransactionError();
-			return { rows: [], rowCount: 0, command: 'RELEASE' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'RELEASE',
+			} satisfies MockQueryResult;
 		}
 		if (!prepareTagReturned) {
 			prepareTagReturned = true;
 			if (prepareEndsTransaction) transactionOpen = false;
 			return prepareResult;
 		}
-		return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		return {
+			rows: [],
+			rowCount: 0,
+			command: 'SELECT',
+		} satisfies MockQueryResult;
 	});
 	return {
 		client: { query, release: vi.fn() } as unknown as PoolClient,
@@ -231,10 +253,10 @@ function collectReachableStrings(
 
 function deferred<T = void>(): {
 	readonly promise: Promise<T>;
-	readonly resolve: (value?: T | PromiseLike<T>) => void;
+	readonly resolve: (value: T | PromiseLike<T>) => void;
 	readonly reject: (error: unknown) => void;
 } {
-	let resolve!: (value?: T | PromiseLike<T>) => void;
+	let resolve!: (value: T | PromiseLike<T>) => void;
 	let reject!: (error: unknown) => void;
 	const promise = new Promise<T>((res, rej) => {
 		resolve = res;
@@ -301,8 +323,16 @@ describe('@dbsp/adapter-pgsql public API', () => {
 	it('throws the transaction-control error the entry point publishes', async () => {
 		const client = makeClient(async (sql: string) =>
 			sql === 'SAVEPOINT s'
-				? ({ rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult)
-				: ({ rows: [], rowCount: 0, command: 'SELECT' } as QueryResult),
+				? ({
+						rows: [],
+						rowCount: 0,
+						command: 'SAVEPOINT',
+					} satisfies MockQueryResult)
+				: ({
+						rows: [],
+						rowCount: 0,
+						command: 'SELECT',
+					} satisfies MockQueryResult),
 		);
 		const adapter = new PgsqlAdapter(makePool({ rows: [] }, client));
 
@@ -316,8 +346,16 @@ describe('@dbsp/adapter-pgsql public API', () => {
 	it('throws the aborted-commit error the entry point publishes', async () => {
 		const client = makeClient(async (sql: string) =>
 			sql === 'COMMIT'
-				? ({ rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult)
-				: ({ rows: [], rowCount: 0, command: 'SELECT' } as QueryResult),
+				? ({
+						rows: [],
+						rowCount: 0,
+						command: 'ROLLBACK',
+					} satisfies MockQueryResult)
+				: ({
+						rows: [],
+						rowCount: 0,
+						command: 'SELECT',
+					} satisfies MockQueryResult),
 		);
 		const adapter = new PgsqlAdapter(makePool({ rows: [] }, client));
 
@@ -331,7 +369,11 @@ describe('@dbsp/adapter-pgsql public API', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT fail') throw statementError;
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = new PgsqlAdapter(client, {
@@ -361,7 +403,11 @@ describe('PgsqlAdapter.withPinnedConnection', () => {
 	it('pins pool-owned work to one client and releases once on success', async () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
-			return { rows: [{ sql }], rowCount: 1, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [{ sql }],
+				rowCount: 1,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [{ sql: 'pool' }] }, client);
@@ -493,7 +539,7 @@ describe('PgsqlAdapter.withPinnedConnection', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			const command = sql === 'BEGIN' || sql === 'COMMIT' ? sql : 'SELECT';
-			return { rows: [], rowCount: 0, command } as QueryResult;
+			return { rows: [], rowCount: 0, command } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, client);
@@ -541,9 +587,13 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 					rows: [{ unlocked: true }],
 					rowCount: 1,
 					command: 'SELECT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, client);
@@ -611,16 +661,20 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 					rows: [{ acquired: true }],
 					rowCount: 1,
 					command: 'SELECT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 			if (sql.includes('pg_advisory_unlock')) {
 				return {
 					rows: [{ unlocked: true }],
 					rowCount: 1,
 					command: 'SELECT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, client);
@@ -648,7 +702,11 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 			if (sql.includes('pg_advisory_unlock')) {
 				throw unlockError;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, client);
@@ -676,9 +734,13 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 					rows: [{ unlocked: false }],
 					rowCount: 1,
 					command: 'SELECT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, client);
@@ -890,7 +952,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'COMMIT') controller.abort();
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -917,7 +979,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT blocked') throw lockError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -955,7 +1017,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT blocked') throw lockError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -987,7 +1049,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT canceled') throw statementError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1019,7 +1081,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT slow') throw statementError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1048,7 +1110,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT caller_timeout') throw statementError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1070,7 +1132,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT caller_lock_timeout') throw lockError;
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1092,9 +1154,13 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'COMMIT') {
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1127,7 +1193,11 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 				firstStarted.resolve();
 				await releaseFirst.promise;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1161,13 +1231,17 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let transactionOpen = false;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'BEGIN') {
 				transactionOpen = true;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'COMMIT') {
 				transactionOpen = false;
@@ -1176,9 +1250,17 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			if (sql === 'ROLLBACK') {
 				if (!transactionOpen) throw noActiveTransactionError();
 				transactionOpen = false;
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1215,7 +1297,11 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			if (sql === 'COMMIT') {
 				await releaseCommit.promise;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1280,11 +1366,15 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'COMMIT') return commitResult;
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1316,12 +1406,16 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			rows: [],
 			rowCount: 0,
 			command,
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'BEGIN') {
 				transactionOpen = true;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
 			if (/^SAVEPOINT /.test(sql)) {
 				if (!transactionOpen) throw noActiveTransactionError();
@@ -1329,7 +1423,7 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 					rows: [],
 					rowCount: 0,
 					command: 'SAVEPOINT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 			if (sql === statement) {
 				transactionOpen = false;
@@ -1338,9 +1432,17 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			if (sql === 'ROLLBACK') {
 				if (!transactionOpen) throw noActiveTransactionError();
 				transactionOpen = false;
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'INSERT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'INSERT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1381,20 +1483,32 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'SAVEPOINT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let openTransaction = false;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'BEGIN') {
 				openTransaction = true;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'SAVEPOINT s') return savepointResult;
 			if (sql === 'ROLLBACK') {
 				openTransaction = false;
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = {
 			query,
@@ -1428,14 +1542,18 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'SAVEPOINT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let openTransaction = false;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'BEGIN') openTransaction = true;
 			if (sql === 'ROLLBACK') openTransaction = false;
 			if (sql === 'SAVEPOINT s') return savepointResult;
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = {
 			query,
@@ -1565,7 +1683,11 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 				firstStarted.resolve();
 				await releaseFirst.promise;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1614,7 +1736,7 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === 'ROLLBACK') throw rollbackError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -1712,15 +1834,15 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 				return {
 					rows: [{ lock_timeout: lockTimeout }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'SHOW statement_timeout') {
 				return {
 					rows: [{ statement_timeout: statementTimeout }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -1766,9 +1888,9 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 				return {
 					rows: [{ lock_timeout: lockTimeout }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -1904,7 +2026,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			if (/^RELEASE SAVEPOINT /.test(sql)) {
 				setTimeout(() => childClosed.resolve(), 0);
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1941,7 +2063,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 		const resumeChild = deferred();
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -1998,7 +2120,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 					setTimeout(() => firstClosed.resolve(), 0);
 				}
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -2039,7 +2161,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let transactionOpen = false;
 		let innerError: unknown;
 		let parentError: unknown;
@@ -2047,7 +2169,11 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			const sql = queryText(input);
 			if (sql === 'BEGIN') {
 				transactionOpen = true;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
 			if (/^SAVEPOINT /.test(sql)) {
 				if (!transactionOpen) throw noActiveTransactionError();
@@ -2055,7 +2181,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 					rows: [],
 					rowCount: 0,
 					command: 'SAVEPOINT',
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'COMMIT') {
 				transactionOpen = false;
@@ -2064,9 +2190,17 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql) || sql === 'ROLLBACK') {
 				if (!transactionOpen) throw noActiveTransactionError();
 				transactionOpen = false;
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -2116,7 +2250,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 				firstStatementStarted.resolve();
 				await releaseFirstStatement.promise;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -2167,7 +2301,7 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 				firstStatementStarted.resolve();
 				await releaseFirstStatement.promise;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -2312,7 +2446,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw rollbackError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -2343,7 +2477,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (/^RELEASE SAVEPOINT /.test(sql)) throw releaseError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -2374,7 +2508,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'INSERT duplicate') throw statementError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2420,7 +2554,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 				releaseAttempts++;
 				if (releaseAttempts === 1) throw releaseError;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2462,7 +2596,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			const sql = queryText(input);
 			if (/^RELEASE SAVEPOINT /.test(sql)) throw savepointGoneError;
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw savepointGoneError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2500,11 +2634,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'SAVEPOINT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SAVEPOINT s') return savepointResult;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2538,11 +2672,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'SAVEPOINT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SAVEPOINT s') return savepointResult;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2624,7 +2758,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			if (/^SAVEPOINT /.test(sql) && savepointAttempts++ === 0) {
 				throw noActiveTransactionError();
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = {
 			query,
@@ -2654,14 +2788,26 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			if (/^SAVEPOINT /.test(sql)) {
 				savepointAttempts++;
 				if (savepointAttempts === 1) throw noActiveTransactionError();
-				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SAVEPOINT',
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'BEGIN') {
 				beginStarted.resolve();
 				await releaseBegin.promise;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -2734,9 +2880,17 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 					beginStarted.resolve();
 					await failFirstBegin.promise;
 				}
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -2833,7 +2987,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let firstError: unknown;
 		let secondError: unknown;
 		const query = vi.fn(async (input: MockQueryInput) => {
@@ -2846,7 +3000,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 				throw noActiveTransactionError();
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -2917,7 +3075,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 				firstStarted.resolve();
 				await releaseFirst.promise;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -2955,13 +3117,17 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		let transactionOpen = true;
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (/^SAVEPOINT /.test(sql)) {
 				if (!transactionOpen) throw noActiveTransactionError();
-				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SAVEPOINT',
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'COMMIT') {
 				transactionOpen = false;
@@ -2969,9 +3135,17 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			}
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 				if (!transactionOpen) throw noActiveTransactionError();
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3005,7 +3179,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT fail') throw pgError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3038,7 +3212,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const childScopeStarted = deferred();
 		const resumeChild = deferred();
 		const query = vi.fn(async () => {
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3107,7 +3281,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 				if (savepointName !== parentSavepoint) {
 					childSavepoint ??= savepointName;
 				}
-				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SAVEPOINT',
+				} satisfies MockQueryResult;
 			}
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 				if (
@@ -3120,7 +3298,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 				if (sql === `ROLLBACK TO SAVEPOINT ${parentSavepoint}`) {
 					parentRolledBack = true;
 				}
-				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'ROLLBACK',
+				} satisfies MockQueryResult;
 			}
 			if (
 				parentRolledBack &&
@@ -3129,7 +3311,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			) {
 				throw savepointGoneError;
 			}
-			return { rows: [], rowCount: 0, command: 'RELEASE' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'RELEASE',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3177,7 +3363,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const childScopeStarted = deferred();
 		const resumeChild = deferred();
 		const query = vi.fn(async () => {
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3234,7 +3420,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			if (/^RELEASE SAVEPOINT /.test(sql)) {
 				setTimeout(() => childClosed.resolve(), 0);
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -3279,7 +3465,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 				firstStarted.resolve();
 				await releaseFirst.promise;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -3380,7 +3566,9 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 		const ddl = 'CREATE INDEX CONCURRENTLY idx_users_name ON users (name)';
 		const client = Object.assign(
 			{
-				query: vi.fn(async () => ({ rows: [], rowCount: 0 }) as QueryResult),
+				query: vi.fn(
+					async () => ({ rows: [], rowCount: 0 }) satisfies MockQueryResult,
+				),
 				release: vi.fn(),
 			} as unknown as PoolClient,
 			{ _txStatus: 'T' },
@@ -3403,7 +3591,7 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
@@ -3413,7 +3601,7 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 						code: '25P01',
 					});
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3441,7 +3629,7 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 					code: '25P01',
 				});
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
@@ -3463,7 +3651,7 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 		const client = Object.assign(
 			makeClient(async (sql) => {
 				if (sql === 'VACUUM "users"') throw pgError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			{ _txStatus: 'T' },
 		);
@@ -3572,7 +3760,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'COMMIT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
@@ -3582,7 +3770,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 						code: '25P01',
 					});
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3613,7 +3801,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const statement = queryText(input);
 				if (statement === sql) throw pgError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3651,7 +3839,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 					releaseAttempts++;
 					if (releaseAttempts === 1) throw releaseError;
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3712,7 +3900,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 				if (/^ROLLBACK TO SAVEPOINT /.test(statement)) {
 					throw savepointGoneError;
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3749,7 +3937,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 					if (releaseAttempts === 1) throw releaseError;
 					if (releaseAttempts === 2) throw secondReleaseError;
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3779,14 +3967,18 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		const multiResult = [
 			{ rows: [], rowCount: 0, command: 'SELECT' },
 			{ rows: [{ value: 1 }], rowCount: 1, command: 'SELECT' },
-		] as QueryResult[];
+		] satisfies MockQueryResult[];
 		let firstError: unknown;
 		let secondError: unknown;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === 'SELECT 1; SELECT 2') return multiResult;
-				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SELECT',
+				} satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3854,14 +4046,18 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		const multiResult = [
 			{ rows: [{ secret_column: literal }], rowCount: 1, command: 'SELECT' },
 			{ rows: [{ value: 1 }], rowCount: 1, command: 'SELECT' },
-		] as QueryResult[];
+		] satisfies MockQueryResult[];
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === 'SELECT secret_column FROM secrets; SELECT 1') {
 					return multiResult;
 				}
-				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SELECT',
+				} satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3896,14 +4092,18 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		const multiResult = [
 			{ rows: [{ value: 1 }], rowCount: 1, command: 'SELECT' },
 			{ rows: [], rowCount: 0, command: 'COMMIT' },
-		] as QueryResult[];
+		] satisfies MockQueryResult[];
 		let transactionOpen = true;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (/^SAVEPOINT /.test(sql)) {
 					if (!transactionOpen) throw noActiveTransactionError();
-					return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+					return {
+						rows: [],
+						rowCount: 0,
+						command: 'SAVEPOINT',
+					} satisfies MockQueryResult;
 				}
 				if (sql === 'SELECT 1; COMMIT') {
 					transactionOpen = false;
@@ -3911,9 +4111,17 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 				}
 				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 					if (!transactionOpen) throw noActiveTransactionError();
-					return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+					return {
+						rows: [],
+						rowCount: 0,
+						command: 'ROLLBACK',
+					} satisfies MockQueryResult;
 				}
-				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SELECT',
+				} satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3950,7 +4158,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			rows: [],
 			rowCount: 0,
 			command: statement,
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
@@ -3960,7 +4168,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 						code: '25P01',
 					});
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -3990,12 +4198,12 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			rows: [],
 			rowCount: 0,
 			command: 'SAVEPOINT',
-		} as QueryResult;
+		} satisfies MockQueryResult;
 		const client = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === 'SAVEPOINT s') return savepointResult;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -4028,7 +4236,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === rawSql) throw pgError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -4066,12 +4274,12 @@ describe('PgsqlAdapter borrowed-client savepoint scope guard', () => {
 			if (sql === 'SELECT first') {
 				firstSqlStarted.resolve();
 				await releaseFirstSql.promise;
-				return { rows: [{ value: 1 }], rowCount: 1 } as QueryResult;
+				return { rows: [{ value: 1 }], rowCount: 1 } satisfies MockQueryResult;
 			}
 			if (sql === 'SELECT second') {
-				return { rows: [{ value: 2 }], rowCount: 1 } as QueryResult;
+				return { rows: [{ value: 2 }], rowCount: 1 } satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
@@ -4209,7 +4417,7 @@ describe('PgsqlAdapter.withSchema — pool inheritance', () => {
 				rows: [{ id: 1, label: 'scoped' }],
 				rowCount: 1,
 				command: 'SELECT',
-			} as QueryResult;
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -4239,7 +4447,7 @@ describe('PgsqlAdapter.withSchema — pool inheritance', () => {
 				rows: [{ id: 2, label: 'nested scoped' }],
 				rowCount: 1,
 				command: 'SELECT',
-			} as QueryResult;
+			} satisfies MockQueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, txClient);
@@ -4335,12 +4543,16 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		let callIdx = 0;
 		const client = makeClient(async (_sql) => {
 			callIdx++;
-			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // SAVEPOINT
-			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
-			if (callIdx === 3) return { rows, rowCount: 1 } as QueryResult; // FETCH -> 1 row
-			if (callIdx === 4) return { rows: [], rowCount: 0 } as QueryResult; // FETCH -> done
-			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
-			return { rows: [], rowCount: 0 } as QueryResult; // RELEASE
+			if (callIdx === 1)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // SAVEPOINT
+			if (callIdx === 2)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // DECLARE
+			if (callIdx === 3) return { rows, rowCount: 1 } satisfies MockQueryResult; // FETCH -> 1 row
+			if (callIdx === 4)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // FETCH -> done
+			if (callIdx === 5)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult; // RELEASE
 		});
 
 		const adapter = createPgsqlAdapter(client, {
@@ -4407,15 +4619,15 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 				return {
 					rows: [{ lock_timeout: lockTimeout }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'SHOW statement_timeout') {
 				return {
 					rows: [{ statement_timeout: statementTimeout }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4457,15 +4669,15 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			if (/^FETCH /.test(sql)) {
 				fetchCount++;
 				if (fetchCount === 1) {
-					return { rows: [{ id: 1 }], rowCount: 1 } as QueryResult;
+					return { rows: [{ id: 1 }], rowCount: 1 } satisfies MockQueryResult;
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}
 			if (/^RELEASE SAVEPOINT /.test(sql)) {
 				releaseAttempts++;
 				if (releaseAttempts === 1) throw releaseError;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4516,9 +4728,9 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			if (/^FETCH /.test(sql)) {
 				fetchCount++;
 				if (fetchCount === 1) {
-					return { rows: [{ id: 1 }], rowCount: 1 } as QueryResult;
+					return { rows: [{ id: 1 }], rowCount: 1 } satisfies MockQueryResult;
 				}
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}
 			if (/^RELEASE SAVEPOINT /.test(sql)) {
 				releaseAttempts++;
@@ -4527,7 +4739,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
 				throw savepointGoneError;
 			}
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4573,7 +4785,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 				/^DECLARE (\S+) NO SCROLL CURSOR FOR SELECT (first|second)$/.exec(sql);
 			if (declare) {
 				cursorKinds.set(declare[1]!, declare[2] as 'first' | 'second');
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}
 
 			const fetch = /^FETCH FORWARD 1 FROM (\S+)$/.exec(sql);
@@ -4582,15 +4794,15 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 				const count = fetchCounts.get(cursor) ?? 0;
 				fetchCounts.set(cursor, count + 1);
 				if (count > 0) {
-					return { rows: [], rowCount: 0 } as QueryResult;
+					return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 				}
 				return {
 					rows: [{ stream: cursorKinds.get(cursor) }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
 
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4639,7 +4851,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 				const sql = queryText(input);
 				if (/^DECLARE /.test(sql)) throw streamError;
 				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw rollbackError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -4672,7 +4884,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			const sql = queryText(input);
 			if (/^FETCH /.test(sql)) throw fetchError;
 			if (/^CLOSE /.test(sql)) throw closeError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4720,12 +4932,16 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 					code: '25P01',
 				});
 			}
-			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
-			if (callIdx === 3) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
-			if (callIdx === 4) return { rows, rowCount: 1 } as QueryResult; // FETCH -> 1 row
-			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // FETCH -> done
-			if (callIdx === 6) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
-			return { rows: [], rowCount: 0 } as QueryResult; // COMMIT
+			if (callIdx === 2)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // BEGIN
+			if (callIdx === 3)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // DECLARE
+			if (callIdx === 4) return { rows, rowCount: 1 } satisfies MockQueryResult; // FETCH -> 1 row
+			if (callIdx === 5)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // FETCH -> done
+			if (callIdx === 6)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult; // COMMIT
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4757,7 +4973,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 					code: '25P01',
 				});
 			}
-			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+			return { rows: [], rowCount: 0, command: sql } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4796,31 +5012,48 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			if (/^SAVEPOINT /.test(sql)) {
 				savepointAttempts++;
 				if (savepointAttempts === 1) throw noActiveTransactionError();
-				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SAVEPOINT',
+				} satisfies MockQueryResult;
 			}
 			if (sql === 'BEGIN') {
 				beginStarted.resolve();
 				await releaseBegin.promise;
-				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'BEGIN',
+				} satisfies MockQueryResult;
 			}
 			const declare =
 				/^DECLARE (\S+) NO SCROLL CURSOR FOR SELECT (first|second)$/.exec(sql);
 			if (declare) {
 				cursorKinds.set(declare[1]!, declare[2] as 'first' | 'second');
-				return { rows: [], rowCount: 0, command: 'DECLARE' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'DECLARE',
+				} satisfies MockQueryResult;
 			}
 			const fetch = /^FETCH FORWARD 1 FROM (\S+)$/.exec(sql);
 			if (fetch) {
 				const cursor = fetch[1]!;
 				const count = fetchCounts.get(cursor) ?? 0;
 				fetchCounts.set(cursor, count + 1);
-				if (count > 0) return { rows: [], rowCount: 0 } as QueryResult;
+				if (count > 0)
+					return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 				return {
 					rows: [{ stream: cursorKinds.get(cursor) }],
 					rowCount: 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			return {
+				rows: [],
+				rowCount: 0,
+				command: 'SELECT',
+			} satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4905,7 +5138,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			}
 			if (/^DECLARE /.test(sql)) throw streamError;
 			if (sql === 'ROLLBACK') throw rollbackError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, {
@@ -4927,12 +5160,16 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		let callIdx = 0;
 		const streamClient = makeClient(async (_sql) => {
 			callIdx++;
-			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
-			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
-			if (callIdx === 3) return { rows, rowCount: 1 } as QueryResult; // FETCH → 1 row
-			if (callIdx === 4) return { rows: [], rowCount: 0 } as QueryResult; // FETCH → done
-			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
-			return { rows: [], rowCount: 0 } as QueryResult; // COMMIT
+			if (callIdx === 1)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // BEGIN
+			if (callIdx === 2)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // DECLARE
+			if (callIdx === 3) return { rows, rowCount: 1 } satisfies MockQueryResult; // FETCH → 1 row
+			if (callIdx === 4)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // FETCH → done
+			if (callIdx === 5)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult; // COMMIT
 		});
 
 		const pool = makePool({ rows: [] }, streamClient);
@@ -5048,9 +5285,10 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		let callIdx = 0;
 		const streamClient = makeClient(async (_sql) => {
 			callIdx++;
-			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
+			if (callIdx === 1)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // BEGIN
 			if (callIdx === 2) throw new Error('cursor error'); // DECLARE fails
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 
 		const pool = makePool({ rows: [] }, streamClient);
@@ -5069,14 +5307,18 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const multiResult = [
 			{ rows: [], rowCount: 0, command: 'DECLARE' },
 			{ rows: [], rowCount: 0, command: 'COMMIT' },
-		] as QueryResult[];
+		] satisfies MockQueryResult[];
 		const streamClient = {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (/^DECLARE \S+ NO SCROLL CURSOR FOR SELECT 1; COMMIT$/.test(sql)) {
 					return multiResult;
 				}
-				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SELECT',
+				} satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -5114,7 +5356,7 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 				const sql = queryText(input);
 				if (/^DECLARE /.test(sql)) throw streamError;
 				if (sql === 'ROLLBACK') throw rollbackError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -5134,19 +5376,22 @@ describe('PgsqlAdapter.streamRaw', () => {
 		const rows: Record<string, unknown>[] = [{ raw_id: 1 }, { raw_id: 2 }];
 		let fetchCount = 0;
 		const streamClient = makeClient(async (sql) => {
-			if (sql === 'BEGIN') return { rows: [], rowCount: 0 } as QueryResult;
+			if (sql === 'BEGIN')
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			if (/^DECLARE /.test(sql))
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			if (/^FETCH FORWARD 1 FROM /.test(sql)) {
 				const row = rows[fetchCount];
 				fetchCount++;
 				return {
 					rows: row === undefined ? [] : [row],
 					rowCount: row === undefined ? 0 : 1,
-				} as QueryResult;
+				} satisfies MockQueryResult;
 			}
-			if (/^CLOSE /.test(sql)) return { rows: [], rowCount: 0 } as QueryResult;
-			if (sql === 'COMMIT') return { rows: [], rowCount: 0 } as QueryResult;
+			if (/^CLOSE /.test(sql))
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
+			if (sql === 'COMMIT')
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			throw new Error(`unexpected SQL: ${sql}`);
 		});
 		const pool = makePool({ rows: [] }, streamClient);
@@ -5250,7 +5495,7 @@ describe('PgsqlAdapter.listIndexes — schema fallback', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql.includes('FROM pg_indexes')) throw pgError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
@@ -5284,7 +5529,7 @@ describe('PgsqlAdapter.listIndexes — schema fallback', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql.includes('FROM information_schema.columns')) throw pgError;
-			return { rows: [], rowCount: 0 } as QueryResult;
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
 
@@ -5518,11 +5763,12 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		if (capturedAdapter === undefined || capturedOrm === undefined) {
 			throw new Error('expected transaction adapter and ORM to be captured');
 		}
+		const committedOrm = capturedOrm;
 		expect(capturedAdapter.inTransaction).toBe(false);
 		expect(capturedAdapter.withSchema('tenant_1').inTransaction).toBe(false);
 
 		const error = await captureRejection(() =>
-			capturedOrm.tables.items.indexes.create({
+			committedOrm.tables.items.indexes.create({
 				name: 'idx_items_label_after_commit',
 				columns: ['label'],
 				concurrently: true,
@@ -5547,7 +5793,7 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 				const sql = queryText(input);
 				if (/^DECLARE /.test(sql)) throw streamError;
 				if (sql === 'ROLLBACK') throw rollbackError;
-				return { rows: [], rowCount: 0 } as QueryResult;
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult;
 			}),
 			release: vi.fn(),
 		} as unknown as PoolClient;
@@ -5781,12 +6027,16 @@ describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
 		let callIdx = 0;
 		const streamClient = makeClient(async (_sql) => {
 			callIdx++;
-			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
-			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
-			if (callIdx === 3) return { rows, rowCount: 1 } as QueryResult; // FETCH → 1 row
-			if (callIdx === 4) return { rows: [], rowCount: 0 } as QueryResult; // FETCH → done
-			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
-			return { rows: [], rowCount: 0 } as QueryResult; // COMMIT
+			if (callIdx === 1)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // BEGIN
+			if (callIdx === 2)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // DECLARE
+			if (callIdx === 3) return { rows, rowCount: 1 } satisfies MockQueryResult; // FETCH → 1 row
+			if (callIdx === 4)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // FETCH → done
+			if (callIdx === 5)
+				return { rows: [], rowCount: 0 } satisfies MockQueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } satisfies MockQueryResult; // COMMIT
 		});
 
 		const pool = makePool({ rows: [] }, streamClient);

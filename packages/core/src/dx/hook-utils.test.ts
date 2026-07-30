@@ -33,7 +33,7 @@ function makeQueryCtx(overrides?: Partial<QueryHookContext>): QueryHookContext {
 		table: 'users',
 		operation: 'select',
 		intent: {} as QueryHookContext['intent'],
-		resultType: 'rows',
+		resultType: 'all',
 		...overrides,
 	};
 }
@@ -56,7 +56,7 @@ function makeErrorCtx(overrides?: Partial<ErrorHookContext>): ErrorHookContext {
 		operation: 'select',
 		error: new Error('original'),
 		intent: {} as ErrorHookContext['intent'],
-		phase: 'before',
+		phase: 'beforeQuery',
 		...overrides,
 	};
 }
@@ -189,13 +189,13 @@ describe('composeBeforeQueryHooks', () => {
 describe('pipeAfterQueryHooks', () => {
 	it('runs left-to-right, threading result', async () => {
 		const order: string[] = [];
-		const h1: AfterQueryHook = (_ctx, result: unknown) => {
+		const h1: AfterQueryHook = <R>(_ctx: QueryHookContext, result: R) => {
 			order.push('h1');
-			return `${result as string}-h1`;
+			return (typeof result === 'string' ? `${result}-h1` : result) as R;
 		};
-		const h2: AfterQueryHook = (_ctx, result: unknown) => {
+		const h2: AfterQueryHook = <R>(_ctx: QueryHookContext, result: R) => {
 			order.push('h2');
-			return `${result as string}-h2`;
+			return (typeof result === 'string' ? `${result}-h2` : result) as R;
 		};
 		const piped = pipeAfterQueryHooks(h1, h2);
 		const result = await piped(makeQueryCtx(), 'start');
@@ -204,7 +204,8 @@ describe('pipeAfterQueryHooks', () => {
 	});
 
 	it('passes result unchanged when hook returns undefined', async () => {
-		const h1: AfterQueryHook = (_ctx, r: unknown) => `${r as string}-h1`;
+		const h1: AfterQueryHook = <R>(_ctx: QueryHookContext, result: R) =>
+			(typeof result === 'string' ? `${result}-h1` : result) as R;
 		const h2: AfterQueryHook = () => undefined;
 		const piped = pipeAfterQueryHooks(h1, h2);
 		const result = await piped(makeQueryCtx(), 'x');
@@ -215,13 +216,13 @@ describe('pipeAfterQueryHooks', () => {
 describe('composeAfterQueryHooks', () => {
 	it('runs right-to-left', async () => {
 		const order: string[] = [];
-		const h1: AfterQueryHook = (_ctx, r: unknown) => {
+		const h1: AfterQueryHook = (_ctx, result) => {
 			order.push('h1');
-			return r;
+			return result;
 		};
-		const h2: AfterQueryHook = (_ctx, r: unknown) => {
+		const h2: AfterQueryHook = (_ctx, result) => {
 			order.push('h2');
-			return r;
+			return result;
 		};
 		const composed = composeAfterQueryHooks(h1, h2);
 		await composed(makeQueryCtx(), 'x');
@@ -283,27 +284,35 @@ describe('composeBeforeMutationHooks', () => {
 describe('pipeAfterMutationHooks', () => {
 	it('runs left-to-right, threading rows', async () => {
 		const order: string[] = [];
-		const h1: AfterMutationHook = (_ctx, rows: unknown[]) => {
+		const h1: AfterMutationHook = <T>(
+			_ctx: MutationHookContext<T>,
+			rows: T[],
+		) => {
 			order.push('h1');
-			return [...rows, 'h1'] as unknown[];
+			return rows.length < 2 ? rows : [...rows.slice(1), rows[0]!];
 		};
-		const h2: AfterMutationHook = (_ctx, rows: unknown[]) => {
+		const h2: AfterMutationHook = <T>(
+			_ctx: MutationHookContext<T>,
+			rows: T[],
+		) => {
 			order.push('h2');
-			return [...rows, 'h2'] as unknown[];
+			return rows.reverse();
 		};
 		const piped = pipeAfterMutationHooks(h1, h2);
-		const result = await piped(makeMutationCtx(), []);
+		const result = await piped(makeMutationCtx(), [1, 2, 3]);
 		expect(order).toEqual(['h1', 'h2']);
-		expect(result).toEqual(['h1', 'h2']);
+		expect(result).toEqual([1, 3, 2]);
 	});
 
 	it('passes rows unchanged when hook returns undefined', async () => {
-		const h1: AfterMutationHook = (_ctx, rows: unknown[]) =>
-			[...rows, 'h1'] as unknown[];
+		const h1: AfterMutationHook = <T>(
+			_ctx: MutationHookContext<T>,
+			rows: T[],
+		) => rows.reverse();
 		const h2: AfterMutationHook = () => undefined;
 		const piped = pipeAfterMutationHooks(h1, h2);
-		const result = await piped(makeMutationCtx(), []);
-		expect(result).toEqual(['h1']);
+		const result = await piped(makeMutationCtx(), [1, 2]);
+		expect(result).toEqual([2, 1]);
 	});
 });
 

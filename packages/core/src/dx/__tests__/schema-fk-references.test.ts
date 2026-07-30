@@ -104,7 +104,7 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			table: 'users',
 			columns: ['tenantId', 'id'],
 		});
-		expect(model.externalTables.has('users')).toBe(false);
+		expect(model.externalTables?.has('users')).toBe(false);
 		expect(model.getRelation('posts.author')).toBeUndefined();
 	});
 
@@ -131,7 +131,7 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 		);
 
 		const fk = db.model.tables.get('memberships')?.foreignKeys[0];
-		expect(db.model.externalTables.has('tenants')).toBe(false);
+		expect(db.model.externalTables?.has('tenants')).toBe(false);
 		expect(fk?.references).toMatchObject({
 			schema: 'auth',
 			table: 'tenants',
@@ -251,7 +251,7 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 
 		const table = db.model.tables.get('accounts');
 		expect(table?.pseudoColumns ?? []).toHaveLength(0);
-		expect(db.model.externalTables.has('accounts')).toBe(false);
+		expect(db.model.externalTables?.has('accounts')).toBe(false);
 		expect(db.model.getRelationsFrom('accounts')).toEqual([]);
 	});
 

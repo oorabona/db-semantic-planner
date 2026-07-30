@@ -80,7 +80,9 @@ function makeLoadedSchema(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
 
 function readStdout(logSpy: ReturnType<typeof vi.spyOn>): string {
 	return logSpy.mock.calls
-		.map((call) => call.map((value) => String(value)).join(' '))
+		.map((call: unknown[]) =>
+			call.map((value: unknown) => String(value)).join(' '),
+		)
 		.join('\n');
 }
 

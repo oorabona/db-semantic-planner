@@ -45,10 +45,10 @@ describe('rangeOverlaps', () => {
 			expect(Array.isArray(right.args)).toBe(true);
 			const args = right.args as Array<Record<string, unknown>>;
 			expect(args).toHaveLength(2);
-			expect(args[0].kind).toBe('param');
-			expect(args[0].value).toBe('2024-01-01');
-			expect(args[1].kind).toBe('param');
-			expect(args[1].value).toBe('2024-01-31');
+			expect(args[0]?.kind).toBe('param');
+			expect(args[0]?.value).toBe('2024-01-01');
+			expect(args[1]?.kind).toBe('param');
+			expect(args[1]?.value).toBe('2024-01-31');
 		});
 
 		it('respects custom int4range rangeType', () => {
@@ -212,8 +212,8 @@ describe('rangeContainedBy', () => {
 			>;
 			const right = intent.right as Record<string, unknown>;
 			const args = right.args as Array<Record<string, unknown>>;
-			expect(args[0].value).toBe('2024-03-01');
-			expect(args[1].value).toBe('2024-03-31');
+			expect(args[0]?.value).toBe('2024-03-01');
+			expect(args[1]?.value).toBe('2024-03-31');
 		});
 	});
 

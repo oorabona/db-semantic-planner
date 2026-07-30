@@ -20,6 +20,14 @@ function makeBlock(overrides: Partial<AssertionBlock> = {}): AssertionBlock {
 	};
 }
 
+function makeBlockWithoutQueryIndex(
+	overrides: Partial<AssertionBlock> = {},
+): AssertionBlock {
+	const block = makeBlock(overrides);
+	Reflect.deleteProperty(block, 'queryIndex');
+	return block;
+}
+
 // ---------------------------------------------------------------------------
 // parseAssertionFile — basic structure
 // ---------------------------------------------------------------------------
@@ -456,8 +464,7 @@ describe('validateAssertionBlocks', () => {
 	});
 
 	it('should error when match text does not match any query', () => {
-		const block = makeBlock({
-			queryIndex: undefined,
+		const block = makeBlockWithoutQueryIndex({
 			queryMatch: 'SELECT nonexistent',
 			startLine: 5,
 			assertions: [{ type: 'success', value: true, line: 6 }],
@@ -468,8 +475,7 @@ describe('validateAssertionBlocks', () => {
 	});
 
 	it('should error when match text is ambiguous (matches multiple queries)', () => {
-		const block = makeBlock({
-			queryIndex: undefined,
+		const block = makeBlockWithoutQueryIndex({
 			queryMatch: 'SELECT 1',
 			startLine: 1,
 			assertions: [{ type: 'success', value: true, line: 2 }],
@@ -490,8 +496,7 @@ describe('validateAssertionBlocks', () => {
 	});
 
 	it('should match query with leading/trailing whitespace (trimmed)', () => {
-		const block = makeBlock({
-			queryIndex: undefined,
+		const block = makeBlockWithoutQueryIndex({
 			queryMatch: 'SELECT 1',
 			assertions: [{ type: 'success', value: true, line: 2 }],
 		});
@@ -516,27 +521,27 @@ describe('resolveQueryIndex', () => {
 	});
 
 	it('should return -1 when queryIndex is undefined and queryMatch is undefined', () => {
-		const block = makeBlock({ queryIndex: undefined, queryMatch: undefined });
+		const block = makeBlockWithoutQueryIndex();
 		expect(resolveQueryIndex(block, ['a', 'b'])).toBe(-1);
 	});
 
 	it('should find matching query by queryMatch text', () => {
-		const block = makeBlock({ queryIndex: undefined, queryMatch: 'SELECT 1' });
+		const block = makeBlockWithoutQueryIndex({ queryMatch: 'SELECT 1' });
 		expect(resolveQueryIndex(block, ['SELECT 1', 'SELECT 2'])).toBe(0);
 	});
 
 	it('should return -1 when queryMatch does not match any query', () => {
-		const block = makeBlock({ queryIndex: undefined, queryMatch: 'SELECT 99' });
+		const block = makeBlockWithoutQueryIndex({ queryMatch: 'SELECT 99' });
 		expect(resolveQueryIndex(block, ['SELECT 1'])).toBe(-1);
 	});
 
 	it('should match using trimmed comparison', () => {
-		const block = makeBlock({ queryIndex: undefined, queryMatch: 'SELECT 1' });
+		const block = makeBlockWithoutQueryIndex({ queryMatch: 'SELECT 1' });
 		expect(resolveQueryIndex(block, ['  SELECT 1  '])).toBe(0);
 	});
 
 	it('should return index of first match when multiple queries match', () => {
-		const block = makeBlock({ queryIndex: undefined, queryMatch: 'SELECT 1' });
+		const block = makeBlockWithoutQueryIndex({ queryMatch: 'SELECT 1' });
 		// First match is at index 0
 		expect(resolveQueryIndex(block, ['SELECT 1', 'SELECT 1'])).toBe(0);
 	});

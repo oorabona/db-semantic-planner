@@ -14,8 +14,8 @@
  * - Error path: compilation failure with specific error messages
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter, CompiledQuery } from '../adapter.js';
 import type { ModelIR, TableIR } from '../model-ir.js';
 import { createNqlTag, extractPseudoColumnKeywords } from './nql.js';

@@ -57,6 +57,7 @@ const mockModel = {
 
 const deps: AdapterCompilerDeps = {
 	naming: identityNaming,
+	schemaName: undefined,
 	defaultPk: DEFAULT_PK_COLUMN,
 	deriveFk: defaultFkDerivation,
 	model: mockModel,
@@ -124,6 +125,9 @@ function buildExplicitColumnsPlan(overrides?: {
 					},
 				]
 			: [],
+		warnings: [],
+		ctes: [],
+		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 	} as unknown as PlanReport;
 }
 
@@ -151,6 +155,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 			},
 			// No include-strategy decision: planner could not resolve 'enclosingSymbol'
 			decisions: [],
+			warnings: [],
+			ctes: [],
+			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		};
 
 		const { sql } = compile(plan);
@@ -175,6 +182,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 				],
 			},
 			decisions: [],
+			warnings: [],
+			ctes: [],
+			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		};
 
 		const { sql } = compile(plan);
@@ -198,6 +208,9 @@ describe('Issue 15: include camelCase alias — synthesizeMissingJoinDecisions',
 				],
 			},
 			decisions: [],
+			warnings: [],
+			ctes: [],
+			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 		};
 
 		const { sql } = compile(plan);
@@ -264,7 +277,10 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 				include: [{ relation: 'enclosingSymbol', join: 'left' as const }],
 			},
 			decisions: [],
-		} as unknown as PlanReport;
+			warnings: [],
+			ctes: [],
+			metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+		};
 		const { sql } = compile(plan);
 		// The normal case should still emit the JOIN
 		expect(sql).toMatch(/LEFT JOIN/i);

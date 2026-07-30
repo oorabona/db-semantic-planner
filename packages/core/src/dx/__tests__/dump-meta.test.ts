@@ -10,12 +10,13 @@
  *   - NqlBuilderImpl (nql template tag)
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import { eq } from '../filters.js';
 import { createNqlTag } from '../nql.js';
 import { createOrm } from '../orm.js';
 import { schema } from '../schema.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 describe('QueryBuilder.dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
@@ -100,6 +101,9 @@ describe('nql`...`.dump(meta?)', () => {
 		expect(dump.meta?.queryName).toBe('nql-users');
 		expect(dump.meta?.correlationId).toBe('cid-nql-1');
 		expect(dump.sql).toMatch(/SELECT/i);
+		expect('plan' in dump).toBe(true);
+		if (!('plan' in dump))
+			throw new Error('NQL dump must include a query plan');
 		expect(dump.plan).toBeDefined();
 	});
 
@@ -128,7 +132,7 @@ describe('nql`...`.dump(meta?)', () => {
 describe('mutation dump(meta?)', () => {
 	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const orm = createOrm({ schema: db, adapter });
+	const orm = stringMutationOrm(createOrm({ schema: db, adapter }));
 
 	it('attaches queryName and correlationId via fluent mutation dump path', () => {
 		const dump = orm

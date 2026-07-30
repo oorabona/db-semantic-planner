@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ErrorCode } from './protocol';
-import { Router } from './router';
+import { ErrorCode } from './protocol.js';
+import { Router } from './router.js';
 
 describe('Router', () => {
 	it('dispatches handshake and returns capabilities', async () => {

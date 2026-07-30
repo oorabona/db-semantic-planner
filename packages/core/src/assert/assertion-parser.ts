@@ -7,6 +7,8 @@
  * Pure string parser — zero external dependencies.
  */
 
+import type { JsonValue } from '@dbsp/types';
+
 // Valid assertion types
 export const ASSERTION_TYPES = [
 	// Existing (keep for backward compat)
@@ -68,12 +70,15 @@ export interface TableAssertionData {
 	rows: string[][];
 }
 
+/** Values representable in an assertion file, plus the parsed db.output table. */
+export type AssertionValue = JsonValue | TableAssertionData;
+
 /**
  * A single assertion within a block
  */
 export interface Assertion {
 	type: AssertionType;
-	value: string | number | boolean | unknown[] | TableAssertionData;
+	value: AssertionValue;
 	line: number;
 }
 
@@ -285,7 +290,7 @@ function isValidAssertionType(type: string): type is AssertionType {
 function parseAssertionValue(
 	type: AssertionType,
 	valueStr: string,
-): { value?: string | number | boolean | unknown[]; error?: string } {
+): { value?: AssertionValue; error?: string } {
 	switch (type) {
 		// Boolean value
 		case 'success':

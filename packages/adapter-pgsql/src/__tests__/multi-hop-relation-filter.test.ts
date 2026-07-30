@@ -20,8 +20,8 @@
  * no thrown error for a declared-relation multi-hop path.
  */
 
-import { and, plan, ref, schema } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
+import { and, POSTGRESQL_CAPABILITIES, plan, ref, schema } from '@dbsp/core';
+import type { WhereIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -58,19 +58,13 @@ function compileMultiHop(
 	relation: string[],
 	body?: string,
 ): { sql: string; parameters: readonly unknown[] } {
-	const whereCondition: {
-		kind: 'comparison';
-		field: string;
-		operator: string;
-		value: unknown;
-	} = body
+	const whereCondition: WhereIntent = body
 		? {
-				kind: 'comparison',
+				kind: 'like',
 				field: 'body',
-				operator: 'like',
-				value: `%${body}%`,
+				pattern: `%${body}%`,
 			}
-		: { kind: 'comparison', field: 'id', operator: 'isNotNull', value: null };
+		: { kind: 'null', field: 'id', operator: 'isNotNull' };
 
 	const planReport = plan(
 		{
@@ -240,10 +234,9 @@ describe('3. multi-hop relationFilter nested under OR', () => {
 							kind: 'relationFilter',
 							relation: ['posts', 'comments'],
 							where: {
-								kind: 'comparison',
+								kind: 'like',
 								field: 'body',
-								operator: 'like',
-								value: '%hi%',
+								pattern: '%hi%',
 							},
 							mode: 'some',
 						},
@@ -453,10 +446,9 @@ describe('6. multi-hop nested under OR — nested chain + inline position (Item 
 							kind: 'relationFilter',
 							relation: ['posts', 'comments'],
 							where: {
-								kind: 'comparison',
+								kind: 'like',
 								field: 'body',
-								operator: 'like',
-								value: '%hi%',
+								pattern: '%hi%',
 							},
 							mode: 'some',
 						},

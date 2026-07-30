@@ -101,6 +101,7 @@ export function rangeOverlaps(
  */
 export function rangeOverlaps(
 	field: string,
+	// #444: PostgreSQL only defines && for two ranges; keep scalar RHS rejected.
 	value: RangeValue,
 ): WhereRangeIntent;
 
@@ -146,7 +147,7 @@ export function rangeContains(
  */
 export function rangeContains(
 	field: string,
-	value: RangeValue,
+	value: RangeOperand,
 ): WhereRangeIntent;
 
 export function rangeContains(
@@ -190,6 +191,7 @@ export function rangeContainedBy(
  */
 export function rangeContainedBy(
 	field: string,
+	// #444: scalar containment has the element on the left, not the RHS here.
 	value: RangeValue,
 ): WhereRangeIntent;
 

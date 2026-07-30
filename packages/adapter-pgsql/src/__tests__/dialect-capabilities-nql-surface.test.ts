@@ -1,12 +1,12 @@
-import type { DialectCapabilities, PlanReport } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
 import {
 	DUCKDB_CAPABILITIES,
 	MSSQL_CAPABILITIES,
 	MYSQL_CAPABILITIES,
 	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
-} from '../../../core/src/dialects/index.js';
+} from '@dbsp/core';
+import type { DialectCapabilities, PlanReport } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import {
 	type CompilerOptions,

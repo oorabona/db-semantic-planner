@@ -3850,7 +3850,7 @@ describe('buildSummary — missing ChangeKind cases (F-006 regression)', () => {
 		const schema = makeModelWithSequences([seq1]);
 		const db = makeModelWithSequences([seq2]);
 		const diff = compareSchemata(schema, db);
-		expect(diff.summary.tables.altered ?? 0).toBe(0);
+		expect(diff.summary.tables.added + diff.summary.tables.dropped).toBe(0);
 		expect(diff.summary.columns.altered).toBe(0);
 	});
 

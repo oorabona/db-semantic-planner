@@ -21,6 +21,7 @@
  * - Test error paths and edge cases ONLY (not happy paths)
  */
 
+import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, CompiledQuery, Dump } from '../../adapter.js';
 import type { QueryIntent } from '../../index.js';
@@ -44,6 +45,7 @@ import { createOrm } from '../orm.js';
 import { createOrmInstance, wrapTablesProxyWithDDL } from '../orm-instance.js';
 import { ref, schema } from '../schema.js';
 import { subquery } from '../subquery-builder.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
 import { createMockAdapter } from '../test-utils.js';
 
 // ============================================================================
@@ -71,10 +73,20 @@ const testSchema = schema({
 
 function attachExecuteWithMeta(adapter: Adapter): void {
 	const execute = adapter.execute.bind(adapter);
-	adapter.executeWithMeta = vi.fn(async <T>(query: CompiledQuery<T>) => {
+	const executeWithMeta: NonNullable<Adapter['executeWithMeta']> = async <T>(
+		query: CompiledQuery<T>,
+	) => {
 		const rows = await execute<T>(query);
 		return { rows, rowCount: rows.length };
-	}) as Adapter['executeWithMeta'];
+	};
+	adapter.executeWithMeta = executeWithMeta;
+}
+
+function mutationCompiledQuery(sql: string): CompiledQuery {
+	return projectionlessCompiledQuery(
+		{ sql, parameters: [] },
+		'branch-coverage-strict mutation compiler stub',
+	);
 }
 
 function makeAdapter(overrides: Partial<Adapter> = {}): Adapter {
@@ -389,7 +401,11 @@ describe('QueryBuilderImpl.join() edge cases', () => {
 			['id', 'name'],
 			['int4', 'text'],
 		);
-		expect(() => orm.select('users').join(bv).plan()).toThrow(/on.*condition/i);
+		const builder = orm.select('users');
+		const joinWithoutOptions = builder.join.bind(builder) as unknown as (
+			source: typeof bv,
+		) => typeof builder;
+		expect(() => joinWithoutOptions(bv).plan()).toThrow(/on.*condition/i);
 	});
 });
 
@@ -493,56 +509,53 @@ describe('QueryBuilderImpl.buildPkCondition', () => {
 describe('UpdateBuilder.batchSet coverage', () => {
 	it('batchSet with string matchColumn → wraps in array', () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE users SET ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE users SET ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.update('users')
 			.batchSet('id', [{ id: 1, name: 'Alice' }]);
 		const dump = builder.dump();
 		expect((dump.intent as { type: string }).type).toBe('batchUpdate');
-		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual([
-			'id',
-		]);
+		expect(dump.intent.type).toBe('batchUpdate');
+		if (dump.intent.type !== 'batchUpdate')
+			throw new Error('expected batch update');
+		expect(dump.intent.matchColumns).toEqual(['id']);
 	});
 
 	it('batchSet with array matchColumn → keeps as-is', () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE users SET ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE users SET ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.update('users')
 			.batchSet(['id', 'email'], [{ id: 1, email: 'a@b.com', name: 'Alice' }]);
 		const dump = builder.dump();
-		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual([
-			'id',
-			'email',
-		]);
+		expect(dump.intent.type).toBe('batchUpdate');
+		if (dump.intent.type !== 'batchUpdate')
+			throw new Error('expected batch update');
+		expect(dump.intent.matchColumns).toEqual(['id', 'email']);
 	});
 
 	it('batchSet with empty data array → throws error', () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE users SET ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE users SET ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm.update('users').batchSet('id', []);
 		expect(() => builder.dump()).toThrow('batchSet requires at least one row');
 	});
 
 	it('batchSet with set() call → includes scalarSet in intent', () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE users SET ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE users SET ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.update('users')
 			.set({ active: true })
@@ -556,15 +569,14 @@ describe('UpdateBuilder.batchSet coverage', () => {
 	});
 
 	it('compileIntent dispatches to compileBatchUpdate for batchUpdate intent', async () => {
-		const compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE batch ...',
-			parameters: [],
-		}));
 		const adapter = createMockAdapter();
+		const compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE batch ...'),
+		);
 		adapter.compileBatchUpdate = compileBatchUpdate;
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
-		const orm = createOrm({ schema: testSchema, adapter });
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		await orm
 			.update('users')
 			.batchSet('id', [{ id: 1, name: 'Alice' }])
@@ -580,7 +592,9 @@ describe('UpdateBuilder.batchSet coverage', () => {
 describe('MutationBuilderBase.extractIntentData coverage', () => {
 	it('insert with single value → hook sees cardinality=single', async () => {
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT...', parameters: [] }));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT...'),
+		);
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
@@ -588,14 +602,18 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 			hookCalled.push(ctx.cardinality as string);
 			return ctx;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm.insert('users').values({ name: 'Alice' }).execute();
 		expect(hookCalled[0]).toBe('single');
 	});
 
 	it('insert with bulk values → hook sees cardinality=bulk', async () => {
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT...', parameters: [] }));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT...'),
+		);
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
@@ -603,7 +621,9 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 			hookCalled.push(ctx.cardinality as string);
 			return ctx;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm
 			.insert('users')
 			.values([{ name: 'Alice' }, { name: 'Bob' }])
@@ -613,7 +633,9 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 
 	it('delete → hook sees cardinality=single and data=undefined', async () => {
 		const adapter = createMockAdapter();
-		adapter.compileDelete = vi.fn(() => ({ sql: 'DELETE...', parameters: [] }));
+		adapter.compileDelete = vi.fn<Adapter['compileDelete']>(() =>
+			mutationCompiledQuery('DELETE...'),
+		);
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
 		const hookCalled: Array<{ cardinality: string; data: unknown }> = [];
@@ -624,7 +646,9 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 			});
 			return ctx;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm.delete('users').where(eq('id', 1)).execute();
 		expect(hookCalled[0]?.cardinality).toBe('single');
 		expect(hookCalled[0]?.data).toBeUndefined();
@@ -632,10 +656,9 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 
 	it('batchUpdate → hook sees cardinality=bulk', async () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({
-			sql: 'UPDATE...',
-			parameters: [],
-		}));
+		adapter.compileBatchUpdate = vi.fn<Adapter['compileBatchUpdate']>(() =>
+			mutationCompiledQuery('UPDATE...'),
+		);
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
 		const hookCalled: string[] = [];
@@ -643,7 +666,9 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 			hookCalled.push(ctx.cardinality as string);
 			return ctx;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm
 			.update('users')
 			.batchSet('id', [
@@ -661,15 +686,14 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 
 describe('MutationBuilderBase.executeWithoutHooks with returning', () => {
 	it('returns results when returning columns are set', async () => {
-		const executeMock = vi.fn(() => Promise.resolve([{ id: 42 }]));
+		const executeMock: Adapter['execute'] = async <T>() => [{ id: 42 }] as T[];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({
-			sql: 'INSERT ... RETURNING id',
-			parameters: [],
-		}));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT ... RETURNING id'),
+		);
 		adapter.execute = executeMock;
 		attachExecuteWithMeta(adapter);
-		const orm = createOrm({ schema: testSchema, adapter });
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const result = await orm
 			.insert('users')
 			.values({ name: 'Alice' })
@@ -687,17 +711,18 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 	it('fires afterMutation hooks without returning columns', async () => {
 		const afterCalled: unknown[] = [];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({
-			sql: 'INSERT ...',
-			parameters: [],
-		}));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT ...'),
+		);
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().afterMutation((ctx, results) => {
 			afterCalled.push({ table: ctx.table, count: results.length });
 			return results;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm.insert('users').values({ name: 'Alice' }).execute();
 		expect(afterCalled).toHaveLength(1);
 		expect((afterCalled[0] as { table: string }).table).toBe('users');
@@ -706,17 +731,18 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 	it('fires afterMutation hooks with results when returning set', async () => {
 		const afterCalled: unknown[] = [];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({
-			sql: 'INSERT ... RETURNING id',
-			parameters: [],
-		}));
-		adapter.execute = vi.fn(() => Promise.resolve([{ id: 1 }]));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT ... RETURNING id'),
+		);
+		adapter.execute = async <T>() => [{ id: 1 }] as T[];
 		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().afterMutation((_ctx, results) => {
 			afterCalled.push(results);
 			return results;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await orm
 			.insert('users')
 			.values({ name: 'Alice' })
@@ -728,17 +754,18 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 	it('runs onError hooks when execute throws', async () => {
 		const errorCaptured: Error[] = [];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({
-			sql: 'INSERT ...',
-			parameters: [],
-		}));
+		adapter.compileInsert = vi.fn<Adapter['compileInsert']>(() =>
+			mutationCompiledQuery('INSERT ...'),
+		);
 		adapter.execute = vi.fn(() => Promise.reject(new Error('DB failure')));
 		attachExecuteWithMeta(adapter);
 		const hooks = createHookManager().onError((ctx) => {
 			errorCaptured.push(ctx.error);
 			return ctx.error;
 		});
-		const orm = createOrm({ schema: testSchema, adapter, hooks });
+		const orm = stringMutationOrm(
+			createOrm({ schema: testSchema, adapter, hooks }),
+		);
 		await expect(
 			orm.insert('users').values({ name: 'Alice' }).execute(),
 		).rejects.toThrow('DB failure');
@@ -816,7 +843,7 @@ describe('filters.ts: notExists option branches', () => {
 
 describe('filters.ts: inSubquery with SubqueryExpression', () => {
 	it('inSubquery with subquery builder → kind=in with subquery intent', () => {
-		const sq = subquery('posts').select(['authorId']);
+		const sq = subquery('posts').select('authorId');
 		const result = inSubquery('id', sq);
 		expect(result.kind).toBe('in');
 		expect(result.subquery).toBeDefined();
@@ -844,9 +871,7 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'customers',
-			where: not(
-				inSubquery('id', subquery('orders_opt').select(['customerId'])),
-			),
+			where: not(inSubquery('id', subquery('orders_opt').select('customerId'))),
 		};
 		const result = plan(intent, schemaForOptimize.model);
 		expect(result).toBeDefined();
@@ -859,7 +884,7 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 			from: 'customers',
 			where: and(
 				eq('name', 'Alice'),
-				inSubquery('id', subquery('orders_opt').select(['customerId'])),
+				inSubquery('id', subquery('orders_opt').select('customerId')),
 			),
 		};
 		const result = plan(intent, schemaForOptimize.model);
@@ -872,7 +897,7 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 			from: 'customers',
 			where: or(
 				eq('name', 'Bob'),
-				inSubquery('id', subquery('orders_opt').select(['customerId'])),
+				inSubquery('id', subquery('orders_opt').select('customerId')),
 			),
 		};
 		const result = plan(intent, schemaForOptimize.model);
@@ -1089,7 +1114,7 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			listIndexes: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+		await expect(orm.tables.users!.indexes.list()).rejects.toThrow(
 			InvalidOperationError,
 		);
 	});
@@ -1103,7 +1128,7 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			executeRaw: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+		await expect(orm.tables.users!.indexes.list()).rejects.toThrow(
 			InvalidOperationError,
 		);
 	});
@@ -1126,7 +1151,7 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			undefined,
 			testSchema.tables as object,
 		);
-		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+		await expect(orm.tables.users!.indexes.list()).rejects.toThrow(
 			InvalidOperationError,
 		);
 	});
@@ -1139,11 +1164,10 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 describe('UpsertBuilder edge cases', () => {
 	it('doUpdate with set + where → action includes set and where', () => {
 		const adapter = createMockAdapter();
-		adapter.compileUpsert = vi.fn(() => ({
-			sql: 'INSERT ... ON CONFLICT ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileUpsert = vi.fn<Adapter['compileUpsert']>(() =>
+			mutationCompiledQuery('INSERT ... ON CONFLICT ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.upsert('users')
 			.values({ id: 1, name: 'Alice' })
@@ -1158,11 +1182,10 @@ describe('UpsertBuilder edge cases', () => {
 
 	it('onConflictConstraint → conflictTarget has constraint property', () => {
 		const adapter = createMockAdapter();
-		adapter.compileUpsert = vi.fn(() => ({
-			sql: 'INSERT ... ON CONFLICT ON CONSTRAINT ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileUpsert = vi.fn<Adapter['compileUpsert']>(() =>
+			mutationCompiledQuery('INSERT ... ON CONFLICT ON CONSTRAINT ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.upsert('users')
 			.values({ id: 1, name: 'Alice' })
@@ -1176,11 +1199,10 @@ describe('UpsertBuilder edge cases', () => {
 
 	it('doUpdate without set → action has no set property', () => {
 		const adapter = createMockAdapter();
-		adapter.compileUpsert = vi.fn(() => ({
-			sql: 'INSERT ... ON CONFLICT ...',
-			parameters: [],
-		}));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileUpsert = vi.fn<Adapter['compileUpsert']>(() =>
+			mutationCompiledQuery('INSERT ... ON CONFLICT ...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.upsert('users')
 			.values({ id: 1, name: 'Alice' })
@@ -1200,8 +1222,10 @@ describe('UpsertBuilder edge cases', () => {
 describe('DeleteBuilder edge cases', () => {
 	it('cascade with relations array → intent has cascade=array', () => {
 		const adapter = createMockAdapter();
-		adapter.compileDelete = vi.fn(() => ({ sql: 'DELETE...', parameters: [] }));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileDelete = vi.fn<Adapter['compileDelete']>(() =>
+			mutationCompiledQuery('DELETE...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm
 			.delete('users')
 			.where(eq('id', 1))
@@ -1215,8 +1239,10 @@ describe('DeleteBuilder edge cases', () => {
 
 	it('cascade without args → intent has cascade=true', () => {
 		const adapter = createMockAdapter();
-		adapter.compileDelete = vi.fn(() => ({ sql: 'DELETE...', parameters: [] }));
-		const orm = createOrm({ schema: testSchema, adapter });
+		adapter.compileDelete = vi.fn<Adapter['compileDelete']>(() =>
+			mutationCompiledQuery('DELETE...'),
+		);
+		const orm = stringMutationOrm(createOrm({ schema: testSchema, adapter }));
 		const builder = orm.delete('users').where(eq('id', 1)).cascade();
 		const dump = builder.dump();
 		expect((dump.intent as { cascade?: unknown }).cascade).toBe(true);

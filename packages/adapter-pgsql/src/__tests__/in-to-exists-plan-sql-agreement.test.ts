@@ -106,7 +106,6 @@ describe('IN→EXISTS: plan and SQL both use EXISTS for optimizable IN subquery'
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -188,7 +187,6 @@ describe('IN→EXISTS: plan and SQL both use EXISTS for optimizable IN subquery'
 					{
 						kind: 'in',
 						field: 'id',
-						values: [],
 						subquery: {
 							type: 'select',
 							from: 'productImages',
@@ -305,7 +303,6 @@ describe('Non-simple subquery: compilation throws for modifiers that would be si
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -352,7 +349,6 @@ describe('Non-simple subquery: compilation throws for modifiers that would be si
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -394,7 +390,6 @@ describe('IN→EXISTS inside OR: EXISTS compiled inline, OR semantics preserved'
 					{
 						kind: 'in',
 						field: 'id',
-						values: [],
 						subquery: {
 							type: 'select',
 							from: 'productImages',
@@ -425,11 +420,12 @@ describe('IN→EXISTS inside OR: EXISTS compiled inline, OR semantics preserved'
 		expect(planReport.intent).toBe(queryIntent);
 
 		// executableIntent carries the optimized OR (exists inside)
-		expect(planReport.executableIntent?.where?.kind).toBe('or');
-		const orWhere = planReport.executableIntent?.where as {
-			kind: 'or';
-			conditions: { kind: string }[];
-		};
+		const executableWhere = planReport.executableIntent?.where;
+		expect(executableWhere?.kind).toBe('or');
+		if (executableWhere?.kind !== 'or') {
+			throw new Error('expected the optimized WHERE clause to be an OR');
+		}
+		const orWhere = executableWhere;
 		expect(orWhere.conditions[1]?.kind).toBe('exists');
 
 		// SQL: exists is OR-combined, not AND-combined
@@ -474,7 +470,6 @@ describe('NOT(AND(inSubquery, eq)): EXISTS compiled inline inside NOT/AND', () =
 						{
 							kind: 'in',
 							field: 'id',
-							values: [],
 							subquery: {
 								type: 'select',
 								from: 'productImages',
@@ -551,7 +546,6 @@ describe('NOT IN under OR (non-nullable FK): NOT EXISTS inline under OR', () => 
 						condition: {
 							kind: 'in',
 							field: 'id',
-							values: [],
 							subquery: {
 								type: 'select',
 								from: 'posts_nn',
@@ -603,7 +597,6 @@ describe('simple top-level IN→EXISTS still works (non-regression)', () => {
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'productImages',
@@ -851,7 +844,6 @@ describe('NOT-IN-via-flag: {kind:"in", not:true} on non-nullable FK → NOT EXIS
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				not: true,
 				subquery: {
 					type: 'select',
@@ -894,7 +886,6 @@ describe('NOT-IN-via-flag: {kind:"in", not:true} on nullable FK → keeps NOT IN
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				not: true,
 				subquery: {
 					type: 'select',
@@ -938,7 +929,6 @@ describe('double-negation: not({kind:"in", not:true}) on non-nullable FK → NOT
 				condition: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					not: true,
 					subquery: {
 						type: 'select',

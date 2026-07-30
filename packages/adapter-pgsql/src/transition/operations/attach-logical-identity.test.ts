@@ -187,7 +187,7 @@ describe('AttachLogicalIdentity operation runtime', () => {
 			]),
 		);
 		expect(effects.effects.externalEffects.accountedFor).toEqual(
-			expect.arrayContaining(effects.effects.writes),
+			expect.arrayContaining([...effects.effects.writes]),
 		);
 	});
 

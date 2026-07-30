@@ -21,12 +21,9 @@ describe('isOverallSuccess', () => {
 		expect(isOverallSuccess({ success: true, dbSuccess: false })).toBe(false);
 	});
 	it('does not throw when fed `null` dbSuccess (non-conforming producer)', () => {
-		expect(() =>
-			isOverallSuccess({
-				success: true,
-				dbSuccess: null as unknown as undefined,
-			}),
-		).not.toThrow();
+		const malformed = { success: true };
+		Reflect.set(malformed, 'dbSuccess', null);
+		expect(() => isOverallSuccess(malformed)).not.toThrow();
 	});
 	// @public defensive contract: malformed inputs return `false` rather
 	// than throwing or returning a non-boolean. See JSDoc on isOverallSuccess.

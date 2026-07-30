@@ -2,9 +2,16 @@
  * @fileoverview FEAT-134: NQL tag interpolation binds values as compiler params.
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
-import type { Adapter, CompiledNqlQuery, CompileOptions } from '../adapter.js';
+import type {
+	Adapter,
+	CompiledQuery,
+	CompileOptions,
+	Dump,
+} from '../adapter.js';
+import type { MutationIntent, QueryIntent } from '../intent-ast.js';
 import type { PlanReport } from '../planner.js';
 import { createHookManager } from './hooks.js';
 import type { MutationDump } from './mutation-builders.js';
@@ -51,6 +58,39 @@ function createMutationPipelineTestSchema() {
 			active: 'boolean',
 		},
 	} as const);
+}
+
+function expectQueryIntent(intent: QueryIntent | MutationIntent): QueryIntent {
+	if (intent.type !== 'select') {
+		throw new Error(`Expected a query intent, received ${intent.type}`);
+	}
+	return intent;
+}
+
+function expectQueryDump(dump: Dump | MutationDump): Dump & {
+	readonly plan: NonNullable<Dump['plan']>;
+} {
+	if (!('plan' in dump) || dump.plan === undefined) {
+		throw new Error('Expected a query dump, received a mutation dump');
+	}
+	return dump as Dump & { readonly plan: NonNullable<Dump['plan']> };
+}
+
+function expectSelectColumns(intent: QueryIntent): readonly unknown[] {
+	if (!intent.select || !('columns' in intent.select)) {
+		throw new Error('Expected an expression select');
+	}
+	return intent.select.columns;
+}
+
+function withParameters<T>(
+	query: CompiledQuery<T>,
+	parameters: readonly unknown[],
+): CompiledQuery<T> {
+	return Object.defineProperties(Object.create(Object.getPrototypeOf(query)), {
+		...Object.getOwnPropertyDescriptors(query),
+		parameters: { value: parameters, enumerable: true },
+	}) as CompiledQuery<T>;
 }
 
 function expectNoOwnSymbols(
@@ -113,10 +153,12 @@ describe('FEAT-134 NQL tag params', () => {
 			adapter: createPgsqlCompileOnlyAdapter(),
 		});
 
-		const dump = orm.nql<{
-			id: number;
-			name: string;
-		}>`users | where id = ${5} and name = ${"O'Brien"}`.dump();
+		const dump = expectQueryDump(
+			orm.nql<{
+				id: number;
+				name: string;
+			}>`users | where id = ${5} and name = ${"O'Brien"}`.dump(),
+		);
 
 		expect(dump.params).toEqual([5, "O'Brien"]);
 		expect(dump.sql).toMatch(/\$1\b/);
@@ -126,10 +168,12 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds scalar interpolations as SQL params', () => {
 		const nql = createParamTestTag();
-		const dump = nql<{
-			id: number;
-			name: string;
-		}>`users | where id = ${5} and name = ${"O'Brien"}`.dump();
+		const dump = expectQueryDump(
+			nql<{
+				id: number;
+				name: string;
+			}>`users | where id = ${5} and name = ${"O'Brien"}`.dump(),
+		);
 
 		expect(dump.params).toEqual([5, "O'Brien"]);
 		expect(dump.sql).toMatch(/\$1\b/);
@@ -139,9 +183,11 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds tag arrays through ANY', () => {
 		const nql = createParamTestTag();
-		const dump = nql<{
-			id: number;
-		}>`users | where id = ANY(${[1, 2, 3]})`.dump();
+		const dump = expectQueryDump(
+			nql<{
+				id: number;
+			}>`users | where id = ANY(${[1, 2, 3]})`.dump(),
+		);
 
 		expect(dump.params).toEqual([[1, 2, 3]]);
 		expect(dump.sql).toMatch(/ANY\s*\(/i);
@@ -151,8 +197,10 @@ describe('FEAT-134 NQL tag params', () => {
 	it('keeps limit interpolation working through params', () => {
 		const nql = createParamTestTag();
 
-		const intent = nql<unknown>`users | limit ${10}`.toIntentIR();
-		const dump = nql<unknown>`users | limit ${10}`.dump();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | limit ${10}`.toIntentIR(),
+		);
+		const dump = expectQueryDump(nql<unknown>`users | limit ${10}`.dump());
 
 		expect(intent.limit).toEqual({ kind: 'param', value: 10 });
 		expect(dump.sql).toMatch(/limit\s+\$1/i);
@@ -161,8 +209,9 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds interpolated JSON keys in json_exists()', () => {
 		const nql = createParamTestTag();
-		const dump =
-			nql<unknown>`users | where json_exists(profile, ${'email'})`.dump();
+		const dump = expectQueryDump(
+			nql<unknown>`users | where json_exists(profile, ${'email'})`.dump(),
+		);
 
 		expect(dump.params).toEqual(['email']);
 		expect(dump.sql).toMatch(/\?/);
@@ -171,8 +220,9 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds interpolated JSON paths in json_extract()', () => {
 		const nql = createParamTestTag();
-		const dump =
-			nql<unknown>`users | where json_extract(profile, ${'role'}) = ${'admin'}`.dump();
+		const dump = expectQueryDump(
+			nql<unknown>`users | where json_extract(profile, ${'role'}) = ${'admin'}`.dump(),
+		);
 
 		expect(dump.params).toEqual(['role', 'admin']);
 		expect(dump.sql).toMatch(/->/);
@@ -182,7 +232,9 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds interpolated JSON keys in ? operator', () => {
 		const nql = createParamTestTag();
-		const dump = nql<unknown>`users | where profile ? ${'timezone'}`.dump();
+		const dump = expectQueryDump(
+			nql<unknown>`users | where profile ? ${'timezone'}`.dump(),
+		);
 
 		expect(dump.params).toEqual(['timezone']);
 		expect(dump.sql).toMatch(/\?/);
@@ -192,8 +244,9 @@ describe('FEAT-134 NQL tag params', () => {
 	it('splices nqlRaw fragments verbatim', () => {
 		const nql = createParamTestTag();
 
-		const intent =
-			nql<unknown>`users | ${nqlRaw('order by createdAt desc')}`.toIntentIR();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | ${nqlRaw('order by createdAt desc')}`.toIntentIR(),
+		);
 
 		expect(intent.orderBy).toEqual([{ field: 'createdAt', direction: 'desc' }]);
 	});
@@ -217,7 +270,9 @@ describe('FEAT-134 NQL tag params', () => {
 	it('allows reserved-looking text inside string literals', () => {
 		const nql = createParamTestTag();
 
-		const intent = nql<unknown>`users | where name = ':__p0'`.toIntentIR();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | where name = ':__p0'`.toIntentIR(),
+		);
 
 		expect(intent.where).toMatchObject({
 			kind: 'comparison',
@@ -260,8 +315,8 @@ describe('FEAT-134 NQL tag params', () => {
 				'order by createdAt desc',
 			)} | where name = ${'Alice'}`.dump();
 
-		const first = makeDump();
-		const second = makeDump();
+		const first = expectQueryDump(makeDump());
+		const second = expectQueryDump(makeDump());
 
 		expect(first.params).toEqual([true, 'Alice']);
 		expect(second.params).toEqual([true, 'Alice']);
@@ -271,8 +326,12 @@ describe('FEAT-134 NQL tag params', () => {
 	it('binds adjacent interpolations in a valid list context', () => {
 		const nql = createParamTestTag();
 
-		const intent = nql<unknown>`users | where id in (${1}, ${2})`.toIntentIR();
-		const dump = nql<unknown>`users | where id in (${1}, ${2})`.dump();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | where id in (${1}, ${2})`.toIntentIR(),
+		);
+		const dump = expectQueryDump(
+			nql<unknown>`users | where id in (${1}, ${2})`.dump(),
+		);
 
 		expect(intent.where).toMatchObject({
 			kind: 'in',
@@ -289,8 +348,9 @@ describe('FEAT-134 NQL tag params', () => {
 	it('returns public toIntentIR() with explicit param nodes and no value markers', () => {
 		const nql = createParamTestTag();
 
-		const intent =
-			nql<unknown>`users | where id = ${5} and id in (${1}, ${2}) and createdAt between ${'2026-01-01'} and ${'2026-12-31'} | select case when active = true then ${'yes'} else ${'no'} end as label, coalesce(name, ${'anon'}) as display`.toIntentIR();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | where id = ${5} and id in (${1}, ${2}) and createdAt between ${'2026-01-01'} and ${'2026-12-31'} | select case when active = true then ${'yes'} else ${'no'} end as label, coalesce(name, ${'anon'}) as display`.toIntentIR(),
+		);
 
 		expectNoOwnSymbols(intent);
 		expect(
@@ -329,8 +389,9 @@ describe('FEAT-134 NQL tag params', () => {
 	it('returns dump().plan with explicit param nodes while keeping SQL params', () => {
 		const nql = createParamTestTag();
 
-		const dump =
-			nql<unknown>`users | where id = ${5} and id in (${1}, ${2})`.dump();
+		const dump = expectQueryDump(
+			nql<unknown>`users | where id = ${5} and id in (${1}, ${2})`.dump(),
+		);
 
 		expect(dump.plan).toBeDefined();
 		expectNoOwnSymbols(dump.plan);
@@ -359,12 +420,18 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('passes explicit param nodes to the adapter without sidecar options', () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter();
+		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 		let compileValue: unknown;
 		let compileOptions: unknown;
 		const adapter: Adapter = {
 			...base,
-			compile<T = unknown>(plan: PlanReport, options) {
+			compile<T = unknown>(
+				plan: PlanReport | CompiledNqlQuery,
+				options?: CompileOptions,
+			) {
+				if (!('intent' in plan)) {
+					throw new Error('Expected a query plan');
+				}
 				const comparison = findFirstObject(
 					plan.intent,
 					(node) => node.kind === 'comparison' && node.field === 'id',
@@ -379,7 +446,7 @@ describe('FEAT-134 NQL tag params', () => {
 		};
 		const nql = createNqlTag(db.definition, db.model, adapter);
 
-		const dump = nql<unknown>`users | where id = ${5}`.dump();
+		const dump = expectQueryDump(nql<unknown>`users | where id = ${5}`.dump());
 
 		expect(compileValue).toEqual({ kind: 'param', value: 5 });
 		expect(compileOptions).toBeUndefined();
@@ -396,11 +463,13 @@ describe('FEAT-134 NQL tag params', () => {
 	it('keeps top-level SELECT param projection structure and alias', () => {
 		const nql = createParamTestTag();
 
-		const intent = nql<unknown>`users | select ${5} as x`.toIntentIR();
-		const dump = nql<unknown>`users | select ${5} as x`.dump();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | select ${5} as x`.toIntentIR(),
+		);
+		const dump = expectQueryDump(nql<unknown>`users | select ${5} as x`.dump());
 
 		expectNoOwnSymbols(intent);
-		expect((intent.select as { columns: unknown[] }).columns[0]).toEqual({
+		expect(expectSelectColumns(intent)[0]).toEqual({
 			kind: 'param',
 			value: 5,
 			as: 'x',
@@ -413,11 +482,15 @@ describe('FEAT-134 NQL tag params', () => {
 		const nql = createParamTestTag();
 		const boundValue = { kind: 'column', column: 'name' };
 
-		const intent = nql<unknown>`users | select ${boundValue} as x`.toIntentIR();
-		const dump = nql<unknown>`users | select ${boundValue} as x`.dump();
+		const intent = expectQueryIntent(
+			nql<unknown>`users | select ${boundValue} as x`.toIntentIR(),
+		);
+		const dump = expectQueryDump(
+			nql<unknown>`users | select ${boundValue} as x`.dump(),
+		);
 
 		expectNoOwnSymbols(intent);
-		expect((intent.select as { columns: unknown[] }).columns[0]).toEqual({
+		expect(expectSelectColumns(intent)[0]).toEqual({
 			kind: 'param',
 			value: boundValue,
 			as: 'x',
@@ -436,12 +509,15 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('compiles bound mutation pipelines through the full NQL bundle', () => {
 		const db = createMutationPipelineTestSchema();
-		const base = createPgsqlCompileOnlyAdapter();
+		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 		let compileInput: PlanReport | CompiledNqlQuery | undefined;
 		let compileOptions: CompileOptions | undefined;
 		const adapter: Adapter = {
 			...base,
-			compile<T = unknown>(plan: PlanReport | CompiledNqlQuery, options) {
+			compile<T = unknown>(
+				plan: PlanReport | CompiledNqlQuery,
+				options?: CompileOptions,
+			) {
 				compileInput = plan;
 				compileOptions = options;
 				return base.compile<T>(plan, options);
@@ -471,19 +547,19 @@ insert into archivedUsers from active_users`.dump() as MutationDump;
 describe('NQL mutation hook lifecycle', () => {
 	it('runs beforeMutation and afterMutation hooks around NQL tag mutations', async () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter();
+		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 		const events: string[] = [];
 		const adapter: Adapter = {
 			...base,
-			compile(plan, options) {
-				const compiled = base.compile(plan, options);
-				return {
-					sql: compiled.sql,
-					parameters: ['compiled-param'],
-				};
+			compile<T = unknown>(
+				plan: PlanReport | CompiledNqlQuery,
+				options?: CompileOptions,
+			) {
+				const compiled = base.compile<T>(plan, options);
+				return withParameters<T>(compiled, ['compiled-param']);
 			},
-			executeWithMeta: async () => ({
-				rows: [{ id: 1 }],
+			executeWithMeta: async <T>(_query: CompiledQuery<T>) => ({
+				rows: [{ id: 1 }] as T[],
 				rowCount: 1,
 			}),
 		};
@@ -498,7 +574,7 @@ describe('NQL mutation hook lifecycle', () => {
 				expect(ctx.sql).toMatch(/insert/i);
 				expect(ctx.parameters).toEqual(['compiled-param']);
 				expect(ctx.affectedRows).toBe(1);
-				return [{ id: 2 }];
+				return rows.map(() => ({ id: 2 })) as typeof rows;
 			});
 		const orm = createOrm({
 			schema: db,
@@ -519,18 +595,18 @@ describe('NQL mutation hook lifecycle', () => {
 
 	it('runs onError hooks when NQL tag mutation execution fails', async () => {
 		const db = createParamTestSchema();
-		const base = createPgsqlCompileOnlyAdapter();
+		const base = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 		const transformed = new Error('transformed NQL mutation error');
 		let errorTable: string | undefined;
 		let errorOperation: string | undefined;
 		const adapter: Adapter = {
 			...base,
-			compile(plan, options) {
-				const compiled = base.compile(plan, options);
-				return {
-					sql: compiled.sql,
-					parameters: compiled.parameters,
-				};
+			compile<T = unknown>(
+				plan: PlanReport | CompiledNqlQuery,
+				options?: CompileOptions,
+			) {
+				const compiled = base.compile<T>(plan, options);
+				return withParameters<T>(compiled, compiled.parameters);
 			},
 			executeWithMeta: async () => {
 				throw new Error('adapter failed');
@@ -561,7 +637,7 @@ describe('FEAT-134 nqlRaw brand guard', () => {
 		const symbols = Object.getOwnPropertySymbols(raw);
 
 		expect(symbols).toHaveLength(1);
-		expect(Object.getOwnPropertyDescriptor(raw, symbols[0])?.enumerable).toBe(
+		expect(Object.getOwnPropertyDescriptor(raw, symbols[0]!)?.enumerable).toBe(
 			false,
 		);
 	});

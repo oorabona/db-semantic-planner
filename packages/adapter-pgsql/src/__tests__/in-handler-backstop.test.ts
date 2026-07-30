@@ -46,9 +46,13 @@ const ctx: CompilerContext = {
 	maxRecursiveDepth: 100,
 };
 
+const unsupportedNestedDispatch = () => {
+	throw new Error('plain IN fixture does not dispatch nested conditions');
+};
+
 function compileDecision(decision: Decision) {
 	const state = createCompilerState();
-	return inHandler.compile(decision, ctx, state);
+	return inHandler.compile(decision, ctx, state, unsupportedNestedDispatch);
 }
 
 beforeEach(() => {
@@ -154,7 +158,9 @@ describe('inHandler backstop: scalar array → compiles correctly (no false posi
 			value: [1, 2, 3],
 		};
 		// Must not throw
-		expect(() => inHandler.compile(decision, ctx, state)).not.toThrow();
+		expect(() =>
+			inHandler.compile(decision, ctx, state, unsupportedNestedDispatch),
+		).not.toThrow();
 		// Must record the array as a parameter
 		expect(state.parameters).toEqual([[1, 2, 3]]);
 	});
@@ -167,7 +173,12 @@ describe('inHandler backstop: scalar array → compiles correctly (no false posi
 			operator: COLLECTION_OPERATORS.IN,
 			value: [],
 		};
-		const node = inHandler.compile(decision, ctx, state);
+		const node = inHandler.compile(
+			decision,
+			ctx,
+			state,
+			unsupportedNestedDispatch,
+		);
 		// Empty IN → false; the node should be a BooleanTest or TypeCast false
 		expect(node).toBeDefined();
 		// No parameters pushed for empty array
@@ -182,7 +193,12 @@ describe('inHandler backstop: scalar array → compiles correctly (no false posi
 			operator: COLLECTION_OPERATORS.NOT_IN,
 			value: [],
 		};
-		const node = inHandler.compile(decision, ctx, state);
+		const node = inHandler.compile(
+			decision,
+			ctx,
+			state,
+			unsupportedNestedDispatch,
+		);
 		expect(node).toBeDefined();
 		expect(state.parameters).toHaveLength(0);
 	});
@@ -195,7 +211,9 @@ describe('inHandler backstop: scalar array → compiles correctly (no false posi
 			operator: COLLECTION_OPERATORS.NOT_IN,
 			value: ['deleted', 'banned'],
 		};
-		expect(() => inHandler.compile(decision, ctx, state)).not.toThrow();
+		expect(() =>
+			inHandler.compile(decision, ctx, state, unsupportedNestedDispatch),
+		).not.toThrow();
 		expect(state.parameters).toEqual([['deleted', 'banned']]);
 	});
 });

@@ -3,14 +3,22 @@ import { ModelIRImpl } from './model-impl.js';
 import type { TableIR } from './model-ir.js';
 
 function makeModel(logicalIdentity: unknown): ModelIRImpl {
-	const table: TableIR = {
+	const baseTable: TableIR = {
 		name: 'users',
 		columns: [{ name: 'id', type: 'integer', nullable: false }],
 		primaryKey: 'id',
 		foreignKeys: [],
 		indexes: [],
-		logicalIdentity: logicalIdentity as TableIR['logicalIdentity'],
 	};
+	const table =
+		logicalIdentity === undefined
+			? baseTable
+			: {
+					...baseTable,
+					logicalIdentity: logicalIdentity as NonNullable<
+						TableIR['logicalIdentity']
+					>,
+				};
 	return new ModelIRImpl(new Map([[table.name, table]]), new Map());
 }
 

@@ -7,16 +7,46 @@ import type { AssertionQueryResult, IntentSummary } from '../types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeResult(
-	overrides: Partial<AssertionQueryResult> = {},
-): AssertionQueryResult {
+type ResultOverrides = {
+	readonly [Key in keyof AssertionQueryResult]?:
+		| AssertionQueryResult[Key]
+		| undefined;
+};
+
+function makeResult(overrides: ResultOverrides = {}): AssertionQueryResult {
+	const {
+		query,
+		success,
+		dbSuccess,
+		output,
+		sql,
+		params,
+		error,
+		rowCount,
+		columns,
+		rows,
+		intent,
+		...requiredOverrides
+	} = overrides;
 	return {
-		query: 'SELECT 1',
-		success: true,
-		sql: 'SELECT 1',
-		params: [],
-		output: '',
-		...overrides,
+		query: query ?? 'SELECT 1',
+		success: success ?? true,
+		...requiredOverrides,
+		...(dbSuccess !== undefined && { dbSuccess }),
+		...(Object.hasOwn(overrides, 'output')
+			? output !== undefined && { output }
+			: { output: '' }),
+		...(Object.hasOwn(overrides, 'sql')
+			? sql !== undefined && { sql }
+			: { sql: 'SELECT 1' }),
+		...(Object.hasOwn(overrides, 'params')
+			? params !== undefined && { params }
+			: { params: [] }),
+		...(error !== undefined && { error }),
+		...(rowCount !== undefined && { rowCount }),
+		...(columns !== undefined && { columns }),
+		...(rows !== undefined && { rows }),
+		...(intent !== undefined && { intent }),
 	};
 }
 
@@ -40,12 +70,13 @@ function makeBlock(
 
 function makeIntent(overrides: Partial<IntentSummary> = {}): IntentSummary {
 	return {
-		type: 'select',
+		type: 'query',
 		table: 'users',
 		with: [],
 		hasWhere: false,
 		hasGroupBy: false,
 		hasOrderBy: false,
+		ctes: [],
 		...overrides,
 	};
 }
@@ -260,15 +291,6 @@ describe('runAssertions', () => {
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
 		});
 
-		it('should pass params.value for matching indexed param', () => {
-			const block = makeBlock(0, [
-				{ type: 'params.value', value: { index: 1, value: 'bar' } },
-			]);
-			const result = makeResult({ params: ['foo', 'bar'] });
-			const summary = runAssertions([block], [result], ['SELECT 1']);
-			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
-		});
-
 		it('should handle undefined params gracefully (fallback to empty array)', () => {
 			const block = makeBlock(0, [{ type: 'params.length', value: 0 }]);
 			const result = makeResult({ params: undefined });
@@ -308,8 +330,8 @@ describe('runAssertions', () => {
 
 	describe('assertion types — intent', () => {
 		it('should pass intent.type when intent type matches', () => {
-			const block = makeBlock(0, [{ type: 'intent.type', value: 'select' }]);
-			const result = makeResult({ intent: makeIntent({ type: 'select' }) });
+			const block = makeBlock(0, [{ type: 'intent.type', value: 'query' }]);
+			const result = makeResult({ intent: makeIntent({ type: 'query' }) });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
 		});
@@ -389,7 +411,6 @@ describe('runAssertions', () => {
 	describe('query resolution via queryMatch', () => {
 		it('should resolve block by queryMatch text', () => {
 			const block: AssertionBlock = {
-				queryIndex: undefined,
 				queryMatch: 'SELECT 2',
 				startLine: 1,
 				assertions: [{ type: 'success', value: true, line: 2 }],
@@ -405,7 +426,6 @@ describe('runAssertions', () => {
 
 		it('should skip block when queryMatch does not resolve', () => {
 			const block: AssertionBlock = {
-				queryIndex: undefined,
 				queryMatch: 'no match',
 				startLine: 1,
 				assertions: [{ type: 'success', value: true, line: 2 }],

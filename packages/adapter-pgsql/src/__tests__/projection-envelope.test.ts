@@ -9,7 +9,6 @@ import {
 	finalizeEnvelope,
 	fromAstProjection,
 	fromModelColumns,
-	type ProjectionEnvelope,
 	preserveOneToOne,
 	projectNamedFields,
 	supplementOutputDescriptors,
@@ -129,32 +128,25 @@ describe('projection envelope', () => {
 		expect(resolveOutputReadHandling(expressionOutput)).toEqual({
 			kind: 'none',
 		});
-		const expressionEnvelope = {
-			sql: 'SELECT count(*) AS total FROM events',
-			parameters: [],
-			projection: {
-				kind: 'known',
-				outputs: new Map([[expressionKey, expressionOutput]]),
-			},
-		} as ProjectionEnvelope;
+		const expressionEnvelope = supplementOutputDescriptors(
+			fromModelColumns({
+				sql: 'SELECT count(*) AS total FROM events',
+				parameters: [],
+				table: 'events',
+				columns: ['legacySequence'],
+				model: testSchema.model,
+				naming: identityNaming,
+			}),
+			[expressionOutput],
+		);
 		expect(finalizeEnvelope(expressionEnvelope).columnMetadata?.size).toBe(0);
 
-		const unknownShapeEnvelope = {
-			sql: 'SELECT sequence FROM events',
-			parameters: [],
-			projection: {
-				kind: 'known',
-				outputs: new Map([
-					[
-						'sequence',
-						{
-							...scalarDescriptor!,
-							shape: { kind: 'unknown', reason: 'unit test' },
-						},
-					],
-				]),
+		const unknownShapeEnvelope = supplementOutputDescriptors(source, [
+			{
+				...scalarDescriptor!,
+				shape: { kind: 'unknown', reason: 'unit test' },
 			},
-		} as ProjectionEnvelope;
+		]);
 		expect(finalizeEnvelope(unknownShapeEnvelope).columnMetadata?.size).toBe(0);
 	});
 
@@ -191,32 +183,32 @@ describe('projection envelope', () => {
 	});
 
 	it('projectNamedFields preserves json_agg container shape through CTE-style passthrough', () => {
-		const source = {
-			sql: 'SELECT events_json FROM event_cte',
-			parameters: [],
-			projection: {
-				kind: 'known',
-				outputs: new Map([
-					[
-						'events_json',
-						{
-							outputKey: 'events_json',
-							source: {
-								kind: 'modelColumn',
-								table: 'events',
-								column: 'sequence',
-								js: 'bigint',
-							},
-							shape: {
-								kind: 'array',
-								cardinality: 'many',
-								aggregate: 'json_agg',
-							},
-						},
-					],
-				]),
-			},
-		} as ProjectionEnvelope;
+		const source = supplementOutputDescriptors(
+			fromModelColumns({
+				sql: 'SELECT events_json FROM event_cte',
+				parameters: [],
+				table: 'events',
+				columns: ['legacySequence'],
+				model: testSchema.model,
+				naming: identityNaming,
+			}),
+			[
+				{
+					outputKey: 'events_json',
+					source: {
+						kind: 'modelColumn',
+						table: 'events',
+						column: 'sequence',
+						js: 'bigint',
+					},
+					shape: {
+						kind: 'array',
+						cardinality: 'many',
+						aggregate: 'json_agg',
+					},
+				},
+			],
+		);
 
 		const projected = projectNamedFields(source, {
 			sql: 'SELECT events_json FROM event_cte',

@@ -19,9 +19,9 @@
  * - Returning clauses
  */
 
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
-import { POSTGRESQL_CAPABILITIES } from '../../core/src/dialects/index.js';
 import { normalizeSQL } from './ast-helpers.js';
 import { PlanCompiler, type SimplifiedPlanReport } from './compiler.js';
 import { identityNaming } from './naming-plugin.js';

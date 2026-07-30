@@ -9,6 +9,7 @@
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
 import { deparse } from '../pgsql-deparser.js';
+import { pgNode } from '../test-compat/pgsql-node.js';
 
 // ---------------------------------------------------------------------------
 // Helpers: build raw AST nodes directly so we can target specific branches
@@ -121,7 +122,7 @@ describe('deparse: top-level dispatch', () => {
 	});
 
 	it('handles Null node', () => {
-		expect(deparse({ Null: {} } as Node)).toBe('NULL');
+		expect(deparse(pgNode({ Null: {} }))).toBe('NULL');
 	});
 
 	it('handles NamedArgExpr', () => {
@@ -1808,10 +1809,14 @@ describe('deparseInferClause — whereClause', () => {
 				selectStmt: {
 					SelectStmt: {
 						valuesLists: [
-							[
-								{ A_Const: { sval: { str: 'alice' } } },
-								{ A_Const: { boolval: { boolval: true } } },
-							],
+							{
+								List: {
+									items: [
+										{ A_Const: { sval: { sval: 'alice' } } },
+										{ A_Const: { boolval: { boolval: true } } },
+									],
+								},
+							},
 						],
 						op: 'SETOP_NONE',
 					},

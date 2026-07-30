@@ -1,7 +1,7 @@
 import { type ModelIR, ModelIRImpl } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { handleRunAssertions, splitQueries } from './assertion-handler';
+import { handleRunAssertions, splitQueries } from './assertion-handler.js';
 
 // ── Minimal schema for NQL compilation ───────────────────────────
 
@@ -15,6 +15,23 @@ const minimalModel = new ModelIRImpl(
 					{ name: 'id', type: 'integer', nullable: false, primaryKey: true },
 					{ name: 'name', type: 'text', nullable: false, primaryKey: false },
 					{ name: 'email', type: 'text', nullable: true, primaryKey: false },
+					{
+						name: 'active',
+						type: 'boolean',
+						nullable: false,
+						primaryKey: false,
+					},
+				],
+				foreignKeys: [],
+				indexes: [],
+			},
+		],
+		[
+			'admins',
+			{
+				name: 'admins',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false, primaryKey: true },
 					{
 						name: 'active',
 						type: 'boolean',
@@ -135,6 +152,31 @@ describe('handleRunAssertions', () => {
 			expect(result.parseErrors).toEqual([]);
 			expect(result.summary.failed).toBe(0);
 			expect(result.summary.passed).toBe(3);
+		});
+
+		it('aggregates set-operation flags across every leaf', async () => {
+			const result = await handleRunAssertions(
+				{
+					connectionId: 'test-conn',
+					dbspContent:
+						'users | select id | union (admins | where active = true | group by id | order by id | select id)',
+					assertContent: [
+						'--- query: 0',
+						'intent.type: setOperation',
+						'intent.table: users',
+						'intent.hasWhere: true',
+						'intent.hasGroupBy: true',
+						'intent.hasOrderBy: true',
+					].join('\n'),
+					execute: false,
+				},
+				mockGetModel(),
+				mockGetPoolThrows(),
+			);
+
+			expect(result.parseErrors).toEqual([]);
+			expect(result.summary.failed).toBe(0);
+			expect(result.summary.passed).toBe(5);
 		});
 	});
 

@@ -50,7 +50,7 @@ describe('query-executor', () => {
 			);
 
 			// Should wrap: SELECT * FROM (SELECT * FROM users) AS _q LIMIT 11
-			const sql = pool.query.mock.calls[0][0] as string;
+			const sql = pool.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('LIMIT 11');
 			expect(sql).toContain('AS _q');
 			expect(result.rows).toHaveLength(5);
@@ -85,7 +85,7 @@ describe('query-executor', () => {
 				() => pool,
 			);
 
-			const sql = pool.query.mock.calls[0][0] as string;
+			const sql = pool.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('LIMIT 101');
 		});
 
@@ -97,7 +97,7 @@ describe('query-executor', () => {
 				() => pool,
 			);
 
-			const sql = pool.query.mock.calls[0][0] as string;
+			const sql = pool.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).not.toContain('LIMIT');
 			expect(sql).toBe('INSERT INTO users VALUES (1)');
 		});
@@ -110,7 +110,7 @@ describe('query-executor', () => {
 				() => pool,
 			);
 
-			const sql = pool.query.mock.calls[0][0] as string;
+			const sql = pool.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('LIMIT 1001');
 		});
 	});
@@ -135,7 +135,7 @@ describe('query-executor', () => {
 				() => page2Pool,
 			);
 
-			const sql = page2Pool.query.mock.calls[0][0] as string;
+			const sql = page2Pool.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('OFFSET 3');
 			expect(second.rows).toHaveLength(3);
 		});
@@ -250,7 +250,7 @@ describe('query-executor', () => {
 			]);
 			await handleFetchMore({ cursorId: first.cursorId }, () => pool2);
 
-			const sql = pool2.query.mock.calls[0][0] as string;
+			const sql = pool2.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('OFFSET');
 			expect(sql).not.toContain('WHERE');
 		});
@@ -274,7 +274,7 @@ describe('query-executor', () => {
 			]);
 			await handleFetchMore({ cursorId: first.cursorId }, () => pool2);
 
-			const sql = pool2.query.mock.calls[0][0] as string;
+			const sql = pool2.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('WHERE "id" >');
 			expect(sql).toContain('ORDER BY "id"');
 			expect(sql).not.toContain('OFFSET');
@@ -296,7 +296,7 @@ describe('query-executor', () => {
 			const pool2 = createMockPool([{ name: 'r6000', value: 6000 }]);
 			await handleFetchMore({ cursorId: first.cursorId }, () => pool2);
 
-			const sql = pool2.query.mock.calls[0][0] as string;
+			const sql = pool2.query.mock.calls[0]?.[0] as string | undefined;
 			expect(sql).toContain('OFFSET');
 			expect(sql).not.toContain('WHERE');
 		});

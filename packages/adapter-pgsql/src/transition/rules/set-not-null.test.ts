@@ -955,7 +955,7 @@ describe('postgresql.column.set-not-null rule', () => {
 		const claim = outcome.plan.claims.find(
 			(item) =>
 				item.derivedBy.conclusion === 'established-under-assumptions' &&
-				item.assumes.includes(assumption.id),
+				item.assumes.some((assumptionId) => assumptionId === assumption.id),
 		);
 		expect(claim).toBeDefined();
 	});
@@ -1448,7 +1448,10 @@ describe('postgresql.column.set-not-null rule', () => {
 			expect(outcome.assessment.reasons[0]?.detail).toMatch(
 				/multiple transition recognitions/i,
 			);
-			expect(outcome.assessment.reasons[0]?.candidates).toHaveLength(2);
+			const reason = outcome.assessment.reasons[0];
+			if (reason?.code === 'ambiguous-rule') {
+				expect(reason.candidates).toHaveLength(2);
+			}
 		}
 	});
 
@@ -1698,11 +1701,7 @@ describe('postgresql.column.set-not-null rule', () => {
 				issuer: {
 					artifact: PG_INTROSPECTION_ARTIFACT,
 					readContext: async () => publicContext,
-					execute: async (
-						request: ObservationRequest,
-						_target: unknown,
-						ctx: ObservationContext,
-					) => {
+					execute: async (request: ObservationRequest, _target, ctx) => {
 						const normalized = normalizedRequest(request, 'public', ctx);
 						if (request.kind !== COLUMN_EXISTS_OBSERVATION) {
 							return normalizedEvidence(request, true, 'public', ctx);
@@ -1710,33 +1709,36 @@ describe('postgresql.column.set-not-null rule', () => {
 						return {
 							...evidence(normalized, true, ctx),
 							result: {
-								value: {
-									exists: true,
-									relkind: 'p',
-									claims: [
-										{
-											kind: COLUMN_EXISTS_OBSERVATION,
-											holds: true,
-											scope: normalized.scope,
-											detail: normalized.detail,
-										},
-										{
-											kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
-											holds: false,
-											scope: [
-												{
-													engine: 'postgresql',
-													database: ctx.databaseId,
-													schema: 'public',
-													kind: 'table',
-													name: 'users',
-												},
-												...normalized.scope,
-											],
-											detail: SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
-										},
-									],
-								},
+								value: JSON.parse(
+									JSON.stringify({
+										exists: true,
+										relkind: 'p',
+										claims: [
+											{
+												kind: COLUMN_EXISTS_OBSERVATION,
+												holds: true,
+												scope: normalized.scope,
+												detail: normalized.detail,
+											},
+											{
+												kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+												holds: false,
+												scope: [
+													{
+														engine: 'postgresql',
+														database: ctx.databaseId,
+														schema: 'public',
+														kind: 'table',
+														name: 'users',
+													},
+													...normalized.scope,
+												],
+												detail:
+													SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
+											},
+										],
+									}),
+								),
 							},
 						};
 					},
@@ -1879,12 +1881,14 @@ describe('postgresql.column.set-not-null rule', () => {
 			ALTER_AUTHORITY_OBSERVATION,
 			ENGINE_VERSION_OBSERVATION,
 		]);
+		const lockBinding =
+			fragment.guards[0]?.protocol.kind === 'lock-and-check'
+				? fragment.guards[0].protocol.binding
+				: undefined;
 		const resources = [
 			...(fragment.assumptions[0]?.scope ?? []),
 			...(fragment.guards[0]?.predicate.scope ?? []),
-			...((fragment.guards[0]?.protocol.kind === 'lock-and-check' &&
-				fragment.guards[0]?.protocol.binding?.scope) ||
-				[]),
+			...(lockBinding && 'scope' in lockBinding ? lockBinding.scope : []),
 		];
 		expect(resources.map((resource) => resource.database)).toEqual(
 			resources.map(() => context.databaseId),

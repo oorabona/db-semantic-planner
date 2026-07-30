@@ -4,8 +4,8 @@
  * Tests for MCP server creation and configuration.
  */
 
+import { schema as dbSchema, ref } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import { schema as dbSchema, ref } from '../../core/src/index.ts';
 import { createMcpServer } from './server.js';
 
 // Mock schema for testing - live schema() result shape

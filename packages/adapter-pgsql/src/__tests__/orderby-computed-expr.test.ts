@@ -23,7 +23,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 				{ type: 'select', column: '*', table: 'symbols' },
 				{
 					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
+					expressionIntent: expr.intent,
 					direction: 'ASC',
 					table: 'symbols',
 				} satisfies PlanDecision,
@@ -45,7 +45,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 				{ type: 'select', column: '*', table: 'symbols' },
 				{
 					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
+					expressionIntent: expr.intent,
 					direction: 'ASC',
 					table: 'symbols',
 				} satisfies PlanDecision,
@@ -63,7 +63,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 				{ type: 'select', column: '*', table: 'symbols' },
 				{
 					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
+					expressionIntent: expr.intent,
 					direction: 'DESC',
 					table: 'symbols',
 				} satisfies PlanDecision,
@@ -81,7 +81,7 @@ describe('ORDERBY-COMPUTED-EXPR: orderBy(op(...)) generates correct SQL', () => 
 				{ type: 'select', column: '*', table: 'rankings' },
 				{
 					type: 'orderBy',
-					expressionIntent: expr.intent as Record<string, unknown>,
+					expressionIntent: expr.intent,
 					direction: 'DESC',
 					table: 'rankings',
 				} satisfies PlanDecision,

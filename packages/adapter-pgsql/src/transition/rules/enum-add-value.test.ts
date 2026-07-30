@@ -317,10 +317,18 @@ class FakeEnumPool {
 			return { rows: [] };
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
-			return { rows: [this.plans.get(String(params?.[0]))].filter(Boolean) };
+			return {
+				rows: [this.plans.get(String(params?.[0]))].filter(
+					(row): row is Record<string, unknown> => row !== undefined,
+				),
+			};
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
-			return { rows: [this.runs.get(String(params?.[0]))].filter(Boolean) };
+			return {
+				rows: [this.runs.get(String(params?.[0]))].filter(
+					(row): row is Record<string, unknown> => row !== undefined,
+				),
+			};
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
 			return { rows: [] };

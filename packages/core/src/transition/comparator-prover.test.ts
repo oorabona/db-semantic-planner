@@ -19,6 +19,7 @@ import type {
 	PhysicalOperation,
 	ProofClaim,
 	ProofObligation,
+	Proposition,
 	RelationIR,
 	ResourceAddress,
 	RulePrecedenceFact,
@@ -452,13 +453,52 @@ function obligation(appliesTo = operation().ref): ProofObligation {
 	};
 }
 
+function proposition(
+	kind: string,
+	scope: readonly ResourceAddress[],
+	detail: Proposition['detail'],
+): Proposition {
+	return {
+		kind,
+		scope,
+		...(detail === undefined ? {} : { detail }),
+	};
+}
+
+function propositionForRequest(request: ObservationRequest): Proposition {
+	return proposition(request.kind, request.scope, request.detail);
+}
+
+function jsonResource(resource: ResourceAddress): JsonValue {
+	return {
+		engine: resource.engine,
+		database: resource.database,
+		kind: resource.kind,
+		name: resource.name,
+		...(resource.schema === undefined ? {} : { schema: resource.schema }),
+		...(resource.qualifiedBy === undefined
+			? {}
+			: { qualifiedBy: resource.qualifiedBy }),
+	};
+}
+
+function jsonClaim(
+	request: ObservationRequest,
+	holds: boolean,
+	scope: readonly ResourceAddress[] = request.scope,
+	detail: JsonValue | undefined = request.detail,
+): JsonValue {
+	return {
+		kind: request.kind,
+		holds,
+		scope: scope.map(jsonResource),
+		...(detail === undefined ? {} : { detail }),
+	};
+}
+
 function obligationForRequest(request: ObservationRequest): ProofObligation {
 	return {
-		proposition: {
-			kind: request.kind,
-			scope: request.scope,
-			detail: request.detail,
-		},
+		proposition: propositionForRequest(request),
 		scope: request.scope,
 		dischargeableBy: [request],
 	};
@@ -786,11 +826,11 @@ function checkEquivalenceRule(): TransitionRule<{
 				return {
 					recognized: 'no-drift',
 					claimDraft: {
-						proposition: {
-							kind: 'dbsp.model.no-drift',
-							scope: [checkResource(desiredCheck.name)],
-							detail: request.detail,
-						},
+						proposition: proposition(
+							'dbsp.model.no-drift',
+							[checkResource(desiredCheck.name)],
+							request.detail,
+						),
 						scope: [checkResource(desiredCheck.name)],
 						semantics: ruleArtifact,
 						conclusion: 'established',
@@ -916,9 +956,15 @@ function registry(
 			rules: options.rules ?? [rule()],
 			operationSemantics: [options.semantics ?? semantics()],
 			issuer: options.issuer ?? issuer(),
-			capabilityDescriptors: options.capabilityDescriptors,
-			comparatorNameNormalizer: options.comparatorNameNormalizer,
-			rulePrecedence: options.rulePrecedence,
+			...(options.capabilityDescriptors === undefined
+				? {}
+				: { capabilityDescriptors: options.capabilityDescriptors }),
+			...(options.comparatorNameNormalizer === undefined
+				? {}
+				: { comparatorNameNormalizer: options.comparatorNameNormalizer }),
+			...(options.rulePrecedence === undefined
+				? {}
+				: { rulePrecedence: options.rulePrecedence }),
 		},
 	]);
 }
@@ -952,11 +998,7 @@ function compositionRequest(opRef: 'op:a' | 'op:b'): ObservationRequest {
 function compositionObligation(opRef: 'op:a' | 'op:b'): ProofObligation {
 	const request = compositionRequest(opRef);
 	return {
-		proposition: {
-			kind: request.kind,
-			scope: request.scope,
-			detail: request.detail,
-		},
+		proposition: propositionForRequest(request),
 		scope: request.scope,
 		appliesTo: opRef,
 		dischargeableBy: [request],
@@ -1056,19 +1098,22 @@ function compositionRule(
 			obligations: [compositionObligation(opRef)],
 			assumptions: [],
 		}),
-		generateCandidate: (_match, evaluation) => ({
-			generatedBy: { id, pack: compositionRuleArtifact },
-			operations: [compositionOperation(opRef)],
-			composition: compositionDeclarations(opRef, mode),
-			obligations: evaluation.obligations,
-			assumptions: [],
-			guards: [],
-			selectionRationale: {
-				chosen: { id, pack: compositionRuleArtifact },
-				overRules: [],
-				why: 'test-only composition fixture',
-			},
-		}),
+		generateCandidate: (_match, evaluation) => {
+			const composition = compositionDeclarations(opRef, mode);
+			return {
+				generatedBy: { id, pack: compositionRuleArtifact },
+				operations: [compositionOperation(opRef)],
+				...(composition === undefined ? {} : { composition }),
+				obligations: evaluation.obligations,
+				assumptions: [],
+				guards: [],
+				selectionRationale: {
+					chosen: { id, pack: compositionRuleArtifact },
+					overRules: [],
+					why: 'test-only composition fixture',
+				},
+			};
+		},
 	};
 }
 
@@ -1308,14 +1353,14 @@ function versionedCompositionRegistry(
 		artifact: compositionRuleArtifact,
 		mergeObservationPrivileges: options.mergePrivileges ?? mergeMockPrivileges,
 		readContext: async (_target, ctx, requests) => {
-			const opRef =
-				requests.find((request) => request.kind.startsWith('mock.composition.'))
-					?.detail &&
-				(
-					requests.find((request) =>
-						request.kind.startsWith('mock.composition.'),
-					)?.detail as { readonly opRef?: 'op:a' | 'op:b' }
-				).opRef;
+			const compositionRequest = (requests ?? []).find((request) =>
+				request.kind.startsWith('mock.composition.'),
+			);
+			const opRef = compositionRequest?.kind.includes('.op:a.')
+				? 'op:a'
+				: compositionRequest?.kind.includes('.op:b.')
+					? 'op:b'
+					: undefined;
 			if (opRef !== 'op:a' && opRef !== 'op:b') {
 				return ctx;
 			}
@@ -2246,11 +2291,11 @@ describe('createComparator', () => {
 					return {
 						kind: 'equivalent',
 						claim: {
-							proposition: {
-								kind: 'mock.expression.equivalent',
-								scope: request.scope,
-								detail: request.detail,
-							},
+							proposition: proposition(
+								'mock.expression.equivalent',
+								request.scope,
+								request.detail,
+							),
 							scope: request.scope,
 							semantics: ruleArtifact,
 							conclusion: 'established',
@@ -2292,11 +2337,11 @@ describe('createComparator', () => {
 					return {
 						recognized: 'no-drift',
 						claimDraft: {
-							proposition: {
-								kind: 'dbsp.model.no-drift',
-								scope: [checkResource(desiredCheck.name)],
-								detail: request.detail,
-							},
+							proposition: proposition(
+								'dbsp.model.no-drift',
+								[checkResource(desiredCheck.name)],
+								request.detail,
+							),
 							scope: [checkResource(desiredCheck.name)],
 							semantics: ruleArtifact,
 							conclusion: 'established',
@@ -2759,11 +2804,7 @@ describe('createComparator', () => {
 					recognized: 'unknown',
 					obligations: [
 						{
-							proposition: {
-								kind: heightRecognitionRequest.kind,
-								scope: heightRecognitionRequest.scope,
-								detail: heightRecognitionRequest.detail,
-							},
+							proposition: propositionForRequest(heightRecognitionRequest),
 							scope: heightRecognitionRequest.scope,
 							dischargeableBy: [heightRecognitionRequest],
 						},
@@ -3174,8 +3215,8 @@ describe('createProver', () => {
 		const baseSemantics = compositionSemantics('disconnected');
 		const exactSemantics: RegisteredOperationSemantics = {
 			...baseSemantics,
-			effectsOf: (operation): OperationEffectAssessment => {
-				const effects = baseSemantics.effectsOf(operation);
+			effectsOf: (operation, context): OperationEffectAssessment => {
+				const effects = baseSemantics.effectsOf(operation, context);
 				const ref = operation.ref === 'op:a' ? 'op:a' : 'op:b';
 				return {
 					...effects,
@@ -3861,14 +3902,7 @@ describe('createProver', () => {
 			engineVersion: '18.0',
 			targetSchema: 'tenant',
 		};
-		const proposition =
-			request.detail === undefined
-				? { kind: request.kind, scope: request.scope }
-				: {
-						kind: request.kind,
-						scope: request.scope,
-						detail: request.detail,
-					};
+		const proposition = propositionForRequest(request);
 		const normalizedRequest: ObservationRequest = {
 			kind: request.kind,
 			scope: [
@@ -3986,14 +4020,7 @@ describe('createProver', () => {
 				request,
 				result: {
 					value: {
-						claims: [
-							{
-								kind: request.kind,
-								holds: true,
-								scope: request.scope,
-								detail: request.detail,
-							},
-						],
+						claims: [jsonClaim(request, true)],
 					},
 				},
 				context: mutate(ctx),
@@ -4038,14 +4065,7 @@ describe('createProver', () => {
 				request,
 				result: {
 					value: {
-						claims: [
-							{
-								kind: request.kind,
-								holds: true,
-								scope: claimScope,
-								detail: claimDetail as JsonValue,
-							},
-						],
+						claims: [jsonClaim(request, true, claimScope, claimDetail)],
 					},
 				},
 				context: ctx,
@@ -4128,20 +4148,7 @@ describe('createProver', () => {
 				request,
 				result: {
 					value: {
-						claims: [
-							{
-								kind: request.kind,
-								holds: true,
-								scope: request.scope,
-								detail: request.detail,
-							},
-							{
-								kind: request.kind,
-								holds: false,
-								scope: request.scope,
-								detail: request.detail,
-							},
-						],
+						claims: [jsonClaim(request, true), jsonClaim(request, false)],
 					},
 				},
 				context: ctx,
@@ -4262,11 +4269,7 @@ describe('createProver', () => {
 						obligations: requests.map((request) => {
 							const normalized = evidenceItems.normalizeRequest(request);
 							return {
-								proposition: {
-									kind: normalized.kind,
-									scope: normalized.scope,
-									detail: normalized.detail,
-								},
+								proposition: propositionForRequest(normalized),
 								scope: normalized.scope,
 								dischargeableBy: [normalized],
 							};

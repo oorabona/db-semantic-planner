@@ -14,8 +14,16 @@
  *             for both 'scalar' and 'scalar-direct' contexts.
  */
 
-import { createOrm, eq, exists, outerRef, plan, ref, schema } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
+import {
+	createOrm,
+	eq,
+	exists,
+	outerRef,
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	ref,
+	schema,
+} from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
@@ -67,20 +75,26 @@ const testSchema = schema({
 	},
 } as const);
 
+interface WhereCompilerCtxOverrides
+	extends Omit<Partial<WhereCompilerCtx>, 'model'> {
+	readonly withoutModel?: boolean;
+}
+
 function makeCtx(
 	rootTable: string,
-	overrides?: Partial<WhereCompilerCtx>,
+	overrides?: WhereCompilerCtxOverrides,
 ): WhereCompilerCtx {
 	const paramState = createCompilerState();
+	const { withoutModel = false, ...rest } = overrides ?? {};
 	return {
 		rootTable,
 		aliases: new Map(),
 		paramState,
 		naming: identityNaming,
-		model: testSchema.model as any,
+		...(!withoutModel ? { model: testSchema.model as any } : {}),
 		compileSubquery: (subIntent, paramOffset) =>
 			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
-		...overrides,
+		...rest,
 	};
 }
 
@@ -190,7 +204,7 @@ describe('DEFECT 1: single-hop relationFilter threads declared FK columns', () =
 			},
 			mode: 'some' as const,
 		};
-		const ctx = makeCtx('users', { model: undefined });
+		const ctx = makeCtx('users', { withoutModel: true });
 		// Must not throw — falls back to convention
 		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
 	});
@@ -402,7 +416,7 @@ describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE (valid 
 			where: undefined as any,
 			mode: 'every' as const,
 		};
-		const ctx = makeCtx('users', { model: undefined });
+		const ctx = makeCtx('users', { withoutModel: true });
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
 			/every relation filter requires a model to validate the relation/,
 		);
@@ -1183,7 +1197,7 @@ describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation 
 			where: undefined as any,
 			mode: 'every' as const,
 		};
-		const ctx = makeCtx('users', { model: undefined });
+		const ctx = makeCtx('users', { withoutModel: true });
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
 			/every relation filter requires a model to validate the relation/,
 		);
@@ -1317,7 +1331,7 @@ describe('NEW-DEFECT-3 (SubqueryRefIntent outer field): outerRef is type-safe an
 		expect(result.column).toBe('userId');
 		// The outer field must be present and true — this is now type-safe
 		// (SubqueryRefIntent declares readonly outer?: true)
-		expect((result as Record<string, unknown>).outer).toBe(true);
+		expect(result.outer).toBe(true);
 	});
 
 	it('outerRef() result is recognized by isOuterRef() as a correlation marker', () => {
@@ -1452,7 +1466,7 @@ describe('NEW DEFECT 4 (single-hop undeclared relation fail-closed)', () => {
 			},
 			mode: 'some' as const,
 		};
-		const ctx = makeCtx('users', { model: undefined });
+		const ctx = makeCtx('users', { withoutModel: true });
 		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
 	});
 });

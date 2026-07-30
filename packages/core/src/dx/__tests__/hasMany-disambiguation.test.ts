@@ -11,8 +11,8 @@
  *
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
 

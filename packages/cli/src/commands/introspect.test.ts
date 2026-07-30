@@ -53,9 +53,9 @@ function makeIntrospectedModel(): ModelIR & {
 		introspectedAt: new Date('2026-01-31T10:00:00Z'),
 		getTable: (name: string) => tables.get(name),
 		getRelation: () => undefined,
-	} as ModelIR & {
-		readonly warnings: readonly string[];
-		readonly introspectedAt: Date;
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
 	};
 }
 

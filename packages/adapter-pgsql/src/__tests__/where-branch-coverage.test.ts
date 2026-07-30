@@ -12,6 +12,7 @@
  */
 
 import type { ModelIR, TableIR } from '@dbsp/types';
+import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import { compileWhereIntent, type WhereCompilerCtx } from '../compile-where.js';
@@ -124,7 +125,7 @@ function buildModel(
 	} as unknown as ModelIR;
 }
 
-function deparseNode(node: object): string {
+function deparseNode(node: Node): string {
 	return deparseSync([{ SelectStmt: { whereClause: node } }])
 		.replace(/^SELECT\s+WHERE\s+/i, '')
 		.trim();

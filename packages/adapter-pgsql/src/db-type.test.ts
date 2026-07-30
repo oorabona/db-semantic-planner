@@ -122,6 +122,7 @@ describe('db-type utilities', () => {
 				{
 					name: 'state',
 					type: 'string',
+					nullable: false,
 					originalDbType: 'status',
 					originalDbTypeSchema: 'tenant_1',
 					originalDbTypeSchemaScope: 'target',
@@ -132,6 +133,7 @@ describe('db-type utilities', () => {
 				{
 					name: 'state',
 					type: 'string',
+					nullable: false,
 					originalDbType: 'status',
 					originalDbTypeSchema: 'select',
 					originalDbTypeSchemaScope: 'target',
@@ -142,6 +144,7 @@ describe('db-type utilities', () => {
 				{
 					name: 'state',
 					type: 'string',
+					nullable: false,
 					originalDbType: 'status',
 					originalDbTypeSchema: 'copy',
 					originalDbTypeSchemaScope: 'target',
@@ -159,6 +162,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status',
 						originalDbTypeSchema: 'tenant_1',
 						originalDbTypeSchemaScope: 'target',
@@ -171,6 +175,7 @@ describe('db-type utilities', () => {
 				dbType: renderColumnDbType({
 					name: 'state',
 					type: 'string',
+					nullable: false,
 					originalDbType: 'status',
 					originalDbTypeSchema: 'tenant_1',
 					originalDbTypeSchemaScope: 'target',
@@ -182,6 +187,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status',
 						originalDbTypeSchema: 'tenant_1',
 						originalDbTypeSchemaScope: 'absolute',
@@ -195,6 +201,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status',
 						originalDbTypeSchema: 'public',
 						originalDbTypeSchemaScope: 'absolute',
@@ -207,6 +214,7 @@ describe('db-type utilities', () => {
 				dbType: renderColumnDbType({
 					name: 'state',
 					type: 'string',
+					nullable: false,
 					originalDbType: 'status',
 					originalDbTypeSchema: 'public',
 					originalDbTypeSchemaScope: 'target',
@@ -218,6 +226,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'amount',
 						type: 'number',
+						nullable: false,
 						originalDbType: 'numeric(10,2)',
 						originalDbTypeSchema: 'pg_catalog',
 					},
@@ -230,6 +239,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'states',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status(4)[]',
 						originalDbTypeSchema: 'tenant_1',
 						originalDbTypeSchemaScope: 'target',
@@ -243,6 +253,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'tenant_1.status',
 					},
 					'tenant_2',
@@ -254,6 +265,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status',
 					},
 					'target',
@@ -265,6 +277,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'embedding',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'vector(768)',
 					},
 					'tenant_1',
@@ -312,6 +325,7 @@ describe('db-type utilities', () => {
 					{
 						name: 'state',
 						type: 'string',
+						nullable: false,
 						originalDbType: 'status',
 						originalDbTypeSchema: schema,
 						originalDbTypeSchemaScope: 'target',

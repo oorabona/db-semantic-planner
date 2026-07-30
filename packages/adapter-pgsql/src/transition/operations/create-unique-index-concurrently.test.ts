@@ -163,7 +163,7 @@ function tableIndexesEvidence(
 				schema: 'tenant',
 				table: 'users',
 				targetIndexNameExists: false,
-				indexes,
+				indexes: JSON.parse(JSON.stringify(indexes)),
 				claims: [],
 			},
 		},
@@ -423,7 +423,8 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		]);
 
 		expect(result.kind).toBe('partially-applied');
-		if (result.kind === 'partially-applied') {
+		expect('detail' in result).toBe(true);
+		if (result.kind === 'partially-applied' && 'detail' in result) {
 			expect(result.recovery).toEqual([
 				expect.objectContaining({
 					kind: 'invalid-index',

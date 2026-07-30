@@ -32,7 +32,7 @@ import {
 	isSqlExpression,
 } from '../handlers/types.js';
 import { introspect } from '../introspection.js';
-import { preserveNaming } from '../naming-plugin.js';
+import { identityNaming } from '../naming-plugin.js';
 import {
 	createPgsqlAdapter,
 	createPgsqlCompileOnlyAdapter,
@@ -81,8 +81,8 @@ function queryText(input: string | QueryConfig<unknown[]>): string {
 }
 
 const defaultDeps = {
-	naming: preserveNaming,
-	schemaName: undefined as string | undefined,
+	naming: identityNaming,
+	schemaName: undefined,
 	model: undefined,
 	defaultPk: 'id',
 	deriveFk: (rel: string) => `${rel}_id`,
@@ -264,19 +264,13 @@ describe('PgsqlAdapter.createDump', () => {
 
 	it('includes schema in meta when schemaName is set', () => {
 		const adapter = createPgsqlAdapter(makePool(), { schemaName: 'myschema' });
-		const dump = adapter.createDump(basePlan as never, {
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const dump = adapter.createDump(basePlan as never, testQuery('SELECT 1'));
 		expect(dump.meta?.schema).toBe('myschema');
 	});
 
 	it('omits schema from meta when no schemaName', () => {
 		const adapter = createPgsqlAdapter(makePool());
-		const dump = adapter.createDump(basePlan as never, {
-			sql: 'SELECT 1',
-			parameters: [],
-		});
+		const dump = adapter.createDump(basePlan as never, testQuery('SELECT 1'));
 		expect(dump.meta?.schema).toBeUndefined();
 	});
 });
@@ -1045,7 +1039,7 @@ describe('resolveCaseValue', () => {
 
 describe('caseHandler.compile', () => {
 	const ctx = {
-		naming: preserveNaming,
+		naming: identityNaming,
 		rootTable: 'tbl',
 		maxRecursiveDepth: 10,
 	};
@@ -1087,7 +1081,7 @@ describe('caseHandler.compile', () => {
 
 describe('simpleCaseHandler.compile', () => {
 	const ctx = {
-		naming: preserveNaming,
+		naming: identityNaming,
 		rootTable: 'tbl',
 		maxRecursiveDepth: 10,
 	};

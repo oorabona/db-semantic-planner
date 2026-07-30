@@ -1,11 +1,12 @@
 import { createOrm, type RecursivePlanReport, ref, schema } from '@dbsp/core';
+import { compile as compileNql } from '@dbsp/nql';
 import { type CompiledNqlQuery, convertBigintJsReadValue } from '@dbsp/types';
 import { compiledQueryFromProjection } from '@dbsp/types/adapter-sdk';
 import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { compile as compileNql } from '../../../nql/src/index.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 const ctx = {
 	table: 'events',
@@ -324,7 +325,9 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		const adapter = createPgsqlAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 		);
-		const orm = createOrm({ model: conversionSchema.model, adapter });
+		const orm = stringMutationOrm(
+			createOrm({ schema: conversionSchema, adapter }),
+		);
 
 		const rows = await orm
 			.insert('events')

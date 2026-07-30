@@ -59,7 +59,17 @@ const minimalModel = new ModelIRImpl(
 );
 
 const introspectedModel: IntrospectedModelIR = {
-	...minimalModel,
+	tables: minimalModel.tables,
+	externalTables: minimalModel.externalTables,
+	relations: minimalModel.relations,
+	...(minimalModel.enums && { enums: minimalModel.enums }),
+	...(minimalModel.extensions && { extensions: minimalModel.extensions }),
+	...(minimalModel.sequences && { sequences: minimalModel.sequences }),
+	getTable: (name) => minimalModel.getTable(name),
+	getRelation: (name) => minimalModel.getRelation(name),
+	getRelationsFrom: (name) => minimalModel.getRelationsFrom(name),
+	getRelationsTo: (name) => minimalModel.getRelationsTo(name),
+	isAmbiguous: (source, target) => minimalModel.isAmbiguous(source, target),
 	hierarchies: [],
 	introspectedAt: new Date('2026-01-01'),
 	warnings: [],
@@ -196,9 +206,11 @@ describe('handleSchemaDiff', () => {
 				schemaPath: '/project',
 			});
 
-			expect(result.changes[0]).toHaveProperty('meta');
-			expect(result.changes[0].meta).toEqual({ someInternalData: true });
-			expect(result.changes[1].meta).toEqual({ anotherMeta: 42 });
+			const [first, second] = result.changes;
+			expect(result.changes).toHaveLength(2);
+			expect(first).toHaveProperty('meta');
+			expect(first!.meta).toEqual({ someInternalData: true });
+			expect(second!.meta).toEqual({ anotherMeta: 42 });
 		});
 	});
 
