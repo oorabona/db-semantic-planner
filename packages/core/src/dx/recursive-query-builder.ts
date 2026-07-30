@@ -21,7 +21,11 @@
  */
 
 import type { Mutable } from '@dbsp/types/internal';
-import type { Adapter, CompiledQuery } from '../adapter.js';
+import {
+	type Adapter,
+	type CompiledQuery,
+	executeCompiledQuery,
+} from '../adapter.js';
 import type {
 	AdjacencyTraversal,
 	EdgeTableTraversal,
@@ -563,7 +567,11 @@ export class RecursiveQueryBuilder<TResult = unknown> {
 	 */
 	async execute(): Promise<TResult[]> {
 		const { compiled } = this.compileOnce();
-		return this.adapter.execute(compiled);
+		return executeCompiledQuery(
+			this.adapter,
+			compiled,
+			'recursive().execute()',
+		);
 	}
 }
 

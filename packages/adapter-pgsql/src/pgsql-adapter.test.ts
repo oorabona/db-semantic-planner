@@ -705,7 +705,7 @@ describe('PgsqlAdapter', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 
 			await expect(adapter.introspect()).rejects.toThrow(
-				'Cannot introspect without a database connection',
+				'Cannot introspect: this PgsqlAdapter was constructed without a connection',
 			);
 		});
 
@@ -740,27 +740,29 @@ describe('PgsqlAdapter', () => {
 		it('should throw on execute in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
 			await expect(adapter.execute(testQuery('SELECT 1'))).rejects.toThrow(
-				'compile-only mode',
+				'constructed without a connection',
 			);
 		});
 
 		it('should throw on stream in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
 			const iter = adapter.stream(testQuery('SELECT 1'));
-			await expect(iter.next()).rejects.toThrow('compile-only mode');
+			await expect(iter.next()).rejects.toThrow(
+				'constructed without a connection',
+			);
 		});
 
 		it('should throw on transaction in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
 			await expect(adapter.transaction(async () => {})).rejects.toThrow(
-				'compile-only mode',
+				'constructed without a connection',
 			);
 		});
 
 		it('should throw on executeRaw in compile-only mode', async () => {
 			const adapter = new PgsqlAdapter(undefined, {});
 			await expect(adapter.executeRaw('SELECT 1')).rejects.toThrow(
-				'compile-only mode',
+				'constructed without a connection',
 			);
 		});
 
@@ -771,7 +773,7 @@ describe('PgsqlAdapter', () => {
 			expect(scoped).toBeInstanceOf(PgsqlAdapter);
 			// Scoped adapter should also be in compile-only mode
 			await expect(scoped.execute(testQuery('SELECT 1'))).rejects.toThrow(
-				'compile-only mode',
+				'constructed without a connection',
 			);
 		});
 

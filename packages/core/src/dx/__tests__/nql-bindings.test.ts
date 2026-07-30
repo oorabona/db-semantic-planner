@@ -19,6 +19,13 @@ import type { MutationDump } from '../mutation-builders.js';
 import { createNqlTag, nqlRaw } from '../nql.js';
 import { ref, schema } from '../schema.js';
 
+function markExecutionAvailable(adapter: Adapter): void {
+	Object.defineProperty(adapter, 'connectionAvailability', {
+		value: { status: 'available' },
+		configurable: true,
+	});
+}
+
 function markSupportsTransactions(adapter: Adapter): void {
 	Object.defineProperty(adapter, 'capabilities', {
 		value: {
@@ -27,6 +34,7 @@ function markSupportsTransactions(adapter: Adapter): void {
 		},
 		configurable: true,
 	});
+	markExecutionAvailable(adapter);
 }
 
 function executeWithMetaFromRows(
@@ -61,6 +69,7 @@ function createBindingTag(executeResult: readonly unknown[] = []) {
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
 	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	markExecutionAvailable(adapter);
 
 	return {
 		adapter,
@@ -97,6 +106,7 @@ function createBlogBindingTag(executeResult: readonly unknown[] = []) {
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
 	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	markExecutionAvailable(adapter);
 
 	return {
 		adapter,
@@ -183,6 +193,7 @@ function createM2mBindingTag(executeResult: readonly unknown[] = []) {
 	const compile = vi.spyOn(adapter, 'compile');
 	adapter.execute = vi.fn(async () => [...executeResult]);
 	adapter.executeWithMeta = executeWithMetaFromRows(adapter.execute);
+	markExecutionAvailable(adapter);
 
 	return {
 		adapter,
@@ -2250,6 +2261,7 @@ posts | where authorId in (touched) | select authorId`.all(),
 			adapter.execute = execute;
 			adapter.executeWithMeta = executeWithMetaFromRows(execute);
 			adapter.transaction = transaction as Adapter['transaction'];
+			markExecutionAvailable(adapter);
 			try {
 				const result = await fn(adapter);
 				events.push('commit');

@@ -89,6 +89,22 @@ export interface AdapterCapabilities {
 	readonly supportsArrayType: boolean;
 }
 
+/**
+ * Per-instance connection state for adapters whose compile surface can exist
+ * without a live database connection.
+ *
+ * This is deliberately separate from AdapterCapabilities: a database can
+ * support a feature such as transactions even when this adapter instance has
+ * no connection with which to execute one.
+ */
+export type ConnectionAvailability =
+	| { readonly status: 'available' }
+	| {
+			readonly status: 'unavailable';
+			readonly reason: string;
+			readonly fix: string;
+	  };
+
 // ============================================================================
 // Compiled Query
 // ============================================================================
@@ -464,6 +480,15 @@ export interface Dump {
 export interface BaseAdapter {
 	/** Adapter capabilities for feature detection */
 	readonly capabilities: AdapterCapabilities;
+
+	/**
+	 * Optional per-instance connection state.
+	 *
+	 * Adapters that omit this retain the existing capability-only execution
+	 * checks. Adapters that declare an unavailable connection let core return
+	 * their actionable refusal before any capability preflight.
+	 */
+	readonly connectionAvailability?: ConnectionAvailability;
 
 	/**
 	 * Whether this adapter instance is scoped inside a transaction.
@@ -897,42 +922,6 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
 // Convenience Composed Types (DX-104)
 // ============================================================================
 
-/**
- * Compile-only adapter - can compile SQL and generate DDL, but cannot execute
- * queries or stream results. Useful for tooling, CLI, and testing without a
- * live database connection.
- *
- * Includes DDLGeneratingAdapter because DDL generation is purely compile-time
- * (no DB connection required — same rationale as SQL compilation).
- *
- * Explicitly excludes execution interfaces so that type-checking catches
- * misuse (e.g. calling execute() on a compile-only instance) at compile time.
- */
-export type CompileOnlyAdapter = CompilingAdapter &
-	DDLGeneratingAdapter &
-	TableDDLGeneratorAdapter & {
-		/** Naming convention used by this adapter. */
-		readonly dbCasing: DbCasing;
-
-		/**
-		 * Create a schema-scoped compile-only adapter.
-		 * Purely a schema-name prefix — no DB interaction required.
-		 */
-		withSchema(schemaName: string): CompileOnlyAdapter;
-
-		readonly execute?: never;
-		readonly executeWithMeta?: never;
-		readonly executeOne?: never;
-		readonly executeOneOrThrow?: never;
-		readonly stream?: never;
-		readonly streamRaw?: never;
-		readonly introspect?: never;
-		readonly transaction?: never;
-		readonly withPinnedConnection?: never;
-		readonly executeRaw?: never;
-		readonly executeDDL?: never;
-	};
-
 // ============================================================================
 // Full Adapter Interface
 // ============================================================================
@@ -960,12 +949,26 @@ export interface Adapter<DB = unknown>
 
 	/**
 	 * Execute a DDL statement directly (e.g. TRUNCATE, VACUUM, ALTER TABLE, CREATE INDEX).
-	 * Optional — compile-only adapters do not implement this.
+	 * Optional — adapters that do not provide DDL execution omit this method.
 	 *
 	 * @since DDL-TABLE-001
 	 */
 	executeDDL?(sql: string): Promise<void>;
 }
+
+/**
+ * @deprecated Existing `CompileOnlyAdapter` annotations remain valid. Use
+ * `Adapter` when direct execution calls are needed.
+ */
+export type CompileOnlyAdapter<DB = unknown> = CompilingAdapter &
+	DDLGeneratingAdapter &
+	TableDDLGeneratorAdapter & {
+		/** Naming convention used by this adapter. */
+		readonly dbCasing: DbCasing;
+
+		/** Create a schema-scoped compile-only adapter. */
+		withSchema(schemaName: string): CompileOnlyAdapter<DB>;
+	};
 
 // ============================================================================
 // DDL Feature Negotiation (CAPS-001/002)

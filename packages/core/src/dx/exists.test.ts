@@ -105,6 +105,10 @@ function createHookProbeAdapter(executeResult: unknown[] = []) {
 		execute: executeSpy,
 		_spies: { compile: compileSpy, execute: executeSpy },
 	});
+	Object.defineProperty(real, 'connectionAvailability', {
+		value: { status: 'available' },
+		configurable: true,
+	});
 	return real as unknown as Adapter & {
 		_spies: {
 			compile: typeof compileSpy;

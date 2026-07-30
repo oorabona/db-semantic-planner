@@ -10,6 +10,7 @@
 
 import {
 	type AdapterStreamOptions,
+	assertConnectionAvailable,
 	type CompiledQuery,
 	type Dump,
 	supportsStreaming,
@@ -124,6 +125,7 @@ export function stream<TResult>(
 			return this;
 		},
 		async next() {
+			assertConnectionAvailable(adapter, 'stream()');
 			if (!supportsStreaming(adapter)) {
 				throw createUnsupportedStreamingError();
 			}

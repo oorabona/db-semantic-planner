@@ -1810,6 +1810,10 @@ adapterWithExecute.executeWithMeta = async () => ({
   rows: [{ id: 'user-1' }],
   rowCount: 1,
 });
+Object.defineProperty(adapterWithExecute, 'connectionAvailability', {
+  value: { status: 'available' },
+  configurable: true,
+});
 
 const events: string[] = [];
 const hooks = createHookManager()

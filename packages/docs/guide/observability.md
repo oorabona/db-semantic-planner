@@ -100,7 +100,7 @@ Warnings do not stop execution — they surface potential performance or correct
 
 ## Compile-Only Mode
 
-For CLI tooling, SQL preview, or offline testing, use `createPgsqlCompileOnlyAdapter()`. It compiles any query to SQL without requiring a database connection. Calling `.execute()` or `.all()` throws `ExecutionError`; only `.dump()` works.
+For CLI tooling, SQL preview, or offline testing, use `createPgsqlCompileOnlyAdapter()`. It constructs a normal PostgreSQL adapter without a connection, so planning, compilation, and `.dump()` work without a database. Execution methods remain present and refuse at runtime with the attempted operation and a pointer to `createPgsqlAdapter(pool)`.
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
@@ -276,6 +276,10 @@ const __nqlHookAdapter = createPgsqlCompileOnlyAdapter() as unknown as NonNullab
   Parameters<typeof createOrm>[0]['adapter']
 >;
 __nqlHookAdapter.executeWithMeta = async () => ({ rows: [{ id: 1 }], rowCount: 1 });
+Object.defineProperty(__nqlHookAdapter, 'connectionAvailability', {
+  value: { status: 'available' },
+  configurable: true,
+});
 
 const __nqlHookEvents: string[] = [];
 const __nqlHooks = createHookManager()

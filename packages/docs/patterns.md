@@ -330,7 +330,7 @@ const orm = createOrm({ model: schema, adapter });
 
 - `packages/core/src/**` MUST NOT contain any import from `packages/adapter-pgsql`
 - Adapter interface is the only coupling point — core never calls `PgsqlAdapter` directly
-- `compile-only` mode: `createPgsqlCompileOnlyAdapter()` — no `Pool` required, useful for CLI/tooling
+- connectionless mode: `createPgsqlCompileOnlyAdapter()` — no `Pool` required for CLI/tooling, planning, compilation, and dumps; database operations refuse at runtime
 - Schema-scoping: `adapter.withSchema(name)` returns a new scoped adapter — core calls this, adapter implements it
 
 ### When to use

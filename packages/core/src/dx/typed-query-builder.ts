@@ -8,7 +8,7 @@
  * @since DX-040
  */
 
-import type { Adapter, Dump } from '../adapter.js';
+import { type Adapter, type Dump, executeCompiledQuery } from '../adapter.js';
 import type { QueryIntent, SelectIntent, WhereIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
@@ -251,7 +251,11 @@ class FromBuilderImpl<
 			model: this.model,
 			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
 		});
-		const rows = await this.adapter.execute(compiled);
+		const rows = await executeCompiledQuery(
+			this.adapter,
+			compiled,
+			'typed exists()',
+		);
 		return (
 			rows.length > 0 && (rows[0] as Record<string, unknown>).exists === true
 		);
@@ -354,7 +358,7 @@ class FromBuilderImpl<
 			model: this.model,
 			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
 		});
-		return this.adapter.execute(compiled);
+		return executeCompiledQuery(this.adapter, compiled, 'typed all()');
 	}
 
 	async first(): Promise<TResult | null> {

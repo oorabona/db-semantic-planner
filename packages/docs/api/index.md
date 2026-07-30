@@ -30,7 +30,7 @@ title: API Reference
 | Export | Description |
 |--------|-------------|
 | `createPgsqlAdapter()` | Create adapter for pg Pool instance |
-| `createPgsqlCompileOnlyAdapter()` | Create compile-only adapter (no DB required) |
+| `createPgsqlCompileOnlyAdapter()` | Create a connectionless PgsqlAdapter (no DB required) |
 | `cosineDistance()`, `l2Distance()`, `innerProduct()` | pgvector similarity operators |
 | `bm25Search()`, `score()` | ParadeDB full-text search |
 

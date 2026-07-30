@@ -26,9 +26,9 @@ import type {
 	ColumnType,
 	CompiledNqlQuery,
 	CompiledQuery,
-	CompileOnlyAdapter,
 	CompileOptions,
 	CompileResultWithIncludes,
+	ConnectionAvailability,
 	CteQueryIntent,
 	DbCasing,
 	DeleteIntent,
@@ -174,6 +174,16 @@ type PgsqlInternalCompileOptions = CompileOptions & {
 type StreamRowMapper<T> = (rows: Record<string, unknown>[]) => T[];
 
 const MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS = 32_000;
+
+const PGSQL_CONNECTION_AVAILABLE: ConnectionAvailability = {
+	status: 'available',
+};
+
+const PGSQL_CONNECTION_UNAVAILABLE: ConnectionAvailability = {
+	status: 'unavailable',
+	reason: 'this PgsqlAdapter was constructed without a connection.',
+	fix: 'Use createPgsqlAdapter(pool) to execute database operations.',
+};
 
 /**
  * SQL that resolves a table name (bound as the given positional param, e.g. '$1')
@@ -2685,14 +2695,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Returns the pool/client executor, or throws if in compile-only mode.
+	 * Returns the pool/client executor, or refuses a connectionless adapter.
 	 */
-	private requireConnection(): Pool | PoolClient {
+	private requireConnection(operation: string): Pool | PoolClient {
 		const executor = this.client ?? this.pool;
 		if (!executor) {
 			throw new Error(
-				'PgsqlAdapter is in compile-only mode (no database connection). ' +
-					'Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.',
+				`Cannot ${operation}: this PgsqlAdapter was constructed without a connection. ` +
+					'Use createPgsqlAdapter(pool) to execute database operations.',
 			);
 		}
 		return executor;
@@ -2701,6 +2711,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/** Adapter capabilities for feature detection */
 	get capabilities(): AdapterCapabilities {
 		return this._capabilities;
+	}
+
+	/** Per-instance connection state, distinct from PostgreSQL capabilities. */
+	get connectionAvailability(): ConnectionAvailability {
+		return (this.client ?? this.pool)
+			? PGSQL_CONNECTION_AVAILABLE
+			: PGSQL_CONNECTION_UNAVAILABLE;
 	}
 
 	/** PostgreSQL dialect capabilities for planner strategy selection */
@@ -2719,7 +2736,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Get the underlying pg Pool or borrowed PoolClient instance.
 	 */
 	getPoolInstance(): Pool | PoolClient {
-		return this.requireConnection();
+		return this.requireConnection('getPoolInstance()');
 	}
 
 	// =========================================================================
@@ -3071,6 +3088,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		readonly rowCount: number;
 		readonly command?: string;
 	}> {
+		this.requireConnection('execute');
 		const guardedQuery = guardCompiledQuery(query, 'execute');
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
@@ -3156,6 +3174,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			guardedQuery.parameters,
 			options,
 			(rows) => this.transformResultRows(rows, guardedQuery) as T[],
+			'stream',
 		);
 	}
 
@@ -3170,6 +3189,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters,
 			options,
 			(rows) => rows as T[],
+			'streamRaw',
 		);
 	}
 
@@ -3178,6 +3198,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters: readonly unknown[],
 		options: AdapterStreamOptions | undefined,
 		mapRows: StreamRowMapper<T>,
+		operation: 'stream' | 'streamRaw',
 	): AsyncIterableIterator<T> {
 		const chunkSize = options?.chunkSize ?? 100;
 		if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
@@ -3190,6 +3211,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		// Use a wrapper to create the async generator
 		async function* streamGenerator(): AsyncIterableIterator<T> {
+			adapter.requireConnection(operation);
 			if (adapter.client) {
 				if (!adapter.managedTransactions) {
 					throw new Error(
@@ -3210,7 +3232,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 
 			// Otherwise, acquire a client and create a transaction
-			const pool = adapter.requireConnection() as Pool;
+			const pool = adapter.requireConnection(operation) as Pool;
 			const client = await pool.connect();
 			let begun = false;
 			let committed = false;
@@ -3782,12 +3804,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async introspect(
 		options?: IntrospectionOptions,
 	): Promise<IntrospectedModelIR> {
-		const executor = this.client ?? this.pool;
-		if (!executor) {
-			throw new Error(
-				'Cannot introspect without a database connection (compile-only adapter)',
-			);
-		}
+		const executor = this.requireConnection('introspect');
 		return introspectDb(
 			{
 				// The brand says this executor already carries the savepoint protection
@@ -3965,7 +3982,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		let pool: Pool;
 		try {
-			pool = this.requireConnection() as Pool;
+			pool = this.requireConnection('withPinnedConnection') as Pool;
 		} catch (error) {
 			return Promise.reject(error);
 		}
@@ -4184,7 +4201,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Otherwise, acquire a client and start transaction
 		let pool: Pool;
 		try {
-			pool = this.requireConnection() as Pool;
+			pool = this.requireConnection('transaction') as Pool;
 		} catch (error) {
 			return Promise.reject(error);
 		}
@@ -4299,7 +4316,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		let pool: Pool;
 		try {
-			pool = this.requireConnection() as Pool;
+			pool = this.requireConnection('withScratchScope') as Pool;
 		} catch (error) {
 			return Promise.reject(error);
 		}
@@ -5622,6 +5639,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters: readonly unknown[] = [],
 	): Promise<T[]> {
+		this.requireConnection('executeRaw');
 		const result =
 			await this.executeQueryProtectingOpenTransaction<QueryResultRow>(
 				sql,
@@ -5666,9 +5684,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @since DDL-TABLE-001
 	 */
 	async executeDDL(sql: string): Promise<void> {
-		if (!this.client && !this.pool) {
-			throw new Error('Cannot execute DDL on compile-only adapter');
-		}
+		this.requireConnection('executeDDL');
 		await this.executeQueryProtectingOpenTransaction(sql);
 	}
 
@@ -5718,7 +5734,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options: StatementExecutionOptions = {},
 	): Promise<QueryResult<T>> {
 		return this.executeConnectionStatement<T>(
-			this.requireConnection(),
+			this.requireConnection('query execution'),
 			sql,
 			parameters,
 			{
@@ -6090,6 +6106,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schema?: string,
 		options?: { namePattern?: string },
 	): Promise<IndexInfo[]> {
+		this.requireConnection('listIndexes');
 		const params: unknown[] = [table, this.explicitSchema(schema) ?? null];
 		let sql =
 			'SELECT indexname, indexdef FROM pg_indexes ' +
@@ -6124,6 +6141,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		table: string,
 		schema?: string,
 	): Promise<boolean> {
+		this.requireConnection('indexExists');
 		const result = await this.executeQueryProtectingOpenTransaction<{
 			exists: boolean;
 		}>(
@@ -6146,6 +6164,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param schema - Schema name (defaults to the search_path-resolved schema)
 	 */
 	async storageSize(table: string, schema?: string): Promise<number> {
+		this.requireConnection('storageSize');
 		const schemaName = this.explicitSchema(schema);
 		// Double any embedded double-quotes to prevent injection.
 		const quotedTable = `"${table.replace(/"/g, '""')}"`;
@@ -6306,10 +6325,11 @@ export function createPgsqlAdapter<DB = unknown>(
 }
 
 /**
- * Creates a compile-only PgsqlAdapter for SQL generation without a database connection.
+ * Creates a connectionless PgsqlAdapter for SQL generation without a database connection.
  *
  * All compilation methods (compile, compileInsert, etc.), createDump(), and generateDDL()
- * work normally. Execution methods (execute, stream, transaction, etc.) throw an error.
+ * work normally. The adapter has the full PgsqlAdapter surface; database operations refuse
+ * at runtime until it is constructed with a connection via createPgsqlAdapter(pool).
  *
  * @example
  * ```typescript
@@ -6324,14 +6344,6 @@ export function createPgsqlAdapter<DB = unknown>(
  */
 export function createPgsqlCompileOnlyAdapter<DB = unknown>(
 	options?: PgsqlAdapterOptions,
-): CompileOnlyAdapter {
-	// The `unknown` intermediate cast is required because TypeScript treats
-	// `?: never` properties as non-overlapping with the concrete methods on
-	// PgsqlAdapter<DB>. CompileOnlyAdapter uses `?: never` to exclude execution
-	// methods at compile time; at runtime those methods throw ExecutionError
-	// when no Pool is provided. The cast is intentional and safe.
-	return new PgsqlAdapter<DB>(
-		undefined,
-		options,
-	) as unknown as CompileOnlyAdapter;
+): PgsqlAdapter<DB> {
+	return new PgsqlAdapter<DB>(undefined, options);
 }

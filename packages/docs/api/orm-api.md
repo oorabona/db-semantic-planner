@@ -388,7 +388,7 @@ const orm = createOrm({
 |--------|------|---------|-------------|
 | `schema` | `Schema` | - | From `schema()` (preferred) |
 | `model` | `ModelIR` | - | Direct ModelIR (alternative to schema) |
-| `adapter` | `Adapter` | - | Database adapter (optional for compile-only) |
+| `adapter` | `Adapter` | - | Database adapter; use a connectionless PgsqlAdapter for compile-only work |
 | `strictMode` | `boolean` | `false` | Throw on ambiguous relations |
 | `maxDepth` | `number` | `10` | Max recursive depth |
 | `maxTableHops` | `number` | `5` | Max relation hops |
@@ -408,7 +408,7 @@ const orm = createOrm({
 // dump() works — returns SQL + params
 const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 
-// execute() throws ExecutionError
+// execute() is callable, but refuses at runtime until the adapter has a connection.
 ```
 
 ### Schema Scoping (Multi-Tenant)

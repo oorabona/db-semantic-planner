@@ -417,6 +417,7 @@ export type {
 	// DX-033: Include hydration
 	CompileResultWithIncludes,
 	CompilingAdapter,
+	ConnectionAvailability,
 	// PGSQL-PHASE2: Intuitive DB casing convention
 	DbCasing,
 	DDLGeneratingAdapter,
@@ -433,6 +434,7 @@ export type {
 export {
 	AdapterRequiredError,
 	assertCapability,
+	assertConnectionAvailable,
 	// DX-104: Feature detection helpers
 	supportsDDLGeneration,
 	supportsExecution,
