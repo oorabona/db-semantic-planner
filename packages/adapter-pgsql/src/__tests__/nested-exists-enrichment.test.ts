@@ -22,13 +22,13 @@ import {
 	exists,
 	or,
 	outerRef,
+	POSTGRESQL_CAPABILITIES,
 	plan,
 	rawExists,
 	ref,
 	schema,
 	subquery,
 } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	buildSubqueryFromIntent,

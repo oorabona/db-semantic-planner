@@ -14,5 +14,5 @@
 	},
 
 	"include": ["src/**/*", "src/**/*.tsx"],
-	"exclude": ["node_modules", "dist", "**/*.test.ts", "spike/**/*"]
+	"exclude": ["node_modules", "dist", "spike/**/*"]
 }

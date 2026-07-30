@@ -16,16 +16,46 @@ import type { AssertionQueryResult, IntentSummary } from '../types.js';
 // Helpers
 // ============================================================================
 
-function makeResult(
-	overrides: Partial<AssertionQueryResult> = {},
-): AssertionQueryResult {
+type ResultOverrides = {
+	readonly [Key in keyof AssertionQueryResult]?:
+		| AssertionQueryResult[Key]
+		| undefined;
+};
+
+function makeResult(overrides: ResultOverrides = {}): AssertionQueryResult {
+	const {
+		query,
+		success,
+		dbSuccess,
+		output,
+		sql,
+		params,
+		error,
+		rowCount,
+		columns,
+		rows,
+		intent,
+		...requiredOverrides
+	} = overrides;
 	return {
-		query: 'SELECT 1',
-		success: true,
-		sql: 'SELECT "users"."id" FROM "users"',
-		params: [1, 'Alice'],
-		output: 'output text',
-		...overrides,
+		query: query ?? 'SELECT 1',
+		success: success ?? true,
+		...requiredOverrides,
+		...(dbSuccess !== undefined && { dbSuccess }),
+		...(Object.hasOwn(overrides, 'output')
+			? output !== undefined && { output }
+			: { output: 'output text' }),
+		...(Object.hasOwn(overrides, 'sql')
+			? sql !== undefined && { sql }
+			: { sql: 'SELECT "users"."id" FROM "users"' }),
+		...(Object.hasOwn(overrides, 'params')
+			? params !== undefined && { params }
+			: { params: [1, 'Alice'] }),
+		...(error !== undefined && { error }),
+		...(rowCount !== undefined && { rowCount }),
+		...(columns !== undefined && { columns }),
+		...(rows !== undefined && { rows }),
+		...(intent !== undefined && { intent }),
 	};
 }
 
@@ -47,20 +77,21 @@ function makeBlock(
 
 function makeIntent(overrides: Partial<IntentSummary> = {}): IntentSummary {
 	return {
-		type: 'select',
+		type: 'query',
 		table: 'users',
 		with: [],
 		hasWhere: false,
 		hasGroupBy: false,
 		hasOrderBy: false,
+		ctes: [],
 		...overrides,
 	};
 }
 
 function run(
 	type: string,
-	value: unknown,
-	resultOverrides: Partial<AssertionQueryResult> = {},
+	value: Assertion['value'],
+	resultOverrides: ResultOverrides = {},
 ) {
 	const block = makeBlock(0, [{ type: type as Assertion['type'], value }]);
 	const results = [makeResult(resultOverrides)];
@@ -243,6 +274,16 @@ describe('params.type ??-evaluate-right branch', () => {
 // ============================================================================
 
 describe('params.value ??-evaluate-right branch', () => {
+	it('passes for a structured indexed parameter lookup', () => {
+		const summary = run(
+			'params.value',
+			{ index: 1, value: 'bar' },
+			{ params: ['foo', 'bar'] },
+		);
+		expect(summary.passed).toBe(1);
+		expect(summary.failed).toBe(0);
+	});
+
 	it('uses empty array when result.params is undefined', () => {
 		// params.value checks if specific value exists in params array
 		const summary = run('params.value', 1, { params: undefined });
@@ -330,7 +371,6 @@ describe('db.rows.max branch', () => {
 
 describe('db.value.equals branch', () => {
 	it('passes when spec value matches row cell', () => {
-		// assertDbValueEquals takes spec { row, column, value } and checks result.rows
 		const spec = { row: 0, column: 'id', value: 42 };
 		const summary = run('db.value.equals', spec, { rows: [{ id: 42 }] });
 		expect(summary.passed).toBe(1);

@@ -318,7 +318,7 @@ describe('#247 aggregate DISTINCT', () => {
 
 		it('expression aggregate lowering: count with no field propagates distinct instead of dropping it (select-expression-handlers.ts chokepoint)', () => {
 			const decisions: SimplifiedPlanReport['decisions'] = [];
-			EXPRESSION_HANDLERS.aggregate(
+			EXPRESSION_HANDLERS.aggregate!(
 				{ function: 'count', distinct: true },
 				'tool_metrics',
 				decisions as never[],

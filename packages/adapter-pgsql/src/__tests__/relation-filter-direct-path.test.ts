@@ -51,17 +51,22 @@ const testSchema = schema({
 	},
 } as const);
 
-function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
+type WhereCompilerCtxOverrides = Omit<Partial<WhereCompilerCtx>, 'model'> & {
+	readonly withoutModel?: boolean;
+};
+
+function makeCtx(overrides?: WhereCompilerCtxOverrides): WhereCompilerCtx {
 	const paramState = createCompilerState();
+	const { withoutModel = false, ...rest } = overrides ?? {};
 	return {
 		rootTable: 'users',
 		aliases: new Map(),
 		paramState,
 		naming: identityNaming,
-		model: testSchema.model as any,
+		...(!withoutModel ? { model: testSchema.model as any } : {}),
 		compileSubquery: (subIntent, paramOffset) =>
 			buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
-		...overrides,
+		...rest,
 	};
 }
 
@@ -191,7 +196,7 @@ describe('multi-hop relationFilter on direct compileWhereIntent path', () => {
 			},
 			mode: 'some' as const,
 		};
-		const ctx = makeCtx({ model: undefined });
+		const ctx = makeCtx({ withoutModel: true });
 		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
 			/require a model on the direct compile path/i,
 		);

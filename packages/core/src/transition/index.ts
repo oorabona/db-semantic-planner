@@ -130,6 +130,7 @@ export {
 export { createEvidenceView } from './evidence-access.js';
 export {
 	claimEntailsProposition,
+	concludeEvidenceForObligation,
 	type EvidenceConclusion,
 	type EvidenceEntailmentResult,
 	evidenceBooleanClaims,

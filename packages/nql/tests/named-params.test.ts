@@ -1,4 +1,5 @@
 import type {
+	ExpressionIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereJsonExistsIntent,
@@ -42,6 +43,30 @@ function expectParamValue(value: unknown, expected: unknown): void {
 
 function expectParamValueEqual(value: unknown, expected: unknown): void {
 	expect(value).toEqual({ kind: 'param', value: expected });
+}
+
+function firstSelectExpression(
+	result: ReturnType<typeof compileOk>,
+): ExpressionIntent {
+	const select = result.query?.select;
+	if (select?.type !== 'expressions') {
+		throw new Error('Expected the query to select expressions');
+	}
+	const expression = select.columns[0];
+	if (!expression) {
+		throw new Error('Expected the query to select one expression');
+	}
+	return expression;
+}
+
+function expectExpressionKind<Kind extends ExpressionIntent['kind']>(
+	expression: ExpressionIntent,
+	kind: Kind,
+): asserts expression is Extract<ExpressionIntent, { kind: Kind }> {
+	expect(expression.kind).toBe(kind);
+	if (expression.kind !== kind) {
+		throw new Error(`Expected a ${kind} expression`);
+	}
 }
 
 describe('FEAT-134 named parameters — grammar and AST', () => {
@@ -331,26 +356,24 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			'users | select coalesce(name, :fallback) as display_name',
 			{ fallback: 'unknown' },
 		);
-		expect(
-			(fnResult.query!.select as { columns: Array<{ args: unknown[] }> })
-				.columns[0]!.args[1],
-		).toEqual({ kind: 'param', value: 'unknown' });
+		const functionExpression = firstSelectExpression(fnResult);
+		expectExpressionKind(functionExpression, 'function');
+		expect(functionExpression.args[1]).toEqual({
+			kind: 'param',
+			value: 'unknown',
+		});
 
 		const caseResult = compileOk(
 			'users | select case when active = true then :yes else :no end as label',
 			{ yes: 'Y', no: 'N' },
 		);
-		expect(
-			(
-				caseResult.query!.select as {
-					columns: Array<{ when: Array<{ result: unknown }>; else: unknown }>;
-				}
-			).columns[0]!.when[0]!.result,
-		).toEqual({ kind: 'param', value: 'Y' });
-		expect(
-			(caseResult.query!.select as { columns: Array<{ else: unknown }> })
-				.columns[0]!.else,
-		).toEqual({ kind: 'param', value: 'N' });
+		const caseExpression = firstSelectExpression(caseResult);
+		expectExpressionKind(caseExpression, 'case');
+		expect(caseExpression.when[0]?.result).toEqual({
+			kind: 'param',
+			value: 'Y',
+		});
+		expect(caseExpression.else).toEqual({ kind: 'param', value: 'N' });
 
 		const jsonResult = compileOk(
 			'users | where json_contains(profile, :needle)',
@@ -374,11 +397,8 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			const result = compileOk(`users | select ${fn}(:p) as value`, {
 				p: value,
 			});
-			const aggregate = (
-				result.query!.select as {
-					columns: Array<{ extraArgs?: unknown[]; field?: unknown }>;
-				}
-			).columns[0]!;
+			const aggregate = firstSelectExpression(result);
+			expectExpressionKind(aggregate, 'aggregate');
 
 			expect(aggregate.field).toBeUndefined();
 			expect(aggregate.extraArgs?.[0]).toEqual({ kind: 'param', value });
@@ -417,11 +437,10 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 
 	it('resolves top-level SELECT projection params and reports missing bindings structurally', () => {
 		const result = compileOk('users | select :p as x', { p: 5 });
-		const select = result.query!.select as {
-			columns: Array<{ kind: string; value: unknown; as?: string }>;
-		};
+		const param = firstSelectExpression(result);
+		expectExpressionKind(param, 'param');
 
-		expect(select.columns[0]).toEqual({ kind: 'param', value: 5, as: 'x' });
+		expect(param).toEqual({ kind: 'param', value: 5, as: 'x' });
 
 		const missing = compileFail('users | select :p as x', {});
 		expect(missing.success).toBe(false);
@@ -466,9 +485,8 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			'orders | select lag(amount, :n) over (order by id) as prev_amount',
 			{ n: 2 },
 		);
-		const win = (
-			ok.query!.select as { columns: Array<{ kind: string; offset?: number }> }
-		).columns[0]!;
+		const win = firstSelectExpression(ok);
+		expectExpressionKind(win, 'window');
 
 		expect(win.kind).toBe('window');
 		expect(win.offset).toBe(2);

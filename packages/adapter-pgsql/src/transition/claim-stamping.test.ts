@@ -1,3 +1,4 @@
+import { concludeEvidenceForObligation } from '@dbsp/core';
 import type {
 	EvidenceObservation,
 	ObservationBooleanClaim,
@@ -7,7 +8,7 @@ import type {
 	ResourceAddress,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { concludeEvidenceForObligation } from '../../../core/src/transition/evidence-match.js';
+import { claimPayload } from '../test-compat/claim-payload-json.js';
 import { stampedClaim, stampedClaimForRequest } from './claim-stamping.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
@@ -102,7 +103,7 @@ function evidence(
 		id: evidenceId(`claim-stamping.${claim.kind}`),
 		issuer: PG_INTROSPECTION_ARTIFACT,
 		request,
-		result: { value: { claims: [claim] } },
+		result: { value: claimPayload(claim) },
 		context,
 		stability: 'externally-mutable',
 		takenAt: new Date().toISOString(),
@@ -131,9 +132,7 @@ function siblingScope(
 	scope: readonly ResourceAddress[],
 ): readonly ResourceAddress[] {
 	const [first, ...rest] = scope;
-	if (!first) {
-		return scope;
-	}
+	if (!first) return scope;
 	return [{ ...first, name: `${first.name}_sibling` }, ...rest];
 }
 
@@ -217,7 +216,7 @@ describe('adapter observation claim stamping', () => {
 					kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 					holds: true,
 					scope: [check],
-					detail: request.detail,
+					...(request.detail === undefined ? {} : { detail: request.detail }),
 				}),
 		},
 		{
@@ -244,7 +243,7 @@ describe('adapter observation claim stamping', () => {
 					kind: INDEX_ABSENT_OBSERVATION,
 					holds: true,
 					scope: [index],
-					detail: request.detail,
+					...(request.detail === undefined ? {} : { detail: request.detail }),
 				}),
 		},
 		{

@@ -56,7 +56,9 @@ describe('decoupled include — sibling exists/notExists never filters the inclu
 			.dump();
 
 		// Plan-level check: the includeStrategy decision for 'posts' must not have conditions
-		const includeDecision = dump.plan.decisions.find(
+		const plan = dump.plan;
+		if (!plan) throw new Error('expected a plan for an ORM dump');
+		const includeDecision = plan.decisions.find(
 			(d: any) =>
 				d.type === 'include-strategy' && d.context?.relation === 'posts',
 		) as any;
@@ -89,7 +91,9 @@ describe('decoupled include — sibling exists/notExists never filters the inclu
 		expect(publishedCount).toBe(1);
 
 		// Plan-level: the includeStrategy for 'posts' must have NO conditions
-		const includeDecision = dump.plan.decisions.find(
+		const plan = dump.plan;
+		if (!plan) throw new Error('expected a plan for an ORM dump');
+		const includeDecision = plan.decisions.find(
 			(d: any) =>
 				d.type === 'include-strategy' && d.context?.relation === 'posts',
 		) as any;

@@ -7,7 +7,7 @@ import {
 	notification,
 	ProtocolError,
 	success,
-} from './protocol';
+} from './protocol.js';
 
 describe('protocol codec', () => {
 	describe('encode', () => {

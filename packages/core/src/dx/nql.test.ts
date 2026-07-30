@@ -5,6 +5,7 @@
  * No mock compiler is needed since NQL is now a direct dependency.
  */
 
+import type { MutationIntent, QueryIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createNqlTag } from './nql.js';
 import { ref, schema } from './schema.js';
@@ -30,6 +31,23 @@ function createTestSchema() {
 			author: ref('users'),
 		},
 	});
+}
+
+function expectQueryIntent(intent: QueryIntent | MutationIntent): QueryIntent {
+	if (intent.type !== 'select') {
+		throw new Error(`Expected a query intent, received ${intent.type}`);
+	}
+	return intent;
+}
+
+function expectQueryDump(dump: { readonly sql: string }): asserts dump is {
+	readonly plan: { readonly rootTable: string };
+	readonly sql: string;
+	readonly params: readonly unknown[];
+} {
+	if (!('plan' in dump)) {
+		throw new Error('Expected a query dump, received a mutation dump');
+	}
 }
 
 // ============================================================================
@@ -65,7 +83,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<{ name: string }>`users | select name`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<{ name: string }>`users | select name`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -77,10 +97,12 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<{
-				name: string;
-				email: string;
-			}>`users | select name, email`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<{
+					name: string;
+					email: string;
+				}>`users | select name, email`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -95,7 +117,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | where active = true`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where active = true`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -111,7 +135,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | order by name`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | order by name`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -123,7 +149,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | order by createdAt desc`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | order by createdAt desc`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -136,7 +164,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | limit 10 | offset 5`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | limit 10 | offset 5`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -148,10 +178,12 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<{
-				name: string;
-				email: string;
-			}>`users | where active = true | select name, email | order by name | limit 10`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<{
+					name: string;
+					email: string;
+				}>`users | where active = true | select name, email | order by name | limit 10`.toIntentIR(),
+			);
 
 			expect(intent.type).toBe('select');
 			expect(intent.from).toBe('users');
@@ -197,6 +229,7 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			const dump = nql<unknown>`users`.dump();
+			expectQueryDump(dump);
 
 			expect(dump.plan).toBeDefined();
 			expect(dump.plan.rootTable).toBe('users');
@@ -243,7 +276,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			const name = 'Alice';
-			const intent = nql<unknown>`users | where name = ${name}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where name = ${name}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',
@@ -258,7 +293,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			const limit = 5;
-			const intent = nql<unknown>`users | limit ${limit}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | limit ${limit}`.toIntentIR(),
+			);
 
 			expect(intent.limit).toEqual({ kind: 'param', value: 5 });
 		});
@@ -270,7 +307,9 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			// Correct: hard-code the table name in the template literal.
-			const intent = nql<unknown>`users | select name`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | select name`.toIntentIR(),
+			);
 
 			expect(intent.from).toBe('users');
 		});
@@ -288,7 +327,9 @@ describe('nql tag value binding', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			const payload = "x' or '1'='1";
-			const intent = nql<unknown>`users | where name = ${payload}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where name = ${payload}`.toIntentIR(),
+			);
 
 			// The entire payload must be contained as a single comparison value.
 			expect(intent.where).toEqual({
@@ -299,7 +340,7 @@ describe('nql tag value binding', () => {
 			});
 
 			// Proof: no extra OR/AND condition injected — where is a single comparison node.
-			expect((intent.where as Record<string, unknown>).kind).toBe('comparison');
+			expect(intent.where?.kind).toBe('comparison');
 		});
 	});
 
@@ -308,7 +349,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | where name = ${'Alice'}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where name = ${'Alice'}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',
@@ -322,7 +365,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | limit ${30}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | limit ${30}`.toIntentIR(),
+			);
 
 			expect(intent.limit).toEqual({ kind: 'param', value: 30 });
 		});
@@ -331,7 +376,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | where active = ${true}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where active = ${true}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',
@@ -345,7 +392,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent = nql<unknown>`users | where active = ${false}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where active = ${false}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',
@@ -361,8 +410,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent =
-				nql<unknown>`users | where name = ${"O'Brien"}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where name = ${"O'Brien"}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',
@@ -376,8 +426,9 @@ describe('nql tag value binding', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			const intent =
-				nql<unknown>`users | where name = ${"it's a ''test''"}`.toIntentIR();
+			const intent = expectQueryIntent(
+				nql<unknown>`users | where name = ${"it's a ''test''"}`.toIntentIR(),
+			);
 
 			expect(intent.where).toEqual({
 				kind: 'comparison',

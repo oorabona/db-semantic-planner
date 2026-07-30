@@ -661,12 +661,12 @@ describe('ReplEngine dot-command error propagation — batch exit-code regressio
 		// repl-engine.coverage.test.ts (lines ~762 and ~900).
 		const result = { output: '❌ Usage: .import <file.sql>' };
 
-		// Old condition: only checks result.error — would be false → 'info' (the bug)
-		const oldEmitsError = !!result.error;
+		// Old condition: only checks an absent error result — false → 'info' (the bug)
+		const oldEmitsError = false;
 		expect(oldEmitsError).toBe(false);
 
 		// New condition: also checks output prefix — is true → 'error' (the fix)
-		const newEmitsError = !!result.error || result.output.startsWith('❌');
+		const newEmitsError = result.output.startsWith('❌');
 		expect(newEmitsError).toBe(true);
 	});
 

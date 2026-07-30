@@ -66,6 +66,10 @@ const stdoutCapture: string[] = [];
 const stderrCapture: string[] = [];
 let origStdout: typeof process.stdout.write;
 let origStderr: typeof process.stderr.write;
+let origConsole: Pick<
+	typeof console,
+	'log' | 'warn' | 'info' | 'debug' | 'error'
+>;
 
 describe('sidecar/index.ts', () => {
 	beforeEach(async () => {
@@ -75,6 +79,13 @@ describe('sidecar/index.ts', () => {
 
 		origStdout = process.stdout.write;
 		origStderr = process.stderr.write;
+		origConsole = {
+			log: console.log,
+			warn: console.warn,
+			info: console.info,
+			debug: console.debug,
+			error: console.error,
+		};
 		process.stdout.write = ((data: string) => {
 			stdoutCapture.push(data);
 			return true;
@@ -93,6 +104,7 @@ describe('sidecar/index.ts', () => {
 		process.stdout.write = origStdout;
 		process.stderr.write = origStderr;
 		vi.restoreAllMocks();
+		Object.assign(console, origConsole);
 		mockStdinEmitter.removeAllListeners();
 	});
 

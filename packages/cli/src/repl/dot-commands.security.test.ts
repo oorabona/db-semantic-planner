@@ -183,8 +183,13 @@ describe('[SEC-S1] .use schema name validation', () => {
 		expect(result.output).toMatch(/✅ Imported/);
 
 		// Verify executeRaw was called WITHOUT a SET search_path line
-		const callArg = (db.executeRaw as ReturnType<typeof vi.fn>).mock
-			.calls[0][0] as string;
+		const executeRaw = db.executeRaw as ReturnType<typeof vi.fn>;
+		expect(executeRaw).toHaveBeenCalledTimes(1);
+		const call = executeRaw.mock.calls[0];
+		if (!call || typeof call[0] !== 'string') {
+			throw new Error('.import must execute the rendered SQL string');
+		}
+		const callArg = call[0];
 		expect(callArg).not.toContain('SET search_path');
 	});
 });

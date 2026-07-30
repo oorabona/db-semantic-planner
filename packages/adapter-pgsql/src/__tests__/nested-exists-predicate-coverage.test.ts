@@ -18,6 +18,7 @@ import {
 	gt,
 	inArray,
 	or,
+	POSTGRESQL_CAPABILITIES,
 	plan,
 	rawExists,
 	rawNotExists,
@@ -25,7 +26,6 @@ import {
 	schema,
 	subquery,
 } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -208,6 +208,7 @@ describe('jsonContains / jsonExists / any nested inside exists() where clause', 
 						kind: 'jsonContains',
 						field: 'metadata',
 						value: { key: 'active' },
+						reversed: false,
 					},
 				},
 			},

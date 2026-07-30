@@ -69,7 +69,7 @@ const testSchema = schema({
 	orders: {
 		id: { type: 'integer', primaryKey: true },
 		customer_id: { type: 'integer' },
-		total: { type: 'numeric' },
+		total: { type: 'number' },
 		status: { type: 'text' },
 	},
 	customers: {
@@ -79,7 +79,7 @@ const testSchema = schema({
 	},
 	products: {
 		id: { type: 'integer', primaryKey: true },
-		price: { type: 'numeric' },
+		price: { type: 'number' },
 	},
 	files: {
 		id: { type: 'integer', primaryKey: true },
@@ -245,7 +245,6 @@ describe('PATH D: nested IN inside logical group (mapInSubqueryCondition → inS
 		const innerSubquery = {
 			from: 'customers',
 			select: 'id',
-			// @ts-expect-error: injecting forbidden modifier
 			groupBy: ['region'],
 		};
 		const plan: SimplifiedPlanReport = {
@@ -310,7 +309,6 @@ describe('PATH E: mutation path (normalizeToDecision → inSubqueryHandler)', ()
 						type: 'select' as const,
 						from: 'customers',
 						select: { type: 'fields' as const, fields: ['id'] as const },
-						// @ts-expect-error: injecting forbidden modifier
 						groupBy: ['region'],
 					},
 				},
@@ -1045,7 +1043,6 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 					subqueryOperator: '>',
 					targetTable: 'products',
 					selectColumn: 'price',
-					// @ts-expect-error
 					distinct: true,
 				},
 			],
@@ -1070,7 +1067,6 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 					subqueryOperator: '>',
 					targetTable: 'products',
 					selectColumn: 'price',
-					// @ts-expect-error: injecting the modifier without an aggregate for the guard test
 					aggregateDistinct: true,
 				},
 			],

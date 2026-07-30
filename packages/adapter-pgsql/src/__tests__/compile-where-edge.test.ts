@@ -373,12 +373,11 @@ describe('compileWhereIntent — like with escape character', () => {
 		expect(params[0]).toBe('%test%');
 	});
 
-	it('should emit LIKE $1 with no ESCAPE clause when escape is undefined', () => {
+	it('should emit LIKE $1 with no ESCAPE clause when escape is omitted', () => {
 		const { sql, params } = compileIntent({
 			kind: 'like',
 			field: 'name',
 			pattern: '%test%',
-			escape: undefined,
 		});
 
 		expect(sql).toContain('LIKE');

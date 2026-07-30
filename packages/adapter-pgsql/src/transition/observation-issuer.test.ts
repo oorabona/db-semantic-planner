@@ -715,6 +715,9 @@ describe('PostgreSQL transition observation issuer', () => {
 			),
 		).toMatch(/ADD CONSTRAINT "users_age_check" CHECK \(age > 0\)$/u);
 		expect(observation.role).toBe('evidence');
+		if (observation.role !== 'evidence') {
+			throw new Error('expected vendor deparser evidence');
+		}
 		expect(observation.source).toBe('vendor-deparser');
 		expect(observation.context).toEqual(proofContext);
 		expect(observation.scope).toEqual([

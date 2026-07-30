@@ -99,7 +99,7 @@ describe('transition plan minting', () => {
 		expect(plan.steps[0]?.operation.ref).toBe('op');
 
 		expect(() => {
-			(plan.steps[0]?.restsOnAssumptions as string[]).push('changed');
+			Array.prototype.push.call(plan.steps[0]?.restsOnAssumptions, 'changed');
 		}).toThrow(TypeError);
 		expect(plan.steps[0]?.restsOnAssumptions).toEqual([
 			assumptionId('dbsp.test.assumption'),

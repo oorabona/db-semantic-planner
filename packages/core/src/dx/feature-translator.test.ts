@@ -166,7 +166,7 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			const limitedContext: TranslationContext = {
 				dialectCapabilities: {
 					...POSTGRESQL_CAPABILITIES,
-					supportsDDLEnumTypes: undefined,
+					supportsDDLEnumTypes: false,
 				} as DialectCapabilities,
 			};
 			const limitedResult = conditionalTranslator.translate(

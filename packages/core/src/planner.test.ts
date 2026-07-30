@@ -308,7 +308,6 @@ describe('Semantic Planner', () => {
 				where: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					subquery: {
 						type: 'select',
 						from: 'productImages',
@@ -341,7 +340,6 @@ describe('Semantic Planner', () => {
 					condition: {
 						kind: 'in',
 						field: 'id',
-						values: [],
 						subquery: {
 							type: 'select',
 							from: 'productImages',
@@ -373,7 +371,6 @@ describe('Semantic Planner', () => {
 				where: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					subquery: {
 						type: 'select',
 						from: 'unknownTable',
@@ -414,7 +411,6 @@ describe('Semantic Planner', () => {
 				where: {
 					kind: 'in',
 					field: 'id',
-					values: [],
 					subquery: {
 						type: 'select',
 						from: 'productImages',
@@ -448,7 +444,6 @@ describe('Semantic Planner', () => {
 						{
 							kind: 'in',
 							field: 'id',
-							values: [],
 							subquery: {
 								type: 'select',
 								from: 'productImages',

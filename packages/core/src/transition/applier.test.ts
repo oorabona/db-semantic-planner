@@ -9,6 +9,7 @@ import type {
 	ObservationContext,
 	OperationEffectAssessment,
 	PhysicalOperation,
+	ProvenApplyGuard,
 	ProvenPlanShape,
 	ResourceAddress,
 	SemanticArtifactRef,
@@ -423,14 +424,14 @@ function acceptsOperationPolicy(): ApplyPolicy {
 	};
 }
 
-function guard(phase: ApplyGuard['phase']): ApplyGuard {
+function guard(phase: ApplyGuard['phase']): ProvenApplyGuard {
 	return guardFor(operation.ref, phase);
 }
 
 function guardFor(
 	operationRef: string,
 	phase: ApplyGuard['phase'],
-): ApplyGuard {
+): ProvenApplyGuard {
 	return {
 		appliesTo: operationRef,
 		predicate: {
@@ -738,7 +739,7 @@ function multiSegmentRuntime(
 				if (options.failB && candidate.ref === 'op:b') {
 					throw new Error('forced op:b failure');
 				}
-				return { kind: 'completed' };
+				return { kind: 'completed' } as const;
 			},
 		),
 		writeCompletionJournal: vi.fn(async (client, _operation, recordValue) => {
@@ -1084,7 +1085,7 @@ describe('createApplier', () => {
 		const runtimeSawSession = vi.fn();
 		const coordinatorSawSession = vi.fn();
 		const rt = runtime(() => undefined, {
-			executeOperation: async () => ({ kind: 'completed' }),
+			executeOperation: async () => ({ kind: 'completed' }) as const,
 		});
 		const writeIntentJournal = rt.writeIntentJournal;
 		rt.writeIntentJournal = async (client, record) => {
@@ -1130,7 +1131,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			},
 		);
 		const registry = createPackRegistry([
@@ -1234,7 +1235,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			},
 		);
 		const registry = createPackRegistry([
@@ -1887,7 +1888,9 @@ describe('createApplier', () => {
 
 	it('reports a pre-execute setup failure as not applied when no prior segment committed', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
 		const rt = nonTransactionalRuntime(
 			(journal) => {
 				observed.push(journal);
@@ -1970,7 +1973,7 @@ describe('createApplier', () => {
 					observed.push(journal);
 				},
 				{
-					executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+					executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 				},
 			),
 			commit: vi.fn(async () => {
@@ -2010,7 +2013,7 @@ describe('createApplier', () => {
 	it('keeps a committed segment completed when the post-commit observed journal write fails', async () => {
 		const rt: OperationRuntime = {
 			...runtime(() => undefined, {
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			}),
 			writeObservedJournal: vi.fn(async () => {
 				throw new Error('journal unavailable');
@@ -2148,8 +2151,8 @@ describe('createApplier', () => {
 		);
 		const rt: OperationRuntime = {
 			...baseRuntime,
-			effectsOf: (candidate): OperationEffectAssessment => {
-				const base = baseRuntime.effectsOf(candidate);
+			effectsOf: (candidate, context): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate, context);
 				if (candidate.ref !== 'op:b') {
 					return base;
 				}
@@ -2291,13 +2294,13 @@ describe('createApplier', () => {
 			},
 			{
 				log,
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			},
 		);
 		const rt: OperationRuntime = {
 			...baseRuntime,
-			effectsOf: (candidate): OperationEffectAssessment => {
-				const base = baseRuntime.effectsOf(candidate);
+			effectsOf: (candidate, context): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate, context);
 				return {
 					...base,
 					effects: {
@@ -2355,8 +2358,8 @@ describe('createApplier', () => {
 		);
 		const rt: OperationRuntime = {
 			...baseRuntime,
-			effectsOf: (candidate): OperationEffectAssessment => {
-				const base = baseRuntime.effectsOf(candidate);
+			effectsOf: (candidate, context): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate, context);
 				return {
 					...base,
 					effects: {
@@ -2435,8 +2438,8 @@ describe('createApplier', () => {
 		);
 		const rt: OperationRuntime = {
 			...baseRuntime,
-			effectsOf: (candidate): OperationEffectAssessment => {
-				const base = baseRuntime.effectsOf(candidate);
+			effectsOf: (candidate, context): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate, context);
 				return {
 					...base,
 					effects: {
@@ -2716,7 +2719,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			},
 		);
 		const registry = createPackRegistry([
@@ -2755,7 +2758,7 @@ describe('createApplier', () => {
 		const operation = operationAssumption();
 		const nativeDefault = userAttestedNativeDefaultAssumption();
 		const rt = runtime(() => undefined, {
-			executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+			executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 		});
 		const registry = createPackRegistry([
 			{
@@ -2812,7 +2815,7 @@ describe('createApplier', () => {
 			scope: [tableResource()],
 		});
 		const rt = runtime(() => undefined, {
-			executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+			executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 		});
 		const registry = createPackRegistry([
 			{
@@ -2898,7 +2901,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 			},
 		);
 		const registry = createPackRegistry([
@@ -2968,7 +2971,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' }) as const),
 				observeOperation: vi.fn(
 					async (_client, _operation, ctx, phase, observationIssuer) => ({
 						observations: [
@@ -3019,7 +3022,9 @@ describe('createApplier', () => {
 
 	it('journals a known context-mismatch when expectedBefore changes before DDL', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -3058,7 +3063,9 @@ describe('createApplier', () => {
 
 	it('blocks before DDL when a relkind fingerprint fact drifts at apply time', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -3100,7 +3107,9 @@ describe('createApplier', () => {
 
 	it('treats a volatile before-operation guard failure as guard-failed, not inapplicable', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -3149,7 +3158,9 @@ describe('createApplier', () => {
 		const observed: StepJournal[] = [];
 		const durableIntentRows = new Set<string>();
 		const log: string[] = [];
-		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
 		const baseRuntime = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -3226,7 +3237,7 @@ describe('createApplier', () => {
 			},
 			{
 				executeOperation: vi.fn(async () => ({
-					kind: 'guard-failed',
+					kind: 'guard-failed' as const,
 					guard: duringGuard,
 					recovery: [],
 				})),
@@ -3471,7 +3482,7 @@ describe('createApplier', () => {
 			},
 			{
 				executeOperation: vi.fn(async () => ({
-					kind: 'partially-applied',
+					kind: 'partially-applied' as const,
 					recovery,
 					detail: 'invalid index cleanup did not remove the target index',
 				})),
@@ -3546,7 +3557,7 @@ describe('createApplier', () => {
 			log,
 			executeOperation: vi.fn(async () => {
 				log.push('execute');
-				return { kind: 'completed' };
+				return { kind: 'completed' } as const;
 			}),
 			checkGuard: vi.fn(async (_client, _operation, checkedGuard) => {
 				log.push(`guard:${checkedGuard.phase}`);

@@ -37,7 +37,7 @@ const NO_STRATEGY_CAPS = createDialectCapabilities({
 	identifierQuote: '"',
 	parameterStyle: 'dollar',
 	limitStyle: 'limit-offset',
-	booleanStyle: 'boolean',
+	booleanStyle: 'native',
 	recursivePathStyle: 'string',
 	stringConcatStyle: 'operator',
 	supportsLateralJoin: false,
@@ -446,7 +446,7 @@ describe('planner: recursive flag on non-self-referential relation', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'posts',
-			include: [{ relation: 'author', recursive: true }],
+			include: [{ relation: 'author', recursive: {} }],
 		};
 		const report = plan(intent, simpleSchema, {
 			dialectCapabilities: SQLITE_CAPABILITIES,
@@ -460,7 +460,7 @@ describe('planner: recursive flag on non-self-referential relation', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'categories',
-			include: [{ relation: 'children', recursive: true }],
+			include: [{ relation: 'children', recursive: {} }],
 		};
 		const report = plan(intent, selfRefSchema);
 		expect(
@@ -478,7 +478,7 @@ describe('planner: CTE deduplication', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'categories',
-			include: [{ relation: 'children', recursive: true }],
+			include: [{ relation: 'children', recursive: {} }],
 		};
 		const report = plan(intent, selfRefSchema);
 		const ctes = report.ctes.filter((c) =>
@@ -628,7 +628,7 @@ describe('planner: extractCTEs branches', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'categories',
-			include: [{ relation: 'children', recursive: true }],
+			include: [{ relation: 'children', recursive: {} }],
 		};
 		const report = plan(intent, selfRefSchema, { cteThreshold: 1 });
 		const ctes = report.ctes.filter((c) => c.name.includes('categories'));
@@ -746,7 +746,13 @@ describe('planner: plan() top-level edge cases', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'fake_table',
-			batchValuesSource: { alias: 'fake_table', columns: ['id'], values: [] },
+			batchValuesSource: {
+				alias: 'fake_table',
+				columns: ['id'],
+				data: [[]],
+				types: ['integer'],
+				ordinality: false,
+			},
 		};
 		expect(() => plan(intent, simpleSchema)).not.toThrow();
 	});

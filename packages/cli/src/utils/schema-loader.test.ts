@@ -4,7 +4,7 @@
  * SEC-8: loadSchema must reject paths outside cwd to prevent path traversal.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SchemaLoadError } from './schema-loader.js';
@@ -12,7 +12,9 @@ import { SchemaLoadError } from './schema-loader.js';
 const tempDirs: string[] = [];
 
 function writeTempSchema(source: string): string {
-	const dir = mkdtempSync(join(process.cwd(), '.tmp-schema-loader-'));
+	const tempRoot = join(process.cwd(), '.tmp');
+	mkdirSync(tempRoot, { recursive: true });
+	const dir = mkdtempSync(join(tempRoot, 'schema-loader-'));
 	tempDirs.push(dir);
 	const schemaPath = join(dir, 'dbsp.schema.ts');
 	writeFileSync(schemaPath, source, 'utf8');

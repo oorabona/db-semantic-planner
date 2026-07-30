@@ -37,7 +37,7 @@ const someWhere = {
 describe('buildExistsIntent()', () => {
 	it('strips orderBy, sets existsWrap and limit: 1', () => {
 		const intent = baseSelectIntent('users', {
-			orderBy: [{ kind: 'field', field: 'name', direction: 'asc' }],
+			orderBy: [{ field: 'name', direction: 'asc' }],
 		});
 		const result = buildExistsIntent(intent);
 		expect(result.orderBy).toBeUndefined();

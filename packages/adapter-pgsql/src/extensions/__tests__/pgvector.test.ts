@@ -34,8 +34,8 @@ function compileSelectExpr(
 			{
 				type: 'selectCustomExpression',
 				// ExpressionRef exposes .intent for the underlying ExpressionIntent
-				expressionIntent: (expr as unknown as { intent: unknown }).intent,
-				alias: alias ?? expr.as,
+				expressionIntent: expr.intent,
+				alias: alias ?? 'expression',
 			},
 		],
 	};
@@ -52,7 +52,7 @@ function compileSelectExprWithAlias(
 		decisions: [
 			{
 				type: 'selectCustomExpression',
-				expressionIntent: (expr as unknown as { intent: unknown }).intent,
+				expressionIntent: expr.intent,
 				alias,
 			},
 		],

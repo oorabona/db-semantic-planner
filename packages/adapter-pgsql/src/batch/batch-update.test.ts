@@ -8,19 +8,36 @@
  *   [RETURNING ...]
  */
 
-import { createOrm, InvalidOperationError } from '@dbsp/core';
+import { createOrm, InvalidOperationError, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 // ---------------------------------------------------------------------------
 // Shared ORM helper
 // ---------------------------------------------------------------------------
 
+const batchSchema = schema({
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		callee_id: 'integer',
+		confidence: 'number',
+		kind: 'text',
+	},
+	org_memberships: {
+		org_id: { type: 'integer', primaryKey: true },
+		user_id: { type: 'integer', primaryKey: true },
+		role: 'text',
+	},
+} as const);
+
 function makeOrm() {
-	return createOrm({
-		model: { getTable: () => undefined } as any,
-		adapter: createPgsqlCompileOnlyAdapter(),
-	});
+	return stringMutationOrm(
+		createOrm({
+			schema: batchSchema,
+			adapter: createPgsqlCompileOnlyAdapter(),
+		}),
+	);
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import type { CheckConstraintNewEnumValueError as CheckConstraintNewEnumValueErrorType } from './live-diff.js';
 import {
 	ExpressionCanonicalizationUnavailableError,
 	type SchemaDiff,
@@ -689,9 +690,9 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		expect((caught as Error).message).toContain(
 			'Apply the enum change on its own first',
 		);
-		expect((caught as CheckConstraintNewEnumValueError).table).toBe('jobs');
+		expect((caught as CheckConstraintNewEnumValueErrorType).table).toBe('jobs');
 		expect(
-			(caught as CheckConstraintNewEnumValueError).addedEnumValues,
+			(caught as CheckConstraintNewEnumValueErrorType).addedEnumValues,
 		).toEqual([{ enumName: 'status', value: 'pending' }]);
 	});
 

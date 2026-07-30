@@ -152,15 +152,26 @@ describe('PostgreSQL execution contract evaluator', () => {
 			.operationSemantics.filter(
 				(runtime) =>
 					runtime.executionContractEligibility?.eligible === true &&
+					'operationKind' in runtime &&
+					'rendererSessionRequirements' in runtime &&
 					runtime.operationKind !== undefined &&
 					(runtime.rendererSessionRequirements?.length ?? 0) > 0,
 			)
-			.flatMap((runtime) =>
-				(runtime.rendererSessionRequirements ?? []).map((requirement) => ({
-					operationKind: runtime.operationKind!,
-					requirement,
-				})),
-			);
+			.flatMap((runtime) => {
+				if (
+					!('operationKind' in runtime) ||
+					!('rendererSessionRequirements' in runtime) ||
+					runtime.operationKind === undefined
+				) {
+					return [];
+				}
+				return (runtime.rendererSessionRequirements ?? []).map(
+					(requirement) => ({
+						operationKind: runtime.operationKind,
+						requirement,
+					}),
+				);
+			});
 
 		for (const { operationKind, requirement } of rendererRequirements) {
 			const contract = createPgExecutionContract(

@@ -7,6 +7,7 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "tsc -b && vite build",
+		"typecheck": "tsc -b && tsc -p sidecar --noEmit",
 		"preview": "vite preview",
 		"test": "vitest run --config vitest.config.ts",
 		"tauri": "tauri"

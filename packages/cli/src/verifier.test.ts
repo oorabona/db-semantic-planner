@@ -15,6 +15,13 @@ function makeModel(tables: [string, TableIR][]): ModelIR {
 	return {
 		tables: new Map(tables),
 		relations: new Map(),
+		enums: new Map(),
+		getTable: (name: string) =>
+			tables.find(([tableName]) => tableName === name)?.[1],
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
 	};
 }
 

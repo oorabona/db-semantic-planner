@@ -260,6 +260,29 @@ function guard(): ApplyGuard {
 }
 
 describe('AlterTableAddCheck operation runtime', () => {
+	it('retains vendor-deparsed CHECK text for the CLI formatter to escape', () => {
+		const deparsedExpression = "CHECK ((status <> '\u001b[2J'))";
+		const sql = renderAlterTableAddCheckSql(
+			{
+				...payload,
+				constraint: 'users_status_check',
+				expression: { ...payload.expression, text: deparsedExpression },
+				predicate: { ...payload.predicate, text: "(status <> '\u001b[2J')" },
+				expectedAfter: [
+					{
+						name: 'users_status_check',
+						oid: null,
+						expression: deparsedExpression,
+						predicate: "(status <> '\u001b[2J')",
+						notValid: false,
+					},
+				],
+			},
+			context,
+		);
+		expect(sql).toContain('\u001b[2J');
+	});
+
 	it('renders only the vendor-deparsed CHECK clause', () => {
 		expect(renderAlterTableAddCheckSql(payload, context)).toBe(
 			'ALTER TABLE "tenant"."users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0))',

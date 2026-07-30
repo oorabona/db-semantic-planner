@@ -603,7 +603,11 @@ describe('migrate rollback — checksum validation', () => {
 
 describe('migrate rollback — DOWN section handling', () => {
 	it('SC-10/ERR-01: should reject rollback when no DOWN section exists', () => {
-		const parsed = {
+		const parsed: {
+			upStatements: string[];
+			downStatements: string[];
+			hasDown: boolean;
+		} = {
 			upStatements: ['CREATE TABLE "users" ("id" serial)'],
 			downStatements: [],
 			hasDown: false,
@@ -613,7 +617,11 @@ describe('migrate rollback — DOWN section handling', () => {
 	});
 
 	it('SC-11/ERR-04: should reject rollback when DOWN section is empty without --force', () => {
-		const parsed = {
+		const parsed: {
+			upStatements: string[];
+			downStatements: string[];
+			hasDown: boolean;
+		} = {
 			upStatements: ['CREATE TABLE "users" ("id" serial)'],
 			downStatements: [],
 			hasDown: true,
@@ -629,7 +637,11 @@ describe('migrate rollback — DOWN section handling', () => {
 	});
 
 	it('SC-11: should allow rollback with empty DOWN when --force is set', () => {
-		const parsed = {
+		const parsed: {
+			upStatements: string[];
+			downStatements: string[];
+			hasDown: boolean;
+		} = {
 			upStatements: ['CREATE TABLE "users" ("id" serial)'],
 			downStatements: [],
 			hasDown: true,

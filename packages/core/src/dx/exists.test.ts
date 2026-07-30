@@ -3,8 +3,8 @@
  * Acceptance criteria A1-A9.
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, it, vi } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter, Dump } from '../adapter.js';
 import { eq } from './filters.js';
 import { createHookManager } from './hooks.js';

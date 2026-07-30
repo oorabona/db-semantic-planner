@@ -115,7 +115,7 @@ function obligationForRequest(
 		proposition: {
 			kind: request.kind,
 			scope: request.scope,
-			detail: request.detail,
+			...(request.detail === undefined ? {} : { detail: request.detail }),
 		},
 		scope: request.scope,
 		dischargeableBy: [request],

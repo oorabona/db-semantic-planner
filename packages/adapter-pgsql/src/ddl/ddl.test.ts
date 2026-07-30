@@ -8,10 +8,10 @@ import type {
 	IndexIR,
 	ModelIR,
 	PartitionIR,
-	SequenceIR,
 	TableIR,
 } from '@dbsp/core';
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { camelCaseNaming } from '../naming-plugin.js';
 import { generateDDL } from './ddl-generator.js';
@@ -780,7 +780,6 @@ describe('DDL Generator', () => {
 							{
 								name: 'posts',
 								columns: [{ name: 'body', type: 'text', nullable: false }],
-								primaryKey: undefined,
 								foreignKeys: [],
 								indexes: [
 									{
@@ -812,7 +811,6 @@ describe('DDL Generator', () => {
 							{
 								name: 'users',
 								columns: [{ name: 'email', type: 'string', nullable: false }],
-								primaryKey: undefined,
 								foreignKeys: [],
 								indexes: [
 									{
@@ -843,7 +841,6 @@ describe('DDL Generator', () => {
 							{
 								name: 'users',
 								columns: [{ name: 'email', type: 'string', nullable: false }],
-								primaryKey: undefined,
 								foreignKeys: [],
 								indexes: [
 									{
@@ -1597,7 +1594,7 @@ describe('FK enhancements in DDL', () => {
 			]),
 			relations: new Map(),
 			enums: new Map(),
-			getTable: (name) =>
+			getTable: (name: string) =>
 				[usersTable, ordersTable].find((t) => t.name === name),
 			getRelation: () => undefined,
 			getRelationsFrom: () => [],
@@ -1671,7 +1668,7 @@ describe('FK enhancements in DDL', () => {
 			]),
 			relations: new Map(),
 			enums: new Map(),
-			getTable: (name) =>
+			getTable: (name: string) =>
 				[usersTable, tokensTable].find((t) => t.name === name),
 			getRelation: () => undefined,
 			getRelationsFrom: () => [],
@@ -1699,7 +1696,7 @@ describe('Column enhancements in DDL', () => {
 			tables: new Map([[table.name, table]]),
 			relations: new Map(),
 			enums: new Map(),
-			getTable: (name) => (name === table.name ? table : undefined),
+			getTable: (name: string) => (name === table.name ? table : undefined),
 			getRelation: () => undefined,
 			getRelationsFrom: () => [],
 			getRelationsTo: () => [],

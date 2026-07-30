@@ -1581,7 +1581,7 @@ describe('SC-23: stream beforeQuery wrapped in re-entrancy guard', () => {
 
 		let outerCallCount = 0;
 		// ORM reference captured after creation (closed over in the hook below)
-		let orm: ReturnType<typeof createOrm<typeof testSchema>>;
+		let orm: ReturnType<typeof createOrm>;
 		const hooks = createHookManager().beforeQuery((ctx) => {
 			outerCallCount++;
 			// Intentional re-entrant query — should NOT recurse into hooks

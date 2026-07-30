@@ -359,6 +359,7 @@ export {
 	checkDelta,
 	chooseReadyCandidate,
 	claimId,
+	concludeEvidenceForObligation,
 	createApplier,
 	createComparator,
 	createEvidenceView,

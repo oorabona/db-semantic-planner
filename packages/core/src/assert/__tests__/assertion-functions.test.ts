@@ -40,14 +40,26 @@ function makeResult(
 
 function makeIntent(overrides: Partial<IntentSummary> = {}): IntentSummary {
 	return {
-		type: 'select',
+		type: 'query',
 		table: 'users',
 		with: [],
 		hasWhere: false,
 		hasGroupBy: false,
 		hasOrderBy: false,
+		ctes: [],
 		...overrides,
 	};
+}
+
+function withoutIntent(result: AssertionQueryResult): AssertionQueryResult {
+	const { intent: _intent, ...withoutIntent } = result;
+	return withoutIntent;
+}
+
+function withoutIntentTable(intent: IntentSummary): IntentSummary {
+	const withoutTable = { ...intent };
+	Reflect.deleteProperty(withoutTable, 'table');
+	return withoutTable;
 }
 
 // ---------------------------------------------------------------------------
@@ -640,8 +652,8 @@ describe('assertDbValueEquals', () => {
 
 describe('assertIntentType', () => {
 	it('should pass when intent type matches', () => {
-		const result = makeResult({ intent: makeIntent({ type: 'select' }) });
-		const out = assertIntentType(result, 'select');
+		const result = makeResult({ intent: makeIntent({ type: 'query' }) });
+		const out = assertIntentType(result, 'query');
 		expect(out.passed).toBe(true);
 	});
 
@@ -654,7 +666,7 @@ describe('assertIntentType', () => {
 	});
 
 	it('should fail when no intent available', () => {
-		const result = makeResult({ intent: undefined });
+		const result = withoutIntent(makeResult());
 		const out = assertIntentType(result, 'select');
 		expect(out.passed).toBe(false);
 		expect(out.message).toBe('No intent available (command or parse error)');
@@ -686,14 +698,14 @@ describe('assertIntentTable', () => {
 	});
 
 	it('should fail when no intent available', () => {
-		const result = makeResult({ intent: undefined });
+		const result = withoutIntent(makeResult());
 		const out = assertIntentTable(result, 'users');
 		expect(out.passed).toBe(false);
 		expect(out.message).toBe('No intent available (command or parse error)');
 	});
 
 	it('should fail when intent table is undefined', () => {
-		const result = makeResult({ intent: makeIntent({ table: undefined }) });
+		const result = makeResult({ intent: withoutIntentTable(makeIntent()) });
 		const out = assertIntentTable(result, 'users');
 		expect(out.passed).toBe(false);
 	});
@@ -734,7 +746,7 @@ describe('assertIntentWith', () => {
 	});
 
 	it('should fail when no intent available', () => {
-		const result = makeResult({ intent: undefined });
+		const result = withoutIntent(makeResult());
 		const out = assertIntentWith(result, 'posts');
 		expect(out.passed).toBe(false);
 		expect(out.message).toBe('No intent available (command or parse error)');
@@ -766,7 +778,7 @@ describe('assertIntentHasWhere', () => {
 	});
 
 	it('should fail when no intent', () => {
-		const result = makeResult({ intent: undefined });
+		const result = withoutIntent(makeResult());
 		const out = assertIntentHasWhere(result, true);
 		expect(out.passed).toBe(false);
 	});

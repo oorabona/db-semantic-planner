@@ -11,7 +11,8 @@
  * D1 - validateSqlExpression error message clarifies $$
  */
 
-import { and, exists, ref, schema } from '@dbsp/core';
+import { and, exists, ModelIRImpl, ref, schema } from '@dbsp/core';
+import type { TableIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -132,6 +133,7 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 		const config: UpsertConfig = {
 			table: 'users',
 			columns: ['email', 'name'],
+			values: [],
 			conflictTarget: {
 				columns: ['email'],
 				where: [
@@ -163,6 +165,7 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 		const config: UpsertConfig = {
 			table: 'users',
 			columns: ['email'],
+			values: [],
 			conflictTarget: { columns: ['email'] },
 			conflictAction: 'nothing',
 		};
@@ -222,8 +225,8 @@ describe('C5: Column default { sql } emitted verbatim in DDL', () => {
 	it('{ sql: "CURRENT_TIMESTAMP" } appears verbatim in CREATE TABLE', async () => {
 		const { generateDDL } = await import('../ddl/ddl-generator.js');
 
-		const schema = {
-			tables: new Map([
+		const model = new ModelIRImpl(
+			new Map([
 				[
 					'events',
 					{
@@ -240,12 +243,13 @@ describe('C5: Column default { sql } emitted verbatim in DDL', () => {
 						primaryKey: 'id',
 						foreignKeys: [],
 						indexes: [],
-					},
+					} satisfies TableIR,
 				],
 			]),
-		} as Parameters<typeof generateDDL>[0];
+			new Map(),
+		);
 
-		const stmts = generateDDL(schema);
+		const stmts = generateDDL(model);
 		const ddl = stmts.join('\n');
 		expect(ddl).toContain('CURRENT_TIMESTAMP');
 		expect(ddl).not.toContain("'CURRENT_TIMESTAMP'");
@@ -254,8 +258,8 @@ describe('C5: Column default { sql } emitted verbatim in DDL', () => {
 	it('raw string default is still quoted as a string literal', async () => {
 		const { generateDDL } = await import('../ddl/ddl-generator.js');
 
-		const schema = {
-			tables: new Map([
+		const model = new ModelIRImpl(
+			new Map([
 				[
 					'items',
 					{
@@ -270,12 +274,13 @@ describe('C5: Column default { sql } emitted verbatim in DDL', () => {
 						],
 						foreignKeys: [],
 						indexes: [],
-					},
+					} satisfies TableIR,
 				],
 			]),
-		} as Parameters<typeof generateDDL>[0];
+			new Map(),
+		);
 
-		const stmts = generateDDL(schema);
+		const stmts = generateDDL(model);
 		const ddl = stmts.join('\n');
 		expect(ddl).toContain("'pending'");
 	});
@@ -375,6 +380,7 @@ describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', 
 		const config: UpsertConfig = {
 			table: 'users',
 			columns: ['email', 'name'],
+			values: [],
 			conflictTarget: {
 				columns: ['email'],
 				where: [

@@ -93,13 +93,24 @@ describe('PgsqlAdapter', () => {
 	});
 
 	describe('createPgsqlAdapter', () => {
-		it('does not accept a PoolClient through createPgsqlAdapter', () => {
-			expectTypeOf<
-				Parameters<typeof createPgsqlAdapter>[0]
-			>().toEqualTypeOf<Pool>();
-			expectTypeOf<PoolClient>().not.toMatchTypeOf<
-				Parameters<typeof createPgsqlAdapter>[0]
-			>();
+		it('accepts Pool and opted-in PoolClient factory overloads only', () => {
+			const pool = createMockPool();
+			const client = {
+				query: vi.fn(),
+				release: vi.fn(),
+			} as unknown as PoolClient;
+
+			expectTypeOf(createPgsqlAdapter(pool)).toEqualTypeOf<PgsqlAdapter>();
+			expectTypeOf(
+				createPgsqlAdapter(client, { borrowedClient: true }),
+			).toEqualTypeOf<PgsqlAdapter>();
+
+			if (process.env.DBSP_TYPECHECK_ONLY === '1') {
+				// @ts-expect-error a PoolClient requires an explicit borrowedClient opt-in.
+				createPgsqlAdapter(client);
+				// @ts-expect-error borrowedClient requires a PoolClient, not a Pool.
+				createPgsqlAdapter(pool, { borrowedClient: true });
+			}
 		});
 	});
 

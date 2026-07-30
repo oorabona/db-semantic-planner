@@ -11,6 +11,7 @@ import type {
 	TypeRef,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { withDeparseRequest } from '../test-compat/equivalence-deparse-request.js';
 import {
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_EQUIVALENCE_ARTIFACT,
@@ -42,10 +43,18 @@ type ProofBoundEquivalenceContext = EquivalenceContext & {
 const proofEquivalenceContext: ProofBoundEquivalenceContext = {
 	engine: proofObservationContext.engine,
 	databaseId: proofObservationContext.databaseId,
-	targetSchema: proofObservationContext.targetSchema,
-	searchPath: proofObservationContext.searchPath,
+	...(proofObservationContext.targetSchema
+		? { targetSchema: proofObservationContext.targetSchema }
+		: {}),
+	...(proofObservationContext.searchPath
+		? { searchPath: proofObservationContext.searchPath }
+		: {}),
 	proofObservationContext,
 };
+
+function jsonFixture(value: unknown) {
+	return JSON.parse(JSON.stringify(value));
+}
 
 function typeRef(
 	name: string,
@@ -150,8 +159,8 @@ function deparseEvidence(
 			table: 'users',
 			column: 'status',
 			schema: 'public',
-			left,
-			right,
+			left: jsonFixture(left),
+			right: jsonFixture(right),
 		},
 	};
 	return {
@@ -166,7 +175,7 @@ function deparseEvidence(
 				category: 'scalar',
 				leftCanonical,
 				rightCanonical,
-				...(options.claims ? { claims: options.claims } : {}),
+				...(options.claims ? { claims: jsonFixture(options.claims) } : {}),
 			},
 		},
 		context: options.context ?? {
@@ -212,8 +221,8 @@ function columnDeparseRequest(
 			table,
 			column,
 			schema: 'public',
-			left,
-			right,
+			left: jsonFixture(left),
+			right: jsonFixture(right),
 		},
 	};
 }
@@ -386,7 +395,7 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			{ ...proofEquivalenceContext, deparseRequest: request },
+			withDeparseRequest(proofEquivalenceContext, request),
 			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request,
@@ -407,13 +416,15 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			{
-				engine: proofEquivalenceContext.engine,
-				databaseId: proofEquivalenceContext.databaseId,
-				targetSchema: proofEquivalenceContext.targetSchema,
-				searchPath: proofEquivalenceContext.searchPath,
-				deparseRequest: request,
-			},
+			withDeparseRequest(
+				{
+					engine: proofObservationContext.engine,
+					databaseId: proofObservationContext.databaseId,
+					targetSchema: 'public',
+					searchPath: ['public'],
+				},
+				request,
+			),
 			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request,
@@ -475,11 +486,13 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			{
-				...proofEquivalenceContext,
-				proofObservationContext: mismatchedProofContext,
-				deparseRequest: request,
-			},
+			withDeparseRequest(
+				{
+					...proofEquivalenceContext,
+					proofObservationContext: mismatchedProofContext,
+				},
+				request,
+			),
 			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request,
@@ -599,7 +612,7 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			{ ...proofEquivalenceContext, deparseRequest: request },
+			withDeparseRequest(proofEquivalenceContext, request),
 			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'pending'::text", {
 					request,

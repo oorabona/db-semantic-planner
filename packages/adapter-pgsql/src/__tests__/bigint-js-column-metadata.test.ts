@@ -6,9 +6,9 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
+import { compile as compileNql } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compile as compileNql } from '../../../nql/src/index.js';
 import { buildCompiledColumnProjections } from '../column-metadata.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';

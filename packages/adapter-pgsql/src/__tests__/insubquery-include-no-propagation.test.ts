@@ -100,7 +100,6 @@ describe('inSubquery + include: optimizer-generated EXISTS must NOT propagate to
 			where: {
 				kind: 'in',
 				field: 'id',
-				values: [],
 				subquery: {
 					type: 'select',
 					from: 'posts',

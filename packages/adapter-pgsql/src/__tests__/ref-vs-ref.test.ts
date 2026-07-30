@@ -18,6 +18,7 @@ import { createOrm, exprRef, op, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { whereExpression } from '../test-compat/issue-442.js';
 
 const testSchema = schema({
 	imports: {
@@ -40,10 +41,10 @@ function buildOrm() {
 describe('REF-VS-REF: op() with two exprRef() operands compiles correctly', () => {
 	it('op("!=", exprRef("file_id"), exprRef("resolved_file_id")) in WHERE produces correct SQL', () => {
 		const orm = buildOrm();
-		const dump = orm
-			.select('imports')
-			.where(op('!=', exprRef('file_id'), exprRef('resolved_file_id')))
-			.dump();
+		const dump = whereExpression(
+			orm.select('imports'),
+			op('!=', exprRef('file_id'), exprRef('resolved_file_id')),
+		).dump();
 
 		const sql = normalizeSQL(dump.sql);
 

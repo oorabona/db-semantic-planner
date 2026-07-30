@@ -1,3 +1,7 @@
+import {
+	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+	MANUAL_SQL_OPERATION_KIND,
+} from '@dbsp/adapter-pgsql';
 import type { InProcessProvenPlan, TransitionPack } from '@dbsp/core';
 import {
 	createPackRegistry,
@@ -12,11 +16,6 @@ import type {
 	PlanAssessment,
 } from '@dbsp/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
-	MANUAL_SQL_OPERATION_KIND,
-} from '../../../adapter-pgsql/src/transition/constants.js';
-import { renderAlterTableAddCheckSql } from '../../../adapter-pgsql/src/transition/operations/alter-table-add-check.js';
 import {
 	buildPgExecutionContract,
 	executionTargetNamespaces,
@@ -114,19 +113,7 @@ function provenPlan(operation?: {
 	} as unknown as InProcessProvenPlan;
 }
 
-function dependencies(
-	compare: CompareOutcome,
-	prove: unknown,
-): Partial<PlanDeps> & {
-	readonly persist: ReturnType<typeof vi.fn>;
-	readonly planner: {
-		readonly compare: ReturnType<typeof vi.fn>;
-		readonly prove: ReturnType<typeof vi.fn>;
-		readonly render: ReturnType<typeof vi.fn>;
-	};
-	readonly createPlanner: ReturnType<typeof vi.fn>;
-	readonly render: ReturnType<typeof vi.fn>;
-} {
+function dependencies(compare: CompareOutcome, prove: unknown) {
 	const pool = { end: vi.fn().mockResolvedValue(undefined) };
 	const persist = vi.fn().mockResolvedValue(undefined);
 	const render = vi
@@ -447,7 +434,7 @@ describe('dbsp plan outcomes', () => {
 			pool: pool as never,
 			release: vi.fn().mockResolvedValue(undefined),
 		});
-		deps.buildExecutionContract = buildPgExecutionContract;
+		deps.buildExecutionContract.mockImplementation(buildPgExecutionContract);
 		const result = await runPlan(
 			{
 				db: 'postgres://localhost/test',
@@ -530,8 +517,9 @@ describe('dbsp plan outcomes', () => {
 			{ kind: 'transitions', candidates: [], obligations: [] },
 			{ kind: 'proven', plan: provenPlan(), assessment: applicable },
 		);
-		const persistenceError = new Error('connection lost');
-		Object.assign(persistenceError, { code: '08006' });
+		const persistenceError = Object.assign(new Error('connection lost'), {
+			code: '08006',
+		});
 		deps.persist.mockRejectedValue(persistenceError);
 		let caught: unknown;
 		try {
@@ -547,7 +535,7 @@ describe('dbsp plan outcomes', () => {
 		const indeterminate = caught as PlanPersistenceIndeterminateError;
 		expect(indeterminate.cause).toBe(persistenceError);
 		expect(indeterminate.persistenceError).toBe(persistenceError);
-		expect((persistenceError as { code: string }).code).toBe('08006');
+		expect(persistenceError.code).toBe('08006');
 		expect(formatPlanFailureJson(indeterminate)).toMatchObject({
 			compareKind: 'transitions',
 			proveKind: 'proven',
@@ -734,8 +722,15 @@ describe('dbsp plan outcomes', () => {
 				proveKind: 'blocked',
 				assessment: {
 					...blocked,
-					reasons: ['refusal\u202Ereason'],
-				} as PlanAssessment,
+					reasons: [
+						{
+							code: 'unsupported-transition',
+							detail: 'refusal\u202Ereason',
+							scope: [],
+							changes: [],
+						},
+					],
+				},
 				persisted: false,
 				runId: null,
 				planDigest: null,
@@ -747,45 +742,7 @@ describe('dbsp plan outcomes', () => {
 
 	it('escapes a vendor-deparsed CHECK literal in the human SQL view but not JSON [mutation: print result.sql raw]', () => {
 		const deparsedExpression = "CHECK ((status <> '\u001b[2J'))";
-		const sql = renderAlterTableAddCheckSql(
-			{
-				schema: 'tenant',
-				table: 'users',
-				constraint: 'users_status_check',
-				expression: {
-					kind: 'vendor-validated',
-					category: 'predicate',
-					validatedBy: {
-						id: 'dbsp.postgresql.deparser.pg18',
-						version: '0.1.0',
-					},
-					text: deparsedExpression,
-				},
-				predicate: {
-					kind: 'vendor-validated',
-					category: 'predicate',
-					validatedBy: {
-						id: 'dbsp.postgresql.deparser.pg18',
-						version: '0.1.0',
-					},
-					text: "(status <> '\u001b[2J')",
-				},
-				expectedBefore: [],
-				expectedAfter: [
-					{
-						name: 'users_status_check',
-						oid: null,
-						expression: deparsedExpression,
-						predicate: "(status <> '\u001b[2J')",
-						notValid: false,
-					},
-				],
-			},
-			{
-				...proofContext,
-				sessionConfiguration: { standard_conforming_strings: 'on' },
-			},
-		);
+		const sql = `ALTER TABLE "tenant"."users" ADD CONSTRAINT "users_status_check" ${deparsedExpression}`;
 		const result = {
 			compareKind: 'transitions',
 			proveKind: 'proven',

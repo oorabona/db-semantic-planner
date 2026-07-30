@@ -53,6 +53,18 @@ function normalizeSql(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
+function fakeQueryResult(
+	rows: readonly Record<string, unknown>[],
+): QueryResult<Record<string, unknown>> {
+	return {
+		command: 'SELECT',
+		oid: 0,
+		fields: [],
+		rows: [...rows],
+		rowCount: rows.length,
+	};
+}
+
 function normalizeCanonicalizationSql(sql: string): string {
 	return normalizeSql(sql)
 		.replace(/\bdbsp_savepoint_[a-f0-9]+\b/giu, 'dbsp_savepoint')
@@ -95,10 +107,10 @@ class FakePgClient {
 	inTransaction = true;
 	readonly release = vi.fn();
 
-	async query<T extends Record<string, unknown> = Record<string, unknown>>(
+	async query(
 		sql: string,
 		parameters?: readonly unknown[],
-	): Promise<QueryResult<T>> {
+	): Promise<QueryResult<Record<string, unknown>>> {
 		const normalized = normalizeSql(sql);
 		this.statements.push(normalized);
 		if (normalized.startsWith('SET LOCAL search_path TO ')) {
@@ -169,26 +181,24 @@ class FakePgClient {
 			const names = parameters?.[1] as readonly string[];
 			const relationName = String(parameters?.[0]);
 			if (!relationName.startsWith('_dbsp_check_canon_')) {
-				return {
-					rows: names.flatMap((name) => {
+				return fakeQueryResult(
+					names.flatMap((name) => {
 						const expression = this.canonicalDatabaseExpressions.get(
 							`${relationName}.${name}`,
 						);
 						return expression === undefined ? [] : [{ name, expression }];
-					}) as T[],
-					rowCount: names.length,
-				} as QueryResult<T>;
+					}),
+				);
 			}
-			return {
-				rows: names.map((name) => ({
+			return fakeQueryResult(
+				names.map((name) => ({
 					name,
 					expression:
 						this.canonicalExpressions.get(name) ??
 						this.canonicalExpressions.get(legacyCanonicalizationName(name)) ??
 						`CHECK ((canonical_${name}))`,
-				})) as T[],
-				rowCount: names.length,
-			} as QueryResult<T>;
+				})),
+			);
 		}
 
 		if (normalized.startsWith('SELECT pg_get_expr(d.adbin,')) {
@@ -199,18 +209,15 @@ class FakePgClient {
 				this.canonicalDefaults.get(key) ??
 				this.canonicalDefaults.get(String(columnName)) ??
 				`canonical_${String(columnName)}`;
-			return {
-				rows: [{ expression }] as T[],
-				rowCount: 1,
-			} as QueryResult<T>;
+			return fakeQueryResult([{ expression }]);
 		}
 
 		if (normalized.startsWith('SELECT source, pg_get_expr(d.adbin,')) {
 			const sources = parameters?.[0] as readonly string[];
 			const relations = parameters?.[1] as readonly string[];
 			const columnName = String(parameters?.[2]);
-			return {
-				rows: sources.flatMap((source, index) => {
+			return fakeQueryResult(
+				sources.flatMap((source, index) => {
 					if (this.omittedDefaultSources.has(source)) return [];
 					const relationName = relations[index]!;
 					return [
@@ -222,17 +229,14 @@ class FakePgClient {
 								`canonical_${columnName}`,
 						},
 					];
-				}) as T[],
-				rowCount: sources.filter(
-					(source) => !this.omittedDefaultSources.has(source),
-				).length,
-			} as QueryResult<T>;
+				}),
+			);
 		}
 
 		const dropMatch = /^DROP TABLE "([^"]+)"$/u.exec(normalized);
 		if (dropMatch) this.tempTables.delete(dropMatch[1]!);
 
-		return { rows: [], rowCount: 0 } as QueryResult<T>;
+		return fakeQueryResult([]);
 	}
 }
 
@@ -436,7 +440,7 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
+		const canonical = await canonicalizeWithScratch(
 			adapterForPool(new FakePgPool(client)),
 			desired,
 			dbModel,
@@ -1455,21 +1459,22 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('does not touch the database when no desired table declares a CHECK constraint', async () => {
+	it('does not issue scratch DDL when no desired table declares a CHECK constraint', async () => {
 		const client = new FakePgClient();
 		const pool = new FakePgPool(client);
 		const desired = makeModel([makeTable({ name: 'logs' })]);
 		const dbModel = makeModel([makeTable({ name: 'logs' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
+		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
 			desired,
 			dbModel,
 		);
 
 		expect(canonical).toBe(desired);
-		expect(pool.connect).not.toHaveBeenCalled();
-		expect(client.queries).toEqual([]);
+		expect(pool.connect).toHaveBeenCalledTimes(1);
+		expect(client.statements).toEqual(['BEGIN', 'ROLLBACK']);
+		expect(client.release).toHaveBeenCalledTimes(1);
 	});
 
 	it('honors canonicalizeCheckConstraints: false in the public helper', async () => {
@@ -1484,7 +1489,7 @@ describe('canonicalizeCheckConstraints', () => {
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
 		await expect(
-			canonicalizeCheckConstraints(
+			canonicalizeWithScratch(
 				adapterForPool(new FakePgPool(client)),
 				desired,
 				dbModel,
@@ -1493,7 +1498,7 @@ describe('canonicalizeCheckConstraints', () => {
 				},
 			),
 		).resolves.toBe(desired);
-		expect(client.queries).toEqual([]);
+		expect(client.statements).toEqual(['BEGIN', 'ROLLBACK']);
 	});
 
 	it.each([

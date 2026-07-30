@@ -1,4 +1,5 @@
 import { schema } from '@dbsp/core';
+import { compile } from '@dbsp/nql';
 import type {
 	ColumnJsReadType,
 	CompiledNqlQuery,
@@ -7,7 +8,6 @@ import type {
 	UpdateIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { compile } from '../../../nql/src/index.js';
 import {
 	createPgsqlCompileOnlyAdapter,
 	type PgsqlAdapterOptions,

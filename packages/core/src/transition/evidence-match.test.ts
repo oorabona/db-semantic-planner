@@ -90,20 +90,7 @@ function evidence(
 		id: evidenceId('mock.evidence-match'),
 		issuer: artifact,
 		request: observed,
-		result: {
-			value: {
-				claims: [
-					{
-						kind: observed.kind,
-						holds: true,
-						scope: observed.scope,
-						...(observed.detail === undefined
-							? {}
-							: { detail: observed.detail }),
-					},
-				],
-			},
-		},
+		result: { value: { holds: true } },
 		context,
 		stability: 'externally-mutable',
 		takenAt: '2026-07-18T00:00:00.000Z',
@@ -155,6 +142,31 @@ describe('evidence request matching', () => {
 });
 
 describe('evidence discharge matching', () => {
+	it('discharges a claim only for its exact scoped proposition', () => {
+		const requested = request(table('tenant'));
+		const observation = evidence(requested);
+		const siblingScope = [{ ...table('tenant'), name: 'accounts' }];
+
+		expect(
+			concludeEvidenceForObligation({
+				obligation: obligation(requested),
+				evidence: [observation],
+				expectedContext: context,
+			}).conclusion,
+		).toBe('established');
+		expect(
+			concludeEvidenceForObligation({
+				obligation: {
+					...obligation(requested),
+					proposition: { kind: requested.kind, scope: siblingScope },
+					scope: siblingScope,
+				},
+				evidence: [observation],
+				expectedContext: context,
+			}).conclusion,
+		).toBe('undischarged');
+	});
+
 	it('does not discharge an omitted-schema obligation from a concrete-schema observation without context fill', () => {
 		const result = concludeEvidenceForObligation({
 			obligation: obligation(request(table())),
@@ -226,7 +238,16 @@ describe('evidence discharge matching', () => {
 								{
 									kind: 'mock.check.absent',
 									holds: true,
-									scope: derivedScope,
+									scope: [
+										{
+											engine: 'postgresql',
+											database: 'evidence-db',
+											schema: 'tenant',
+											kind: 'check-constraint',
+											name: 'users_age_check',
+											qualifiedBy: ['users'],
+										},
+									],
 									detail,
 								},
 							],

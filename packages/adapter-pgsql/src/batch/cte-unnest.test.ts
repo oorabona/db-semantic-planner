@@ -12,12 +12,24 @@
 import { createOrm, eq, InvalidOperationError, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
+
+const batchSchema = schema({
+	calls: {
+		id: { type: 'integer', primaryKey: true },
+		callee_id: 'integer',
+		kind: 'text',
+	},
+	symbols: { id: { type: 'integer', primaryKey: true } },
+} as const);
 
 function makeOrm() {
-	return createOrm({
-		model: { getTable: () => undefined } as any,
-		adapter: createPgsqlCompileOnlyAdapter(),
-	});
+	return stringMutationOrm(
+		createOrm({
+			schema: batchSchema,
+			adapter: createPgsqlCompileOnlyAdapter(),
+		}),
+	);
 }
 
 // ---------------------------------------------------------------------------

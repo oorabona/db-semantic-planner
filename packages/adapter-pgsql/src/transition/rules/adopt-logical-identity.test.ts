@@ -192,16 +192,18 @@ function createFakeIssuer(rows: BindingRow[]): ObservationIssuer {
 					},
 				},
 				result: {
-					value: {
-						objectExists: true,
-						sideTableExists: rows.length > 0,
-						logicalId: detail.logicalId,
-						carrierKind: detail.carrierKind,
-						authenticated: false,
-						objectBindings: objectBindings.map(bindingValue),
-						logicalIdBindings: logicalIdBindings.map(bindingValue),
-						claims: [{ kind: LOGICAL_IDENTITY_CARRIER_OBSERVATION, holds }],
-					},
+					value: JSON.parse(
+						JSON.stringify({
+							objectExists: true,
+							sideTableExists: rows.length > 0,
+							logicalId: detail.logicalId,
+							carrierKind: detail.carrierKind,
+							authenticated: false,
+							objectBindings: objectBindings.map(bindingValue),
+							logicalIdBindings: logicalIdBindings.map(bindingValue),
+							claims: [{ kind: LOGICAL_IDENTITY_CARRIER_OBSERVATION, holds }],
+						}),
+					),
 				},
 				context: ctx,
 				stability: 'externally-mutable',
@@ -415,10 +417,18 @@ function createFakePool(rows: BindingRow[]) {
 				return { rows: [] };
 			}
 			if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
-				return { rows: [plans.get(String(params?.[0]))].filter(Boolean) };
+				return {
+					rows: [plans.get(String(params?.[0]))].filter(
+						(row): row is Record<string, unknown> => row !== undefined,
+					),
+				};
 			}
 			if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
-				return { rows: [runs.get(String(params?.[0]))].filter(Boolean) };
+				return {
+					rows: [runs.get(String(params?.[0]))].filter(
+						(row): row is Record<string, unknown> => row !== undefined,
+					),
+				};
 			}
 			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
 				return { rows: [] };

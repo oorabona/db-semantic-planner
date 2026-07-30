@@ -61,7 +61,7 @@ const basicSchema = schema({
 describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 	it('decisions, warnings, ctes are frozen readonly arrays on the returned report', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'user' }],
 		};
@@ -84,7 +84,7 @@ describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 	});
 
 	it('decisions array is a new copy — not the same reference as internal state', () => {
-		const intent: QueryIntent = { type: 'query', from: 'users' };
+		const intent: QueryIntent = { type: 'select', from: 'users' };
 
 		const r1 = plan(intent, basicSchema);
 		const r2 = plan(intent, basicSchema);
@@ -101,7 +101,7 @@ describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 		// building a multi-include plan exercises both plan() and potentially
 		// planRecursive().  Here we just verify the contract on plan().
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'user' }],
 		};
@@ -122,7 +122,7 @@ describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 describe('plan() — isAmbiguous metadata flag (FIND-052)', () => {
 	it('non-ambiguous query: isAmbiguous=false and no ambiguity decisions', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'user' }],
 		};
@@ -137,14 +137,14 @@ describe('plan() — isAmbiguous metadata flag (FIND-052)', () => {
 	});
 
 	it('plan with no includes: isAmbiguous=false', () => {
-		const intent: QueryIntent = { type: 'query', from: 'users' };
+		const intent: QueryIntent = { type: 'select', from: 'users' };
 		const report = plan(intent, basicSchema);
 		expect(report.metadata.isAmbiguous).toBe(false);
 	});
 
 	it('plan with multiple includes: isAmbiguous=false (unambiguous schema)', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'user' }],
 		};
@@ -163,7 +163,7 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 	it('extracts CTE for a relation accessed >= cteThreshold times', () => {
 		// Access primaryCategory twice in the intent (via include + where filter)
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [
 				{ relation: 'primaryCategory' },
@@ -191,7 +191,7 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 	it('CTE extraction is skipped when threshold is not met', () => {
 		// With threshold=3 and only 1 access, no CTE extraction should occur.
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'primaryCategory' }],
 		};
@@ -211,7 +211,7 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 	it('CTE output is identical with pre-built Map vs linear scan — golden regression', () => {
 		// Run the same query twice and verify the decisions are stable (deterministic).
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [
 				{ relation: 'primaryCategory' },
@@ -225,8 +225,8 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 		// Decisions are structurally identical between two runs (deterministic)
 		expect(r1.decisions.length).toBe(r2.decisions.length);
 		for (let i = 0; i < r1.decisions.length; i++) {
-			expect(r1.decisions[i].type).toBe(r2.decisions[i].type);
-			expect(r1.decisions[i].choice).toBe(r2.decisions[i].choice);
+			expect(r1.decisions[i]!.type).toBe(r2.decisions[i]!.type);
+			expect(r1.decisions[i]!.choice).toBe(r2.decisions[i]!.choice);
 		}
 
 		// CTEs are also stable
@@ -235,7 +235,7 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 
 	it('plan with no CTEs threshold: cte array is empty when enableCTEs=false', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'primaryCategory' }],
 		};
@@ -254,7 +254,7 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 describe('plan() — golden regression: semantic output unchanged after perf fixes', () => {
 	it('multi-include plan produces same decision types as before optimisations', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'posts',
 			include: [{ relation: 'user' }],
 		};
@@ -281,7 +281,7 @@ describe('plan() — golden regression: semantic output unchanged after perf fix
 
 	it('deeper include chain: decisions array ordered parent-before-child', () => {
 		const intent: QueryIntent = {
-			type: 'query',
+			type: 'select',
 			from: 'comments',
 			include: [{ relation: 'post', include: [{ relation: 'user' }] }],
 		};

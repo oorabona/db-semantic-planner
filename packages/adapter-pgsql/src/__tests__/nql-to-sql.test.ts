@@ -28,19 +28,19 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
+import { compile } from '@dbsp/nql';
 import type {
 	CompiledNqlQuery,
 	InsertFromIntent,
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
-import { createNqlBindingRef } from '@dbsp/types/internal';
-import { describe, expect, it } from 'vitest';
-import { compile } from '../../../nql/src/index.js';
 import {
 	NQL_SELECT_SCALAR_FUNCTIONS,
 	NQL_SELECT_WINDOW_FUNCTIONS,
-} from '../../../types/src/intent/select-function-allowlist.js';
+} from '@dbsp/types';
+import { createNqlBindingRef } from '@dbsp/types/internal';
+import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { intentToDecisions } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -391,6 +391,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 
 	it('rejects direct QueryIntent NQL SELECT functions at adapter emission', () => {
 		const directIntent: QueryIntent = {
+			type: 'select',
 			from: 'users',
 			select: {
 				type: 'expressions',
@@ -425,6 +426,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 
 	it('rejects direct QueryIntent window-only names in scalar SELECT function position', () => {
 		const directIntent: QueryIntent = {
+			type: 'select',
 			from: 'users',
 			select: {
 				type: 'expressions',
@@ -459,6 +461,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 
 	it('rejects direct QueryIntent unsupported names in window SELECT position', () => {
 		const directIntent: QueryIntent = {
+			type: 'select',
 			from: 'users',
 			select: {
 				type: 'expressions',
@@ -859,6 +862,9 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(normalizeSQL(rawFragment.sql)).toContain(
 			'order by users.created_at desc',
 		);
+		if (!('params' in rawFragment)) {
+			throw new Error('expected NQL dump to be a query dump');
+		}
 		expect(rawFragment.params).toEqual([]);
 	});
 
@@ -945,18 +951,19 @@ describe('NQL → SQL compile-only pipeline', () => {
 	});
 
 	it('throws a structured error for unknown SELECT expression kinds', () => {
-		expect(() =>
-			intentToDecisions(
-				{
-					from: 'employees',
-					select: {
-						type: 'expressions',
-						columns: [{ kind: 'notARealSelectExpression', as: 'x' }],
-					},
-				} as QueryIntent,
-				'employees',
-			),
-		).toThrowError(
+		const intent = {
+			type: 'select',
+			from: 'employees',
+			select: {
+				type: 'expressions',
+				columns: [{ kind: 'column', column: 'id' }],
+			},
+		} satisfies QueryIntent;
+		Object.assign(intent.select.columns[0]!, {
+			kind: 'notARealSelectExpression',
+			as: 'x',
+		});
+		expect(() => intentToDecisions(intent, 'employees')).toThrowError(
 			expect.objectContaining({
 				name: 'UnknownSelectExpressionKindError',
 				code: 'ERR_ADAPTER_UNKNOWN_SELECT_EXPRESSION_KIND',
@@ -2195,6 +2202,9 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		expect(sql).toContain('from draft_posts');
 		expect(sql).toContain('from tenant_bound.comments');
 		expect(sql).not.toContain('from tenant_bound.draft_posts');
+		if (!('params' in dump)) {
+			throw new Error('expected NQL dump to be a query dump');
+		}
 		expect(dump.params).toEqual([false]);
 	});
 

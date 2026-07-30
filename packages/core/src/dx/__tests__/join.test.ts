@@ -31,7 +31,7 @@ const testSchema = schema({
 	embeddings: {
 		id: { type: 'integer', primaryKey: true },
 		content: 'string',
-		score: { type: 'float' },
+		score: { type: 'decimal' },
 	},
 });
 
@@ -41,7 +41,7 @@ const orm = createOrm({ schema: testSchema, adapter: createMockAdapter() });
 // Helper: extract the QueryIntent from a QueryBuilder
 // ---------------------------------------------------------------------------
 function getIntent(builder: ReturnType<typeof orm.select>): QueryIntent {
-	return builder.buildIntent() as QueryIntent;
+	return builder.plan().intent;
 }
 
 // ---------------------------------------------------------------------------

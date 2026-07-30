@@ -5,9 +5,9 @@
  * BDD scenarios SC-01 through SC-10 from docs/plans/NQL-WITH.md
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import type { CteQueryIntent, SimpleCteIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../adapter-pgsql/src/pgsql-adapter.js';
 import { compile } from '../src/index.js';
 
 // ---------------------------------------------------------------------------

@@ -78,7 +78,7 @@ const compositeFkModel = {
 	relations: compositeFkRelations,
 	tables: new Map(),
 	getTable: () => undefined,
-	getRelation: (qualifiedName: string) =>
+	getRelation: (qualifiedName: 'customers.orders' | 'orders.items') =>
 		compositeFkRelations.get(qualifiedName),
 	getRelationsFrom: (source: string) =>
 		[...compositeFkRelations.values()].filter(

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { compileCteQuery } from '../adapter-compiler-recursive.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
-import type { ProjectionEnvelope } from '../projection-envelope.js';
+import { fromOutputDescriptors } from '../projection-envelope.js';
 
 const includeSchema = schema({
 	parents: {
@@ -239,33 +239,25 @@ describe('bigint js json_agg SQL projection', () => {
 				isAmbiguous: false,
 			},
 		};
-		const includeSource = {
+		const includeSource = fromOutputDescriptors({
 			sql: 'SELECT readings_json FROM include_source',
 			parameters: [],
+			columns: ['readings_json'],
+			declaredOutputs: [
+				{
+					outputKey: 'readings_json',
+					source: {
+						kind: 'modelColumn',
+						table: 'readings',
+						column: 'observedAt',
+						js: 'bigint',
+					},
+					shape: { kind: 'array', cardinality: 'many', aggregate: 'json_agg' },
+				},
+			],
+			naming: identityNaming,
 			hydrationPlan,
-			projection: {
-				kind: 'known',
-				outputs: new Map([
-					[
-						'readings_json',
-						{
-							outputKey: 'readings_json',
-							source: {
-								kind: 'modelColumn',
-								table: 'readings',
-								column: 'observedAt',
-								js: 'bigint',
-							},
-							shape: {
-								kind: 'array',
-								cardinality: 'many',
-								aggregate: 'json_agg',
-							},
-						},
-					],
-				]),
-			},
-		} as ProjectionEnvelope;
+		});
 
 		const compiled = compileCteQuery(
 			{
@@ -290,6 +282,7 @@ describe('bigint js json_agg SQL projection', () => {
 			{ model: includeSchema.model },
 			{
 				naming: identityNaming,
+				schemaName: undefined,
 				model: includeSchema.model,
 				defaultPk: 'id',
 				deriveFk: (relation: string) => `${relation}Id`,

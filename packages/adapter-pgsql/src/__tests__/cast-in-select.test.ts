@@ -36,7 +36,7 @@ const testSchema = schema({
 	events: {
 		id: { type: 'integer', primaryKey: true },
 		created_at: { type: 'timestamp' },
-		score: { type: 'float' },
+		score: { type: 'number' },
 		amount: { type: 'integer' },
 	},
 } as const);

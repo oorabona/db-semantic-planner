@@ -10,8 +10,8 @@
  * - FIND-037: SelectExpressionResult.execute() default Record<string, unknown>
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import { fn } from '../expressions.js';
 import { eq } from '../filters.js';
 import {

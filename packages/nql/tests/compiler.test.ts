@@ -6,6 +6,7 @@
 
 import type {
 	FieldRef,
+	QueryIntent,
 	SetOperationIntent,
 	WhereJsonContainsIntent,
 	WhereJsonExistsIntent,
@@ -45,6 +46,15 @@ function compileNql(
 		throw new Error(`Compile error: ${result.errors[0]?.message}`);
 	}
 	return result.ast!;
+}
+
+function expectQueryIntent(
+	intent: QueryIntent | SetOperationIntent,
+): QueryIntent {
+	if ('kind' in intent) {
+		throw new Error('Expected a query intent, received a nested set operation');
+	}
+	return intent;
 }
 
 describe('NQL Compiler - Basic Queries', () => {
@@ -980,7 +990,10 @@ describe('NQL Compiler - Bug Fixes', () => {
 	});
 
 	it('rejects string_agg until SELECT aggregate projection support exists', () => {
-		const result = compile("users | select string_agg(name, ',') as names");
+		const result = compile(
+			"users | select string_agg(name, ',') as names",
+			null,
+		);
 
 		expect(result.success).toBe(false);
 		expect(result.ast).toBeUndefined();
@@ -2108,8 +2121,8 @@ describe('NQL Compiler - Set Operations (E13b)', () => {
 			expect(setOp.kind).toBe('setOperation');
 			expect(setOp.op).toBe('union');
 			expect(setOp.all).toBe(false);
-			expect(setOp.left.from).toBe('users');
-			expect((setOp.right as { from: string }).from).toBe('admins');
+			expect(expectQueryIntent(setOp.left).from).toBe('users');
+			expect(expectQueryIntent(setOp.right).from).toBe('admins');
 		});
 
 		it('compiles UNION ALL', () => {
@@ -2146,7 +2159,7 @@ describe('NQL Compiler - Set Operations (E13b)', () => {
 				'users | select name | union (admins | where active = true | select name)',
 			);
 			const setOp = result.setOperation!;
-			const right = setOp.right as { from: string; where: unknown };
+			const right = expectQueryIntent(setOp.right);
 			expect(right.from).toBe('admins');
 			expect(right.where).toBeDefined();
 		});
@@ -2159,7 +2172,7 @@ describe('NQL Compiler - Set Operations (E13b)', () => {
 			);
 			const setOp = result.setOperation!;
 			expect(setOp.op).toBe('union');
-			expect(setOp.left.from).toBe('users');
+			expect(expectQueryIntent(setOp.left).from).toBe('users');
 			// Right side is itself a set operation
 			const rightSetOp = setOp.right as SetOperationIntent;
 			expect(rightSetOp.kind).toBe('setOperation');
@@ -2175,7 +2188,7 @@ describe('NQL Compiler - Set Operations (E13b)', () => {
 			expect(result.setOperation).toBeDefined();
 			const setOp = result.setOperation!;
 			expect(setOp.op).toBe('union');
-			expect(setOp.left.from).toBe('users');
+			expect(expectQueryIntent(setOp.left).from).toBe('users');
 			// Right side resolved from binding 'a' → admins query
 			expect((setOp.right as { from: string }).from).toBe('admins');
 		});
@@ -2221,7 +2234,7 @@ describe('NQL Compiler - Set Operations (E13b)', () => {
 				'users | where active = true | select name | union (admins | select name)',
 			);
 			const setOp = result.setOperation!;
-			expect(setOp.left.where).toBeDefined();
+			expect(expectQueryIntent(setOp.left).where).toBeDefined();
 		});
 
 		it('preserves ORDER BY on right side of set operation', () => {

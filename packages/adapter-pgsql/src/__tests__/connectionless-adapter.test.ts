@@ -19,6 +19,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	type PgsqlAdapter,
 } from '../pgsql-adapter.js';
+import { stringMutationOrm } from '../test-compat/issue-441.js';
 
 const db = schema({
 	users: {
@@ -42,7 +43,10 @@ function ormConnectionlessMessage(operation: string): string {
 
 function createConnectionlessOrm() {
 	const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
-	return { adapter, orm: createOrm({ schema: db, adapter }) };
+	return {
+		adapter,
+		orm: stringMutationOrm(createOrm({ schema: db, adapter })),
+	};
 }
 
 function connectionlessCteQuery() {

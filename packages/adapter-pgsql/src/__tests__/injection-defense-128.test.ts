@@ -14,7 +14,13 @@
  *  7. batch/unnest cast type — validateDbTypeName in mapToPgBaseType default path
  */
 
-import { createOrm, literal, schema } from '@dbsp/core';
+import {
+	createOrm,
+	literal,
+	POSTGRESQL_CAPABILITIES,
+	schema,
+} from '@dbsp/core';
+import type { PolicyIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { columnRef, rangeVar } from '../ast-helpers.js';
 import { inferPgArrayType } from '../compiler-utils.js';
@@ -259,6 +265,7 @@ describe('ITEM-5a: partition strategy allowlist (ddl-generator)', () => {
 			sequences: new Map(),
 		} as unknown as Parameters<typeof generateDDL>[0];
 		const caps = {
+			...POSTGRESQL_CAPABILITIES,
 			supportsDDLTableOperations: true,
 			supportsInsert: true,
 			supportsUpdate: true,
@@ -308,6 +315,7 @@ describe('ITEM-5a: partition strategy allowlist (ddl-generator)', () => {
 			sequences: new Map(),
 		} as unknown as Parameters<typeof generateDDL>[0];
 		const caps = {
+			...POSTGRESQL_CAPABILITIES,
 			supportsDDLTableOperations: true,
 			supportsInsert: true,
 			supportsUpdate: true,
@@ -334,6 +342,7 @@ describe('ITEM-5a: partition strategy allowlist (ddl-generator)', () => {
 	it('accepts RANGE, LIST, HASH (case-insensitive)', async () => {
 		const { generateDDL } = await import('../ddl/ddl-generator.js');
 		const caps = {
+			...POSTGRESQL_CAPABILITIES,
 			supportsDDLTableOperations: true,
 			supportsInsert: true,
 			supportsUpdate: true,
@@ -397,32 +406,26 @@ describe('ITEM-5b: RLS policy command allowlist (generateCreatePolicy)', () => {
 	const naming = identityNaming;
 
 	it('rejects injection payload as policy command', () => {
+		const policy: PolicyIR = {
+			name: 'test_policy',
+			command: 'SELECT',
+			permissive: true,
+		};
+		Object.assign(policy, { command: 'SELECT; DROP TABLE users --' });
 		expect(() =>
-			generateCreatePolicy(
-				'users',
-				{
-					name: 'test_policy',
-					command: 'SELECT; DROP TABLE users --',
-					permissive: true,
-				} as Parameters<typeof generateCreatePolicy>[1],
-				undefined,
-				naming,
-			),
+			generateCreatePolicy('users', policy, undefined, naming),
 		).toThrow(/Invalid RLS policy command/);
 	});
 
 	it('rejects unknown command EXECUTE', () => {
+		const policy: PolicyIR = {
+			name: 'test_policy',
+			command: 'SELECT',
+			permissive: true,
+		};
+		Object.assign(policy, { command: 'EXECUTE' });
 		expect(() =>
-			generateCreatePolicy(
-				'users',
-				{
-					name: 'test_policy',
-					command: 'EXECUTE',
-					permissive: true,
-				} as Parameters<typeof generateCreatePolicy>[1],
-				undefined,
-				naming,
-			),
+			generateCreatePolicy('users', policy, undefined, naming),
 		).toThrow(/Invalid RLS policy command/);
 	});
 

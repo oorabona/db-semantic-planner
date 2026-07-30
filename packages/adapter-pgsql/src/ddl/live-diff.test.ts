@@ -1,6 +1,6 @@
-import { ModelIRImpl } from '@dbsp/core';
+import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
-import type { Pool, PoolClient, QueryResult } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
@@ -114,6 +114,11 @@ function normalizeSql(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
+type FakeQueryResult = {
+	readonly rows: readonly Record<string, unknown>[];
+	readonly rowCount: number;
+};
+
 class FakeLiveDiffClient {
 	readonly queries: string[] = [];
 	readonly release = vi.fn();
@@ -123,10 +128,10 @@ class FakeLiveDiffClient {
 		readonly failCanonicalization: boolean,
 	) {}
 
-	async query<T extends Record<string, unknown> = Record<string, unknown>>(
+	async query(
 		sql: string,
 		parameters?: readonly unknown[],
-	): Promise<QueryResult<T>> {
+	): Promise<FakeQueryResult> {
 		const normalized = normalizeSql(sql);
 		this.queries.push(normalized);
 
@@ -137,7 +142,7 @@ class FakeLiveDiffClient {
 					{ code: '42501' },
 				);
 			}
-			return { rows: [], rowCount: 0 } as QueryResult<T>;
+			return { rows: [], rowCount: 0 };
 		}
 
 		if (normalized.startsWith('SELECT conname AS name,')) {
@@ -146,9 +151,9 @@ class FakeLiveDiffClient {
 				rows: names.map((name) => ({
 					name,
 					expression: 'CHECK ((age > 0))',
-				})) as T[],
+				})),
 				rowCount: names.length,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (normalized.includes('FROM information_schema.columns')) {
@@ -176,9 +181,9 @@ class FakeLiveDiffClient {
 						is_identity: 'NO',
 						identity_generation: null,
 					},
-				] as T[],
+				],
 				rowCount: 2,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (
@@ -193,31 +198,28 @@ class FakeLiveDiffClient {
 						not_valid: false,
 						raw_table: 'users',
 					},
-				] as T[],
+				],
 				rowCount: 1,
-			} as QueryResult<T>;
+			};
 		}
 
-		return { rows: [], rowCount: 0 } as QueryResult<T>;
+		return { rows: [], rowCount: 0 };
 	}
 }
 
 interface FakeQueryableClient {
 	readonly release: ReturnType<typeof vi.fn>;
-	query<T extends Record<string, unknown> = Record<string, unknown>>(
-		sql: string,
-		parameters?: readonly unknown[],
-	): Promise<QueryResult<T>>;
+	query(sql: string, parameters?: readonly unknown[]): Promise<FakeQueryResult>;
 }
 
 class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 	readonly queries: string[] = [];
 	readonly release = vi.fn();
 
-	async query<T extends Record<string, unknown> = Record<string, unknown>>(
+	async query(
 		sql: string,
 		parameters?: readonly unknown[],
-	): Promise<QueryResult<T>> {
+	): Promise<FakeQueryResult> {
 		const normalized = normalizeSql(sql);
 		this.queries.push(normalized);
 
@@ -234,9 +236,9 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 				rows: names.map((name) => ({
 					name,
 					expression: "CHECK (((state)::text <> 'blocked'::text))",
-				})) as T[],
+				})),
 				rowCount: names.length,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (normalized.includes('FROM information_schema.columns')) {
@@ -264,16 +266,16 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 						is_identity: 'NO',
 						identity_generation: null,
 					},
-				] as T[],
+				],
 				rowCount: 2,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (normalized.includes('FROM information_schema.table_constraints')) {
 			return {
-				rows: [{ table_name: 'jobs', column_name: 'id' }] as T[],
+				rows: [{ table_name: 'jobs', column_name: 'id' }],
 				rowCount: 1,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (normalized.includes('JOIN pg_enum')) {
@@ -284,9 +286,9 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 						schema: 'tenant_1',
 						values: ['queued', 'done'],
 					},
-				] as T[],
+				],
 				rowCount: 1,
-			} as QueryResult<T>;
+			};
 		}
 
 		if (normalized.includes('format_type(a.atttypid')) {
@@ -298,22 +300,19 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 						db_type: 'status',
 						type_schema: 'tenant_1',
 					},
-				] as T[],
+				],
 				rowCount: 1,
-			} as QueryResult<T>;
+			};
 		}
 
-		return { rows: [], rowCount: 0 } as QueryResult<T>;
+		return { rows: [], rowCount: 0 };
 	}
 }
 
 class FakeLiveDiffPool {
 	readonly connect = vi.fn(async () => this.client as unknown as PoolClient);
-	readonly query = vi.fn(
-		async <T extends Record<string, unknown> = Record<string, unknown>>(
-			sql: string,
-			parameters?: readonly unknown[],
-		) => this.client.query<T>(sql, parameters),
+	readonly query = vi.fn(async (sql: string, parameters?: readonly unknown[]) =>
+		this.client.query(sql, parameters),
 	);
 
 	constructor(readonly client: FakeQueryableClient) {}
@@ -622,7 +621,10 @@ describe('comparePgsqlDatabaseSchema', () => {
 			adapterForPool(pool),
 			desired,
 			{
-				dialectCapabilities: { supportsDDLCheckConstraints: false },
+				dialectCapabilities: {
+					...POSTGRESQL_CAPABILITIES,
+					supportsDDLCheckConstraints: false,
+				},
 				requireExpressionCanonicalization: true,
 				onWarning,
 			},

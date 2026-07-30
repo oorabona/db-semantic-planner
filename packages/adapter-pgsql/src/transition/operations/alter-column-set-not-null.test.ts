@@ -309,15 +309,17 @@ function defaultDeparseEvidence(
 				qualifiedBy: ['users'],
 			},
 		],
-		detail: {
-			surface: 'column-default',
-			category: 'scalar',
-			schema: 'tenant',
-			table: 'users',
-			column: 'age',
-			left: expectedColumnShape.default,
-			right,
-		},
+		detail: JSON.parse(
+			JSON.stringify({
+				surface: 'column-default',
+				category: 'scalar',
+				schema: 'tenant',
+				table: 'users',
+				column: 'age',
+				left: expectedColumnShape.default,
+				right,
+			}),
+		),
 	};
 	return {
 		role: 'evidence',

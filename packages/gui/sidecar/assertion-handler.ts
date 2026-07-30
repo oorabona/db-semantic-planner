@@ -24,6 +24,7 @@ import {
 	validateAssertionBlocks,
 } from '@dbsp/core';
 import { type CompileResult, compile as compileNql } from '@dbsp/nql';
+import type { QueryIntent, SetOperationIntent } from '@dbsp/types';
 import type { Pool } from 'pg';
 
 // ── Types ────────────────────────────────────────────────────────
@@ -84,6 +85,27 @@ export function splitQueries(content: string): string[] {
 
 // ── Intent extraction ────────────────────────────────────────────
 
+function extractSetOperationSummary(
+	intent: QueryIntent | SetOperationIntent,
+): Pick<IntentSummary, 'table' | 'hasWhere' | 'hasGroupBy' | 'hasOrderBy'> {
+	if ('left' in intent && 'right' in intent) {
+		const left = extractSetOperationSummary(intent.left);
+		const right = extractSetOperationSummary(intent.right);
+		return {
+			table: left.table,
+			hasWhere: left.hasWhere || right.hasWhere,
+			hasGroupBy: left.hasGroupBy || right.hasGroupBy,
+			hasOrderBy: left.hasOrderBy || right.hasOrderBy,
+		};
+	}
+	return {
+		table: intent.from,
+		hasWhere: intent.where !== undefined,
+		hasGroupBy: (intent.groupBy?.length ?? 0) > 0,
+		hasOrderBy: (intent.orderBy?.length ?? 0) > 0,
+	};
+}
+
 function extractIntentSummary(
 	compiled: CompileResult,
 	intentType: IntentSummary['type'],
@@ -115,14 +137,14 @@ function extractIntentSummary(
 	}
 
 	if (compiled.setOperation) {
-		const setOp = compiled.setOperation;
+		const summary = extractSetOperationSummary(compiled.setOperation);
 		return {
 			type: 'setOperation',
-			table: setOp.left.from,
+			table: summary.table,
 			with: [],
-			hasWhere: !!setOp.left.where,
-			hasGroupBy: false,
-			hasOrderBy: false,
+			hasWhere: summary.hasWhere,
+			hasGroupBy: summary.hasGroupBy,
+			hasOrderBy: summary.hasOrderBy,
 			ctes: [],
 		};
 	}
