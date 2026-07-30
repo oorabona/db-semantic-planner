@@ -11,9 +11,10 @@ import {
 	Play,
 	Plus,
 	RefreshCw,
+	TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import type { SchemaDiffChange } from '@/lib/ipc';
+import type { SchemaDiffChange, SchemaDiffComparisonWarning } from '@/lib/ipc';
 import { sidecarApi } from '@/lib/ipc';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
@@ -91,6 +92,14 @@ export function SchemaDiffView() {
 		);
 	}
 
+	const warnings = diff.warnings;
+	const rawWarnings = warnings.filter(
+		(warning) => warning.comparison === 'raw',
+	);
+	const degradedWarnings = rawWarnings;
+	const unpairedWarnings = warnings.filter(
+		(warning) => warning.comparison === 'unpaired',
+	);
 	const groups = groupChangesByTable(diff.changes);
 	const hasChanges = diff.changes.length > 0;
 
@@ -101,6 +110,12 @@ export function SchemaDiffView() {
 				hasDestructive={diff.hasDestructive}
 				totalChanges={diff.changes.length}
 			/>
+			{degradedWarnings.length > 0 && (
+				<ComparisonDegradedNotice warnings={degradedWarnings} />
+			)}
+			{unpairedWarnings.length > 0 && (
+				<ComparisonPairingNotice warnings={unpairedWarnings} />
+			)}
 
 			{/* Toolbar: SQL preview toggle + Side-by-side toggle + Apply button */}
 			{hasChanges && (
@@ -182,6 +197,94 @@ export function SchemaDiffView() {
 				applying={applying}
 			/>
 		</div>
+	);
+}
+
+function ComparisonDegradedNotice({
+	warnings,
+}: {
+	warnings: readonly SchemaDiffComparisonWarning[];
+}) {
+	return (
+		<section
+			className="border-b border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs"
+			aria-label="Comparison degraded"
+			data-testid="comparison-degraded-notice"
+		>
+			<div className="flex items-start gap-2">
+				<TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600 dark:text-yellow-400" />
+				<div className="min-w-0">
+					<p className="font-medium text-yellow-800 dark:text-yellow-300">
+						Comparison degraded
+					</p>
+					<p className="mt-0.5 text-yellow-800/90 dark:text-yellow-200/90">
+						{warnings.length} expression surface
+						{warnings.length === 1 ? '' : 's'} could not be compared reliably.
+						This preview may show a migration that does not exist, or hide one
+						that does. Review the affected surfaces before applying this
+						preview.
+					</p>
+					<details className="mt-1.5">
+						<summary className="cursor-pointer font-medium text-yellow-800 dark:text-yellow-200">
+							View affected surfaces
+						</summary>
+						<ul className="mt-1 space-y-1 text-yellow-900 dark:text-yellow-100">
+							{warnings.map((warning, index) => (
+								<li
+									key={`${warning.kind}-${warning.table}-${warning.name}-${index}`}
+								>
+									<span className="font-mono">
+										{warning.kind === 'column_default'
+											? 'column default'
+											: 'CHECK constraint'}{' '}
+										{warning.table}.{warning.name}
+									</span>
+									{warning.outcome !== undefined && ` (${warning.outcome})`}:{' '}
+									{warning.message}
+								</li>
+							))}
+						</ul>
+					</details>
+				</div>
+			</div>
+		</section>
+	);
+}
+
+function ComparisonPairingNotice({
+	warnings,
+}: {
+	warnings: readonly SchemaDiffComparisonWarning[];
+}) {
+	return (
+		<section
+			className="border-b border-border bg-muted/30 px-3 py-2 text-xs"
+			aria-label="Comparison notes"
+			data-testid="comparison-pairing-notice"
+		>
+			<p className="font-medium text-foreground">Comparison note</p>
+			<p className="mt-0.5 text-muted-foreground">
+				{warnings.length} column default{warnings.length === 1 ? '' : 's'} had
+				no counterpart to compare against.
+			</p>
+			<details className="mt-1.5">
+				<summary className="cursor-pointer font-medium text-foreground">
+					View unpaired defaults
+				</summary>
+				<ul className="mt-1 space-y-1 text-muted-foreground">
+					{warnings.map((warning, index) => (
+						<li
+							key={`${warning.kind}-${warning.table}-${warning.name}-${index}`}
+						>
+							<span className="font-mono">
+								column default {warning.table}.{warning.name}
+							</span>
+							: {warning.message}
+						</li>
+					))}
+				</ul>
+			</details>
+		</section>
 	);
 }
 

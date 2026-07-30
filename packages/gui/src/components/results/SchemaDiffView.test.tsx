@@ -176,6 +176,7 @@ const mockDiff: SchemaDiffResult = {
 		'ALTER TABLE "users" ADD COLUMN "email" text;',
 	],
 	downSQL: ['DROP TABLE "orders";', 'ALTER TABLE "users" DROP COLUMN "email";'],
+	warnings: [],
 };
 
 // ── Tests ───────────────────────────────────────────────────────
@@ -207,6 +208,59 @@ describe('SchemaDiffView', () => {
 		mockState.diff = mockDiff;
 		render(<SchemaDiffView />);
 		expect(screen.getByTestId('schema-diff-summary-bar')).toBeDefined();
+	});
+
+	it('keeps canonicalization fallback visible with affected-surface details', () => {
+		mockState.diff = {
+			...mockDiff,
+			warnings: [
+				{
+					kind: 'column_default',
+					table: 'jobs',
+					name: 'state',
+					outcome: 'unavailable',
+					comparison: 'raw',
+					message: 'Could not canonicalize this column default.',
+				},
+			],
+		};
+		render(<SchemaDiffView />);
+
+		expect(screen.getByTestId('comparison-degraded-notice')).toBeDefined();
+		expect(screen.getByText('Comparison degraded')).toBeDefined();
+		expect(screen.getByText(/column default jobs\.state/)).toBeDefined();
+		expect(
+			screen.getByText(/Could not canonicalize this column default/),
+		).toBeDefined();
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
+	});
+
+	it('shows an unpaired default without inferring its cause', () => {
+		mockState.diff = {
+			...mockDiff,
+			warnings: [
+				{
+					kind: 'column_default',
+					table: 'jobs',
+					name: 'state',
+					outcome: 'unavailable',
+					comparison: 'unpaired',
+					side: 'desired',
+					message:
+						'Column default jobs.state had no database default counterpart to compare against.',
+				},
+			],
+		};
+		render(<SchemaDiffView />);
+
+		expect(screen.getByTestId('comparison-pairing-notice')).toBeDefined();
+		expect(screen.queryByTestId('comparison-degraded-notice')).toBeNull();
+		expect(
+			screen.getByText(
+				'1 column default had no counterpart to compare against.',
+			),
+		).toBeDefined();
 	});
 
 	// ── SC-24: Grouping by table ────────────────────────────────

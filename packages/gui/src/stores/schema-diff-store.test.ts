@@ -35,6 +35,7 @@ const mockDiff: SchemaDiffResult = {
 		'ALTER TABLE "users" DROP COLUMN "email";',
 		'CREATE TABLE "legacy_logs" ();',
 	],
+	warnings: [],
 };
 
 const mockDiffSafe: SchemaDiffResult = {
@@ -55,6 +56,7 @@ const mockDiffSafe: SchemaDiffResult = {
 	},
 	upSQL: ['CREATE INDEX "idx_orders_date" ON "orders" ("created_at");'],
 	downSQL: ['DROP INDEX "idx_orders_date";'],
+	warnings: [],
 };
 
 // ── Store tests ─────────────────────────────────────────────────────

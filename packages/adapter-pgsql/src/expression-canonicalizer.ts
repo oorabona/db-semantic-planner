@@ -51,6 +51,10 @@ export interface ColumnDefaultCanonicalizationWarning {
 	readonly message: string;
 	readonly cause: unknown;
 	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+	/** Whether this warning represents a raw fallback or absent counterpart. */
+	readonly comparison: 'raw' | 'unpaired';
+	/** Present when the default could not be paired with the opposite model side. */
+	readonly side?: 'desired' | 'database';
 }
 
 export type ExpressionCanonicalizationWarning =
@@ -171,14 +175,29 @@ export interface CanonicalizedExpressionModels {
 	readonly defaultOutcomes: readonly ColumnDefaultCanonicalizationOutcome[];
 }
 
-export interface ColumnDefaultCanonicalizationOutcome {
+interface ColumnDefaultCanonicalizationOutcomeIdentity {
 	/** The model side whose default could not be canonicalized. */
 	readonly side: 'desired' | 'database';
 	readonly table: string;
 	readonly column: string;
-	readonly status: 'canonicalised' | 'unavailable' | 'rejected';
-	readonly reason?: unknown;
 }
+
+type ColumnDefaultFallbackOutcome =
+	ColumnDefaultCanonicalizationOutcomeIdentity & {
+		/** Whether this fallback uses raw comparison or has no counterpart. */
+		readonly status: 'unavailable' | 'rejected';
+		readonly comparison: 'raw' | 'unpaired';
+		readonly reason: unknown;
+	};
+
+type CanonicalizedColumnDefaultOutcome =
+	ColumnDefaultCanonicalizationOutcomeIdentity & {
+		readonly status: 'canonicalised';
+	};
+
+export type ColumnDefaultCanonicalizationOutcome =
+	| CanonicalizedColumnDefaultOutcome
+	| ColumnDefaultFallbackOutcome;
 
 interface CanonicalizedTableChecks {
 	readonly desired: readonly CheckConstraintIR[];
@@ -255,13 +274,14 @@ export function fallbackToRawExpressionComparison(
 				options,
 				'unavailable',
 			);
-			const outcome = {
-				side: 'desired',
-				table: target.dbTableName,
-				column: namingForOptions(options).toDatabase(column.name),
-				status: 'unavailable',
-				reason: cause,
-			} as const;
+			const outcome = fallbackColumnDefaultOutcome(
+				'desired',
+				target.dbTableName,
+				namingForOptions(options).toDatabase(column.name),
+				'unavailable',
+				'raw',
+				cause,
+			);
 			if (!recordedDefaultOutcomes.has(defaultOutcomeKey(outcome))) {
 				defaultOutcomes.push(outcome);
 				recordedDefaultOutcomes.add(defaultOutcomeKey(outcome));
@@ -274,13 +294,14 @@ export function fallbackToRawExpressionComparison(
 				databaseColumn?.default !== undefined &&
 				databaseColumn.default !== null
 			) {
-				const databaseOutcome = {
-					side: 'database',
-					table: target.dbTableName,
-					column: databaseColumn.name,
-					status: 'unavailable',
-					reason: cause,
-				} as const;
+				const databaseOutcome = fallbackColumnDefaultOutcome(
+					'database',
+					target.dbTableName,
+					databaseColumn.name,
+					'unavailable',
+					'raw',
+					cause,
+				);
 				if (!recordedDefaultOutcomes.has(defaultOutcomeKey(databaseOutcome))) {
 					defaultOutcomes.push(databaseOutcome);
 					recordedDefaultOutcomes.add(defaultOutcomeKey(databaseOutcome));
@@ -511,8 +532,8 @@ function unavailableDefaultOutcomesForEnumCreation(
 	targets: readonly ColumnDefaultTarget[],
 	cause: unknown,
 	options: CanonicalizeExpressionSurfacesOptions | undefined,
-): ColumnDefaultCanonicalizationOutcome[] {
-	const outcomes: ColumnDefaultCanonicalizationOutcome[] = [];
+): ColumnDefaultFallbackOutcome[] {
+	const outcomes: ColumnDefaultFallbackOutcome[] = [];
 	for (const target of targets) {
 		for (const column of target.columns) {
 			reportColumnDefaultCanonicalizationFailure(
@@ -522,13 +543,16 @@ function unavailableDefaultOutcomesForEnumCreation(
 				options,
 				'unavailable',
 			);
-			outcomes.push({
-				side: 'desired',
-				table: target.dbTableName,
-				column: namingForOptions(options).toDatabase(column.name),
-				status: 'unavailable',
-				reason: cause,
-			});
+			outcomes.push(
+				fallbackColumnDefaultOutcome(
+					'desired',
+					target.dbTableName,
+					namingForOptions(options).toDatabase(column.name),
+					'unavailable',
+					'raw',
+					cause,
+				),
+			);
 		}
 	}
 	return outcomes;
@@ -538,9 +562,9 @@ function collectUnavailableColumnDefaultOutcomes(
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
-): ColumnDefaultCanonicalizationOutcome[] {
+): ColumnDefaultFallbackOutcome[] {
 	const naming = namingForOptions(options);
-	const outcomes: ColumnDefaultCanonicalizationOutcome[] = [];
+	const outcomes: ColumnDefaultFallbackOutcome[] = [];
 	const desiredTablesByDatabaseName = new Map<string, TableIR>(
 		[...desired.tables.values()].map((table) => [
 			naming.toDatabase(table.name),
@@ -555,10 +579,12 @@ function collectUnavailableColumnDefaultOutcomes(
 			const columnName = naming.toDatabase(column.name);
 			if (dbTable === undefined) {
 				outcomes.push(
-					unavailableDefaultOutcome(
+					fallbackColumnDefaultOutcome(
 						'desired',
 						dbTableName,
 						columnName,
+						'unavailable',
+						'unpaired',
 						'the table is absent from the database',
 					),
 				);
@@ -566,10 +592,12 @@ function collectUnavailableColumnDefaultOutcomes(
 				!dbTable.columns.some((candidate) => candidate.name === columnName)
 			) {
 				outcomes.push(
-					unavailableDefaultOutcome(
+					fallbackColumnDefaultOutcome(
 						'desired',
 						dbTableName,
 						columnName,
+						'unavailable',
+						'unpaired',
 						'the column is absent from the database',
 					),
 				);
@@ -588,10 +616,12 @@ function collectUnavailableColumnDefaultOutcomes(
 				desiredColumn.default === null
 			) {
 				outcomes.push(
-					unavailableDefaultOutcome(
+					fallbackColumnDefaultOutcome(
 						'database',
 						dbTable.name,
 						dbColumn.name,
+						'unavailable',
+						'unpaired',
 						'the default exists only in the database',
 					),
 				);
@@ -601,13 +631,15 @@ function collectUnavailableColumnDefaultOutcomes(
 	return outcomes;
 }
 
-function unavailableDefaultOutcome(
+function fallbackColumnDefaultOutcome(
 	side: 'desired' | 'database',
 	table: string,
 	column: string,
-	reason: string,
-): ColumnDefaultCanonicalizationOutcome {
-	return { side, table, column, status: 'unavailable', reason };
+	status: ColumnDefaultFallbackOutcome['status'],
+	comparison: ColumnDefaultFallbackOutcome['comparison'],
+	reason: unknown,
+): ColumnDefaultFallbackOutcome {
+	return { side, table, column, status, comparison, reason };
 }
 
 function defaultOutcomeKey(
@@ -676,28 +708,40 @@ async function canonicalizeColumnDefaults(
 			names,
 		);
 		for (const result of targetDefaults) {
-			defaultOutcomes.push({
-				side: result.side,
-				table: target.dbTableName,
-				column: result.databaseColumnName,
-				status: result.status,
-				...(result.reason === undefined ? {} : { reason: result.reason }),
-			});
-			if (result.desired !== undefined) {
-				let defaults = desiredDefaults.get(target.modelKey);
-				if (defaults === undefined) {
-					defaults = new Map();
-					desiredDefaults.set(target.modelKey, defaults);
+			if (result.status === 'canonicalised') {
+				defaultOutcomes.push({
+					side: result.side,
+					table: target.dbTableName,
+					column: result.databaseColumnName,
+					status: 'canonicalised',
+				});
+				if (result.desired !== undefined) {
+					let defaults = desiredDefaults.get(target.modelKey);
+					if (defaults === undefined) {
+						defaults = new Map();
+						desiredDefaults.set(target.modelKey, defaults);
+					}
+					defaults.set(result.modelColumnName, result.desired);
 				}
-				defaults.set(result.modelColumnName, result.desired);
-			}
-			if (result.database !== undefined) {
-				let defaults = databaseDefaults.get(target.dbTableName);
-				if (defaults === undefined) {
-					defaults = new Map();
-					databaseDefaults.set(target.dbTableName, defaults);
+				if (result.database !== undefined) {
+					let defaults = databaseDefaults.get(target.dbTableName);
+					if (defaults === undefined) {
+						defaults = new Map();
+						databaseDefaults.set(target.dbTableName, defaults);
+					}
+					defaults.set(result.databaseColumnName, result.database);
 				}
-				defaults.set(result.databaseColumnName, result.database);
+			} else {
+				defaultOutcomes.push(
+					fallbackColumnDefaultOutcome(
+						result.side,
+						target.dbTableName,
+						result.databaseColumnName,
+						result.status,
+						result.comparison,
+						result.reason,
+					),
+				);
 			}
 		}
 	}
@@ -709,15 +753,23 @@ async function canonicalizeColumnDefaults(
 	};
 }
 
-interface CanonicalColumnDefault {
-	readonly side: 'desired' | 'database';
-	readonly modelColumnName: string;
-	readonly databaseColumnName: string;
-	readonly desired?: EngineCanonicalExpression;
-	readonly database?: EngineCanonicalExpression;
-	readonly status: 'canonicalised' | 'unavailable' | 'rejected';
-	readonly reason?: unknown;
-}
+type CanonicalColumnDefault =
+	| {
+			readonly side: 'desired' | 'database';
+			readonly modelColumnName: string;
+			readonly databaseColumnName: string;
+			readonly desired?: EngineCanonicalExpression;
+			readonly database?: EngineCanonicalExpression;
+			readonly status: 'canonicalised';
+	  }
+	| {
+			readonly side: 'desired' | 'database';
+			readonly modelColumnName: string;
+			readonly databaseColumnName: string;
+			readonly status: 'unavailable' | 'rejected';
+			readonly comparison: 'raw';
+			readonly reason: unknown;
+	  };
 
 async function canonicalizeTableDefaultsBestEffort(
 	adapter: PgsqlCanonicalizationScope,
@@ -807,6 +859,7 @@ async function canonicalizeColumnDefault(
 				modelColumnName: column.name,
 				databaseColumnName,
 				status: 'unavailable',
+				comparison: 'raw',
 				reason: error,
 			};
 		}
@@ -847,6 +900,7 @@ async function canonicalizeColumnDefault(
 			modelColumnName: column.name,
 			databaseColumnName,
 			status: 'rejected',
+			comparison: 'raw',
 			reason: error,
 		};
 	}
@@ -866,10 +920,12 @@ async function canonicalizeColumnDefault(
 		dbColumn.default !== null &&
 		defaults.database === undefined
 	) {
-		const outcome = unavailableDefaultOutcome(
+		const outcome = fallbackColumnDefaultOutcome(
 			'database',
 			target.dbTableName,
 			databaseColumnName,
+			'unavailable',
+			'raw',
 			'PostgreSQL default disappeared before paired deparse',
 		);
 		reportUnavailableColumnDefault(outcome, options);
@@ -878,6 +934,7 @@ async function canonicalizeColumnDefault(
 			modelColumnName: column.name,
 			databaseColumnName,
 			status: 'unavailable',
+			comparison: 'raw',
 			reason: outcome.reason,
 		};
 	}
@@ -1372,6 +1429,7 @@ function reportColumnDefaultCanonicalizationFailure(
 		message,
 		cause,
 		outcome,
+		comparison: 'raw',
 	};
 	if (options?.onWarning) {
 		options.onWarning(warning);
@@ -1381,16 +1439,22 @@ function reportColumnDefaultCanonicalizationFailure(
 }
 
 function reportUnavailableColumnDefault(
-	outcome: ColumnDefaultCanonicalizationOutcome,
+	outcome: ColumnDefaultFallbackOutcome,
 	options: CanonicalizeExpressionSurfacesOptions | undefined,
 ): void {
 	const cause = outcome.reason;
 	const refused = options?.requireCanonicalization === true;
+	const comparisonMessage =
+		outcome.comparison === 'unpaired'
+			? refused
+				? 'with PostgreSQL because it has no matching default on the opposite model side; strict canonicalization cannot compare this column. '
+				: 'with PostgreSQL because it has no matching default on the opposite model side; comparison is unavailable for this column. '
+			: refused
+				? 'with PostgreSQL; strict canonicalization refused raw comparison for this column. '
+				: 'with PostgreSQL; falling back to verbatim raw comparison for this column. ';
 	const message =
 		'Could not canonicalize one column default ' +
-		(refused
-			? 'with PostgreSQL; strict canonicalization refused raw comparison for this column. '
-			: 'with PostgreSQL; falling back to verbatim raw comparison for this column. ') +
+		comparisonMessage +
 		'Inspect the warning table and name fields for its identity. ' +
 		`Reason: ${errorMessage(cause)}`;
 	const warning: ColumnDefaultCanonicalizationWarning = {
@@ -1400,6 +1464,8 @@ function reportUnavailableColumnDefault(
 		message,
 		cause,
 		outcome: refused ? 'refused' : 'unavailable',
+		comparison: outcome.comparison,
+		side: outcome.side,
 	};
 	if (options?.onWarning) {
 		options.onWarning(warning);
