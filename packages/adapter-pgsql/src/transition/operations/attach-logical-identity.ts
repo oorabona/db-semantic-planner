@@ -624,6 +624,11 @@ function observationRequest(
 export function createAttachLogicalIdentityOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
+		executionContractEligibility: {
+			eligible: false,
+			detail:
+				'PostgreSQL AttachLogicalIdentity has no derivable execution requirements yet',
+		} as const,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

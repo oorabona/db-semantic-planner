@@ -2,6 +2,15 @@ import type { SemanticArtifactRef } from './artifact.js';
 import type { JsonValue } from './json.js';
 import type { ResourceAddress } from './resource.js';
 
+export interface PostgreSqlObservationTargetIdentity {
+	readonly systemIdentifier: string;
+	readonly databaseOid: string;
+	readonly namespaces: readonly {
+		readonly name: string;
+		readonly oid: string;
+	}[];
+}
+
 export type EvidenceId = string & { readonly __brand: 'EvidenceId' };
 
 export type AdvisoryObservationId = string & {
@@ -35,6 +44,8 @@ export interface ObservationContext {
 	readonly collationProvider?: string;
 	readonly collationVersion?: string;
 	readonly transaction?: string;
+	/** Read from PostgreSQL catalogs; no name-only fallback is permitted. */
+	readonly postgresqlTargetIdentity?: PostgreSqlObservationTargetIdentity;
 }
 
 export type ObservationPrivilegeMergeResult =

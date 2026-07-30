@@ -45,6 +45,10 @@ import {
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
+import {
+	pgTargetIdentityMismatch,
+	readPgExecutionTargetFromClient,
+} from './execution-contract.js';
 import { evidenceId } from './ids.js';
 import {
 	logicalIdentityCarrierTableStatus,
@@ -2133,6 +2137,18 @@ export async function executePgObservationFromClient(
 	context: ObservationContext,
 ): Promise<EvidenceObservation> {
 	const executor = queryable(target);
+	// This is the common boundary for every fingerprint observation. Node-pg
+	// sends text parameters in UTF-8, so pin and verify the server session before
+	// a non-ASCII label can become evidence.
+	await executor.query("SET client_encoding TO 'UTF8'");
+	const clientEncoding = String(
+		(await executor.query('SHOW client_encoding')).rows[0]?.client_encoding ??
+			'',
+	);
+	if (clientEncoding !== 'UTF8')
+		throw new Error(
+			`PostgreSQL client_encoding expected "UTF8", observed ${JSON.stringify(clientEncoding || 'no value')}`,
+		);
 	switch (request.kind) {
 		case COLUMN_EXISTS_OBSERVATION:
 			return observeColumn(executor, request, context);
@@ -2216,11 +2232,28 @@ export async function readPgObservationContextFromClient(
 	target: TransitionSessionClient,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
+	expectedTargetIdentity?: ObservationContext['postgresqlTargetIdentity'],
 ): Promise<ObservationContext> {
+	const targetSchema = observationTarget?.schema ?? schema ?? 'public';
+	const targetIdentity = await readPgExecutionTargetFromClient(target, [
+		targetSchema,
+	]);
+	if (expectedTargetIdentity) {
+		const mismatch = pgTargetIdentityMismatch(
+			expectedTargetIdentity,
+			targetIdentity.identity,
+		);
+		if (mismatch) {
+			throw new Error(
+				`PostgreSQL observation target identity does not match the captured target: ${mismatch}`,
+			);
+		}
+	}
 	return readPgObservationContextFromQueryable(
 		queryable(target),
 		schema,
 		observationTarget,
+		targetIdentity.identity,
 	);
 }
 
@@ -2229,6 +2262,7 @@ export async function readPgObservationContextFromLessor(
 	lessor: TransitionLessor,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
+	expectedTargetIdentity?: ObservationContext['postgresqlTargetIdentity'],
 ): Promise<ObservationContext> {
 	assertTransitionLessor(lessor);
 	const lease = await acquireTransitionLease(lessor);
@@ -2238,6 +2272,7 @@ export async function readPgObservationContextFromLessor(
 			lease.session,
 			schema,
 			observationTarget,
+			expectedTargetIdentity,
 		);
 	} catch (error) {
 		releaseFailure = { error };
@@ -2251,7 +2286,11 @@ async function readPgObservationContextFromQueryable(
 	executor: Queryable,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
+	postgresqlTargetIdentity?: ObservationContext['postgresqlTargetIdentity'],
 ): Promise<ObservationContext> {
+	// Context itself contains role and search-path text, so it has the same
+	// encoding boundary as individual observations. The target identity read by
+	// readPgExecutionTargetFromClient established and verified UTF-8 first.
 	const version = await executor.query('SHOW server_version_num');
 	const database = await executor.query(
 		'SELECT current_database() AS database_id',
@@ -2334,6 +2373,7 @@ async function readPgObservationContextFromQueryable(
 		extensions: extensionMap,
 		...(collationProvider ? { collationProvider } : {}),
 		...(collationVersion ? { collationVersion } : {}),
+		...(postgresqlTargetIdentity ? { postgresqlTargetIdentity } : {}),
 	};
 }
 

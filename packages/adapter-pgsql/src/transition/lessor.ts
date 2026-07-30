@@ -1,6 +1,15 @@
 import { createTransitionLessor } from '@dbsp/core';
 import type { TransitionLessor } from '@dbsp/types';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+
+export type PgTransitionClientLease = {
+	readonly client: PoolClient;
+	query(
+		sql: string,
+		params?: unknown,
+	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+	release(error?: unknown): void;
+};
 
 /**
  * Declare a pg Pool as a source of transition leases.
@@ -35,46 +44,86 @@ export function createPgTransitionLessor(pool: Pool): TransitionLessor {
 		);
 	}
 	return createTransitionLessor(async () => {
-		const client = await pool.connect();
-		// Capture the way to close this connection before reading the member that
-		// decides whether it must be closed, so a getter cannot remove the only
-		// cleanup left on the very path that needs it.
-		const end = readMember(client, 'end');
-		const release = readMember(client, 'release');
-		const query = readMember(client, 'query');
-		if (typeof release !== 'function' || typeof query !== 'function') {
-			if (typeof release === 'function') {
-				const rejection = new Error(
-					'createPgTransitionLessor acquired a malformed pg lease without query(); ' +
-						'it was returned through its captured release().',
-				);
-				try {
-					// Contained rather than awaited: pg's release() returns nothing, and
-					// a promise handed back against that contract only needs a handler
-					// in this turn so it cannot surface unhandled. The last-resort
-					// close below follows the same policy, for the same reason.
-					void Promise.resolve(release.call(client, rejection)).catch(
-						() => undefined,
-					);
-				} catch {
-					// Reporting the malformed acquisition matters more than this cleanup.
-				}
-				throw rejection;
-			}
-			// connect() opened a value with no callable release path, so end() is the
-			// remaining cleanup route. Leaving it open leaks a socket on every repeat.
-			endLeakedConnection(client, end);
-			throw new Error(
-				'createPgTransitionLessor was given a pg Client rather than a pg Pool: ' +
-					'connect() returned the connection itself without release(), so no ' +
-					'acquired lease could be returned. Pass a pg Pool.',
-			);
-		}
-		return Object.freeze({
-			query: (sql: string, params?: unknown) => query.call(client, sql, params),
-			release: (error?: unknown) => release.call(client, error),
-		});
+		const lease = await acquirePgTransitionClient(pool);
+		return Object.freeze({ query: lease.query, release: lease.release });
 	});
+}
+
+/** Acquire a UTF-8-configured PostgreSQL client for direct planning paths. */
+export async function acquirePgTransitionClient(
+	pool: Pool,
+): Promise<PgTransitionClientLease> {
+	const client = await pool.connect();
+	// Capture the way to close this connection before reading the member that
+	// decides whether it must be closed, so a getter cannot remove the only
+	// cleanup left on the very path that needs it.
+	const end = readMember(client, 'end');
+	const release = readMember(client, 'release');
+	const query = readMember(client, 'query');
+	if (typeof release !== 'function' || typeof query !== 'function') {
+		if (typeof release === 'function') {
+			const rejection = new Error(
+				'createPgTransitionLessor acquired a malformed pg lease without query(); ' +
+					'it was returned through its captured release().',
+			);
+			try {
+				// Contained rather than awaited: pg's release() returns nothing, and
+				// a promise handed back against that contract only needs a handler
+				// in this turn so it cannot surface unhandled. The last-resort
+				// close below follows the same policy, for the same reason.
+				void Promise.resolve(release.call(client, rejection)).catch(
+					() => undefined,
+				);
+			} catch {
+				// Reporting the malformed acquisition matters more than this cleanup.
+			}
+			throw rejection;
+		}
+		// connect() opened a value with no callable release path, so end() is the
+		// remaining cleanup route. Leaving it open leaks a socket on every repeat.
+		endLeakedConnection(client, end);
+		throw new Error(
+			'createPgTransitionLessor was given a pg Client rather than a pg Pool: ' +
+				'connect() returned the connection itself without release(), so no ' +
+				'acquired lease could be returned. Pass a pg Pool.',
+		);
+	}
+	try {
+		await configurePgUtf8({
+			query: (sql, params) => query.call(client, sql, params),
+		});
+	} catch (error) {
+		try {
+			release.call(
+				client,
+				error instanceof Error ? error : new Error(String(error)),
+			);
+		} catch {
+			// The UTF-8 acquisition failure remains the useful result.
+		}
+		throw error;
+	}
+	return Object.freeze({
+		client,
+		query: (sql: string, params?: unknown) => query.call(client, sql, params),
+		release: (error?: unknown) => release.call(client, error),
+	});
+}
+
+async function configurePgUtf8(client: {
+	query(
+		sql: string,
+		params?: readonly unknown[],
+	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+}): Promise<void> {
+	await client.query("SET client_encoding TO 'UTF8'");
+	const value = String(
+		(await client.query('SHOW client_encoding')).rows[0]?.client_encoding ?? '',
+	);
+	if (value !== 'UTF8')
+		throw new Error(
+			`PostgreSQL client_encoding expected "UTF8", observed ${JSON.stringify(value || 'no value')}`,
+		);
 }
 
 /**

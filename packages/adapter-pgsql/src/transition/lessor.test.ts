@@ -4,7 +4,14 @@ import { createPgTransitionLessor } from './lessor.js';
 
 describe('createPgTransitionLessor', () => {
 	it('uses the pool acquisition function through the core-minted lessor', async () => {
-		const client = { query: vi.fn(), release: vi.fn() };
+		const client = {
+			query: vi.fn(async (sql: string) =>
+				sql === 'SHOW client_encoding'
+					? { rows: [{ client_encoding: 'UTF8' }] }
+					: { rows: [] },
+			),
+			release: vi.fn(),
+		};
 		const pool = new Pool();
 		const connect = vi.fn(async () => client);
 		Object.defineProperty(pool, 'connect', { value: connect });
@@ -15,6 +22,10 @@ describe('createPgTransitionLessor', () => {
 		expect(Object.isFrozen(lease)).toBe(true);
 		await lease.query('SELECT 1');
 		lease.release();
+		expect(client.query.mock.calls.slice(0, 2)).toEqual([
+			["SET client_encoding TO 'UTF8'", undefined],
+			['SHOW client_encoding', undefined],
+		]);
 		expect(client.query).toHaveBeenCalledWith('SELECT 1', undefined);
 		expect(client.release).toHaveBeenCalledWith(undefined);
 		expect(connect).toHaveBeenCalledOnce();
@@ -131,7 +142,11 @@ describe('createPgTransitionLessor', () => {
 		const reads: string[] = [];
 		const end = vi.fn(async () => {});
 		const release = vi.fn();
-		const query = vi.fn(async () => ({ rows: [] }));
+		const query = vi.fn(async (sql: string) =>
+			sql === 'SHOW client_encoding'
+				? { rows: [{ client_encoding: 'UTF8' }] }
+				: { rows: [] },
+		);
 		let releaseReads = 0;
 		let queryReads = 0;
 		const client = {} as Record<string, unknown>;

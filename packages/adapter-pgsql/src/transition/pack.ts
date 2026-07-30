@@ -57,6 +57,12 @@ type Queryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
 };
 
+type ExecutionContractAwareOperation = {
+	readonly executionContractEligibility:
+		| { readonly eligible: true }
+		| { readonly eligible: false; readonly detail: string };
+};
+
 const PG_TRANSACTION_DOMAIN = 'postgresql.transition.connection';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -139,6 +145,14 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		INDEX_INCLUDE_CAPABILITY,
 		INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 	];
+	const operationSemantics = [
+		createAttachLogicalIdentityOperationRuntime(),
+		createAlterColumnSetNotNullOperationRuntime(),
+		createAlterTableAddCheckOperationRuntime(),
+		createAlterTypeAddValueOperationRuntime(),
+		createCreateUniqueIndexConcurrentlyOperationRuntime(),
+		createManualSqlOperationRuntime(),
+	] satisfies readonly ExecutionContractAwareOperation[];
 	return {
 		rules: [
 			createLogicalIdentityAdoptionRule({
@@ -155,14 +169,7 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 			createEnumAddValueRule({ naming }),
 			createCreateUniqueIndexConcurrentlyRule({ naming }),
 		],
-		operationSemantics: [
-			createAttachLogicalIdentityOperationRuntime(),
-			createAlterColumnSetNotNullOperationRuntime(),
-			createAlterTableAddCheckOperationRuntime(),
-			createAlterTypeAddValueOperationRuntime(),
-			createCreateUniqueIndexConcurrentlyOperationRuntime(),
-			createManualSqlOperationRuntime(),
-		],
+		operationSemantics,
 		issuer: createPgObservationIssuer(),
 		executionCoordinator,
 		transactionDomain: executionCoordinator.transactionDomain,

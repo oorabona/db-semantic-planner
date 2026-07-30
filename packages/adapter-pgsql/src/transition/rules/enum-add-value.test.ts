@@ -176,6 +176,33 @@ class FakeEnumPool {
 				checks: [],
 			};
 		}
+		if (table === 'dbsp_transition_authorization') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					seq: { type: 'bigint', notNull: true },
+					policy: { type: 'jsonb', notNull: true },
+					grants: { type: 'jsonb', notNull: true },
+					digest: { type: 'text', notNull: true },
+					actor: { type: 'text', notNull: true },
+					authorized_at: {
+						type: 'timestamp with time zone',
+						notNull: true,
+					},
+				},
+				primary_key: ['run_id', 'seq'],
+				foreign_keys: [
+					{
+						columns: ['run_id'],
+						foreignSchema: 'dbsp_meta',
+						foreignTable: 'dbsp_transition_run',
+						foreignColumns: ['run_id'],
+					},
+				],
+				checks: [],
+			};
+		}
 		return {
 			relkind: 'r',
 			columns: {
@@ -203,6 +230,29 @@ class FakeEnumPool {
 
 	async query(sql: string, params?: readonly unknown[]) {
 		this.queries.push(sql);
+		if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+		if (sql === 'SHOW client_encoding')
+			return { rows: [{ client_encoding: 'UTF8' }] };
+		if (sql.startsWith('SELECT (pg_catalog.pg_control_system())')) {
+			return { rows: [{ system_identifier: 'enum-system' }] };
+		}
+		if (sql.startsWith('SELECT d.oid::text')) {
+			return { rows: [{ database_oid: '5' }] };
+		}
+		if (sql.startsWith('SELECT n.nspname')) {
+			return { rows: [{ name: this.schema, oid: '2200' }] };
+		}
+		if (sql.startsWith("SELECT current_setting('search_path')")) {
+			return {
+				rows: [
+					{
+						search_path: this.schema,
+						client_encoding: 'UTF8',
+						timezone: 'UTC',
+					},
+				],
+			};
+		}
 		if (sql.startsWith('CREATE ')) {
 			return { rows: [] };
 		}

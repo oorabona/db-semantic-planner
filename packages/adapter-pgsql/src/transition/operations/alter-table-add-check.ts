@@ -86,6 +86,9 @@ type CheckCatalogValue = {
 };
 
 const GUARD_STATEMENT_TIMEOUT_MS = 5000;
+const RENDERER_SESSION_REQUIREMENTS = [
+	{ setting: 'standard_conforming_strings', value: 'on' },
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -115,9 +118,10 @@ function quoteIdent(
 }
 
 function assertStandardConformingStrings(context: ObservationContext): void {
-	if (context.sessionConfiguration.standard_conforming_strings !== 'on') {
+	const requirement = RENDERER_SESSION_REQUIREMENTS[0];
+	if (context.sessionConfiguration[requirement.setting] !== requirement.value) {
 		throw new Error(
-			'AlterTableAddCheck requires standard_conforming_strings=on before rendering CHECK expressions',
+			`AlterTableAddCheck requires ${requirement.setting}=${requirement.value} before rendering CHECK expressions`,
 		);
 	}
 }
@@ -805,6 +809,8 @@ export function createAlterTableAddCheckOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
 		operationKind: ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
+		executionContractEligibility: { eligible: true } as const,
+		rendererSessionRequirements: RENDERER_SESSION_REQUIREMENTS,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

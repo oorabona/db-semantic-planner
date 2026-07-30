@@ -15,6 +15,8 @@
  * - Every external-ddl-exclusion binding's AssumptionId is present in the step's restsOnAssumptions closure and in GuardedPlan.assumptions.
  * - Journal record stepIds are consistent with intent.stepId; ApplyResult.observations is a superset of every ObservedOutcomeRecord.observations.
  */
+
+import type { ExecutionContract } from './execution-contract.js';
 import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
 import type { ApplyGuard, GuardProtocol, RecoveryArtefact } from './guard.js';
@@ -172,6 +174,8 @@ export interface GuardedPlan {
 	readonly segments: readonly GuardedPlanSegment[];
 	readonly steps: readonly GuardedPlanStep[];
 	readonly postconditions: readonly ExecutableAssertion[];
+	/** Present on plans emitted by current `dbsp plan` and covered by its digest. */
+	readonly executionContract?: ExecutionContract;
 }
 
 export type ProvenGuardProtocol = Exclude<

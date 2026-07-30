@@ -940,6 +940,7 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
 		operationKind: CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
+		executionContractEligibility: { eligible: true } as const,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

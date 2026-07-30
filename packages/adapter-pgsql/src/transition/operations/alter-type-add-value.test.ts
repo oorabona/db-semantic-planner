@@ -588,7 +588,7 @@ describe('AlterTypeAddValue operation runtime', () => {
 		await runtime.writeCompletionJournal(client, operation, completion);
 		await runtime.writeObservedJournal(client, journal);
 
-		expect(queries).toContain('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"');
+		expect(queries).not.toContain('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"');
 		expect(
 			queries.some((sql) =>
 				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"'),

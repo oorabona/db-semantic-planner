@@ -73,6 +73,9 @@ type EnumCatalogValue = {
 };
 
 const MAX_PG_ENUM_LABEL_BYTES = 63;
+const RENDERER_SESSION_REQUIREMENTS = [
+	{ setting: 'standard_conforming_strings', value: 'on' },
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -90,9 +93,10 @@ function quoteIdent(value: string, type: 'schema' | 'alias'): string {
 }
 
 function assertStandardConformingStrings(context: ObservationContext): void {
-	if (context.sessionConfiguration.standard_conforming_strings !== 'on') {
+	const requirement = RENDERER_SESSION_REQUIREMENTS[0];
+	if (context.sessionConfiguration[requirement.setting] !== requirement.value) {
 		throw new Error(
-			'AlterTypeAddValue requires standard_conforming_strings=on before rendering enum labels',
+			`AlterTypeAddValue requires ${requirement.setting}=${requirement.value} before rendering enum labels`,
 		);
 	}
 }
@@ -633,6 +637,8 @@ export function createAlterTypeAddValueOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
 		operationKind: ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
+		executionContractEligibility: { eligible: true } as const,
+		rendererSessionRequirements: RENDERER_SESSION_REQUIREMENTS,
 		supportsOperation(operation: PhysicalOperation) {
 			return (
 				operation.operationKind.artifact.id === PG_OPERATION_PACK_ARTIFACT.id &&

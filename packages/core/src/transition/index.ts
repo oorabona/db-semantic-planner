@@ -10,7 +10,6 @@ import type {
 	ProvenPlanShape,
 	SemanticArtifactRef,
 	TransitionLessor,
-	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 
@@ -74,21 +73,12 @@ export interface Applier {
 	): Promise<ApplyResult>;
 	resume(
 		runId: string,
-		loadCurrent: TransitionResumeJournalLoader,
-		readContext: TransitionResumeContextReader,
+		loadCurrent: import('./resume.js').ResumeTransitionInput['loadCurrent'],
+		readContext: import('./resume.js').ResumeTransitionInput['readContext'],
 		policy: ApplyPolicy,
 		target: TransitionLessor,
 	): Promise<ApplyResult>;
 }
-
-export type TransitionResumeJournalLoader = (
-	runId: string,
-) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
-
-export type TransitionResumeContextReader = (
-	target: TransitionLessor,
-	run: TransitionRunJournal['run'],
-) => Promise<ObservationContext>;
 
 export type {
 	ApplicableAssessment,
@@ -148,6 +138,12 @@ export {
 	sameObservationRequest,
 	sameObservationRequestInContext,
 } from './evidence-match.js';
+export {
+	bindExecutionContract,
+	createExecutionContract,
+	type ExecutionContractValidation,
+	validateExecutionContract,
+} from './execution-contract.js';
 export {
 	advisoryObservationId,
 	assumptionId,
