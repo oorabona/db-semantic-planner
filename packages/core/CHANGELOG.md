@@ -1,5 +1,27 @@
 # Changelog
 
+## [3.4.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.3.0...core-v3.4.0) (2026-07-31)
+
+
+### Features
+
+* **adapter-pgsql:** Make a recorded plan describe a target it can identify ([#435](https://github.com/oorabona/db-semantic-planner/issues/435)) ([5217c4a](https://github.com/oorabona/db-semantic-planner/commit/5217c4ab3491f0a54aa2878adeca50383e47273e)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+* **cli:** Compute a transition plan and make it durable before anything runs ([#432](https://github.com/oorabona/db-semantic-planner/issues/432)) ([50beccf](https://github.com/oorabona/db-semantic-planner/commit/50beccfca3393c542f259b7b5ff8c4d82364102d)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+* **core:** Make a transition run's proven plan durable ([#416](https://github.com/oorabona/db-semantic-planner/issues/416)) ([acaa1b1](https://github.com/oorabona/db-semantic-planner/commit/acaa1b1f6cb4c3bf5cc9f824e69a531e2c62f592)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Expose full connectionless adapter ([#436](https://github.com/oorabona/db-semantic-planner/issues/436)) ([#440](https://github.com/oorabona/db-semantic-planner/issues/440)) ([53336bd](https://github.com/oorabona/db-semantic-planner/commit/53336bdb5fb0e877f0551655d69c01bfbeba89d8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.10.3
+    * @dbsp/types bumped to 3.4.0
+
 ## [3.3.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.2.0...core-v3.3.0) (2026-07-27)
 
 

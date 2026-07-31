@@ -1,5 +1,18 @@
 # Changelog
 
+## [3.4.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.3.0...types-v3.4.0) (2026-07-31)
+
+
+### Features
+
+* **adapter-pgsql:** Make a recorded plan describe a target it can identify ([#435](https://github.com/oorabona/db-semantic-planner/issues/435)) ([5217c4a](https://github.com/oorabona/db-semantic-planner/commit/5217c4ab3491f0a54aa2878adeca50383e47273e)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+* **core:** Make a transition run's proven plan durable ([#416](https://github.com/oorabona/db-semantic-planner/issues/416)) ([acaa1b1](https://github.com/oorabona/db-semantic-planner/commit/acaa1b1f6cb4c3bf5cc9f824e69a531e2c62f592)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Expose full connectionless adapter ([#436](https://github.com/oorabona/db-semantic-planner/issues/436)) ([#440](https://github.com/oorabona/db-semantic-planner/issues/440)) ([53336bd](https://github.com/oorabona/db-semantic-planner/commit/53336bdb5fb0e877f0551655d69c01bfbeba89d8))
+
 ## [3.3.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.2.0...types-v3.3.0) (2026-07-27)
 
 
