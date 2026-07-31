@@ -45,14 +45,14 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 	return rows;
 }
 
-function deferred<T = void>(): {
-	readonly promise: Promise<T>;
-	readonly resolve: (value?: T | PromiseLike<T>) => void;
+function deferred(): {
+	readonly promise: Promise<void>;
+	readonly resolve: () => void;
 	readonly reject: (error: unknown) => void;
 } {
-	let resolve!: (value?: T | PromiseLike<T>) => void;
+	let resolve!: () => void;
 	let reject!: (error: unknown) => void;
-	const promise = new Promise<T>((res, rej) => {
+	const promise = new Promise<void>((res, rej) => {
 		resolve = res;
 		reject = rej;
 	});
@@ -912,14 +912,14 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			const [first, second] = await adapter.transaction(async (tx) => {
 				return Promise.all([
 					collect(
-						tx.streamRaw<{ id: number }>(
+						tx.streamRaw!<{ id: number }>(
 							`SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
 							[11, 12],
 							{ chunkSize: 1 },
 						),
 					),
 					collect(
-						tx.streamRaw<{ id: number }>(
+						tx.streamRaw!<{ id: number }>(
 							`SELECT id FROM "${SCHEMA}".items WHERE id IN ($1, $2) ORDER BY id`,
 							[13, 14],
 							{ chunkSize: 1 },

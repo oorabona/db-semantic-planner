@@ -22,6 +22,7 @@ import {
 	getTestPool,
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
+import { stringMutationOrm } from './testkit/test-compat/issue-441.js';
 
 // ============================================================================
 // Schema: job queue
@@ -214,12 +215,13 @@ describe('E15 — Row-level locking', () => {
 
 		await expect(
 			scoped.transaction(async (tx) => {
-				const updated = await tx
+				const mutations = stringMutationOrm(tx);
+				const updated = await mutations
 					.update('jobs')
 					.set({ workerId: 'affected-rows-probe' })
 					.where(eq('status', 'pending'))
 					.affectedRows();
-				const deleted = await tx
+				const deleted = await mutations
 					.delete('jobs')
 					.where(eq('workerId', 'affected-rows-probe'))
 					.affectedRows();

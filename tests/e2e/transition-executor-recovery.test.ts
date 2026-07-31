@@ -24,14 +24,12 @@ import {
 	type Assumption,
 	acquireTransitionLease,
 	assumptionId,
-	type CheckConstraintIR,
 	type CompareOutcome,
 	createApplier,
 	createComparator,
 	createPackRegistry,
 	createProver,
 	createStagedTransitionOrchestrator,
-	type EnumIR,
 	isOperationRuntime,
 	type ModelIR,
 	type ObservationContext,
@@ -47,6 +45,7 @@ import {
 	type TransitionRunMetadata,
 	type TransitionRunPersister,
 } from '@dbsp/core';
+import type { CheckConstraintIR, EnumIR } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {

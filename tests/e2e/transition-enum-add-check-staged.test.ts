@@ -8,17 +8,16 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	type ApplyPolicy,
-	type CheckConstraintIR,
 	createApplier,
 	createComparator,
 	createPackRegistry,
 	createProver,
 	createStagedTransitionOrchestrator,
 	createTransitionLessor,
-	type EnumIR,
 	type ModelIR,
 	type TableIR,
 } from '@dbsp/core';
+import type { CheckConstraintIR, EnumIR } from '@dbsp/types';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {

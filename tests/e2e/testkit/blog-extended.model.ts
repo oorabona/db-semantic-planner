@@ -91,6 +91,26 @@ function withBlogExtendedManyToManyRelations(model: ModelIR): ModelIR {
 	const relations = new Map(model.relations);
 	relations.set('posts.tags', postsTagsRelation);
 	relations.set('tags.posts', tagsPostsRelation);
+	const getRelationsFrom = (sourceTable: string): readonly RelationIR[] => {
+		const sourceRelations = model.getRelationsFrom(sourceTable);
+		if (sourceTable === 'posts') {
+			return [...sourceRelations, postsTagsRelation];
+		}
+		if (sourceTable === 'tags') {
+			return [...sourceRelations, tagsPostsRelation];
+		}
+		return sourceRelations;
+	};
+	const getRelationsTo = (targetTable: string): readonly RelationIR[] => {
+		const targetRelations = model.getRelationsTo(targetTable);
+		if (targetTable === 'posts') {
+			return [...targetRelations, tagsPostsRelation];
+		}
+		if (targetTable === 'tags') {
+			return [...targetRelations, postsTagsRelation];
+		}
+		return targetRelations;
+	};
 	return {
 		tables: model.tables,
 		relations,
@@ -98,22 +118,22 @@ function withBlogExtendedManyToManyRelations(model: ModelIR): ModelIR {
 		...(model.extensions !== undefined && { extensions: model.extensions }),
 		...(model.sequences !== undefined && { sequences: model.sequences }),
 		getTable: model.getTable.bind(model),
-		getRelationsFrom(sourceTable: string) {
-			const sourceRelations = model.getRelationsFrom(sourceTable);
-			if (sourceTable === 'posts') {
-				return [...sourceRelations, postsTagsRelation];
-			}
-			if (sourceTable === 'tags') {
-				return [...sourceRelations, tagsPostsRelation];
-			}
-			return sourceRelations;
-		},
+		getRelationsFrom,
 		getRelation(qualifiedName: string) {
 			if (qualifiedName === 'posts.tags') return postsTagsRelation;
 			if (qualifiedName === 'tags.posts') return tagsPostsRelation;
 			return model.getRelation(qualifiedName);
 		},
-		getRelationsTo: model.getRelationsTo.bind(model),
+		getRelationsTo,
+		isAmbiguous(sourceTable: string, targetTable: string) {
+			const matches = getRelationsFrom(sourceTable).filter(
+				(relation) => relation.target === targetTable,
+			);
+			return {
+				ambiguous: matches.length > 1,
+				options: matches.map((relation) => relation.name),
+			};
+		},
 	};
 }
 

@@ -34,7 +34,7 @@
 		"test": "pnpm run test:unit && pnpm run test:e2e",
 		"clean:artifacts": "bash scripts/clean-artifacts.sh",
 		"pretest:unit": "pnpm run clean:artifacts",
-		"test:unit": "pnpm -r test",
+		"test:unit": "pnpm -r --filter './packages/*' test",
 		"pretest:e2e": "pnpm run clean:artifacts",
 		"test:e2e": "pnpm --filter @dbsp/adapter-pgsql... build && pnpm vitest run --config tests/e2e/vitest.config.e2e.ts",
 		"check:catalog": "node scripts/check-catalog.mjs",

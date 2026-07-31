@@ -280,9 +280,12 @@ describe('STREAMING-001: Cursor/Streaming Support', () => {
 	describe('Scenario 7: Raw SQL streaming', () => {
 		it('should stream raw SQL with parameters and chunkSize', async () => {
 			const adapter = await getTestAdapter();
+			const streamRaw = adapter.streamRaw?.bind(adapter);
+			if (streamRaw === undefined)
+				throw new Error('Expected raw streaming support');
 			const rows: { name: string }[] = [];
 
-			for await (const row of adapter.streamRaw<{ name: string }>(
+			for await (const row of streamRaw<{ name: string }>(
 				`SELECT name FROM "${SCHEMA}".authors WHERE name = $1 ORDER BY id`,
 				['Alice Johnson'],
 				{ chunkSize: 1 },

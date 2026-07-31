@@ -50,7 +50,7 @@ describe('orm.from() table-ref API', () => {
 
 		const fromQuery = orm
 			.from(authors)
-			.where(eq(authors.email, 'bob@example.com'))
+			.where(eq(authors.email!, 'bob@example.com'))
 			.columns(['id', 'name', 'email']);
 		const selectQuery = orm
 			.select('authors')
@@ -74,6 +74,7 @@ describe('orm.from() table-ref API', () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
 		const { posts } = orm.tables;
+		if (posts === undefined) throw new Error('Expected posts table');
 
 		const rows = await orm
 			.from(posts)
@@ -93,6 +94,9 @@ describe('orm.from() table-ref API', () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: blogModel, adapter }).withSchema(SCHEMA);
 		const { authors } = orm.tables;
+		if (authors === undefined) throw new Error('Expected authors table');
+		if (authors.email === undefined)
+			throw new Error('Expected authors.email column');
 
 		const rows = await orm
 			.from(authors)

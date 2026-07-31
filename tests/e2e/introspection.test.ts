@@ -19,6 +19,10 @@ import {
 
 const SCHEMA = 'introspection_test';
 
+function member(value: object, name: string): unknown {
+	return Reflect.get(value, name);
+}
+
 describe('Auto-Introspection (ARCH-006)', () => {
 	beforeAll(async () => {
 		await dropBlogSchema(SCHEMA);
@@ -38,9 +42,9 @@ describe('Auto-Introspection (ARCH-006)', () => {
 
 			expect(orm).toBeDefined();
 			expect(orm.select).toBeDefined();
-			expect(orm.insert).toBeDefined();
-			expect(orm.update).toBeDefined();
-			expect(orm.delete).toBeDefined();
+			expect(typeof member(orm, 'insert')).toBe('function');
+			expect(typeof member(orm, 'update')).toBe('function');
+			expect(typeof member(orm, 'delete')).toBe('function');
 			expect(orm.withSchema).toBeDefined();
 			expect(typeof orm.strictMode).toBe('boolean');
 		});

@@ -179,10 +179,10 @@ export async function handleSchemaDiff(
 		changes: diff.changes.map((c) => ({
 			kind: c.kind,
 			table: c.table,
-			column: c.column,
+			...(c.column !== undefined && { column: c.column }),
 			destructive: c.destructive,
 			details: c.details,
-			meta: c.meta,
+			...(c.meta !== undefined && { meta: c.meta }),
 		})),
 		hasDestructive: diff.hasDestructive,
 		summary: diff.summary,
