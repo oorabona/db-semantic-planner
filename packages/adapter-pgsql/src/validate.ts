@@ -710,8 +710,14 @@ export function validateSqlExpression(sql: string, context: string): void {
  * This intentionally does not parse CHECK semantics. It only tracks enough
  * PostgreSQL literal context to catch accidental or malformed unsafe tokens in
  * machine-produced strings without false positives for inert quoted text.
- * Escape-string syntax (`E'...'`, `U&'...'`) is outside this scanner's literal
- * model; PostgreSQL's deparser does not emit it.
+ * It tracks standard, escape, and Unicode-escape single-quoted strings, plus
+ * dollar-quoted strings. A backslash in an ordinary quoted string is rejected
+ * because its meaning depends on
+ * `standard_conforming_strings` in the session that eventually applies DDL.
+ * Escape strings (`E'...'`) are setting-independent. Unicode-escape strings
+ * (`U&'...'`) are still scanned as literals so inert text inside them cannot
+ * be mistaken for SQL, but are refused because PostgreSQL only accepts that
+ * spelling when `standard_conforming_strings` is enabled.
  *
  * @security This is not a trust boundary against an author who controls the
  * schema definition. A comma is legal inside an expression, so that boundary
@@ -731,16 +737,38 @@ export function validateCheckExpression(sql: string, context: string): void {
 
 	let i = 0;
 	let singleQuoted = false;
+	let escapeSingleQuoted = false;
+	let settingIndependentSingleQuoted = false;
+	let unicodeEscapeSingleQuoted = false;
+	let doubleQuotedIdentifier = false;
 	let dollarQuoteDelimiter: string | undefined;
 
 	while (i < sql.length) {
 		if (singleQuoted) {
+			if (escapeSingleQuoted && sql[i] === '\\') {
+				i += 2;
+				continue;
+			}
+			if (!settingIndependentSingleQuoted && sql[i] === '\\') {
+				throw new Error(
+					`Unsafe SQL expression in ${context}: contains a backslash in an ordinary single-quoted string literal, whose meaning depends on PostgreSQL standard_conforming_strings; use E'...' for a setting-independent string literal. Value: "${sql}"`,
+				);
+			}
+
 			if (sql[i] === "'") {
 				if (sql[i + 1] === "'") {
 					i += 2;
 					continue;
 				}
 				singleQuoted = false;
+				escapeSingleQuoted = false;
+				settingIndependentSingleQuoted = false;
+				if (unicodeEscapeSingleQuoted) {
+					throw new Error(
+						`Unsafe SQL expression in ${context}: contains a Unicode-escape string literal (U&'...'), which PostgreSQL accepts only when standard_conforming_strings is enabled; use an ordinary single-quoted literal or E'...' instead. Value: "${sql}"`,
+					);
+				}
+				unicodeEscapeSingleQuoted = false;
 			}
 			i++;
 			continue;
@@ -756,8 +784,42 @@ export function validateCheckExpression(sql: string, context: string): void {
 			continue;
 		}
 
+		if (doubleQuotedIdentifier) {
+			if (sql[i] === '"') {
+				if (sql[i + 1] === '"') {
+					i += 2;
+					continue;
+				}
+				doubleQuotedIdentifier = false;
+			}
+			i++;
+			continue;
+		}
+
+		if (isEscapeStringStart(sql, i)) {
+			singleQuoted = true;
+			escapeSingleQuoted = true;
+			settingIndependentSingleQuoted = true;
+			i += 2;
+			continue;
+		}
+
+		if (isUnicodeEscapeStringStart(sql, i)) {
+			singleQuoted = true;
+			settingIndependentSingleQuoted = true;
+			unicodeEscapeSingleQuoted = true;
+			i += 3;
+			continue;
+		}
+
 		if (sql[i] === "'") {
 			singleQuoted = true;
+			i++;
+			continue;
+		}
+
+		if (sql[i] === '"') {
+			doubleQuotedIdentifier = true;
 			i++;
 			continue;
 		}
@@ -790,6 +852,32 @@ export function validateCheckExpression(sql: string, context: string): void {
 			`Unsafe SQL expression in ${context}: unterminated dollar-quoted string literal ${dollarQuoteDelimiter}. Value: "${sql}"`,
 		);
 	}
+
+	if (doubleQuotedIdentifier) {
+		throw new Error(
+			`Unsafe SQL expression in ${context}: unterminated double-quoted identifier. Value: "${sql}"`,
+		);
+	}
+}
+
+function isEscapeStringStart(sql: string, index: number): boolean {
+	if (sql[index] !== 'E' && sql[index] !== 'e') return false;
+	if (sql[index + 1] !== "'") return false;
+
+	const previous = index > 0 ? sql[index - 1] : undefined;
+	return !(
+		previous && isIdentifierContinuationBeforeStringLiteralPrefix(previous)
+	);
+}
+
+function isUnicodeEscapeStringStart(sql: string, index: number): boolean {
+	if (sql[index] !== 'U' && sql[index] !== 'u') return false;
+	if (sql[index + 1] !== '&' || sql[index + 2] !== "'") return false;
+
+	const previous = index > 0 ? sql[index - 1] : undefined;
+	return !(
+		previous && isIdentifierContinuationBeforeStringLiteralPrefix(previous)
+	);
 }
 
 function forbiddenCheckTokenAt(sql: string, index: number): string | undefined {
@@ -808,7 +896,7 @@ function readDollarQuoteDelimiter(
 ): string | undefined {
 	if (sql[index] !== '$') return undefined;
 	const previous = index > 0 ? sql[index - 1] : undefined;
-	if (previous && isIdentifierContinuationBeforeDollarQuote(previous)) {
+	if (previous && isIdentifierContinuationBeforeStringLiteralPrefix(previous)) {
 		return undefined;
 	}
 
@@ -824,10 +912,12 @@ function readDollarQuoteDelimiter(
 	return sql.slice(index, cursor + 1);
 }
 
-function isIdentifierContinuationBeforeDollarQuote(ch: string): boolean {
+function isIdentifierContinuationBeforeStringLiteralPrefix(
+	ch: string,
+): boolean {
 	// PostgreSQL also permits "$" after the first identifier character; blocking
-	// a delimiter immediately after "$" prevents opening inside identifiers such
-	// as a$$tag$.
+	// a literal prefix immediately after "$" prevents opening inside identifiers
+	// such as a$$tag$.
 	return /[A-Za-z0-9_$]/.test(ch) || (ch.codePointAt(0) ?? 0) > 127;
 }
 

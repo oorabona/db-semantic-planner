@@ -763,6 +763,162 @@ describe('PostgreSQL transition observation issuer', () => {
 		});
 	});
 
+	it('deparses an index predicate when the session setting starts off', async () => {
+		const issuer = createPgObservationIssuer();
+		const queries: string[] = [];
+		const query = vi.fn(async (sql: string) => {
+			queries.push(sql);
+			if (
+				sql ===
+				"SELECT pg_catalog.current_setting('search_path') AS search_path"
+			) {
+				return { rows: [{ search_path: 'tenant, public' }] };
+			}
+			if (sql.includes('FROM pg_catalog.pg_index ix')) {
+				return {
+					rows: [{ predicate: String.raw`((note)::text = E'\\n'::text)` }],
+				};
+			}
+			return { rows: [] };
+		});
+
+		const observation = await issuer.execute(
+			{
+				kind: EXPRESSION_DEPARSE_OBSERVATION,
+				scope: [],
+				detail: {
+					surface: 'index-predicate',
+					category: 'predicate',
+					schema: 'tenant',
+					table: 'users',
+					index: 'idx_users_note',
+					expression: String.raw`note = E'\\n'`,
+				},
+			},
+			createTestTransitionSession({ query }),
+			{
+				...context,
+				sessionConfiguration: { standard_conforming_strings: 'off' },
+			},
+		);
+
+		expect(observation.role).toBe('evidence');
+		expect(queries).toContain("SET LOCAL standard_conforming_strings TO 'on'");
+		expect(queries.some((sql) => sql.startsWith('CREATE TEMP TABLE'))).toBe(
+			true,
+		);
+	});
+
+	it('reports both an index-predicate deparse failure and a rollback cleanup failure', async () => {
+		const issuer = createPgObservationIssuer();
+		const primaryError = Object.assign(
+			new Error('function digest does not exist'),
+			{
+				code: '42883',
+			},
+		);
+		const cleanupError = Object.assign(
+			new Error('rollback to savepoint failed'),
+			{
+				code: '25P02',
+			},
+		);
+
+		let caught: unknown;
+		try {
+			await issuer.execute(
+				{
+					kind: EXPRESSION_DEPARSE_OBSERVATION,
+					scope: [],
+					detail: {
+						surface: 'index-predicate',
+						category: 'predicate',
+						schema: 'tenant',
+						table: 'users',
+						index: 'idx_users_digest',
+						expression: "digest(note, 'sha256') IS NOT NULL",
+					},
+				},
+				createTestTransitionSession({
+					query: async (sql: string) => {
+						if (
+							sql ===
+							'SELECT pg_catalog.current_schemas(false)::pg_catalog.text[] AS schemas'
+						) {
+							return { rows: [{ schemas: ['tenant', 'public'] }] };
+						}
+						if (sql.startsWith('CREATE INDEX ')) throw primaryError;
+						if (sql.startsWith('ROLLBACK TO SAVEPOINT ')) {
+							throw cleanupError;
+						}
+						return { rows: [] };
+					},
+				}),
+				{
+					...context,
+					sessionConfiguration: { standard_conforming_strings: 'on' },
+				},
+			);
+		} catch (error) {
+			caught = error;
+		}
+
+		expect(caught).toBeInstanceOf(AggregateError);
+		expect(caught).toMatchObject({
+			originalError: {
+				statement: 'create_partial_index',
+				cause: primaryError,
+			},
+			cleanupError: { cleanupError },
+		});
+		expect((caught as AggregateError).errors).toEqual([
+			expect.objectContaining({
+				statement: 'create_partial_index',
+				cause: primaryError,
+			}),
+			expect.objectContaining({ cleanupError }),
+		]);
+	});
+
+	it('propagates a non-25P01 index-predicate savepoint failure without taking transaction ownership', async () => {
+		const issuer = createPgObservationIssuer();
+		const savepointError = Object.assign(
+			new Error('proxy rejected SAVEPOINT'),
+			{ code: 'XX000' },
+		);
+		const queries: string[] = [];
+
+		await expect(
+			issuer.execute(
+				{
+					kind: EXPRESSION_DEPARSE_OBSERVATION,
+					scope: [],
+					detail: {
+						surface: 'index-predicate',
+						category: 'predicate',
+						schema: 'tenant',
+						table: 'users',
+						index: 'idx_users_note',
+						expression: 'note IS NOT NULL',
+					},
+				},
+				createTestTransitionSession({
+					query: async (sql: string) => {
+						queries.push(sql);
+						if (sql.startsWith('SAVEPOINT ')) throw savepointError;
+						return { rows: [] };
+					},
+				}),
+				{
+					...context,
+					sessionConfiguration: { standard_conforming_strings: 'on' },
+				},
+			),
+		).rejects.toBe(savepointError);
+
+		expect(queries).toEqual([expect.stringMatching(/^SAVEPOINT /u)]);
+	});
+
 	it('opens a transaction before table CHECK temp-table deparse when no outer transaction exists', async () => {
 		const issuer = createPgObservationIssuer();
 		const queries: string[] = [];
@@ -786,9 +942,9 @@ describe('PostgreSQL transition observation issuer', () => {
 					if (sql.startsWith('SAVEPOINT')) {
 						savepointAttempts += 1;
 						if (savepointAttempts === 1) {
-							throw new Error(
-								'SAVEPOINT can only be used in transaction blocks',
-							);
+							throw Object.assign(new Error('no transaction is in progress'), {
+								code: '25P01',
+							});
 						}
 					}
 					if (sql.includes('JOIN pg_catalog.pg_class')) {

@@ -13,11 +13,69 @@ import type {
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { markEngineCanonicalCheck } from '../expression-provenance.js';
 import { camelCaseNaming } from '../naming-plugin.js';
 import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 describe('DDL Generator', () => {
+	it('makes a canonical CHECK literal independent of standard_conforming_strings', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'notes',
+					{
+						name: 'notes',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'note', type: 'text', nullable: false },
+						],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							markEngineCanonicalCheck({
+								name: 'notes_pattern_check',
+								expression: String.raw`CHECK (note ~ '\d+')`,
+							}),
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		expect(generateDDL(schema)).toEqual([
+			expect.stringContaining('"note" TEXT NOT NULL'),
+			'ALTER TABLE "notes" ADD CONSTRAINT "notes_pattern_check" CHECK (note ~ E\'\\\\d+\');',
+		]);
+	});
+
+	it('refuses an authored Unicode-escape CHECK literal', () => {
+		const expression = String.raw`CHECK (note ~ U&'\005Cd+')`;
+		const schema = {
+			tables: new Map([
+				[
+					'notes',
+					{
+						name: 'notes',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'note', type: 'text', nullable: false },
+						],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'notes_pattern_check', expression }],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		expect(() => generateDDL(schema)).toThrow(
+			/contains a Unicode-escape string literal/,
+		);
+	});
+
 	describe('Type Mapping', () => {
 		it('should map basic types correctly', () => {
 			expect(

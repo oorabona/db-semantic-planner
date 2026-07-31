@@ -45,6 +45,7 @@ import {
 	quoteRoleName,
 	validateEnumLabel,
 } from './phases/utils.js';
+import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 import {
 	getAutoFkIndexName,
 	type SchemaChange,
@@ -422,6 +423,7 @@ function buildCreateIndexSpec(
 		nullsNotDistinct: idx.nullsNotDistinct,
 		with: idx.with,
 		where: idx.where,
+		whereSource: idx,
 		ifNotExists: true,
 	};
 }
@@ -528,14 +530,12 @@ export function generateMigrationSQL(
 	const schemaName = options?.schemaName;
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
-	assertCreateIndexesSupported(
-		collectUpCreateIndexSpecs(
-			changes,
-			schemaName,
-			options?.fkAutoIndex !== false,
-		),
-		indexContext,
+	const createIndexSpecs = collectUpCreateIndexSpecs(
+		changes,
+		schemaName,
+		options?.fkAutoIndex !== false,
 	);
+	assertCreateIndexesSupported(createIndexSpecs, indexContext);
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
@@ -608,7 +608,6 @@ export function generateMigrationSQL(
 			}
 		}
 	}
-
 	return statements;
 }
 
@@ -832,8 +831,9 @@ function upAddCheckConstraint(
 ): string | undefined {
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
+	const canonicalCheck = isEngineCanonicalCheck(check);
 	const expression = renderCheckConstraintClause(check);
-	if (!isEngineCanonicalCheck(check)) {
+	if (!canonicalCheck) {
 		validateCheckExpression(
 			expression,
 			'migration check constraint expression',
@@ -845,7 +845,7 @@ function upAddCheckConstraint(
 			' ADD CONSTRAINT ' +
 			quoteIdent(check.name, 'alias') +
 			' ' +
-			expression +
+			(canonicalCheck ? escapeCanonicalSqlLiterals(expression) : expression) +
 			'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 	);
 }
@@ -1352,8 +1352,9 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
+			const canonicalCheck = isEngineCanonicalCheck(check);
 			const expression = renderCheckConstraintClause(check);
-			if (!isEngineCanonicalCheck(check)) {
+			if (!canonicalCheck) {
 				validateCheckExpression(
 					expression,
 					'migration check constraint (down)',
@@ -1366,7 +1367,9 @@ function changeToDownSQL(
 						' ADD CONSTRAINT ' +
 						quoteIdent(check.name, 'alias') +
 						' ' +
-						expression +
+						(canonicalCheck
+							? escapeCanonicalSqlLiterals(expression)
+							: expression) +
 						'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 				),
 				// Allowlisted: re-adds the dropped CHECK constraint from metadata.
@@ -1711,10 +1714,8 @@ export function generateDownMigrationSQL(
 	// destructiveness filter below.
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
-	assertCreateIndexesSupported(
-		collectDownCreateIndexSpecs(changes, schemaName),
-		indexContext,
-	);
+	const createIndexSpecs = collectDownCreateIndexSpecs(changes, schemaName);
+	assertCreateIndexesSupported(createIndexSpecs, indexContext);
 
 	for (const change of changes) {
 		const phase = getPhase(change.kind);
@@ -1746,7 +1747,6 @@ export function generateDownMigrationSQL(
 		}
 	}
 	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
-
 	return { statements, destructive };
 }
 

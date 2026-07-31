@@ -307,7 +307,7 @@ async function __resetSchema(): Promise<void> {
 \t\tconst quoted = tableNames.map((n) => '"' + n + '"').join(', ');
 \t\tawait __pool.query('DROP TABLE IF EXISTS ' + quoted + ' CASCADE');
 \t}
-\t// Replay all DDL statements (CREATE TABLE + FK constraints + indexes).
+\t// Each generated statement is independently executable.
 \tfor (const stmt of __bootstrapDDL) {
 \t\tawait __pool.query(stmt);
 \t}

@@ -13,8 +13,10 @@ import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
 	type CompareSchemataOptions,
+	collectExpressionSurfaces,
 	compareSchemata,
 	ExpressionCanonicalizationUnavailableError,
+	indexComparisonKey,
 	type SchemaChange,
 } from './schema-diff.js';
 
@@ -60,6 +62,29 @@ function changeKinds(changes: readonly SchemaChange[]) {
 // ============================================================================
 
 describe('compareSchemata', () => {
+	it('collects a present non-breaking-space index predicate as an expression surface', () => {
+		const model = makeModel([
+			makeTable({
+				name: 'users',
+				indexes: [{ name: 'idx_users_id', columns: ['id'], where: '\u00a0' }],
+			}),
+		]);
+
+		expect(collectExpressionSurfaces('schema', model)).toEqual([
+			'schema.users.INDEX(idx_users_id).WHERE',
+		]);
+	});
+
+	it('keeps an absent predicate distinct from a present empty predicate', () => {
+		const index: Omit<IndexIR, 'where'> = {
+			name: 'idx_users_id',
+			columns: ['id'],
+		};
+		expect(indexComparisonKey(index)).not.toBe(
+			indexComparisonKey({ ...index, where: '' }),
+		);
+	});
+
 	describe('table-level changes', () => {
 		it('should detect new tables', () => {
 			const schema = makeModel([
@@ -928,11 +953,6 @@ describe('compareSchemata', () => {
 				columns: ['email'],
 				method: 'rum',
 			};
-			const rejectedPredicateIdx: IndexIR = {
-				name: 'idx_users_email_literal',
-				columns: ['email'],
-				where: "email = 'a;b'",
-			};
 			const rejectedOpclassIdx: IndexIR = {
 				name: 'idx_users_email_pattern',
 				columns: ['email'],
@@ -1004,7 +1024,6 @@ describe('compareSchemata', () => {
 				expressionIdx,
 				rejectedNameIdx,
 				rejectedMethodIdx,
-				rejectedPredicateIdx,
 				rejectedOpclassIdx,
 				schemaRejectedIdx,
 			]) {
@@ -1492,6 +1511,22 @@ describe('compareSchemata', () => {
 				const diff = compareSchemata(schema, db);
 				expect(diff.changes).toHaveLength(0);
 			});
+
+			it('orders structured index options by code unit', () => {
+				const composed = '\u00e9';
+				const decomposed = 'e\u0301';
+				expect(
+					indexComparisonKey({
+						columns: ['title'],
+						with: { [composed]: '1', [decomposed]: '2' },
+					}),
+				).toEqual(
+					indexComparisonKey({
+						columns: ['title'],
+						with: { [decomposed]: '2', [composed]: '1' },
+					}),
+				);
+			});
 		});
 
 		describe('implicit unique index suppression', () => {
@@ -1867,6 +1902,30 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('treats an omitted predicate on an implicit unique index as absent', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+					indexes: [
+						{
+							name: 'users_email_key',
+							columns: ['email'],
+							unique: true,
+						},
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([]);
 		});
 
 		it('should flag number vs integer as a type change (number can be NUMERIC)', () => {

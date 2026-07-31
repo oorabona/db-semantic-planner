@@ -236,6 +236,30 @@ describe('SchemaDiffView', () => {
 		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
 	});
 
+	it('labels a degraded partial-index predicate as an index surface', () => {
+		mockState.diff = {
+			...mockDiff,
+			warnings: [
+				{
+					kind: 'index_predicate',
+					table: 'jobs',
+					name: 'idx_jobs_pending',
+					outcome: 'unavailable',
+					comparison: 'raw',
+					message: 'Could not canonicalize this partial-index predicate.',
+				},
+			],
+		};
+		render(<SchemaDiffView />);
+
+		expect(
+			screen.getByText(/partial-index predicate jobs\.idx_jobs_pending/),
+		).toBeDefined();
+		expect(
+			screen.queryByText(/CHECK constraint jobs\.idx_jobs_pending/),
+		).toBeNull();
+	});
+
 	it('shows an unpaired default without inferring its cause', () => {
 		mockState.diff = {
 			...mockDiff,

@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
-import type { CheckConstraintIR, EnumIR, ModelIR } from '@dbsp/types';
+import type { CheckConstraintIR, EnumIR, IndexIR, ModelIR } from '@dbsp/types';
 import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
 import {
 	type CanonicalizeExpressionSurfacesOptions,
 	type CheckConstraintCanonicalizationWarning,
-	type ColumnDefaultCanonicalizationWarning,
 	canonicalizeExpressionSurfaces,
 	type ExpressionCanonicalizationWarning,
 	fallbackToRawExpressionComparison,
-	isCheckCanonicalizationTempTableUnavailableError,
+	isExpressionCanonicalizationInfrastructureUnavailableError,
+	PlannedSchemaStagingError,
 } from '../expression-canonicalizer.js';
 import type {
 	IntrospectionOptions,
@@ -19,6 +19,8 @@ import {
 	identityNaming,
 } from '../naming-plugin.js';
 import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import { escapeDiagnosticText } from '../validate.js';
+import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
 	type CompareSchemataOptions,
 	collectExpressionSurfaces,
@@ -32,8 +34,9 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	extends CompareSchemataOptions,
 		SchemaScopeOptions {
 	/**
-	 * Whether to canonicalise PostgreSQL CHECK constraint expressions and column defaults before
-	 * comparing. Defaults to `true`. Set to `false` only for compatibility with
+	 * Whether to canonicalise PostgreSQL CHECK constraint expressions, column defaults, and predicates on column-keyed
+	 * partial indexes before comparing. Defaults to `true`. Expression-keyed
+	 * partial-index predicates are reported as unavailable. Set to `false` only for compatibility with
 	 * legacy raw-string live diffs.
 	 *
 	 * Live canonicalisation creates temporary scratch tables inside an adapter
@@ -53,7 +56,7 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	) => void;
 	/**
 	 * Diff that the caller just applied before this live re-diff. Used only when
-	 * CHECK expressions or column defaults are compared by raw text to fail loudly if the exact same
+	 * expression surfaces are compared by raw text to fail loudly if the exact same
 	 * expression-surface drift appears again after re-introspection.
 	 */
 	readonly previouslyAppliedDiff?: SchemaDiff;
@@ -101,25 +104,108 @@ export class CheckConstraintNewEnumValueError extends Error {
 		public readonly table: string,
 		public readonly constraint: string,
 		public readonly addedEnumValues: readonly AddedEnumValue[],
-		public readonly surfaceKind:
-			| 'CHECK constraint'
-			| 'column default' = 'CHECK constraint',
 	) {
 		super(
-			`PostgreSQL could not canonicalise one ${surfaceKind}, ` +
+			'PostgreSQL could not canonicalise one CHECK constraint, ' +
 				`and this migration also adds ${addedEnumValues.length} enum value(s). PostgreSQL ` +
 				'cannot use an enum value in the transaction that adds it, and dbsp applies ' +
-				'each migration in one transaction, so this constraint cannot be proven ' +
-				'applicable. Apply the enum change on its own first, then add or update the ' +
-				'constraint. Inspect the table, constraint, and addedEnumValues fields for identities.',
+				'each migration in one transaction, so this schema change cannot be proven ' +
+				'applicable. Apply the enum change on its own first, then apply the ' +
+				'dependent schema change. Inspect addedEnumValues for candidate labels.' +
+				' Inspect the table and constraint fields for the affected CHECK.',
 		);
 		this.name = 'CheckConstraintNewEnumValueError';
 	}
 }
 
+/** A raw partial-index predicate and added enum values cannot share one migration. */
+export class PartialIndexPredicateNewEnumValueError extends Error {
+	constructor(public readonly addedEnumValues: readonly AddedEnumValue[]) {
+		super(
+			'PostgreSQL could not canonicalise at least one partial-index predicate, ' +
+				`and this migration also adds ${addedEnumValues.length} enum value(s). PostgreSQL ` +
+				'cannot use an enum value in the transaction that adds it, and dbsp applies ' +
+				'each migration in one transaction, so this schema change cannot be proven ' +
+				'applicable. Apply the enum change on its own first, then apply the ' +
+				'dependent index migration. Inspect addedEnumValues for candidate labels.',
+		);
+		this.name = 'PartialIndexPredicateNewEnumValueError';
+	}
+}
+
+/** #454: Predicate canonicalization is not implemented for indexes with expression keys. */
+export class ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError extends Error {
+	constructor(
+		public readonly predicates: readonly {
+			readonly side: 'desired' | 'database';
+			readonly table: string;
+			readonly index: string;
+		}[],
+	) {
+		super(
+			'Partial-index predicates on indexes with expression keys cannot be canonicalized. Use a column-keyed partial index instead.',
+		);
+		this.name = 'ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError';
+	}
+}
+
+/**
+ * A raw partial-index predicate cannot be proven to converge after PostgreSQL
+ * deparses it, so emitting its CREATE statement is unsafe.
+ */
+export class RawIndexPredicateFallbackError extends Error {
+	constructor(cause?: unknown) {
+		const stagingFailure =
+			cause instanceof PlannedSchemaStagingError ? cause : undefined;
+		super(
+			stagingFailure === undefined
+				? 'PostgreSQL could not create a temporary scratch relation while canonicalising at least one partial-index predicate. ' +
+						`Grant TEMP so PostgreSQL can canonicalise the predicate. PostgreSQL reported: ${errorMessage(cause)}. ` +
+						'This migration emits a partial-index CREATE in UP or DOWN SQL, so dbsp refuses it because it cannot prove the index will converge. Apply the index in a migration of its own if needed.'
+				: `PostgreSQL could not stage ${stagingFailure.statement} while canonicalising at least one partial-index predicate. ` +
+						`${stagingFailure.statement} requires CREATE on the target schema, not TEMP. PostgreSQL reported: ${errorMessage(stagingFailure.cause)}. ` +
+						'This migration emits a partial-index CREATE in UP or DOWN SQL, so dbsp refuses it because it cannot prove the index will converge.',
+		);
+		this.name = 'RawIndexPredicateFallbackError';
+	}
+}
+
+function errorMessage(error: unknown): string {
+	return escapeDiagnosticText(
+		error instanceof Error ? error.message : String(error),
+	);
+}
+
+export class IndexPredicateCanonicalizationError extends Error {
+	constructor(
+		public readonly rejectedPredicates: readonly {
+			readonly side: 'desired' | 'database';
+			readonly table: string;
+			readonly index: string;
+			readonly reason?: unknown;
+		}[],
+		/**
+		 * Enum values added by this migration are diagnostic candidates only. They
+		 * are collected from the schema diff, never matched to a rejected index.
+		 */
+		public readonly addedEnumValues: readonly AddedEnumValue[] = [],
+	) {
+		super(
+			`PostgreSQL rejected ${rejectedPredicates.length} partial-index predicate(s); ` +
+				'no migration was emitted. If the predicate uses a function from an extension added by this migration, add that extension in a separate migration before the predicate. ' +
+				'Inspect rejectedPredicates for identities and causes.' +
+				(addedEnumValues.length === 0
+					? ''
+					: ' Inspect addedEnumValues for same-migration enum candidate labels.'),
+		);
+		this.name = 'IndexPredicateCanonicalizationError';
+	}
+}
+
 /**
  * Live PostgreSQL schema diff: introspect, canonicalise desired CHECK
- * constraint expressions and column defaults through PostgreSQL, then call the pure synchronous
+ * constraint expressions, column defaults, and predicates on column-keyed
+ * partial indexes through PostgreSQL, then call the pure synchronous
  * schema comparator.
  *
  * If CHECK canonicalisation falls back while the same diff adds a plausibly
@@ -129,9 +215,9 @@ export class CheckConstraintNewEnumValueError extends Error {
  * that cannot run. Apply the enum addition by itself first, then add or update
  * the CHECK constraint in a later migration.
  *
- * Partial-index predicates and index expressions are intentionally not
- * canonicalised here; non-strict diffs compare them by raw string, and strict
- * diffs reject them.
+ * Index expressions are intentionally not canonicalised here; partial-index
+ * predicates on expression-keyed indexes are reported as unavailable and are
+ * therefore rejected by strict mode. They need their own key-shape substrate.
  */
 export async function comparePgsqlDatabaseSchema(
 	adapter: PgsqlAdapter,
@@ -142,6 +228,8 @@ export async function comparePgsqlDatabaseSchema(
 	const compareCheckConstraints = supportsDDLCheckConstraints(options);
 	const useCanonicalizer = options?.canonicalizeExpressions ?? true;
 	const rawExpressionSurfaces = new Set<string>();
+	let hasRawIndexPredicateFallback = false;
+	let rawIndexPredicateFallbackCause: unknown;
 	const canonicalModels = useCanonicalizer
 		? await canonicalizeLiveExpressions(
 				adapter,
@@ -149,14 +237,26 @@ export async function comparePgsqlDatabaseSchema(
 				dbModel,
 				options,
 				rawExpressionSurfaces,
+				(rawFallback, cause) => {
+					hasRawIndexPredicateFallback = rawFallback;
+					rawIndexPredicateFallbackCause = cause;
+				},
 			)
-		: { desired, database: dbModel, defaultOutcomes: [] };
+		: {
+				desired,
+				database: dbModel,
+				defaultOutcomes: [],
+				indexPredicateOutcomes: [],
+			};
 	const desiredForCompare = canonicalModels.desired;
 	const dbModelForCompare = canonicalModels.database;
 	if (options?.requireExpressionCanonicalization) {
 		if (useCanonicalizer) {
 			assertStrictDefaultCanonicalization(
 				canonicalModels.defaultOutcomes ?? [],
+			);
+			assertStrictIndexPredicateCanonicalization(
+				canonicalModels.indexPredicateOutcomes ?? [],
 			);
 			assertNoUncanonicalizedLiveExpressionSurfaces(
 				desiredForCompare,
@@ -182,9 +282,33 @@ export async function comparePgsqlDatabaseSchema(
 				compareCheckConstraints,
 		}),
 	);
+	assertNoRejectedIndexPredicates(
+		canonicalModels.indexPredicateOutcomes ?? [],
+		diff,
+	);
 
-	if (useCanonicalizer && rawExpressionSurfaces.size > 0) {
-		assertNoCheckFallbackUsesAddedEnumValue(diff, rawExpressionSurfaces);
+	if (useCanonicalizer) {
+		assertNoExpressionKeyedIndexPredicateExclusionWithCreate(diff, options);
+	}
+
+	if (
+		useCanonicalizer &&
+		(rawExpressionSurfaces.size > 0 || hasRawIndexPredicateFallback)
+	) {
+		assertNoFallbackUsesAddedEnumValue(
+			diff,
+			rawExpressionSurfaces,
+			hasRawIndexPredicateFallback,
+			options,
+		);
+	}
+
+	if (useCanonicalizer && hasRawIndexPredicateFallback) {
+		assertNoRawIndexPredicateFallbackWithCreate(
+			diff,
+			options,
+			rawIndexPredicateFallbackCause,
+		);
 	}
 
 	if (options?.previouslyAppliedDiff !== undefined) {
@@ -231,12 +355,38 @@ function assertStrictDefaultCanonicalization(
 	}
 }
 
+function assertStrictIndexPredicateCanonicalization(
+	outcomes: readonly {
+		readonly side: 'desired' | 'database';
+		readonly table: string;
+		readonly index: string;
+		readonly status: 'canonicalised' | 'unavailable' | 'rejected';
+		readonly reason?: unknown;
+	}[],
+): void {
+	const unavailable = outcomes.filter(
+		(outcome) => outcome.status === 'unavailable',
+	);
+	if (unavailable.length > 0) {
+		throw new ExpressionCanonicalizationUnavailableError(
+			unavailable.map(
+				(outcome) =>
+					`${outcome.side}.${outcome.table}.INDEX(${outcome.index}).WHERE`,
+			),
+		);
+	}
+}
+
 async function canonicalizeLiveExpressions(
 	adapter: PgsqlAdapter,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options: ComparePgsqlDatabaseSchemaOptions | undefined,
 	rawExpressionSurfaces: Set<string>,
+	recordRawIndexPredicateFallback: (
+		rawFallback: boolean,
+		cause?: unknown,
+	) => void,
 ): Promise<{
 	readonly desired: ModelIR;
 	readonly database: ModelIR;
@@ -246,6 +396,14 @@ async function canonicalizeLiveExpressions(
 		readonly column: string;
 		readonly status: 'canonicalised' | 'unavailable' | 'rejected';
 		readonly reason?: unknown;
+	}[];
+	readonly indexPredicateOutcomes: readonly {
+		readonly side: 'desired' | 'database';
+		readonly table: string;
+		readonly index: string;
+		readonly status: 'canonicalised' | 'unavailable' | 'rejected';
+		readonly reason?: unknown;
+		readonly unavailableCause?: 'infrastructure' | 'expression-keyed';
 	}[];
 }> {
 	const canonicalizerOptions = toCanonicalizerOptions(
@@ -265,11 +423,18 @@ async function canonicalizeLiveExpressions(
 			rawExpressionSurfaces,
 			canonicalModels.defaultOutcomes ?? [],
 		);
+		const rawFallback = rawIndexPredicateFallbackOutcome(
+			canonicalModels.indexPredicateOutcomes ?? [],
+		);
+		recordRawIndexPredicateFallback(
+			rawFallback !== undefined,
+			rawFallback?.reason,
+		);
 		return canonicalModels;
 	} catch (error) {
 		if (
 			options?.requireExpressionCanonicalization === true ||
-			!isCheckCanonicalizationTempTableUnavailableError(error)
+			!isExpressionCanonicalizationInfrastructureUnavailableError(error)
 		) {
 			throw error;
 		}
@@ -282,6 +447,13 @@ async function canonicalizeLiveExpressions(
 		recordRawDefaultExpressionSurfaces(
 			rawExpressionSurfaces,
 			fallback.defaultOutcomes ?? [],
+		);
+		const rawFallback = rawIndexPredicateFallbackOutcome(
+			fallback.indexPredicateOutcomes ?? [],
+		);
+		recordRawIndexPredicateFallback(
+			rawFallback !== undefined,
+			rawFallback?.reason,
 		);
 		return fallback;
 	}
@@ -297,10 +469,12 @@ function assertNoUncanonicalizedLiveExpressionSurfaces(
 		...collectExpressionSurfaces('schema', desired, {
 			includeColumnDefaults: false,
 			includeCheckConstraints: false,
+			includeIndexPredicates: false,
 		}),
 		...collectExpressionSurfaces('database', dbModel, {
 			includeColumnDefaults: false,
 			includeCheckConstraints: false,
+			includeIndexPredicates: false,
 		}),
 		...collectDatabaseOnlyExpressionSurfaces(
 			desired,
@@ -394,12 +568,12 @@ export function assertNoRepeatedExpressionSurfaceDrift(
 					? {
 							kind: 'column_default',
 							table: current.table,
-							column: current.constraint,
+							column: current.name,
 						}
 					: {
 							kind: 'check_constraint',
 							table: current.table,
-							constraint: current.constraint,
+							constraint: current.name,
 						},
 				current.desiredExpressionHash,
 				current.databaseExpressionHash,
@@ -408,19 +582,19 @@ export function assertNoRepeatedExpressionSurfaceDrift(
 	}
 }
 
-interface CheckExpressionDrift {
+interface ExpressionSurfaceDrift {
 	readonly kind: 'check_constraint' | 'column_default';
 	readonly table: string;
-	readonly constraint: string;
+	readonly name: string;
 	readonly desiredExpressionHash: string;
 	readonly databaseExpressionHash: string;
 }
 
 function collectCheckExpressionDrifts(
 	diff: SchemaDiff,
-): Map<string, CheckExpressionDrift> {
+): Map<string, ExpressionSurfaceDrift> {
 	const dropped = new Map<string, string>();
-	const drifts = new Map<string, CheckExpressionDrift>();
+	const drifts = new Map<string, ExpressionSurfaceDrift>();
 
 	for (const change of diff.changes) {
 		if (change.kind === 'drop_check_constraint') {
@@ -442,7 +616,7 @@ function collectCheckExpressionDrifts(
 			drifts.set(key, {
 				kind: 'check_constraint',
 				table: change.table,
-				constraint: check.name,
+				name: check.name,
 				desiredExpressionHash: hashExpression(check.expression),
 				databaseExpressionHash: hashExpression(databaseExpression),
 			});
@@ -453,7 +627,7 @@ function collectCheckExpressionDrifts(
 			drifts.set(key, {
 				kind: 'column_default',
 				table: change.table,
-				constraint: change.column,
+				name: change.column,
 				desiredExpressionHash: hashExpression(
 					defaultFromChange(change.meta?.default),
 				),
@@ -508,26 +682,34 @@ function driftKey(
 }
 
 /**
- * Refuse a CHECK constraint the diff intends to ADD when PostgreSQL itself
- * refused to canonicalise it while the same diff adds enum values.
- *
- * The trigger is the engine's own verdict: `rawCheckExpressionSurfaces` holds
- * exactly the constraints PostgreSQL would not accept against a scratch table
- * carrying the desired columns and types. Reading the expression text to work
- * out *which* added enum value is to blame would be a heuristic, and every
- * literal spelling PostgreSQL accepts — single-quoted, dollar-quoted,
- * Unicode-escaped, concatenated — would be another way past it. So the text is
- * not read at all.
- *
- * Declared bound: a CHECK that failed canonicalisation for an unrelated reason,
- * in a diff that happens to also add an enum value elsewhere, is refused too.
- * That is deliberate — an expression PostgreSQL rejected in the scratch table is
- * not one this layer can prove executable — and it is why the added values are
- * reported as candidates rather than as an asserted cause.
+ * A rejected predicate is terminal. Added enum values are reported only as
+ * candidates: labels are display diagnostics, never a desired-to-database key
+ * or evidence inferred by parsing predicate SQL.
  */
-function assertNoCheckFallbackUsesAddedEnumValue(
+function assertNoRejectedIndexPredicates(
+	outcomes: readonly {
+		readonly side: 'desired' | 'database';
+		readonly table: string;
+		readonly index: string;
+		readonly status: 'canonicalised' | 'unavailable' | 'rejected';
+		readonly reason?: unknown;
+	}[],
+	diff: SchemaDiff,
+): void {
+	const rejected = outcomes.filter((outcome) => outcome.status === 'rejected');
+	if (rejected.length === 0) return;
+
+	throw new IndexPredicateCanonicalizationError(
+		rejected,
+		collectAddedEnumValues(diff),
+	);
+}
+
+function assertNoFallbackUsesAddedEnumValue(
 	diff: SchemaDiff,
 	rawExpressionSurfaces: ReadonlySet<string>,
+	hasRawIndexPredicateFallback: boolean,
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
 ): void {
 	const addedEnumValues = collectAddedEnumValues(diff);
 	if (addedEnumValues.length === 0) return;
@@ -549,6 +731,73 @@ function assertNoCheckFallbackUsesAddedEnumValue(
 			}
 		}
 	}
+
+	if (
+		hasRawIndexPredicateFallback &&
+		hasEmittedPredicateBearingCreateIndex(diff, options)
+	) {
+		throw new PartialIndexPredicateNewEnumValueError(addedEnumValues);
+	}
+}
+
+function assertNoExpressionKeyedIndexPredicateExclusionWithCreate(
+	diff: SchemaDiff,
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+): void {
+	const changes = diff.changes.filter((change) => {
+		if (change.kind !== 'create_index' && change.kind !== 'drop_index') {
+			return false;
+		}
+		const index = change.meta?.index as IndexIR | undefined;
+		return (
+			index !== undefined &&
+			index.where !== undefined &&
+			(index.expressions?.length ?? 0) > 0
+		);
+	});
+	if (changes.length === 0) return;
+	if (!hasEmittedPredicateBearingCreateIndex({ ...diff, changes }, options)) {
+		return;
+	}
+	throw new ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError(
+		changes.map((change) => {
+			const index = change.meta?.index as IndexIR;
+			return {
+				side: change.kind === 'create_index' ? 'desired' : 'database',
+				table: change.table,
+				index: index.name ?? `<unnamed:${index.columns.join(',')}>`,
+			};
+		}),
+	);
+}
+
+function assertNoRawIndexPredicateFallbackWithCreate(
+	diff: SchemaDiff,
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	cause: unknown,
+): void {
+	if (hasEmittedPredicateBearingCreateIndex(diff, options)) {
+		throw new RawIndexPredicateFallbackError(cause);
+	}
+}
+
+/** True when UP or DOWN SQL emits a partial-index CREATE statement. */
+function hasEmittedPredicateBearingCreateIndex(
+	diff: SchemaDiff,
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+): boolean {
+	const migrationOptions = {
+		...(options?.schema === undefined ? {} : { schemaName: options.schema }),
+		...(options?.dialectCapabilities === undefined
+			? {}
+			: { dialectCapabilities: options.dialectCapabilities }),
+	};
+	return [
+		...generateMigrationSQL(diff, migrationOptions),
+		...generateDownSQL(diff, migrationOptions),
+	].some((statement) =>
+		/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b[\s\S]*\bWHERE\b/iu.test(statement),
+	);
 }
 
 function collectAddedEnumValues(diff: SchemaDiff): AddedEnumValue[] {
@@ -594,6 +843,9 @@ function toCanonicalizerOptions(
 		...(options?.requireExpressionCanonicalization !== undefined
 			? { requireCanonicalization: options.requireExpressionCanonicalization }
 			: {}),
+		...(options?.dialectCapabilities !== undefined
+			? { dialectCapabilities: options.dialectCapabilities }
+			: {}),
 		canonicalizeCheckConstraints: supportsDDLCheckConstraints(options),
 		onWarning: (warning) => {
 			if (warning.kind === 'check_constraint') {
@@ -628,11 +880,33 @@ function recordRawDefaultExpressionSurfaces(
 	}
 }
 
+function rawIndexPredicateFallbackOutcome(
+	outcomes: readonly {
+		readonly table: string;
+		readonly index: string;
+		readonly status: 'canonicalised' | 'unavailable' | 'rejected';
+		readonly unavailableCause?: 'infrastructure' | 'expression-keyed';
+		readonly reason?: unknown;
+	}[],
+):
+	| {
+			readonly table: string;
+			readonly index: string;
+			readonly status: 'canonicalised' | 'unavailable' | 'rejected';
+			readonly unavailableCause?: 'infrastructure' | 'expression-keyed';
+			readonly reason?: unknown;
+	  }
+	| undefined {
+	return outcomes.find(
+		(outcome) =>
+			outcome.status === 'unavailable' &&
+			outcome.unavailableCause !== 'expression-keyed',
+	);
+}
+
 function recordRawCheckExpressionSurface(
 	rawExpressionSurfaces: Set<string>,
-	warning:
-		| CheckConstraintCanonicalizationWarning
-		| ColumnDefaultCanonicalizationWarning,
+	warning: CheckConstraintCanonicalizationWarning,
 ): void {
 	rawExpressionSurfaces.add(
 		driftKey(warning.kind, warning.table, warning.name),

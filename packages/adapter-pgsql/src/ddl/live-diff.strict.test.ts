@@ -23,13 +23,20 @@ vi.mock('../expression-canonicalizer.js', async (importOriginal) => {
 const {
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
+	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
+	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
+	PartialIndexPredicateNewEnumValueError,
+	RawIndexPredicateFallbackError,
 } = await import('./live-diff.js');
 const {
 	CheckConstraintNewEnumValueError: RootCheckConstraintNewEnumValueError,
 	ColumnDefaultCanonicalizationError: RootColumnDefaultCanonicalizationError,
 } = await import('../index.js');
 const { ColumnDefaultCanonicalizationError } = await import(
+	'../expression-canonicalizer.js'
+);
+const { PlannedSchemaStagingError } = await import(
 	'../expression-canonicalizer.js'
 );
 
@@ -278,7 +285,7 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		);
 	});
 
-	it('refuses strict live diffs for index predicates that are not canonicalized', async () => {
+	it('accepts strict live diffs for canonicalized partial-index predicates', async () => {
 		const desired = makeModel([
 			makeTable({
 				name: 'users',
@@ -295,12 +302,13 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
 			desired,
 			database: dbModel,
-			defaultOutcomes: [
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
 				{
 					side: 'desired',
 					table: 'users',
-					column: 'state',
-					status: 'unavailable',
+					index: 'idx_users_active',
+					status: 'canonicalised',
 				},
 			],
 		});
@@ -310,7 +318,131 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			comparePgsqlDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
-		).rejects.toThrow(ExpressionCanonicalizationUnavailableError);
+		).resolves.toBeDefined();
+	});
+
+	it('refuses an unavailable partial-index predicate in strict mode', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol('id'), makeCol('email', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_users_active_email',
+						columns: [],
+						expressions: ['lower(email)'],
+						where: 'active',
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'users' })]);
+		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
+				{
+					side: 'desired',
+					table: 'users',
+					index: 'idx_users_active_email',
+					status: 'unavailable',
+					comparison: 'raw',
+					reason: new Error('permission denied to create temporary tables'),
+				},
+			],
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+				requireExpressionCanonicalization: true,
+			}),
+		).rejects.toMatchObject({
+			surfaces: ['desired.users.INDEX(idx_users_active_email).WHERE'],
+		});
+	});
+
+	it('refuses a rejected partial-index predicate before emitting a migration', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				indexes: [
+					{
+						name: 'idx_users_missing',
+						columns: ['id'],
+						where: 'missing = 1',
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'users' })]);
+		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
+				{
+					side: 'desired',
+					table: 'users',
+					index: 'idx_users_missing',
+					status: 'rejected',
+					comparison: 'raw',
+					reason: new Error('column missing does not exist'),
+				},
+			],
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired),
+		).rejects.toBeInstanceOf(IndexPredicateCanonicalizationError);
+	});
+
+	it('reports same-migration enum additions as candidates for a rejected predicate', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'users',
+					indexes: [
+						{
+							name: 'idx_users_missing',
+							columns: ['id'],
+							where: 'missing = 1',
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active', 'pending'] }],
+		);
+		const dbModel = makeModel(
+			[makeTable({ name: 'users' })],
+			[{ name: 'status', values: ['active'] }],
+		);
+		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
+				{
+					side: 'desired',
+					table: 'users',
+					index: 'idx_users_missing',
+					status: 'rejected',
+					comparison: 'raw',
+					reason: new Error('column missing does not exist'),
+				},
+			],
+		});
+
+		let caught: unknown;
+		try {
+			await comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired);
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(IndexPredicateCanonicalizationError);
+		expect(caught).toMatchObject({
+			addedEnumValues: [{ enumName: 'status', value: 'pending' }],
+		});
 	});
 
 	it.each([
@@ -750,6 +882,188 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		});
 	});
 
+	it('refuses raw unnamed predicates with enum additions under database casing without an index join', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobQueue',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [
+						{
+							columns: ['id'],
+							where: "status = 'pending'",
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active', 'pending'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'job_queue',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [
+						{
+							name: 'idx_job_queue_id',
+							columns: ['id'],
+							where: "status = 'active'",
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active'] }],
+		);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toMatchObject({
+			name: PartialIndexPredicateNewEnumValueError.name,
+			addedEnumValues: [{ enumName: 'status', value: 'pending' }],
+		});
+		expect(mockCanonicalizeExpressionSurfaces).not.toHaveBeenCalled();
+	});
+
+	it('allows an unrelated enum addition when a raw partial-index fallback emits no predicate DDL', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobQueue',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [
+						{
+							name: 'idx_job_queue_id',
+							columns: ['id'],
+							where: "status = 'active'",
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active', 'pending'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'job_queue',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [
+						{
+							name: 'idx_job_queue_id',
+							columns: ['id'],
+							where: "status = 'active'",
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active'] }],
+		);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).resolves.toMatchObject({
+			changes: [expect.objectContaining({ kind: 'alter_enum_add_value' })],
+		});
+	});
+
+	it('allows an ordinary replacement with an omitted predicate through both raw-predicate guards', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [
+						{
+							name: 'idx_jobs_status',
+							columns: ['id', 'status'],
+						},
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active', 'pending'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					indexes: [{ name: 'idx_jobs_status', columns: ['id'] }],
+				}),
+			],
+			[{ name: 'status', values: ['active'] }],
+		);
+		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
+				{
+					side: 'desired',
+					table: 'jobs',
+					index: 'idx_jobs_status',
+					status: 'unavailable',
+				},
+			],
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired),
+		).resolves.toMatchObject({
+			changes: expect.arrayContaining([
+				expect.objectContaining({ kind: 'alter_enum_add_value' }),
+				expect.objectContaining({ kind: 'drop_index' }),
+				expect.objectContaining({ kind: 'create_index' }),
+			]),
+		});
+	});
+
 	it('throws on repeated CHECK drift when canonicalization falls back to raw comparison', async () => {
 		const desiredExpression = "CHECK ((status = 'skipped'))";
 		const databaseExpression = "CHECK ((status = 'skipped'::text))";
@@ -796,5 +1110,258 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				onWarning: vi.fn(),
 			}),
 		).rejects.toThrow(NonConvergentSchemaDiffError);
+	});
+
+	it('refuses raw unnamed predicates with index replacements under database casing without pair matching', async () => {
+		const desiredPredicate = "status = 'pending'";
+		const databasePredicate = "(status)::text = 'pending'::text";
+		const desired = makeModel([
+			makeTable({
+				name: 'jobQueue',
+				indexes: [
+					{
+						columns: ['id'],
+						where: desiredPredicate,
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([
+			makeTable({
+				name: 'job_queue',
+				indexes: [
+					{
+						name: 'idx_job_queue_id',
+						columns: ['id'],
+						where: databasePredicate,
+					},
+				],
+			}),
+		]);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toBeInstanceOf(RawIndexPredicateFallbackError);
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow('Grant TEMP');
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow(
+			'permission denied to create temporary tables in database "dbsp_test"',
+		);
+	});
+
+	it('names CREATE SEQUENCE and the schema CREATE permission when staging blocks a partial-index migration', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{
+						name: 'jobs_pending_idx',
+						columns: ['id'],
+						where: "status = 'pending'",
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
+		const cause = new PlannedSchemaStagingError(
+			'CREATE SEQUENCE',
+			pgError('42501', 'permission denied for schema "tenant"'),
+		);
+		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [
+				{
+					side: 'desired',
+					table: 'jobs',
+					index: 'jobs_pending_idx',
+					status: 'unavailable',
+					comparison: 'raw',
+					reason: cause,
+					unavailableCause: 'infrastructure',
+				},
+			],
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow(
+			'CREATE SEQUENCE requires CREATE on the target schema, not TEMP',
+		);
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow('permission denied for schema "tenant"');
+	});
+
+	it('refuses an ordinary-to-partial same-name index replacement during raw fallback', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobQueue',
+				indexes: [
+					{
+						name: 'idx_jobs_state',
+						columns: ['id'],
+						where: "status = 'pending'",
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([
+			makeTable({
+				name: 'job_queue',
+				indexes: [{ name: 'idx_jobs_state', columns: ['id'] }],
+			}),
+		]);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toBeInstanceOf(RawIndexPredicateFallbackError);
+	});
+
+	it('refuses a drop-only partial index during raw fallback because DOWN recreates it', async () => {
+		const desired = makeModel([makeTable({ name: 'jobQueue' })]);
+		const dbModel = makeModel([
+			makeTable({
+				name: 'job_queue',
+				indexes: [
+					{
+						name: 'idx_job_queue_pending',
+						columns: ['id'],
+						where: "status = 'pending'",
+					},
+				],
+			}),
+		]);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toBeInstanceOf(RawIndexPredicateFallbackError);
+	});
+
+	it('allows a raw expression-keyed partial index when canonicalization is opted out', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'auditLog',
+				columns: [makeCol('id'), makeCol('email', { type: 'string' })],
+				indexes: [
+					{
+						columns: [],
+						expressions: ['lower(email)'],
+						where: 'active',
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'audit_log' })]);
+
+		await expect(
+			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+				dbCasing: 'snake_case',
+				canonicalizeExpressions: false,
+			}),
+		).resolves.toMatchObject({
+			changes: expect.arrayContaining([
+				expect.objectContaining({ kind: 'create_index' }),
+			]),
+		});
+		expect(mockCanonicalizeExpressionSurfaces).not.toHaveBeenCalled();
+	});
+
+	it('refuses a desired-only expression-keyed partial index during raw fallback', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'auditLog',
+				columns: [makeCol('id'), makeCol('email', { type: 'string' })],
+				indexes: [
+					{
+						columns: [],
+						expressions: ['lower(email)'],
+						where: "status = 'pending'",
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'audit_log' })]);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toBeInstanceOf(
+			ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
+		);
+	});
+
+	it('refuses raw unnamed predicates when index changes are on different normalized tables', async () => {
+		const desired = makeModel([
+			makeTable({ name: 'jobQueue' }),
+			makeTable({
+				name: 'auditLog',
+				indexes: [
+					{
+						columns: ['id'],
+						where: "status = 'pending'",
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([
+			makeTable({
+				name: 'job_queue',
+				indexes: [
+					{
+						name: 'idx_job_queue_id',
+						columns: ['id'],
+						where: "(status)::text = 'pending'::text",
+					},
+				],
+			}),
+			makeTable({ name: 'audit_log' }),
+		]);
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempTablePermissionDeniedError();
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				dbCasing: 'snake_case',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow(RawIndexPredicateFallbackError);
 	});
 });

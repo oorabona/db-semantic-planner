@@ -152,7 +152,7 @@ export function generateDDL(
 		indexContextFromCaps(caps),
 	);
 
-	return [
+	const statements = [
 		...generateExtensionsPhase(ctx), // PASS -1: CREATE EXTENSION
 		...generateSequencesPhase(ctx), // PASS -0.5: CREATE SEQUENCE
 		...generateDropStatementsPhase(ctx), // PASS 0: DROP TABLE (optional)
@@ -163,6 +163,8 @@ export function generateDDL(
 		...generateRlsPhase(ctx), // PASS 3.5: RLS + policies
 		...generateCommentsPhase(ctx), // PASS 4: COMMENT ON
 	];
+
+	return statements;
 }
 
 function buildIndexRenderSpec(
@@ -188,6 +190,7 @@ function buildIndexRenderSpec(
 		nullsNotDistinct: idx.nullsNotDistinct,
 		with: idx.with,
 		where: idx.where,
+		whereSource: idx,
 	};
 }
 

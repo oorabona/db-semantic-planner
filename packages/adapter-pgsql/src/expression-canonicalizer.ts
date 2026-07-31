@@ -4,11 +4,13 @@
 import { randomUUID } from 'node:crypto';
 import { ModelIRImpl } from '@dbsp/core';
 import type {
-	Adapter,
 	CheckConstraintIR,
 	DbCasing,
+	DialectCapabilities,
 	EnumIR,
+	IndexIR,
 	ModelIR,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import { getCheckConstraintDatabaseName } from './check-constraint-name.js';
@@ -17,15 +19,27 @@ import {
 	renderCheckConstraintClause,
 	stripNotValidSuffix,
 } from './check-expression.js';
+import {
+	columnDbTypeSchemaIdentity,
+	dbTypesEqual,
+	stripDbTypeSchema,
+} from './db-type.js';
+import { generateColumnDef } from './ddl/ddl-generator.js';
 import { generateEnumTypesPhase } from './ddl/phases/enum-types.js';
+import { generateSequencesPhase } from './ddl/phases/sequences.js';
 import type { PhaseContext } from './ddl/phases/types.js';
-import { formatSqlDefault, quoteIdent } from './ddl/phases/utils.js';
+import {
+	formatSqlDefault,
+	quoteCollation,
+	quoteIdent,
+} from './ddl/phases/utils.js';
 import { mapColumnType } from './ddl/type-mapping.js';
 import {
 	type EngineCanonicalExpression,
 	engineCanonicalSqlDefault,
 	isEngineCanonicalCheck,
 	markEngineCanonicalCheck,
+	markEngineCanonicalIndex,
 } from './expression-provenance.js';
 import {
 	getNamingPluginForDbCasing,
@@ -57,9 +71,22 @@ export interface ColumnDefaultCanonicalizationWarning {
 	readonly side?: 'desired' | 'database';
 }
 
+export interface IndexPredicateCanonicalizationWarning {
+	readonly table: string;
+	readonly kind: 'index_predicate';
+	readonly name: string;
+	readonly message: string;
+	readonly cause: unknown;
+	readonly outcome: 'unavailable' | 'rejected' | 'refused';
+	/** Predicate fallback always compares both complete models raw. */
+	readonly comparison: 'raw';
+	readonly side?: 'desired' | 'database';
+}
+
 export type ExpressionCanonicalizationWarning =
 	| CheckConstraintCanonicalizationWarning
-	| ColumnDefaultCanonicalizationWarning;
+	| ColumnDefaultCanonicalizationWarning
+	| IndexPredicateCanonicalizationWarning;
 
 export interface CanonicalizeCheckConstraintsOptions {
 	/** Database schema that owns the target tables and target-scoped enum types. */
@@ -74,6 +101,8 @@ export interface CanonicalizeCheckConstraintsOptions {
 	readonly requireCanonicalization?: boolean;
 	/** Skip CHECK scratch work when the caller's dialect does not support CHECK DDL. */
 	readonly canonicalizeCheckConstraints?: boolean;
+	/** Capabilities used to generate the migration this scope is staging for. */
+	readonly dialectCapabilities?: DialectCapabilities;
 }
 
 export interface CanonicalizeExpressionSurfacesOptions
@@ -97,12 +126,58 @@ interface CheckConstraintTarget {
 
 interface ColumnDefaultTarget {
 	readonly modelKey: string;
+	readonly modelTable: TableIR;
 	readonly dbTable: TableIR;
 	readonly dbTableName: string;
 	readonly columns: readonly TableIR['columns'][number][];
 }
 
-type PgsqlCanonicalizationScope = Pick<Adapter, 'executeRaw' | 'transaction'>;
+interface DesiredIndexPredicateTarget {
+	readonly modelKey: string;
+	readonly modelTable: TableIR;
+	readonly dbTable?: TableIR;
+	readonly dbTableName: string;
+	readonly index: IndexIR;
+	readonly predicate: string;
+}
+
+interface DatabaseIndexPredicateTarget {
+	readonly tableName: string;
+	readonly index: IndexIR;
+	readonly predicate: string;
+}
+
+const pgsqlCanonicalizationScopeBrand: unique symbol = Symbol(
+	'dbsp.pgsql.canonicalization-scope',
+);
+
+const expressionIndexPredicateCanonicalizationUnavailable = new Error(
+	'Partial-index predicates on expression-keyed indexes are not canonicalized.',
+);
+
+/**
+ * The rollback-only PostgreSQL scope required by canonicalization scratch DDL.
+ *
+ * `SET LOCAL` and `ON COMMIT DROP` only have the required lifetime inside this
+ * branded scope.  A plain auto-commit implementation cannot satisfy it.
+ */
+export type PgsqlCanonicalizationScope = {
+	executeRaw<T = unknown>(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<T[]>;
+	transaction<T>(
+		fn: (scope: PgsqlCanonicalizationScope) => Promise<T>,
+	): Promise<T>;
+	readonly [pgsqlCanonicalizationScopeBrand]: typeof pgsqlCanonicalizationScopeBrand;
+};
+
+/** Mint canonicalization provenance from the adapter's rollback-only scope. */
+function canonicalizationScope(
+	adapter: RollbackOnlyPgsqlScope,
+): PgsqlCanonicalizationScope {
+	return adapter as unknown as PgsqlCanonicalizationScope;
+}
 
 /** Only deparse readers below may mint this provenance brand. */
 function engineCanonicalExpression(value: string): EngineCanonicalExpression {
@@ -125,7 +200,10 @@ const TRANSACTION_INTEGRITY_OR_CLEANUP_SQLSTATE_CODES = new Set([
 	'25006', // read_only_sql_transaction
 ]);
 
-type ExpressionStatement = 'alter_column_set_default' | 'add_check_constraint';
+type ExpressionStatement =
+	| 'alter_column_set_default'
+	| 'add_check_constraint'
+	| 'create_partial_index';
 
 /**
  * Keep the source statement in a wrapper we own. PostgreSQL errors can be
@@ -138,6 +216,31 @@ class TaggedExpressionRejection extends Error {
 	) {
 		super(`PostgreSQL rejected expression while executing ${statement}`);
 		this.name = 'TaggedExpressionRejection';
+	}
+}
+
+class IndexPredicateCanonicalizationUnavailableError extends Error {
+	constructor(readonly cause: unknown) {
+		super(
+			'PostgreSQL could not build the scratch relation for a partial-index predicate. ' +
+				`Reason: ${errorMessage(cause)}`,
+		);
+		this.name = 'IndexPredicateCanonicalizationUnavailableError';
+	}
+}
+
+/** A schema object needed by expression staging could not be created. */
+export class PlannedSchemaStagingError extends Error {
+	constructor(
+		readonly statement: 'CREATE TYPE' | 'CREATE SEQUENCE',
+		readonly cause: unknown,
+	) {
+		super(
+			`PostgreSQL could not stage ${statement} for expression canonicalization. ` +
+				`Reason: ${errorMessage(cause)}`,
+			{ cause },
+		);
+		this.name = 'PlannedSchemaStagingError';
 	}
 }
 
@@ -173,6 +276,8 @@ export interface CanonicalizedExpressionModels {
 	readonly database: ModelIR;
 	/** The observed outcome for every column-default surface considered here. */
 	readonly defaultOutcomes: readonly ColumnDefaultCanonicalizationOutcome[];
+	/** The observed outcome for every partial-index predicate considered here. */
+	readonly indexPredicateOutcomes: readonly IndexPredicateCanonicalizationOutcome[];
 }
 
 interface ColumnDefaultCanonicalizationOutcomeIdentity {
@@ -199,6 +304,24 @@ export type ColumnDefaultCanonicalizationOutcome =
 	| CanonicalizedColumnDefaultOutcome
 	| ColumnDefaultFallbackOutcome;
 
+export type IndexPredicateCanonicalizationOutcome =
+	| {
+			readonly side: 'desired' | 'database';
+			readonly table: string;
+			readonly index: string;
+			readonly status: 'canonicalised';
+	  }
+	| {
+			readonly side: 'desired' | 'database';
+			readonly table: string;
+			readonly index: string;
+			readonly status: 'unavailable' | 'rejected';
+			readonly comparison: 'raw';
+			readonly reason: unknown;
+			/** Why an unavailable predicate was not canonicalized. */
+			readonly unavailableCause?: 'infrastructure' | 'expression-keyed';
+	  };
+
 interface CanonicalizedTableChecks {
 	readonly desired: readonly CheckConstraintIR[];
 	/** Present only when the live database CHECKs were deparsed in this scope. */
@@ -221,6 +344,42 @@ export function isCheckCanonicalizationTempTableUnavailableError(
 	// also present. Surface it instead of masking it.
 	if (chain.some(isTransactionIntegrityOrCleanupFailureItem)) return false;
 	return chain.some(isTempTableUnavailableErrorItem);
+}
+
+/**
+ * Classifies only failures while constructing a scratch relation. `42501` may
+ * deny TEMP or a scratch dependency, while `42704` identifies an unavailable
+ * scratch type or operator class. The same SQLSTATE from an expression
+ * statement is not evidence that raw comparison is safe.
+ */
+function isScratchRelationSetupUnavailableError(error: unknown): boolean {
+	const chain = errorChain(error);
+	if (chain.some(isTransactionIntegrityOrCleanupFailureItem)) return false;
+	return chain.some((item) => {
+		const code = pgErrorCode(item);
+		return (
+			code === '42501' ||
+			code === '42704' ||
+			isTempTableUnavailableErrorItem(item)
+		);
+	});
+}
+
+function throwIndexPredicateScratchRelationSetupFailure(error: unknown): never {
+	if (isScratchRelationSetupUnavailableError(error)) {
+		throw new IndexPredicateCanonicalizationUnavailableError(error);
+	}
+	throw error;
+}
+
+/** True when the full live comparison can safely restart from both raw models. */
+export function isExpressionCanonicalizationInfrastructureUnavailableError(
+	error: unknown,
+): boolean {
+	return (
+		error instanceof IndexPredicateCanonicalizationUnavailableError ||
+		isCheckCanonicalizationTempTableUnavailableError(error)
+	);
 }
 
 export function fallbackToRawCheckConstraintComparison(
@@ -258,6 +417,20 @@ export function fallbackToRawExpressionComparison(
 		desired,
 		dbModel,
 		options,
+	);
+	const desiredPredicateTargets = collectDesiredIndexPredicateTargets(
+		desired,
+		dbModel,
+		options,
+	);
+	const databasePredicateTargets =
+		collectDatabaseIndexPredicateTargets(dbModel);
+	const indexPredicateOutcomes = unavailableIndexPredicateOutcomes(
+		desiredPredicateTargets,
+		databasePredicateTargets,
+		cause,
+		options,
+		'infrastructure',
 	);
 	const recordedDefaultOutcomes = new Set(
 		defaultOutcomes.map(defaultOutcomeKey),
@@ -309,7 +482,12 @@ export function fallbackToRawExpressionComparison(
 			}
 		}
 	}
-	return { desired: desiredWithRawChecks, database: dbModel, defaultOutcomes };
+	return {
+		desired: desiredWithRawChecks,
+		database: dbModel,
+		defaultOutcomes,
+		indexPredicateOutcomes,
+	};
 }
 
 /**
@@ -324,7 +502,7 @@ export async function canonicalizeCheckConstraints(
 	if (options?.canonicalizeCheckConstraints === false) return desired;
 	return (
 		await canonicalizeCheckConstraintModels(
-			adapter,
+			canonicalizationScope(adapter),
 			desired,
 			dbModel,
 			options,
@@ -350,7 +528,12 @@ async function canonicalizeCheckConstraintModels(
 ): Promise<CanonicalizedExpressionModels> {
 	const targets = collectCheckConstraintTargets(desired, dbModel, options);
 	if (targets.length === 0) {
-		return { desired, database: dbModel, defaultOutcomes: [] };
+		return {
+			desired,
+			database: dbModel,
+			defaultOutcomes: [],
+			indexPredicateOutcomes: [],
+		};
 	}
 
 	const canonicalChecksByTable = new Map<
@@ -376,7 +559,33 @@ async function canonicalizeCheckConstraintModels(
 				for (const target of targets) {
 					reportCanonicalizationFailure(target, enumCreationFailure, options);
 				}
-				return { desired, database: dbModel, defaultOutcomes: [] };
+				return {
+					desired,
+					database: dbModel,
+					defaultOutcomes: [],
+					indexPredicateOutcomes: [],
+				};
+			}
+			const sequenceCreationFailure = await createMissingDesiredSequences(
+				adapter,
+				desired,
+				dbModel,
+				options,
+			);
+			if (sequenceCreationFailure !== undefined) {
+				for (const target of targets) {
+					reportCanonicalizationFailure(
+						target,
+						sequenceCreationFailure,
+						options,
+					);
+				}
+				return {
+					desired,
+					database: dbModel,
+					defaultOutcomes: [],
+					indexPredicateOutcomes: [],
+				};
 			}
 		}
 		for (let i = 0; i < targets.length; i++) {
@@ -424,17 +633,20 @@ async function canonicalizeCheckConstraintModels(
 			canonicalDatabaseChecksByTable,
 		),
 		defaultOutcomes: [],
+		indexPredicateOutcomes: [],
 	};
 }
 
 /**
  * Canonicalise CHECK constraints and column defaults through PostgreSQL.
  *
- * Both models returned here are clones. Expressions are resolved while the
- * target schema is pinned in `search_path`, then deparsed with only
- * `pg_catalog` in that path so target-scoped names are schema-qualified in the
+ * Both models returned here are clones. Expressions are resolved under the
+ * planning lease's unmodified session path, then deparsed with only `pg_catalog` in
+ * the path so target-scoped names are qualified in
  * text that later reaches emitted DDL. The introspection-time `{ sql }`
- * rendering is deliberately never parsed again.
+ * rendering is deliberately never parsed again. The migration may use a
+ * different lease; #473 tracks binding its resolution path to this planning
+ * lease.
  */
 export async function canonicalizeExpressionSurfaces(
 	adapter: RollbackOnlyPgsqlScope,
@@ -442,7 +654,27 @@ export async function canonicalizeExpressionSurfaces(
 	dbModel: ModelIR,
 	options?: CanonicalizeExpressionSurfacesOptions,
 ): Promise<CanonicalizedExpressionModels> {
+	const scope = canonicalizationScope(adapter);
 	const defaultTargets = collectColumnDefaultTargets(desired, dbModel, options);
+	const desiredPredicateTargets = collectDesiredIndexPredicateTargets(
+		desired,
+		dbModel,
+		options,
+	);
+	const databasePredicateTargets =
+		collectDatabaseIndexPredicateTargets(dbModel);
+	const expressionIndexPredicateOutcomes =
+		unavailableExpressionIndexPredicateOutcomes(
+			desiredPredicateTargets,
+			databasePredicateTargets,
+			options,
+		);
+	const canonicalDesiredPredicateTargets = desiredPredicateTargets.filter(
+		(target) => !hasIndexExpressions(target.index),
+	);
+	const canonicalDatabasePredicateTargets = databasePredicateTargets.filter(
+		(target) => !hasIndexExpressions(target.index),
+	);
 	const unavailableDefaultOutcomes = collectUnavailableColumnDefaultOutcomes(
 		desired,
 		dbModel,
@@ -451,7 +683,12 @@ export async function canonicalizeExpressionSurfaces(
 	const hasChecks =
 		options?.canonicalizeCheckConstraints !== false &&
 		collectCheckConstraintTargets(desired, dbModel, options).length > 0;
-	if (!hasChecks && defaultTargets.length === 0) {
+	if (
+		!hasChecks &&
+		defaultTargets.length === 0 &&
+		canonicalDesiredPredicateTargets.length === 0 &&
+		canonicalDatabasePredicateTargets.length === 0
+	) {
 		for (const outcome of unavailableDefaultOutcomes) {
 			reportUnavailableColumnDefault(outcome, options);
 		}
@@ -459,10 +696,11 @@ export async function canonicalizeExpressionSurfaces(
 			desired,
 			database: dbModel,
 			defaultOutcomes: unavailableDefaultOutcomes,
+			indexPredicateOutcomes: expressionIndexPredicateOutcomes,
 		};
 	}
 	const enumCreationFailure = await createMissingDesiredEnumTypes(
-		adapter,
+		scope,
 		desired,
 		dbModel,
 		options,
@@ -482,6 +720,13 @@ export async function canonicalizeExpressionSurfaces(
 			enumCreationFailure,
 			options,
 		);
+		const failedPredicates = unavailableIndexPredicateOutcomes(
+			canonicalDesiredPredicateTargets,
+			canonicalDatabasePredicateTargets,
+			enumCreationFailure,
+			options,
+			'infrastructure',
+		);
 		for (const outcome of unavailableDefaultOutcomes) {
 			reportUnavailableColumnDefault(outcome, options);
 		}
@@ -489,28 +734,82 @@ export async function canonicalizeExpressionSurfaces(
 			desired,
 			database: dbModel,
 			defaultOutcomes: [...unavailableDefaultOutcomes, ...failedDefaults],
+			indexPredicateOutcomes: [
+				...expressionIndexPredicateOutcomes,
+				...failedPredicates,
+			],
+		};
+	}
+	const sequenceCreationFailure = await createMissingDesiredSequences(
+		scope,
+		desired,
+		dbModel,
+		options,
+	);
+	if (sequenceCreationFailure !== undefined) {
+		if (hasChecks) {
+			for (const target of collectCheckConstraintTargets(
+				desired,
+				dbModel,
+				options,
+			)) {
+				reportCanonicalizationFailure(target, sequenceCreationFailure, options);
+			}
+		}
+		const failedDefaults = unavailableDefaultOutcomesForEnumCreation(
+			defaultTargets,
+			sequenceCreationFailure,
+			options,
+		);
+		const failedPredicates = unavailableIndexPredicateOutcomes(
+			canonicalDesiredPredicateTargets,
+			canonicalDatabasePredicateTargets,
+			sequenceCreationFailure,
+			options,
+			'infrastructure',
+		);
+		for (const outcome of unavailableDefaultOutcomes) {
+			reportUnavailableColumnDefault(outcome, options);
+		}
+		return {
+			desired,
+			database: dbModel,
+			defaultOutcomes: [...unavailableDefaultOutcomes, ...failedDefaults],
+			indexPredicateOutcomes: [
+				...expressionIndexPredicateOutcomes,
+				...failedPredicates,
+			],
 		};
 	}
 
-	let checkModels: CanonicalizedExpressionModels = {
+	const canonicalPredicates = await canonicalizeIndexPredicates(
+		scope,
 		desired,
-		database: dbModel,
+		dbModel,
+		canonicalDesiredPredicateTargets,
+		canonicalDatabasePredicateTargets,
+		options,
+	);
+	let checkModels: CanonicalizedExpressionModels = {
+		desired: canonicalPredicates.desired,
+		database: canonicalPredicates.database,
 		defaultOutcomes: [],
+		indexPredicateOutcomes: [],
 	};
 	if (hasChecks) {
 		checkModels = await canonicalizeCheckConstraintModels(
-			adapter,
-			desired,
-			dbModel,
+			scope,
+			canonicalPredicates.desired,
+			canonicalPredicates.database,
 			options,
 			true,
 			false,
 		);
-	} else {
-		await pinCanonicalizationSearchPath(adapter, options);
+	} else if (defaultTargets.length > 0) {
+		await pinCanonicalizationSettings(scope);
 	}
 	const canonicalDefaults = await canonicalizeColumnDefaults(
-		adapter,
+		scope,
 		checkModels.desired,
 		checkModels.database,
 		defaultTargets,
@@ -520,12 +819,68 @@ export async function canonicalizeExpressionSurfaces(
 		reportUnavailableColumnDefault(outcome, options);
 	}
 	return {
-		...canonicalDefaults,
+		desired: canonicalDefaults.desired,
+		database: canonicalDefaults.database,
 		defaultOutcomes: [
 			...unavailableDefaultOutcomes,
 			...canonicalDefaults.defaultOutcomes,
 		],
+		indexPredicateOutcomes: [
+			...expressionIndexPredicateOutcomes,
+			...canonicalPredicates.indexPredicateOutcomes,
+		],
 	};
+}
+
+function unavailableExpressionIndexPredicateOutcomes(
+	desiredTargets: readonly DesiredIndexPredicateTarget[],
+	databaseTargets: readonly DatabaseIndexPredicateTarget[],
+	options: CanonicalizeExpressionSurfacesOptions | undefined,
+): IndexPredicateCanonicalizationOutcome[] {
+	return unavailableIndexPredicateOutcomes(
+		desiredTargets.filter((target) => hasIndexExpressions(target.index)),
+		databaseTargets.filter((target) => hasIndexExpressions(target.index)),
+		expressionIndexPredicateCanonicalizationUnavailable,
+		options,
+		'expression-keyed',
+	);
+}
+
+function unavailableIndexPredicateOutcomes(
+	desiredTargets: readonly DesiredIndexPredicateTarget[],
+	databaseTargets: readonly DatabaseIndexPredicateTarget[],
+	cause: unknown,
+	options: CanonicalizeExpressionSurfacesOptions | undefined,
+	unavailableCause: 'infrastructure' | 'expression-keyed',
+): IndexPredicateCanonicalizationOutcome[] {
+	const outcomes: IndexPredicateCanonicalizationOutcome[] = [];
+	for (const target of desiredTargets) {
+		const desiredOutcome: IndexPredicateCanonicalizationOutcome = {
+			side: 'desired',
+			table: target.dbTableName,
+			index: indexPredicateName(target.index),
+			status: 'unavailable',
+			comparison: 'raw',
+			reason: cause,
+			unavailableCause,
+		};
+		outcomes.push(desiredOutcome);
+		reportIndexPredicateCanonicalizationFailure(desiredOutcome, options);
+	}
+	for (const target of databaseTargets) {
+		const databaseOutcome: IndexPredicateCanonicalizationOutcome = {
+			side: 'database',
+			table: target.tableName,
+			index: indexPredicateName(target.index),
+			status: 'unavailable',
+			comparison: 'raw',
+			reason: cause,
+			unavailableCause,
+		};
+		outcomes.push(databaseOutcome);
+		reportIndexPredicateCanonicalizationFailure(databaseOutcome, options);
+	}
+	return outcomes;
 }
 
 function unavailableDefaultOutcomesForEnumCreation(
@@ -672,12 +1027,76 @@ function collectColumnDefaultTargets(
 		if (columns.length === 0) continue;
 		targets.push({
 			modelKey,
+			modelTable: table,
 			dbTable,
 			dbTableName,
 			columns,
 		});
 	}
 	return targets;
+}
+
+function collectDesiredIndexPredicateTargets(
+	desired: ModelIR,
+	database: ModelIR,
+	options: CanonicalizationOptions | undefined,
+): DesiredIndexPredicateTarget[] {
+	const naming = namingForOptions(options);
+	const targets: DesiredIndexPredicateTarget[] = [];
+	for (const [modelKey, modelTable] of desired.tables) {
+		const dbTableName = naming.toDatabase(modelTable.name);
+		const dbTable = database.tables.get(dbTableName);
+		for (const index of modelTable.indexes) {
+			const predicate = index.where;
+			if (predicate === undefined) continue;
+			targets.push({
+				modelKey,
+				modelTable,
+				...(dbTable === undefined ? {} : { dbTable }),
+				dbTableName,
+				index,
+				predicate,
+			});
+		}
+	}
+	return targets;
+}
+
+function collectDatabaseIndexPredicateTargets(
+	database: ModelIR,
+): DatabaseIndexPredicateTarget[] {
+	const targets: DatabaseIndexPredicateTarget[] = [];
+	for (const table of database.tables.values()) {
+		for (const index of table.indexes) {
+			const predicate = index.where;
+			if (predicate !== undefined) {
+				targets.push({ tableName: table.name, index, predicate });
+			}
+		}
+	}
+	return targets;
+}
+
+function hasIndexExpressions(index: IndexIR): boolean {
+	return (index.expressions?.length ?? 0) > 0;
+}
+
+function indexPredicateName(index: IndexIR): string {
+	return index.name ?? `<unnamed:${index.columns.join(',')}>`;
+}
+
+function setCanonicalIndexPredicate(
+	canonical: Map<string, Map<IndexIR, EngineCanonicalExpression>>,
+	table: string,
+	index: IndexIR,
+	predicate: EngineCanonicalExpression,
+): void {
+	let tablePredicates = canonical.get(table);
+	if (tablePredicates === undefined) {
+		tablePredicates = new Map();
+		canonical.set(table, tablePredicates);
+	}
+	tablePredicates.set(index, predicate);
 }
 
 async function canonicalizeColumnDefaults(
@@ -750,7 +1169,284 @@ async function canonicalizeColumnDefaults(
 		desired: cloneModelWithCanonicalDefaults(desired, desiredDefaults),
 		database: cloneModelWithCanonicalDefaults(dbModel, databaseDefaults),
 		defaultOutcomes,
+		indexPredicateOutcomes: [],
 	};
+}
+
+/**
+ * Canonicalise a partial-index predicate by letting PostgreSQL bind it against
+ * a rollback-only scratch relation and then reading `pg_index.indpred`.  The
+ * index key is a private btree marker: predicates may reference any table
+ * column, so using the authored key would accidentally make expression-keyed
+ * index support part of this column-keyed predicate-only boundary.
+ */
+async function canonicalizeIndexPredicates(
+	adapter: PgsqlCanonicalizationScope,
+	desired: ModelIR,
+	database: ModelIR,
+	desiredTargets: readonly DesiredIndexPredicateTarget[],
+	databaseTargets: readonly DatabaseIndexPredicateTarget[],
+	options: CanonicalizeExpressionSurfacesOptions | undefined,
+): Promise<
+	Pick<
+		CanonicalizedExpressionModels,
+		'desired' | 'database' | 'indexPredicateOutcomes'
+	>
+> {
+	const desiredPredicates = new Map<
+		string,
+		Map<IndexIR, EngineCanonicalExpression>
+	>();
+	const databasePredicates = new Map<
+		string,
+		Map<IndexIR, EngineCanonicalExpression>
+	>();
+	const outcomes: IndexPredicateCanonicalizationOutcome[] = [];
+	const names = createCheckCanonicalizationNameScope();
+	for (
+		let targetIndex = 0;
+		targetIndex < desiredTargets.length;
+		targetIndex++
+	) {
+		const target = desiredTargets[targetIndex]!;
+		const indexName = indexPredicateName(target.index);
+		try {
+			const canonical = await adapter.transaction(async (tx) => {
+				return canonicalizeIndexPredicate(tx, {
+					table: target.dbTableName,
+					predicate: target.predicate,
+					columns: target.modelTable.columns,
+					...(target.dbTable === undefined
+						? {}
+						: {
+								desiredTable: target.modelTable,
+								databaseTable: target.dbTable,
+							}),
+					tempPrefix: `${names.tempPrefix}_predicate_${targetIndex}`,
+					...(options === undefined ? {} : { options }),
+				});
+			});
+			setCanonicalIndexPredicate(
+				desiredPredicates,
+				target.modelKey,
+				target.index,
+				canonical,
+			);
+			outcomes.push({
+				side: 'desired',
+				table: target.dbTableName,
+				index: indexName,
+				status: 'canonicalised',
+			});
+		} catch (error) {
+			if (error instanceof IndexPredicateCanonicalizationUnavailableError) {
+				// A recognised scratch-setup failure invalidates every canonical
+				// substitution, so the live helper restarts from both raw models.
+				throw error;
+			}
+			if (!isSemanticExpressionRejection(error, 'create_partial_index'))
+				throw error;
+			const outcome: IndexPredicateCanonicalizationOutcome = {
+				side: 'desired',
+				table: target.dbTableName,
+				index: indexName,
+				status: 'rejected',
+				comparison: 'raw',
+				reason: error,
+			};
+			outcomes.push(outcome);
+			reportIndexPredicateCanonicalizationFailure(outcome, options);
+		}
+	}
+
+	if (outcomes.some((outcome) => outcome.status !== 'canonicalised')) {
+		// Never compare a partially canonical model after a semantic rejection.
+		// The database predicates are still considered: record that the desired
+		// rejection made their paired raw comparison unavailable to canonicalize.
+		const rejection = outcomes.find((outcome) => outcome.status === 'rejected');
+		if (rejection !== undefined && 'reason' in rejection) {
+			for (const target of databaseTargets) {
+				const outcome: IndexPredicateCanonicalizationOutcome = {
+					side: 'database',
+					table: target.tableName,
+					index: indexPredicateName(target.index),
+					status: 'rejected',
+					comparison: 'raw',
+					reason: rejection.reason,
+				};
+				outcomes.push(outcome);
+				reportIndexPredicateCanonicalizationFailure(outcome, options);
+			}
+		}
+		return { desired, database, indexPredicateOutcomes: outcomes };
+	}
+
+	for (const target of databaseTargets) {
+		const canonical = await deparseWithCatalogSearchPath(adapter, (tx) =>
+			deparseDatabaseIndexPredicate(
+				tx,
+				qualifiedRelationName(target.tableName, options),
+				indexPredicateName(target.index),
+			),
+		);
+		if (canonical === undefined) {
+			throw new Error('PostgreSQL did not return a canonical index predicate.');
+		}
+		setCanonicalIndexPredicate(
+			databasePredicates,
+			target.tableName,
+			target.index,
+			canonical,
+		);
+		outcomes.push({
+			side: 'database',
+			table: target.tableName,
+			index: indexPredicateName(target.index),
+			status: 'canonicalised',
+		});
+	}
+
+	return {
+		desired: cloneModelWithCanonicalIndexPredicates(desired, desiredPredicates),
+		database: cloneModelWithCanonicalIndexPredicates(
+			database,
+			databasePredicates,
+		),
+		indexPredicateOutcomes: outcomes,
+	};
+}
+
+/** Adapter-level predicate round trip shared by live comparison and evidence. */
+export async function canonicalizeIndexPredicate(
+	adapter: PgsqlCanonicalizationScope,
+	request: {
+		readonly table: string;
+		readonly predicate: string;
+		readonly columns?: readonly TableIR['columns'][number][];
+		/** Live columns used only to enrich incomplete desired column metadata. */
+		readonly databaseColumns?: readonly TableIR['columns'][number][];
+		/** Existing relation whose column context is faithful for evidence use. */
+		readonly likeTable?: string;
+		/** Desired and live tables used to project the migration's column changes. */
+		readonly desiredTable?: TableIR;
+		readonly databaseTable?: TableIR;
+		readonly tempPrefix: string;
+		readonly options?: CanonicalizationOptions;
+	},
+): Promise<EngineCanonicalExpression> {
+	const requestedPredicate = request.predicate;
+	if (requestedPredicate === undefined) {
+		throw new Error(
+			'Index predicate canonicalization requires a non-empty WHERE predicate.',
+		);
+	}
+	validateCheckExpression(
+		requestedPredicate,
+		'canonicalized index WHERE predicate',
+	);
+	await adapter.executeRaw("SET LOCAL standard_conforming_strings TO 'on'");
+	const tempTableName = `${request.tempPrefix}_table`;
+	const tempIndexName = `${request.tempPrefix}_index`;
+	const tempTable = quoteIdent(tempTableName, 'table');
+	if (
+		request.desiredTable !== undefined &&
+		request.databaseTable !== undefined
+	) {
+		try {
+			await createProjectedScratchRelation(adapter, {
+				tempTable,
+				desiredTable: request.desiredTable,
+				databaseTable: request.databaseTable,
+				liveRelation: qualifiedRelationName(request.table, request.options),
+				options: request.options,
+			});
+		} catch (error) {
+			throwIndexPredicateScratchRelationSetupFailure(error);
+		}
+	} else if (request.likeTable !== undefined) {
+		try {
+			await adapter.executeRaw(
+				`CREATE TEMP TABLE ${tempTable} (LIKE ${request.likeTable}) ON COMMIT DROP`,
+			);
+		} catch (error) {
+			throwIndexPredicateScratchRelationSetupFailure(error);
+		}
+	} else {
+		if (request.columns === undefined) {
+			throw new Error(
+				'Index predicate canonicalization requires columns or a live scratch relation.',
+			);
+		}
+		const naming = namingForOptions(request.options);
+		const dbColumnsByName = new Map(
+			(request.databaseColumns ?? []).map((column) => [column.name, column]),
+		);
+		const columns = request.columns.map((column) =>
+			generateColumnDef(
+				toScratchColumn(column, dbColumnsByName, naming),
+				naming,
+				request.options?.schemaName,
+			),
+		);
+		try {
+			await adapter.executeRaw(
+				`CREATE TEMP TABLE ${tempTable} (${columns.join(', ')}) ON COMMIT DROP`,
+			);
+		} catch (error) {
+			throwIndexPredicateScratchRelationSetupFailure(error);
+		}
+	}
+	try {
+		await adapter.executeRaw(
+			`CREATE INDEX ${quoteIdent(tempIndexName, 'alias')} ON ${tempTable} ` +
+				`((1)) WHERE ${requestedPredicate}`,
+		);
+	} catch (error) {
+		throw markExpressionRejection(error, 'create_partial_index');
+	}
+	const rows = await deparseWithCatalogSearchPath(adapter, (tx) =>
+		tx.executeRaw<{ predicate: string }>(
+			`SELECT pg_catalog.pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate
+			   FROM pg_catalog.pg_index ix
+			   JOIN pg_catalog.pg_class c ON c.oid = ix.indexrelid
+			  WHERE ix.indrelid = $1::pg_catalog.regclass AND c.relname = $2`,
+			[tempTableName, tempIndexName],
+		),
+	);
+	const predicate = rows[0]?.predicate;
+	if (typeof predicate !== 'string') {
+		throw new Error('PostgreSQL did not return a canonical index predicate.');
+	}
+	return engineCanonicalExpression(predicate);
+}
+
+async function deparseDatabaseIndexPredicate(
+	adapter: PgsqlCanonicalizationScope,
+	relationName: string,
+	indexName: string,
+): Promise<EngineCanonicalExpression | undefined> {
+	const rows = await adapter.executeRaw<{ predicate: string | null }>(
+		`SELECT pg_catalog.pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate
+		   FROM pg_catalog.pg_index ix
+		   JOIN pg_catalog.pg_class i ON i.oid = ix.indexrelid
+		  WHERE ix.indrelid = $1::pg_catalog.regclass AND i.relname = $2`,
+		[relationName, indexName],
+	);
+	return typeof rows[0]?.predicate === 'string'
+		? engineCanonicalExpression(rows[0].predicate)
+		: undefined;
+}
+
+/** Read an existing partial-index predicate under the canonical deparse path. */
+export async function deparseIndexPredicate(
+	adapter: PgsqlCanonicalizationScope,
+	relationName: string,
+	indexName: string,
+	_options?: CanonicalizationOptions,
+): Promise<EngineCanonicalExpression | undefined> {
+	return deparseWithCatalogSearchPath(adapter, (tx) =>
+		deparseDatabaseIndexPredicate(tx, relationName, indexName),
+	);
 }
 
 type CanonicalColumnDefault =
@@ -831,21 +1527,18 @@ async function canonicalizeColumnDefault(
 	const tempTable = quoteIdent(tempTableName, 'table');
 	try {
 		await adapter.transaction((tx) =>
-			tx.executeRaw(
-				`CREATE TEMP TABLE ${tempTable} (${generateScratchColumnDef(
-					column,
-					new Map([[databaseColumnName, dbColumn]]),
-					naming,
-					options?.schemaName,
-				)}) ON COMMIT DROP`,
-			),
+			createProjectedScratchRelation(tx, {
+				tempTable,
+				desiredTable: target.modelTable,
+				databaseTable: target.dbTable,
+				liveRelation: qualifiedRelationName(target.dbTableName, options),
+				options,
+			}),
 		);
 	} catch (error) {
 		if (
 			!options?.requireCanonicalization &&
-			(isCheckCanonicalizationTempTableUnavailableError(error) ||
-				pgErrorCode(error) === '42501' ||
-				pgErrorCode(error) === '42704')
+			isScratchRelationSetupUnavailableError(error)
 		) {
 			reportColumnDefaultCanonicalizationFailure(
 				target,
@@ -865,47 +1558,24 @@ async function canonicalizeColumnDefault(
 		}
 		throw error;
 	}
+	// Validation is local author-input validation, not a PostgreSQL refusal.
+	const formattedDefault = formatSqlDefault(
+		column.default,
+		'canonicalized column default',
+	);
 	try {
-		// Validation is local author-input validation, not a PostgreSQL refusal.
-		const formattedDefault = formatSqlDefault(
-			column.default,
-			'canonicalized column default',
+		await adapter.transaction((tx) =>
+			tx.executeRaw(
+				`ALTER TABLE ${tempTable} ALTER COLUMN ${quoteIdent(databaseColumnName, 'column')} SET DEFAULT ${formattedDefault}`,
+			),
 		);
-		try {
-			await adapter.transaction((tx) =>
-				tx.executeRaw(
-					`ALTER TABLE ${tempTable} ALTER COLUMN ${quoteIdent(databaseColumnName, 'column')} SET DEFAULT ${formattedDefault}`,
-				),
-			);
-		} catch (error) {
-			throw markExpressionRejection(error, 'alter_column_set_default');
-		}
 	} catch (error) {
-		if (
-			options?.requireCanonicalization ||
-			!isSemanticExpressionRejection(error, 'alter_column_set_default')
-		) {
-			throw error;
-		}
-		// Preserve the classified PostgreSQL result if best-effort cleanup also fails.
-		reportColumnDefaultCanonicalizationFailure(
-			target,
-			column,
-			error,
-			options,
-			'rejected',
-		);
-		return {
-			side: 'desired',
-			modelColumnName: column.name,
-			databaseColumnName,
-			status: 'rejected',
-			comparison: 'raw',
-			reason: error,
-		};
+		// An authored default that PostgreSQL rejects cannot run in the migration.
+		// Unlike scratch infrastructure, this is never safe to compare as raw text.
+		throw markExpressionRejection(error, 'alter_column_set_default');
 	}
 
-	const defaults = await deparseWithCatalogSearchPath(adapter, options, (tx) =>
+	const defaults = await deparseWithCatalogSearchPath(adapter, (tx) =>
 		deparseColumnDefaults(
 			tx,
 			tempTableName,
@@ -1034,7 +1704,7 @@ async function canonicalizeTableChecksBestEffort(
 ): Promise<CanonicalizedTableChecks | undefined> {
 	try {
 		return await adapter.transaction(async (tx) => {
-			await pinCanonicalizationSearchPath(tx, options);
+			await pinCanonicalizationSettings(tx);
 			return canonicalizeTableChecks(
 				tx,
 				target,
@@ -1073,28 +1743,29 @@ async function canonicalizeTableChecks(
 ): Promise<CanonicalizedTableChecks> {
 	const tempTableName = `${names.tempPrefix}_${targetIndex}`;
 	const tempTable = quoteIdent(tempTableName, 'table');
-	const naming = namingForOptions(options);
-	const targetSchema = options?.schemaName;
-	const dbColumnsByName = new Map(
-		(target.dbTable?.columns ?? []).map((column) => [column.name, column]),
-	);
-	const columnDefs = target.modelTable.columns.map((column) =>
-		generateScratchColumnDef(column, dbColumnsByName, naming, targetSchema),
-	);
 	const canonicalChecks = [...target.checks];
 
 	try {
-		await adapter.transaction((tx) =>
-			tx.executeRaw(
-				`CREATE TEMP TABLE ${tempTable} (${columnDefs.join(', ')}) ON COMMIT DROP`,
-			),
-		);
+		if (target.dbTable === undefined) {
+			await adapter.transaction((tx) =>
+				createDesiredScratchRelation(tx, tempTable, target.modelTable, options),
+			);
+		} else {
+			const databaseTable = target.dbTable;
+			await adapter.transaction((tx) =>
+				createProjectedScratchRelation(tx, {
+					tempTable,
+					desiredTable: target.modelTable,
+					databaseTable,
+					liveRelation: qualifiedRelationName(target.dbTableName, options),
+					options,
+				}),
+			);
+		}
 	} catch (error) {
 		if (
 			!options?.requireCanonicalization &&
-			(isCheckCanonicalizationTempTableUnavailableError(error) ||
-				pgErrorCode(error) === '42501' ||
-				pgErrorCode(error) === '42704')
+			isScratchRelationSetupUnavailableError(error)
 		) {
 			reportCanonicalizationFailure(target, error, options);
 			return { desired: canonicalChecks };
@@ -1141,7 +1812,7 @@ async function canonicalizeTableChecks(
 		return { desired: canonicalChecks };
 	}
 
-	const rows = await deparseWithCatalogSearchPath(adapter, options, (tx) =>
+	const rows = await deparseWithCatalogSearchPath(adapter, (tx) =>
 		tx.executeRaw<{
 			name: string;
 			expression: string;
@@ -1197,7 +1868,6 @@ async function canonicalizeTableChecks(
 	if (matchingDatabaseCheckNames.length > 0) {
 		const databaseExpressions = await deparseWithCatalogSearchPath(
 			adapter,
-			options,
 			(tx) =>
 				deparseDatabaseChecks(
 					tx,
@@ -1241,24 +1911,176 @@ async function deparseDatabaseChecks(
 	return expressions;
 }
 
-function generateScratchColumnDef(
+function toScratchColumn(
 	column: TableIR['columns'][number],
 	dbColumnsByName: ReadonlyMap<string, TableIR['columns'][number]>,
 	naming: NamingPlugin,
-	targetSchema: string | undefined,
-): string {
+): TableIR['columns'][number] {
 	const dbColumn = dbColumnsByName.get(naming.toDatabase(column.name));
-	const typeColumn =
+	const dbOriginalDbType = dbColumn?.originalDbType;
+	let typeColumn = column;
+	if (
 		!column.originalDbType?.trim() &&
-		dbColumn?.originalDbType?.trim() &&
+		dbOriginalDbType?.trim() &&
+		dbColumn !== undefined &&
 		column.type === dbColumn.type
-			? dbColumn
-			: column;
-	const scratchColumn =
-		typeColumn.autoIncrement === true
-			? { ...typeColumn, autoIncrement: false }
-			: typeColumn;
-	return `${quoteIdent(naming.toDatabase(column.name), 'column')} ${mapColumnType(scratchColumn, targetSchema)}`;
+	) {
+		const {
+			originalDbType: _originalDbType,
+			originalDbTypeSchema: _originalDbTypeSchema,
+			originalDbTypeSchemaScope: _originalDbTypeSchemaScope,
+			...desiredColumn
+		} = column;
+		// The database supplies only the precise type spelling the desired model
+		// lacks. The scratch relation must otherwise reproduce the shape the
+		// migration will produce.
+		typeColumn = {
+			...desiredColumn,
+			originalDbType: dbOriginalDbType,
+			...(dbColumn.originalDbTypeSchema === undefined
+				? {}
+				: { originalDbTypeSchema: dbColumn.originalDbTypeSchema }),
+			...(dbColumn.originalDbTypeSchemaScope === undefined
+				? {}
+				: {
+						originalDbTypeSchemaScope: dbColumn.originalDbTypeSchemaScope,
+					}),
+		};
+	}
+	const {
+		// Scratch relations must not allocate sequences.
+		autoIncrement: _autoIncrement,
+		// Scratch relations must not allocate identity sequences.
+		identity: _identity,
+		// Defaults can reference sequences or functions unavailable in scratch scope.
+		default: _default,
+		// A scratch-only index cannot change the meaning of an expression.
+		unique: _unique,
+		...scratchColumn
+	} = typeColumn;
+	return { ...scratchColumn, name: column.name };
+}
+
+/**
+ * Construct the final column context for an existing relation without asking
+ * PostgreSQL to re-resolve its untouched types.  `LIKE` keeps catalog type OIDs,
+ * collations, and NOT NULL exactly as they are on the live relation; the small
+ * projection below mirrors only column operations the migration will emit.
+ * Defaults are intentionally not copied and are never projected here: the
+ * expression currently under proof is the sole SET DEFAULT operation.
+ */
+async function createProjectedScratchRelation(
+	adapter: PgsqlCanonicalizationScope,
+	request: {
+		readonly tempTable: string;
+		readonly desiredTable: TableIR;
+		readonly databaseTable: TableIR;
+		readonly liveRelation: string;
+		readonly options: CanonicalizationOptions | undefined;
+	},
+): Promise<void> {
+	await adapter.executeRaw(
+		`CREATE TEMP TABLE ${request.tempTable} (LIKE ${request.liveRelation}) ON COMMIT DROP`,
+	);
+
+	const naming = namingForOptions(request.options);
+	const desiredByDatabaseName = new Map(
+		request.desiredTable.columns.map((column) => [
+			naming.toDatabase(column.name),
+			column,
+		]),
+	);
+	const databaseByName = new Map(
+		request.databaseTable.columns.map((column) => [column.name, column]),
+	);
+
+	for (const databaseColumn of request.databaseTable.columns) {
+		if (desiredByDatabaseName.has(databaseColumn.name)) continue;
+		await adapter.executeRaw(
+			`ALTER TABLE ${request.tempTable} DROP COLUMN ${quoteIdent(databaseColumn.name, 'column')}`,
+		);
+	}
+
+	for (const desiredColumn of request.desiredTable.columns) {
+		const databaseName = naming.toDatabase(desiredColumn.name);
+		const databaseColumn = databaseByName.get(databaseName);
+		if (databaseColumn === undefined) {
+			await adapter.executeRaw(
+				`ALTER TABLE ${request.tempTable} ADD COLUMN ${generateColumnDef(
+					toScratchColumn(desiredColumn, databaseByName, naming),
+					naming,
+					request.options?.schemaName,
+				)}`,
+			);
+			continue;
+		}
+
+		const typeChanged = scratchColumnTypeChanged(desiredColumn, databaseColumn);
+		const collationChanged =
+			(desiredColumn.collation ?? null) !== (databaseColumn.collation ?? null);
+		if (typeChanged || collationChanged) {
+			const collation = desiredColumn.collation
+				? ` COLLATE ${quoteCollation(desiredColumn.collation)}`
+				: '';
+			await adapter.executeRaw(
+				`ALTER TABLE ${request.tempTable} ALTER COLUMN ${quoteIdent(databaseName, 'column')} TYPE ${mapColumnType(desiredColumn, request.options?.schemaName)}${collation}`,
+			);
+		}
+		if (desiredColumn.nullable !== databaseColumn.nullable) {
+			await adapter.executeRaw(
+				`ALTER TABLE ${request.tempTable} ALTER COLUMN ${quoteIdent(databaseName, 'column')} ${desiredColumn.nullable ? 'DROP NOT NULL' : 'SET NOT NULL'}`,
+			);
+		}
+	}
+}
+
+/** Desired-shape construction remains necessary only when no live relation exists. */
+async function createDesiredScratchRelation(
+	adapter: PgsqlCanonicalizationScope,
+	tempTable: string,
+	table: TableIR,
+	options: CanonicalizationOptions | undefined,
+): Promise<void> {
+	const naming = namingForOptions(options);
+	const columns = table.columns.map((column) =>
+		generateColumnDef(
+			toScratchColumn(column, new Map(), naming),
+			naming,
+			options?.schemaName,
+		),
+	);
+	await adapter.executeRaw(
+		`CREATE TEMP TABLE ${tempTable} (${columns.join(', ')}) ON COMMIT DROP`,
+	);
+}
+
+function scratchColumnTypeChanged(
+	desired: TableIR['columns'][number],
+	database: TableIR['columns'][number],
+): boolean {
+	const desiredIdentity = columnDbTypeSchemaIdentity(desired);
+	const databaseIdentity = columnDbTypeSchemaIdentity(database);
+	if (
+		desired.originalDbType !== undefined &&
+		database.originalDbType !== undefined
+	) {
+		return (
+			!dbTypesEqual(
+				stripDbTypeSchema(desired.originalDbType),
+				stripDbTypeSchema(database.originalDbType),
+			) ||
+			(desiredIdentity !== undefined &&
+				databaseIdentity !== undefined &&
+				desiredIdentity !== databaseIdentity)
+		);
+	}
+	return !scratchTypesEquivalent(desired.type, database.type);
+}
+
+function scratchTypesEquivalent(desired: string, database: string): boolean {
+	const normalize = (type: string): string =>
+		type === 'timestamp' || type === 'datetime' ? 'timestamptz' : type;
+	return normalize(desired) === normalize(database);
 }
 
 /**
@@ -1281,7 +2103,7 @@ async function createMissingDesiredEnumTypes(
 		tables: [],
 		schemaName: options?.schemaName,
 		naming: namingForOptions(options),
-		caps: undefined,
+		caps: options?.dialectCapabilities,
 		fkAutoIndex: false,
 		includeDropStatements: false,
 	};
@@ -1289,7 +2111,7 @@ async function createMissingDesiredEnumTypes(
 		try {
 			await adapter.transaction((tx) => tx.executeRaw(statement));
 		} catch (error) {
-			return error;
+			return new PlannedSchemaStagingError('CREATE TYPE', error);
 		}
 	}
 	return undefined;
@@ -1306,21 +2128,70 @@ function missingDesiredEnums(
 	return missing;
 }
 
-async function pinCanonicalizationSearchPath(
+/**
+ * Install desired sequences that phase 5 of the migration will create before
+ * phase-8 expressions are bound. This is rollback-only staging: extensions,
+ * destructive operations, and enum-value additions are deliberately excluded.
+ * The real qualified name is required for a qualified reference to resolve; it
+ * takes a catalogue lock for this scope's duration, so concurrent planners may
+ * time out while staging the same absent sequence.
+ */
+async function createMissingDesiredSequences(
 	adapter: PgsqlCanonicalizationScope,
+	desired: ModelIR,
+	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
-): Promise<void> {
-	const schemaName = options?.schemaName ?? 'public';
-	await adapter.executeRaw(
-		`SET LOCAL search_path TO pg_catalog, ${quoteIdent(schemaName, 'schema')}`,
+): Promise<unknown | undefined> {
+	const missingSequences = missingDesiredSequences(desired, dbModel);
+	if (missingSequences.size === 0) return undefined;
+	const sequenceModel = new ModelIRImpl(
+		new Map(),
+		new Map(),
+		undefined,
+		undefined,
+		missingSequences,
 	);
+	const context: PhaseContext = {
+		schema: sequenceModel,
+		tables: [],
+		schemaName: options?.schemaName,
+		naming: namingForOptions(options),
+		caps: options?.dialectCapabilities,
+		fkAutoIndex: false,
+		includeDropStatements: false,
+	};
+	for (const statement of generateSequencesPhase(context)) {
+		try {
+			await adapter.transaction((tx) => tx.executeRaw(statement));
+		} catch (error) {
+			return new PlannedSchemaStagingError('CREATE SEQUENCE', error);
+		}
+	}
+	return undefined;
+}
+
+function missingDesiredSequences(
+	desired: ModelIR,
+	dbModel: ModelIR,
+): Map<string, SequenceIR> {
+	const missing = new Map<string, SequenceIR>();
+	for (const [name, sequence] of desired.sequences ?? []) {
+		if (!dbModel.sequences?.has(name)) missing.set(name, sequence);
+	}
+	return missing;
+}
+
+async function pinCanonicalizationSettings(
+	adapter: PgsqlCanonicalizationScope,
+): Promise<void> {
+	await adapter.executeRaw("SET LOCAL standard_conforming_strings TO 'on'");
 }
 
 /**
  * PostgreSQL's deparsers omit qualification for objects visible through the
  * current search path. Canonical expressions are later emitted by a different
- * session, so render them under `pg_catalog` only and restore the resolution
- * path before any further scratch DDL.
+ * session, so render them under `pg_catalog` only and restore the session's
+ * exact setting before any further scratch DDL.
  *
  * Temporary relations remain addressable while this path is active: PostgreSQL
  * searches its temporary schema first for relation lookup even when `pg_temp`
@@ -1328,17 +2199,23 @@ async function pinCanonicalizationSearchPath(
  */
 async function deparseWithCatalogSearchPath<T>(
 	adapter: PgsqlCanonicalizationScope,
-	options: CanonicalizationOptions | undefined,
 	deparse: (adapter: PgsqlCanonicalizationScope) => Promise<T>,
 ): Promise<T> {
+	const rows = await adapter.executeRaw<{ search_path: string }>(
+		"SELECT pg_catalog.current_setting('search_path') AS search_path",
+	);
+	const searchPath = rows[0]?.search_path;
+	if (typeof searchPath !== 'string') {
+		throw new Error('PostgreSQL did not return the session search path.');
+	}
 	await adapter.executeRaw('SET LOCAL search_path TO pg_catalog');
 	try {
 		const result = await adapter.transaction(deparse);
-		await pinCanonicalizationSearchPath(adapter, options);
+		await restoreSearchPath(adapter, searchPath);
 		return result;
 	} catch (error) {
 		try {
-			await pinCanonicalizationSearchPath(adapter, options);
+			await restoreSearchPath(adapter, searchPath);
 		} catch (restoreError) {
 			throw new AggregateError(
 				[error, restoreError],
@@ -1347,6 +2224,16 @@ async function deparseWithCatalogSearchPath<T>(
 		}
 		throw error;
 	}
+}
+
+async function restoreSearchPath(
+	adapter: PgsqlCanonicalizationScope,
+	searchPath: string,
+): Promise<void> {
+	await adapter.executeRaw(
+		"SELECT pg_catalog.set_config('search_path', $1, true)",
+		[searchPath],
+	);
 }
 
 function qualifiedRelationName(
@@ -1474,8 +2361,48 @@ function reportUnavailableColumnDefault(
 	}
 }
 
+function reportIndexPredicateCanonicalizationFailure(
+	outcome: Extract<
+		IndexPredicateCanonicalizationOutcome,
+		{ readonly status: 'unavailable' | 'rejected' }
+	>,
+	options: CanonicalizeExpressionSurfacesOptions | undefined,
+): void {
+	const refused = options?.requireCanonicalization === true;
+	const message =
+		'Could not canonicalize one partial-index predicate with PostgreSQL; ' +
+		(outcome.status === 'rejected'
+			? 'the live migration is refused. '
+			: refused
+				? 'strict canonicalization refused raw comparison. '
+				: 'the live comparison restarts from both raw models. ') +
+		'Inspect the warning table and name fields for its identity. ' +
+		`Reason: ${errorMessage(outcome.reason)}`;
+	const warning: IndexPredicateCanonicalizationWarning = {
+		table: outcome.table,
+		kind: 'index_predicate',
+		name: outcome.index,
+		message,
+		cause: outcome.reason,
+		outcome: refused ? 'refused' : outcome.status,
+		comparison: outcome.comparison,
+		side: outcome.side,
+	};
+	if (options?.onWarning) {
+		options.onWarning(warning);
+	} else {
+		console.warn(`Warning: ${message}`);
+	}
+}
+
 function errorMessage(error: unknown): string {
 	if (error instanceof TaggedExpressionRejection) {
+		return errorMessage(error.cause);
+	}
+	if (error instanceof IndexPredicateCanonicalizationUnavailableError) {
+		return errorMessage(error.cause);
+	}
+	if (error instanceof PlannedSchemaStagingError) {
 		return errorMessage(error.cause);
 	}
 	return escapeDiagnosticText(
@@ -1568,7 +2495,8 @@ function isSemanticExpressionRejection(
 				!isOperationalSqlState(code) &&
 				(code.startsWith('22') ||
 					code.startsWith('23') ||
-					(code.startsWith('42') && code !== '42501') ||
+					(code.startsWith('42') &&
+						(code !== '42501' || statement === 'create_partial_index')) ||
 					code === '0A000')
 			);
 		})
@@ -1699,6 +2627,41 @@ function cloneModelWithCanonicalDefaults(
 		);
 	}
 
+	return new ModelIRImpl(
+		tables,
+		new Map(model.relations),
+		model.enums === undefined ? undefined : new Map(model.enums),
+		model.extensions,
+		model.sequences === undefined ? undefined : new Map(model.sequences),
+		model.externalTables,
+	);
+}
+
+function cloneModelWithCanonicalIndexPredicates(
+	model: ModelIR,
+	canonicalPredicatesByTable: ReadonlyMap<
+		string,
+		ReadonlyMap<IndexIR, EngineCanonicalExpression>
+	>,
+): ModelIR {
+	const tables = new Map<string, TableIR>();
+	for (const [key, table] of model.tables) {
+		const predicates = canonicalPredicatesByTable.get(key);
+		tables.set(
+			key,
+			predicates === undefined
+				? table
+				: {
+						...table,
+						indexes: table.indexes.map((index) => {
+							const predicate = predicates.get(index);
+							return predicate === undefined
+								? index
+								: markEngineCanonicalIndex({ ...index, where: predicate });
+						}),
+					},
+		);
+	}
 	return new ModelIRImpl(
 		tables,
 		new Map(model.relations),

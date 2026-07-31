@@ -1,5 +1,11 @@
-import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
+import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import type {
+	ColumnIR,
+	EnumIR,
+	ModelIR,
+	SequenceIR,
+	TableIR,
+} from '@dbsp/types';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { generateMigrationSQL } from './ddl/migration-sql.js';
@@ -11,9 +17,11 @@ import {
 	canonicalizeCheckConstraints,
 	canonicalizeExpressionSurfaces,
 	fallbackToRawExpressionComparison,
+	isExpressionCanonicalizationInfrastructureUnavailableError,
 } from './expression-canonicalizer.js';
 import {
 	isEngineCanonicalCheck,
+	isEngineCanonicalSqlDefault,
 	markEngineCanonicalCheck,
 } from './expression-provenance.js';
 import { PgsqlAdapter } from './pgsql-adapter.js';
@@ -39,6 +47,8 @@ function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
 function makeModel(
 	tables: readonly TableIR[],
 	enums?: readonly EnumIR[],
+	extensions?: readonly string[],
+	sequences?: readonly SequenceIR[],
 ): ModelIR {
 	return new ModelIRImpl(
 		new Map(tables.map((table) => [table.name, table])),
@@ -46,6 +56,10 @@ function makeModel(
 		enums === undefined
 			? undefined
 			: new Map(enums.map((enumDef) => [enumDef.name, enumDef])),
+		extensions,
+		sequences === undefined
+			? undefined
+			: new Map(sequences.map((sequence) => [sequence.name, sequence])),
 	);
 }
 
@@ -94,6 +108,13 @@ class FakePgClient {
 	readonly canonicalExpressions = new Map<string, string>();
 	readonly canonicalDatabaseExpressions = new Map<string, string>();
 	readonly canonicalDefaults = new Map<string, string>();
+	readonly canonicalPredicates = new Map<string, string>();
+	canonicalPredicateFallback: string | undefined;
+	canonicalPredicateFromCreateIndex = false;
+	requiredPredicateSearchPathSchema: string | undefined;
+	requiredScratchTypeSearchPathSchema: string | undefined;
+	shadowedPredicateFunctionSchemas: readonly string[] | undefined;
+	standardConformingStrings: 'on' | 'off' = 'on';
 	readonly omittedDefaultSources = new Set<string>();
 	readonly searchPathQueries: string[] = [];
 	searchPath = '"$user", public';
@@ -116,6 +137,17 @@ class FakePgClient {
 		if (normalized.startsWith('SET LOCAL search_path TO ')) {
 			this.searchPathQueries.push(normalized);
 			this.searchPath = normalized.replace(/^SET LOCAL search_path TO /u, '');
+		} else if (normalized === "SET LOCAL standard_conforming_strings TO 'on'") {
+			this.standardConformingStrings = 'on';
+		} else if (
+			normalized ===
+			"SELECT pg_catalog.current_setting('search_path') AS search_path"
+		) {
+			return fakeQueryResult([{ search_path: this.searchPath }]);
+		} else if (
+			normalized === "SELECT pg_catalog.set_config('search_path', $1, true)"
+		) {
+			this.searchPath = String(parameters?.[0]);
 		} else if (!normalized.startsWith('RELEASE SAVEPOINT ')) {
 			this.queries.push({ sql, parameters });
 		}
@@ -142,6 +174,17 @@ class FakePgClient {
 
 		const createMatch = /^CREATE TEMP TABLE "([^"]+)"/u.exec(normalized);
 		if (createMatch) {
+			if (
+				this.requiredScratchTypeSearchPathSchema !== undefined &&
+				normalized.includes('tenant_status') &&
+				!this.searchPath.includes(
+					`"${this.requiredScratchTypeSearchPathSchema}"`,
+				)
+			) {
+				throw Object.assign(new Error('type does not exist'), {
+					code: '42704',
+				});
+			}
 			const tempTableName = createMatch[1]!;
 			if (
 				this.preexistingTempTables.has(tempTableName) ||
@@ -150,6 +193,43 @@ class FakePgClient {
 				throw new Error(`relation "${tempTableName}" already exists`);
 			}
 			this.tempTables.add(tempTableName);
+		}
+		const createIndexMatch =
+			/^CREATE INDEX "([^"]+)" ON "([^"]+)" \(\(1\)\) WHERE (.+)$/u.exec(
+				normalized,
+			);
+		if (
+			createIndexMatch &&
+			this.requiredPredicateSearchPathSchema !== undefined &&
+			!this.searchPath.includes(`"${this.requiredPredicateSearchPathSchema}"`)
+		) {
+			throw Object.assign(new Error('function does not exist'), {
+				code: '42883',
+			});
+		}
+		if (createIndexMatch && this.canonicalPredicateFromCreateIndex) {
+			this.canonicalPredicates.set(
+				`${createIndexMatch[2]}.${createIndexMatch[1]}`,
+				this.standardConformingStrings === 'on'
+					? `canonical(${createIndexMatch[3]})`
+					: `session-dependent(${createIndexMatch[3]})`,
+			);
+		}
+		if (
+			createIndexMatch &&
+			this.shadowedPredicateFunctionSchemas !== undefined
+		) {
+			const resolvedSchema = [...this.shadowedPredicateFunctionSchemas].sort(
+				(left, right) =>
+					this.searchPath.indexOf(`"${left}"`) -
+					this.searchPath.indexOf(`"${right}"`),
+			)[0];
+			if (resolvedSchema !== undefined) {
+				this.canonicalPredicates.set(
+					`${createIndexMatch[2]}.${createIndexMatch[1]}`,
+					`"${resolvedSchema}".is_active(state)`,
+				);
+			}
 		}
 
 		if (normalized === 'ROLLBACK') {
@@ -231,6 +311,20 @@ class FakePgClient {
 					];
 				}),
 			);
+		}
+
+		if (normalized.includes('FROM pg_catalog.pg_index ix')) {
+			const relationName = String(parameters?.[0]);
+			const indexName = String(parameters?.[1]);
+			return fakeQueryResult([
+				{
+					predicate:
+						this.canonicalPredicates.get(`${relationName}.${indexName}`) ??
+						this.canonicalPredicates.get(indexName) ??
+						this.canonicalPredicateFallback ??
+						"((state)::text = 'active'::text)",
+				},
+			]);
 		}
 
 		const dropMatch = /^DROP TABLE "([^"]+)"$/u.exec(normalized);
@@ -427,7 +521,29 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(isEngineCanonicalCheck(check)).toBe(true);
 	});
 
-	it('pins a direct pool-backed call before its scratch DDL', async () => {
+	it('does not authenticate Proxy-forged CHECK or default provenance', () => {
+		const forge = <T extends object>(value: T) =>
+			new Proxy(value, {
+				get(target, property, receiver) {
+					return typeof property === 'symbol'
+						? property
+						: Reflect.get(target, property, receiver);
+				},
+			});
+		const check = forge({
+			name: 'jobs_status_check',
+			expression: "CHECK (status = U&'\\0441')",
+		});
+		const defaultValue = forge({ sql: "U&'\\0441'" });
+
+		expect(isEngineCanonicalCheck(check)).toBe(false);
+		expect(isEngineCanonicalSqlDefault(defaultValue)).toBe(false);
+		expect(() => formatSqlDefault(defaultValue)).toThrow(
+			/Unsafe SQL expression in column default/,
+		);
+	});
+
+	it('keeps a direct pool-backed call on its session path before scratch DDL', async () => {
 		const client = new FakePgClient();
 		client.canonicalExpressions.set(
 			'_dbsp_check_canon_0_0',
@@ -455,15 +571,18 @@ describe('canonicalizeCheckConstraints', () => {
 			{ name: 'jobs_age_check', expression: 'CHECK ((tenant_fn(age)))' },
 		]);
 		const begin = client.statements.indexOf('BEGIN');
-		const pin = client.statements.indexOf(
-			'SET LOCAL search_path TO pg_catalog, "tenant_one"',
+		const settings = client.statements.indexOf(
+			"SET LOCAL standard_conforming_strings TO 'on'",
 		);
 		const create = client.statements.findIndex((statement) =>
 			statement.startsWith('CREATE TEMP TABLE '),
 		);
 		expect(begin).toBeGreaterThanOrEqual(0);
-		expect(pin).toBeGreaterThan(begin);
-		expect(create).toBeGreaterThan(pin);
+		expect(settings).toBeGreaterThan(begin);
+		expect(create).toBeGreaterThan(settings);
+		expect(client.searchPathQueries).not.toContain(
+			'SET LOCAL search_path TO pg_catalog, "tenant_one"',
+		);
 	});
 
 	it('batches CHECK canonicalization one desired-shaped temp table per target table and rolls it back', async () => {
@@ -529,7 +648,9 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER, "status" VARCHAR(255)) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."users") ON COMMIT DROP',
+			'ALTER TABLE "_dbsp_check_canon_0" ADD COLUMN "age" INTEGER NOT NULL',
+			'ALTER TABLE "_dbsp_check_canon_0" ADD COLUMN "status" VARCHAR(255) NOT NULL',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
 			'SAVEPOINT dbsp_savepoint',
@@ -538,7 +659,8 @@ describe('canonicalizeCheckConstraints', () => {
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_1" ("id" INTEGER, "price" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_1" (LIKE "public"."products") ON COMMIT DROP',
+			'ALTER TABLE "_dbsp_check_canon_1" ADD COLUMN "price" INTEGER NOT NULL',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_1" ADD CONSTRAINT "_dbsp_check_canon_1_0" CHECK (price > 0)',
 			'SAVEPOINT dbsp_savepoint',
@@ -604,7 +726,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."users") ON COMMIT DROP',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
 			'SAVEPOINT dbsp_savepoint',
@@ -740,7 +862,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."jobs") ON COMMIT DROP',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
 			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
@@ -891,7 +1013,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."jobs") ON COMMIT DROP',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
 			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
@@ -930,7 +1052,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "amount" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER NOT NULL, "amount" INTEGER NOT NULL) ON COMMIT DROP',
 			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (amount > 0)',
 			'SAVEPOINT dbsp_savepoint',
@@ -943,7 +1065,7 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(client.tempTables.size).toBe(0);
 	});
 
-	it('types an existing desired column from the database column when originalDbType is absent', async () => {
+	it('keeps an existing column as PostgreSQL typed it when desired metadata is less precise', async () => {
 		const client = new FakePgClient();
 		client.canonicalExpressions.set(
 			'_dbsp_check_canon_0_0',
@@ -992,7 +1114,7 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toContain(
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" "tenant_1".status) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "tenant_1"."jobs") ON COMMIT DROP',
 		);
 	});
 
@@ -1049,7 +1171,7 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toContain(
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" "tenantOne".status) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "tenantOne"."jobs") ON COMMIT DROP',
 		);
 		expect(
 			client.queries.some((q) => q.sql.includes('"tenant_one".status')),
@@ -1129,7 +1251,12 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toContain(
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "tenant_1"."jobs") ON COMMIT DROP',
+		);
+		expect(
+			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
+		).toContain(
+			'ALTER TABLE "_dbsp_check_canon_0" ALTER COLUMN "state" TYPE INTEGER',
 		);
 	});
 
@@ -1140,22 +1267,24 @@ describe('canonicalizeCheckConstraints', () => {
 				default: { sql: "nextval('missing_subject_seq'::regclass)" },
 			}),
 			forbiddenClause: /DEFAULT/u,
-			expectedType: 'INTEGER',
+		},
+		{
+			label: 'auto increment',
+			column: makeCol('subject', { autoIncrement: true }),
+			forbiddenClause: /SERIAL/u,
 		},
 		{
 			label: 'UNIQUE',
 			column: makeCol('subject', { type: 'string', unique: true }),
 			forbiddenClause: /UNIQUE/u,
-			expectedType: 'VARCHAR(255)',
 		},
 		{
 			label: 'identity',
 			column: makeCol('subject', { identity: 'always' }),
 			forbiddenClause: /GENERATED/u,
-			expectedType: 'INTEGER',
 		},
 	] as const) {
-		it(`canonicalizes a CHECK when the checked column has ${testCase.label} using only name and type`, async () => {
+		it(`removes ${testCase.label} but keeps NOT NULL on a scratch CHECK column`, async () => {
 			const client = new FakePgClient();
 			client.failOnSql = testCase.forbiddenClause;
 			client.canonicalExpressions.set(
@@ -1163,7 +1292,7 @@ describe('canonicalizeCheckConstraints', () => {
 				'CHECK ((subject > 0))',
 			);
 			const pool = new FakePgPool(client);
-			const tableName = `scratch_${testCase.label.toLowerCase()}`;
+			const tableName = `scratch_${testCase.label.toLowerCase().replace(/ /gu, '_')}`;
 			const check = {
 				name: `${tableName}_subject_check`,
 				expression: 'subject > 0',
@@ -1193,7 +1322,7 @@ describe('canonicalizeCheckConstraints', () => {
 			expect(
 				client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 			).toContain(
-				`CREATE TEMP TABLE "_dbsp_check_canon_0" ("subject" ${testCase.expectedType}) ON COMMIT DROP`,
+				`CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."${tableName}") ON COMMIT DROP`,
 			);
 			expect(canonical.tables.get(tableName)?.checkConstraints).toEqual([
 				dbCheck,
@@ -1242,7 +1371,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."users") ON COMMIT DROP',
 			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
@@ -1250,7 +1379,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 	it('falls back only for CHECKs whose scratch column type is unavailable', async () => {
 		const client = new FakePgClient();
-		client.failOnSql = /CREATE TEMP TABLE .*"status" missing_status/u;
+		client.failOnSql = /ADD COLUMN "status" missing_status/u;
 		client.failOnSqlError = Object.assign(new Error('type does not exist'), {
 			code: '42704',
 		});
@@ -1361,7 +1490,7 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_savepoint',
 			'SAVEPOINT dbsp_savepoint',
-			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" (LIKE "public"."users") ON COMMIT DROP',
 			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
 			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
@@ -1694,7 +1823,7 @@ describe('canonicalizeCheckConstraints', () => {
 		).toBe(false);
 	});
 
-	it('rolls back the scratch relation on a semantic default fallback', async () => {
+	it('rolls back the scratch relation when PostgreSQL rejects a default', async () => {
 		const client = new FakePgClient();
 		client.failOnSql = /SET DEFAULT missing_default\(\)/u;
 		client.failOnSqlError = Object.assign(new Error('undefined function'), {
@@ -1715,10 +1844,887 @@ describe('canonicalizeCheckConstraints', () => {
 				columns: [makeCol('id'), makeCol('state', { default: 0 })],
 			}),
 		]);
+		await expect(
+			adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, database),
+			),
+		).rejects.toMatchObject({ name: ColumnDefaultCanonicalizationError.name });
+		expect(client.tempTables).toEqual(new Set());
+	});
+});
+
+describe('canonicalizeExpressionSurfaces partial-index predicates', () => {
+	it('uses the migration session function lookup order and reconstructs the desired shape for an existing table', async () => {
+		const client = new FakePgClient();
+		client.searchPath = '"trusted_extensions", "tenant", public';
+		client.shadowedPredicateFunctionSchemas = ['trusted_extensions', 'tenant'];
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: 'is_active(state)',
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				schemaName: 'tenant',
+			}),
+		);
+
+		expect(client.searchPathQueries).toEqual([
+			'SET LOCAL search_path TO pg_catalog',
+		]);
+		expect(
+			client.statements.find((statement) =>
+				statement.startsWith('CREATE TEMP TABLE '),
+			),
+		).toContain('(LIKE "tenant"."jobs") ON COMMIT DROP');
+		expect(canonical.desired.tables.get('jobs')?.indexes[0]?.where).toBe(
+			'"trusted_extensions".is_active(state)',
+		);
+	});
+
+	it('uses the migration session path for a predicate whose bare column type resolves only there', async () => {
+		const client = new FakePgClient();
+		client.searchPath = '"shared_types", public';
+		client.requiredScratchTypeSearchPathSchema = 'shared_types';
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('state', {
+						type: 'string',
+						originalDbType: 'tenant_status',
+					}),
+				],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+					},
+				],
+			}),
+		]);
+		const database = makeModel([makeTable({ name: 'jobs' })]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				schemaName: 'tenant',
+			}),
+		);
+
+		expect(canonical.indexPredicateOutcomes).toContainEqual(
+			expect.objectContaining({
+				side: 'desired',
+				index: 'idx_jobs_active',
+				status: 'canonicalised',
+			}),
+		);
+		expect(
+			client.statements.find((statement) =>
+				statement.startsWith('CREATE TEMP TABLE '),
+			),
+		).toContain('(LIKE "tenant"."jobs") ON COMMIT DROP');
+		expect(client.statements).toContainEqual(
+			expect.stringMatching(/ADD COLUMN "state" tenant_status NOT NULL$/u),
+		);
+		expect(client.searchPathQueries).toEqual([
+			'SET LOCAL search_path TO pg_catalog',
+		]);
+		expect(client.searchPath).toBe('"shared_types", public');
+	});
+
+	it('keeps an anonymous 42704 as scratch infrastructure failure', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /ADD COLUMN "missing" missing_type/u;
+		client.failOnSqlError = Object.assign(
+			new Error('type "missing_type" does not exist'),
+			{ code: '42704' },
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('first', {
+						type: 'string',
+						originalDbType: 'unrelated_type',
+					}),
+					makeCol('missing', {
+						type: 'string',
+						originalDbType: 'missing_type',
+					}),
+				],
+				indexes: [
+					{ name: 'idx_jobs_missing', columns: ['first'], where: 'true' },
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('first', {
+						type: 'string',
+						originalDbType: 'unrelated_type',
+					}),
+				],
+			}),
+		]);
+
+		let error: unknown;
+		try {
+			await adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, database),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+
+		expect(
+			isExpressionCanonicalizationInfrastructureUnavailableError(error),
+		).toBe(true);
+		expect(error).toMatchObject({
+			message:
+				'PostgreSQL could not build the scratch relation for a partial-index predicate. Reason: type "missing_type" does not exist',
+		});
+		expect((error as Error).message).not.toContain('unrelated_type');
+	});
+
+	it('qualifies a planned predicate column type from its structural schema identity', async () => {
+		const client = new FakePgClient();
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('state', {
+						type: 'string',
+						originalDbType: 'tenant_status',
+						originalDbTypeSchema: 'tenant',
+						originalDbTypeSchemaScope: 'target',
+					}),
+				],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+					},
+				],
+			}),
+		]);
+
+		await adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(
+				scratch,
+				desired,
+				makeModel([makeTable({ name: 'jobs' })]),
+				{ schemaName: 'tenant' },
+			),
+		);
+		expect(client.statements).toContainEqual(
+			expect.stringMatching(
+				/ADD COLUMN "state" "tenant"\.tenant_status NOT NULL$/u,
+			),
+		);
+	});
+
+	it('takes only type spelling from the database when a collation change has a predicate', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicateFallback = "(value ~~ 'foo%'::text)";
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('value', {
+						type: 'string',
+						collation: 'nondeterministic_icu',
+					}),
+				],
+				indexes: [
+					{
+						name: 'idx_jobs_value_prefix',
+						columns: ['id'],
+						where: "value LIKE 'foo%'",
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('value', {
+						type: 'string',
+						nullable: true,
+						collation: 'C',
+						originalDbType: 'text',
+					}),
+				],
+			}),
+		]);
+
 		await adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
 			canonicalizeExpressionSurfaces(scratch, desired, database),
 		);
-		expect(client.tempTables).toEqual(new Set());
+
+		// PG 18 accepts pattern matching under nondeterministic collations, so no live rejection can witness this.
+		expect(
+			client.statements.find((statement) =>
+				statement.startsWith('CREATE TEMP TABLE '),
+			),
+		).toContain('(LIKE "public"."jobs") ON COMMIT DROP');
+		expect(client.statements).toContainEqual(
+			expect.stringMatching(
+				/ALTER COLUMN "value" TYPE VARCHAR\(255\) COLLATE "nondeterministic_icu"$/u,
+			),
+		);
+	});
+
+	it('rejects a predicate needing a desired-only extension without installing it', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /^CREATE INDEX/u;
+		client.failOnSqlError = Object.assign(
+			new Error('function does not exist'),
+			{
+				code: '42883',
+			},
+		);
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [makeCol('id'), makeCol('payload', { type: 'string' })],
+					indexes: [
+						{
+							name: 'idx_jobs_payload_digest',
+							columns: ['id'],
+							where: "digest(payload, 'sha256') IS NOT NULL",
+						},
+					],
+				}),
+			],
+			undefined,
+			['pgcrypto'],
+		);
+		const database = makeModel([makeTable({ name: 'jobs' })]);
+		const onWarning = vi.fn();
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				schemaName: 'tenant',
+				onWarning,
+			}),
+		);
+
+		expect(canonical.indexPredicateOutcomes).toContainEqual(
+			expect.objectContaining({
+				side: 'desired',
+				index: 'idx_jobs_payload_digest',
+				status: 'rejected',
+				comparison: 'raw',
+			}),
+		);
+		expect(onWarning).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: 'index_predicate',
+				outcome: 'rejected',
+			}),
+		);
+		expect(client.statements).not.toContainEqual(
+			expect.stringMatching(/^CREATE EXTENSION/u),
+		);
+		expect(client.searchPathQueries).toEqual([]);
+	});
+
+	it('records database predicates when a desired predicate is rejected', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /^CREATE INDEX/u;
+		client.failOnSqlError = Object.assign(
+			new Error('function does not exist'),
+			{ code: '42883' },
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{
+						name: 'idx_jobs_desired',
+						columns: ['id'],
+						where: 'missing_predicate(id)',
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{
+						name: 'idx_jobs_live',
+						columns: ['id'],
+						where: 'state = 1',
+					},
+				],
+			}),
+		]);
+		const onWarning = vi.fn();
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, { onWarning }),
+		);
+
+		expect(canonical.indexPredicateOutcomes).toEqual([
+			expect.objectContaining({
+				side: 'desired',
+				index: 'idx_jobs_desired',
+				status: 'rejected',
+				comparison: 'raw',
+			}),
+			expect.objectContaining({
+				side: 'database',
+				index: 'idx_jobs_live',
+				status: 'rejected',
+				comparison: 'raw',
+			}),
+		]);
+		expect(onWarning).toHaveBeenCalledTimes(2);
+		expect(onWarning).toHaveBeenCalledWith(
+			expect.objectContaining({ side: 'database', name: 'idx_jobs_live' }),
+		);
+	});
+
+	it('canonicalizes duplicate structural indexes independently without overwriting either predicate', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicateFromCreateIndex = true;
+		client.canonicalPredicates.set(
+			'idx_jobs_active',
+			"canonical(state = 'active')",
+		);
+		client.canonicalPredicates.set(
+			'idx_jobs_inactive',
+			"canonical(state = 'inactive')",
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+					},
+					{
+						name: 'idx_jobs_inactive',
+						columns: ['id'],
+						where: "state = 'inactive'",
+					},
+				],
+			}),
+		]);
+		// Reverse the physical order: matching by an unconsumed structural key
+		// alone would pair both desired indexes with this first database index.
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_inactive',
+						columns: ['id'],
+						where: "state = 'inactive'",
+					},
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+					},
+				],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+
+		expect(canonical.desired.tables.get('jobs')!.indexes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					name: 'idx_jobs_active',
+					where: "canonical(state = 'active')",
+				}),
+				expect.objectContaining({
+					name: 'idx_jobs_inactive',
+					where: "canonical(state = 'inactive')",
+				}),
+			]),
+		);
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).toEqual([]);
+	});
+
+	it('canonicalizes desired-only and database-only predicates without a cross-model join', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicateFromCreateIndex = true;
+		client.canonicalPredicates.set('idx_jobs_archived', 'canonical(state = 2)');
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{ name: 'idx_jobs_active', columns: ['id'], where: 'state = 1' },
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_archived',
+						columns: ['id'],
+						where: 'state = 2',
+					},
+				],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+
+		expect(canonical.indexPredicateOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					side: 'desired',
+					index: 'idx_jobs_active',
+					status: 'canonicalised',
+				}),
+				expect.objectContaining({
+					side: 'database',
+					index: 'idx_jobs_archived',
+					status: 'canonicalised',
+				}),
+			]),
+		);
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'create_index' }),
+				expect.objectContaining({ kind: 'drop_index' }),
+			]),
+		);
+	});
+
+	it('reports expression-keyed partial predicates as unavailable without canonicalizing them', async () => {
+		const client = new FakePgClient();
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol('id'), makeCol('email', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_users_active_email',
+						columns: [],
+						expressions: ['lower(email)'],
+						where: 'active',
+					},
+				],
+			}),
+		]);
+		const database = makeModel([makeTable({ name: 'users' })]);
+		const onWarning = vi.fn();
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				onWarning,
+			}),
+		);
+
+		expect(canonical.indexPredicateOutcomes).toEqual([
+			expect.objectContaining({
+				side: 'desired',
+				table: 'users',
+				index: 'idx_users_active_email',
+				status: 'unavailable',
+				comparison: 'raw',
+				reason: expect.objectContaining({
+					message:
+						'Partial-index predicates on expression-keyed indexes are not canonicalized.',
+				}),
+			}),
+		]);
+		expect(onWarning).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: 'index_predicate',
+				name: 'idx_users_active_email',
+				outcome: 'unavailable',
+			}),
+		);
+		expect(client.statements).not.toContainEqual(
+			expect.stringMatching(/^CREATE INDEX/u),
+		);
+	});
+
+	it('canonicalizes each side when structural columns need database casing', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicates.set(
+			'idx_job_queues_active',
+			"((state_code)::text = 'active'::text)",
+		);
+		client.canonicalPredicateFallback = "((state_code)::text = 'active'::text)";
+		const desired = makeModel([
+			makeTable({
+				name: 'jobQueues',
+				columns: [makeCol('id'), makeCol('stateCode', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idxJobQueuesActive',
+						columns: ['stateCode'],
+						where: "state_code = 'active'",
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'job_queues',
+				columns: [makeCol('id'), makeCol('state_code', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_job_queues_active',
+						columns: ['state_code'],
+						where: "((state_code)::text = 'active'::text)",
+					},
+				],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				dbCasing: 'snake_case',
+			}),
+		);
+
+		expect(
+			compareSchemata(canonical.desired, canonical.database, {
+				dbCasing: 'snake_case',
+			}).changes,
+		).toEqual([]);
+	});
+
+	it('does not return a mixed model when database deparse fails after desired canonicalization', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /JOIN pg_catalog\.pg_class i/u;
+		client.failOnSqlError = Object.assign(new Error('catalog deparse denied'), {
+			code: '42501',
+		});
+		const model = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{ name: 'idx_jobs_active', columns: ['id'], where: 'id > 0' },
+				],
+			}),
+		]);
+
+		await expect(
+			adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, model, model),
+			),
+		).rejects.toThrow('catalog deparse denied');
+		expect(
+			client.statements.some((statement) =>
+				statement.startsWith('CREATE INDEX'),
+			),
+		).toBe(true);
+	});
+
+	it('uses PostgreSQL predicate spelling so a raw index replacement disappears', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicates.set(
+			'idx_jobs_active',
+			"((state)::text = 'a;b'::text)",
+		);
+		client.canonicalPredicateFallback = "((state)::text = 'a;b'::text)";
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'a;b'",
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "((state)::text = 'a;b'::text)",
+					},
+				],
+			}),
+		]);
+
+		// Non-vacuity: connectionless raw comparison sees the replacement.
+		expect(compareSchemata(desired, database).changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'create_index' }),
+				expect.objectContaining({ kind: 'drop_index' }),
+			]),
+		);
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).toEqual([]);
+		expect(canonical.indexPredicateOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					side: 'desired',
+					index: 'idx_jobs_active',
+					status: 'canonicalised',
+				}),
+			]),
+		);
+		expect(client.statements).toContainEqual(
+			expect.stringContaining("WHERE state = 'a;b'"),
+		);
+	});
+
+	it('canonicalizes an introspected predicate with omitted expressions before comparing public enum qualification', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicateFallback =
+			"((state)::text = 'active'::public.dbsp_383_index_predicate_state)";
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+						expressions: [],
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "((state)::text = 'active'::dbsp_383_index_predicate_state)",
+					},
+				],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).toEqual([]);
+		expect(canonical.indexPredicateOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					side: 'database',
+					index: 'idx_jobs_active',
+					status: 'canonicalised',
+				}),
+			]),
+		);
+	});
+
+	it('classifies a PostgreSQL predicate rejection without treating it as equality', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /^CREATE INDEX/u;
+		client.failOnSqlError = Object.assign(
+			new Error('column "missing" does not exist'),
+			{
+				code: '42703',
+			},
+		);
+		const model = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{ name: 'idx_jobs_missing', columns: ['id'], where: 'missing = 1' },
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{ name: 'idx_jobs_missing', columns: ['id'], where: 'missing = 2' },
+				],
+			}),
+		]);
+		const warning = vi.fn();
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, model, database, {
+				onWarning: warning,
+			}),
+		);
+		expect(canonical.indexPredicateOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ status: 'rejected', comparison: 'raw' }),
+			]),
+		);
+		expect(warning).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'index_predicate', outcome: 'rejected' }),
+		);
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).not.toEqual([]);
+	});
+
+	it('classifies permission denied by the tagged predicate statement as terminal', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /^CREATE INDEX/u;
+		client.failOnSqlError = Object.assign(
+			new Error('permission denied for function restricted_predicate'),
+			{ code: '42501' },
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{
+						name: 'idx_jobs_restricted',
+						columns: ['id'],
+						where: 'restricted_predicate(id)',
+					},
+				],
+			}),
+		]);
+		const database = makeModel([makeTable({ name: 'jobs' })]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+
+		expect(
+			client.statements.some((statement) =>
+				statement.startsWith('CREATE TEMP TABLE '),
+			),
+		).toBe(true);
+		expect(canonical.indexPredicateOutcomes).toEqual([
+			expect.objectContaining({
+				side: 'desired',
+				index: 'idx_jobs_restricted',
+				status: 'rejected',
+				comparison: 'raw',
+			}),
+		]);
+	});
+
+	it('keeps a real canonical predicate change as an index replacement', async () => {
+		const client = new FakePgClient();
+		client.canonicalPredicates.set(
+			'"public"."jobs".idx_jobs_active',
+			"((state)::text = 'inactive'::text)",
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "state = 'active'",
+					},
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [makeCol('id'), makeCol('state', { type: 'string' })],
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: "((state)::text = 'inactive'::text)",
+					},
+				],
+			}),
+		]);
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database),
+		);
+		expect(
+			compareSchemata(canonical.desired, canonical.database).changes,
+		).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'create_index' }),
+				expect.objectContaining({ kind: 'drop_index' }),
+			]),
+		);
 	});
 });
 
@@ -1741,7 +2747,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			formatSqlDefault(
 				canonical.desired.tables.get('notes')!.columns[0]!.default,
 			),
-		).toBe(String.raw`'back\slash'::text`);
+		).toBe(String.raw`E'back\\slash'::text`);
 	});
 
 	it('emits a PostgreSQL-deparsed CHECK regex containing a backslash without lexing it as authored SQL', async () => {
@@ -1771,9 +2777,9 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 
 		expect(
 			generateMigrationSQL(compareSchemata(canonical, database)).join('\n'),
-		).toContain(String.raw`CHECK ((a ~ '\d+'::text))`);
+		).toContain(String.raw`CHECK ((a ~ E'\\d+'::text))`);
 	});
-	it('resolves matching live CHECK constraints under the pinned path and deparses them under pg_catalog', async () => {
+	it('resolves matching live CHECK constraints under the session path and deparses them under pg_catalog', async () => {
 		const client = new FakePgClient();
 		client.canonicalExpressions.set(
 			'_dbsp_check_canon_0_0',
@@ -1833,12 +2839,10 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				dbCasing: 'snake_case',
 			}).changes,
 		).toEqual([]);
-		expect(client.searchPathQueries).toContain(
-			'SET LOCAL search_path TO pg_catalog, "tenantOne"',
-		);
-		expect(client.searchPathQueries).toContain(
+		expect(client.searchPathQueries).toEqual([
 			'SET LOCAL search_path TO pg_catalog',
-		);
+			'SET LOCAL search_path TO pg_catalog',
+		]);
 		expect(
 			client.queries.some(
 				(query) =>
@@ -1924,7 +2928,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		});
 	});
 
-	it('resolves defaults under the target path, deparses both sides under pg_catalog, and preserves PostgreSQL rendering verbatim', async () => {
+	it('resolves defaults under the session path, deparses both sides under pg_catalog, and preserves PostgreSQL rendering verbatim', async () => {
 		const client = new FakePgClient();
 		client.canonicalDefaults.set('state', "'pending'::tenant_1.status");
 		client.canonicalDefaults.set('counter', "nextval('counter_seq'::regclass)");
@@ -2004,17 +3008,17 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				(change) => change.kind,
 			),
 		).toEqual(['create_sequence']);
-		expect(client.searchPathQueries).toContain(
-			'SET LOCAL search_path TO pg_catalog, "tenant_1"',
+		expect(client.searchPathQueries).toEqual(
+			expect.arrayContaining(['SET LOCAL search_path TO pg_catalog']),
 		);
-		expect(client.searchPathQueries).toContain(
-			'SET LOCAL search_path TO pg_catalog',
+		expect(client.searchPathQueries).not.toContain(
+			'SET LOCAL search_path TO pg_catalog, "tenant_1"',
 		);
 		expect(
 			client.queries.some((query) =>
 				normalizeSql(query.sql).startsWith('CREATE SEQUENCE'),
 			),
-		).toBe(false);
+		).toBe(true);
 		expect(
 			client.queries.some((query) =>
 				normalizeSql(query.sql).startsWith(
@@ -2025,7 +3029,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		expect(client.tempTables).toEqual(new Set());
 	});
 
-	it('falls back for one unresolved default while preserving canonicalized siblings, and rejects it in strict mode', async () => {
+	it('rejects an unresolved default even without strict canonicalization', async () => {
 		const client = new FakePgClient();
 		client.canonicalDefaults.set('good', "nextval('counter_seq'::regclass)");
 		client.failOnSql =
@@ -2061,56 +3065,168 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				],
 			}),
 		]);
-		const warnings: unknown[] = [];
 		const adapter = adapterForPool(new FakePgPool(client));
-		const canonical = await adapter.withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
-				onWarning: (warning) => warnings.push(warning),
-			}),
-		);
-		expect(canonical.desired.tables.get('jobs')?.columns[0]?.default).toEqual({
-			sql: "nextval('counter_seq'::regclass)",
-		});
-		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toEqual({
-			sql: "nextval('missing'::regclass)",
-		});
-		expect(warnings).toEqual([
-			expect.objectContaining({
-				kind: 'column_default',
-				name: 'missing',
-				comparison: 'raw',
-			}),
-			expect.objectContaining({
-				kind: 'column_default',
-				name: 'missing_function',
-				comparison: 'raw',
-			}),
-		]);
-		expect(canonical.defaultOutcomes).toEqual(
-			expect.arrayContaining([
-				expect.objectContaining({
-					column: 'missing',
-					status: 'rejected',
-					comparison: 'raw',
-				}),
-				expect.objectContaining({
-					column: 'missing_function',
-					status: 'rejected',
-					comparison: 'raw',
-				}),
-			]),
-		);
-
 		await expect(
-			adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
-				canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
-					requireCanonicalization: true,
-				}),
+			adapter.withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, dbModel),
 			),
 		).rejects.toThrow('Could not canonicalize one column default');
 	});
 
-	it('falls back for a declared default with an absent sequence without creating it', async () => {
+	it.each([
+		['bare', "nextval('counter_seq'::regclass)"],
+		['target-qualified', "nextval('tenant.counter_seq'::regclass)"],
+	] as const)('stages a planned sequence before canonicalizing a %s default reference', async (_reference, defaultSql) => {
+		const client = new FakePgClient();
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('counter', { default: { sql: defaultSql } }),
+					],
+				}),
+			],
+			undefined,
+			undefined,
+			[{ name: 'counter_seq' }],
+		);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('counter', { default: { sql: 'old counter default' } }),
+				],
+			}),
+		]);
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				schemaName: 'tenant',
+			}),
+		);
+
+		const statements = client.queries.map((query) => normalizeSql(query.sql));
+		const sequence = statements.indexOf(
+			'CREATE SEQUENCE "tenant"."counter_seq";',
+		);
+		const defaultStatement = statements.findIndex((statement) =>
+			statement.includes(`SET DEFAULT ${defaultSql}`),
+		);
+		expect(sequence).toBeGreaterThanOrEqual(0);
+		expect(defaultStatement).toBeGreaterThan(sequence);
+		expect(canonical.defaultOutcomes).toContainEqual(
+			expect.objectContaining({ status: 'canonicalised', column: 'counter' }),
+		);
+	});
+
+	it('does not stage an unused missing sequence when the migration excludes sequence DDL', async () => {
+		const client = new FakePgClient();
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					indexes: [
+						{
+							name: 'jobs_pending_idx',
+							columns: ['id'],
+							where: "status = 'pending'",
+						},
+					],
+				}),
+			],
+			undefined,
+			undefined,
+			[{ name: 'unused_seq' }],
+		);
+		const database = makeModel([makeTable({ name: 'jobs' })]);
+		const dialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLSequences: false,
+		};
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				dialectCapabilities,
+			}),
+		);
+
+		expect(
+			client.queries.some((query) =>
+				normalizeSql(query.sql).startsWith('CREATE SEQUENCE'),
+			),
+		).toBe(false);
+		expect(
+			compareSchemata(canonical.desired, canonical.database, {
+				dialectCapabilities,
+			}).changes,
+		).toContainEqual(expect.objectContaining({ kind: 'create_index' }));
+	});
+
+	it('classifies a planned-sequence staging failure as unavailable', async () => {
+		const client = new FakePgClient();
+		client.failOnSql = /^CREATE SEQUENCE/u;
+		client.failOnSqlError = Object.assign(new Error('permission denied'), {
+			code: '42501',
+		});
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('counter', {
+							default: { sql: "nextval('counter_seq'::regclass)" },
+						}),
+					],
+				}),
+			],
+			undefined,
+			undefined,
+			[{ name: 'counter_seq' }],
+		);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('counter', { default: { sql: 'old counter default' } }),
+				],
+			}),
+		]);
+		const onWarning = vi.fn();
+
+		const canonical = await adapterForPool(
+			new FakePgPool(client),
+		).withScratchScope((scratch) =>
+			canonicalizeExpressionSurfaces(scratch, desired, database, {
+				requireCanonicalization: true,
+				onWarning,
+			}),
+		);
+
+		expect(canonical.defaultOutcomes).toContainEqual(
+			expect.objectContaining({
+				status: 'unavailable',
+				column: 'counter',
+				comparison: 'raw',
+			}),
+		);
+		expect(onWarning).toHaveBeenCalledWith(
+			expect.objectContaining({
+				kind: 'column_default',
+				outcome: 'unavailable',
+			}),
+		);
+	});
+
+	it('rejects a default with a genuinely missing sequence', async () => {
 		const client = new FakePgClient();
 		client.failOnSql =
 			/SET DEFAULT nextval\('missing_counter_seq'::regclass\)/u;
@@ -2140,7 +3256,6 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			new Map(),
 			undefined,
 			undefined,
-			new Map([['missing_counter_seq', { name: 'missing_counter_seq' }]]),
 		);
 		const dbModel = makeModel([
 			makeTable({
@@ -2151,22 +3266,14 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				],
 			}),
 		]);
-		const warnings: unknown[] = [];
-
-		const canonical = await adapterForPool(
-			new FakePgPool(client),
-		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
-				onWarning: (warning) => warnings.push(warning),
-			}),
-		);
-
-		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toEqual({
-			sql: "nextval('missing_counter_seq'::regclass)",
+		await expect(
+			adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, dbModel),
+			),
+		).rejects.toMatchObject({
+			name: ColumnDefaultCanonicalizationError.name,
+			column: 'counter',
 		});
-		expect(warnings).toEqual([
-			expect.objectContaining({ kind: 'column_default', name: 'counter' }),
-		]);
 		expect(
 			client.queries.some((query) =>
 				normalizeSql(query.sql).startsWith('CREATE SEQUENCE'),
@@ -2174,13 +3281,9 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		).toBe(false);
 	});
 
-	it('canonicalizes a default despite an unrelated column with a missing type', async () => {
+	it('uses the live OID for an unrelated existing column type', async () => {
 		const client = new FakePgClient();
 		client.canonicalDefaults.set('ready', '1');
-		client.failOnSql = /CREATE TEMP TABLE .*"unavailable" missing_type/u;
-		client.failOnSqlError = Object.assign(new Error('type does not exist'), {
-			code: '42704',
-		});
 		const desired = makeModel([
 			makeTable({
 				name: 'jobs',
@@ -2204,29 +3307,18 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			}),
 		]);
 
-		const warnings: unknown[] = [];
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
-				onWarning: (warning) => warnings.push(warning),
-			}),
+			canonicalizeExpressionSurfaces(scratch, desired, dbModel),
 		);
 
 		expect(canonical.desired.tables.get('jobs')?.columns[0]?.default).toEqual({
 			sql: '1',
 		});
-		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toBe(2);
-		expect(canonical.defaultOutcomes).toContainEqual(
-			expect.objectContaining({
-				column: 'unavailable',
-				status: 'unavailable',
-				comparison: 'raw',
-			}),
-		);
-		expect(warnings).toEqual([
-			expect.objectContaining({ kind: 'column_default', name: 'unavailable' }),
-		]);
+		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toEqual({
+			sql: 'canonical_unavailable',
+		});
 	});
 
 	it('skips canonicalization for an absent column default', async () => {
@@ -2396,6 +3488,56 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		);
 	});
 
+	it('reports every predicate on both complete raw models during raw fallback', () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{ name: 'idx_jobs_active', columns: ['id'], where: 'state = 1' },
+				],
+			}),
+		]);
+		const database = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{ name: 'idx_jobs_active', columns: ['id'], where: 'state = 1' },
+					{ name: 'idx_jobs_archived', columns: ['id'], where: 'state = 2' },
+				],
+			}),
+		]);
+
+		const fallback = fallbackToRawExpressionComparison(
+			desired,
+			database,
+			new Error('scratch scope unavailable'),
+			{ canonicalizeCheckConstraints: false, onWarning: () => undefined },
+		);
+
+		expect(fallback.indexPredicateOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					side: 'desired',
+					index: 'idx_jobs_active',
+					status: 'unavailable',
+					comparison: 'raw',
+				}),
+				expect.objectContaining({
+					side: 'database',
+					index: 'idx_jobs_active',
+					status: 'unavailable',
+					comparison: 'raw',
+				}),
+				expect.objectContaining({
+					side: 'database',
+					index: 'idx_jobs_archived',
+					status: 'unavailable',
+					comparison: 'raw',
+				}),
+			]),
+		);
+	});
+
 	it('reports strict refusal instead of announcing raw fallback for shape-unavailable defaults', async () => {
 		const desired = makeModel([
 			makeTable({
@@ -2490,7 +3632,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			}
 			if (
 				catalogOnlyPathWasSet &&
-				normalized === 'SET LOCAL search_path TO pg_catalog, "public"'
+				normalized === "SELECT pg_catalog.set_config('search_path', $1, true)"
 			) {
 				throw restoreError;
 			}

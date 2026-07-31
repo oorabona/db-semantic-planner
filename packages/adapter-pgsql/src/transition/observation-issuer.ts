@@ -21,6 +21,11 @@ import {
 	splitCheckConstraintState,
 } from '../check-expression.js';
 import { formatSqlDefault, quoteIdent } from '../ddl/phases/utils.js';
+import {
+	canonicalizeIndexPredicate,
+	deparseIndexPredicate,
+	type PgsqlCanonicalizationScope,
+} from '../expression-canonicalizer.js';
 import { validateCheckExpression } from '../validate.js';
 import { stampedClaim, stampedClaimForRequest } from './claim-stamping.js';
 import {
@@ -114,6 +119,11 @@ const EXPLICIT_SCHEMA_CONTEXT_KEY = 'dbsp.transition.explicit_schema';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** PostgreSQL errors are classified by their SQLSTATE, never their message. */
+function isPgErrorWithSqlState(error: unknown, sqlState: string): boolean {
+	return isRecord(error) && error.code === sqlState;
 }
 
 function queryable(target: unknown): Queryable {
@@ -921,10 +931,13 @@ async function readTempDefaultCanonical(
 	return expression;
 }
 
-function assertStandardConformingStrings(context: ObservationContext): void {
+function assertStandardConformingStrings(
+	context: ObservationContext,
+	surface: 'table-check' | 'index-predicate',
+): void {
 	if (context.sessionConfiguration.standard_conforming_strings !== 'on') {
 		throw new Error(
-			'table-check deparse requires standard_conforming_strings=on before rendering authored CHECK text',
+			`${surface} deparse requires standard_conforming_strings=on before rendering authored predicate text`,
 		);
 	}
 }
@@ -1050,6 +1063,191 @@ function vendorValidatedPredicate(text: string): VendorValidatedExpression {
 	};
 }
 
+function canonicalizationScope(
+	executor: Queryable,
+): PgsqlCanonicalizationScope {
+	// The caller opens a transaction and savepoint before minting this narrow
+	// adapter. That savepoint is always rolled back by
+	// cleanupObservationScratchScope, giving observation deparse the same
+	// rollback-only contract as PgsqlAdapter.withScratchScope().
+	const scope = {
+		executeRaw: async <T>(sql: string, parameters?: readonly unknown[]) =>
+			(await executor.query(sql, parameters)).rows as T[],
+		transaction: async <T>(
+			fn: (inner: PgsqlCanonicalizationScope) => Promise<T>,
+		) => fn(scope as PgsqlCanonicalizationScope),
+	};
+	return scope as unknown as PgsqlCanonicalizationScope;
+}
+
+/**
+ * Leave an observation scratch scope without ever returning a session whose
+ * transaction state is unknown.  Attempt every applicable cleanup statement:
+ * a failed rollback-to-savepoint must not prevent release or the transaction
+ * rollback from being attempted, but any one of those failures makes the
+ * observation fail so its owning lease is released as broken.
+ */
+async function cleanupObservationScratchScope(
+	executor: Queryable,
+	savepoint: string,
+	savepointActive: boolean,
+	startedTransaction: boolean,
+): Promise<void> {
+	const errors: unknown[] = [];
+	const attempt = async (sql: string): Promise<void> => {
+		try {
+			await executor.query(sql);
+		} catch (error) {
+			errors.push(error);
+		}
+	};
+	if (savepointActive) {
+		await attempt(`ROLLBACK TO SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+		await attempt(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+	}
+	if (startedTransaction) await attempt('ROLLBACK');
+	if (errors.length === 0) return;
+	const cleanupError =
+		errors.length === 1
+			? errors[0]
+			: new AggregateError(
+					errors,
+					'PostgreSQL expression deparse cleanup failed at multiple statements',
+				);
+	const failure = new AggregateError(
+		[cleanupError],
+		'PostgreSQL expression deparse cleanup failed',
+	);
+	Object.defineProperty(failure, 'cleanupError', {
+		value: cleanupError,
+		configurable: true,
+	});
+	throw failure;
+}
+
+/**
+ * A finally block would otherwise replace the deparse failure with a cleanup
+ * failure. Keep both: the work error explains the failed statement, while the
+ * cleanup error tells the caller not to trust the session.
+ */
+function observationDeparseAndCleanupFailure(
+	originalError: unknown,
+	cleanupError: unknown,
+): AggregateError {
+	const failure = new AggregateError(
+		[originalError, cleanupError],
+		'PostgreSQL expression deparse failed and its cleanup also failed',
+	);
+	Object.defineProperties(failure, {
+		originalError: { value: originalError, configurable: true },
+		cleanupError: { value: cleanupError, configurable: true },
+	});
+	return failure;
+}
+
+async function observeIndexPredicateDeparse(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	if (
+		!isRecord(request.detail) ||
+		request.detail.surface !== 'index-predicate' ||
+		request.detail.category !== 'predicate'
+	) {
+		throw new Error(
+			`${request.kind} requires surface=index-predicate and category=predicate`,
+		);
+	}
+	const target = tableDetailTarget(request, context);
+	if (!target.index || typeof request.detail.expression !== 'string') {
+		throw new Error(
+			'index-predicate deparse requires index and authored expression detail',
+		);
+	}
+	const normalizedRequest = requestForTarget(request, target, context, 'table');
+	const tempPrefix = `_dbsp_index_predicate_${Date.now()}_${++observationSequence}`;
+	const savepoint = `${tempPrefix}_sp`;
+	let savepointActive = false;
+	let startedTransaction = false;
+	let workFailed = false;
+	let workError: unknown;
+	let observation: EvidenceObservation | undefined;
+	try {
+		try {
+			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+			savepointActive = true;
+		} catch (error) {
+			if (!isPgErrorWithSqlState(error, '25P01')) throw error;
+			await executor.query('BEGIN');
+			startedTransaction = true;
+			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+			savepointActive = true;
+		}
+		const scope = canonicalizationScope(executor);
+		const relation = `${quoteIdent(target.schema, 'schema')}.${quoteIdent(target.table, 'table')}`;
+		const desiredCanonical = await canonicalizeIndexPredicate(scope, {
+			table: target.table,
+			predicate: request.detail.expression,
+			likeTable: relation,
+			tempPrefix,
+			options: { schemaName: target.schema },
+		});
+		const catalogCanonical = await deparseIndexPredicate(
+			scope,
+			relation,
+			target.index,
+			{ schemaName: target.schema },
+		);
+		observation = evidenceObservation({
+			request: normalizedRequest,
+			context,
+			scope: [scopeFor(target, context, 'table')],
+			stability: 'externally-mutable',
+			source: 'vendor-deparser',
+			value: {
+				ok: true,
+				surface: 'index-predicate',
+				category: 'predicate',
+				desiredCanonical,
+				...(catalogCanonical === undefined
+					? {}
+					: {
+							catalogCanonical,
+							equivalentToCatalog: catalogCanonical === desiredCanonical,
+						}),
+				predicate: vendorValidatedPredicate(desiredCanonical),
+				claims: [stampedClaimForRequest(normalizedRequest, true)],
+			} as unknown as JsonValue,
+		});
+	} catch (error) {
+		workFailed = true;
+		workError = error;
+	}
+	let cleanupError: unknown;
+	try {
+		await cleanupObservationScratchScope(
+			executor,
+			savepoint,
+			savepointActive,
+			startedTransaction,
+		);
+	} catch (error) {
+		cleanupError = error;
+	}
+	if (workFailed) {
+		if (cleanupError !== undefined) {
+			throw observationDeparseAndCleanupFailure(workError, cleanupError);
+		}
+		throw workError;
+	}
+	if (cleanupError !== undefined) throw cleanupError;
+	if (observation === undefined) {
+		throw new Error('index-predicate deparse completed without an observation');
+	}
+	return observation;
+}
+
 async function observeTableCheckDeparse(
 	executor: Queryable,
 	request: ObservationRequest,
@@ -1064,7 +1262,7 @@ async function observeTableCheckDeparse(
 			`${request.kind} requires surface=table-check and category=predicate`,
 		);
 	}
-	assertStandardConformingStrings(context);
+	assertStandardConformingStrings(context, 'table-check');
 	const { target, expression } = tableCheckDetail(request, context);
 	const normalizedRequest = requestForTarget(request, target, context, 'table');
 	const desiredClause = validatedCheckClause(expression);
@@ -1073,11 +1271,15 @@ async function observeTableCheckDeparse(
 	const savepoint = `dbsp_check_deparse_sp_${observationSequence}`;
 	let savepointActive = false;
 	let startedTransaction = false;
+	let workFailed = false;
+	let workError: unknown;
+	let observation: EvidenceObservation | undefined;
 	try {
 		try {
 			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
 			savepointActive = true;
-		} catch {
+		} catch (error) {
+			if (!isPgErrorWithSqlState(error, '25P01')) throw error;
 			await executor.query('BEGIN');
 			startedTransaction = true;
 			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
@@ -1105,7 +1307,7 @@ async function observeTableCheckDeparse(
 				: catalogCanonical.expression === desiredCanonical.expression &&
 					catalogCanonical.predicate === desiredCanonical.predicate &&
 					catalogCanonical.notValid === desiredCanonical.notValid;
-		return evidenceObservation({
+		observation = evidenceObservation({
 			request: normalizedRequest,
 			context,
 			scope: [scopeFor(target, context, 'table')],
@@ -1129,19 +1331,32 @@ async function observeTableCheckDeparse(
 				claims: [stampedClaimForRequest(normalizedRequest, true)],
 			} as unknown as JsonValue,
 		});
-	} finally {
-		if (savepointActive) {
-			await executor
-				.query(`ROLLBACK TO SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
-				.catch(() => undefined);
-			await executor
-				.query(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
-				.catch(() => undefined);
-		}
-		if (startedTransaction) {
-			await executor.query('ROLLBACK').catch(() => undefined);
-		}
+	} catch (error) {
+		workFailed = true;
+		workError = error;
 	}
+	let cleanupError: unknown;
+	try {
+		await cleanupObservationScratchScope(
+			executor,
+			savepoint,
+			savepointActive,
+			startedTransaction,
+		);
+	} catch (error) {
+		cleanupError = error;
+	}
+	if (workFailed) {
+		if (cleanupError !== undefined) {
+			throw observationDeparseAndCleanupFailure(workError, cleanupError);
+		}
+		throw workError;
+	}
+	if (cleanupError !== undefined) throw cleanupError;
+	if (observation === undefined) {
+		throw new Error('table-check deparse completed without an observation');
+	}
+	return observation;
 }
 
 async function observeExpressionDeparse(
@@ -1151,6 +1366,12 @@ async function observeExpressionDeparse(
 ): Promise<EvidenceObservation> {
 	if (isRecord(request.detail) && request.detail.surface === 'table-check') {
 		return observeTableCheckDeparse(executor, request, context);
+	}
+	if (
+		isRecord(request.detail) &&
+		request.detail.surface === 'index-predicate'
+	) {
+		return observeIndexPredicateDeparse(executor, request, context);
 	}
 	if (
 		!isRecord(request.detail) ||
@@ -1180,17 +1401,22 @@ async function observeExpressionDeparse(
 	const savepoint = `dbsp_default_deparse_sp_${observationSequence}`;
 	let savepointActive = false;
 	let startedTransaction = false;
+	let workFailed = false;
+	let workError: unknown;
+	let observation: EvidenceObservation | undefined;
 	try {
 		// Isolate the round-trip so it NEVER disturbs an outer transaction. At apply
 		// this observation runs inside the applier's lock transaction, so a bare
 		// BEGIN/ROLLBACK here would roll back the applier's DDL and lock. A SAVEPOINT
-		// nests safely; it errors only when there is no transaction (pure prove-time
-		// autocommit), in which case we open our own BEGIN/ROLLBACK. Either way the
-		// temp table lives across CREATE / ALTER / read and is discarded afterwards.
+		// nests safely. Only SQLSTATE 25P01 proves there is no transaction (pure
+		// prove-time autocommit), in which case we open our own BEGIN/ROLLBACK.
+		// Either way the temp table lives across CREATE / ALTER / read and is
+		// discarded afterwards.
 		try {
 			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
 			savepointActive = true;
-		} catch {
+		} catch (error) {
+			if (!isPgErrorWithSqlState(error, '25P01')) throw error;
 			await executor.query('BEGIN');
 			startedTransaction = true;
 		}
@@ -1211,7 +1437,7 @@ async function observeExpressionDeparse(
 			tempTable,
 			target.column,
 		);
-		return evidenceObservation({
+		observation = evidenceObservation({
 			request: normalizedRequest,
 			context,
 			scope: [scopeFor(target, context, 'column')],
@@ -1236,18 +1462,32 @@ async function observeExpressionDeparse(
 				claims: [stampedClaimForRequest(normalizedRequest, true)],
 			},
 		});
-	} finally {
-		if (savepointActive) {
-			await executor
-				.query(`ROLLBACK TO SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
-				.catch(() => undefined);
-			await executor
-				.query(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
-				.catch(() => undefined);
-		} else if (startedTransaction) {
-			await executor.query('ROLLBACK').catch(() => undefined);
-		}
+	} catch (error) {
+		workFailed = true;
+		workError = error;
 	}
+	let cleanupError: unknown;
+	try {
+		await cleanupObservationScratchScope(
+			executor,
+			savepoint,
+			savepointActive,
+			startedTransaction,
+		);
+	} catch (error) {
+		cleanupError = error;
+	}
+	if (workFailed) {
+		if (cleanupError !== undefined) {
+			throw observationDeparseAndCleanupFailure(workError, cleanupError);
+		}
+		throw workError;
+	}
+	if (cleanupError !== undefined) throw cleanupError;
+	if (observation === undefined) {
+		throw new Error('column-default deparse completed without an observation');
+	}
+	return observation;
 }
 
 function logicalIdentityBindingFromRow(

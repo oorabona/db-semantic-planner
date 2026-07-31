@@ -180,16 +180,33 @@ export interface SchemaDiffResult {
 	readonly warnings: readonly SchemaDiffComparisonWarning[];
 }
 
-/** A JSON-safe expression fallback or unpaired surface. */
-export interface SchemaDiffComparisonWarning {
-	readonly kind: 'check_constraint' | 'column_default';
+/** Fields shared by all JSON-safe expression comparison warnings. */
+interface SchemaDiffComparisonWarningBase {
 	readonly table: string;
 	readonly name: string;
-	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
-	readonly comparison: 'raw' | 'unpaired';
-	readonly side?: 'desired' | 'database';
 	readonly message: string;
 }
+
+/** A JSON-safe expression surface compared as raw text. */
+export type SchemaDiffRawComparisonWarning = SchemaDiffComparisonWarningBase & {
+	readonly kind: 'check_constraint' | 'column_default' | 'index_predicate';
+	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+	readonly comparison: 'raw';
+};
+
+/** A column default with no opposite-model counterpart to compare. */
+export type SchemaDiffUnpairedColumnDefaultWarning =
+	SchemaDiffComparisonWarningBase & {
+		readonly kind: 'column_default';
+		readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+		readonly comparison: 'unpaired';
+		readonly side?: 'desired' | 'database';
+	};
+
+/** A JSON-safe expression fallback or unpaired column default. */
+export type SchemaDiffComparisonWarning =
+	| SchemaDiffRawComparisonWarning
+	| SchemaDiffUnpairedColumnDefaultWarning;
 
 export interface SchemaApplyParams {
 	connectionId: string;
