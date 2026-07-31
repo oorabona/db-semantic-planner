@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.2.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.1.4...cli-v2.2.0) (2026-07-31)
+
+
+### Features
+
+* **adapter-pgsql:** Let PostgreSQL canonicalise column defaults so they converge ([#427](https://github.com/oorabona/db-semantic-planner/issues/427)) ([e49104e](https://github.com/oorabona/db-semantic-planner/commit/e49104e81a98952f1c87efa4a67e65290b28581f)), closes [#382](https://github.com/oorabona/db-semantic-planner/issues/382)
+* **adapter-pgsql:** Make a recorded plan describe a target it can identify ([#435](https://github.com/oorabona/db-semantic-planner/issues/435)) ([5217c4a](https://github.com/oorabona/db-semantic-planner/commit/5217c4ab3491f0a54aa2878adeca50383e47273e)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+* **cli:** Compute a transition plan and make it durable before anything runs ([#432](https://github.com/oorabona/db-semantic-planner/issues/432)) ([50beccf](https://github.com/oorabona/db-semantic-planner/commit/50beccfca3393c542f259b7b5ff8c4d82364102d)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 3.4.0
+    * @dbsp/core bumped to 3.4.0
+    * @dbsp/nql bumped to 1.10.3
+    * @dbsp/types bumped to 3.4.0
+
 ## [2.1.4](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.1.3...cli-v2.1.4) (2026-07-27)
 
 

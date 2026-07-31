@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/core",
-	"version": "3.3.0",
+	"version": "3.4.0",
 	"description": "Intent-first semantic query planner for databases — declare WHAT to fetch, the planner decides HOW",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
