@@ -59,7 +59,7 @@ describe('FIX-162 manual .join() alias collisions', () => {
 		expect(sql).toContain('file.path AS def_file');
 		expect(sql).toContain('file_2.path AS use_file');
 
-		const rows = (await query.execute()) as Array<{
+		const rows = (await query.execute()) as unknown as Array<{
 			defFile: string;
 			useFile: string;
 		}>;

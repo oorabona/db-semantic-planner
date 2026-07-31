@@ -38,6 +38,20 @@ describe('NQL binding many-to-many columns E2E', () => {
 			);
 		expect(postTagsRelation?.name).toBe('tags');
 		expect(tagPostsRelation?.name).toBe('posts');
+		expect(blogExtendedModel.getRelationsTo('tags')).toContainEqual(
+			postTagsRelation,
+		);
+		expect(blogExtendedModel.getRelationsTo('posts')).toContainEqual(
+			tagPostsRelation,
+		);
+		expect(blogExtendedModel.isAmbiguous('posts', 'tags')).toEqual({
+			ambiguous: false,
+			options: ['tags'],
+		});
+		expect(blogExtendedModel.isAmbiguous('tags', 'posts')).toEqual({
+			ambiguous: false,
+			options: ['posts'],
+		});
 
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: blogExtendedModel, adapter }).withSchema(

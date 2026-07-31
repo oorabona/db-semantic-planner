@@ -325,7 +325,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: 'catalog:'
-        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
 
   packages/cli:
     dependencies:
@@ -632,6 +632,51 @@ importers:
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.16)(tsx@4.22.5)(typescript@6.0.3)(yaml@2.9.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+
+  tests/e2e:
+    devDependencies:
+      '@dbsp/adapter-pgsql':
+        specifier: workspace:*
+        version: link:../../packages/adapter-pgsql
+      '@dbsp/cli':
+        specifier: workspace:*
+        version: link:../../packages/cli
+      '@dbsp/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@dbsp/gui':
+        specifier: workspace:*
+        version: link:../../packages/gui
+      '@dbsp/nql':
+        specifier: workspace:*
+        version: link:../../packages/nql
+      '@dbsp/types':
+        specifier: workspace:*
+        version: link:../../packages/types
+      '@testcontainers/postgresql':
+        specifier: 'catalog:'
+        version: 12.0.4
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.1.0
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.20.0
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.17
+      pg:
+        specifier: 'catalog:'
+        version: 8.22.0
+      testcontainers:
+        specifier: 'catalog:'
+        version: 12.0.4
       typescript:
         specifier: 'catalog:'
         version: 6.0.3

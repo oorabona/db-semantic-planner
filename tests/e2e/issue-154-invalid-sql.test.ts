@@ -57,7 +57,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 		);
 		expect(sql).not.toContain('definitions.uses.id');
 
-		const rows = (await query.execute()) as Array<{
+		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
 			useIds: number[] | null;
 		}>;
@@ -94,7 +94,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 		expect(sql).toContain('file.path AS def_file');
 		expect(sql).toContain('file_1.path AS use_file');
 
-		const rows = (await query.execute()) as Array<{
+		const rows = (await query.execute()) as unknown as Array<{
 			defFile: string;
 			useFile: string;
 		}>;
@@ -131,7 +131,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 		expect(sql).toContain('file_1.path AS "file.path"');
 		expect(sql).not.toContain('AS "file_1.path"');
 
-		const rows = (await query.execute()) as Array<{
+		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
 			definition: { id: number; file: { id: number; path: string } };
 			file: { id: number; path: string };
@@ -163,7 +163,7 @@ describe('FIX-154 invalid SQL regressions', () => {
 			.columns(['id', 'def_id', 'file_id', 'alt_file_id'])
 			.orderBy('id');
 
-		const rows = (await query.execute()) as Array<{
+		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
 			defId: number;
 			fileId: number;

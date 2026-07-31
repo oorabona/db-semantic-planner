@@ -41,7 +41,7 @@ describe('Composite FK correlation', () => {
 			.select('orders')
 			.include('items')
 			.columns(['order_id', 'tenant_id', 'status'])
-			.execute()) as Array<{
+			.execute()) as unknown as Array<{
 			orderId: number;
 			tenantId: number;
 			status: string;
@@ -69,7 +69,7 @@ describe('Composite FK correlation', () => {
 			.select('orders')
 			.where(exists('items', { where: eq('sku', 'sku-a') }))
 			.columns(['order_id', 'tenant_id'])
-			.execute()) as Array<{ orderId: number; tenantId: number }>;
+			.execute()) as unknown as Array<{ orderId: number; tenantId: number }>;
 
 		expect(rows.map(orderKey).sort()).toEqual(['100:1', '101:1']);
 	});

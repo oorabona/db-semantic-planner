@@ -1859,9 +1859,12 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			const error = await comparePgsqlDatabaseSchema(adapter, desired, {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
-			}).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+			}).catch((error: unknown) => error);
 
 			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
+			if (!(error instanceof CheckConstraintNewEnumValueError)) {
+				throw new Error('Expected CheckConstraintNewEnumValueError');
+			}
 			expect(error.constraint).toBe('jobs_state_pending_check');
 		});
 
@@ -1883,9 +1886,12 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				adapter,
 				desiredWithPendingValue('state = $$pending$$'),
 				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
-			).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+			).catch((error: unknown) => error);
 
 			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
+			if (!(error instanceof CheckConstraintNewEnumValueError)) {
+				throw new Error('Expected CheckConstraintNewEnumValueError');
+			}
 			expect(error.table).toBe('jobs');
 			expect(error.constraint).toBe('jobs_state_check');
 			expect(error.addedEnumValues).toEqual([

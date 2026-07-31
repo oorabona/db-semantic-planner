@@ -250,6 +250,7 @@ describe('EXPLAIN Integration', () => {
 			const dump = orm.withSchema('acme').select('products').dump();
 
 			expect(dump.plan).toBeDefined();
+			if (dump.plan === undefined) throw new Error('Expected a query plan');
 			expect(dump.plan.decisions).toBeInstanceOf(Array);
 		});
 	});

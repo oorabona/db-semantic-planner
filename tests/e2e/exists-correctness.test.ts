@@ -553,16 +553,14 @@ describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: existsCorrectnessModel, adapter });
 
-		const [existsRows, inSubqueryRows] = await Promise.all([
+		const [existsRows, inSubqueryRows] = (await Promise.all([
 			orm
 				.withSchema(SCHEMA)
 				.select('users')
 				.where(exists('posts', { where: eq('published', true) }))
 				.include('posts')
 				.columns(['id', 'name'])
-				.execute() as Promise<
-				Array<{ name: string; posts: Array<{ published: boolean }> }>
-			>,
+				.execute(),
 			orm
 				.withSchema(SCHEMA)
 				.select('users')
@@ -574,10 +572,11 @@ describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the
 				)
 				.include('posts')
 				.columns(['id', 'name'])
-				.execute() as Promise<
-				Array<{ name: string; posts: Array<{ published: boolean }> }>
-			>,
-		]);
+				.execute(),
+		])) as unknown as [
+			Array<{ name: string; posts: Array<{ published: boolean }> }>,
+			Array<{ name: string; posts: Array<{ published: boolean }> }>,
+		];
 
 		const aliceExists = existsRows.find((r) => r.name === 'Alice');
 		const aliceInSub = inSubqueryRows.find((r) => r.name === 'Alice');

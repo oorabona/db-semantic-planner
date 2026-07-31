@@ -1,0 +1,24 @@
+{
+	"name": "@dbsp/e2e",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@dbsp/adapter-pgsql": "workspace:*",
+		"@dbsp/cli": "workspace:*",
+		"@dbsp/core": "workspace:*",
+		"@dbsp/gui": "workspace:*",
+		"@dbsp/nql": "workspace:*",
+		"@dbsp/types": "workspace:*",
+		"@testcontainers/postgresql": "catalog:",
+		"@types/node": "catalog:",
+		"@types/pg": "catalog:",
+		"@types/react": "catalog:",
+		"pg": "catalog:",
+		"testcontainers": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

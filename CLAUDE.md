@@ -71,8 +71,14 @@ const usersFromRef = await orm
 
 | Package | May Import | Must NOT Import |
 |---------|------------|-----------------|
-| `packages/core` | Nothing | `adapter-pgsql` |
-| `packages/adapter-pgsql` | `core` | - |
+| `packages/types` | — | everything else |
+| `packages/nql` | `types` | `core`, `adapter-pgsql` |
+| `packages/core` | `types`, `nql` | `adapter-pgsql` |
+| `packages/adapter-pgsql` | `types`, `core` | — |
+
+The rule that matters is the last column: **core must not reach for an adapter.** Core is not
+dependency-free — `core/src/dx/nql.ts` imports `@dbsp/nql`, and both it and `nql` import `@dbsp/types`
+— and reading the first column as "nothing" is what makes the build order above look arbitrary.
 
 ### Enforcing Architecture (Recommended)
 
@@ -300,8 +306,12 @@ type Dump = {
 ## Build Order
 
 ```
-packages/core → packages/adapter-pgsql
+packages/types → packages/nql → packages/core → packages/adapter-pgsql
 ```
+
+Each step consumes the previous one's `dist/`, so building out of order fails with errors that read
+like missing exports in the *sources* — `Module './intent-ast.js' has no exported member …`, or
+`Cannot find module '@dbsp/nql'` from `core/src/dx/nql.ts`. The cause is the order, not the code.
 
 ## Getting Started
 
@@ -309,6 +319,8 @@ Install dependencies and build all packages:
 
 ```bash
 pnpm install
+pnpm -C packages/types build
+pnpm -C packages/nql build
 pnpm -C packages/core build
 pnpm -C packages/adapter-pgsql build
 ```

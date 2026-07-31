@@ -15,6 +15,7 @@ import {
 	seedBlogData,
 	sql,
 } from './testkit/index.js';
+import { readNqlDump } from './testkit/test-compat/issue-437.js';
 
 describe('FEAT-134 NQL params E2E', () => {
 	const SCHEMA = 'nql_params_e2e';
@@ -38,7 +39,7 @@ describe('FEAT-134 NQL params E2E', () => {
 			| where id = ${3} and title = ${'Introduction to PostgreSQL'}
 			| select id, title`;
 
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.params).toEqual([3, 'Introduction to PostgreSQL']);
@@ -58,7 +59,7 @@ describe('FEAT-134 NQL params E2E', () => {
 			| select id, title
 			| order by id`;
 
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.params).toEqual([ids]);
@@ -76,7 +77,7 @@ describe('FEAT-134 NQL params E2E', () => {
 			| select id, coalesce(name, ${fallback}) as label
 			| order by id`;
 
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.params).toEqual([fallback]);
@@ -97,7 +98,7 @@ describe('FEAT-134 NQL params E2E', () => {
 			| ${nqlRaw('order by id desc')}
 			| limit 1`;
 
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/order by/i);
@@ -117,7 +118,7 @@ posts
 			| where published = ${true}
 			| select id
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
@@ -137,7 +138,7 @@ recent_posts
 			| where id < ${5}
 			| select id, title
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
@@ -145,6 +146,7 @@ recent_posts
 		expect(dump.sql).toContain('FROM recent_posts');
 		expect(dump.sql).not.toContain(`${SCHEMA}.recent_posts`);
 		expect(dump.params).toEqual([3, 5]);
+		if (dump.plan === undefined) throw new Error('Expected a query plan');
 		expect(dump.plan.rootTable).toBe('recent_posts');
 		expect(dump.plan.decisions).toEqual([]);
 		expect(rows).toEqual([
@@ -164,7 +166,7 @@ projected_posts
 			| where some(author).name = ${'Alice Johnson'}
 			| select id, title
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
@@ -189,7 +191,7 @@ projected_posts
 projected_posts
 			| select id, author.name as authorName
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
@@ -215,7 +217,7 @@ projected_posts
 projected_posts
 			| select id, author.company.name as companyName
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
@@ -250,7 +252,7 @@ projected_posts
 projected_authors
 			| select id, author_posts.title as titles
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
@@ -331,7 +333,7 @@ projected_authors
 projected_authors
 			| select *, author_posts.*
 			| order by id`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
@@ -381,7 +383,7 @@ projected_authors
 			| bind projected_authors
 projected_authors
 			| select *, author_posts.post_comments.*`;
-		const dump = query.dump();
+		const dump = readNqlDump(query);
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
@@ -390,6 +392,7 @@ projected_authors
 		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('jsonb_build_object');
 		expect(dump.sql).toContain('AS author_posts_json');
+		if (dump.plan === undefined) throw new Error('Expected a query plan');
 		expect(
 			dump.plan.decisions.map((decision) => decision.context.intentPath),
 		).toEqual(['include[0]', 'include[0].include[0]']);
