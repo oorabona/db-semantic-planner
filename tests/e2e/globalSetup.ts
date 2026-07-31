@@ -14,6 +14,10 @@ import { Wait } from 'testcontainers';
 // Store container reference for teardown
 let container: StartedPostgreSqlContainer | undefined;
 
+// This setup owns the provenance: e2e fixtures must only make local-container
+// assumptions when this marker says setup actually created that container.
+export const LOCAL_CONTAINER_ENV = 'DBSP_E2E_LOCAL_CONTAINER';
+
 /**
  * Check if Docker is available
  */
@@ -32,6 +36,7 @@ async function isDockerAvailable(): Promise<boolean> {
 export async function setup(): Promise<void> {
 	// If DATABASE_URL is already set externally, use it directly (no container needed)
 	if (process.env.DATABASE_URL) {
+		process.env[LOCAL_CONTAINER_ENV] = '0';
 		console.log(
 			`\n🐘 Using external DATABASE_URL: ${process.env.DATABASE_URL}\n`,
 		);
@@ -76,6 +81,7 @@ export async function setup(): Promise<void> {
 		// Set environment variables for tests
 		const connectionUri = container.getConnectionUri();
 		process.env.DATABASE_URL = connectionUri;
+		process.env[LOCAL_CONTAINER_ENV] = '1';
 		process.env.PG_HOST = container.getHost();
 		process.env.PG_PORT = container.getPort().toString();
 		process.env.PG_DATABASE = container.getDatabase();

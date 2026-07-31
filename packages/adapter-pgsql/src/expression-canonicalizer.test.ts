@@ -398,7 +398,11 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 
 		expect(canonical.defaultOutcomes).toContainEqual(
-			expect.objectContaining({ status: 'unavailable', column: 'status' }),
+			expect.objectContaining({
+				status: 'unavailable',
+				column: 'status',
+				comparison: 'raw',
+			}),
 		);
 		expect(onWarning).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -2071,12 +2075,31 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			sql: "nextval('missing'::regclass)",
 		});
 		expect(warnings).toEqual([
-			expect.objectContaining({ kind: 'column_default', name: 'missing' }),
+			expect.objectContaining({
+				kind: 'column_default',
+				name: 'missing',
+				comparison: 'raw',
+			}),
 			expect.objectContaining({
 				kind: 'column_default',
 				name: 'missing_function',
+				comparison: 'raw',
 			}),
 		]);
+		expect(canonical.defaultOutcomes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					column: 'missing',
+					status: 'rejected',
+					comparison: 'raw',
+				}),
+				expect.objectContaining({
+					column: 'missing_function',
+					status: 'rejected',
+					comparison: 'raw',
+				}),
+			]),
+		);
 
 		await expect(
 			adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
@@ -2194,6 +2217,13 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			sql: '1',
 		});
 		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toBe(2);
+		expect(canonical.defaultOutcomes).toContainEqual(
+			expect.objectContaining({
+				column: 'unavailable',
+				status: 'unavailable',
+				comparison: 'raw',
+			}),
+		);
 		expect(warnings).toEqual([
 			expect.objectContaining({ kind: 'column_default', name: 'unavailable' }),
 		]);
@@ -2212,10 +2242,13 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			makeTable({ name: 'jobs', columns: [makeCol('id')] }),
 		]);
 
+		const warnings: unknown[] = [];
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, dbModel),
+			canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
+				onWarning: (warning) => warnings.push(warning),
+			}),
 		);
 
 		expect(canonical.desired.tables.get('jobs')?.columns[1]?.default).toBe(1);
@@ -2224,6 +2257,17 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				normalizeSql(query.sql).includes('"new_counter" SET DEFAULT'),
 			),
 		).toBe(false);
+		expect(warnings).toEqual([
+			expect.objectContaining({
+				kind: 'column_default',
+				name: 'new_counter',
+				comparison: 'unpaired',
+				side: 'desired',
+				message: expect.stringContaining(
+					'comparison is unavailable for this column',
+				),
+			}),
+		]);
 	});
 
 	it('keeps the failing later column when strict default canonicalization rejects', async () => {
@@ -2297,6 +2341,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				table: 'jobs',
 				column: 'state',
 				status: 'unavailable',
+				comparison: 'raw',
 			}),
 		);
 		expect(warnings).toEqual([
@@ -2304,6 +2349,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				kind: 'column_default',
 				name: 'state',
 				outcome: 'unavailable',
+				comparison: 'raw',
 			}),
 		]);
 	});
@@ -2338,11 +2384,13 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 					side: 'desired',
 					table: 'jobs',
 					column: 'state',
+					comparison: 'raw',
 				}),
 				expect.objectContaining({
 					side: 'database',
 					table: 'jobs',
 					column: 'state',
+					comparison: 'raw',
 				}),
 			]),
 		);
@@ -2371,13 +2419,14 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 				table: 'new_jobs',
 				column: 'state',
 				status: 'unavailable',
+				comparison: 'unpaired',
 			}),
 		);
 		expect(warnings).toEqual([
 			expect.objectContaining({
 				outcome: 'refused',
 				message: expect.stringContaining(
-					'strict canonicalization refused raw comparison',
+					'strict canonicalization cannot compare this column',
 				),
 			}),
 		]);

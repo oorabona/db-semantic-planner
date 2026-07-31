@@ -177,6 +177,18 @@ export interface SchemaDiffResult {
 	readonly summary: DiffSummary;
 	readonly upSQL: readonly string[];
 	readonly downSQL: readonly string[];
+	readonly warnings: readonly SchemaDiffComparisonWarning[];
+}
+
+/** A JSON-safe expression fallback or unpaired surface. */
+export interface SchemaDiffComparisonWarning {
+	readonly kind: 'check_constraint' | 'column_default';
+	readonly table: string;
+	readonly name: string;
+	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+	readonly comparison: 'raw' | 'unpaired';
+	readonly side?: 'desired' | 'database';
+	readonly message: string;
 }
 
 export interface SchemaApplyParams {

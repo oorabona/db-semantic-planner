@@ -39,6 +39,8 @@ function sslConfig(mode: SslMode): boolean | { rejectUnauthorized: boolean } {
 		case 'prefer':
 			return { rejectUnauthorized: false };
 		case 'require':
+			// `require` deliberately encrypts while allowing self-signed development
+			// certificates; `verify-full` is the mode that verifies the certificate.
 			return { rejectUnauthorized: false };
 		case 'verify-full':
 			return { rejectUnauthorized: true };
