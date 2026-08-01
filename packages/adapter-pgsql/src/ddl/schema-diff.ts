@@ -36,7 +36,9 @@ import {
 } from '../db-type.js';
 import {
 	isEngineCanonicalCheck,
+	isEngineCanonicalIndex,
 	markEngineCanonicalCheck,
+	markEngineCanonicalIndex,
 } from '../expression-provenance.js';
 import {
 	getNamingPluginForDbCasing,
@@ -162,12 +164,13 @@ export interface CompareSchemataOptions {
 	 * compile-only diff for a convergence-sensitive check.
 	 *
 	 * Live PostgreSQL callers should use `comparePgsqlDatabaseSchema()`, which
-	 * canonicalises CHECK constraint expressions and column defaults before calling this function.
-	 * Under that live mode, every default surface considered under this option is
-	 * either canonicalised as a pair or explicitly refused. This does not prove
+	 * canonicalises CHECK constraint expressions, column defaults, and partial-index predicates before calling this function.
+	 * Under that live mode, each side is canonicalised independently; rejected
+	 * predicates refuse the migration and infrastructure fallback uses both raw
+	 * models. This does not prove
 	 * that the resulting migration is executable.
-	 * Partial-index predicates and index expressions are not canonicalised by the
-	 * live helper and are rejected there when this strict flag is set.
+	 * Index expressions are not canonicalised by the live helper and are rejected
+	 * there when this strict flag is set.
 	 */
 	readonly requireExpressionCanonicalization?: boolean;
 }
@@ -178,9 +181,9 @@ export class ExpressionCanonicalizationUnavailableError extends Error {
 			`Strict expression canonicalization was requested, but ${surfaces.length} raw SQL ` +
 				'expression surfaces could not all be canonicalized. compareSchemata() is ' +
 				'compile-only and cannot ask PostgreSQL to canonicalise CHECK constraints or ' +
-				'column defaults. comparePgsqlDatabaseSchema() canonicalises both surfaces ' +
+				'column defaults, and partial-index predicates. comparePgsqlDatabaseSchema() canonicalises those surfaces ' +
 				'live; under a live diff, this error means PostgreSQL could not canonicalise at least one ' +
-				'listed surface. Index predicates and index expressions are not covered by the ' +
+				'listed surface. Index expressions are not covered by the ' +
 				'live canonicalizer. Omit ' +
 				'requireExpressionCanonicalization for best-effort raw string comparison. ' +
 				'Inspect the surfaces field for their identities.',
@@ -479,22 +482,29 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 					: {}),
 			},
 		})),
-		indexes: table.indexes.map((idx) => ({
-			...idx,
-			...(idx.name !== undefined ? { name: toDb(idx.name) } : {}),
-			columns: idx.columns.map(toDb),
-			...(idx.include !== undefined ? { include: idx.include.map(toDb) } : {}),
-			...(idx.opclass !== undefined
-				? {
-						opclass: Object.fromEntries(
-							Object.entries(idx.opclass).map(([key, value]) => [
-								toDb(key),
-								value,
-							]),
-						),
-					}
-				: {}),
-		})),
+		indexes: table.indexes.map((idx) => {
+			const normalized = {
+				...idx,
+				...(idx.name !== undefined ? { name: toDb(idx.name) } : {}),
+				columns: idx.columns.map(toDb),
+				...(idx.include !== undefined
+					? { include: idx.include.map(toDb) }
+					: {}),
+				...(idx.opclass !== undefined
+					? {
+							opclass: Object.fromEntries(
+								Object.entries(idx.opclass).map(([key, value]) => [
+									toDb(key),
+									value,
+								]),
+							),
+						}
+					: {}),
+			};
+			return isEngineCanonicalIndex(idx)
+				? markEngineCanonicalIndex({ ...normalized, where: idx.where })
+				: normalized;
+		}),
 		...(table.checkConstraints !== undefined
 			? {
 					checkConstraints: table.checkConstraints.map((check) => {
@@ -927,7 +937,7 @@ function compareIndexes(
 					!explicitIndexCols.has(fk.columns[0]),
 			)
 			.map((fk) =>
-				indexKey({
+				indexComparisonKey({
 					columns: fk.columns,
 					unique: false,
 				}),
@@ -944,7 +954,7 @@ function compareIndexes(
 				);
 			})
 			.map((fk) =>
-				indexKey({
+				indexComparisonKey({
 					columns: fk.columns,
 					unique: false,
 				}),
@@ -953,12 +963,12 @@ function compareIndexes(
 
 	// Index identity: structural definition (name is cosmetic)
 	const schemaIdxMap = new Map(
-		schema.indexes.map((idx) => [indexKey(idx), idx]),
+		schema.indexes.map((idx) => [indexComparisonKey(idx), idx]),
 	);
 	const dbIdxMap = new Map(
 		db.indexes
 			.filter((idx) => isManagedIndex(schema.name, idx))
-			.map((idx) => [indexKey(idx), idx]),
+			.map((idx) => [indexComparisonKey(idx), idx]),
 	);
 	const pendingCreates: PendingIndexCreate[] = [];
 
@@ -1117,31 +1127,6 @@ function isAutoUniqueIndex(
 		(idx.opclass === undefined || Object.keys(idx.opclass).length === 0) &&
 		(idx.with === undefined || Object.keys(idx.with).length === 0)
 	);
-}
-
-function indexKey(idx: IndexIR): string {
-	const parts = [
-		idx.columns.join(','),
-		idx.unique ? 'unique' : 'nonunique',
-		idx.unique && idx.nullsNotDistinct ? 'nulls-not-distinct' : '',
-		idx.method ?? 'btree',
-		idx.where ?? '',
-		(idx.expressions ?? []).join(','),
-		(idx.include ?? []).join(','),
-		idx.opclass
-			? Object.entries(idx.opclass)
-					.sort()
-					.map(([k, v]) => `${k}=${v}`)
-					.join(',')
-			: '',
-		idx.with
-			? Object.entries(idx.with)
-					.sort()
-					.map(([k, v]) => `${k}=${v}`)
-					.join(',')
-			: '',
-	];
-	return parts.join(':');
 }
 
 function indexReplacementKey(tableName: string, idx: IndexIR): string {
@@ -1752,4 +1737,32 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 	}
 
 	return { tables, columns, indexes, constraints };
+}
+
+/** Stable structural index comparison; index names are cosmetic. */
+export function indexComparisonKey(index: IndexIR): string {
+	return JSON.stringify({
+		columns: index.columns,
+		unique: index.unique === true,
+		nullsNotDistinct: index.unique === true && index.nullsNotDistinct === true,
+		method: index.method ?? 'btree',
+		// `undefined` is the only absence value. Keep it distinct from a present
+		// empty predicate so a caller cannot silently turn a partial unique index
+		// into a global unique index.
+		where: index.where,
+		expressions: index.expressions ?? [],
+		include: index.include ?? [],
+		opclass: sortedIndexOptionRecord(index.opclass),
+		with: sortedIndexOptionRecord(index.with),
+	});
+}
+
+function sortedIndexOptionRecord(
+	record: Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> {
+	return Object.fromEntries(
+		Object.entries(record ?? {}).sort(([left], [right]) =>
+			left < right ? -1 : left > right ? 1 : 0,
+		),
+	);
 }

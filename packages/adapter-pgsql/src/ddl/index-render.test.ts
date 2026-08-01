@@ -1,6 +1,12 @@
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { DialectCapabilities, IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import {
+	type EngineCanonicalExpression,
+	isEngineCanonicalIndex,
+	markEngineCanonicalCheck,
+	markEngineCanonicalIndex,
+} from '../expression-provenance.js';
 import { identityNaming } from '../naming-plugin.js';
 import { derivePostgresqlCapabilitiesForVersion } from '../postgresql-capabilities.js';
 import { generateCreateIndex } from './ddl-generator.js';
@@ -62,6 +68,124 @@ const pg10Caps: DialectCapabilities = {
 	...pg14Caps,
 	supportsDDLIndexInclude: false,
 };
+
+describe('partial-index predicate literal validation', () => {
+	it('rejects SQL injection hidden by apostrophes in double-quoted identifiers', () => {
+		expect(() =>
+			renderCreateIndex({
+				name: 'idx_notes_flag',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: '"flag\'"; DROP TABLE victims; SELECT 1 AS "bar\'"',
+			}),
+		).toThrow(/contains forbidden token ";" outside string literal/);
+	});
+
+	it('accepts a legitimate double-quoted identifier containing an apostrophe', () => {
+		expect(
+			renderCreateIndex({
+				name: 'idx_notes_its',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: '"it\'s" = true',
+			}),
+		).toContain('WHERE "it\'s" = true');
+	});
+
+	it('omits WHERE only when the predicate is undefined', () => {
+		expect(
+			renderCreateIndex({
+				name: 'idx_notes_empty_predicate',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+			}),
+		).not.toContain(' WHERE ');
+	});
+
+	it('passes a present blank predicate through to PostgreSQL', () => {
+		expect(
+			renderCreateIndex({
+				name: 'idx_notes_whitespace_predicate',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: '   ',
+			}),
+		).toContain('WHERE    ');
+	});
+
+	it('rejects a backslash in an ordinary quoted predicate literal', () => {
+		const predicate = String.raw`note = '\n'`;
+		expect(() =>
+			renderCreateIndex({
+				name: 'idx_notes_newline',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: predicate,
+			}),
+		).toThrow(
+			`Unsafe SQL expression in index WHERE predicate: contains a backslash in an ordinary single-quoted string literal, whose meaning depends on PostgreSQL standard_conforming_strings; use E'...' for a setting-independent string literal. Value: "${predicate}"`,
+		);
+	});
+
+	it('renders an authored escape-string predicate literal', () => {
+		const predicate = String.raw`note = E'\\n'`;
+		expect(
+			renderCreateIndex({
+				name: 'idx_notes_newline',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: predicate,
+			}),
+		).toContain(`WHERE ${predicate}`);
+	});
+
+	it('refuses an authored Unicode-escape predicate literal', () => {
+		expect(() =>
+			renderCreateIndex({
+				name: 'idx_notes_unicode_escape',
+				table: 'notes',
+				keys: [{ column: 'id' }],
+				unique: false,
+				where: String.raw`note = U&'\0441'`,
+			}),
+		).toThrow(/contains a Unicode-escape string literal/);
+	});
+
+	it('refuses a Proxy forged as a canonical predicate', () => {
+		const forged = new Proxy(
+			{
+				name: 'idx_notes_forged',
+				columns: ['id'],
+				where: "note = U&'\\0441'",
+			},
+			{
+				get(target, property, receiver) {
+					return typeof property === 'symbol'
+						? property
+						: Reflect.get(target, property, receiver);
+				},
+			},
+		);
+
+		expect(isEngineCanonicalIndex(forged)).toBe(false);
+		expect(() =>
+			renderCreateIndex({
+				name: 'idx_notes_forged',
+				table: 'notes',
+				unique: false,
+				keys: [{ column: 'id' }],
+				where: forged.where,
+				whereSource: forged,
+			}),
+		).toThrow(/contains a Unicode-escape string literal/);
+	});
+});
 
 function createIndexDiff(index: IndexIR = maximalIndex): SchemaDiff {
 	return {
@@ -168,6 +292,66 @@ describe('CREATE INDEX pre-refactor goldens', () => {
 			generateMigrationSQL(createIndexDiff(), { schemaName: 'app' }),
 		).toEqual([
 			'CREATE UNIQUE INDEX IF NOT EXISTS "idx_orders_email_cover" ON "app"."orders" USING gin (lower(email), "email" gin_trgm_ops, "tenant_id" int4_ops) INCLUDE ("id", "created_at") NULLS NOT DISTINCT WITH (fillfactor = 80, fastupdate = off) WHERE deleted_at IS NULL AND note = \'active\';',
+		]);
+	});
+
+	it('makes canonical predicates with backslashes setting-independent', () => {
+		const canonicalPredicate = String.raw`note ~ '\d+'::text`;
+		const canonicalIndex = markEngineCanonicalIndex({
+			name: 'idx_orders_note_pattern',
+			columns: ['id'],
+			where: canonicalPredicate as EngineCanonicalExpression,
+		});
+		const diff = createIndexDiff(canonicalIndex);
+
+		expect(generateMigrationSQL(diff, { schemaName: 'app' })).toEqual([
+			'CREATE INDEX IF NOT EXISTS "idx_orders_note_pattern" ON "app"."orders" ("id") WHERE note ~ E\'\\\\d+\'::text;',
+		]);
+		expect(
+			generateDownSQL(dropIndexDiff(canonicalIndex), { schemaName: 'app' }),
+		).toEqual([
+			'CREATE INDEX IF NOT EXISTS "idx_orders_note_pattern" ON "app"."users" ("id") WHERE note ~ E\'\\\\d+\'::text;',
+		]);
+	});
+
+	it('makes canonical CHECK SQL without an index setting-independent', () => {
+		const canonicalCheck = markEngineCanonicalCheck({
+			name: 'orders_note_format',
+			expression: String.raw`CHECK (note ~ '\d+')`,
+		});
+		const diff: SchemaDiff = {
+			changes: [
+				{
+					kind: 'drop_check_constraint',
+					table: 'orders',
+					destructive: true,
+					details: 'Drop previous note format check',
+					meta: { check: canonicalCheck },
+				},
+				{
+					kind: 'add_check_constraint',
+					table: 'orders',
+					destructive: false,
+					details: 'Add note format check',
+					meta: { check: canonicalCheck },
+				},
+			],
+			hasDestructive: true,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 1, dropped: 1, altered: 0 },
+			},
+		};
+
+		expect(generateMigrationSQL(diff)).toEqual([
+			'ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "orders_note_format";',
+			expect.stringContaining("CHECK (note ~ E'\\\\d+')"),
+		]);
+		expect(generateDownSQL(diff)).toEqual([
+			'ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "orders_note_format";',
+			expect.stringContaining("CHECK (note ~ E'\\\\d+')"),
 		]);
 	});
 
@@ -482,6 +666,18 @@ describe('CREATE INDEX capability assertions', () => {
 				with: {},
 			}),
 		).toEqual('CREATE INDEX "idx_no_with" ON "public"."users" ("email")');
+	});
+
+	it('renders a partial-index predicate with a literal semicolon', () => {
+		expect(
+			renderCreateIndex({
+				name: 'idx_notes_tag',
+				table: 'notes',
+				unique: false,
+				keys: [{ column: 'id' }],
+				where: "tag = 'a;b'",
+			}),
+		).toContain("WHERE tag = 'a;b'");
 	});
 
 	it('routes equivalent site inputs through the same renderer output', () => {

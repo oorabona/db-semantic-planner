@@ -795,7 +795,7 @@ describe('generateMigrationSQL', () => {
 
 				expect(error).toBeInstanceOf(Error);
 				expect((error as Error).message).toBe(
-					'Unsafe SQL expression in index WHERE predicate: contains forbidden characters (;, --, /*, */, "$$" (dollar-quoted strings), \\). Value: "active = true; DROP TABLE users"',
+					'Unsafe SQL expression in index WHERE predicate: contains forbidden token ";" outside string literal. Value: "active = true; DROP TABLE users"',
 				);
 			});
 

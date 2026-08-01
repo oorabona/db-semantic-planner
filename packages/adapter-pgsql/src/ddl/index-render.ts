@@ -1,15 +1,18 @@
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
-import type { DialectCapabilities } from '@dbsp/types';
+import type { DialectCapabilities, IndexIR } from '@dbsp/types';
+import { isEngineCanonicalIndex } from '../expression-provenance.js';
 import {
 	INDEX_INCLUDE_CAPABILITY,
 	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 } from '../transition/index-feature-capabilities.js';
 import {
 	formatStorageParameterValue,
+	validateCheckExpression,
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
 import { quoteIdent, validateIndexMethod } from './phases/utils.js';
+import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 
 export type IndexRenderKey = {
 	readonly column?: string | undefined;
@@ -28,6 +31,8 @@ export type IndexRenderSpec = {
 	readonly nullsNotDistinct?: boolean | undefined;
 	readonly with?: Readonly<Record<string, unknown>> | undefined;
 	readonly where?: string | undefined;
+	/** The in-process index value that owns a deparsed `where` predicate. */
+	readonly whereSource?: IndexIR | undefined;
 	readonly concurrently?: boolean | undefined;
 	readonly ifNotExists?: boolean | undefined;
 };
@@ -62,7 +67,7 @@ const INDEX_FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
 	{
 		feature: 'PARTIAL INDEX',
 		capability: 'supportsDDLPartialIndexes',
-		present: (spec) => spec.where !== undefined && spec.where.length > 0,
+		present: (spec) => spec.where !== undefined,
 	},
 	{
 		feature: 'EXPRESSION INDEX',
@@ -267,9 +272,20 @@ export function renderCreateIndex(
 			.join(', ');
 		parts.push(`WITH (${withParams})`);
 	}
-	if (spec.where) {
-		validateSqlExpression(spec.where, 'index WHERE predicate');
-		parts.push(`WHERE ${spec.where}`);
+	const where = spec.where;
+	if (where !== undefined) {
+		// Provenance lives on the frozen index object, not on a caller-controlled
+		// boolean. A branded index can only bypass authored-input validation for
+		// its exact deparsed predicate.
+		const canonicalPredicate =
+			isEngineCanonicalIndex(spec.whereSource) &&
+			spec.whereSource.where === where;
+		if (!canonicalPredicate) {
+			validateCheckExpression(where, 'index WHERE predicate');
+		}
+		parts.push(
+			`WHERE ${canonicalPredicate ? escapeCanonicalSqlLiterals(where) : where}`,
+		);
 	}
 
 	return parts.join(' ');

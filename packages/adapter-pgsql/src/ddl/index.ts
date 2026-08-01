@@ -24,8 +24,12 @@ export {
 	CheckConstraintNewEnumValueError,
 	type ComparePgsqlDatabaseSchemaOptions,
 	comparePgsqlDatabaseSchema,
+	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
+	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
 	type NonConvergentSchemaDiffSurface,
+	PartialIndexPredicateNewEnumValueError,
+	RawIndexPredicateFallbackError,
 } from './live-diff.js';
 export {
 	generateMigrationFile,

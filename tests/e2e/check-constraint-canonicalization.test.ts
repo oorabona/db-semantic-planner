@@ -504,7 +504,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		expect(second.changes).toEqual([]);
 	});
 
-	it('canonicalizes column defaults through pg_attrdef under the target schema search_path', async () => {
+	it('canonicalizes column defaults through pg_attrdef on the migration session path', async () => {
 		await pool.query(`
 			CREATE TYPE ${quoteIdent(SCHEMA)}.status AS ENUM ('pending', 'active');
 			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.counter_seq;
@@ -534,7 +534,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 								name: 'counter',
 								type: 'integer',
 								nullable: false,
-								default: { sql: "nextval('counter_seq'::regclass)" },
+								default: {
+									sql: `nextval('${SCHEMA}.counter_seq'::regclass)`,
+								},
 							},
 							{
 								name: 'ivl',
@@ -597,8 +599,8 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 	it('canonicalizes a default backed by an existing managed sequence', async () => {
 		// This setup runs through the pool's ambient search_path, so qualify both
-		// relations. The canonicaliser resolves the desired unqualified regclass
-		// reference through its pinned target path.
+		// relations. The canonicaliser preserves the migration session path, so
+		// the authored regclass reference is qualified too.
 		await pool.query(`
 			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.scratch_counter_seq;
 			CREATE TABLE ${quoteIdent(SCHEMA)}.jobs (
@@ -618,7 +620,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 								name: 'counter',
 								type: 'integer',
 								nullable: false,
-								default: { sql: "nextval('scratch_counter_seq'::regclass)" },
+								default: {
+									sql: `nextval('${SCHEMA}.scratch_counter_seq'::regclass)`,
+								},
 							},
 						],
 						foreignKeys: [],
@@ -662,11 +666,11 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		expect(sequence.rows[0]?.sequence).toBe(`${SCHEMA}.scratch_counter_seq`);
 	});
 
-	it('falls back for one unresolved sequence default without losing peer canonicalization', async () => {
+	it('rejects a missing sequence default at plan time', async () => {
 		// As above, this is pool-session setup with no pinned search_path: qualify
 		// the fixture sequence in its regclass literal.  The desired model below
-		// deliberately keeps its references unqualified for the pinned scratch
-		// session used by the canonicaliser.
+		// qualifies real references for the migration session; the missing reference
+		// below remains intentionally non-executable.
 		await pool.query(`
 			CREATE TYPE ${quoteIdent(SCHEMA)}.status AS ENUM ('pending', 'active');
 			CREATE SEQUENCE ${quoteIdent(SCHEMA)}.counter_seq;
@@ -694,7 +698,9 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 								name: 'counter',
 								type: 'integer',
 								nullable: false,
-								default: { sql: "nextval('counter_seq'::regclass)" },
+								default: {
+									sql: `nextval('${SCHEMA}.counter_seq'::regclass)`,
+								},
 							},
 							{
 								name: 'missing_counter',
@@ -734,24 +740,13 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			]),
 		);
 
-		const warnings: string[] = [];
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-			onWarning: (message) => warnings.push(message),
-		});
-
-		// The scalar enum default and the existing sequence default have different
-		// raw spellings from introspection, so a table-wide fallback would add
-		// drift here.  Only the nonexistent sequence may fall back.
-		expect(warnings).toHaveLength(1);
-		expect(warnings[0]).toContain(
-			'Reason: relation "missing_counter_seq" does not exist',
-		);
-		expect(diff.changes).toHaveLength(1);
-		expect(diff.changes[0]).toMatchObject({
-			kind: 'alter_column_default',
-			table: 'jobs',
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				schema: SCHEMA,
+				ignoreUnmanagedExtensions: true,
+			}),
+		).rejects.toMatchObject({
+			name: 'ColumnDefaultCanonicalizationError',
 			column: 'missing_counter',
 		});
 	});

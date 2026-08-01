@@ -84,13 +84,55 @@ describe('validateCheckExpression', () => {
 		).not.toThrow();
 	});
 
-	it('accepts PostgreSQL-deparsed CHECK regex literals containing backslashes', () => {
+	it('accepts an apostrophe inside a double-quoted identifier', () => {
+		expect(() =>
+			validateCheckExpression('CHECK ("it\'s" = true)', 'test check'),
+		).not.toThrow();
+	});
+
+	it('does not let an apostrophe in a double-quoted identifier hide SQL injection', () => {
+		const sql = '"flag\'"; DROP TABLE victims; SELECT 1 AS "bar\'"';
+		expect(() => validateCheckExpression(sql, 'test check')).toThrow(
+			/contains forbidden token ";" outside string literal/,
+		);
+	});
+
+	it('accepts escape string literals with backslashes', () => {
+		expect(() =>
+			validateCheckExpression(String.raw`CHECK (note = E'a\'b')`, 'test check'),
+		).not.toThrow();
+	});
+
+	it.each([
+		'U',
+		'u',
+	])('rejects %s& Unicode-escape string literals after scanning their inert contents', (prefix) => {
+		const sql = String.raw`CHECK (note = ${prefix}&'a;--\005C')`;
+		expect(() => validateCheckExpression(sql, 'test check')).toThrow(
+			`Unsafe SQL expression in test check: contains a Unicode-escape string literal (U&'...'), which PostgreSQL accepts only when standard_conforming_strings is enabled; use an ordinary single-quoted literal or E'...' instead. Value: "${sql}"`,
+		);
+	});
+
+	it('accepts escape string literals with doubled quotes', () => {
+		expect(() =>
+			validateCheckExpression("CHECK (note = E'it''s')", 'test check'),
+		).not.toThrow();
+	});
+
+	it('still rejects a semicolon after an escape string literal', () => {
 		expect(() =>
 			validateCheckExpression(
-				String.raw`CHECK ((a ~ '\d+'::text))`,
+				String.raw`CHECK (note = E'a\'b'); DROP TABLE users`,
 				'test check',
 			),
-		).not.toThrow();
+		).toThrow(/contains forbidden token ";" outside string literal/);
+	});
+
+	it('rejects backslashes in ordinary quoted strings because applying-session settings change their meaning', () => {
+		const sql = String.raw`CHECK ((a ~ '\d+'::text))`;
+		expect(() => validateCheckExpression(sql, 'test check')).toThrow(
+			`Unsafe SQL expression in test check: contains a backslash in an ordinary single-quoted string literal, whose meaning depends on PostgreSQL standard_conforming_strings; use E'...' for a setting-independent string literal. Value: "${sql}"`,
+		);
 	});
 
 	it('accepts safe dollar-quoted literal', () => {

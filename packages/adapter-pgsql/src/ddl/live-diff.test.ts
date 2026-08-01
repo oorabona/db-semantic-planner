@@ -2,11 +2,13 @@ import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
+import type { PgsqlCanonicalizationScope } from '../expression-canonicalizer.js';
 import { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
+	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
 import type { SchemaDiff } from './schema-diff.js';
@@ -92,10 +94,15 @@ function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
 	};
 }
 
-function makeModel(tables: readonly TableIR[]): ModelIR {
+function makeModel(
+	tables: readonly TableIR[],
+	extensions?: readonly string[],
+): ModelIR {
 	return new ModelIRImpl(
 		new Map(tables.map((table) => [table.name, table])),
 		new Map(),
+		undefined,
+		extensions,
 	);
 }
 
@@ -134,6 +141,18 @@ class FakeLiveDiffClient {
 	): Promise<FakeQueryResult> {
 		const normalized = normalizeSql(sql);
 		this.queries.push(normalized);
+		if (
+			normalized ===
+			"SELECT pg_catalog.current_setting('search_path') AS search_path"
+		) {
+			return { rows: [{ search_path: 'public' }], rowCount: 1 };
+		}
+		if (
+			normalized ===
+			'SELECT pg_catalog.current_schemas(false)::pg_catalog.text[] AS schemas'
+		) {
+			return { rows: [{ schemas: ['public'] }], rowCount: 1 };
+		}
 
 		if (normalized.startsWith('CREATE TEMP TABLE')) {
 			if (this.failCanonicalization) {
@@ -222,6 +241,12 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 	): Promise<FakeQueryResult> {
 		const normalized = normalizeSql(sql);
 		this.queries.push(normalized);
+		if (
+			normalized ===
+			"SELECT pg_catalog.current_setting('search_path') AS search_path"
+		) {
+			return { rows: [{ search_path: 'tenant_1, public' }], rowCount: 1 };
+		}
 
 		if (
 			normalized.startsWith('ALTER TABLE') &&
@@ -430,6 +455,125 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
+	it('rejects a missing desired extension predicate in strict and non-strict modes', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					indexes: [
+						{
+							name: 'idx_jobs_payload_digest',
+							columns: ['id'],
+							where: "digest(payload, 'sha256') IS NOT NULL",
+						},
+					],
+				}),
+			],
+			['pgcrypto'],
+		);
+		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
+		const missingExtensionFunction = Object.assign(
+			new Error('function digest(text, unknown) does not exist'),
+			{ code: '42883' },
+		);
+		const scratch = {
+			executeRaw: vi.fn(async (sql: string) => {
+				if (
+					sql ===
+					'SELECT pg_catalog.current_schemas(false)::pg_catalog.text[] AS schemas'
+				) {
+					return [{ schemas: ['public'] }];
+				}
+				if (sql.startsWith('CREATE INDEX ')) {
+					throw missingExtensionFunction;
+				}
+				return [];
+			}),
+			transaction: vi.fn(
+				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
+					fn(scratch as unknown as PgsqlCanonicalizationScope),
+			),
+		};
+		const adapter = {
+			introspect: vi.fn(async () => dbModel),
+			withScratchScope: vi.fn(
+				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
+					fn(scratch as unknown as PgsqlCanonicalizationScope),
+			),
+		} as unknown as PgsqlAdapter;
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				requireExpressionCanonicalization: true,
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow(
+			'add that extension in a separate migration before the predicate',
+		);
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, { onWarning: vi.fn() }),
+		).rejects.toBeInstanceOf(IndexPredicateCanonicalizationError);
+		expect(scratch.executeRaw).toHaveBeenCalledWith(
+			expect.stringMatching(/^CREATE INDEX /u),
+		);
+		expect(scratch.executeRaw).not.toHaveBeenCalledWith(
+			expect.stringMatching(/^CREATE EXTENSION /u),
+		);
+	});
+
+	it('does not emit a desired-only partial-index migration after canonicalization is cancelled', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				indexes: [
+					{
+						name: 'idx_jobs_active',
+						columns: ['id'],
+						where: 'id > 0',
+					},
+				],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
+		const cancelled = Object.assign(new Error('query cancelled'), {
+			code: '57014',
+		});
+		const scratch = {
+			executeRaw: vi.fn(async (sql: string) => {
+				if (
+					sql ===
+					'SELECT pg_catalog.current_schemas(false)::pg_catalog.text[] AS schemas'
+				) {
+					return [{ schemas: ['public'] }];
+				}
+				if (sql.startsWith('CREATE INDEX ')) throw cancelled;
+				return [];
+			}),
+			transaction: vi.fn(
+				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
+					fn(scratch as unknown as PgsqlCanonicalizationScope),
+			),
+		};
+		const adapter = {
+			introspect: vi.fn(async () => dbModel),
+			withScratchScope: vi.fn(
+				async (fn: (scope: PgsqlCanonicalizationScope) => Promise<unknown>) =>
+					fn(scratch as unknown as PgsqlCanonicalizationScope),
+			),
+		} as unknown as PgsqlAdapter;
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired),
+		).rejects.toMatchObject({
+			statement: 'create_partial_index',
+			cause: cancelled,
+		});
+		expect(scratch.executeRaw).toHaveBeenCalledWith(
+			expect.stringMatching(/^CREATE INDEX /u),
+		);
+	});
+
 	it('refuses a CHECK on an existing enum column without desired originalDbType when the diff adds the enum value', async () => {
 		const desired = makeModelWithEnums(
 			[
@@ -470,7 +614,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			client.queries.some(
 				(query) =>
 					query.startsWith('CREATE TEMP TABLE') &&
-					query.includes('"state" "tenant_1".status'),
+					query.includes('(LIKE "tenant_1"."jobs")'),
 			),
 		).toBe(true);
 	});

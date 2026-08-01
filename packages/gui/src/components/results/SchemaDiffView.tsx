@@ -14,7 +14,12 @@ import {
 	TriangleAlert,
 } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import type { SchemaDiffChange, SchemaDiffComparisonWarning } from '@/lib/ipc';
+import type {
+	SchemaDiffChange,
+	SchemaDiffComparisonWarning,
+	SchemaDiffRawComparisonWarning,
+	SchemaDiffUnpairedColumnDefaultWarning,
+} from '@/lib/ipc';
 import { sidecarApi } from '@/lib/ipc';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
@@ -94,11 +99,13 @@ export function SchemaDiffView() {
 
 	const warnings = diff.warnings;
 	const rawWarnings = warnings.filter(
-		(warning) => warning.comparison === 'raw',
+		(warning): warning is SchemaDiffRawComparisonWarning =>
+			warning.comparison === 'raw',
 	);
 	const degradedWarnings = rawWarnings;
 	const unpairedWarnings = warnings.filter(
-		(warning) => warning.comparison === 'unpaired',
+		(warning): warning is SchemaDiffUnpairedColumnDefaultWarning =>
+			warning.comparison === 'unpaired',
 	);
 	const groups = groupChangesByTable(diff.changes);
 	const hasChanges = diff.changes.length > 0;
@@ -203,7 +210,7 @@ export function SchemaDiffView() {
 function ComparisonDegradedNotice({
 	warnings,
 }: {
-	warnings: readonly SchemaDiffComparisonWarning[];
+	warnings: readonly SchemaDiffRawComparisonWarning[];
 }) {
 	return (
 		<section
@@ -236,7 +243,9 @@ function ComparisonDegradedNotice({
 									<span className="font-mono">
 										{warning.kind === 'column_default'
 											? 'column default'
-											: 'CHECK constraint'}{' '}
+											: warning.kind === 'index_predicate'
+												? 'partial-index predicate'
+												: 'CHECK constraint'}{' '}
 										{warning.table}.{warning.name}
 									</span>
 									{warning.outcome !== undefined && ` (${warning.outcome})`}:{' '}
@@ -254,7 +263,7 @@ function ComparisonDegradedNotice({
 function ComparisonPairingNotice({
 	warnings,
 }: {
-	warnings: readonly SchemaDiffComparisonWarning[];
+	warnings: readonly SchemaDiffUnpairedColumnDefaultWarning[];
 }) {
 	return (
 		<section

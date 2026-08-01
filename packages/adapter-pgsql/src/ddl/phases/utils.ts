@@ -15,6 +15,7 @@ import {
 	validateIdentifier,
 	validateSqlExpression,
 } from '../../validate.js';
+import { escapeCanonicalSqlLiterals } from '../rendered-sql.js';
 import type { PhaseContext } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -257,7 +258,7 @@ export function formatSqlDefault(
 	// { sql: string } escape hatch — emit verbatim after validation
 	if (typeof value === 'object' && 'sql' in (value as object)) {
 		if (isEngineCanonicalSqlDefault(value)) {
-			return value.sql;
+			return escapeCanonicalSqlLiterals(value.sql);
 		}
 		const rawSql = (value as Record<string, unknown>).sql;
 		if (typeof rawSql !== 'string') {

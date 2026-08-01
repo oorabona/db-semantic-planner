@@ -40,16 +40,33 @@ export interface SchemaDiffChange {
 	readonly meta?: Readonly<Record<string, unknown>>;
 }
 
-/** A JSON-safe record of an expression fallback or unpaired surface. */
-export interface SchemaDiffComparisonWarning {
-	readonly kind: 'check_constraint' | 'column_default';
+/** Fields shared by all JSON-safe expression comparison warnings. */
+interface SchemaDiffComparisonWarningBase {
 	readonly table: string;
 	readonly name: string;
-	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
-	readonly comparison: 'raw' | 'unpaired';
-	readonly side?: 'desired' | 'database';
 	readonly message: string;
 }
+
+/** A JSON-safe expression surface compared as raw text. */
+export type SchemaDiffRawComparisonWarning = SchemaDiffComparisonWarningBase & {
+	readonly kind: 'check_constraint' | 'column_default' | 'index_predicate';
+	readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+	readonly comparison: 'raw';
+};
+
+/** A column default with no opposite-model counterpart to compare. */
+export type SchemaDiffUnpairedColumnDefaultWarning =
+	SchemaDiffComparisonWarningBase & {
+		readonly kind: 'column_default';
+		readonly outcome?: 'unavailable' | 'rejected' | 'refused';
+		readonly comparison: 'unpaired';
+		readonly side?: 'desired' | 'database';
+	};
+
+/** A JSON-safe record of an expression fallback or unpaired column default. */
+export type SchemaDiffComparisonWarning =
+	| SchemaDiffRawComparisonWarning
+	| SchemaDiffUnpairedColumnDefaultWarning;
 
 export interface SchemaDiffResult {
 	readonly changes: readonly SchemaDiffChange[];
@@ -87,31 +104,46 @@ export const compareManagedSchema: SchemaDiffComparisonOperation = async (
 function serializeCanonicalizationWarning(
 	warning: ExpressionCanonicalizationWarning,
 ): SchemaDiffComparisonWarning {
+	if (warning.kind === 'check_constraint') {
+		return {
+			kind: warning.kind,
+			table: warning.table,
+			name: warning.name,
+			comparison: 'raw',
+			// Adapter diagnostics include the PostgreSQL error's message. Keep that
+			// diagnostic in the sidecar only: the renderer gets an identity-based
+			// explanation that cannot disclose database details embedded in `cause`.
+			message: `PostgreSQL could not canonicalize CHECK constraint ${warning.table}.${warning.name}; it was compared as raw text.`,
+		};
+	}
+
+	if (warning.kind === 'column_default' && warning.comparison === 'unpaired') {
+		return {
+			kind: warning.kind,
+			table: warning.table,
+			name: warning.name,
+			...(warning.outcome !== undefined ? { outcome: warning.outcome } : {}),
+			comparison: warning.comparison,
+			...(warning.side !== undefined ? { side: warning.side } : {}),
+			message: `Column default ${warning.table}.${warning.name} had no ${warning.side === 'database' ? 'desired' : 'database'} default counterpart to compare against.`,
+		};
+	}
+
 	const surface =
-		warning.kind === 'column_default' ? 'column default' : 'CHECK constraint';
-	const surfaceLabel =
-		warning.kind === 'column_default' ? 'Column default' : 'CHECK constraint';
-	const unpaired =
-		warning.kind === 'column_default' && warning.comparison === 'unpaired';
-	const outcome =
-		warning.kind === 'column_default' && warning.outcome !== undefined
-			? ` (${warning.outcome})`
-			: '';
+		warning.kind === 'column_default'
+			? 'column default'
+			: 'partial-index predicate';
+	const outcome = warning.outcome !== undefined ? ` (${warning.outcome})` : '';
 	return {
 		kind: warning.kind,
 		table: warning.table,
 		name: warning.name,
-		...(warning.kind === 'column_default' && warning.outcome !== undefined
-			? { outcome: warning.outcome }
-			: {}),
-		comparison: unpaired ? 'unpaired' : 'raw',
-		...(unpaired && warning.side !== undefined ? { side: warning.side } : {}),
+		...(warning.outcome !== undefined ? { outcome: warning.outcome } : {}),
+		comparison: 'raw',
 		// Adapter diagnostics include the PostgreSQL error's message. Keep that
 		// diagnostic in the sidecar only: the renderer gets an identity-based
 		// explanation that cannot disclose database details embedded in `cause`.
-		message: unpaired
-			? `${surfaceLabel} ${warning.table}.${warning.name} had no ${warning.side === 'database' ? 'desired' : 'database'} default counterpart to compare against.`
-			: `PostgreSQL could not canonicalize ${surface} ${warning.table}.${warning.name}${outcome}; it was compared as raw text.`,
+		message: `PostgreSQL could not canonicalize ${surface} ${warning.table}.${warning.name}${outcome}; it was compared as raw text.`,
 	};
 }
 

@@ -100,7 +100,7 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 		await closeTestDb();
 	});
 
-	it('regenerates FK-column indexes deliberately and leaves unmanaged indexes untouched', async () => {
+	it('regenerates FK-column and literal-predicate indexes while leaving expression indexes unmanaged', async () => {
 		const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 		const dbModel = await adapter.introspect({ schema: SCHEMA });
 		// The generator reads the model's own warnings; there is no option to pass
@@ -121,10 +121,8 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 				'dbsp will neither drop nor recreate it; maintain it by hand.',
 			),
 		);
-		expect(warnings).toContainEqual(
-			expect.stringContaining(
-				'Index "idx_rt_users_note_literal" on table "index_roundtrip_users" cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it',
-			),
+		expect(warnings).not.toContainEqual(
+			expect.stringContaining('idx_rt_users_note_literal'),
 		);
 		expect(generatedCode).toContain("name: 'my_lookup_idx'");
 		expect(generatedCode).toContain(
@@ -134,8 +132,9 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 		// form, so that is what round-trips: the regenerated schema carries the same
 		// text the catalog reports, which is why comparing it back yields no drift.
 		expect(generatedCode).toContain("where: '(deleted_at IS NULL)'");
+		expect(generatedCode).toContain("name: 'idx_rt_users_note_literal'");
+		expect(generatedCode).toContain("note = \\'a;b\\'");
 		expect(generatedCode).not.toContain('idx_rt_users_lower_email');
-		expect(generatedCode).not.toContain('idx_rt_users_note_literal');
 		const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-index-roundtrip-'));
 
 		try {

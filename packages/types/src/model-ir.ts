@@ -423,7 +423,12 @@ export interface IndexIR {
 	/** Index access method (default: btree) */
 	readonly method?: string;
 
-	/** Partial index predicate (WHERE clause) */
+	/**
+	 * Partial index predicate (WHERE clause). The model representation has one
+	 * absence value: `undefined`. Every present string, including an empty or
+	 * whitespace-only string, is an authored `WHERE` clause and must reach
+	 * PostgreSQL.
+	 */
 	readonly where?: string;
 
 	/** Expression-based index entries (used instead of/alongside columns) */

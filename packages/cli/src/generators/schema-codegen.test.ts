@@ -1140,28 +1140,26 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			});
 
 			expect(typeof result.code).toBe('string');
-			expect(result.warnings).toHaveLength(3);
+			expect(result.warnings).toHaveLength(2);
 			expect(result.warnings[0]).toBe(model.warnings[0]);
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
 					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema and is not managed by dbsp.',
 				),
 			);
-			expect(result.warnings).toContainEqual(
-				expect.stringContaining(
-					'Index "idx_notes_note_literal" on table "notes" cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it',
-				),
+			expect(result.warnings).not.toContainEqual(
+				expect.stringContaining('idx_notes_note_literal'),
 			);
 			expect(streamed).toEqual(result.warnings);
 			expect(result.code).not.toContain('source injection');
 			expect(result.code).not.toContain('no primary key */');
 			expect(result.code).not.toContain('${');
 			expect(result.code).not.toContain('idx_notes_lower_email');
-			expect(result.code).not.toContain('idx_notes_note_literal');
+			expect(result.code).toContain('idx_notes_note_literal');
 			expectValidTypeScript(result.code);
 		});
 
-		it('omits partial indexes whose predicates the DDL validator rejects and leaves them unmanaged', async () => {
+		it('emits partial indexes whose predicates contain safe quoted literals', async () => {
 			const model = makeCodegenModel([
 				{
 					name: 'notes',
@@ -1184,13 +1182,9 @@ describe('generateSchemaFileWithDiagnostics', () => {
 
 			const result = generateSchemaFileWithDiagnostics(model);
 
-			expect(result.code).not.toContain('idx_notes_note_literal');
-			expect(result.code).not.toContain("where: 'note = \\'a;b\\''");
-			expect(result.warnings).toContainEqual(
-				expect.stringContaining(
-					'Index "idx_notes_note_literal" on table "notes" cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it',
-				),
-			);
+			expect(result.code).toContain('idx_notes_note_literal');
+			expect(result.code).toContain("where: 'note = \\'a;b\\''");
+			expect(result.warnings).toEqual([]);
 
 			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
@@ -1328,7 +1322,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			const result = generateSchemaFileWithDiagnostics(model);
 
 			expect(result.code).not.toContain('idx_notes_lower_email');
-			expect(result.code).not.toContain('idx_notes_note_literal');
+			expect(result.code).toContain('idx_notes_note_literal');
 			expect(result.code).not.toContain('idx-notes-email');
 			expect(result.code).not.toContain('idx_notes_email_rum');
 			expect(result.code).not.toContain('idx_notes_email_nonunique_nulls');
