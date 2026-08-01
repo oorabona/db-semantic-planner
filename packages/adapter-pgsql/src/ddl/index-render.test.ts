@@ -291,7 +291,7 @@ describe('CREATE INDEX pre-refactor goldens', () => {
 		expect(
 			generateMigrationSQL(createIndexDiff(), { schemaName: 'app' }),
 		).toEqual([
-			'CREATE UNIQUE INDEX IF NOT EXISTS "idx_orders_email_cover" ON "app"."orders" USING gin (lower(email), "email" gin_trgm_ops, "tenant_id" int4_ops) INCLUDE ("id", "created_at") NULLS NOT DISTINCT WITH (fillfactor = 80, fastupdate = off) WHERE deleted_at IS NULL AND note = \'active\';',
+			'CREATE UNIQUE INDEX "idx_orders_email_cover" ON "app"."orders" USING gin (lower(email), "email" gin_trgm_ops, "tenant_id" int4_ops) INCLUDE ("id", "created_at") NULLS NOT DISTINCT WITH (fillfactor = 80, fastupdate = off) WHERE deleted_at IS NULL AND note = \'active\';',
 		]);
 	});
 
@@ -305,12 +305,12 @@ describe('CREATE INDEX pre-refactor goldens', () => {
 		const diff = createIndexDiff(canonicalIndex);
 
 		expect(generateMigrationSQL(diff, { schemaName: 'app' })).toEqual([
-			'CREATE INDEX IF NOT EXISTS "idx_orders_note_pattern" ON "app"."orders" ("id") WHERE note ~ E\'\\\\d+\'::text;',
+			'CREATE INDEX "idx_orders_note_pattern" ON "app"."orders" ("id") WHERE note ~ E\'\\\\d+\'::text;',
 		]);
 		expect(
 			generateDownSQL(dropIndexDiff(canonicalIndex), { schemaName: 'app' }),
 		).toEqual([
-			'CREATE INDEX IF NOT EXISTS "idx_orders_note_pattern" ON "app"."users" ("id") WHERE note ~ E\'\\\\d+\'::text;',
+			'CREATE INDEX "idx_orders_note_pattern" ON "app"."users" ("id") WHERE note ~ E\'\\\\d+\'::text;',
 		]);
 	});
 
@@ -386,7 +386,7 @@ describe('CREATE INDEX pre-refactor goldens', () => {
 		expect(
 			generateMigrationSQL(createTableWithFkDiff(table), { schemaName: 'app' }),
 		).toContain(
-			'CREATE INDEX IF NOT EXISTS "idx_posts_user_id" ON "app"."posts" ("user_id");',
+			'CREATE INDEX "idx_posts_user_id" ON "app"."posts" ("user_id");',
 		);
 	});
 });

@@ -228,7 +228,7 @@ describe('generateMigrationFile metadata from real DOWN SQL', () => {
 		const parsed = parseMigrationFile(content);
 		const force = false;
 
-		expect(content).toContain('CREATE INDEX IF NOT EXISTS "idx_users_email"');
+		expect(content).toContain('CREATE INDEX "idx_users_email"');
 		expect(content).toContain('DROP INDEX IF EXISTS "idx_users_email"');
 		expect(content).toContain('-- dbsp:destructive: true');
 		expect(parsed.destructive).toBe(true);

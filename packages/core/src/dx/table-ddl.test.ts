@@ -408,6 +408,30 @@ describe('orm.tables.X.indexes.create()', () => {
 		);
 	});
 
+	it('lets the runtime helper request IF NOT EXISTS', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as IndexProxy;
+
+		await idxProxy.users.indexes.create({
+			name: 'idx_users_email',
+			columns: ['email'],
+			ifNotExists: true,
+		});
+
+		expect(generateCreateIndex).toHaveBeenCalledWith('users', 'public', {
+			name: 'idx_users_email',
+			columns: ['email'],
+			ifNotExists: true,
+		});
+		expect(executeDDL).toHaveBeenCalledWith(
+			'CREATE INDEX IF NOT EXISTS idx_users_email ON public.users (email)',
+		);
+	});
+
 	it('forwards nullsNotDistinct to adapter SQL generation', async () => {
 		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
 		const idxProxy = wrapTablesProxyWithDDL(

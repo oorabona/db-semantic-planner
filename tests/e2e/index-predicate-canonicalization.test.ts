@@ -305,9 +305,7 @@ describe('#383 partial-index predicate canonicalization (real PG)', () => {
 			schemaName: SCHEMA,
 		});
 
-		expect(statements).toEqual([
-			expect.stringContaining('CREATE INDEX IF NOT EXISTS'),
-		]);
+		expect(statements).toEqual([expect.stringContaining('CREATE INDEX ')]);
 		expect(statements[0]).toContain(String.raw`note ~ E'\\d+'::text`);
 	});
 

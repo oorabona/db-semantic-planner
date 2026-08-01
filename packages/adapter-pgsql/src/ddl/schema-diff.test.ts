@@ -104,6 +104,68 @@ describe('compareSchemata', () => {
 			expect(diff.summary.tables.added).toBe(1);
 		});
 
+		it('emits the table and every column comment when creating a table', () => {
+			const users = makeTable({
+				name: 'users',
+				comment: 'Registered user accounts',
+				columns: [
+					makeCol({ name: 'id', type: 'integer', comment: 'Primary key' }),
+					makeCol({ name: 'email', comment: 'Primary login address' }),
+				],
+			});
+			const schema = makeModel([users]);
+			const diff = compareSchemata(schema, makeModel([]));
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'create_table',
+				'add_comment',
+				'add_comment',
+				'add_comment',
+			]);
+			expect(diff.changes.slice(1)).toMatchObject([
+				{
+					table: 'users',
+					meta: { target: 'table', comment: 'Registered user accounts' },
+				},
+				{
+					table: 'users',
+					column: 'id',
+					meta: { target: 'column', comment: 'Primary key' },
+				},
+				{
+					table: 'users',
+					column: 'email',
+					meta: { target: 'column', comment: 'Primary login address' },
+				},
+			]);
+		});
+
+		it('does not drop empty table or column comments when creating a table', () => {
+			const users = makeTable({
+				name: 'users',
+				comment: '',
+				columns: [
+					makeCol({ name: 'id', type: 'integer', comment: '' }),
+					makeCol({ name: 'email', comment: 'Primary login address' }),
+				],
+			});
+
+			const diff = compareSchemata(makeModel([users]), makeModel([]));
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'create_table',
+				'add_comment',
+			]);
+			expect(diff.changes).not.toContainEqual(
+				expect.objectContaining({ kind: 'drop_comment' }),
+			);
+			expect(diff.changes[1]).toMatchObject({
+				table: 'users',
+				column: 'email',
+				meta: { target: 'column', comment: 'Primary login address' },
+			});
+		});
+
 		it('should detect dropped tables', () => {
 			const schema = makeModel([]);
 			const db = makeModel([

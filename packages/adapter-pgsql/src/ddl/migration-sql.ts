@@ -20,6 +20,7 @@ import type {
 } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { isEngineCanonicalCheck } from '../expression-provenance.js';
+import { identityNaming } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertNumericLiteral,
@@ -30,12 +31,14 @@ import {
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
-import { assertPartitionStrategy } from './ddl-generator.js';
+import {
+	assertPartitionStrategy,
+	generateCreateIndex,
+} from './ddl-generator.js';
 import {
 	assertCreateIndexesSupported,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
-	renderCreateIndex,
 } from './index-render.js';
 import {
 	formatSqlDefault,
@@ -424,7 +427,9 @@ function buildCreateIndexSpec(
 		with: idx.with,
 		where: idx.where,
 		whereSource: idx,
-		ifNotExists: true,
+		// A migration must surface an existing conflicting index instead of
+		// silently accepting drift between the model and database.
+		ifNotExists: false,
 	};
 }
 
@@ -439,7 +444,17 @@ function buildFkAutoIndexSpec(
 		schema: schemaName,
 		unique: false,
 		keys: [{ column: fkCol }],
-		ifNotExists: true,
+		// A migration must surface an existing conflicting index instead of
+		// silently accepting drift between the model and database.
+		ifNotExists: false,
+	};
+}
+
+function buildFkAutoIndex(table: TableIR, fkCol: string): IndexIR {
+	return {
+		name: getAutoFkIndexName(table.name, fkCol),
+		columns: [fkCol],
+		unique: false,
 	};
 }
 
@@ -597,11 +612,16 @@ export function generateMigrationSQL(
 						fkCol &&
 						!explicitIndexColumns.has(fkCol)
 					) {
+						const spec = buildFkAutoIndexSpec(table, fkCol, schemaName);
 						statements.push(
-							`${renderCreateIndex(
-								buildFkAutoIndexSpec(table, fkCol, schemaName),
+							generateCreateIndex(
+								table.name,
+								buildFkAutoIndex(table, fkCol),
+								schemaName,
+								identityNaming,
 								indexContext,
-							)};`,
+								spec.ifNotExists,
+							),
 						);
 					}
 				}
@@ -807,8 +827,18 @@ function upCreateIndex(
 	schemaName?: string,
 	context?: IndexCapabilityContext,
 ): string | undefined {
+	const idx = change.meta?.index as IndexIR | undefined;
 	const spec = buildCreateIndexSpec(change, schemaName);
-	return spec ? `${renderCreateIndex(spec, context)};` : undefined;
+	return idx && spec
+		? generateCreateIndex(
+				change.table,
+				idx,
+				schemaName,
+				identityNaming,
+				context,
+				spec.ifNotExists,
+			)
+		: undefined;
 }
 
 function upDropIndex(

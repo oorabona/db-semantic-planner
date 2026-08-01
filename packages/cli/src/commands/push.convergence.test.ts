@@ -138,6 +138,44 @@ describe('push — #315 casing and convergence wiring', () => {
 		expect(pool.end).toHaveBeenCalledOnce();
 	});
 
+	it('surfaces an existing-index error from an additive create instead of treating it as a no-op', async () => {
+		const firstDiff = makeDiff([
+			{
+				kind: 'create_index',
+				table: 'users',
+				details: 'Create index idx_users_email',
+			},
+		]);
+		mockComparePgsqlDatabaseSchema.mockResolvedValueOnce(firstDiff);
+		mockGenerateMigrationSQL.mockReturnValue([
+			'CREATE INDEX "idx_users_email" ON "users" ("email");',
+		]);
+		mockExecuteDdl.mockRejectedValueOnce(
+			new Error('relation "idx_users_email" already exists'),
+		);
+
+		await expect(
+			pushCommand.parseAsync(
+				['--schema', 'dbsp.schema.ts', '--db', 'postgres://localhost/db'],
+				{ from: 'user' },
+			),
+		).rejects.toThrow('process.exit:1');
+
+		expect(mockGenerateMigrationSQL).toHaveBeenCalledWith(firstDiff, {
+			includeDestructive: false,
+		});
+		expect(mockExecuteDdl).toHaveBeenCalledWith(
+			pool,
+			['CREATE INDEX "idx_users_email" ON "users" ("email");'],
+			expect.any(Object),
+		);
+		expect(console.error).toHaveBeenCalledWith(
+			expect.stringContaining('idx_users_email" already exists'),
+		);
+		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledOnce();
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
 	it('passes loaded dbCasing to drop-mode generateDDL as a naming plugin', async () => {
 		mockGenerateDDL.mockImplementation((_model, options) => {
 			const naming = options.naming as {
