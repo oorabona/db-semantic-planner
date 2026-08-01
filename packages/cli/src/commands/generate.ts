@@ -15,11 +15,14 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { DbCasing } from '@dbsp/types';
+import type { DbCasing, DialectCapabilities } from '@dbsp/types';
 import { Command } from 'commander';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 export type GenerateCasingOption = 'snake' | 'camel' | 'none';
+
+const POSTGRESQL_VERSION_USAGE =
+	'expected a PostgreSQL major version or dotted release version such as 14, 14.2, or 14.2.1; PostgreSQL 10 or later is supported';
 
 export const generateCommand = new Command('generate')
 	.description('Generate code from schema')
@@ -29,6 +32,10 @@ export const generateCommand = new Command('generate')
 	.option('--output <dir>', 'Output directory (alias for --out)')
 	.option('--drop', 'Include DROP TABLE IF EXISTS statements (ddl only)')
 	.option('--schema-name <name>', 'Database schema name (ddl only)')
+	.option(
+		'--postgresql-version <version>',
+		'Target PostgreSQL major or dotted release version (for example, 14 or 14.2; ddl only)',
+	)
 	.option(
 		'--dialect <name>',
 		'Database dialect: postgresql | mysql | sqlite | mssql (default: postgresql)',
@@ -46,6 +53,7 @@ export const generateCommand = new Command('generate')
 				output?: string;
 				drop?: boolean;
 				schemaName?: string;
+				postgresqlVersion?: string;
 				dialect?: string;
 				casing?: GenerateCasingOption;
 			},
@@ -62,6 +70,23 @@ export const generateCommand = new Command('generate')
 				}
 				if (target !== 'ddl') {
 					throw new Error(`Unknown target: ${target}. Available targets: ddl`);
+				}
+
+				let targetDialectCapabilities: DialectCapabilities | undefined;
+				if (options.postgresqlVersion !== undefined) {
+					const { derivePostgresqlCapabilitiesForVersion } = await import(
+						'@dbsp/adapter-pgsql'
+					);
+					try {
+						targetDialectCapabilities = derivePostgresqlCapabilitiesForVersion(
+							options.postgresqlVersion,
+						);
+					} catch (error) {
+						const reason = error instanceof Error ? ` ${error.message}` : '';
+						throw new Error(
+							`Invalid --postgresql-version "${options.postgresqlVersion}": ${POSTGRESQL_VERSION_USAGE}.${reason}`,
+						);
+					}
 				}
 
 				// Load schema (ARCH-005: only schema() format supported)
@@ -117,6 +142,9 @@ export const generateCommand = new Command('generate')
 							const ddlStatements = adapter.generateDDL(schema.model, {
 								...(options.drop !== undefined && {
 									includeDropStatements: options.drop,
+								}),
+								...(targetDialectCapabilities !== undefined && {
+									dialectCapabilities: targetDialectCapabilities,
 								}),
 							});
 
