@@ -7,6 +7,7 @@
  * than on a mocked adapter's own bookkeeping.
  */
 
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -28,6 +29,27 @@ const ddlSchema = schema({
 		displayName: 'text',
 	},
 });
+
+const nullsNotDistinctDdlSchema = schema(
+	{
+		users: {
+			id: { type: 'integer', primaryKey: true },
+			email: 'text',
+		},
+	},
+	{
+		users: {
+			indexes: [
+				{
+					columns: ['email'],
+					unique: true,
+					name: 'uk_users_email_nulls',
+					nullsNotDistinct: true,
+				},
+			],
+		},
+	},
+);
 
 function makeLoadedSchema(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
 	return {
@@ -209,5 +231,85 @@ describe('generate: the command options reach the generator', () => {
 			expect.stringContaining('dialect'),
 		);
 		expect(capturedLog()).toContain('CREATE TABLE "user_profiles"');
+	});
+
+	it('refuses NULLS NOT DISTINCT for a PostgreSQL 14 target at generation time', async () => {
+		loadSchema.mockResolvedValue({
+			...nullsNotDistinctDdlSchema,
+			dbCasing: 'snake_case',
+		});
+		const exit = vi
+			.spyOn(process, 'exit')
+			.mockImplementation((() => undefined) as never);
+
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--postgresql-version', '14'],
+			{ from: 'user' },
+		);
+
+		expect(console.error).toHaveBeenCalledWith(
+			'❌ index `uk_users_email_nulls`: NULLS NOT DISTINCT requires PostgreSQL >= 15 (target 14)',
+		);
+		expect(exit).toHaveBeenCalledWith(1);
+	});
+
+	it('emits NULLS NOT DISTINCT for a PostgreSQL 15 target', async () => {
+		loadSchema.mockResolvedValue({
+			...nullsNotDistinctDdlSchema,
+			dbCasing: 'snake_case',
+		});
+
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--postgresql-version', '15'],
+			{ from: 'user' },
+		);
+
+		expect(capturedLog()).toContain('NULLS NOT DISTINCT');
+	});
+
+	it('keeps output without --postgresql-version byte-identical to the current adapter default', async () => {
+		loadSchema.mockResolvedValue({
+			...nullsNotDistinctDdlSchema,
+			dbCasing: 'snake_case',
+		});
+		const expected = createPgsqlCompileOnlyAdapter()
+			.generateDDL(nullsNotDistinctDdlSchema.model)
+			.join('\n\n');
+
+		await generateCommand.parseAsync(['ddl', '--schema', 'dbsp.schema.ts'], {
+			from: 'user',
+		});
+
+		expect(capturedLog()).toBe(expected);
+	});
+
+	it.each([
+		'garbage',
+		'140005',
+		'14.100',
+		'9',
+	])('rejects PostgreSQL version spelling %s as a usage error before loading the schema', async (postgresqlVersion) => {
+		const exit = vi
+			.spyOn(process, 'exit')
+			.mockImplementation((() => undefined) as never);
+
+		await generateCommand.parseAsync(
+			[
+				'ddl',
+				'--schema',
+				'dbsp.schema.ts',
+				'--postgresql-version',
+				postgresqlVersion,
+			],
+			{ from: 'user' },
+		);
+
+		expect(loadSchema).not.toHaveBeenCalled();
+		expect(console.error).toHaveBeenCalledWith(
+			expect.stringContaining(
+				`Invalid --postgresql-version "${postgresqlVersion}": expected a PostgreSQL major version or dotted release version`,
+			),
+		);
+		expect(exit).toHaveBeenCalledWith(1);
 	});
 });
