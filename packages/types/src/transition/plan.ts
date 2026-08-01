@@ -91,6 +91,25 @@ export interface TransitionJournalEvent {
 export interface TransitionRunJournal {
 	readonly run: TransitionRunMetadata;
 	readonly events: readonly TransitionJournalEvent[];
+	/** Run-level approval records are deliberately not step attempts. */
+	readonly authorizations?: readonly TransitionRunAuthorization[];
+}
+
+/**
+ * The audit record made before a durable plan may begin execution.  Keeping it
+ * outside the step event stream means a crash after authorization is retryable:
+ * pristine means no intent, completion, or observed step event.
+ */
+export interface TransitionRunAuthorization {
+	readonly runId: string;
+	readonly policy: readonly import('./policy.js').AssumptionAcceptance[];
+	readonly grants: readonly {
+		readonly assumptionId: string;
+		readonly grant: number;
+	}[];
+	readonly digest: string;
+	readonly actor: string;
+	readonly authorizedAt: string;
 }
 
 export type StepOutcome =
@@ -174,7 +193,11 @@ export interface GuardedPlan {
 	readonly segments: readonly GuardedPlanSegment[];
 	readonly steps: readonly GuardedPlanStep[];
 	readonly postconditions: readonly ExecutableAssertion[];
-	/** Present on plans emitted by current `dbsp plan` and covered by its digest. */
+	/**
+	 * Present on plans emitted by current `dbsp plan`.  It remains optional in
+	 * the TypeScript shape solely so recovery can read historic documents; new
+	 * execution rejects an absent contract before taking intent.
+	 */
 	readonly executionContract?: ExecutionContract;
 }
 

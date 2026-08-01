@@ -1,13 +1,27 @@
-import { createTransitionLessor } from '@dbsp/core';
-import type { TransitionLessor } from '@dbsp/types';
+import { createHash } from 'node:crypto';
+import {
+	createExclusiveTransitionTarget,
+	createTransitionLessor,
+} from '@dbsp/core';
+import type {
+	ExclusiveTransitionTarget,
+	TransitionLessor,
+	TransitionQueryClient,
+} from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
+
+export type PgTransitionRunLockResult<T> =
+	| { readonly kind: 'acquired'; readonly value: T }
+	| { readonly kind: 'busy' };
 
 export type PgTransitionClientLease = {
 	readonly client: PoolClient;
 	query(
 		sql: string,
 		params?: unknown,
-	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+	): Promise<{
+		readonly rows: readonly Record<string, unknown>[];
+	}>;
 	release(error?: unknown): void;
 };
 
@@ -45,11 +59,19 @@ export function createPgTransitionLessor(pool: Pool): TransitionLessor {
 	}
 	return createTransitionLessor(async () => {
 		const lease = await acquirePgTransitionClient(pool);
-		return Object.freeze({ query: lease.query, release: lease.release });
+		return Object.freeze({
+			query: lease.query,
+			release: lease.release,
+		});
 	});
 }
 
-/** Acquire a UTF-8-configured PostgreSQL client for direct planning paths. */
+/**
+ * Acquire a configured PostgreSQL transition client.
+ *
+ * Callers that use the native adapter must pass this checked-out client with
+ * `borrowedClient: true` and return it through `release()` when finished.
+ */
 export async function acquirePgTransitionClient(
 	pool: Pool,
 ): Promise<PgTransitionClientLease> {
@@ -110,11 +132,134 @@ export async function acquirePgTransitionClient(
 	});
 }
 
+/**
+ * Hold a session advisory lock on the same checked-out session used for every
+ * transition segment.  `pg_try_advisory_lock` makes contention an explicit
+ * `busy` result rather than a hidden queue; releasing the client also releases
+ * the lock if an unlock attempt itself fails.
+ */
+export async function withPgTransitionRunLock<T>(
+	pool: Pool,
+	runId: string,
+	callback: (target: ExclusiveTransitionTarget) => Promise<T>,
+): Promise<PgTransitionRunLockResult<T>> {
+	const client = await pool.connect();
+	const key = advisoryKey(runId);
+	let locked = false;
+	let bodyFailed = false;
+	let cleanupFailure: Error | undefined;
+	let value: T | undefined;
+	let callbackLive = false;
+	let planOperationViolatedInvariant = false;
+	try {
+		await configurePgUtf8(client);
+		const result = await client.query(
+			'SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked',
+			[key.toString()],
+		);
+		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
+		locked = true;
+		const lessor = createTransitionLessor(
+			async () =>
+				({
+					// This channel is adapter-owned infrastructure: execution-contract
+					// setup, authorization, journals, and lock cleanup are not plan SQL.
+					query: (sql: string, params?: unknown) =>
+						client.query(sql, params as never) as Promise<{
+							readonly rows: readonly Record<string, unknown>[];
+						}>,
+					// Core only selects this channel for executeOperation().  Guarding
+					// the origin rather than parsing SQL means every spelling reaches the
+					// same invariant check, while our own SET/SHOW contract clauses do not.
+					queryPlanOperation: async (sql: string, params?: unknown) => {
+						try {
+							await assertDurablePlanOperationInvariants(client, key);
+						} catch (error) {
+							// A failed check at either boundary makes this session unsafe to
+							// pool, even if the final unlock happens to succeed.
+							planOperationViolatedInvariant = true;
+							throw error;
+						}
+						let result:
+							| {
+									readonly rows: readonly Record<string, unknown>[];
+							  }
+							| undefined;
+						let queryFailure: unknown;
+						try {
+							result = await (client.query(sql, params as never) as Promise<{
+								readonly rows: readonly Record<string, unknown>[];
+							}>);
+						} catch (error) {
+							queryFailure = error;
+						}
+						try {
+							await assertDurablePlanOperationInvariants(client, key);
+						} catch (error) {
+							planOperationViolatedInvariant = true;
+							throw error;
+						}
+						if (queryFailure) throw queryFailure;
+						return result as {
+							readonly rows: readonly Record<string, unknown>[];
+						};
+					},
+					// Segment cleanup must not give back the session that owns the run lock.
+					release: () => undefined,
+				}) as TransitionQueryClient,
+		);
+		callbackLive = true;
+		const target = createExclusiveTransitionTarget(lessor, () => callbackLive);
+		value = await callback(target);
+	} catch (error) {
+		bodyFailed = true;
+		throw error;
+	} finally {
+		callbackLive = false;
+		if (locked) {
+			try {
+				const unlock = await client.query(
+					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
+					[key.toString()],
+				);
+				if (unlock.rows[0]?.unlocked !== true)
+					cleanupFailure = new Error(
+						'PostgreSQL transition run lock cleanup failed: pg_advisory_unlock did not confirm ownership',
+					);
+			} catch (error) {
+				cleanupFailure = new Error(
+					`PostgreSQL transition run lock cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}
+		// An unconfirmed unlock may leave a session advisory lock behind. pg-pool
+		// destroys a client when release receives a truthy error, which is the only
+		// safe cleanup because PostgreSQL releases session locks on disconnect.
+		client.release(
+			cleanupFailure ??
+				(planOperationViolatedInvariant
+					? new Error(
+							'PostgreSQL transition plan operation violated the exclusive session invariants',
+						)
+					: undefined),
+		);
+	}
+	if (cleanupFailure && !bodyFailed) throw cleanupFailure;
+	return { kind: 'acquired', value: value as T };
+}
+
+/**
+ * Establish the text encoding before any caller receives a session.  The SHOW
+ * is deliberately part of acquisition: SET succeeding is not proof that this
+ * backend will encode future database text as UTF-8.
+ */
 async function configurePgUtf8(client: {
 	query(
 		sql: string,
 		params?: readonly unknown[],
-	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+	): Promise<{
+		readonly rows: readonly Record<string, unknown>[];
+	}>;
 }): Promise<void> {
 	await client.query("SET client_encoding TO 'UTF8'");
 	const value = String(
@@ -124,6 +269,59 @@ async function configurePgUtf8(client: {
 		throw new Error(
 			`PostgreSQL client_encoding expected "UTF8", observed ${JSON.stringify(value || 'no value')}`,
 		);
+}
+
+/**
+ * Assert the properties owned by the exclusive durable session.  This is a
+ * state check, not a SQL recognizer: alternative spelling, comments, compound
+ * statements, and future PostgreSQL syntax all get the same answer.
+ */
+async function assertDurablePlanOperationInvariants(
+	client: PoolClient,
+	key: bigint,
+): Promise<void> {
+	const { classId, objectId } = advisoryLockIds(key);
+	const row = (
+		await client.query(
+			`SELECT
+				EXISTS (
+					SELECT 1
+					FROM pg_catalog.pg_locks
+					WHERE locktype = 'advisory'
+						AND pid = pg_backend_pid()
+						AND classid = $1::oid
+						AND objid = $2::oid
+						AND objsubid = 1
+						AND granted
+				) AS run_lock_held,
+				current_setting('client_encoding') AS client_encoding`,
+			[classId, objectId],
+		)
+	).rows[0];
+	if (row?.run_lock_held !== true || row.client_encoding !== 'UTF8') {
+		throw new Error(
+			'durable plan operation may not release the run lock or change client_encoding',
+		);
+	}
+}
+
+function advisoryLockIds(key: bigint): {
+	readonly classId: number;
+	readonly objectId: number;
+} {
+	const unsigned = BigInt.asUintN(64, key);
+	return {
+		classId: Number((unsigned >> 32n) & 0xffff_ffffn),
+		objectId: Number(unsigned & 0xffff_ffffn),
+	};
+}
+
+function advisoryKey(runId: string): bigint {
+	const bytes = createHash('sha256')
+		.update('dbsp.transition.run.v1:\0')
+		.update(runId)
+		.digest();
+	return bytes.readBigInt64BE(0);
 }
 
 /**

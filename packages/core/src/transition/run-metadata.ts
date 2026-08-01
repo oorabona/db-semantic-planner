@@ -17,7 +17,7 @@ import { stableJson } from './stable-json.js';
  */
 const TRANSITION_PLANNER_ARTIFACT = {
 	id: semanticArtifactId('dbsp.core.transition.planner'),
-	version: '0.1.0',
+	version: '0.3.0',
 };
 
 function evidenceContext(

@@ -59,6 +59,24 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 | `dbsp generate ddl` | Generate SQL CREATE TABLE statements for provisioning |
 | `dbsp introspect` | Generate schema.ts from database introspection |
 
+## Durable transition review
+
+`dbsp plan` prints a `Run id` and `Plan digest`. Apply carries both:
+
+```bash
+dbsp apply <run-id> --plan-digest <sha256> --db <url>
+```
+
+Before authorization or planned DDL, apply recomputes the stored plan's digest and compares it
+with the value the operator carried from review. It refuses if the value is absent or differs,
+naming the expected and observed digests. This detects substitution of a plan under a run id; it
+does not detect deletion. Missing run evidence therefore makes apply refuse, which is the safe
+direction. Stable-object binding is outside this guarantee.
+
+The durable authorization digest is SHA-256 over canonical JSON
+`{ runId, planDigest, policy, grants }`: it is intentionally distinct per run, even when two
+plans have the same content digest.
+
 ## Key features
 
 - **REPL with completion** — Tab-complete table names, columns, NQL keywords, and relation paths

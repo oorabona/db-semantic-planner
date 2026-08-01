@@ -3,6 +3,9 @@ import type {
 	ApplyPolicy,
 	ApplyResult,
 	CompareOutcome,
+	DurableApplyOutcome,
+	ExclusiveTransitionTarget,
+	ExecutionContract,
 	InapplicableAssessment,
 	ObservationContext,
 	PlanAssessment,
@@ -10,7 +13,9 @@ import type {
 	ProvenPlanShape,
 	SemanticArtifactRef,
 	TransitionLessor,
+	TransitionRunJournal,
 	TransitionRunMetadata,
+	TransitionSessionClient,
 } from '@dbsp/types';
 
 export type InProcessProvenPlan = ProvenPlanShape & {
@@ -71,14 +76,74 @@ export interface Applier {
 		policy: ApplyPolicy,
 		target: TransitionLessor,
 	): Promise<ApplyResult>;
+	applyDurable(input: DurableApplyInput): Promise<DurableApplyResult>;
 	resume(
-		runId: string,
-		loadCurrent: import('./resume.js').ResumeTransitionInput['loadCurrent'],
+		journal: import('./resume.js').VerifiedRecoveryJournal,
 		readContext: import('./resume.js').ResumeTransitionInput['readContext'],
-		policy: ApplyPolicy,
-		target: TransitionLessor,
+		policy: ApplyPolicy | undefined,
+		target: import('./transition-lessor.js').TransitionReadTarget,
+		admitRecovery?: TransitionRecoveryAdmission,
 	): Promise<ApplyResult>;
 }
+
+/** Durable-run entry point; it snapshots and verifies serialized evidence. */
+export interface DurableApplyInput {
+	readonly runId: string;
+	/**
+	 * Content hash the operator reviewed outside the target database. Durable
+	 * apply refuses unless it is the hash of the loaded plan itself.
+	 */
+	readonly expectedPlanDigest: string;
+	readonly loadCurrent: TransitionResumeJournalLoader;
+	readonly policy: ApplyPolicy;
+	readonly target: ExclusiveTransitionTarget;
+	/** Runs on the held execution lease before authorization, a transaction, intent, or DDL. */
+	readonly prepareExecutionSession: (
+		target: TransitionSessionClient,
+		contract: ExecutionContract,
+		plan: ProvenPlanShape,
+	) => Promise<
+		| { readonly ok: true; readonly context: ObservationContext }
+		| {
+				readonly ok: false;
+				/** Omitted by legacy adapters; treated as a contract refusal. */
+				readonly kind?: 'refused' | 'failed';
+				readonly detail: string;
+		  }
+	>;
+	/** Called on that same preflight lease, after admission and before any step attempt. */
+	readonly authorize: (
+		run: TransitionRunJournal['run'],
+		plan: ProvenPlanShape,
+		target: TransitionSessionClient,
+	) => Promise<void>;
+}
+
+export type DurableApplyResult = ApplyResult & {
+	readonly durableOutcome: DurableApplyOutcome;
+};
+
+export type TransitionResumeJournalLoader = (
+	runId: string,
+) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
+
+export type TransitionResumeContextReader = (
+	target: import('./transition-lessor.js').TransitionReadTarget,
+	run: TransitionRunJournal['run'],
+) => Promise<ObservationContext>;
+
+/**
+ * Recovery admission identifies the physical PostgreSQL target before any
+ * classification journal can be written. It deliberately does not re-check
+ * apply authority or the historic observation-context digest.
+ */
+export type TransitionRecoveryAdmission = (
+	target: import('./transition-lessor.js').TransitionReadTarget,
+	contract: ExecutionContract,
+) => Promise<
+	| { readonly ok: true; readonly context: ObservationContext }
+	| { readonly ok: false; readonly detail: string }
+>;
 
 export type {
 	ApplicableAssessment,
@@ -89,6 +154,7 @@ export type {
 	Comparator,
 	CompareOutcome,
 	DurableIntentRecord,
+	ExclusiveTransitionTarget,
 	FingerprintManifest,
 	InapplicableAssessment,
 	ObservationContext,
@@ -192,8 +258,11 @@ export {
 	selectorMatchesResource,
 } from './resource-scope.js';
 export {
+	loadVerifiedRecoveryJournal,
+	type RecoveryJournalLoadResult,
 	type ResumeTransitionInput,
 	resumeTransitionRun,
+	type VerifiedRecoveryJournal,
 } from './resume.js';
 export { createTransitionRunMetadata } from './run-metadata.js';
 export {
@@ -210,11 +279,17 @@ export {
 	type StagedCompositionPreflightInput,
 } from './staging.js';
 export {
+	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
+	acquireTransitionTargetLease,
+	createExclusiveTransitionTarget,
 	createTransitionLessor,
+	isExclusiveTransitionTarget,
 	isTransitionLessor,
+	planOperationSession,
 	TRANSITION_LESSOR_REJECTION,
 	type TransitionLeaseFailure,
+	type TransitionReadTarget,
 } from './transition-lessor.js';
 export {
 	type TransitionRelationalValidationInput,

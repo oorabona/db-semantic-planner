@@ -50,6 +50,18 @@ export interface TransitionQueryClient {
 	// Deliberately duplicated instead of extending TransitionSessionClient: adapters
 	// construct raw leases, while only core can mint an affinity-preserving session.
 	query(sql: string, params?: unknown): Promise<TransitionQueryResult>;
+	/**
+	 * Execute a statement contributed by a plan operation.
+	 *
+	 * This is intentionally a separate, optional channel rather than a SQL
+	 * classifier.  Core only routes the client it gives to executeOperation()
+	 * through it; adapter-owned preflight, journalling, and cleanup continue to
+	 * use query().
+	 */
+	queryPlanOperation?(
+		sql: string,
+		params?: unknown,
+	): Promise<TransitionQueryResult>;
 	release(error?: unknown): void;
 }
 
@@ -68,6 +80,21 @@ export interface TransitionLessor {
 	 * would let TypeScript accept an assignment that throws at runtime.
 	 */
 	readonly acquire: () => Promise<TransitionQueryClient>;
+}
+
+declare const exclusiveTransitionTargetTypeBrand: unique symbol;
+
+/**
+ * A callback-scoped target for durable execution.
+ *
+ * Adapters mint this only after they have acquired their exclusive backend
+ * lease.  Its representation deliberately has no public members: core is the
+ * only package that can turn it back into a query lease.  This is a nominal
+ * accidental-misuse guard, not a security boundary against code which imports
+ * core's public factory deliberately.
+ */
+export interface ExclusiveTransitionTarget {
+	readonly [exclusiveTransitionTargetTypeBrand]: never;
 }
 
 export interface OperationEffectAssessment {

@@ -14,6 +14,7 @@ import {
 	appendCompletionJournal,
 	appendIntentJournal,
 	appendObservedJournal,
+	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	readTransitionJournal,
 	type TransitionJournalQueryable,
@@ -57,6 +58,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 	readonly runs = new Map<string, Record<string, unknown>>();
 	readonly plans = new Map<string, Record<string, unknown>>();
 	readonly events: Record<string, unknown>[] = [];
+	readonly authorizations: Record<string, unknown>[] = [];
 	readonly sql: string[] = [];
 	readonly queryLog: {
 		readonly sql: string;
@@ -246,7 +248,11 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					: [{ run_id: params[0] }],
 			};
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_authorization"')) {
-			return { rows: [] };
+			return {
+				rows: this.authorizations.filter(
+					(authorization) => authorization.run_id === params[0],
+				),
+			};
 		}
 		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 			return {
@@ -281,6 +287,67 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it('mutation: bypassing shape verification on an apply or recovery load reads a damaged journal', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		executor.shapeOverrides.set('dbsp_transition_authorization', {
+			...executor.tableShape('dbsp_transition_authorization'),
+			foreign_keys: [],
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId, { ensure: false }),
+		).rejects.toThrow(/authorization table foreign key drifted/);
+	});
+
+	it('mutation: allowing authorization after a step event creates approval after an attempt', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		await appendIntentJournal(executor, {
+			runId: metadata.runId,
+			run: metadata,
+			stepId: 'step:mock',
+			operation,
+			recordedAt: '2026-07-17T00:00:00.100Z',
+		});
+
+		await expect(
+			appendTransitionAuthorization(executor, {
+				runId: metadata.runId,
+				policy: [],
+				grants: [],
+				digest: 'digest',
+				actor: 'operator',
+				authorizedAt: '2026-07-17T00:00:00.000Z',
+			}),
+		).rejects.toThrow(/already has step-attempt events/);
+	});
+
+	it.each([
+		['policy object', 'policy', {}],
+		['policy scalar', 'policy', 'approval'],
+		['grants object', 'grants', {}],
+		['grants malformed parser text', 'grants', '{not-json'],
+	] as const)('mutation: coercing a %s authorization value to an empty list accepts a damaged approval row', async (_name, field, malformedValue) => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		executor.authorizations.push({
+			run_id: metadata.runId,
+			policy: field === 'policy' ? malformedValue : [],
+			grants: field === 'grants' ? malformedValue : [],
+			digest: 'approval-digest',
+			actor: 'operator',
+			authorized_at: '2026-07-17 00:00:00+00',
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow(new RegExp(`authorization row has an invalid ${field}`));
+	});
+
 	it('appends and reads intent, completion, and observed rows with run metadata', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
@@ -473,7 +540,7 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/invalid and non-resumable/);
 	});
 
-	it('allocates journal seq while holding the persisted run row lock', async () => {
+	it('allocates journal seq while holding the run row lock shared with authorization', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		const intent: DurableIntentRecord = {

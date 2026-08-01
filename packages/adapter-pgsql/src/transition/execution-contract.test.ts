@@ -22,6 +22,7 @@ import {
 	evaluatePgExecutionContract,
 	forcePgUtf8Session,
 	pgOperationEngineFloor,
+	preparePgRecoveryAdmission,
 	validatePgExecutionContractDerivation,
 } from './execution-contract.js';
 import { createPgTransitionPack } from './pack.js';
@@ -581,5 +582,68 @@ describe('PostgreSQL execution contract evaluator', () => {
 			detail:
 				'authority schema-usage on "public" expected true, observed false',
 		});
+	});
+
+	it('mutation: using apply authority or the historic context digest for recovery blocks a moved target with revoked DDL', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+				return { rows: [{ system_identifier: 'system-1' }] };
+			if (sql.startsWith('SELECT d.oid::text'))
+				return { rows: [{ database_oid: '5' }] };
+			if (sql.startsWith('SELECT n.nspname'))
+				return { rows: [{ name: 'public', oid: '2200' }] };
+			if (sql.startsWith("SELECT current_setting('search_path')"))
+				return {
+					rows: [
+						{ search_path: 'public', client_encoding: 'UTF8', timezone: 'UTC' },
+					],
+				};
+			if (sql === 'SHOW server_version_num')
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === 'SELECT current_database() AS database_id')
+				return { rows: [{ database_id: 'moved-target-state' }] };
+			if (sql === 'SELECT current_user AS current_user')
+				return { rows: [{ current_user: 'recovery-reader' }] };
+			if (sql.includes('current_schemas(false)'))
+				return { rows: [{ search_path: [] }] };
+			if (sql === 'SHOW search_path')
+				return { rows: [{ search_path: 'public' }] };
+			if (sql === 'SHOW standard_conforming_strings')
+				return { rows: [{ standard_conforming_strings: 'on' }] };
+			if (sql.includes('FROM pg_catalog.pg_extension')) return { rows: [] };
+			if (sql.includes('datlocprovider')) return { rows: [{}] };
+			if (sql.includes('has_schema_privilege'))
+				throw new Error('revoked DDL authority must not be read for recovery');
+			if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+			if (sql === 'SHOW client_encoding')
+				return { rows: [{ client_encoding: 'UTF8' }] };
+			throw new Error(`unexpected query ${sql}`);
+		});
+		const recoveryContract: ExecutionContract = {
+			version: 1,
+			requirements: [
+				contract.requirements[0]!,
+				{
+					kind: 'postgresql.authority',
+					mode: 'must-satisfy',
+					action: 'schema-usage',
+					schema: 'public',
+				},
+				contract.requirements[1]!,
+			],
+		};
+
+		await expect(
+			preparePgRecoveryAdmission(
+				{ query } as unknown as TransitionSessionClient,
+				recoveryContract,
+			),
+		).resolves.toMatchObject({
+			ok: true,
+			context: { databaseId: 'moved-target-state' },
+		});
+		expect(query.mock.calls.map(([sql]) => sql)).not.toContainEqual(
+			expect.stringContaining('has_schema_privilege'),
+		);
 	});
 });

@@ -1,11 +1,14 @@
 import {
 	acquireTransitionLease,
+	acquireTransitionTargetLease,
+	isExclusiveTransitionTarget,
 	isTransitionLessor,
 	TRANSITION_LESSOR_REJECTION,
 	type TransitionLeaseFailure,
 } from '@dbsp/core';
 import type {
 	EvidenceObservation,
+	ExclusiveTransitionTarget,
 	JsonValue,
 	ObservationContext,
 	ObservationIssuer,
@@ -2499,13 +2502,14 @@ export async function readPgObservationContextFromClient(
 
 /** Acquire one lease, read context, then release that lease. */
 export async function readPgObservationContextFromLessor(
-	lessor: TransitionLessor,
+	lessor: TransitionLessor | ExclusiveTransitionTarget,
 	schema?: string,
 	observationTarget?: ObservationTarget | EnumObservationTarget,
 	expectedTargetIdentity?: ObservationContext['postgresqlTargetIdentity'],
 ): Promise<ObservationContext> {
-	assertTransitionLessor(lessor);
-	const lease = await acquireTransitionLease(lessor);
+	if (!isTransitionLessor(lessor) && !isExclusiveTransitionTarget(lessor))
+		throw new Error(TRANSITION_LESSOR_REJECTION);
+	const lease = await acquireTransitionTargetLease(lessor);
 	let releaseFailure: TransitionLeaseFailure | undefined;
 	try {
 		return await readPgObservationContextFromClient(

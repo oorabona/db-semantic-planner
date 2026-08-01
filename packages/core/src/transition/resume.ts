@@ -16,7 +16,6 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionJournalEvent,
-	TransitionLessor,
 	TransitionRunJournal,
 } from '@dbsp/types';
 import {
@@ -24,6 +23,7 @@ import {
 	matchObservationContextIdentity,
 	matchRunObservationContext,
 } from './context-match.js';
+import { validateExecutionContract } from './execution-contract.js';
 import { semanticArtifactId } from './ids.js';
 import { transitionPlanDigest } from './plan-digest.js';
 import {
@@ -34,9 +34,11 @@ import {
 import { assumptionAccepted } from './resource-scope.js';
 import { stableJson } from './stable-json.js';
 import {
-	acquireTransitionLease,
+	acquireTransitionTargetLease,
+	isExclusiveTransitionTarget,
 	isTransitionLessor,
 	type TransitionLease,
+	type TransitionReadTarget,
 	transitionLessorRejectionAssessment,
 } from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
@@ -47,17 +49,37 @@ const RESUMER_ARTIFACT = {
 };
 
 export interface ResumeTransitionInput {
-	readonly runId: string;
-	readonly loadCurrent: (
-		runId: string,
-	) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
+	readonly journal: VerifiedRecoveryJournal;
 	readonly readContext: (
-		target: TransitionLessor,
+		target: TransitionReadTarget,
 		run: TransitionRunJournal['run'],
 	) => Promise<ObservationContext>;
-	readonly policy: ApplyPolicy;
-	readonly target: TransitionLessor;
+	readonly policy?: ApplyPolicy;
+	readonly target: TransitionReadTarget;
+	readonly admitRecovery?: import('./index.js').TransitionRecoveryAdmission;
 }
+
+/**
+ * A frozen journal whose run identity, durable digest, external review digest,
+ * and plan structure were verified together. The WeakSet is the runtime brand:
+ * callers may cast a lookalike, but recovery will not accept it.
+ */
+export type VerifiedRecoveryJournal = TransitionRunJournal & {
+	readonly plan: ProvenPlanShape;
+};
+
+export type RecoveryJournalLoadResult =
+	| { readonly ok: true; readonly journal: VerifiedRecoveryJournal }
+	| {
+			readonly ok: false;
+			readonly code:
+				| 'load-failed'
+				| 'run-id-mismatch'
+				| 'plan-digest-mismatch'
+				| 'plan-invalid'
+				| 'event-invalid';
+			readonly detail: string;
+	  };
 
 type StepEvents = {
 	readonly intent?: TransitionJournalEvent & {
@@ -76,6 +98,8 @@ type GroupEventsResult =
 	  }
 	| { readonly ok: false; readonly detail: string };
 
+const verifiedRecoveryJournals = new WeakSet<object>();
+
 function deepFreeze<T>(value: T): T {
 	if (value !== null && typeof value === 'object') {
 		for (const child of Object.values(value)) {
@@ -92,6 +116,81 @@ function snapshotLoadedRun<T>(value: T): T {
 		throw new Error('loaded transition journal is not JSON serializable');
 	}
 	return deepFreeze(JSON.parse(serialized) as T);
+}
+
+/** Load exactly once, snapshot and freeze the complete durable evidence set. */
+export async function loadVerifiedRecoveryJournal(
+	runId: string,
+	expectedPlanDigest: string,
+	loadCurrent: (
+		runId: string,
+	) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>,
+): Promise<RecoveryJournalLoadResult> {
+	let loaded: TransitionRunJournal & { readonly plan: ProvenPlanShape };
+	try {
+		loaded = snapshotLoadedRun(await loadCurrent(runId));
+	} catch (error) {
+		return {
+			ok: false,
+			code: 'load-failed',
+			detail: `transition run ${runId} could not be loaded: ${errorDetail(error)}`,
+		};
+	}
+	if (loaded.run.runId !== runId) {
+		return {
+			ok: false,
+			code: 'run-id-mismatch',
+			detail: 'loaded journal run id does not match requested run id',
+		};
+	}
+	let observedPlanDigest: string;
+	try {
+		observedPlanDigest = transitionPlanDigest(loaded.plan);
+	} catch (error) {
+		return {
+			ok: false,
+			code: 'plan-invalid',
+			detail: `loaded plan could not be digested: ${errorDetail(error)}`,
+		};
+	}
+	if (observedPlanDigest !== expectedPlanDigest) {
+		return {
+			ok: false,
+			code: 'plan-digest-mismatch',
+			detail: 'reviewed plan digest does not match the loaded plan',
+		};
+	}
+	if (loaded.run.planDigest !== observedPlanDigest) {
+		return {
+			ok: false,
+			code: 'plan-invalid',
+			detail: 'loaded plan digest does not match run metadata',
+		};
+	}
+	try {
+		const diagnostic = validateTransitionRelationalInvariants({
+			kind: 'plan',
+			plan: loaded.plan,
+		});
+		if (!diagnostic.ok) {
+			return { ok: false, code: 'plan-invalid', detail: diagnostic.detail };
+		}
+	} catch (error) {
+		return {
+			ok: false,
+			code: 'plan-invalid',
+			detail: `loaded plan could not be validated: ${errorDetail(error)}`,
+		};
+	}
+	const stepById = new Map(
+		loaded.plan.steps.map((step) => [step.stepId, step]),
+	);
+	const events = groupEvents(loaded.events, loaded.run.runId, stepById);
+	if (!events.ok) {
+		return { ok: false, code: 'event-invalid', detail: events.detail };
+	}
+	verifiedRecoveryJournals.add(loaded);
+	return { ok: true, journal: loaded };
 }
 
 function errorDetail(error: unknown): string {
@@ -164,6 +263,14 @@ function contextMismatch(
 		),
 		journals,
 		observations,
+	};
+}
+
+/** The recovery-admission phase owns target-read failures. */
+function recoveryReadFailure(detail: string): ApplyResult {
+	return {
+		...contextMismatch(detail),
+		recoveryOutcome: 'recovery-read-failed',
 	};
 }
 
@@ -617,7 +724,7 @@ type StepObservation =
 async function withObservedStep<T>(
 	registry: PackRegistry,
 	step: ProvenPlanStep,
-	target: TransitionLessor,
+	target: TransitionReadTarget,
 	baseContext: ObservationContext,
 	phase: 'before' | 'after',
 	use: (observation: StepObservation) => Promise<T>,
@@ -637,7 +744,7 @@ async function withObservedStep<T>(
 	try {
 		let observation: StepObservation;
 		try {
-			lease = await acquireTransitionLease(target);
+			lease = await acquireTransitionTargetLease(target);
 			const client: TransitionExecutionClient = { opaqueClient: lease.session };
 			let context = await runtime.observeContext(
 				client,
@@ -717,48 +824,48 @@ async function resumeTransitionRunInternal(
 	completed: StepJournal[],
 	observations: IssuedObservation[],
 ): Promise<ApplyResult> {
-	// A loader that refuses — because the durable plan row is corrupt, or the
-	// database is unreachable — must block recovery, never escape as an
-	// exception. It is reported apart from the snapshot failure below so an
-	// operator reading this during a recovery knows which one happened.
-	let supplied: TransitionRunJournal & { readonly plan: ProvenPlanShape };
-	try {
-		supplied = await input.loadCurrent(runId);
-	} catch (error) {
+	if (!verifiedRecoveryJournals.has(input.journal)) {
 		return contextMismatch(
-			`transition run ${runId} could not be loaded: ${errorDetail(error)}`,
+			'recovery journal was not loaded and verified by the durable boundary',
 		);
 	}
-	let loaded: TransitionRunJournal & { readonly plan: ProvenPlanShape };
-	try {
-		loaded = snapshotLoadedRun(supplied);
-	} catch (error) {
-		return contextMismatch(
-			`loaded journal could not be snapshotted safely: ${errorDetail(error)}`,
-		);
-	}
+	const loaded = input.journal;
 	if (loaded.run.runId !== runId) {
 		return contextMismatch(
 			'loaded journal run id does not match requested run id',
 		);
 	}
-	let diagnostic: ReturnType<typeof validateTransitionRelationalInvariants>;
-	try {
-		if (loaded.run.planDigest !== transitionPlanDigest(loaded.plan)) {
-			return contextMismatch('loaded plan digest does not match run metadata');
-		}
-		diagnostic = validateTransitionRelationalInvariants({
-			kind: 'plan',
-			plan: loaded.plan,
-		});
-	} catch (error) {
-		return contextMismatch(
-			`loaded plan could not be validated: ${errorDetail(error)}`,
-		);
+	const stepById = new Map(
+		loaded.plan.steps.map((step) => [step.stepId, step]),
+	);
+	// Event identity is durable evidence, so validate it before interpreting any
+	// authorization. A malformed non-empty stream is never a pristine run.
+	const groupedResult = groupEvents(loaded.events, loaded.run.runId, stepById);
+	if (!groupedResult.ok) {
+		return contextMismatch(groupedResult.detail);
 	}
-	if (!diagnostic.ok) {
+	const grouped = groupedResult.grouped;
+	if (loaded.events.length === 0) {
+		const firstStep = orderedPlanSteps(loaded.plan, stepById)[0];
+		if (!firstStep) {
+			return {
+				assessment: completedAssessment(),
+				journals: [],
+				observations: [],
+			};
+		}
+		return resumeRequiredResult({
+			step: firstStep,
+			completed: [],
+			observations: [],
+		});
+	}
+	const contract = input.admitRecovery
+		? validateExecutionContract(loaded.plan.executionContract)
+		: undefined;
+	if (contract && !contract.ok) {
 		return contextMismatch(
-			`loaded plan failed invariant validation: ${diagnostic.detail}`,
+			`recovery admission contract is invalid: ${contract.detail}`,
 		);
 	}
 	const evidenceContext = planEvidenceContext(loaded.plan);
@@ -766,6 +873,9 @@ async function resumeTransitionRunInternal(
 		return contextMismatch('loaded plan contains no durable evidence context');
 	}
 	const referencedAssumptions = new Set<string>();
+	if (!input.policy) {
+		return contextMismatch('attempted recovery has no durable authorization');
+	}
 	for (const step of loaded.plan.steps) {
 		for (const assumptionId of step.restsOnAssumptions) {
 			referencedAssumptions.add(assumptionId);
@@ -788,15 +898,10 @@ async function resumeTransitionRunInternal(
 		}
 	}
 
-	const stepById = new Map(
-		loaded.plan.steps.map((step) => [step.stepId, step]),
-	);
-	const groupedResult = groupEvents(loaded.events, loaded.run.runId, stepById);
-	if (!groupedResult.ok) {
-		return contextMismatch(groupedResult.detail);
-	}
-	const grouped = groupedResult.grouped;
-	if (!isTransitionLessor(input.target)) {
+	if (
+		!isTransitionLessor(input.target) &&
+		!isExclusiveTransitionTarget(input.target)
+	) {
 		// Resume accepts journaled outcomes only after re-observing them through the
 		// target, so grouped records alone are not honest result journals here.
 		return {
@@ -814,28 +919,39 @@ async function resumeTransitionRunInternal(
 	// differently depending on which call the outage landed on.
 	let baseContext: ObservationContext;
 	try {
-		baseContext = await input.readContext(input.target, loaded.run);
+		if (input.admitRecovery) {
+			if (!contract?.ok)
+				return contextMismatch('recovery admission contract is unavailable');
+			const admitted = await input.admitRecovery(
+				input.target,
+				contract.contract,
+			);
+			if (!admitted.ok) return recoveryReadFailure(admitted.detail);
+			baseContext = admitted.context;
+		} else {
+			baseContext = await input.readContext(input.target, loaded.run);
+		}
 	} catch (error) {
-		return contextMismatch(
+		return recoveryReadFailure(
 			`transition run ${runId} target context could not be read: ${errorDetail(error)}`,
 		);
 	}
-	const runContextMatch = matchRunObservationContext({
-		run: loaded.run,
-		actual: baseContext,
-	});
-	if (!runContextMatch.ok) {
-		return contextMismatch(runContextMatch.detail);
-	}
-	const evidenceIdentityMatch = matchObservationContextIdentity({
-		expected: baseContext,
-		actual: evidenceContext,
-		label: 'loaded plan evidence context',
-	});
-	if (!evidenceIdentityMatch.ok) {
-		return contextMismatch(
-			`loaded plan evidence context does not match run proof context: ${evidenceIdentityMatch.detail}`,
-		);
+	if (!input.admitRecovery) {
+		const runContextMatch = matchRunObservationContext({
+			run: loaded.run,
+			actual: baseContext,
+		});
+		if (!runContextMatch.ok) return contextMismatch(runContextMatch.detail);
+		const evidenceIdentityMatch = matchObservationContextIdentity({
+			expected: baseContext,
+			actual: evidenceContext,
+			label: 'loaded plan evidence context',
+		});
+		if (!evidenceIdentityMatch.ok) {
+			return contextMismatch(
+				`loaded plan evidence context does not match run proof context: ${evidenceIdentityMatch.detail}`,
+			);
+		}
 	}
 	const operationEffectsByRef = new Map<string, OperationEffectAssessment>();
 	for (const step of loaded.plan.steps) {
@@ -1097,7 +1213,7 @@ export async function resumeTransitionRun(
 ): Promise<ApplyResult> {
 	const completed: StepJournal[] = [];
 	const observations: IssuedObservation[] = [];
-	const runId = input.runId;
+	const runId = input.journal.run.runId;
 	// For ordinary failures--an unreachable database, a throwing pack, or a rejected
 	// journal write--this boundary returns a blocked assessment with steps reconciled
 	// so far rather than rejecting. Inputs engineered to throw from caller-owned

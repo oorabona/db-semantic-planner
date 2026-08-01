@@ -19,6 +19,7 @@ import {
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
 } from './constants.js';
+import { readPgObservationContextFromClient } from './observation-issuer.js';
 import { createPgTransitionPack } from './pack.js';
 
 type Queryable = {
@@ -531,4 +532,126 @@ export async function evaluatePgExecutionContract(
 		};
 	}
 	return { ok: true };
+}
+
+/**
+ * The durable preflight boundary.  This intentionally receives a core-minted
+ * leased session, so SET/SHOW and the context used by the renderer are on the
+ * exact connection that subsequently records intent and executes DDL.
+ */
+export async function preparePgExecutionSession(
+	target: TransitionSessionClient,
+	contract: ExecutionContract,
+	plan: ProvenPlanShape,
+): Promise<
+	| {
+			readonly ok: true;
+			readonly context: import('@dbsp/types').ObservationContext;
+	  }
+	| {
+			readonly ok: false;
+			readonly kind: 'refused' | 'failed';
+			readonly detail: string;
+	  }
+> {
+	const derivation = validatePgExecutionContractDerivation(plan, contract);
+	if (!derivation.ok)
+		return { ok: false, kind: 'refused', detail: derivation.detail };
+	let evaluation: Awaited<ReturnType<typeof evaluatePgExecutionContract>>;
+	try {
+		evaluation = await evaluatePgExecutionContract(target, contract);
+	} catch (error) {
+		return {
+			ok: false,
+			kind: 'failed',
+			detail: `execution contract query failed: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+	if (!evaluation.ok)
+		return {
+			ok: false,
+			kind: 'refused',
+			detail: `${evaluation.clause}: ${evaluation.detail}`,
+		};
+	const physical = contract.requirements.find(
+		(
+			requirement,
+		): requirement is Extract<
+			ExecutionRequirement,
+			{ readonly kind: 'postgresql.physical-target' }
+		> => requirement.kind === 'postgresql.physical-target',
+	);
+	if (!physical)
+		return {
+			ok: false,
+			kind: 'refused',
+			detail: 'execution contract has no physical target clause',
+		};
+	try {
+		return {
+			ok: true,
+			context: await readPgObservationContextFromClient(
+				target,
+				physical.namespaces[0]?.name,
+			),
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			kind: 'failed',
+			detail: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
+
+/**
+ * Recovery admission is intentionally narrower than apply preflight: it proves
+ * only that recovery is reading the planned cluster, database and namespaces.
+ * Target state may have changed, and revoked DDL authority is irrelevant to
+ * classification.
+ */
+export async function preparePgRecoveryAdmission(
+	target: TransitionSessionClient,
+	contract: ExecutionContract,
+): Promise<
+	| {
+			readonly ok: true;
+			readonly context: import('@dbsp/types').ObservationContext;
+	  }
+	| { readonly ok: false; readonly detail: string }
+> {
+	const physical = contract.requirements.find(
+		(
+			requirement,
+		): requirement is Extract<
+			ExecutionRequirement,
+			{ readonly kind: 'postgresql.physical-target' }
+		> => requirement.kind === 'postgresql.physical-target',
+	);
+	if (!physical)
+		return {
+			ok: false,
+			detail: 'recovery admission contract has no physical target clause',
+		};
+	try {
+		const live = await readPgExecutionTargetFromClient(
+			target,
+			physical.namespaces.map((entry) => entry.name),
+		);
+		const mismatch = pgTargetIdentityMismatch(physical, live.identity);
+		if (mismatch)
+			return { ok: false, detail: `postgresql.physical-target: ${mismatch}` };
+		return {
+			ok: true,
+			context: await readPgObservationContextFromClient(
+				target,
+				physical.namespaces[0]?.name,
+			),
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			detail: error instanceof Error ? error.message : String(error),
+		};
+	}
 }
