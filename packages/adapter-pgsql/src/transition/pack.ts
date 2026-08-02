@@ -22,6 +22,7 @@ import {
 	INDEX_INCLUDE_CAPABILITY,
 	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 } from './index-feature-capabilities.js';
+import { reserveTransitionJournalRun } from './journal.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';
@@ -90,6 +91,9 @@ function boundedLockTimeout(maxWaitMs: number): number {
 function createPgExecutionCoordinator(): ExecutionCoordinator {
 	return {
 		transactionDomain: PG_TRANSACTION_DOMAIN,
+		async reserveJournalRun(client: TransitionExecutionClient, run) {
+			await reserveTransitionJournalRun(clientQuery(client), run.runId);
+		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
 		},

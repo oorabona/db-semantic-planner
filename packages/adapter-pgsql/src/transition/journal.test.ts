@@ -17,6 +17,7 @@ import {
 	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	readTransitionJournal,
+	reserveTransitionJournalRun,
 	type TransitionJournalQueryable,
 } from './journal.js';
 
@@ -287,6 +288,21 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it('reserves the persisted run row with a transaction-scoped lock for later append reuse', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		const writesAfterPersist = executor.sql.length;
+
+		await reserveTransitionJournalRun(executor, metadata.runId);
+
+		expect(executor.sql.slice(writesAfterPersist)).toEqual([
+			expect.stringContaining(
+				'SELECT run_id FROM "dbsp_meta"."dbsp_transition_run" WHERE run_id = $1 FOR UPDATE',
+			),
+		]);
+	});
+
 	it('mutation: bypassing shape verification on an apply or recovery load reads a damaged journal', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();

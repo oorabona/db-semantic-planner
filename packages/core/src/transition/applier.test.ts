@@ -1282,9 +1282,10 @@ describe('createApplier', () => {
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
-		expect(result.journals[0]?.outcome).toBe('context-mismatch');
+		expect(result.journals).toEqual([]);
 		expect(executeOperation).not.toHaveBeenCalled();
-		expect(observed[0]?.outcome).toBe('context-mismatch');
+		expect(observed).toEqual([]);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
 	});
 
 	it('derives the completed assessment from the minted plan instead of the caller assessment', async () => {
@@ -1430,6 +1431,67 @@ describe('createApplier', () => {
 		]);
 	});
 
+	it('reserves the transactional journal before acquiring application locks', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		let lockTimeoutApplied = false;
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log, executeOperation: async () => ({ kind: 'completed' }) as const },
+		);
+		const coordinator: ExecutionCoordinator = {
+			transactionDomain: 'mock.journal-first',
+			begin: vi.fn(async () => {
+				log.push('coordinator:begin');
+			}),
+			reserveJournalRun: vi.fn(async () => {
+				if (!lockTimeoutApplied) {
+					throw new Error('reservation ran before its lock timeout was set');
+				}
+				log.push('coordinator:reserve-journal');
+			}),
+			setLockTimeout: vi.fn(async () => {
+				lockTimeoutApplied = true;
+				log.push('coordinator:lock-timeout');
+			}),
+			commit: vi.fn(async () => undefined),
+			rollback: vi.fn(async () => undefined),
+			isLockTimeout: () => false,
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+				executionCoordinator: coordinator,
+				transactionDomain: coordinator.transactionDomain,
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(log.indexOf('coordinator:reserve-journal')).toBeGreaterThan(
+			log.indexOf('coordinator:begin'),
+		);
+		expect(log.indexOf('coordinator:lock-timeout')).toBeLessThan(
+			log.indexOf('coordinator:reserve-journal'),
+		);
+		expect(log.indexOf('coordinator:reserve-journal')).toBeLessThan(
+			log.indexOf('lock'),
+		);
+		expect(observed[0]?.outcome).toBe('completed');
+	});
+
 	it('rejects cross-runtime transactional segments without a shared coordinator before acquiring a lease', async () => {
 		const persisted = vi.fn(async () => undefined);
 		const observed: StepJournal[] = [];
@@ -1520,11 +1582,62 @@ describe('createApplier', () => {
 		expect(log).toContain('commit:1');
 		expect(log).toContain('rollback:2');
 		expect(log).not.toContain('rollback:1');
-		expect(log).not.toContain('commit:2');
+		expect(log.indexOf('rollback:2')).toBeLessThan(log.lastIndexOf('commit:2'));
 		expect(observed.map((journal) => journal.outcome)).toEqual([
 			'completed',
 			'operation-failed-not-applied',
 		]);
+	});
+
+	it('requires recovery when later expectedBefore drift follows committed work', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			buildFingerprints: (candidate) => ({
+				expectedBefore: fingerprint(
+					candidate.ref === 'op:b' ? 'op:b:changed-before' : 'op:a:before',
+				),
+				expectedAfter: fingerprint(`${candidate.ref}:after`),
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: multiSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.assessment.continuation).toBe('resume-possible');
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+		]);
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+		]);
+		expect(log).toContain('commit:1');
+		expect(log.some((entry) => entry.startsWith('intent:step:op:b'))).toBe(
+			false,
+		);
+		expect(log).not.toContain('execute:op:b:2');
 	});
 
 	it('reports a later segment setup failure as not applied after an earlier segment committed', async () => {
@@ -1576,17 +1689,12 @@ describe('createApplier', () => {
 		);
 		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
 			'step:op:a',
-			'step:op:b',
 		]);
 		expect(result.journals.map((journal) => journal.outcome)).toEqual([
 			'completed',
-			'operation-failed-not-applied',
 		]);
-		expect(result.journals[1]?.outcome).not.toBe('partially-applied');
-		expect(observed.map((journal) => journal.outcome)).toEqual([
-			'completed',
-			'operation-failed-not-applied',
-		]);
+		expect(result.journals[1]).toBeUndefined();
+		expect(observed.map((journal) => journal.outcome)).toEqual(['completed']);
 		expect(log).toContain('commit:1');
 		expect(log).toContain('begin:2');
 		expect(log.some((entry) => entry.startsWith('intent:step:op:b'))).toBe(
@@ -1679,7 +1787,7 @@ describe('createApplier', () => {
 		expect(afterContexts).toEqual(['op:a:op:a', 'op:b:op:b']);
 		expect(log).toContain('completion:step:op:a:1');
 		expect(log).toContain('rollback:1');
-		expect(log).not.toContain('commit:1');
+		expect(log.indexOf('rollback:1')).toBeLessThan(log.lastIndexOf('commit:1'));
 	});
 
 	it('rolls back step A when step B fails in the same transactional segment', async () => {
@@ -1724,7 +1832,70 @@ describe('createApplier', () => {
 		]);
 		expect(log).toContain('completion:step:op:a:1');
 		expect(log).toContain('rollback:1');
-		expect(log).not.toContain('commit:1');
+		expect(log.indexOf('rollback:1')).toBeLessThan(log.lastIndexOf('commit:1'));
+	});
+
+	it('reports an unknown segment outcome when rollback fails after step A executed and step B fails before its operation', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log, transactionMode: 'single-segment' },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			observeContext: vi.fn(async (_client, candidate) => {
+				if (candidate.ref === 'op:b') {
+					throw new Error('step B context setup failed before operation');
+				}
+				return context;
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback connection lost');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'unknown-step-result',
+			stepId: 'step:op:a',
+		});
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'unknown-step-result',
+		]);
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+		]);
+		expect(observed.map((journal) => journal.outcome)).toEqual([
+			'unknown-step-result',
+		]);
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+		]);
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'durable record cannot yet express reconcilable segment uncertainty',
+		);
+		expect(log).toContain('execute:op:a:1');
+		expect(log).not.toContain('execute:op:b:1');
 	});
 
 	it('rolls back step A when step B guard fails in the same transactional segment', async () => {
@@ -1793,7 +1964,7 @@ describe('createApplier', () => {
 		]);
 		expect(log).toContain('completion:step:op:a:1');
 		expect(log).toContain('rollback:1');
-		expect(log).not.toContain('commit:1');
+		expect(log.indexOf('rollback:1')).toBeLessThan(log.lastIndexOf('commit:1'));
 	});
 
 	it('reports a forbids-transaction failure after an earlier committed segment as resumable partial work', async () => {
@@ -1986,8 +2157,9 @@ describe('createApplier', () => {
 			stepId: 'step:op',
 		});
 		expect(result.assessment.reasons[0]?.code).not.toBe('unknown-step-result');
-		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
-		expect(observed[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(result.journals).toEqual([]);
+		expect(observed).toEqual([]);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
 		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
@@ -2979,8 +3151,7 @@ describe('createApplier', () => {
 			'operation-failed-not-applied',
 		);
 		expect(result.assessment.lifecycle).toBe('planned');
-		expect(result.journals[0]?.intent.stepId).toBe('step:op');
-		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(result.journals).toEqual([]);
 		// Nothing was leased, so nothing runs and nothing is given back.
 		expect(rt.begin).not.toHaveBeenCalled();
 	});
@@ -3111,7 +3282,7 @@ describe('createApplier', () => {
 		expect(correctExecute).toHaveBeenCalledTimes(2);
 	});
 
-	it('journals a known context-mismatch when expectedBefore changes before DDL', async () => {
+	it('keeps an expectedBefore drift pristine when no DDL has run', async () => {
 		const observed: StepJournal[] = [];
 		const executeOperation = vi.fn(
 			async () => ({ kind: 'completed' }) as const,
@@ -3146,10 +3317,271 @@ describe('createApplier', () => {
 		);
 
 		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
-		expect(result.journals[0]?.outcome).toBe('context-mismatch');
-		expect(observed[0]?.outcome).toBe('context-mismatch');
+		expect(result.journals).toEqual([]);
+		expect(observed).toEqual([]);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
 		expect(executeOperation).not.toHaveBeenCalled();
 		expect(rt.rollback).toHaveBeenCalledOnce();
+	});
+
+	it('reports a throwing fingerprint builder as an observed execution failure with its cause', async () => {
+		const observed: StepJournal[] = [];
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation,
+				buildFingerprints: () => {
+					throw new Error('malformed fingerprint evidence');
+				},
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'unknown-step-result',
+			stepId: 'step:op',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'malformed fingerprint evidence',
+		);
+		expect(result.journals[0]?.outcome).toBe('unknown-step-result');
+		expect(observed[0]?.outcome).toBe('unknown-step-result');
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('keeps fingerprint construction and rollback failures together', async () => {
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				buildFingerprints: () => {
+					throw new Error('malformed fingerprint evidence');
+				},
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback connection lost');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'malformed fingerprint evidence',
+		);
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'rollback connection lost',
+		);
+	});
+
+	it('keeps a live-context mismatch and its rollback failure together', async () => {
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				observeContext: vi.fn(async () => ({
+					...context,
+					databaseId: 'other-db',
+				})),
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback connection lost');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]).toMatchObject({
+			fact: {
+				value: expect.stringContaining('other-db'),
+			},
+		});
+		expect(result.assessment.reasons[0]).toMatchObject({
+			fact: {
+				value: expect.stringContaining('rollback connection lost'),
+			},
+		});
+	});
+
+	it('keeps an expectedBefore mismatch and its rollback failure together', async () => {
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				buildFingerprints: () => ({
+					expectedBefore: fingerprint('changed-before'),
+					expectedAfter: fingerprint('after'),
+				}),
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback connection lost');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry, persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]).toMatchObject({
+			fact: {
+				value: expect.stringContaining('expectedBefore mismatch'),
+			},
+		});
+		expect(result.assessment.reasons[0]).toMatchObject({
+			fact: {
+				value: expect.stringContaining('rollback connection lost'),
+			},
+		});
+	});
+
+	it('keeps an expectedBefore drift admission-pristine while authorization alone stays retryable', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		let drifted = true;
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				log,
+				executeOperation,
+				buildFingerprints: () => ({
+					expectedBefore: fingerprint(drifted ? 'changed-before' : 'before'),
+					expectedAfter: fingerprint('after'),
+				}),
+			},
+		);
+		const journal = durableJournal();
+		let authorizationRecorded = false;
+		const loadCurrent = vi.fn(async () => ({
+			...journal,
+			authorizations: authorizationRecorded
+				? [
+						{
+							runId: journal.run.runId,
+							policy: acceptsOperationPolicy().accepts,
+							grants: [],
+							digest: 'prior-authorization',
+							actor: 'operator',
+							authorizedAt: new Date().toISOString(),
+						},
+					]
+				: [],
+		}));
+		const authorize = vi.fn(async () => {
+			authorizationRecorded = true;
+		});
+		const applier = createApplier(durableRegistry(rt), persister);
+		const input = {
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent,
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			authorize,
+		};
+
+		const refused = await applier.applyDurable({
+			...input,
+			target: durableExecutionTarget(),
+		});
+
+		expect(refused.durableOutcome).toBe('context-mismatch');
+		expect(refused.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(refused.journals).toEqual([]);
+		expect(refused.observations).toHaveLength(1);
+		expect(observed).toEqual([]);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
+		expect(executeOperation).not.toHaveBeenCalled();
+		expect(log).toEqual([
+			'begin',
+			'lock-timeout',
+			'lock-timeout',
+			'lock',
+			'context',
+			'observe:before',
+			'rollback',
+		]);
+
+		drifted = false;
+		const retried = await applier.applyDurable({
+			...input,
+			target: durableExecutionTarget(),
+		});
+
+		expect(retried.assessment.lifecycle).toBe('completed');
+		expect(loadCurrent).toHaveBeenCalledTimes(2);
+		expect(authorize).toHaveBeenCalledTimes(2);
+		expect(rt.writeIntentJournal).toHaveBeenCalledOnce();
+		expect(executeOperation).toHaveBeenCalledOnce();
 	});
 
 	it('blocks before DDL when a relkind fingerprint fact drifts at apply time', async () => {
@@ -3191,8 +3623,9 @@ describe('createApplier', () => {
 
 		expect(result.assessment.decision).toBe('blocked');
 		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
-		expect(result.journals[0]?.outcome).toBe('context-mismatch');
-		expect(observed[0]?.outcome).toBe('context-mismatch');
+		expect(result.journals).toEqual([]);
+		expect(observed).toEqual([]);
+		expect(rt.writeIntentJournal).not.toHaveBeenCalled();
 		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
@@ -3314,6 +3747,12 @@ describe('createApplier', () => {
 		expect(log).toContain('rollback-clears-intent');
 		expect(log.indexOf('rollback-clears-intent')).toBeLessThan(
 			log.indexOf('observed:guard-failed'),
+		);
+		expect(log.lastIndexOf('begin')).toBeGreaterThan(
+			log.indexOf('rollback-clears-intent'),
+		);
+		expect(log.lastIndexOf('lock-timeout')).toBeGreaterThan(
+			log.indexOf('rollback-clears-intent'),
 		);
 		expect(durableIntentRows.size).toBe(0);
 		expect(executeOperation).not.toHaveBeenCalled();

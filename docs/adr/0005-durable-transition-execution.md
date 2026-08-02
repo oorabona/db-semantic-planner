@@ -43,12 +43,19 @@ Whether a step still applies is decided against the live database under that
 step's locks, immediately before its DDL — never from the stored artifact alone.
 The supplied digest answers whether the artifact is intact; the per-step
 `expectedBefore` fingerprint answers whether the target is unchanged. Intent is
-written *before* those locks and that observation, so a step whose fingerprint
-has moved is refused after its intent is recorded. Physical identity is compared
-as cluster system identifier, database OID and namespace OIDs, because a
-database answering to the same name is not the same database, and the apply
-preflight additionally re-derives the contract's requirements and checks engine
-version, privileges and session settings on the executing session.
+written *after* lock timeout setup, locking, live-context observation and the
+`expectedBefore` check. A moved fingerprint in the first uncommitted segment is
+therefore refused with no per-step event and the run remains pristine for
+re-planning. If an earlier segment committed, its journals remain: the result is
+`partially-applied` with `resume-possible`, even though the later moved step has
+no event. This boundary rests on a pack obligation: `setLockTimeout`,
+`acquireLocks`, `observeContext`, `observeOperation`, and fingerprint construction
+must perform no DDL or external effect; `executeOperation` is the first callback
+allowed to do so. Physical
+identity is compared as cluster system identifier, database OID and namespace
+OIDs, because a database answering to the same name is not the same database,
+and the apply preflight additionally re-derives the contract's requirements and
+checks engine version, privileges and session settings on the executing session.
 
 Acceptance is an authorization boundary, not a warning channel. `ApplyPolicy`
 requires its `accepts` list explicitly, so a plan resting on an unverified
