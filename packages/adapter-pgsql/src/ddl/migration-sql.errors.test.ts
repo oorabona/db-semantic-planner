@@ -1050,7 +1050,7 @@ describe('generateMigrationSQL — error paths & edge cases', () => {
 			);
 
 			expect(sql[0]).toBe(
-				'CREATE INDEX IF NOT EXISTS "idx_users_email_tenant_id" ON "users" ("email", "tenant_id");',
+				'CREATE INDEX "idx_users_email_tenant_id" ON "users" ("email", "tenant_id");',
 			);
 		});
 

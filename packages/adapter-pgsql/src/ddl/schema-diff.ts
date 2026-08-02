@@ -327,6 +327,19 @@ export function compareSchemata(
 					});
 				}
 			}
+			// Reuse the ordinary comment diff against a comment-free version of the
+			// newly-created table. Keep only the comments that CREATE TABLE would
+			// emit: a new table has no existing comment for a falsy value to drop.
+			// Retaining its columns lets compareComments emit COMMENT ON COLUMN
+			// changes as well as the table-level comment.
+			if (sup(caps?.supportsDDLComments)) {
+				const tableWithCreatableComments = withoutFalsyComments(schemaTable);
+				compareComments(
+					tableWithCreatableComments,
+					withoutComments(tableWithCreatableComments),
+					changes,
+				);
+			}
 			continue;
 		}
 
@@ -1020,8 +1033,8 @@ function compareIndexes(
 	}
 
 	// Same-name replacements must be all-or-nothing: with destructive changes
-	// skipped, CREATE INDEX IF NOT EXISTS would no-op against the still-existing
-	// old index name and report success without changing the database.
+	// skipped, leaving the old index in place and attempting its replacement
+	// would fail instead of honoring the requested non-destructive migration.
 	markDestructiveReplacementCreates(pendingCreates, pendingDrops);
 
 	for (const create of pendingCreates) {
@@ -1135,6 +1148,33 @@ function indexReplacementKey(tableName: string, idx: IndexIR): string {
 
 function formatIndexTargets(idx: IndexIR): string {
 	return [...(idx.expressions ?? []), ...idx.columns].join(', ');
+}
+
+function withoutComments(table: TableIR): TableIR {
+	const { comment: _tableComment, ...tableWithoutComment } = table;
+	return {
+		...tableWithoutComment,
+		columns: table.columns.map(
+			({ comment: _columnComment, ...column }) => column,
+		),
+	};
+}
+
+/**
+ * New-table comment changes only create truthy comments. An empty PostgreSQL
+ * comment has the same effect as no comment, so it must not become a synthetic
+ * drop_comment while bootstrapping a table.
+ */
+function withoutFalsyComments(table: TableIR): TableIR {
+	const { comment, ...tableWithoutComment } = table;
+	return {
+		...tableWithoutComment,
+		...(comment ? { comment } : {}),
+		columns: table.columns.map(({ comment: columnComment, ...column }) => ({
+			...column,
+			...(columnComment ? { comment: columnComment } : {}),
+		})),
+	};
 }
 
 // ============================================================================

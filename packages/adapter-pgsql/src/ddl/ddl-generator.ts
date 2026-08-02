@@ -464,9 +464,11 @@ export function generateCreateIndex(
 	schemaName: string | undefined,
 	naming: NamingPlugin,
 	context?: IndexCapabilityContext,
+	ifNotExists?: boolean,
 ): string {
+	const spec = buildIndexRenderSpec(tableName, idx, schemaName, naming);
 	return `${renderCreateIndex(
-		buildIndexRenderSpec(tableName, idx, schemaName, naming),
+		ifNotExists === undefined ? spec : { ...spec, ifNotExists },
 		context,
 	)};`;
 }

@@ -85,6 +85,64 @@ function makeModel(tables: readonly TableIR[]): ModelIRImpl {
 // ============================================================================
 
 describe('generateMigrationSQL', () => {
+	it('matches generateDDL for a complete empty-database bootstrap', () => {
+		const users: TableIR = {
+			name: 'users',
+			comment: 'Registered user accounts',
+			columns: [
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({
+					name: 'email',
+					type: 'string',
+					default: 'unknown@example.com',
+					unique: true,
+					comment: 'Primary login address',
+				}),
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const posts: TableIR = {
+			name: 'posts',
+			columns: [
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({ name: 'user_id', type: 'integer' }),
+				makeCol({ name: 'title', type: 'string' }),
+			],
+			primaryKey: 'id',
+			foreignKeys: [
+				{
+					columns: ['user_id'],
+					references: { table: 'users', columns: ['id'] },
+				},
+			],
+			indexes: [{ name: 'idx_posts_title', columns: ['title'] }],
+		};
+		const model = new ModelIRImpl(
+			new Map([
+				['users', users],
+				['posts', posts],
+			]),
+			new Map(),
+			new Map([['status', { name: 'status', values: ['draft', 'published'] }]]),
+		);
+
+		// Set equality, not sequence equality: the two paths place an implicit FK
+		// index differently relative to comments. generateDDL emits the index
+		// before them; the diff path emits comments in their ordering slot and
+		// appends the index after. Same statements, different order — tracked in
+		// #418 as the reason two implementations of one computation cannot be
+		// kept in step.
+		expect(
+			[
+				...generateMigrationSQL(
+					compareSchemata(model, new ModelIRImpl(new Map(), new Map())),
+				),
+			].sort(),
+		).toEqual([...generateDDL(model)].sort());
+	});
+
 	describe('CREATE TABLE', () => {
 		it('should generate CREATE TABLE with columns and PK', () => {
 			const table = makeTable(
@@ -569,7 +627,7 @@ describe('generateMigrationSQL', () => {
 	});
 
 	describe('INDEX', () => {
-		it('should generate CREATE INDEX IF NOT EXISTS', () => {
+		it('should generate an unguarded CREATE INDEX', () => {
 			const idx: IndexIR = {
 				name: 'idx_users_email',
 				columns: ['email'],
@@ -589,7 +647,7 @@ describe('generateMigrationSQL', () => {
 			);
 
 			expect(sql[0]).toBe(
-				'CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");',
+				'CREATE INDEX "idx_users_email" ON "users" ("email");',
 			);
 		});
 
@@ -612,7 +670,8 @@ describe('generateMigrationSQL', () => {
 				]),
 			);
 
-			expect(sql[0]).toContain('CREATE UNIQUE INDEX IF NOT EXISTS');
+			expect(sql[0]).toContain('CREATE UNIQUE INDEX "idx_users_email_unique"');
+			expect(sql[0]).not.toContain('IF NOT EXISTS');
 		});
 
 		it('should generate NULLS NOT DISTINCT only for unique indexes', () => {
@@ -658,10 +717,10 @@ describe('generateMigrationSQL', () => {
 				]),
 			);
 			expect(withNullsSql[0]).toBe(
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
+				'CREATE UNIQUE INDEX "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
 			);
 			expect(withoutNullsSql[0]).toBe(
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
+				'CREATE UNIQUE INDEX "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			);
 			// #245: nullsNotDistinct on a NON-unique index is a fail-loud input error (was a silent drop).
 			expect(() =>
@@ -743,7 +802,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_posts_body_gin" ON "posts" USING gin ("body");',
+					'CREATE INDEX "idx_posts_body_gin" ON "posts" USING gin ("body");',
 				);
 			});
 
@@ -765,7 +824,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_users_active" ON "users" ("email") WHERE active = true;',
+					'CREATE INDEX "idx_users_active" ON "users" ("email") WHERE active = true;',
 				);
 			});
 
@@ -818,7 +877,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_posts_title_trgm" ON "posts" USING gin ("title" gin_trgm_ops);',
+					'CREATE INDEX "idx_posts_title_trgm" ON "posts" USING gin ("title" gin_trgm_ops);',
 				);
 			});
 
@@ -841,7 +900,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_embeddings_hnsw" ON "embeddings" USING hnsw ("embedding") WITH (m = 16, ef_construction = 200);',
+					'CREATE INDEX "idx_embeddings_hnsw" ON "embeddings" USING hnsw ("embedding") WITH (m = 16, ef_construction = 200);',
 				);
 			});
 
@@ -863,7 +922,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_users_email_include" ON "users" ("email") INCLUDE ("id", "name");',
+					'CREATE INDEX "idx_users_email_include" ON "users" ("email") INCLUDE ("id", "name");',
 				);
 			});
 
@@ -888,7 +947,7 @@ describe('generateMigrationSQL', () => {
 				);
 
 				expect(sql[0]).toBe(
-					'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_include_nulls" ON "users" ("email") INCLUDE ("id") NULLS NOT DISTINCT;',
+					'CREATE UNIQUE INDEX "idx_users_email_include_nulls" ON "users" ("email") INCLUDE ("id") NULLS NOT DISTINCT;',
 				);
 			});
 
@@ -910,7 +969,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_users_lower_email" ON "users" (lower("email"));',
+					'CREATE INDEX "idx_users_lower_email" ON "users" (lower("email"));',
 				);
 			});
 
@@ -935,7 +994,7 @@ describe('generateMigrationSQL', () => {
 					]),
 				);
 				expect(sql[0]).toBe(
-					'CREATE INDEX IF NOT EXISTS "idx_docs_content_trgm" ON "docs" USING gin ("content" gin_trgm_ops) WITH (fastupdate = on) WHERE published = true;',
+					'CREATE INDEX "idx_docs_content_trgm" ON "docs" USING gin ("content" gin_trgm_ops) WITH (fastupdate = on) WHERE published = true;',
 				);
 			});
 		});
@@ -1147,7 +1206,7 @@ describe('generateMigrationSQL', () => {
 			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
 			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
 				'DROP INDEX IF EXISTS "idx_users_email";',
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email") NULLS NOT DISTINCT;',
+				'CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email") NULLS NOT DISTINCT;',
 			]);
 		});
 
@@ -1197,12 +1256,12 @@ describe('generateMigrationSQL', () => {
 			]);
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[
-					'CREATE INDEX IF NOT EXISTS "idx_users_email_active" ON "users" ("email") WHERE active = true;',
+					'CREATE INDEX "idx_users_email_active" ON "users" ("email") WHERE active = true;',
 				],
 			);
 			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
 				'DROP INDEX IF EXISTS "idx_users_email_unique";',
-				'CREATE INDEX IF NOT EXISTS "idx_users_email_active" ON "users" ("email") WHERE active = true;',
+				'CREATE INDEX "idx_users_email_active" ON "users" ("email") WHERE active = true;',
 			]);
 		});
 
@@ -1245,7 +1304,7 @@ describe('generateMigrationSQL', () => {
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[
 					'DROP INDEX IF EXISTS "idx_users_email";',
-					'CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" USING hash ("email");',
+					'CREATE INDEX "idx_users_email" ON "users" USING hash ("email");',
 				],
 			);
 		});
@@ -1930,10 +1989,10 @@ describe('generateDownSQL', () => {
 				]),
 			);
 			expect(withNullsSql).toEqual([
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
+				'CREATE UNIQUE INDEX "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
 			]);
 			expect(withoutNullsSql).toEqual([
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
+				'CREATE UNIQUE INDEX "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			]);
 			// #245: recreating a non-unique index that declares nullsNotDistinct is a fail-loud input error.
 			expect(() =>
@@ -2535,7 +2594,7 @@ describe('generateDownSQL', () => {
 			// CREATE TABLE (phase 5) must come before CREATE INDEX (phase 11)
 			expect(idxIdx).toBeGreaterThan(createIdx);
 			expect(sql[idxIdx]).toBe(
-				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email");',
+				'CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");',
 			);
 		});
 
@@ -2720,7 +2779,7 @@ describe('generateDownSQL', () => {
 				'DROP INDEX IF EXISTS "uq_users_email";',
 			]);
 			expect(generateDownSQL(diff, { includeDestructive: true })).toEqual([
-				'CREATE UNIQUE INDEX IF NOT EXISTS "uq_users_email" ON "users" ("email");',
+				'CREATE UNIQUE INDEX "uq_users_email" ON "users" ("email");',
 			]);
 		});
 
@@ -3554,7 +3613,7 @@ describe('FK enhancements — migration SQL', () => {
 			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
 		);
 		expect(sql).toContain(
-			'CREATE INDEX IF NOT EXISTS "idx_posts_author_id" ON "posts" ("author_id");',
+			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
 		);
 	});
 
@@ -3646,10 +3705,10 @@ describe('FK enhancements — migration SQL', () => {
 		const sql = generateMigrationSQL(diff);
 
 		expect(sql).toContain(
-			'CREATE INDEX IF NOT EXISTS "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
+			'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
 		);
 		expect(sql).not.toContain(
-			'CREATE INDEX IF NOT EXISTS "idx_orders_user_id" ON "orders" ("user_id");',
+			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
 		);
 	});
 
