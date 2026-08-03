@@ -21,6 +21,7 @@ import type {
 	TransactionalCompletionRecord,
 	TransitionCompositionFact,
 	TransitionRule,
+	TransitionRunMetadata,
 	TransitionSessionClient,
 } from '@dbsp/types';
 import {
@@ -113,6 +114,23 @@ export interface NonRollbackableExecutionTracker {
 
 export interface ExecutionCoordinator {
 	readonly transactionDomain: string;
+	/**
+	 * When supplied, core calls this after `begin` and before application locks
+	 * for transactional segments. It may reserve the durable run journal on the
+	 * same session so later intent writes keep journal-then-application lock
+	 * order. Generic runtimes without an operation/journal reservation protocol
+	 * leave this absent; in particular a non-transactional segment cannot retain
+	 * a transaction-scoped journal row lock across application locking.
+	 *
+	 * Before an intent exists, core can invoke `begin`, `setLockTimeout`, this
+	 * optional reservation, `rollback`, and `isLockTimeout`. They must
+	 * not perform operation DDL or any external effect. `executeOperation` is
+	 * the first callback allowed to do so.
+	 */
+	reserveJournalRun?(
+		client: TransitionExecutionClient,
+		run: TransitionRunMetadata,
+	): Promise<void>;
 	begin(client: TransitionExecutionClient): Promise<void>;
 	setLockTimeout(
 		client: TransitionExecutionClient,
@@ -129,6 +147,22 @@ export interface TransactionCoordinatorBinding {
 }
 
 export interface OperationRuntime extends RegisteredOperationSemantics {
+	/**
+	 * Before `writeIntentJournal`, core can invoke `effectsOf`, `begin`,
+	 * `setLockTimeout`, optional `reserveJournalRun`, `acquireLocks`,
+	 * `observeContext`,
+	 * `observeOperation`, `buildFingerprints`, `rollback`, and `isLockTimeout`.
+	 * All must perform no operation DDL or external effect. The only
+	 * pre-intent diagnostic exception is `writeObservedJournal` after a
+	 * fingerprint-construction failure: it may append that immutable failure
+	 * event, but may not perform operation DDL or an external effect. This lets a
+	 * refusal before the intent leave the run pristine; `executeOperation` is the
+	 * first callback allowed to perform the operation's DDL or external effect.
+	 */
+	reserveJournalRun?(
+		client: TransitionExecutionClient,
+		run: TransitionRunMetadata,
+	): Promise<void>;
 	writeIntentJournal(
 		client: TransitionExecutionClient,
 		record: DurableIntentRecord,

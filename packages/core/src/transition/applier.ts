@@ -352,21 +352,6 @@ function journalWithObserved(
 	return { ...base, recovery };
 }
 
-function contextMismatchJournal(
-	intent: DurableIntentRecord,
-	observations: readonly IssuedObservation[],
-): StepJournal {
-	return {
-		intent,
-		outcome: 'context-mismatch',
-		observedOutcome: {
-			stepId: intent.stepId,
-			observations: evidenceIds(observations),
-			recordedAt: recordedAt(),
-		},
-	};
-}
-
 function unacceptedAssumptionResult(
 	plan: InProcessProvenPlan,
 	assumption: Assumption,
@@ -550,7 +535,51 @@ class CommitOutcomeUncertainError extends Error {
 }
 
 function errorDetail(error: unknown): string {
+	if (error instanceof AggregateError) {
+		const details = error.errors
+			.map(errorDetail)
+			.filter((detail) => detail !== 'unknown error');
+		return details.length > 0
+			? `${error.message}: ${details.join('; ')}`
+			: error.message;
+	}
 	return error instanceof Error ? error.message : 'unknown error';
+}
+
+/** Keep the failed work and the rollback that failed to clean it up together. */
+function applyAndRollbackFailure(
+	originalError: unknown,
+	cleanupError: unknown,
+): AggregateError {
+	const failure = new AggregateError(
+		[originalError, cleanupError],
+		'transition apply failed and its rollback also failed',
+	);
+	Object.defineProperties(failure, {
+		originalError: { value: originalError, configurable: true },
+		cleanupError: { value: cleanupError, configurable: true },
+	});
+	return failure;
+}
+
+const postRollbackObservedJournalWrites = new WeakMap<
+	TransitionExecutionClient,
+	{
+		readonly coordinator: ExecutionCoordinator | OperationRuntime;
+		readonly maxWaitMs: number;
+	}
+>();
+
+async function rollbackAndPrepareObservedJournalWrite(
+	coordinator: ExecutionCoordinator | OperationRuntime,
+	client: TransitionExecutionClient,
+	maxWaitMs: number,
+): Promise<void> {
+	await coordinator.rollback(client);
+	// ROLLBACK clears PostgreSQL's SET LOCAL lock_timeout. An observed event
+	// appends through SELECT ... FOR UPDATE, so give the standalone append a new,
+	// bounded transaction.
+	postRollbackObservedJournalWrites.set(client, { coordinator, maxWaitMs });
 }
 
 function withJournalWriteWarning<T extends PlanAssessment>(
@@ -579,7 +608,32 @@ async function writeObservedJournalOutcome(params: {
 	{ readonly ok: true } | { readonly ok: false; readonly error: unknown }
 > {
 	try {
-		await params.semantics.writeObservedJournal(params.client, params.journal);
+		const postRollback = postRollbackObservedJournalWrites.get(params.client);
+		if (postRollback) {
+			postRollbackObservedJournalWrites.delete(params.client);
+			await postRollback.coordinator.begin(params.client);
+			try {
+				await postRollback.coordinator.setLockTimeout(
+					params.client,
+					postRollback.maxWaitMs,
+				);
+				await params.semantics.writeObservedJournal(
+					params.client,
+					params.journal,
+				);
+				await postRollback.coordinator.commit(params.client);
+			} catch (error) {
+				await postRollback.coordinator
+					.rollback(params.client)
+					.catch(() => undefined);
+				throw error;
+			}
+		} else {
+			await params.semantics.writeObservedJournal(
+				params.client,
+				params.journal,
+			);
+		}
 		return { ok: true };
 	} catch (error) {
 		return { ok: false, error };
@@ -810,6 +864,17 @@ export function createApplier(
 					journalWriteFailure ?? params.result,
 				);
 			};
+			// Locking and observing precede the durable step boundary.  The
+			// OperationRuntime contract makes that safe: if this refusal is reached,
+			// no DDL or external effect has occurred, so there is no step attempt to
+			// reconcile.  Previously committed steps remain in `journals`, however,
+			// and keep the run recoverable.
+			const preIntentRefusal = (reason: OutcomeReason): ApplyResult =>
+				resultWithCommittedJournals({
+					assessment: stoppedAssessment(reason, journals.length > 0),
+					journals: [],
+					observations,
+				});
 			const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
 			type ResolvedStep = {
 				readonly step: ProvenPlanStep;
@@ -1022,6 +1087,7 @@ export function createApplier(
 				let releaseFailure: TransitionLeaseFailure | undefined;
 				let active = first;
 				let activeContext = runtimeContext;
+				let activeIntentWritten = false;
 				let activeOperationAttempted = false;
 				let activeNonRollbackableOperationExecuted = false;
 				const completedInSegment: {
@@ -1044,17 +1110,28 @@ export function createApplier(
 					if (transactional) {
 						await segmentCoordinator.begin(executionClient);
 						transactionStarted = true;
+						// The reservation takes a PostgreSQL row lock. Set the plan-derived
+						// bound first, so this wait and later application locks report the
+						// timeout that actually applied.
+						await segmentCoordinator.setLockTimeout(
+							executionClient,
+							lockTimeoutMs(first.semantics, first.step, runtimeContext),
+						);
+						// PostgreSQL reservations hold the proven run row before any
+						// application lock. The subsequent intent append runs on this
+						// session and therefore reuses that journal lock. Coordinators
+						// without this optional protocol (including the generic
+						// non-transactional path) retain the old exposure: a row lock
+						// cannot be held across application locking without a transaction.
+						await segmentCoordinator.reserveJournalRun?.(executionClient, run);
 					}
 
 					for (const entry of resolvedSteps) {
 						active = entry;
 						activeContext = runtimeContext;
+						activeIntentWritten = false;
 						activeOperationAttempted = false;
 						activeNonRollbackableOperationExecuted = false;
-						await entry.semantics.writeIntentJournal(
-							executionClient,
-							entry.intent,
-						);
 						await segmentCoordinator.setLockTimeout(
 							executionClient,
 							lockTimeoutMs(entry.semantics, entry.step, runtimeContext),
@@ -1079,25 +1156,33 @@ export function createApplier(
 							stepContext,
 						);
 						if (!liveContextMatch.ok) {
+							const mismatchDetail = liveContextMatch.detail;
+							const mismatch = contextMismatchReason(
+								entry.step,
+								mismatchDetail,
+							);
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								try {
+									await rollbackAndPrepareObservedJournalWrite(
+										segmentCoordinator,
+										executionClient,
+										lockTimeoutMs(entry.semantics, entry.step, activeContext),
+									);
+								} catch (cleanupError) {
+									return preIntentRefusal(
+										contextMismatchReason(
+											entry.step,
+											errorDetail(
+												applyAndRollbackFailure(
+													new Error(mismatchDetail),
+													cleanupError,
+												),
+											),
+										),
+									);
+								}
 							}
-							const journal = contextMismatchJournal(entry.intent, []);
-							const result = {
-								assessment: stoppedAssessment(
-									contextMismatchReason(entry.step, liveContextMatch.detail),
-									journals.length > 0,
-								),
-								journals: [...journals, journal],
-								observations,
-							};
-							return resultWithObservedJournal({
-								semantics: entry.semantics,
-								client: executionClient,
-								journal,
-								result,
-								outcomeDurable: journals.length > 0,
-							});
+							return preIntentRefusal(mismatch);
 						}
 
 						const before = await entry.semantics.observeOperation(
@@ -1117,18 +1202,36 @@ export function createApplier(
 								durableEvidence(before.observations),
 								stepContext,
 							);
-						} catch {
+						} catch (error) {
+							let reportedError = error;
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								try {
+									await rollbackAndPrepareObservedJournalWrite(
+										segmentCoordinator,
+										executionClient,
+										lockTimeoutMs(entry.semantics, entry.step, activeContext),
+									);
+								} catch (cleanupError) {
+									reportedError = applyAndRollbackFailure(error, cleanupError);
+								}
 							}
+							// A builder failure cannot establish drift. Preserve an
+							// observed unknown outcome, including the original cause, so
+							// admission will not turn an evidence failure into a pristine
+							// re-planning loop.
 							const journal = unknownJournal(entry.intent);
 							const result = {
-								assessment: stoppedAssessment(
-									contextMismatchReason(
-										entry.step,
-										'expectedBefore fingerprint could not be rebuilt',
-									),
-									journals.length > 0,
+								assessment: assessment(
+									{
+										code: 'unknown-step-result',
+										stepId: entry.step.stepId,
+										operationKind: entry.step.operation.operationKind,
+										operationRef: entry.step.operation.ref,
+										scope: [],
+										detail: `expectedBefore fingerprint construction failed: ${errorDetail(reportedError)}`,
+									},
+									'outcome-unknown',
+									'human-intervention-required',
 								),
 								journals: [...journals, journal],
 								observations,
@@ -1138,7 +1241,7 @@ export function createApplier(
 								client: executionClient,
 								journal,
 								result,
-								outcomeDurable: journals.length > 0,
+								outcomeDurable: true,
 							});
 						}
 						if (
@@ -1147,29 +1250,43 @@ export function createApplier(
 								currentFingerprints.expectedBefore,
 							)
 						) {
-							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
-							}
-							const journal = contextMismatchJournal(
-								entry.intent,
-								observations,
+							const mismatchDetail = 'expectedBefore mismatch';
+							const mismatch = contextMismatchReason(
+								entry.step,
+								mismatchDetail,
 							);
-							const result = {
-								assessment: stoppedAssessment(
-									contextMismatchReason(entry.step, 'expectedBefore mismatch'),
-									journals.length > 0,
-								),
-								journals: [...journals, journal],
-								observations,
-							};
-							return resultWithObservedJournal({
-								semantics: entry.semantics,
-								client: executionClient,
-								journal,
-								result,
-								outcomeDurable: journals.length > 0,
-							});
+							if (transactionStarted && !committed) {
+								try {
+									await rollbackAndPrepareObservedJournalWrite(
+										segmentCoordinator,
+										executionClient,
+										lockTimeoutMs(entry.semantics, entry.step, activeContext),
+									);
+								} catch (cleanupError) {
+									return preIntentRefusal(
+										contextMismatchReason(
+											entry.step,
+											errorDetail(
+												applyAndRollbackFailure(
+													new Error(mismatchDetail),
+													cleanupError,
+												),
+											),
+										),
+									);
+								}
+							}
+							return preIntentRefusal(mismatch);
 						}
+
+						// Mark before awaiting: a write error can still mean the intent
+						// reached durable storage, so downstream recovery must remain
+						// conservative.
+						activeIntentWritten = true;
+						await entry.semantics.writeIntentJournal(
+							executionClient,
+							entry.intent,
+						);
 
 						const runGuardPhase = async (
 							phase: ProvenPlanStep['guards'][number]['phase'],
@@ -1187,7 +1304,11 @@ export function createApplier(
 								observations.push(...guardResult.observations);
 								if (!guardResult.passed) {
 									if (transactionStarted && !committed) {
-										await segmentCoordinator.rollback(executionClient);
+										await rollbackAndPrepareObservedJournalWrite(
+											segmentCoordinator,
+											executionClient,
+											lockTimeoutMs(entry.semantics, entry.step, activeContext),
+										);
 									}
 									const hasAppliedWork =
 										journals.length > 0 || nonRollbackableOperationExecuted;
@@ -1256,7 +1377,11 @@ export function createApplier(
 						);
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								await rollbackAndPrepareObservedJournalWrite(
+									segmentCoordinator,
+									executionClient,
+									lockTimeoutMs(entry.semantics, entry.step, activeContext),
+								);
 							}
 							const nonRollbackableFootprint =
 								executionOutcome.nonRollbackableFootprint ??
@@ -1301,7 +1426,11 @@ export function createApplier(
 						}
 						if (executionOutcome.kind === 'partially-applied') {
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								await rollbackAndPrepareObservedJournalWrite(
+									segmentCoordinator,
+									executionClient,
+									lockTimeoutMs(entry.semantics, entry.step, activeContext),
+								);
 							}
 							if (transactional) {
 								const detail =
@@ -1413,7 +1542,11 @@ export function createApplier(
 							);
 						} catch (error) {
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								await rollbackAndPrepareObservedJournalWrite(
+									segmentCoordinator,
+									executionClient,
+									lockTimeoutMs(entry.semantics, entry.step, activeContext),
+								);
 							}
 							const journal = journalWithObserved(
 								entry.intent,
@@ -1465,7 +1598,11 @@ export function createApplier(
 							!fingerprintMatches(entry.step.expectedAfter, after.fingerprint)
 						) {
 							if (transactionStarted && !committed) {
-								await segmentCoordinator.rollback(executionClient);
+								await rollbackAndPrepareObservedJournalWrite(
+									segmentCoordinator,
+									executionClient,
+									lockTimeoutMs(entry.semantics, entry.step, activeContext),
+								);
 							}
 							const journal: StepJournal = {
 								intent: entry.intent,
@@ -1651,7 +1788,11 @@ export function createApplier(
 					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
 						if (client && transactionStarted) {
-							await segmentCoordinator.rollback(client).catch(() => undefined);
+							await rollbackAndPrepareObservedJournalWrite(
+								segmentCoordinator,
+								client,
+								lockTimeoutMs(active.semantics, active.step, activeContext),
+							).catch(() => undefined);
 						}
 						const journal = unknownJournal(active.intent);
 						const result = {
@@ -1683,7 +1824,11 @@ export function createApplier(
 					if (client && transactionStarted && !committed) {
 						rollbackAttempted = true;
 						try {
-							await segmentCoordinator.rollback(client);
+							await rollbackAndPrepareObservedJournalWrite(
+								segmentCoordinator,
+								client,
+								lockTimeoutMs(active.semantics, active.step, activeContext),
+							);
 							rollbackSucceeded = true;
 						} catch {
 							// The outcome below reports uncertainty; resume must re-introspect.
@@ -1692,21 +1837,26 @@ export function createApplier(
 					if (
 						rollbackAttempted &&
 						!rollbackSucceeded &&
-						activeOperationAttempted
+						(activeOperationAttempted || completedInSegment.length > 0)
 					) {
-						const journal = unknownJournal(active.intent);
+						// Attribute uncertainty to the earliest operation that ran in this
+						// segment. The durable record cannot yet express reconcilable
+						// segment uncertainty, so an unconfirmed rollback after executed
+						// work requires human intervention.
+						const uncertain = completedInSegment[0] ?? active;
+						const journal = unknownJournal(uncertain.intent);
 						const result = {
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
-									stepId: active.step.stepId,
-									operationKind: active.step.operation.operationKind,
-									operationRef: active.step.operation.ref,
+									stepId: uncertain.step.stepId,
+									operationKind: uncertain.step.operation.operationKind,
+									operationRef: uncertain.step.operation.ref,
 									scope: [],
 									detail:
 										error instanceof Error
-											? `rollback outcome uncertain after failure: ${error.message}`
-											: 'rollback outcome uncertain after apply failure',
+											? `rollback outcome uncertain after failure: ${error.message}; human intervention is required because the durable record cannot yet express reconcilable segment uncertainty`
+											: 'rollback outcome uncertain after apply failure; human intervention is required because the durable record cannot yet express reconcilable segment uncertainty',
 								},
 								'outcome-unknown',
 								'human-intervention-required',
@@ -1715,12 +1865,36 @@ export function createApplier(
 							observations,
 						};
 						return resultWithObservedJournal({
-							semantics: active.semantics,
+							semantics: uncertain.semantics,
 							client,
 							journal,
 							result,
 							outcomeDurable: true,
 						});
+					}
+					if (!activeIntentWritten) {
+						if (segmentCoordinator.isLockTimeout(error)) {
+							return preIntentRefusal({
+								code: 'guard-timeout',
+								stepId: active.step.stepId,
+								operationKind: active.step.operation.operationKind,
+								operationRef: active.step.operation.ref,
+								maxWaitMs: lockTimeoutMs(
+									active.semantics,
+									active.step,
+									activeContext,
+								),
+								scope: [],
+							});
+						}
+						return preIntentRefusal(
+							operationFailedNotAppliedReason(
+								active.step,
+								error instanceof Error
+									? error.message
+									: 'operation setup failed before intent',
+							),
+						);
 					}
 					if (segmentCoordinator.isLockTimeout(error)) {
 						const hasAppliedWork =

@@ -581,6 +581,25 @@ async function appendJournalEvent(params: {
 	);
 }
 
+/**
+ * Reserve the run row for the current transaction before application locks are
+ * acquired. `appendJournalEvent` takes this same row lock, so intent and later
+ * journal appends reuse the reservation on this session rather than inverting
+ * journal/application lock order.
+ */
+export async function reserveTransitionJournalRun(
+	executor: TransitionJournalQueryable,
+	runId: string,
+): Promise<void> {
+	const reserved = await executor.query(
+		`SELECT run_id FROM ${transitionRunTable()} WHERE run_id = $1 FOR UPDATE`,
+		[runId],
+	);
+	if (!reserved.rows[0]) {
+		throw new Error(`dbsp transition run ${runId} was not persisted`);
+	}
+}
+
 async function ensurePersistedRun(
 	executor: TransitionJournalQueryable,
 	runId: string,

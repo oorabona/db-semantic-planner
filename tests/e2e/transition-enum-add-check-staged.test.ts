@@ -403,7 +403,10 @@ describe('ADR-0003 transition planner: staged enum ADD VALUE plus ADD CHECK', ()
 		]);
 		expect(await enumLabels()).toEqual(['active']);
 		expect(await checkExists()).toBe(false);
-		expect(tracked.queries.filter((sql) => sql === 'COMMIT')).toHaveLength(0);
+		// The two assertions above prove no schema change survived. The one commit
+		// is the observed journal event's own bounded transaction: a record of the
+		// guard failure that never commits is not a durable record.
+		expect(tracked.queries.filter((sql) => sql === 'COMMIT')).toHaveLength(1);
 		expect(tracked.queries.filter((sql) => sql === 'ROLLBACK')).toHaveLength(1);
 	});
 
