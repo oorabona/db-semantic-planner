@@ -157,14 +157,21 @@ export {
 	normalizeManualSqlPayload,
 } from './operations/manual-sql.js';
 export {
+	appendPgOutcomeResolution,
 	executePgManagedBundle,
 	openPgOutcomeClaim,
 	type PgOutcomeClaimRequest,
 	type PgOutcomeExecutionRequest,
 	type PgOutcomeNonTransactionalRequest,
+	type PgOutcomeReadBackFactory,
+	type PgOutcomeRecoveryRequest,
+	type PgOutcomeRecoveryResult,
 	type PgOutcomeResolution,
+	type PgOutcomeResolutionAppendResult,
 	type PgOutcomeResult,
 	type PgOutcomeTransactionalRequest,
+	readPgOutcomeRecoveryReadBack,
+	recoverPgOutcomeClaim,
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './outcome-protocol.js';

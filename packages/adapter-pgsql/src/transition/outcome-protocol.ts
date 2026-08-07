@@ -1,6 +1,7 @@
 import {
 	admitOutcomeClaim,
 	claimIdForToken,
+	classifyOutcomeRecovery,
 	consumeClaimToken,
 	projectLedgerChain,
 } from '@dbsp/core';
@@ -8,14 +9,19 @@ import type {
 	AdmittedOutcomeClaim,
 	ClaimBundleStatement,
 	ClaimToken,
+	LedgerAddress,
 	LedgerChainMember,
 	LedgerEventKind,
+	LedgerPayload,
 	LedgerReservationRow,
 	OutcomeClaimAdmission,
 	OutcomeClaimPlan,
 	OutcomeProtocolRefusal,
+	OutcomeRecoveryClassification,
+	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
 } from '@dbsp/types';
+import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
@@ -69,6 +75,51 @@ export interface PgOutcomeNonTransactionalRequest
 	readonly onExecutingCommitted?: () => Promise<void> | void;
 }
 
+/** Builds the canonical read-back payload once catalogue presence is proven. */
+export type PgOutcomeReadBackFactory = (
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	catalogueIdentity: NonNullable<
+		Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+	>['catalogueIdentity'],
+) => Promise<LedgerPayload>;
+
+export interface PgOutcomeRecoveryRequest {
+	readonly address: LedgerAddress;
+	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
+	readonly resolutionEventId: string;
+	readonly acceptedExternalDdlExclusion: boolean;
+	readonly resolveIndeterminate?: boolean;
+	readonly readBack: PgOutcomeReadBackFactory;
+	readonly lockTimeoutMs?: number;
+}
+
+export type PgOutcomeResolutionAppendResult =
+	| { readonly kind: 'appended-outcome-resolution' }
+	| { readonly kind: 'already-appended-outcome-resolution' }
+	| {
+			readonly kind: 'malformed-outcome-resolution';
+			readonly reason: string;
+	  };
+
+export type PgOutcomeRecoveryResult =
+	| Exclude<
+			OutcomeRecoveryClassification,
+			{ readonly kind: 'outcome-recovery-append' }
+	  >
+	| {
+			readonly kind: 'outcome-recovery-appended';
+			readonly classification: Extract<
+				OutcomeRecoveryClassification,
+				{ readonly kind: 'outcome-recovery-append' }
+			>;
+			readonly append: Exclude<
+				PgOutcomeResolutionAppendResult,
+				{ readonly kind: 'malformed-outcome-resolution' }
+			>;
+	  }
+	| OutcomeProtocolRefusal;
+
 export type PgOutcomeResult =
 	| {
 			readonly kind: 'executed-outcome-claim';
@@ -85,12 +136,17 @@ function detail(error: unknown): string {
 }
 
 function targetForPlan(plan: OutcomeClaimPlan): PgLedgerTarget {
-	if (plan.address.scope === 'database') return { scope: 'database' };
-	if (!plan.address.schema)
-		throw new Error(
-			`schema-scoped claim ${plan.claimId} has no schema address`,
-		);
-	return { scope: 'schema', schema: plan.address.schema };
+	return targetForAddress(plan.address, plan.claimId);
+}
+
+function targetForAddress(
+	address: LedgerAddress,
+	label = address.name,
+): PgLedgerTarget {
+	if (address.scope === 'database') return { scope: 'database' };
+	if (!address.schema)
+		throw new Error(`schema-scoped claim ${label} has no schema address`);
+	return { scope: 'schema', schema: address.schema };
 }
 
 function homesFor(request: PgOutcomeClaimRequest) {
@@ -165,6 +221,136 @@ function resolutionMember(
 		...(resolution.observed === undefined
 			? {}
 			: { observed: resolution.observed }),
+	};
+}
+
+function recoveryResolutionMember(
+	address: LedgerAddress,
+	eventId: string,
+	resolution: Extract<
+		OutcomeRecoveryClassification,
+		{ readonly kind: 'outcome-recovery-append' }
+	>['resolution'],
+): Omit<LedgerChainMember, 'controller' | 'recordedAt'> {
+	const readBack = resolution.readBack;
+	return {
+		eventId,
+		address,
+		eventKind: resolution.eventKind,
+		predecessor: resolution.predecessor,
+		...(readBack.kind === 'present'
+			? {
+					catalogueIdentity: readBack.catalogueIdentity,
+					observed: readBack.observed,
+				}
+			: {}),
+	};
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const object = value as Record<string, unknown>;
+	return `{${Object.keys(object)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
+		.join(',')}}`;
+}
+
+function sameResolutionPayload(
+	left: Omit<LedgerChainMember, 'controller' | 'recordedAt'>,
+	right: LedgerChainMember,
+): boolean {
+	return (
+		left.eventKind === right.eventKind &&
+		left.predecessor === right.predecessor &&
+		left.pairId === right.pairId &&
+		canonicalJson(left.catalogueIdentity ?? null) ===
+			canonicalJson(right.catalogueIdentity ?? null) &&
+		canonicalJson(left.declared ?? null) ===
+			canonicalJson(right.declared ?? null) &&
+		canonicalJson(left.observed ?? null) ===
+			canonicalJson(right.observed ?? null)
+	);
+}
+
+/**
+ * Appends a resolution once, or treats an already-written equal payload as a
+ * successful retry. A different child cannot be written by PostgreSQL's
+ * one-child constraint and is reported as a fail-closed malformed outcome.
+ */
+export async function appendPgOutcomeResolution(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>,
+	rootClaimId: string,
+	reservations: readonly Pick<LedgerReservationRow, 'address'>[],
+): Promise<PgOutcomeResolutionAppendResult> {
+	try {
+		if (member.eventKind === 'indeterminate')
+			await appendPgLedgerProgress(executor, target, member);
+		else
+			await appendPgLedgerResolution(
+				executor,
+				target,
+				member,
+				rootClaimId,
+				reservations,
+			);
+		return { kind: 'appended-outcome-resolution' };
+	} catch (error) {
+		const original = detail(error);
+		let chain: Awaited<ReturnType<typeof readPgLedgerAddressChain>>;
+		try {
+			chain = await readPgLedgerAddressChain(executor, target, member.address);
+		} catch {
+			throw error;
+		}
+		const existing = chain.events.find(
+			(event) => event.predecessor === member.predecessor,
+		);
+		if (!existing) throw error;
+		if (sameResolutionPayload(member, existing))
+			return { kind: 'already-appended-outcome-resolution' };
+		return {
+			kind: 'malformed-outcome-resolution',
+			reason: `resolution predecessor ${member.predecessor ?? 'root'} has a differing terminal member after append failure: ${original}`,
+		};
+	}
+}
+
+async function appendOutcomeTerminal(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>,
+	rootClaimId: string,
+	reservations: readonly Pick<LedgerReservationRow, 'address'>[],
+): Promise<void> {
+	if (member.eventKind === 'indeterminate') {
+		await appendPgLedgerProgress(executor, target, member);
+		return;
+	}
+	await appendPgLedgerResolution(
+		executor,
+		target,
+		member,
+		rootClaimId,
+		reservations,
+	);
+}
+
+/** PostgreSQL catalogue read used by recovery before any ledger append. */
+export async function readPgOutcomeRecoveryReadBack(
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	readBack: PgOutcomeReadBackFactory,
+): Promise<OutcomeRecoveryReadBack> {
+	const resource = await readPgCatalogueIdentity(executor, address);
+	if (!resource?.catalogueIdentity) return { kind: 'absent' };
+	return {
+		kind: 'present',
+		catalogueIdentity: resource.catalogueIdentity,
+		observed: await readBack(executor, address, resource.catalogueIdentity),
 	};
 }
 
@@ -360,7 +546,7 @@ export async function runPgTransactionalOutcome(
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) throw new Error(sent.reason);
-		await appendPgLedgerResolution(
+		await appendOutcomeTerminal(
 			executor,
 			target,
 			resolutionMember(admission, request.resolution, request.plan.claimId),
@@ -421,7 +607,7 @@ export async function runPgNonTransactionalOutcome(
 		});
 		if (sent) return sent;
 		await begin(executor, request.lockTimeoutMs);
-		await appendPgLedgerResolution(
+		await appendOutcomeTerminal(
 			executor,
 			targetForPlan(request.plan),
 			resolutionMember(admission, request.resolution, request.executingEventId),
@@ -432,6 +618,101 @@ export async function runPgNonTransactionalOutcome(
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		await rollback(executor);
+		return refusal(detail(error));
+	}
+}
+
+/**
+ * Reads an address's chain and live catalogue in one locked transaction before
+ * appending the core classifier's instruction. It never calls the DDL sink.
+ */
+export async function recoverPgOutcomeClaim(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeRecoveryRequest,
+): Promise<PgOutcomeRecoveryResult> {
+	let begun = false;
+	try {
+		await begin(executor, request.lockTimeoutMs);
+		begun = true;
+		const target = targetForAddress(request.address, 'recovery target');
+		const homes = [target];
+		for (const reservation of request.reservations) {
+			if (reservation.address.scope === 'database')
+				homes.push({ scope: 'database' });
+			else if (reservation.address.schema)
+				homes.push({ scope: 'schema', schema: reservation.address.schema });
+			else
+				throw new Error(
+					`schema-scoped recovery reservation ${reservation.address.name} has no schema address`,
+				);
+		}
+		const lock = await acquirePgLedgerLocks(executor, homes);
+		if (lock.kind !== 'acquired') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal(
+				lock.kind === 'busy'
+					? 'ledger advisory lock is busy'
+					: detail(lock.error),
+			);
+		}
+		const chain = await readPgLedgerAddressChain(
+			executor,
+			target,
+			request.address,
+		);
+		const classification = await classifyOutcomeRecovery({
+			projection: projectLedgerChain(chain),
+			acceptedExternalDdlExclusion: request.acceptedExternalDdlExclusion,
+			...(request.resolveIndeterminate === undefined
+				? {}
+				: { resolveIndeterminate: request.resolveIndeterminate }),
+			catalogue: async (address) => {
+				try {
+					return await readPgOutcomeRecoveryReadBack(
+						executor,
+						address,
+						request.readBack,
+					);
+				} catch (error) {
+					return { kind: 'catalogue-unavailable', reason: detail(error) };
+				}
+			},
+		});
+		if (classification.kind !== 'outcome-recovery-append') {
+			try {
+				await executor.query('COMMIT');
+				begun = false;
+			} catch (error) {
+				// A lost catalogue session cannot append anyway. Preserve the
+				// classifier's pending result rather than replacing it with a
+				// transaction-cleanup failure after the read has failed.
+				if (classification.kind !== 'outcome-recovery-pending') throw error;
+				begun = false;
+			}
+			return classification;
+		}
+		const append = await appendPgOutcomeResolution(
+			executor,
+			target,
+			recoveryResolutionMember(
+				request.address,
+				request.resolutionEventId,
+				classification.resolution,
+			),
+			classification.resolution.rootClaimId,
+			request.reservations,
+		);
+		if (append.kind === 'malformed-outcome-resolution') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal(append.reason);
+		}
+		await executor.query('COMMIT');
+		begun = false;
+		return { kind: 'outcome-recovery-appended', classification, append };
+	} catch (error) {
+		if (begun) await rollback(executor);
 		return refusal(detail(error));
 	}
 }

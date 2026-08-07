@@ -1,6 +1,11 @@
-import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
+import type {
+	LedgerChainMember,
+	LedgerReservationRow,
+	OutcomeClaimPlan,
+} from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
+	appendPgOutcomeResolution,
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './outcome-protocol.js';
@@ -135,5 +140,142 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(executor.sql.slice(checkpoint)).toContain(
 			'CREATE TABLE tenant.accounts (id integer)',
 		);
+	});
+
+	it('treats an equal resolving payload as a retry success and a different child as malformed (SC-36)', async () => {
+		const input = request('resolution-retry');
+		const member: Omit<LedgerChainMember, 'controller' | 'recordedAt'> = {
+			eventId: 'recovery-refused',
+			address,
+			eventKind: 'refused',
+			predecessor: 'resolution-retry',
+		};
+		const row = (value: LedgerChainMember) => ({
+			event_id: value.eventId,
+			address_engine: value.address.engine,
+			address_database: value.address.database,
+			address_schema: value.address.schema,
+			address_parent: null,
+			address_kind: value.address.kind,
+			address_name: value.address.name,
+			catalogue_identity: null,
+			event_kind: value.eventKind,
+			predecessor: value.predecessor ?? null,
+			pair_id: null,
+			declared: null,
+			declared_digest: null,
+			observed: null,
+			observed_digest: null,
+			controller: value.controller,
+			recorded_at: null,
+		});
+		const existing: LedgerChainMember = { ...member, controller: 'deployment' };
+		const equal = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.startsWith('SELECT event_id')) return { rows: [row(existing)] };
+				throw new Error(
+					'duplicate key value violates dbsp_ledger_event_one_child',
+				);
+			}),
+		};
+		await expect(
+			appendPgOutcomeResolution(
+				equal,
+				{ scope: 'schema', schema: 'tenant' },
+				member,
+				'resolution-retry',
+				input.reservations,
+			),
+		).resolves.toEqual({ kind: 'already-appended-outcome-resolution' });
+
+		const differing = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.startsWith('SELECT event_id'))
+					return { rows: [row({ ...existing, eventKind: 'absent' })] };
+				throw new Error(
+					'duplicate key value violates dbsp_ledger_event_one_child',
+				);
+			}),
+		};
+		await expect(
+			appendPgOutcomeResolution(
+				differing,
+				{ scope: 'schema', schema: 'tenant' },
+				member,
+				'resolution-retry',
+				input.reservations,
+			),
+		).resolves.toMatchObject({ kind: 'malformed-outcome-resolution' });
+	});
+
+	it('leaves a one-shot resolving append fault retryable and writes one terminal member (SC-37)', async () => {
+		const input = request('failpoint-retry');
+		const member: Omit<LedgerChainMember, 'controller' | 'recordedAt'> = {
+			eventId: 'failpoint-refused',
+			address,
+			eventKind: 'refused',
+			predecessor: 'failpoint-retry',
+		};
+		let failures = 1;
+		let appended = 0;
+		const executor = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.startsWith('SELECT event_id')) return { rows: [] };
+				if (sql.includes('WITH appended AS')) {
+					if (failures > 0) {
+						failures -= 1;
+						throw new Error('failpoint targeted event insert');
+					}
+					appended += 1;
+				}
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			appendPgOutcomeResolution(
+				executor,
+				{ scope: 'schema', schema: 'tenant' },
+				member,
+				'failpoint-retry',
+				input.reservations,
+			),
+		).rejects.toThrow('failpoint targeted event insert');
+		await expect(
+			appendPgOutcomeResolution(
+				executor,
+				{ scope: 'schema', schema: 'tenant' },
+				member,
+				'failpoint-retry',
+				input.reservations,
+			),
+		).resolves.toEqual({ kind: 'appended-outcome-resolution' });
+		expect(appended).toBe(1);
+	});
+
+	it('keeps the reservation open when recovery appends indeterminate (SC-39)', async () => {
+		const input = request('indeterminate-claim');
+		const sql: string[] = [];
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				sql.push(statement);
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			appendPgOutcomeResolution(
+				executor,
+				{ scope: 'schema', schema: 'tenant' },
+				{
+					eventId: 'indeterminate-event',
+					address,
+					eventKind: 'indeterminate',
+					predecessor: 'indeterminate-claim-executing',
+				},
+				'indeterminate-claim',
+				input.reservations,
+			),
+		).resolves.toEqual({ kind: 'appended-outcome-resolution' });
+		expect(sql).toHaveLength(1);
+		expect(sql[0]).not.toContain('DELETE FROM');
 	});
 });

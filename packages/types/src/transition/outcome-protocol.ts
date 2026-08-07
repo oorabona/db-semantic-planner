@@ -4,6 +4,7 @@ import type {
 	LedgerPayload,
 } from './ledger.js';
 import type { LedgerChainProjection, LedgerStableState } from './projection.js';
+import type { CatalogueIdentity } from './resource.js';
 
 /** A planned managed statement has a stable position inside its claim bundle. */
 export interface ClaimBundleStatement {
@@ -66,4 +67,78 @@ export type OutcomeVacancy =
 export interface OutcomeClaimAdmissionInput {
 	readonly plan: OutcomeClaimPlan;
 	readonly projection: LedgerChainProjection;
+}
+
+/** Typed catalogue evidence used by outcome-protocol recovery. */
+export type OutcomeRecoveryReadBack =
+	| { readonly kind: 'absent' }
+	| {
+			readonly kind: 'present';
+			readonly catalogueIdentity: CatalogueIdentity;
+			/** The canonical shape read from the live catalogue. */
+			readonly observed: LedgerPayload;
+	  };
+
+/** A failed read is evidence of nothing, and therefore permits no append. */
+export interface OutcomeCatalogueUnavailable {
+	readonly kind: 'catalogue-unavailable';
+	readonly reason: string;
+}
+
+export type OutcomeRecoveryCatalogueRead =
+	| OutcomeRecoveryReadBack
+	| OutcomeCatalogueUnavailable;
+
+/** The catalogue boundary is injected so core has no database dependency. */
+export type OutcomeRecoveryCatalogueReader = (
+	address: LedgerAddress,
+) => Promise<OutcomeRecoveryCatalogueRead>;
+
+/** A recovery append has one canonical predecessor/payload comparison shape. */
+export interface OutcomeRecoveryResolution {
+	readonly eventKind:
+		| 'refused'
+		| 'observed'
+		| 'absent'
+		| 'indeterminate'
+		| 'resolved';
+	readonly predecessor: string;
+	readonly rootClaimId: string;
+	readonly reason: string;
+	readonly readBack: OutcomeRecoveryReadBack;
+}
+
+export type OutcomeRecoveryClassification =
+	| {
+			readonly kind: 'outcome-recovery-append';
+			readonly address: LedgerAddress;
+			readonly resolution: OutcomeRecoveryResolution;
+	  }
+	| {
+			readonly kind: 'outcome-recovery-pending';
+			readonly address: LedgerAddress;
+			readonly reason: string;
+	  }
+	| {
+			readonly kind: 'outcome-recovery-blocked';
+			readonly address: LedgerAddress;
+			readonly reason: string;
+	  }
+	| {
+			readonly kind: 'outcome-recovery-no-open-claim';
+			readonly address: LedgerAddress;
+	  }
+	| {
+			readonly kind: 'outcome-recovery-malformed-chain';
+			readonly address: LedgerAddress;
+			readonly reason: string;
+	  };
+
+export interface OutcomeRecoveryInput {
+	readonly projection: LedgerChainProjection;
+	readonly catalogue: OutcomeRecoveryCatalogueReader;
+	/** Accepted with the interrupted run, never inferred from a current policy. */
+	readonly acceptedExternalDdlExclusion: boolean;
+	/** Only an explicit reconciliation path may close an indeterminate claim. */
+	readonly resolveIndeterminate?: boolean;
 }

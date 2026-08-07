@@ -368,6 +368,7 @@ export {
 	chooseReadyCandidate,
 	claimId,
 	claimIdForToken,
+	classifyOutcomeRecovery,
 	concludeEvidenceForObligation,
 	consumeClaimToken,
 	createApplier,

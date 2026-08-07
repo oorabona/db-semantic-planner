@@ -2,10 +2,14 @@ import type {
 	ClaimBundleStatement,
 	ClaimStatementBundle,
 	ClaimToken,
+	LedgerChainMember,
 	OutcomeClaimAdmission,
 	OutcomeClaimAdmissionInput,
 	OutcomeClaimPlan,
 	OutcomeProtocolRefusal,
+	OutcomeRecoveryClassification,
+	OutcomeRecoveryInput,
+	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
 
@@ -154,4 +158,187 @@ export function admitOutcomeClaim(
 		stableStateBeforeClaim: projection.stableState,
 		token: mintClaimToken(plan),
 	};
+}
+
+function recoveryPending(
+	input: OutcomeRecoveryInput,
+	reason: string,
+): OutcomeRecoveryClassification {
+	return {
+		kind: 'outcome-recovery-pending',
+		address: input.projection.address,
+		reason,
+	};
+}
+
+function terminalMember(
+	events: readonly LedgerChainMember[],
+): LedgerChainMember | undefined {
+	const predecessors = new Set(
+		events
+			.map((event) => event.predecessor)
+			.filter(
+				(predecessor): predecessor is string => predecessor !== undefined,
+			),
+	);
+	const terminal = events.filter((event) => !predecessors.has(event.eventId));
+	return terminal.length === 1 ? terminal[0] : undefined;
+}
+
+function appendRecovery(
+	input: OutcomeRecoveryInput,
+	readBack: OutcomeRecoveryReadBack,
+	eventKind: 'refused' | 'observed' | 'absent' | 'indeterminate' | 'resolved',
+	reason: string,
+): OutcomeRecoveryClassification {
+	const projection = input.projection;
+	if (projection.kind !== 'projected-ledger-chain')
+		return {
+			kind: 'outcome-recovery-malformed-chain',
+			address: projection.address,
+			reason: projection.reason.code,
+		};
+	const claim = projection.openClaim;
+	const predecessor = terminalMember(projection.events);
+	if (!claim || !predecessor)
+		return recoveryPending(
+			input,
+			'recovery could not identify the open claim terminal',
+		);
+	return {
+		kind: 'outcome-recovery-append',
+		address: projection.address,
+		resolution: {
+			eventKind,
+			predecessor: predecessor.eventId,
+			rootClaimId: claim.event.eventId,
+			reason,
+			readBack,
+		},
+	};
+}
+
+/**
+ * Classifies one open outcome-protocol claim from a fresh catalogue read.
+ * It never issues DDL; its only mutation instruction is an append for the
+ * adapter to perform after the read has completed.  Calling this once per
+ * address deliberately keeps interrupted closures independently recoverable.
+ */
+export async function classifyOutcomeRecovery(
+	input: OutcomeRecoveryInput,
+): Promise<OutcomeRecoveryClassification> {
+	const projection = input.projection;
+	if (projection.kind !== 'projected-ledger-chain')
+		return {
+			kind: 'outcome-recovery-malformed-chain',
+			address: projection.address,
+			reason: projection.reason.code,
+		};
+	if (projection.openClaim === undefined)
+		return {
+			kind: 'outcome-recovery-no-open-claim',
+			address: projection.address,
+		};
+
+	// This is intentionally before every recovery append decision. A failed
+	// read remains a pending claim, including a claim that has not reached DDL.
+	const readBack = await input.catalogue(projection.address);
+	if (readBack.kind === 'catalogue-unavailable')
+		return recoveryPending(input, readBack.reason);
+
+	const claim = projection.openClaim;
+	if (claim.phase === 'indeterminate') {
+		if (!input.resolveIndeterminate)
+			return {
+				kind: 'outcome-recovery-blocked',
+				address: projection.address,
+				reason:
+					'indeterminate claim remains blocked until resolved with a read-back',
+			};
+		if (claim.kind === 'intent') {
+			if (readBack.kind === 'present')
+				return appendRecovery(
+					input,
+					readBack,
+					'resolved',
+					'resolved intent is supported by the catalogue read-back',
+				);
+			if (claim.stableStateBeforeClaim !== 'managed')
+				return appendRecovery(
+					input,
+					readBack,
+					'resolved',
+					'resolved intent absence is supported by the catalogue read-back',
+				);
+			return {
+				kind: 'outcome-recovery-blocked',
+				address: projection.address,
+				reason:
+					'catalogue absence cannot resolve an indeterminate modify intent to managed',
+			};
+		}
+		if (claim.kind === 'retire-intent')
+			return appendRecovery(
+				input,
+				readBack,
+				'resolved',
+				readBack.kind === 'absent'
+					? 'resolved retirement absence is supported by the catalogue read-back'
+					: 'resolved retirement is supported by the catalogue read-back',
+			);
+		return {
+			kind: 'outcome-recovery-blocked',
+			address: projection.address,
+			reason: `indeterminate ${claim.kind} has no resolved grammar column`,
+		};
+	}
+
+	if (claim.phase === 'claimed')
+		return appendRecovery(
+			input,
+			readBack,
+			'refused',
+			'recovery read live state before refusing a claim that never reached executing',
+		);
+
+	if (claim.kind === 'intent') {
+		if (readBack.kind === 'absent')
+			return appendRecovery(
+				input,
+				readBack,
+				'refused',
+				'recovery read-back proves no effect after executing',
+			);
+		if (
+			claim.stableStateBeforeClaim !== 'managed' &&
+			!input.acceptedExternalDdlExclusion
+		)
+			return appendRecovery(
+				input,
+				readBack,
+				'indeterminate',
+				'create read-back requires the run accepted external-ddl-exclusion',
+			);
+		return appendRecovery(
+			input,
+			readBack,
+			'observed',
+			'recovery observed the live catalogue read-back after executing',
+		);
+	}
+	if (claim.kind === 'retire-intent')
+		return appendRecovery(
+			input,
+			readBack,
+			readBack.kind === 'absent' ? 'absent' : 'indeterminate',
+			readBack.kind === 'absent'
+				? 'recovery observed retirement absence after executing'
+				: 'retirement remains indeterminate because the catalogue object is present',
+		);
+
+	// Readdress and adopt never have an executing edge in their own grammar.
+	return recoveryPending(
+		input,
+		`executing ${claim.kind} is not a recoverable lifecycle edge`,
+	);
 }

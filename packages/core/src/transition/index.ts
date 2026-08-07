@@ -243,6 +243,7 @@ export {
 export {
 	admitOutcomeClaim,
 	claimIdForToken,
+	classifyOutcomeRecovery,
 	consumeClaimToken,
 	mintClaimToken,
 } from './outcome-protocol.js';

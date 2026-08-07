@@ -341,7 +341,10 @@ export async function appendPgLedgerProgress(
 	member: LedgerWriteMember,
 ): Promise<void> {
 	assertTargetMatchesAddress(target, member);
-	if (member.eventKind !== 'executing') {
+	if (
+		member.eventKind !== 'executing' &&
+		member.eventKind !== 'indeterminate'
+	) {
 		throw new Error(
 			`ledger event ${member.eventKind} changes reservation state; use the claim or resolution append primitive`,
 		);
