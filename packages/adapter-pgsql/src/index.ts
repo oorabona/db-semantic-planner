@@ -317,6 +317,7 @@ export {
 	readPgCatalogueIdentity,
 	readPgExecutionTargetFromClient,
 	readPgLedgerAddressChain,
+	readPgLedgerMarker,
 	readPgObservationContextFromLessor,
 	readPgOutcomeRecoveryReadBack,
 	readTransitionJournal,

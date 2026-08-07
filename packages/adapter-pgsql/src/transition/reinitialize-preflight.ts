@@ -176,7 +176,12 @@ export function classifyPgLedgerMarker(
 		: { kind: 'future', version };
 }
 
-async function readMarker(
+/**
+ * Read exactly one ledger shape marker without creating or repairing anything.
+ * Ordinary command surfaces use this to refuse a non-current mutating scope;
+ * inspect deliberately reports the returned value instead.
+ */
+export async function readPgLedgerMarker(
 	executor: TransitionJournalQueryable,
 	home: LedgerHome,
 ): Promise<LedgerMarkerState> {
@@ -270,7 +275,7 @@ async function inspectScope(
 	home: LedgerHome,
 ): Promise<ReinitializePreflightScopeInspection> {
 	try {
-		const marker = await readMarker(executor, home);
+		const marker = await readPgLedgerMarker(executor, home);
 		if (marker.kind !== 'current') return { home, marker };
 		return { home, marker, identity: await readIdentity(executor, home) };
 	} catch (error) {
@@ -645,7 +650,7 @@ async function readChainAddresses(
 		await client.query(REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL);
 		const addresses = new Set<string>();
 		for (const home of homes) {
-			const marker = await readMarker(client, home);
+			const marker = await readPgLedgerMarker(client, home);
 			if (marker.kind !== 'current') continue;
 			const rows = await client.query(
 				`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name FROM ${qualified(home, DBSP_LEDGER_EVENT_TABLE)}`,

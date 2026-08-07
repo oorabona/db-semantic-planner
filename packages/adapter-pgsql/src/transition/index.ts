@@ -186,6 +186,7 @@ export {
 	type PgReinitializePreflightPool,
 	type ReinitializePreflightCheckpoint,
 	type ReinitializePreflightObserver,
+	readPgLedgerMarker,
 	runPgReinitializePreflight,
 	selectReinitializeAdoptionCandidates,
 } from './reinitialize-preflight.js';

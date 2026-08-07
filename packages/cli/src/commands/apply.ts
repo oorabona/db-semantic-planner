@@ -1,6 +1,7 @@
 /** Execute exactly one reviewed durable transition run; never re-plan. */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { createInterface } from 'node:readline/promises';
 import {
 	appendTransitionAuthorization,
 	createPgTransitionPack,
@@ -28,6 +29,13 @@ import type {
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
+import {
+	exitCodeForPlanResult,
+	formatPlanHuman,
+	formatPlanJson,
+	type PlanResult,
+	runPlan,
+} from './plan.js';
 
 export type ApplyFormat = 'text' | 'json';
 export interface ApplyOptions {
@@ -36,6 +44,11 @@ export interface ApplyOptions {
 	readonly accept?: readonly string[];
 	readonly acceptPolicy?: string;
 	readonly format?: ApplyFormat;
+	/** The no-argument form's authored declaration. */
+	readonly schemaFile?: string;
+	readonly schema?: string;
+	readonly yes?: boolean;
+	readonly dryRun?: boolean;
 }
 
 function errorDetail(error: unknown): string {
@@ -439,6 +452,16 @@ export const APPLY_OUTCOME_CONTRACT = [
 		56,
 		'execution phase failed after preflight; inspect the run with recover',
 	],
+	[
+		'confirmation-required',
+		57,
+		'no-argument apply requires an interactive confirmation or --yes',
+	],
+	[
+		'confirmation-declined',
+		58,
+		'operator declined the persisted plan before execution',
+	],
 	['operation-unavailable', 24, 'a required operation artifact is unavailable'],
 	['plan-validation-failed', 25, 'stored run evidence is invalid'],
 	['run-id-mismatch', 26, 'loaded run does not match the requested id'],
@@ -558,6 +581,119 @@ export type ApplyCommandResult = (
 	  }
 ) & { readonly cleanupError?: string };
 
+export type NoArgumentApplyResult =
+	| {
+			readonly outcome:
+				| 'dry-run'
+				| 'not-executable'
+				| 'confirmation-required'
+				| 'confirmation-declined';
+			readonly plan: PlanResult;
+			readonly runId: string | null;
+			readonly planDigest: string | null;
+	  }
+	| {
+			readonly outcome: ApplyOutcome;
+			readonly plan: PlanResult;
+			readonly runId: string;
+			readonly planDigest: string;
+			readonly result: ApplyCommandResult;
+	  };
+
+export type ApplyConfirmation = (
+	runId: string,
+	planDigest: string,
+) => Promise<boolean>;
+
+/** The sole interactive gate for no-argument apply. EOF and every non-y answer refuse. */
+export async function confirmNoArgumentApply(
+	runId: string,
+	planDigest: string,
+): Promise<boolean> {
+	const prompt = createInterface({
+		input: process.stdin,
+		output: process.stderr,
+	});
+	try {
+		const answer = await prompt.question(
+			`Apply persisted run ${runId} (plan digest ${planDigest})? [y/N] `,
+		);
+		return /^(?:y|yes)$/iu.test(answer.trim());
+	} finally {
+		prompt.close();
+	}
+}
+
+/**
+ * The unrecorded-plan path deliberately delegates proving and persistence to
+ * runPlan. Therefore the durable row exists before this function asks a human
+ * to approve it, and a decline is inspectable rather than a discarded plan.
+ */
+export async function runNoArgumentApply(
+	options: ApplyOptions,
+	confirm: ApplyConfirmation = confirmNoArgumentApply,
+	execute: typeof runApply = runApply,
+): Promise<NoArgumentApplyResult> {
+	if (!options.schemaFile)
+		throw new Error('no-argument apply requires --schema-file <path>');
+	const plan = await runPlan({
+		db: options.db,
+		schemaFile: options.schemaFile,
+		...(options.schema === undefined ? {} : { schema: options.schema }),
+		dryRun: options.dryRun === true,
+		format: options.format === 'json' ? 'json' : 'sql',
+	});
+	if (options.dryRun === true)
+		return {
+			outcome: 'dry-run',
+			plan,
+			runId: null,
+			planDigest: null,
+		};
+	if (
+		plan.proveKind !== 'proven' ||
+		plan.persisted !== true ||
+		!plan.runId ||
+		!plan.planDigest
+	) {
+		// A blocked/no-drift plan has no executable durable record. Its existing
+		// presentation is the complete result; do not invent an apply attempt.
+		return {
+			outcome: 'not-executable',
+			plan,
+			runId: plan.runId,
+			planDigest: plan.planDigest,
+		};
+	}
+	if (options.yes !== true && process.stdin.isTTY !== true) {
+		return {
+			outcome: 'confirmation-required',
+			plan,
+			runId: plan.runId,
+			planDigest: plan.planDigest,
+		};
+	}
+	if (options.yes !== true && !(await confirm(plan.runId, plan.planDigest))) {
+		return {
+			outcome: 'confirmation-declined',
+			plan,
+			runId: plan.runId,
+			planDigest: plan.planDigest,
+		};
+	}
+	const result = await execute(plan.runId, {
+		...options,
+		planDigest: plan.planDigest,
+	});
+	return {
+		outcome: result.outcome,
+		plan,
+		runId: plan.runId,
+		planDigest: plan.planDigest,
+		result,
+	};
+}
+
 async function loadOnTarget(
 	target: Parameters<typeof acquireExclusiveTransitionLease>[0],
 	runId: string,
@@ -670,13 +806,24 @@ export async function runApply(
 
 export const applyCommand = new Command('apply')
 	.description(
-		'Execute a reviewed durable run; its recorded target schema and session context are used (there is no --schema)',
+		'Plan, persist, present and execute a declaration, or execute one reviewed durable run',
 	)
-	.argument('<run-id>', 'Durable run identifier returned by dbsp plan')
+	.argument('[run-id]', 'Durable run identifier returned by dbsp plan')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
-	.requiredOption(
+	.option(
 		'--plan-digest <sha>',
 		'Plan digest printed by dbsp plan; required to anchor review outside the database',
+	)
+	.option('--schema-file <path>', 'Schema DSL file for no-argument apply')
+	.option(
+		'--schema <name>',
+		'Database schema name for no-argument apply',
+		'public',
+	)
+	.option('--yes', 'Confirm no-argument apply without an interactive prompt')
+	.option(
+		'--dry-run',
+		'Present a no-argument plan without persisting or executing',
 	)
 	.option(
 		'--accept <class>',
@@ -688,7 +835,62 @@ export const applyCommand = new Command('apply')
 		'UTF-8 JSON AssumptionAcceptance[] policy file; set-unioned with --accept and canonicalised before authorization',
 	)
 	.option('--format <format>', 'Output format: text or json', 'text')
-	.action(async (runId: string, options: ApplyOptions) => {
+	.action(async (runId: string | undefined, options: ApplyOptions) => {
+		if (runId === undefined) {
+			let result: NoArgumentApplyResult | { readonly error: string };
+			try {
+				result = await runNoArgumentApply(options);
+			} catch (error) {
+				result = {
+					error: error instanceof Error ? error.message : String(error),
+				};
+			}
+			if ('error' in result) {
+				if (options.format === 'json')
+					console.log(
+						JSON.stringify({ outcome: 'apply-failed', ...result }, null, 2),
+					);
+				else console.error(`❌ ${result.error}`);
+				process.exitCode = exitCodeForApplyOutcome('apply-failed');
+				return;
+			}
+			const exitCode =
+				result.outcome === 'dry-run' || result.outcome === 'not-executable'
+					? exitCodeForPlanResult(result.plan)
+					: exitCodeForApplyOutcome(result.outcome);
+			if (options.format === 'json') {
+				console.log(
+					JSON.stringify(
+						{
+							outcome: result.outcome,
+							exitCode,
+							plan: formatPlanJson(result.plan, options.dryRun === true),
+							...(result.runId === null ? {} : { runId: result.runId }),
+							...(result.planDigest === null
+								? {}
+								: { planDigest: result.planDigest }),
+							...('result' in result ? { apply: result.result } : {}),
+						},
+						null,
+						2,
+					),
+				);
+			} else {
+				console.log(formatPlanHuman(result.plan, options.dryRun === true));
+				if (result.outcome === 'confirmation-required')
+					console.error(
+						'confirmation-required: rerun with --yes or from an interactive TTY',
+					);
+				else if (result.outcome === 'confirmation-declined')
+					console.log('confirmation-declined: persisted run was not executed');
+				else if (result.outcome === 'not-executable') {
+					// The planner already rendered the concrete no-drift/blocked reason.
+				} else if (result.outcome !== 'dry-run' && 'result' in result)
+					console.log(formatApplyHuman(result.result));
+			}
+			process.exitCode = exitCode;
+			return;
+		}
 		let result:
 			| ApplyCommandResult
 			| {
@@ -697,7 +899,9 @@ export const applyCommand = new Command('apply')
 					readonly error: string;
 			  };
 		try {
-			result = await runApply(runId, options);
+			result = options.planDigest
+				? await runApply(runId, options)
+				: { outcome: 'plan-digest-required', runId };
 		} catch (error) {
 			result = {
 				outcome:
