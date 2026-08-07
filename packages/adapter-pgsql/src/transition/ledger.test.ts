@@ -69,6 +69,20 @@ describe('managed ledger storage', () => {
 		expect(sql).toContain('INSERT INTO "tenant_a"."dbsp_ledger_marker"');
 	});
 
+	it('can defer the marker for the reinitialize-preflight final step', async () => {
+		const query = vi.fn(async (sql: string) =>
+			sql === 'SHOW server_version_num'
+				? { rows: [{ server_version_num: '150000' }] }
+				: { rows: [] },
+		);
+		await ensurePgLedger({ query }, target, { writeMarker: false });
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('INSERT INTO "tenant_a"."dbsp_ledger_marker"'),
+			),
+		).toBe(false);
+	});
+
 	it('makes a claim append and its closure reservations one statement', async () => {
 		const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => ({
 			rows: [],

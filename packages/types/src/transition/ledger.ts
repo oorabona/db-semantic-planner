@@ -78,3 +78,81 @@ export interface LedgerIdentity {
 export interface LedgerShapeMarker {
 	readonly version: number;
 }
+
+/**
+ * The only marker vocabulary understood by the reinitialize-preflight path.
+ * `absent` is deliberately distinct from a malformed or old marker: a
+ * missing marker is how a new scope enters the cutover.
+ */
+export type LedgerMarkerState =
+	| { readonly kind: 'current' }
+	| { readonly kind: 'absent' }
+	| { readonly kind: 'older'; readonly version: number }
+	| { readonly kind: 'future'; readonly version: number }
+	| { readonly kind: 'mixed'; readonly versions: readonly number[] }
+	| { readonly kind: 'unreadable'; readonly reason: string };
+
+/** The closed result set for one explicit reinitialize-preflight scope. */
+export type ReinitializePreflightScopeOutcome =
+	| 'current'
+	| 'unchanged'
+	| 'failed'
+	| 'not-attempted';
+
+export type ReinitializePreflightRefusalCode =
+	| 'reinitialize-preflight-marker-not-current'
+	| 'reinitialize-preflight-advisory-lock'
+	| 'reinitialize-preflight-ownership'
+	| 'reinitialize-preflight-grants'
+	| 'reinitialize-preflight-lineage'
+	| 'reinitialize-preflight-failed';
+
+/** The exact operation that produced a reported preflight failure. */
+export type ReinitializePreflightFailureStep =
+	| 'advisory-lock'
+	| 'marker'
+	| 'identity'
+	| 'ownership-grants'
+	| 'archive'
+	| 'create'
+	| 'record-identity'
+	| 'creation-grants'
+	| 'write-marker'
+	| 'output';
+
+/** PostgreSQL's unmodified message, paired with the engine step that failed. */
+export interface ReinitializePreflightFailureReason {
+	readonly step: ReinitializePreflightFailureStep;
+	readonly message: string;
+}
+
+interface ReinitializePreflightScopeReportBase {
+	readonly ledger: LedgerHome;
+	readonly marker: LedgerMarkerState;
+	readonly refusal?: {
+		readonly code: ReinitializePreflightRefusalCode;
+		readonly detail: string;
+	};
+}
+
+/** A failed scope is structurally required to retain its diagnostic. */
+export type ReinitializePreflightScopeReport =
+	| (ReinitializePreflightScopeReportBase & {
+			readonly outcome: 'failed';
+			readonly reason: ReinitializePreflightFailureReason;
+	  })
+	| (ReinitializePreflightScopeReportBase & {
+			readonly outcome: Exclude<ReinitializePreflightScopeOutcome, 'failed'>;
+			readonly reason?: never;
+	  });
+
+/** A current DSL declaration for which no chain exists in its home ledger. */
+export interface ReinitializePreflightAdoptionCandidate {
+	readonly address: LedgerAddress;
+	readonly declaration: LedgerPayload;
+}
+
+export interface ReinitializePreflightReport {
+	readonly scopes: readonly ReinitializePreflightScopeReport[];
+	readonly adoptionCandidates: readonly ReinitializePreflightAdoptionCandidate[];
+}

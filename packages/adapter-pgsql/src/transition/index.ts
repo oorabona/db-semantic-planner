@@ -95,6 +95,7 @@ export {
 	renderCreateLedgerMarkerTableSql,
 	renderCreateLedgerReservationTableSql,
 	renderCreateLedgerTerminalMemberIndexSql,
+	writePgLedgerShapeMarker,
 } from './ledger.js';
 export {
 	acquirePgTransitionClient,
@@ -154,6 +155,16 @@ export {
 	createPgTransitionPack,
 	type PgTransitionPackOptions,
 } from './pack.js';
+export {
+	assembleReinitializePreflightScopeReports,
+	classifyPgLedgerMarker,
+	type PgReinitializePreflightOptions,
+	type PgReinitializePreflightPool,
+	type ReinitializePreflightCheckpoint,
+	type ReinitializePreflightObserver,
+	runPgReinitializePreflight,
+	selectReinitializeAdoptionCandidates,
+} from './reinitialize-preflight.js';
 export {
 	type AddCheckMatch,
 	type AddCheckRuleOptions,

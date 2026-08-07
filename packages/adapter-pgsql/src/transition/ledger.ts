@@ -284,6 +284,7 @@ export async function ensurePgLedgerStorageVersion(
 export async function ensurePgLedger(
 	executor: TransitionJournalQueryable,
 	target: PgLedgerTarget,
+	options: { readonly writeMarker?: boolean } = {},
 ): Promise<void> {
 	await ensurePgLedgerStorageVersion(executor);
 	await executor.query(renderCreateLedgerEventTableSql(target));
@@ -291,21 +292,31 @@ export async function ensurePgLedger(
 	await executor.query(renderCreateLedgerReservationTableSql(target));
 	await executor.query(renderCreateLedgerIdentityTableSql(target));
 	await executor.query(renderCreateLedgerMarkerTableSql(target));
-	await executor.query(
-		`INSERT INTO ${qualified(ledgerSchema(target), DBSP_LEDGER_MARKER_TABLE)} (id, version) VALUES (true, $1) ON CONFLICT (id) DO NOTHING`,
-		[PG_LEDGER_SHAPE_VERSION],
-	);
+	if (options.writeMarker !== false)
+		await writePgLedgerShapeMarker(executor, target);
 	await executor.query(renderCreateLedgerImmutabilityFunctionSql(target));
 	await executor.query(renderCreateLedgerImmutabilityTriggerSql(target));
 }
 
 export async function ensureDbspMetaLedger(
 	executor: TransitionJournalQueryable,
+	options: { readonly writeMarker?: boolean } = {},
 ): Promise<void> {
 	await executor.query(
 		`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(DBSP_META_SCHEMA, 'schema')}`,
 	);
-	await ensurePgLedger(executor, { scope: 'database' });
+	await ensurePgLedger(executor, { scope: 'database' }, options);
+}
+
+/** Writes the marker separately when a cutover must make it the final step. */
+export async function writePgLedgerShapeMarker(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+): Promise<void> {
+	await executor.query(
+		`INSERT INTO ${qualified(ledgerSchema(target), DBSP_LEDGER_MARKER_TABLE)} (id, version) VALUES (true, $1) ON CONFLICT (id) DO NOTHING`,
+		[PG_LEDGER_SHAPE_VERSION],
+	);
 }
 
 /** Records lineage once; a mismatching identity is an admission concern of unit 5. */
