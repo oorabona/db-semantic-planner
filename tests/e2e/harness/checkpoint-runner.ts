@@ -30,7 +30,11 @@ export interface CheckpointChild {
 	readonly exited: Promise<CheckpointChildExit>;
 	/** Wait for the currently-blocked checkpoint; no timeout or polling is used. */
 	waitForCheckpoint(expected: string): Promise<void>;
-	/** Allow the child to continue from the currently-blocked named checkpoint. */
+	/**
+	 * Queue a fire-and-forget acknowledgement for the currently-blocked named
+	 * checkpoint. The protocol observes liveness through the child's next
+	 * checkpoint or exit, not acknowledgement delivery.
+	 */
 	acknowledge(checkpoint: string): Promise<void>;
 	/**
 	 * Wait until the child has reported this exact checkpoint, then send SIGKILL.
@@ -121,10 +125,9 @@ export function spawnCheckpointChild(
 	});
 	child.once('error', (error) => {
 		childError = error;
-		if (checkpointWaiter !== undefined) {
-			checkpointWaiter.reject(error);
-			checkpointWaiter = undefined;
-		}
+		// A failed fork (for example an invalid cwd) need not emit `exit`.
+		// Settle the same lifecycle state as an exit so no cleanup waiter hangs.
+		settleExit({ code: null, signal: null }, error);
 	});
 
 	const waitForCheckpoint = async (expected: string): Promise<void> => {
@@ -165,9 +168,9 @@ export function spawnCheckpointChild(
 			type: CHECKPOINT_ACK,
 			checkpoint,
 		};
-		// The child can reach its next checkpoint as soon as it receives this
-		// message. Queueing is the acknowledgement boundary; no send callback is
-		// involved in checkpoint state, so the next receipt cannot overwrite it.
+		// Acknowledgements are deliberately fire-and-forget. Once queued, delivery
+		// is unknowable here; the child's next checkpoint or exit is the protocol's
+		// liveness signal.
 		activeCheckpoint = undefined;
 		try {
 			child.send(message);

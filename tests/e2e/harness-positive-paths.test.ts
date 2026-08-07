@@ -9,6 +9,7 @@ import {
 	describeWithE2eCapabilities,
 	dumpAndRestoreInLocalPostgresContainer,
 	requireE2eCapabilities,
+	spawnCheckpointChild,
 } from './harness/index.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 
@@ -187,6 +188,23 @@ describeWithE2eCapabilities(
 			}
 		});
 
+		it('settles fork startup errors so cleanup never waits indefinitely', async () => {
+			const child = spawnCheckpointChild(
+				'tests/e2e/harness-positive-paths.test.ts',
+				{
+					cwd: `/tmp/dbsp-e2e-missing-${randomUUID()}`,
+				},
+			);
+			await expect(child.waitForCheckpoint('never-reached')).rejects.toThrow(
+				'ENOENT',
+			);
+			await expect(child.exited).resolves.toEqual({ code: null, signal: null });
+			await expect(child.terminate()).resolves.toEqual({
+				code: null,
+				signal: null,
+			});
+		});
+
 		it('disarms its function and sequence after the target table has disappeared', async () => {
 			const schema = `harness_failpoint_cleanup_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 			const pool = await getTestPool();
@@ -208,7 +226,11 @@ describeWithE2eCapabilities(
 				await failpoint.disarm();
 				const remaining = await pool.query<{ cleaned: boolean }>(
 					'SELECT to_regclass($2) IS NULL AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc procedure JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = $1 AND procedure.proname = $3) AS cleaned',
-					[schema, `${failpoint.name}_sequence`, `${failpoint.name}_function`],
+					[
+						schema,
+						`${schema}.${failpoint.name}_sequence`,
+						`${failpoint.name}_function`,
+					],
 				);
 				expect(remaining.rows[0]?.cleaned).toBe(true);
 				failpoint = undefined;

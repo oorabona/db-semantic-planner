@@ -293,6 +293,7 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 		throw new E2eCapabilityError(
 			'standby-topology',
 			`${error instanceof Error ? error.message : String(error)}${readinessLogTail}`,
+			error,
 		);
 	}
 }

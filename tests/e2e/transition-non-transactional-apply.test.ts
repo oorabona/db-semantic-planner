@@ -69,6 +69,17 @@ function waitFor<T>(
 	});
 }
 
+function waitForCheckpoint(
+	child: CheckpointChild,
+	checkpoint: string,
+): Promise<void> {
+	return waitFor(
+		`checkpoint "${checkpoint}"`,
+		child.waitForCheckpoint(checkpoint),
+		WAIT_TIMEOUT_MS,
+	);
+}
+
 async function pollUntil<T>(
 	label: string,
 	read: () => Promise<T>,
@@ -587,9 +598,9 @@ describeWithE2eCapabilities(
 				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
-				await child.waitForCheckpoint('before-statement-sent');
+				await waitForCheckpoint(child, 'before-statement-sent');
 				await child.acknowledge('before-statement-sent');
-				await child.waitForCheckpoint('after-statement-sent');
+				await waitForCheckpoint(child, 'after-statement-sent');
 				await waitForWitnessPhase(scenario.schema);
 				scenario.registerBackend(await concurrentIndexBackend(scenario.schema));
 				const writer = await scenario.acquireWriter();
@@ -632,9 +643,9 @@ describeWithE2eCapabilities(
 				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
-				await child.waitForCheckpoint('before-statement-sent');
+				await waitForCheckpoint(child, 'before-statement-sent');
 				await child.acknowledge('before-statement-sent');
-				await child.waitForCheckpoint('after-statement-sent');
+				await waitForCheckpoint(child, 'after-statement-sent');
 				scenario.registerBackend(await concurrentIndexBackend(scenario.schema));
 				expect(await child.kill('SIGKILL')).toMatchObject({
 					signal: 'SIGKILL',
@@ -658,9 +669,9 @@ describeWithE2eCapabilities(
 				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
-				await child.waitForCheckpoint('before-statement-sent');
+				await waitForCheckpoint(child, 'before-statement-sent');
 				await child.acknowledge('before-statement-sent');
-				await child.waitForCheckpoint('after-statement-sent');
+				await waitForCheckpoint(child, 'after-statement-sent');
 				await waitForIndex(scenario.schema, (row) => !row.indisvalid);
 				const backend = scenario.registerBackend(
 					await concurrentIndexBackend(scenario.schema),
@@ -682,7 +693,7 @@ describeWithE2eCapabilities(
 				await createUsers(scenario.schema, 10);
 				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const child = scenario.spawnApplyChild(plan);
-				await child.waitForCheckpoint('before-statement-sent');
+				await waitForCheckpoint(child, 'before-statement-sent');
 				expect(await child.kill('SIGKILL')).toMatchObject({
 					signal: 'SIGKILL',
 				});

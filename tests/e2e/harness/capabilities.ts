@@ -100,6 +100,7 @@ export async function requireE2eCapabilities(
 					throw new E2eCapabilityError(
 						capability,
 						error instanceof Error ? error.message : String(error),
+						error,
 					);
 				}
 				if (!available) {
@@ -118,6 +119,7 @@ export async function requireE2eCapabilities(
 					throw new E2eCapabilityError(
 						capability,
 						error instanceof Error ? error.message : String(error),
+						error,
 					);
 				}
 				if (!available) {
@@ -138,6 +140,7 @@ export async function requireE2eCapabilities(
 					throw new E2eCapabilityError(
 						capability,
 						error instanceof Error ? error.message : String(error),
+						error,
 					);
 				}
 				throw new E2eCapabilityError(
@@ -155,6 +158,7 @@ export async function requireE2eCapabilities(
 					throw new E2eCapabilityError(
 						capability,
 						error instanceof Error ? error.message : String(error),
+						error,
 					);
 				}
 				throw new E2eCapabilityError(

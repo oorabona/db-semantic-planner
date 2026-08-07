@@ -54,6 +54,7 @@ export async function execInLocalPostgresContainer(
 		throw new E2eCapabilityError(
 			'container-exec',
 			error instanceof Error ? error.message : String(error),
+			error,
 		);
 	}
 	if (result.exitCode !== 0) throw commandFailure(command, result);
