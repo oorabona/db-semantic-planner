@@ -233,6 +233,13 @@ export {
 	indexDelta,
 	normalizedIndex,
 } from './index-delta.js';
+export {
+	interpretLedgerLifecycle,
+	LEDGER_LIFECYCLE_GRAMMAR,
+	LEDGER_PROJECTION_CODE_VERSION,
+	type LedgerChainProjectionInput,
+	projectLedgerChain,
+} from './lifecycle-interpreter.js';
 export { transitionPlanDigest } from './plan-digest.js';
 export { createProver } from './prover.js';
 export {

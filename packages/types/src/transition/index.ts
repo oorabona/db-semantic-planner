@@ -16,5 +16,6 @@ export * from './observation.js';
 export * from './operation.js';
 export * from './plan.js';
 export * from './policy.js';
+export * from './projection.js';
 export * from './proof.js';
 export * from './resource.js';
