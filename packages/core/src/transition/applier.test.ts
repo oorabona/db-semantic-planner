@@ -111,6 +111,19 @@ function operationAssumption(overrides: Partial<Assumption> = {}): Assumption {
 	};
 }
 
+function nonTransactionalSegmentAssumption(
+	overrides: Partial<Assumption> = {},
+): Assumption {
+	return {
+		id: 'mock.non-transactional-segment' as Assumption['id'],
+		class: 'non-transactional-segment',
+		asserter: { kind: 'pack', artifact: operationArtifact },
+		statement: 'mock plan contains a non-transactional segment',
+		scope: [columnResource()],
+		...overrides,
+	};
+}
+
 function userAttestedNativeDefaultAssumption(
 	overrides: Partial<Assumption> = {},
 ): Assumption {
@@ -4711,11 +4724,13 @@ describe('createApplier', () => {
 		expect(authorizedPlans[0]).toBe(preparedPlans[0]);
 	});
 
-	it('mutation: treating a transactional-only refusal as executable must not authorize or execute', async () => {
+	it('mutation: an unaccepted non-transactional segment refuses before authorization or execution', async () => {
 		const base = durablePlanShape();
+		const nonTransactionalAssumption = nonTransactionalSegmentAssumption();
 		const journal = durableJournal({
 			plan: {
 				...base,
+				assumptions: [...base.assumptions, nonTransactionalAssumption],
 				segments: [
 					{
 						...base.segments[0]!,
@@ -4739,6 +4754,105 @@ describe('createApplier', () => {
 				context,
 			})),
 			policy: acceptsOperationPolicy(),
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('transactional-only-refusal');
+		expect(authorize).not.toHaveBeenCalled();
+		expect(rt.executeOperation).not.toHaveBeenCalled();
+	});
+
+	it('admits a non-transactional segment when its assumption is accepted', async () => {
+		const base = durablePlanShape();
+		const nonTransactionalAssumption = nonTransactionalSegmentAssumption();
+		const journal = durableJournal({
+			plan: {
+				...base,
+				assumptions: [...base.assumptions, nonTransactionalAssumption],
+				segments: [
+					{
+						...base.segments[0]!,
+						transaction: 'forbids-transaction',
+						commitBoundaryAfter: true,
+					},
+				],
+			},
+		});
+		const rt = nonTransactionalRuntime(() => undefined, {
+			executeOperation: vi.fn(async () => ({ kind: 'completed' as const })),
+		});
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: {
+				accepts: [
+					...acceptsOperationPolicy().accepts,
+					{ class: 'non-transactional-segment' },
+				],
+			},
+			target: durableExecutionTarget(),
+			authorize,
+		});
+		expect(result.durableOutcome).toBe('completed');
+		expect(authorize).toHaveBeenCalledOnce();
+		expect(rt.executeOperation).toHaveBeenCalledOnce();
+	});
+
+	it('refuses transaction-forbidden segments when one of two scoped non-transactional assumptions is unaccepted', async () => {
+		const base = durablePlanShape();
+		const acceptedAssumption = nonTransactionalSegmentAssumption();
+		const unacceptedAssumption = nonTransactionalSegmentAssumption({
+			id: 'mock.non-transactional-segment.other-scope' as Assumption['id'],
+			scope: [tableResource()],
+		});
+		const journal = durableJournal({
+			plan: {
+				...base,
+				assumptions: [
+					...base.assumptions,
+					acceptedAssumption,
+					unacceptedAssumption,
+				],
+				segments: [
+					{
+						...base.segments[0]!,
+						transaction: 'forbids-transaction',
+						commitBoundaryAfter: true,
+					},
+				],
+			},
+		});
+		const rt = runtime(() => undefined);
+		const authorize = vi.fn(async () => undefined);
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: {
+				accepts: [
+					...acceptsOperationPolicy().accepts,
+					{
+						class: 'non-transactional-segment',
+						withinScope: [{ kind: 'column', name: 'age' }],
+					},
+				],
+			},
 			target: durableExecutionTarget(),
 			authorize,
 		});

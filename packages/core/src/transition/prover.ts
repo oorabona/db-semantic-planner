@@ -46,7 +46,7 @@ import {
 	observationRequestForProposition,
 	sameObservationRequest,
 } from './evidence-match.js';
-import { claimId, semanticArtifactId } from './ids.js';
+import { assumptionId, claimId, semanticArtifactId } from './ids.js';
 import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import type { PackRegistry, RegisteredOperationSemantics } from './registry.js';
@@ -64,6 +64,10 @@ const PROVER_ARTIFACT: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.core.transition.prover'),
 	version: '0.1.0',
 };
+
+const NON_TRANSACTIONAL_SEGMENT_ASSUMPTION_ID = assumptionId(
+	'dbsp.core.transition.prover.non-transactional-segment',
+);
 
 function sameArtifact(
 	left: SemanticArtifactRef,
@@ -237,6 +241,35 @@ function uniqueAssumptionIds(
 		unique.push(assumptionId);
 	}
 	return unique;
+}
+
+function nonTransactionalSegmentAssumption(
+	operations: readonly CompositionOperation[],
+	segments: ProvenPlanShape['segments'],
+): Assumption | undefined {
+	const nonTransactionalStepIds = new Set(
+		segments
+			.filter((segment) => segment.transaction === 'forbids-transaction')
+			.flatMap((segment) => segment.stepIds),
+	);
+	if (nonTransactionalStepIds.size === 0) return undefined;
+	const scopeByResource = new Map<string, ResourceAddress>();
+	for (const entry of operations) {
+		if (!nonTransactionalStepIds.has(`step:${entry.operation.ref}`)) continue;
+		for (const assumption of entry.effects.restsOn) {
+			for (const resource of assumption.scope) {
+				scopeByResource.set(stableJson(resource), resource);
+			}
+		}
+	}
+	return {
+		id: NON_TRANSACTIONAL_SEGMENT_ASSUMPTION_ID,
+		class: 'non-transactional-segment',
+		asserter: { kind: 'pack', artifact: PROVER_ARTIFACT },
+		statement:
+			'The plan contains a segment that must execute outside a transaction block.',
+		scope: [...scopeByResource.values()],
+	};
 }
 
 function stepAssumptionClosure(params: {
@@ -1975,6 +2008,26 @@ async function proveTransitions(
 			kind: 'blocked',
 			assessment: uncomposable(fragments, composition.detail),
 		};
+	}
+	const nonTransactionalAssumption = nonTransactionalSegmentAssumption(
+		operationInputs,
+		composition.segments,
+	);
+	if (nonTransactionalAssumption) {
+		try {
+			assumptions = uniqueAssumptions([
+				...assumptions,
+				nonTransactionalAssumption,
+			]);
+		} catch (error) {
+			return {
+				kind: 'blocked',
+				assessment: uncomposable(
+					fragments,
+					error instanceof Error ? error.message : 'conflicting assumption ids',
+				),
+			};
+		}
 	}
 	const segmentByStepId = new Map<string, string>();
 	for (const segment of composition.segments) {

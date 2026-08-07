@@ -17,6 +17,9 @@ let container: StartedPostgreSqlContainer | undefined;
 // This setup owns the provenance: e2e fixtures must only make local-container
 // assumptions when this marker says setup actually created that container.
 export const LOCAL_CONTAINER_ENV = 'DBSP_E2E_LOCAL_CONTAINER';
+// The setup object lives in a different process from Vitest test files. Export
+// the runtime ID so harness helpers can reattach for container.exec.
+export const LOCAL_CONTAINER_ID_ENV = 'DBSP_E2E_LOCAL_CONTAINER_ID';
 
 /**
  * Check if Docker is available
@@ -37,11 +40,16 @@ export async function setup(): Promise<void> {
 	// If DATABASE_URL is already set externally, use it directly (no container needed)
 	if (process.env.DATABASE_URL) {
 		process.env[LOCAL_CONTAINER_ENV] = '0';
+		delete process.env[LOCAL_CONTAINER_ID_ENV];
 		console.log(
 			`\n🐘 Using external DATABASE_URL: ${process.env.DATABASE_URL}\n`,
 		);
 		return;
 	}
+	// This branch owns local-container provenance. Clear inherited values before
+	// probing so any later failure cannot expose an unrelated prior container.
+	delete process.env[LOCAL_CONTAINER_ENV];
+	delete process.env[LOCAL_CONTAINER_ID_ENV];
 
 	// Check Docker/Podman availability (works with or without DOCKER_HOST)
 	const dockerAvailable = await isDockerAvailable();
@@ -82,6 +90,7 @@ export async function setup(): Promise<void> {
 		const connectionUri = container.getConnectionUri();
 		process.env.DATABASE_URL = connectionUri;
 		process.env[LOCAL_CONTAINER_ENV] = '1';
+		process.env[LOCAL_CONTAINER_ID_ENV] = container.getId();
 		process.env.PG_HOST = container.getHost();
 		process.env.PG_PORT = container.getPort().toString();
 		process.env.PG_DATABASE = container.getDatabase();
@@ -90,6 +99,8 @@ export async function setup(): Promise<void> {
 
 		console.log(`✅ PostgreSQL container started at ${connectionUri}\n`);
 	} catch (error) {
+		delete process.env[LOCAL_CONTAINER_ENV];
+		delete process.env[LOCAL_CONTAINER_ID_ENV];
 		console.error('\n❌ Failed to start PostgreSQL container:', error);
 		console.warn('\n⚠️  E2E database tests will be skipped.\n');
 		return;

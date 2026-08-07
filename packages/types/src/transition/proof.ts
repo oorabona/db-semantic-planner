@@ -28,6 +28,7 @@ export interface Assumption {
 		| 'external-ddl-exclusion'
 		| 'operation-pack-semantics'
 		| 'baseline-identity-attachment'
+		| 'non-transactional-segment'
 		| (string & {});
 	readonly asserter: TrustRoot;
 	readonly statement: string;

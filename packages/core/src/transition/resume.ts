@@ -817,6 +817,13 @@ function validatePolicyForStep(
 	return undefined;
 }
 
+function isExecutionAdmissionAssumption(assumption: Assumption): boolean {
+	// This gates a fresh durable apply, which `resume` never performs. Recovery
+	// must still report the observed state of an already-recorded intent; CLI
+	// recovery separately verifies its durable authorization before calling here.
+	return assumption.class === 'non-transactional-segment';
+}
+
 async function resumeTransitionRunInternal(
 	registry: PackRegistry,
 	input: ResumeTransitionInput,
@@ -892,6 +899,7 @@ async function resumeTransitionRunInternal(
 	for (const assumption of loaded.plan.assumptions) {
 		if (
 			!referencedAssumptions.has(assumption.id) &&
+			!isExecutionAdmissionAssumption(assumption) &&
 			!assumptionAccepted(assumption, input.policy)
 		) {
 			return unacceptedPlanAssumption(loaded.plan, assumption);

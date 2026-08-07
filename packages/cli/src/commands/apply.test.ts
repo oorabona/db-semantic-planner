@@ -78,7 +78,7 @@ describe('dbsp apply contract and policy', () => {
 		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
 			'transactional-only-refusal',
 			17,
-			'durable apply executes transactional segments and refuses operations that forbid a transaction block',
+			"durable apply executes segments that forbid a transaction block only when the plan's non-transactional-segment assumption is accepted",
 		]);
 	});
 

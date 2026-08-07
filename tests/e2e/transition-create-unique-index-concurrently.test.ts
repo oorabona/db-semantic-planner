@@ -27,6 +27,7 @@ const policy: ApplyPolicy = {
 	accepts: [
 		{ class: 'operation-pack-semantics' },
 		{ class: 'external-ddl-exclusion' },
+		{ class: 'non-transactional-segment' },
 	],
 };
 

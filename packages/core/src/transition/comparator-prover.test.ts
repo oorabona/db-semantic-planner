@@ -855,6 +855,7 @@ function checkEquivalenceRule(): TransitionRule<{
 function semantics(
 	restsOn: readonly Assumption[] = [operationAssumption()],
 	operationKind: PhysicalOperation['operationKind'] = operation().operationKind,
+	transaction: 'joins-current' | 'forbids-transaction' = 'joins-current',
 ): RegisteredOperationSemantics {
 	return {
 		artifact: operationKind.artifact,
@@ -867,7 +868,10 @@ function semantics(
 				invalidates: [],
 				contextMutations: [],
 				externalEffects: { accountedFor: [], couldNotAccountFor: [] },
-				execution: { transaction: 'joins-current', commitBoundary: 'none' },
+				execution:
+					transaction === 'forbids-transaction'
+						? { transaction, commitBoundary: 'after' }
+						: { transaction, commitBoundary: 'none' },
 			},
 			restsOn,
 		}),
@@ -3157,6 +3161,33 @@ describe('createProver', () => {
 					};
 			}).toThrow(TypeError);
 		}
+	});
+
+	it('adds exactly one central assumption when composition emits a forbids-transaction segment', async () => {
+		const outcome = await createProver(
+			registry({
+				semantics: semantics(
+					[operationAssumption()],
+					operation().operationKind,
+					'forbids-transaction',
+				),
+			}),
+		).prove(validCompare(), proofTarget(), context);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') return;
+		const assumptions = outcome.plan.assumptions.filter(
+			(assumption) => assumption.class === 'non-transactional-segment',
+		);
+		expect(assumptions).toEqual([
+			expect.objectContaining({
+				id: 'dbsp.core.transition.prover.non-transactional-segment',
+				asserter: expect.objectContaining({ kind: 'pack' }),
+				scope: [columnResource()],
+			}),
+		]);
+		expect(outcome.plan.segments).toContainEqual(
+			expect.objectContaining({ transaction: 'forbids-transaction' }),
+		);
 	});
 
 	it('keeps single-candidate proving independent of privilege merge hooks', async () => {
