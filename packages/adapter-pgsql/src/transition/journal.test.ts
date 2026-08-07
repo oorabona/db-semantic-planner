@@ -288,6 +288,42 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it('SC-22: keeps the declaration digest stable across the jsonb plan round trip', async () => {
+		const executor = new FakeJournalExecutor();
+		const declarationPlan = {
+			...plan,
+			declarations: {
+				version: 1 as const,
+				declarations: [
+					{
+						address: {
+							engine: 'postgresql',
+							database: 'db',
+							schema: 'public',
+							kind: 'table',
+							name: 'users',
+						},
+						fragment: { z: 1, a: { second: true, first: false } },
+						digest: 'fragment-digest',
+					},
+				],
+				digest: 'set-digest',
+			},
+		} as unknown as ProvenPlanShape;
+		const metadata: TransitionRunMetadata = {
+			...run(),
+			runId: 'run:jsonb-declarations',
+			planDigest: transitionPlanDigest(declarationPlan),
+		};
+		await createPgTransitionRunPersister(asPool(executor)).persist(
+			metadata,
+			declarationPlan,
+		);
+		const loaded = await readTransitionJournal(executor, metadata.runId);
+		expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
+		expect(loaded.plan.declarations).toEqual(declarationPlan.declarations);
+	});
+
 	it('reserves the persisted run row with a transaction-scoped lock for later append reuse', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();

@@ -322,6 +322,10 @@ export interface Schema<T extends SchemaDefinition> {
 	readonly definition: T;
 	/** Table-level constraints supplied to schema() or reconstructed from introspection */
 	readonly constraints?: SchemaConstraints;
+	/** Schema-wide objects supplied to schema(); retained for durable declarations. */
+	readonly extras?: SchemaExtras;
+	/** Planning inputs supplied to schema(); retained without changing model semantics. */
+	readonly options?: SchemaOptions;
 	/** Converted ModelIR for use with ORM */
 	readonly model: ModelIR;
 	/** Table names */
@@ -682,6 +686,8 @@ export function schema<const T extends SchemaDefinition>(
 	return {
 		definition,
 		...(constraints !== undefined ? { constraints } : {}),
+		...(extras !== undefined ? { extras } : {}),
+		...(options !== undefined ? { options } : {}),
 		model,
 		tableNames,
 		tables,

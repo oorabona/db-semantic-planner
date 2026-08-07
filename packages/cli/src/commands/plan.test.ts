@@ -296,6 +296,52 @@ describe('dbsp plan outcomes', () => {
 		expect(runMetadata.targetContextDigest).not.toBe(
 			observationContextDigest(initialContext),
 		);
+		expect(result.plan?.declarations).toMatchObject({
+			version: 1,
+			declarations: [],
+			digest: expect.any(String),
+		});
+		expect(runMetadata.planDigest).toBe(transitionPlanDigest(result.plan!));
+	});
+
+	it('SC-25: rejects a non-canonicalizable declaration before comparison or persistence', async () => {
+		const deps = dependencies(
+			{ kind: 'no-drift', claimedInvariant: { kind: 'test', scope: [] } },
+			{ kind: 'no-drift', claim: {}, assessment: applicable },
+		);
+		deps.loadSchema.mockResolvedValue({
+			model: {
+				...model,
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{
+									name: 'createdAt',
+									type: 'datetime',
+									nullable: false,
+									default: () => 'now()',
+								},
+							],
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+			},
+			definition: {},
+			tableNames: ['users'],
+		});
+		await expect(
+			runPlan(
+				{ db: 'postgres://localhost/test', schemaFile: 'schema.ts' },
+				deps,
+			),
+		).rejects.toThrow(/schema\.tables\["users"\]\.columns\[0\]\.default/);
+		expect(deps.createPlanner).not.toHaveBeenCalled();
+		expect(deps.persist).not.toHaveBeenCalled();
 	});
 
 	it('mutation: printing a digest other than the one durable apply recomputes disconnects review from execution', async () => {

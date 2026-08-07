@@ -19,13 +19,16 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	acquireTransitionLease,
+	bindDeclarationSet,
 	bindExecutionContract,
 	createComparator,
 	createPackRegistry,
 	createProver,
 	createTransitionRunMetadata,
+	declarationSetFromModel,
 	type InProcessProvenPlan,
 	type PackRegistry,
+	validateDeclarationModel,
 } from '@dbsp/core';
 import type {
 	CompareOutcome,
@@ -406,6 +409,10 @@ export async function runPlan(
 		throw new Error(`unsupported plan format ${format}; expected sql or json`);
 	}
 	const loaded = await deps.loadSchema(options.schemaFile);
+	// This is deliberately before comparison: an unchanged/unsupported model is
+	// still a declaration authored for durable replay and may not silently lose a
+	// non-JSON default during a future plan.
+	validateDeclarationModel(loaded.model);
 	const connection = await deps.createDbConnection(options.db);
 	const { pool } = connection;
 	let result: PlanResult | undefined;
@@ -456,9 +463,17 @@ export async function runPlan(
 			if (executionContract !== undefined) {
 				// Order is intentional: an id exists before an indeterminate write, while
 				// rendering happens before a durable record can be stranded unseen.
-				const durablePlan = bindExecutionContract(
+				const contractedPlan = bindExecutionContract(
 					prove.plan,
 					executionContract,
+				);
+				const durablePlan = bindDeclarationSet(
+					contractedPlan,
+					declarationSetFromModel(loaded.model, {
+						engine: context.engine,
+						database: context.databaseId,
+						schema: options.schema ?? 'public',
+					}),
 				);
 				const run = createTransitionRunMetadata(durablePlan);
 				const proofContext = prove.plan.observations.find(

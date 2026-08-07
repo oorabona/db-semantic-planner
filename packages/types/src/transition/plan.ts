@@ -16,6 +16,7 @@
  * - Journal record stepIds are consistent with intent.stepId; ApplyResult.observations is a superset of every ObservedOutcomeRecord.observations.
  */
 
+import type { DeclarationSet } from './declaration.js';
 import type { ExecutionContract } from './execution-contract.js';
 import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
@@ -216,6 +217,11 @@ export interface ProvenPlanStep extends Omit<GuardedPlanStep, 'guards'> {
 
 export interface ProvenPlanShape extends Omit<GuardedPlan, 'steps'> {
 	readonly steps: readonly ProvenPlanStep[];
+	/**
+	 * Present on newly persisted declarative runs. It is inside the plan document
+	 * deliberately: the plan digest therefore covers the declaration set.
+	 */
+	readonly declarations?: DeclarationSet;
 }
 
 /**

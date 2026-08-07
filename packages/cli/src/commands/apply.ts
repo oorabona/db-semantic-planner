@@ -117,13 +117,45 @@ function validateResourceAddress(
 	const candidate = record(value, path);
 	exactKeys(
 		candidate,
-		['engine', 'database', 'schema', 'kind', 'name', 'qualifiedBy'],
+		[
+			'engine',
+			'database',
+			'schema',
+			'parent',
+			'kind',
+			'name',
+			'catalogueIdentity',
+			'qualifiedBy',
+		],
 		path,
 	);
 	for (const key of ['engine', 'database', 'kind', 'name'] as const)
 		nonEmptyString(candidate[key], `${path}.${key}`);
 	if (candidate.schema !== undefined)
 		nonEmptyString(candidate.schema, `${path}.schema`);
+	if (candidate.parent !== undefined)
+		validateResourceAddress(candidate.parent, `${path}.parent`);
+	if (candidate.catalogueIdentity !== undefined) {
+		const identity = record(
+			candidate.catalogueIdentity,
+			`${path}.catalogueIdentity`,
+		);
+		nonEmptyString(identity.kind, `${path}.catalogueIdentity.kind`);
+		if (identity.kind === 'oid') {
+			exactKeys(identity, ['kind', 'oid'], `${path}.catalogueIdentity`);
+			nonEmptyString(identity.oid, `${path}.catalogueIdentity.oid`);
+		} else if (identity.kind === 'column') {
+			exactKeys(
+				identity,
+				['kind', 'parentOid', 'name'],
+				`${path}.catalogueIdentity`,
+			);
+			nonEmptyString(identity.parentOid, `${path}.catalogueIdentity.parentOid`);
+			nonEmptyString(identity.name, `${path}.catalogueIdentity.name`);
+		} else {
+			throw new Error(`${path}.catalogueIdentity.kind must be oid or column`);
+		}
+	}
 	if (candidate.qualifiedBy !== undefined) {
 		if (!Array.isArray(candidate.qualifiedBy))
 			throw new Error(`${path}.qualifiedBy must be an array of strings`);

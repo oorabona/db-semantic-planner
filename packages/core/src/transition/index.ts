@@ -188,6 +188,14 @@ export {
 	observationContextDigest,
 } from './context-match.js';
 export {
+	admitRecordedIdentity,
+	assertCanonicalizableJson,
+	bindDeclarationSet,
+	type DeclarationAddressContext,
+	declarationSetFromModel,
+	validateDeclarationModel,
+} from './declaration.js';
+export {
 	type EnumAddDelta,
 	type EnumAddDeltaOptions,
 	enumAddDelta,

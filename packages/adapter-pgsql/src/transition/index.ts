@@ -1,4 +1,8 @@
 export {
+	type PgCatalogueIdentityQueryable,
+	readPgCatalogueIdentity,
+} from './catalogue-identity.js';
+export {
 	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
