@@ -226,8 +226,8 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
   shape and identity matched. A new object needs none.
 - PRE-02: A non-transactional segment executes only when its assumption class is accepted.
 - PRE-03: Every ledger in a command's scope reads current before any event is appended.
-- PRE-04: A scope upgraded from the legacy shape resumes management only after its adoption
-  cutover has run.
+- PRE-04: (retired — greenfield decision 2026-08-07: no legacy upgrade path exists; every
+  scope initializes as new.)
 
 ### 3.3 Effects
 
@@ -306,8 +306,8 @@ chain, otherwise the stable state.
 | `dbsp_meta` ledger | the same shape, for database-scoped addresses | Yes |
 | ledger identity + shape marker | database and namespace identity, and a version marker, per ledger | Yes |
 | declaration-set artifact | persisted by `plan` with the run, covered by the plan digest | Yes |
-| legacy `dbsp_meta` transition tables | rows preserved read-only; no runtime reader of the old semantics | Yes |
-| `_dbsp_migrations` | none | No |
+| legacy `dbsp_meta` transition tables | ignored (greenfield 2026-08-07): no upgrade path, no archival, no reader; rows in existing dev databases are inert | No |
+| `_dbsp_migrations` | deleted with `migrate` at unit 14 (greenfield 2026-08-07); no reader remains | No |
 | `Schema<T>` | retain `extras` and the schema options | No |
 | `Assumption.class` | new value `non-transactional-segment` | No |
 
@@ -345,7 +345,7 @@ tenant grants, and the preflight validates ownership and grants on every scope i
 | Execute a removal | a dropped table, column, index, constraint, enum, extension or sequence on the managed path; undeclarable kinds never reach it |
 | Execute a data-destructive transformation | a lossy type change, a truncation, any unclassified mutation |
 | Record an object absent | `executed` ∧ catalogue `absent`, per object including everything containment removed; `not-issued` · `failed` · `rolled-back` · `connection-lost` · `unknown` refuse |
-| Upgrade a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker in {`absent-legacy-tables-present`→upgrade, `absent-no-legacy`→initialize, `older`→upgrade}; `current` no-op; `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse |
+| Upgrade a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker in {`absent`→initialize, `older`→upgrade}; `current` no-op; `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse |
 
 The permitting combination is a value the interpreter returns; an emitter cannot be reached
 without it.
@@ -424,8 +424,9 @@ it is unavailable.
 - SC-17 kill-point matrix: the preflight is killed at each acknowledged point — archive, create,
   grants, marker, output — and each time the old marker is intact and a rerun reaches current;
   the adoption file is written to a temp path and atomically renamed.
-- SC-18 a schema holding application tables but no legacy dbsp tables initializes as new; legacy
-  upgrade triggers only on the known legacy table names.
+- SC-18 a schema holding application tables — including inert pre-ledger `dbsp_transition_*`
+  tables — initializes as new; the preflight reads no table it did not create (greenfield
+  2026-08-07: no legacy upgrade path).
 - SC-19 the cutover file contains adoption declarations only for DSL-declared objects lacking
   chains, lands at `--out`, and the preflight appended nothing.
 
@@ -570,7 +571,7 @@ apply pipeline, so it precedes them rather than arriving last.
 | 11 | Destructive authority: classification, containment, effects closure, differ→token bridge | 8, 9 | 1.5 d | SC-46…52 |
 | 12 | Re-addressing | 11 | 1.5 d | SC-53…58 |
 | 13 | Adoption, release, replace | 11 | 1 d | SC-59…62 |
-| 14 | Final surface: `push` deleted, release command, docs, sink labelling, refusal catalogue, output escaping | 12, 13 | 1 d | SC-63…67 |
+| 14 | Final surface: `push` AND `migrate` deleted (greenfield 2026-08-07), release command, docs, sink labelling, refusal catalogue, output escaping | 12, 13 | 1.5 d | SC-63…67 |
 
 Total 16.5 d. Each unit's property is its ADR section; its exit is its scenarios green at their
 stated level plus `pnpm biome check` and `pnpm -r typecheck`. The orchestrator runs every
@@ -634,6 +635,7 @@ The preflight's own interruption behaviour is the SC-17 kill-point matrix.
       records the three rules 0006 replaces
 - [ ] `packages/docs/guide/cli-usage.md` documents plan, apply, inspect, reconcile, release and
       the reinitialize preflight, with no reference to a removed command, wired into the nav
-- [ ] #490 tracks takeover and the migrate audit event; the data-steps decision tracks the
-      attested surface; nothing from either leaked into this delivery
+- [ ] #490 re-scoped to takeover only (its migrate-audit half is moot: `migrate` is deleted at
+      unit 14, greenfield 2026-08-07); the data-steps decision tracks the attested surface;
+      nothing from either leaked into this delivery
 - [ ] The cross-family gate exits clean on the cumulative diff

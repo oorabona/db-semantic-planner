@@ -357,26 +357,29 @@ the declaration no longer names is what apply does, under the destructive author
 published command is a major version of `@dbsp/cli`, taken now. The cutover's adoption file is
 written to an explicit `--out` path, never guessed.
 
-### `migrate` stays, and records only what it can know
+### `migrate` is deleted with `push` (greenfield decision, 2026-08-07)
 
-`migrate apply` and `migrate rollback` keep `_dbsp_migrations` unchanged and per-schema — it is a
-live data contract and a file-idempotency key, not a shim. Their `execution-audit` ledger event is
-deferred with #490; until then their effect on managed objects is what it is today: visible as
-drift at the next plan or inspect. Arbitrary SQL can dispatch dynamically, change `search_path`
-and cross transaction boundaries, so no honest object-level fact can be derived from its text.
+The project has no production consumers, so the managed model ships greenfield: `migrate apply`,
+`migrate rollback`, `_dbsp_migrations` and the migration-file machinery are deleted in the same
+CLI major that deletes `push`. Nothing reads or migrates their tables; rows left in existing
+development databases are inert. This supersedes the earlier "migrate stays" position and the
+`execution-audit` half of #490. The reasoning that arbitrary SQL yields no honest object-level
+fact stands — it is why hand-written steps enter the managed model as attested statements
+(tracked separately), not why a parallel unrecorded executor should survive.
 
 ### Reshaping the shipped metadata
 
-A shape marker per ledger records its version; every command reads it before acting. **Legacy
-detection is by the known legacy tables** — `dbsp_meta.dbsp_transition_run` and its siblings —
-never by "a schema that contains tables", which would misread every application schema. The
-preflight's scope set is an explicit input: the schemas the operator names, plus `dbsp_meta`. It
-proceeds per scope in its own transaction, marker written last, reports current / unchanged /
-failed / not-attempted per scope, and an interrupted scope repeats from its old marker. Ordinary
-commands refuse any scope that is not current. Legacy rows are preserved read-only; no runtime
-reader of the old semantics is kept; nothing is backfilled. The cutover writes adoption
-declarations only for objects the current DSL declares that no chain covers — deriving candidates
-from introspection instead would offer to adopt everything in sight.
+A shape marker per ledger records its version; every command reads it before acting. There is
+no legacy upgrade path (greenfield decision, 2026-08-07): every scope initializes as new, and
+the preflight never reads a table it did not create — pre-ledger `dbsp_transition_*` tables in
+existing development databases are inert and ignored. The marker still versions the NEW ledger
+shape: an older marker upgrades, a future or unreadable one refuses. The preflight's scope set
+is an explicit input: the schemas the operator names, plus `dbsp_meta`. It proceeds per scope
+in its own transaction, marker written last, reports current / unchanged / failed /
+not-attempted per scope, and an interrupted scope repeats from its old marker. Ordinary
+commands refuse any scope that is not current. The cutover writes adoption declarations only
+for objects the current DSL declares that no chain covers — deriving candidates from
+introspection instead would offer to adopt everything in sight.
 
 ### Lineage
 
