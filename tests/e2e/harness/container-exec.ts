@@ -13,7 +13,7 @@ export interface DumpRestoreOptions {
 }
 
 function shellQuote(value: string): string {
-	return `'${value.replace(/'/gu, "'\\\"'\\\"'")}'`;
+	return `'${value.replace(/'/gu, "'\"'\"'")}'`;
 }
 
 function assertNonEmpty(label: string, value: string): void {
@@ -70,6 +70,11 @@ export async function dumpAndRestoreInLocalPostgresContainer(
 	const username = options.username ?? process.env.PG_USER;
 	assertNonEmpty('sourceDatabase', options.sourceDatabase);
 	assertNonEmpty('targetDatabase', options.targetDatabase);
+	if (options.sourceDatabase === options.targetDatabase) {
+		throw new Error(
+			'E2E container dump/restore requires distinct sourceDatabase and targetDatabase',
+		);
+	}
 	if (username === undefined) {
 		throw new Error(
 			'E2E container exec requires PG_USER or an explicit username',

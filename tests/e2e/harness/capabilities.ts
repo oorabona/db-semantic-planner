@@ -1,3 +1,4 @@
+import { getContainerRuntimeClient } from 'testcontainers';
 import { beforeAll, describe } from 'vitest';
 import { LOCAL_CONTAINER_ENV, LOCAL_CONTAINER_ID_ENV } from '../globalSetup.js';
 import { getTestPool } from '../testkit/db.js';
@@ -54,6 +55,17 @@ async function canAdministerRoles(): Promise<boolean> {
 	return result.rows[0]?.can_administer_roles === true;
 }
 
+async function canExecuteInRecordedContainer(
+	environment: NodeJS.ProcessEnv,
+): Promise<boolean> {
+	const containerId = environment[LOCAL_CONTAINER_ID_ENV];
+	if (!containerId) return false;
+	const runtime = await getContainerRuntimeClient();
+	const container = runtime.container.getById(containerId);
+	const result = await runtime.container.exec(container, ['true']);
+	return result.exitCode === 0;
+}
+
 /**
  * Fail at the harness boundary for every declared requirement. This function
  * never calls Vitest skip APIs: a missing capability is always an exception.
@@ -89,13 +101,35 @@ export async function requireE2eCapabilities(
 				const reason = localContainerReason(environment);
 				if (reason !== undefined)
 					throw new E2eCapabilityError(capability, reason);
-				break;
+				try {
+					if (await canExecuteInRecordedContainer(environment)) break;
+				} catch (error) {
+					throw new E2eCapabilityError(
+						capability,
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				throw new E2eCapabilityError(
+					capability,
+					`${LOCAL_CONTAINER_ID_ENV} is not reachable by the container runtime`,
+				);
 			}
 			case 'standby-topology': {
 				const reason = localContainerReason(environment);
 				if (reason !== undefined)
 					throw new E2eCapabilityError(capability, reason);
-				break;
+				try {
+					if (await canExecuteInRecordedContainer(environment)) break;
+				} catch (error) {
+					throw new E2eCapabilityError(
+						capability,
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				throw new E2eCapabilityError(
+					capability,
+					`${LOCAL_CONTAINER_ID_ENV} is not reachable by the container runtime`,
+				);
 			}
 			default: {
 				const exhaustive: never = capability;

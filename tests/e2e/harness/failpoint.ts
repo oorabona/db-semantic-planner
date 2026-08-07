@@ -51,6 +51,33 @@ function qualified(schema: string, name: string): string {
 	return `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`;
 }
 
+async function dropFailpointObjects(
+	queryable: SqlQueryable,
+	triggerName: string,
+	tableReference: string,
+	functionReference: string,
+	sequence: string,
+): Promise<void> {
+	const failures: Error[] = [];
+	for (const statement of [
+		`DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference}`,
+		`DROP FUNCTION IF EXISTS ${functionReference}()`,
+		`DROP SEQUENCE IF EXISTS ${sequence}`,
+	]) {
+		try {
+			await queryable.query(statement);
+		} catch (error) {
+			failures.push(error instanceof Error ? error : new Error(String(error)));
+		}
+	}
+	if (failures.length > 0) {
+		throw new AggregateError(
+			failures,
+			'failed to remove E2E failpoint objects',
+		);
+	}
+}
+
 /**
  * Install a server-side, one-shot trigger for one exact inserted column value.
  *
@@ -72,8 +99,10 @@ export async function armOneShotInsertFailpoint(
 	const functionReference = qualified(target.schema, functionName);
 	const tableReference = qualified(target.schema, target.table);
 
-	await queryable.query(`CREATE SEQUENCE ${sequence} START WITH 1`);
-	await queryable.query(`
+	try {
+		await queryable.query('BEGIN');
+		await queryable.query(`CREATE SEQUENCE ${sequence} START WITH 1`);
+		await queryable.query(`
 		CREATE FUNCTION ${functionReference}()
 		RETURNS trigger
 		LANGUAGE plpgsql
@@ -85,14 +114,38 @@ export async function armOneShotInsertFailpoint(
 			RETURN NEW;
 		END;
 		$dbsp_failpoint$
-	`);
-	await queryable.query(`
+		`);
+		await queryable.query(`
 		CREATE TRIGGER ${quoteIdentifier(triggerName)}
 		BEFORE INSERT ON ${tableReference}
 		FOR EACH ROW
 		WHEN (NEW.${quoteIdentifier(target.column)} IS NOT DISTINCT FROM ${sqlLiteral(target.value)})
 		EXECUTE FUNCTION ${functionReference}()
-	`);
+		`);
+		await queryable.query('COMMIT');
+	} catch (error) {
+		await queryable.query('ROLLBACK').catch(() => undefined);
+		try {
+			await dropFailpointObjects(
+				queryable,
+				triggerName,
+				tableReference,
+				functionReference,
+				sequence,
+			);
+		} catch (cleanupError) {
+			throw new AggregateError(
+				[
+					error instanceof Error ? error : new Error(String(error)),
+					cleanupError instanceof Error
+						? cleanupError
+						: new Error(String(cleanupError)),
+				],
+				'failed to arm E2E failpoint and remove partial objects',
+			);
+		}
+		throw error;
+	}
 
 	const hasFired = async (): Promise<boolean> => {
 		const result = await queryable.query<{ is_called: boolean }>(
@@ -111,11 +164,13 @@ export async function armOneShotInsertFailpoint(
 			throw new Error(`E2E failpoint "${name}" was armed but did not fire`);
 		},
 		async disarm(): Promise<void> {
-			await queryable.query(
-				`DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference}`,
+			await dropFailpointObjects(
+				queryable,
+				triggerName,
+				tableReference,
+				functionReference,
+				sequence,
 			);
-			await queryable.query(`DROP FUNCTION IF EXISTS ${functionReference}()`);
-			await queryable.query(`DROP SEQUENCE IF EXISTS ${sequence}`);
 		},
 	};
 }

@@ -6,6 +6,7 @@ import {
 	createStreamingStandbyTopology,
 	describeWithE2eCapabilities,
 	dumpAndRestoreInLocalPostgresContainer,
+	requireE2eCapabilities,
 } from './harness/index.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 
@@ -13,14 +14,14 @@ describeWithE2eCapabilities(
 	['container-exec'],
 	'SC-01 #481 container dump/restore harness positive path',
 	() => {
-		it('round-trips a database through in-container pg_dump and pg_restore', async () => {
+		it('round-trips a database through in-container pg_dump and pg_restore with apostrophes in names', async () => {
 			const suffix = randomUUID().replaceAll('-', '');
-			const sourceDatabase = `dbsp_e2e_dump_source_${suffix}`;
-			const targetDatabase = `dbsp_e2e_dump_target_${suffix}`;
+			const sourceDatabase = `dbsp_e2e_dump_source_${suffix}_owner's`;
+			const targetDatabase = `dbsp_e2e_dump_target_${suffix}_owner's`;
 			const pool = await getTestPool();
 			try {
-				await pool.query(`CREATE DATABASE ${sourceDatabase}`);
-				await pool.query(`CREATE DATABASE ${targetDatabase}`);
+				await pool.query(`CREATE DATABASE "${sourceDatabase}"`);
+				await pool.query(`CREATE DATABASE "${targetDatabase}"`);
 				const source = new pg.Pool({
 					connectionString: process.env.DATABASE_URL?.replace(
 						/\/[^/?]+(?=\?|$)/u,
@@ -54,9 +55,21 @@ describeWithE2eCapabilities(
 					await target.end();
 				}
 			} finally {
-				await pool.query(`DROP DATABASE IF EXISTS ${sourceDatabase}`);
-				await pool.query(`DROP DATABASE IF EXISTS ${targetDatabase}`);
+				await pool.query(`DROP DATABASE IF EXISTS "${sourceDatabase}"`);
+				await pool.query(`DROP DATABASE IF EXISTS "${targetDatabase}"`);
 			}
+		});
+	},
+);
+
+describeWithE2eCapabilities(
+	[],
+	'SC-01 #481 role-administration harness positive path',
+	() => {
+		it('executes the live role-administration probe', async () => {
+			await expect(
+				requireE2eCapabilities(['role-administration']),
+			).resolves.toBeUndefined();
 		});
 	},
 );

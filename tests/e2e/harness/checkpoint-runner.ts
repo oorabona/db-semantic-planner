@@ -15,6 +15,8 @@ export interface CheckpointChildOptions {
 	 * so this loader adds no harness dependency.
 	 */
 	readonly execArgv?: readonly string[];
+	/** Start a separate process group when the scenario needs that isolation. */
+	readonly detached?: boolean;
 }
 
 export interface CheckpointChildExit {
@@ -29,14 +31,16 @@ export interface CheckpointChild {
 	/** Wait for the currently-blocked checkpoint; no timeout or polling is used. */
 	waitForCheckpoint(expected: string): Promise<void>;
 	/** Allow the child to continue from the currently-blocked named checkpoint. */
-	acknowledge(checkpoint: string): void;
+	acknowledge(checkpoint: string): Promise<void>;
 	/**
 	 * Wait until the child has reported this exact checkpoint, then send SIGKILL.
 	 * The signal is sent only after the IPC receipt, never on a timer.
 	 */
 	killAtCheckpoint(checkpoint: string): Promise<CheckpointChildExit>;
 	/** Kill a child already known to be stopped at a checkpoint. */
-	kill(): Promise<CheckpointChildExit>;
+	kill(signal?: NodeJS.Signals): Promise<CheckpointChildExit>;
+	/** Stop this owned child during cleanup, unless its exit was already observed. */
+	terminate(signal?: NodeJS.Signals): Promise<CheckpointChildExit>;
 }
 
 function checkpointProtocolError(message: string): Error {
@@ -56,10 +60,13 @@ export function spawnCheckpointChild(
 		cwd: options.cwd,
 		env: options.env,
 		execArgv: [...(options.execArgv ?? ['--import', 'tsx'])],
+		detached: options.detached,
 		stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
 	} satisfies ForkOptions);
 
 	let activeCheckpoint: string | undefined;
+	let acknowledging = false;
+	let exitState: CheckpointChildExit | undefined;
 	let checkpointWaiter:
 		| {
 				readonly expected: string;
@@ -71,6 +78,20 @@ export function spawnCheckpointChild(
 	const exited = new Promise<CheckpointChildExit>((resolveExit) => {
 		exitResolve = resolveExit;
 	});
+	const settleExit = (exit: CheckpointChildExit, reason?: Error): void => {
+		if (exitState !== undefined) return;
+		exitState = exit;
+		if (checkpointWaiter !== undefined) {
+			checkpointWaiter.reject(
+				reason ??
+					checkpointProtocolError(
+						`child exited before reaching "${checkpointWaiter.expected}"`,
+					),
+			);
+			checkpointWaiter = undefined;
+		}
+		exitResolve?.(exit);
+	};
 
 	child.on('message', (message: unknown) => {
 		if (!isCheckpointReachedMessage(message)) return;
@@ -96,15 +117,13 @@ export function spawnCheckpointChild(
 		checkpointWaiter = undefined;
 	});
 	child.once('exit', (code, signal) => {
-		if (checkpointWaiter !== undefined) {
-			checkpointWaiter.reject(
-				checkpointProtocolError(
-					`child exited before reaching "${checkpointWaiter.expected}"`,
-				),
-			);
-			checkpointWaiter = undefined;
-		}
-		exitResolve?.({ code, signal });
+		settleExit({ code, signal });
+	});
+	child.once('error', (error) => {
+		settleExit(
+			{ code: null, signal: null },
+			checkpointProtocolError(`failed to spawn child: ${error.message}`),
+		);
 	});
 
 	const waitForCheckpoint = async (expected: string): Promise<void> => {
@@ -119,6 +138,11 @@ export function spawnCheckpointChild(
 				`already waiting for "${checkpointWaiter.expected}"`,
 			);
 		}
+		if (exitState !== undefined) {
+			throw checkpointProtocolError(
+				`child exited before reaching "${expected}"`,
+			);
+		}
 		await new Promise<void>((resolveWait, rejectWait) => {
 			checkpointWaiter = {
 				expected,
@@ -128,27 +152,55 @@ export function spawnCheckpointChild(
 		});
 	};
 
-	const acknowledge = (checkpoint: string): void => {
+	const acknowledge = async (checkpoint: string): Promise<void> => {
 		if (activeCheckpoint !== checkpoint) {
 			throw checkpointProtocolError(
 				`cannot acknowledge "${checkpoint}" while child is at "${activeCheckpoint ?? 'no checkpoint'}"`,
 			);
 		}
+		if (acknowledging) {
+			throw checkpointProtocolError(`already acknowledging "${checkpoint}"`);
+		}
 		const message: CheckpointAckMessage = {
 			type: CHECKPOINT_ACK,
 			checkpoint,
 		};
-		child.send(message);
-		activeCheckpoint = undefined;
+		acknowledging = true;
+		try {
+			await new Promise<void>((resolveAck, rejectAck) => {
+				try {
+					child.send(message, (error) => {
+						if (error === null || error === undefined) resolveAck();
+						else rejectAck(error);
+					});
+				} catch (error) {
+					rejectAck(error);
+				}
+			});
+			activeCheckpoint = undefined;
+		} finally {
+			acknowledging = false;
+		}
 	};
 
-	const kill = async (): Promise<CheckpointChildExit> => {
+	const kill = async (
+		signal: NodeJS.Signals = 'SIGKILL',
+	): Promise<CheckpointChildExit> => {
+		if (exitState !== undefined) return exitState;
 		if (activeCheckpoint === undefined) {
 			throw checkpointProtocolError(
 				'cannot kill before a checkpoint is acknowledged',
 			);
 		}
-		child.kill('SIGKILL');
+		child.kill(signal);
+		return exited;
+	};
+
+	const terminate = async (
+		signal: NodeJS.Signals = 'SIGTERM',
+	): Promise<CheckpointChildExit> => {
+		if (exitState !== undefined) return exitState;
+		child.kill(signal);
 		return exited;
 	};
 
@@ -162,5 +214,6 @@ export function spawnCheckpointChild(
 			return kill();
 		},
 		kill,
+		terminate,
 	};
 }

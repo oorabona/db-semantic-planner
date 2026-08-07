@@ -1,6 +1,4 @@
-import { type ChildProcess, fork } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import type { ModelIR } from '@dbsp/core';
 import type { PoolClient } from 'pg';
@@ -9,30 +7,17 @@ import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { runRecover } from '../../packages/cli/src/commands/recover.js';
 import {
-	CHECKPOINT_ACK,
-	CHECKPOINT_REACHED,
+	type CheckpointChild,
 	describeWithE2eCapabilities,
+	spawnCheckpointChild,
 } from './harness/index.js';
 import { createSchema, getTestPool } from './testkit/index.js';
 
 const indexName = 'idx_users_email';
-const POLL_INTERVAL_MS = 20;
+const POLL_INTERVAL_MS = 100;
 const WAIT_TIMEOUT_MS = 45_000;
 const CLEANUP_TIMEOUT_MS = 4_000;
 const CHILD_TERM_TIMEOUT_MS = 1_500;
-
-interface CheckpointChildExit {
-	readonly code: number | null;
-	readonly signal: NodeJS.Signals | null;
-}
-
-interface ScenarioChild {
-	readonly process: ChildProcess;
-	readonly exited: Promise<CheckpointChildExit>;
-	waitForCheckpoint(expected: string): Promise<void>;
-	acknowledge(checkpoint: string): void;
-	killNow(signal: NodeJS.Signals): Promise<CheckpointChildExit>;
-}
 
 interface ManagedResource {
 	readonly dispose: () => Promise<void>;
@@ -48,6 +33,10 @@ function testSchemaName(label: string): string {
 
 function errorDetail(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function asError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
 }
 
 function waitFor<T>(
@@ -76,14 +65,20 @@ async function pollUntil<T>(
 ): Promise<T> {
 	const deadline = Date.now() + WAIT_TIMEOUT_MS;
 	for (;;) {
-		const value = await read();
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) throw new Error(`timed out waiting for ${label}`);
+		const value = await waitFor(label, read(), remaining);
 		if (matched(value)) return value;
 		if (Date.now() >= deadline) {
 			throw new Error(`timed out waiting for ${label}`);
 		}
-		await new Promise<void>((resolvePoll) => {
-			setTimeout(resolvePoll, POLL_INTERVAL_MS);
-		});
+		await waitFor(
+			`the next ${label} poll`,
+			new Promise<void>((resolvePoll) => {
+				setTimeout(resolvePoll, POLL_INTERVAL_MS);
+			}),
+			deadline - Date.now(),
+		);
 	}
 }
 
@@ -95,10 +90,23 @@ class ResourceStack {
 
 	register(name: string, dispose: () => Promise<void>): ManagedResource {
 		let disposed = false;
+		let disposing: Promise<void> | undefined;
 		const disposeOnce = async (): Promise<void> => {
 			if (disposed) return;
-			disposed = true;
-			await dispose();
+			if (disposing !== undefined) return disposing;
+			disposing = dispose().then(
+				() => {
+					disposed = true;
+				},
+				(error: unknown) => {
+					throw error;
+				},
+			);
+			try {
+				await disposing;
+			} finally {
+				if (!disposed) disposing = undefined;
+			}
 		};
 		this.#resources.push({ name, dispose: disposeOnce });
 		return { dispose: disposeOnce };
@@ -116,169 +124,65 @@ class ResourceStack {
 			} catch (error) {
 				failures.push(
 					new Error(
-						`failed to dispose ${resource.name}: ${errorDetail(error)}`,
+						`failed to dispose ${resource.name}: ${errorDetail(error)}; resource remains pending`,
 					),
 				);
+				if (String(error).includes('timed out')) break;
 			}
 		}
 		if (failures.length === 0) return undefined;
 		return new AggregateError(failures, 'non-transactional E2E cleanup failed');
 	}
 }
-
-function isCheckpointReached(
-	message: unknown,
-): message is { checkpoint: string } {
-	return (
-		typeof message === 'object' &&
-		message !== null &&
-		(message as { type?: unknown }).type === CHECKPOINT_REACHED &&
-		typeof (message as { checkpoint?: unknown }).checkpoint === 'string'
-	);
-}
-
-function spawnScenarioChild(
-	args: readonly string[],
-	env: NodeJS.ProcessEnv,
-): ScenarioChild {
-	const child = fork(
-		resolve(
-			new URL('./transition-non-transactional-apply-child.ts', import.meta.url)
-				.pathname,
-		),
-		[...args],
-		{
-			detached: true,
-			env,
-			execArgv: ['--import', 'tsx'],
-			stdio: ['inherit', 'inherit', 'inherit', 'ipc'],
-		},
-	);
-	let activeCheckpoint: string | undefined;
-	let waiter:
-		| {
-				readonly expected: string;
-				readonly resolve: () => void;
-				readonly reject: (error: Error) => void;
-		  }
-		| undefined;
-	let resolveExit: ((exit: CheckpointChildExit) => void) | undefined;
-	const exited = new Promise<CheckpointChildExit>((resolve) => {
-		resolveExit = resolve;
-	});
-
-	child.on('message', (message: unknown) => {
-		if (!isCheckpointReached(message)) return;
-		if (activeCheckpoint !== undefined) {
-			waiter?.reject(
-				new Error(
-					`child reached "${message.checkpoint}" while blocked at "${activeCheckpoint}"`,
-				),
-			);
-			return;
-		}
-		activeCheckpoint = message.checkpoint;
-		if (waiter === undefined) return;
-		if (waiter.expected === activeCheckpoint) waiter.resolve();
-		else {
-			waiter.reject(
-				new Error(
-					`expected child checkpoint "${waiter.expected}", received "${activeCheckpoint}"`,
-				),
-			);
-		}
-		waiter = undefined;
-	});
-	child.once('exit', (code, signal) => {
-		waiter?.reject(new Error(`child exited before "${waiter.expected}"`));
-		waiter = undefined;
-		resolveExit?.({ code, signal });
-	});
-
-	const waitForCheckpoint = async (expected: string): Promise<void> => {
-		if (activeCheckpoint === expected) return;
-		if (activeCheckpoint !== undefined) {
-			throw new Error(
-				`expected child checkpoint "${expected}", found "${activeCheckpoint}"`,
-			);
-		}
-		if (waiter !== undefined) {
-			throw new Error(
-				`already waiting for child checkpoint "${waiter.expected}"`,
-			);
-		}
+async function disposeChild(child: CheckpointChild): Promise<void> {
+	try {
 		await waitFor(
-			`child checkpoint "${expected}"`,
-			new Promise<void>((resolveWait, rejectWait) => {
-				waiter = { expected, resolve: resolveWait, reject: rejectWait };
-			}),
-		);
-	};
-
-	const acknowledge = (checkpoint: string): void => {
-		if (activeCheckpoint !== checkpoint) {
-			throw new Error(
-				`cannot acknowledge "${checkpoint}" while child is at "${activeCheckpoint ?? 'no checkpoint'}"`,
-			);
-		}
-		child.send({ type: CHECKPOINT_ACK, checkpoint });
-		activeCheckpoint = undefined;
-	};
-
-	const killNow = async (
-		signal: NodeJS.Signals,
-	): Promise<CheckpointChildExit> => {
-		if (child.pid !== undefined && child.exitCode === null) {
-			try {
-				process.kill(-child.pid, signal);
-			} catch (error) {
-				if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-			}
-		}
-		return waitFor(
-			`child process group exit after ${signal}`,
-			exited,
+			'checkpoint child exit after SIGTERM',
+			child.terminate('SIGTERM'),
 			CHILD_TERM_TIMEOUT_MS,
 		);
-	};
-
-	return { process: child, exited, waitForCheckpoint, acknowledge, killNow };
-}
-
-async function disposeChild(child: ScenarioChild): Promise<void> {
-	if (child.process.exitCode !== null) return;
-	try {
-		await child.killNow('SIGTERM');
 	} catch (error) {
 		if (!String(error).includes('timed out')) throw error;
-		await child.killNow('SIGKILL');
+		await waitFor(
+			'checkpoint child exit after SIGKILL',
+			child.terminate('SIGKILL'),
+			CHILD_TERM_TIMEOUT_MS,
+		);
 	}
 }
 
-async function terminateBackend(pid: number): Promise<void> {
+interface BackendIdentity {
+	readonly pid: number;
+	readonly backendStart: string;
+}
+
+async function terminateBackend(backend: BackendIdentity): Promise<void> {
 	const pool = await getTestPool();
 	const terminated = await pool.query<{ terminated: boolean }>(
-		'SELECT pg_catalog.pg_terminate_backend($1::integer, $2::bigint) AS terminated',
-		[pid, CHILD_TERM_TIMEOUT_MS],
+		'SELECT pg_catalog.pg_terminate_backend(activity.pid, $3::bigint) AS terminated ' +
+			'FROM pg_catalog.pg_stat_activity activity ' +
+			'WHERE activity.pid = $1 AND activity.backend_start = $2::timestamptz ' +
+			"AND activity.datname = current_database() AND activity.backend_type = 'client backend'",
+		[backend.pid, backend.backendStart, CHILD_TERM_TIMEOUT_MS],
 	);
 	if (terminated.rows[0]?.terminated === true) return;
 	const stillActive = await pool.query<{ active: boolean }>(
-		'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE pid = $1 AND datname = current_database()) AS active',
-		[pid],
+		"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE pid = $1 AND backend_start = $2::timestamptz AND datname = current_database() AND backend_type = 'client backend') AS active",
+		[backend.pid, backend.backendStart],
 	);
 	if (stillActive.rows[0]?.active === true) {
-		throw new Error(`pg_terminate_backend(${pid}) returned false`);
+		throw new Error(`pg_terminate_backend(${backend.pid}) returned false`);
 	}
 }
 
 async function terminateSchemaLockBackends(schema: string): Promise<void> {
 	const pool = await getTestPool();
-	const candidates = await pool.query<{ pid: number }>(
+	const candidates = await pool.query<BackendIdentity>(
 		'WITH schema_relations AS (' +
 			'SELECT relation.oid FROM pg_catalog.pg_class relation ' +
 			'JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace ' +
 			'WHERE namespace.nspname = $1' +
-			') SELECT DISTINCT activity.pid FROM pg_catalog.pg_locks lock ' +
+			') SELECT DISTINCT activity.pid, activity.backend_start::text AS "backendStart" FROM pg_catalog.pg_locks lock ' +
 			'JOIN schema_relations ON schema_relations.oid = lock.relation ' +
 			'JOIN pg_catalog.pg_stat_activity activity ON activity.pid = lock.pid ' +
 			'WHERE lock.database = (SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()) ' +
@@ -286,7 +190,7 @@ async function terminateSchemaLockBackends(schema: string): Promise<void> {
 			'AND activity.pid <> pg_catalog.pg_backend_pid()',
 		[schema],
 	);
-	for (const { pid } of candidates.rows) await terminateBackend(pid);
+	for (const backend of candidates.rows) await terminateBackend(backend);
 }
 
 async function dropSchemaWithTimeout(schema: string): Promise<void> {
@@ -310,6 +214,12 @@ async function dropSchemaWithTimeout(schema: string): Promise<void> {
 		await client?.query('ROLLBACK').catch(() => undefined);
 	} finally {
 		cleanupError = await resources.dispose();
+	}
+	if (primaryError !== undefined && cleanupError !== undefined) {
+		throw new AggregateError(
+			[asError(primaryError), cleanupError],
+			'schema-drop operation and cleanup both failed',
+		);
 	}
 	if (primaryError !== undefined) throw primaryError;
 	if (cleanupError !== undefined) throw cleanupError;
@@ -358,6 +268,7 @@ async function cleanupSchema(schema: string): Promise<void> {
 class Scenario {
 	readonly schema: string;
 	readonly #resources = new ResourceStack();
+	readonly #runIds = new Set<string>();
 
 	private constructor(schema: string) {
 		this.schema = schema;
@@ -368,6 +279,30 @@ class Scenario {
 		await createSchema(scenario.schema);
 		scenario.#resources.register(`schema ${scenario.schema}`, () =>
 			cleanupSchema(scenario.schema),
+		);
+		scenario.#resources.register(
+			'dbsp_meta rows for observed runs',
+			async () => {
+				const pool = await getTestPool();
+				for (const runId of scenario.#runIds) {
+					await pool.query(
+						'DELETE FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
+						[runId],
+					);
+					await pool.query(
+						'DELETE FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
+						[runId],
+					);
+					await pool.query(
+						'DELETE FROM dbsp_meta.dbsp_transition_run_plan WHERE run_id = $1',
+						[runId],
+					);
+					await pool.query(
+						'DELETE FROM dbsp_meta.dbsp_transition_run WHERE run_id = $1',
+						[runId],
+					);
+				}
+			},
 		);
 		return scenario;
 	}
@@ -410,27 +345,34 @@ class Scenario {
 
 	spawnApplyChild(
 		plan: Awaited<ReturnType<typeof planConcurrentIndex>>,
-	): ScenarioChild {
-		const child = spawnScenarioChild(
-			[plan.runId, plan.planDigest, this.schema],
+	): CheckpointChild {
+		this.observeRunId(plan.runId);
+		const child = spawnCheckpointChild(
+			new URL('./transition-non-transactional-apply-child.ts', import.meta.url)
+				.pathname,
 			{
-				...process.env,
-				DATABASE_URL: plan.db,
-				DBSP_E2E_NON_TRANSACTIONAL_ACCEPTS: plan.plan.assumptions
-					.map((assumption) => assumption.class)
-					.join(','),
+				args: [plan.runId, plan.planDigest, this.schema],
+				env: {
+					...process.env,
+					DATABASE_URL: plan.db,
+					DBSP_E2E_NON_TRANSACTIONAL_ACCEPTS: plan.plan.assumptions
+						.map((assumption) => assumption.class)
+						.join(','),
+				},
 			},
 		);
-		this.#resources.register('checkpoint child process group', () =>
-			disposeChild(child),
-		);
+		this.#resources.register('checkpoint child', () => disposeChild(child));
 		return child;
 	}
 
-	registerBackend(pid: number): ManagedResource {
-		return this.#resources.register(`PostgreSQL backend ${pid}`, () =>
-			terminateBackend(pid),
+	registerBackend(backend: BackendIdentity): ManagedResource {
+		return this.#resources.register(`PostgreSQL backend ${backend.pid}`, () =>
+			terminateBackend(backend),
 		);
+	}
+
+	observeRunId(runId: string): void {
+		this.#runIds.add(runId);
 	}
 }
 
@@ -449,6 +391,12 @@ async function inScenario<T>(
 		primaryError = error;
 	} finally {
 		cleanupError = await scenario?.dispose();
+	}
+	if (primaryError !== undefined && cleanupError !== undefined) {
+		throw new AggregateError(
+			[asError(primaryError), cleanupError],
+			'non-transactional E2E scenario and cleanup both failed',
+		);
 	}
 	if (primaryError !== undefined) throw primaryError;
 	if (cleanupError !== undefined) throw cleanupError;
@@ -525,29 +473,32 @@ async function waitForWitnessPhase(schema: string): Promise<void> {
 	);
 }
 
-async function concurrentIndexBackendPid(schema: string): Promise<number> {
+async function concurrentIndexBackend(
+	schema: string,
+): Promise<BackendIdentity> {
 	const pool = await getTestPool();
-	const pid = await pollUntil(
-		'concurrent index backend PID',
+	const backend = await pollUntil(
+		'concurrent index backend identity',
 		async () => {
-			const result = await pool.query<{ pid: number }>(
-				'SELECT progress.pid FROM pg_catalog.pg_stat_progress_create_index progress ' +
+			const result = await pool.query<BackendIdentity>(
+				'SELECT progress.pid, activity.backend_start::text AS "backendStart" FROM pg_catalog.pg_stat_progress_create_index progress ' +
 					'JOIN pg_catalog.pg_class index_relation ON index_relation.oid = progress.index_relid ' +
 					'JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace ' +
+					'JOIN pg_catalog.pg_stat_activity activity ON activity.pid = progress.pid ' +
 					'WHERE namespace.nspname = $1 AND index_relation.relname = $2',
 				[schema, indexName],
 			);
-			return result.rows[0]?.pid;
+			return result.rows[0];
 		},
 		(candidate) => candidate !== undefined,
 	);
-	if (pid === undefined) {
+	if (backend === undefined) {
 		throw new Error('concurrent index backend was not observable');
 	}
-	return pid;
+	return backend;
 }
 
-async function planConcurrentIndex(schema: string) {
+async function planConcurrentIndex(schema: string, scenario?: Scenario) {
 	const pool = await getTestPool();
 	const db = process.env.DATABASE_URL;
 	if (!db) throw new Error('e2e DATABASE_URL is required');
@@ -575,6 +526,7 @@ async function planConcurrentIndex(schema: string) {
 	if (!planned.runId || !planned.planDigest || !planned.plan) {
 		throw new Error('expected a persisted concurrent-index plan');
 	}
+	scenario?.observeRunId(planned.runId);
 	return {
 		db,
 		runId: planned.runId,
@@ -587,7 +539,7 @@ describe('SC-03 #481 non-transactional durable admission', () => {
 	it('refuses an unaccepted segment before any step-attempt event', async () => {
 		await inScenario('sc03', async (scenario) => {
 			await createUsers(scenario.schema, 10);
-			const plan = await planConcurrentIndex(scenario.schema);
+			const plan = await planConcurrentIndex(scenario.schema, scenario);
 			const pool = await getTestPool();
 			const result = await runApply(
 				plan.runId,
@@ -619,22 +571,20 @@ describeWithE2eCapabilities(
 		it('SC-02: accepts a 200k-row segment while a writer commits in its witnessed window', async () => {
 			await inScenario('sc02', async (scenario) => {
 				await createUsers(scenario.schema, 200_000);
-				const plan = await planConcurrentIndex(scenario.schema);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
 				await child.waitForCheckpoint('before-statement-sent');
-				child.acknowledge('before-statement-sent');
+				await child.acknowledge('before-statement-sent');
 				await child.waitForCheckpoint('after-statement-sent');
 				await waitForWitnessPhase(scenario.schema);
-				scenario.registerBackend(
-					await concurrentIndexBackendPid(scenario.schema),
-				);
+				scenario.registerBackend(await concurrentIndexBackend(scenario.schema));
 				const writer = await scenario.acquireWriter();
 				await writer.client.query(
 					`INSERT INTO ${quoteIdent(scenario.schema)}.${quoteIdent('users')} (id, email) VALUES (200001, 'writer@example.com')`,
 				);
 				await writer.resource.dispose();
-				child.acknowledge('after-statement-sent');
+				await child.acknowledge('after-statement-sent');
 				await blocker.resource.dispose();
 				expect(
 					await waitFor('successful apply child exit', child.exited),
@@ -660,16 +610,14 @@ describeWithE2eCapabilities(
 		it('SC-04: recovers a server-finished build after the client is killed after send', async () => {
 			await inScenario('sc04', async (scenario) => {
 				await createUsers(scenario.schema, 200_000);
-				const plan = await planConcurrentIndex(scenario.schema);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
 				await child.waitForCheckpoint('before-statement-sent');
-				child.acknowledge('before-statement-sent');
+				await child.acknowledge('before-statement-sent');
 				await child.waitForCheckpoint('after-statement-sent');
-				scenario.registerBackend(
-					await concurrentIndexBackendPid(scenario.schema),
-				);
-				expect(await child.killNow('SIGKILL')).toMatchObject({
+				scenario.registerBackend(await concurrentIndexBackend(scenario.schema));
+				expect(await child.kill('SIGKILL')).toMatchObject({
 					signal: 'SIGKILL',
 				});
 				await blocker.resource.dispose();
@@ -688,17 +636,17 @@ describeWithE2eCapabilities(
 		it('SC-05: classifies a server-aborted invalid index as recovery-unknown-step-result', async () => {
 			await inScenario('sc05', async (scenario) => {
 				await createUsers(scenario.schema, 200_000);
-				const plan = await planConcurrentIndex(scenario.schema);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const blocker = await scenario.startSnapshotBlocker();
 				const child = scenario.spawnApplyChild(plan);
 				await child.waitForCheckpoint('before-statement-sent');
-				child.acknowledge('before-statement-sent');
+				await child.acknowledge('before-statement-sent');
 				await child.waitForCheckpoint('after-statement-sent');
 				await waitForIndex(scenario.schema, (row) => !row.indisvalid);
 				const backend = scenario.registerBackend(
-					await concurrentIndexBackendPid(scenario.schema),
+					await concurrentIndexBackend(scenario.schema),
 				);
-				await child.killNow('SIGKILL');
+				await child.kill('SIGKILL');
 				await backend.dispose();
 				await blocker.resource.dispose();
 				await waitForIndex(scenario.schema, (row) => !row.indisvalid);
@@ -713,10 +661,10 @@ describeWithE2eCapabilities(
 		it('SC-06: recovers a kill before send as recovery-resume-required', async () => {
 			await inScenario('sc06', async (scenario) => {
 				await createUsers(scenario.schema, 10);
-				const plan = await planConcurrentIndex(scenario.schema);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
 				const child = scenario.spawnApplyChild(plan);
 				await child.waitForCheckpoint('before-statement-sent');
-				expect(await child.killNow('SIGKILL')).toMatchObject({
+				expect(await child.kill('SIGKILL')).toMatchObject({
 					signal: 'SIGKILL',
 				});
 				expect((await indexCatalog(scenario.schema)).rows).toEqual([]);

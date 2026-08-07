@@ -8,6 +8,26 @@ const accepts = (process.env.DBSP_E2E_NON_TRANSACTIONAL_ACCEPTS ?? '')
 	.split(',')
 	.filter((value) => value.length > 0);
 const WAIT_TIMEOUT_MS = 45_000;
+const POLL_INTERVAL_MS = 100;
+
+function waitFor<T>(
+	label: string,
+	promise: Promise<T>,
+	timeoutMs: number,
+): Promise<T> {
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	return Promise.race([
+		promise,
+		new Promise<T>((_resolve, reject) => {
+			timeout = setTimeout(
+				() => reject(new Error(`timed out waiting for ${label}`)),
+				timeoutMs,
+			);
+		}),
+	]).finally(() => {
+		if (timeout !== undefined) clearTimeout(timeout);
+	});
+}
 
 if (!runId || !planDigest || !schema || !db) {
 	throw new Error(
@@ -34,14 +54,36 @@ async function statementIsInFlight(
 async function waitForStatementToBeSent(
 	pool: pg.Pool,
 	schemaName: string,
+	applying: Promise<Awaited<ReturnType<typeof runApply>>>,
 ): Promise<void> {
 	const deadline = Date.now() + WAIT_TIMEOUT_MS;
 	for (;;) {
-		if (await statementIsInFlight(pool, schemaName)) return;
-		if (Date.now() >= deadline) {
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) {
 			throw new Error('timed out waiting for the concurrent index statement');
 		}
-		await new Promise<void>((resolve) => setTimeout(resolve, 20));
+		const observed = await waitFor(
+			'the concurrent index statement',
+			Promise.race([
+				statementIsInFlight(pool, schemaName).then((inFlight) => ({
+					kind: 'statement' as const,
+					inFlight,
+				})),
+				applying.then((result) => ({ kind: 'apply' as const, result })),
+			]),
+			remaining,
+		);
+		if (observed.kind === 'apply') {
+			throw new Error(
+				`apply completed before the server-observation checkpoint with outcome "${observed.result.outcome}"`,
+			);
+		}
+		if (observed.inFlight) return;
+		await waitFor(
+			'the next concurrent-index poll',
+			new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS)),
+			deadline - Date.now(),
+		);
 	}
 }
 
@@ -55,7 +97,7 @@ async function main(): Promise<void> {
 	try {
 		await checkpoint('before-statement-sent');
 		const applying = runApply(runId, { db, planDigest, accept: accepts });
-		await waitForStatementToBeSent(observer, schema);
+		await waitForStatementToBeSent(observer, schema, applying);
 		await checkpoint('after-statement-sent');
 		await applying;
 	} finally {

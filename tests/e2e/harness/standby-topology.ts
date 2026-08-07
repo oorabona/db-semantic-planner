@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import pg from 'pg';
 import {
@@ -26,12 +27,16 @@ export interface StreamingStandbyTopology {
 	stop(): Promise<void>;
 }
 
-function postgresPool(container: StartedTestContainer): pg.Pool {
+function postgresPool(
+	container: StartedTestContainer,
+	password: string,
+): pg.Pool {
 	return new Pool({
 		host: container.getHost(),
 		port: container.getMappedPort(5432),
 		user: POSTGRES_USER,
 		database: POSTGRES_DATABASE,
+		password,
 		max: 2,
 	});
 }
@@ -47,10 +52,30 @@ async function checkedExec(
 	);
 }
 
-async function stopQuietly(
-	resource: { stop(): Promise<unknown> } | undefined,
+async function stopAll(
+	resources: ReadonlyArray<{
+		readonly name: string;
+		readonly stop: () => Promise<unknown>;
+	}>,
 ): Promise<void> {
-	await resource?.stop().catch(() => undefined);
+	const failures: Error[] = [];
+	for (const resource of resources) {
+		try {
+			await resource.stop();
+		} catch (error) {
+			failures.push(
+				new Error(
+					`failed to stop ${resource.name}: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			);
+		}
+	}
+	if (failures.length > 0) {
+		throw new AggregateError(
+			failures,
+			'streaming standby topology cleanup failed',
+		);
+	}
 }
 
 function captureLogTail(): {
@@ -78,6 +103,7 @@ function captureLogTail(): {
 export async function createStreamingStandbyTopology(): Promise<StreamingStandbyTopology> {
 	await requireE2eCapabilities(['standby-topology']);
 	const image = process.env.POSTGRES_IMAGE ?? POSTGRES_IMAGE;
+	const password = randomUUID();
 	let network: StartedNetwork | undefined;
 	let primary: StartedTestContainer | undefined;
 	let standby: StartedTestContainer | undefined;
@@ -94,7 +120,7 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			.withEnvironment({
 				POSTGRES_DB: POSTGRES_DATABASE,
 				POSTGRES_USER,
-				POSTGRES_HOST_AUTH_METHOD: 'trust',
+				POSTGRES_PASSWORD: password,
 			})
 			.withNetwork(network)
 			.withNetworkAliases('dbsp-e2e-primary')
@@ -114,7 +140,7 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			'-d',
 			POSTGRES_DATABASE,
 			'-c',
-			`CREATE ROLE ${REPLICATION_ROLE} WITH REPLICATION LOGIN`,
+			`CREATE ROLE ${REPLICATION_ROLE} WITH REPLICATION LOGIN PASSWORD '${password}'`,
 		]);
 		await checkedExec(primary, [
 			'bash',
@@ -138,7 +164,7 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 				[
 					'set -eu',
 					'rm -rf "$PGDATA"',
-					`pg_basebackup -h dbsp-e2e-primary -U ${REPLICATION_ROLE} -D "$PGDATA" -R -X stream`,
+					`PGPASSWORD='${password}' pg_basebackup -h dbsp-e2e-primary -U ${REPLICATION_ROLE} -D "$PGDATA" -R -X stream`,
 					'exec postgres',
 				].join('\n'),
 			])
@@ -159,8 +185,8 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			.start();
 		starting = undefined;
 
-		primaryPool = postgresPool(primary);
-		standbyPool = postgresPool(standby);
+		primaryPool = postgresPool(primary, password);
+		standbyPool = postgresPool(standby, password);
 		const [primaryState, standbyState] = await Promise.all([
 			primaryPool.query<{ receiving: boolean }>(
 				'SELECT EXISTS (SELECT 1 FROM pg_stat_replication) AS receiving',
@@ -189,13 +215,13 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			primaryPool: ownedPrimaryPool,
 			standbyPool: ownedStandbyPool,
 			async stop(): Promise<void> {
-				await Promise.allSettled([
-					ownedPrimaryPool.end(),
-					ownedStandbyPool.end(),
+				await stopAll([
+					{ name: 'primary pool', stop: () => ownedPrimaryPool.end() },
+					{ name: 'standby pool', stop: () => ownedStandbyPool.end() },
+					{ name: 'standby container', stop: () => ownedStandby.stop() },
+					{ name: 'primary container', stop: () => ownedPrimary.stop() },
+					{ name: 'topology network', stop: () => ownedNetwork.stop() },
 				]);
-				await stopQuietly(ownedStandby);
-				await stopQuietly(ownedPrimary);
-				await stopQuietly(ownedNetwork);
 			},
 		};
 	} catch (error) {
@@ -205,10 +231,54 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 				: starting === 'standby'
 					? `\nstandby container log tail:\n${standbyLogTail.read() || '(no logs captured)'}`
 					: '';
-		await Promise.allSettled([primaryPool?.end(), standbyPool?.end()]);
-		await stopQuietly(standby);
-		await stopQuietly(primary);
-		await stopQuietly(network);
+		let cleanupError: unknown;
+		try {
+			const cleanupResources: Array<{
+				readonly name: string;
+				readonly stop: () => Promise<unknown>;
+			}> = [];
+			if (primaryPool !== undefined) {
+				const pool = primaryPool;
+				cleanupResources.push({ name: 'primary pool', stop: () => pool.end() });
+			}
+			if (standbyPool !== undefined) {
+				const pool = standbyPool;
+				cleanupResources.push({ name: 'standby pool', stop: () => pool.end() });
+			}
+			if (standby !== undefined) {
+				const container = standby;
+				cleanupResources.push({
+					name: 'standby container',
+					stop: () => container.stop(),
+				});
+			}
+			if (primary !== undefined) {
+				const container = primary;
+				cleanupResources.push({
+					name: 'primary container',
+					stop: () => container.stop(),
+				});
+			}
+			if (network !== undefined) {
+				const ownedNetwork = network;
+				cleanupResources.push({
+					name: 'topology network',
+					stop: () => ownedNetwork.stop(),
+				});
+			}
+			await stopAll(cleanupResources);
+		} catch (cleanupFailure) {
+			cleanupError = cleanupFailure;
+		}
+		if (cleanupError !== undefined) {
+			throw new AggregateError(
+				[
+					error instanceof Error ? error : new Error(String(error)),
+					cleanupError,
+				],
+				'failed to create and clean up streaming standby topology',
+			);
+		}
 		if (error instanceof E2eCapabilityError) throw error;
 		throw new E2eCapabilityError(
 			'standby-topology',
