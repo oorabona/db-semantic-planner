@@ -11,6 +11,7 @@ export * from './fingerprint.js';
 export * from './fragment.js';
 export * from './guard.js';
 export * from './json.js';
+export * from './ledger.js';
 export * from './observation.js';
 export * from './operation.js';
 export * from './plan.js';

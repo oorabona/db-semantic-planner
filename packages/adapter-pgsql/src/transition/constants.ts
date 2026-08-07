@@ -87,6 +87,10 @@ export const DBSP_TRANSITION_RUN_PLAN_TABLE = 'dbsp_transition_run_plan';
 export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
 export const DBSP_TRANSITION_AUTHORIZATION_TABLE =
 	'dbsp_transition_authorization';
+export const DBSP_LEDGER_EVENT_TABLE = 'dbsp_ledger_event';
+export const DBSP_LEDGER_RESERVATION_TABLE = 'dbsp_ledger_reservation';
+export const DBSP_LEDGER_IDENTITY_TABLE = 'dbsp_ledger_identity';
+export const DBSP_LEDGER_MARKER_TABLE = 'dbsp_ledger_marker';
 export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
 export const DBSP_LOGICAL_IDENTITY_MARKER_COLUMN = 'dbsp_managed_by';
 export const DBSP_LOGICAL_IDENTITY_MARKER_VALUE = `${PG_OPERATION_PACK_ARTIFACT.id}@${PG_OPERATION_PACK_ARTIFACT.version}`;
