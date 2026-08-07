@@ -2191,14 +2191,19 @@ export function createApplier(
 					'run has prior step-attempt events; run dbsp recover instead',
 				);
 			}
+			const nonTransactionalAssumption = plan.assumptions.find(
+				(assumption) => assumption.class === 'non-transactional-segment',
+			);
 			if (
 				plan.segments.some(
 					(segment) => segment.transaction === 'forbids-transaction',
-				)
+				) &&
+				(!nonTransactionalAssumption ||
+					!assumptionAccepted(nonTransactionalAssumption, input.policy))
 			) {
 				return durableRefusal(
 					'transactional-only-refusal',
-					'durable apply executes transactional segments and refuses operations that forbid a transaction block; run was not attempted',
+					"durable apply executes segments that forbid a transaction block only when the plan's non-transactional-segment assumption is accepted; run was not attempted",
 				);
 			}
 			const context = plan.observations.find(
