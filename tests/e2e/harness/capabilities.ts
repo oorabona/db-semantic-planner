@@ -5,6 +5,7 @@ import { getTestPool } from '../testkit/db.js';
 
 export const E2E_CAPABILITIES = [
 	'role-administration',
+	'backend-termination',
 	'container-exec',
 	'standby-topology',
 ] as const;
@@ -55,6 +56,17 @@ async function canAdministerRoles(): Promise<boolean> {
 	return result.rows[0]?.can_administer_roles === true;
 }
 
+async function canTerminateBackends(): Promise<boolean> {
+	const pool = await getTestPool();
+	const result = await pool.query<{ can_terminate_backends: boolean }>(
+		`SELECT rolsuper OR pg_has_role(current_user, 'pg_signal_backend', 'member')
+		   AS can_terminate_backends
+		   FROM pg_catalog.pg_roles
+		  WHERE rolname = current_user`,
+	);
+	return result.rows[0]?.can_terminate_backends === true;
+}
+
 async function canExecuteInRecordedContainer(
 	environment: NodeJS.ProcessEnv,
 ): Promise<boolean> {
@@ -97,6 +109,24 @@ export async function requireE2eCapabilities(
 				}
 				break;
 			}
+			case 'backend-termination': {
+				let available: boolean;
+				try {
+					available = await canTerminateBackends();
+				} catch (error) {
+					throw new E2eCapabilityError(
+						capability,
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				if (!available) {
+					throw new E2eCapabilityError(
+						capability,
+						'current_user is neither a superuser nor a member of pg_signal_backend',
+					);
+				}
+				break;
+			}
 			case 'container-exec': {
 				const reason = localContainerReason(environment);
 				if (reason !== undefined)
@@ -118,18 +148,10 @@ export async function requireE2eCapabilities(
 				const reason = localContainerReason(environment);
 				if (reason !== undefined)
 					throw new E2eCapabilityError(capability, reason);
-				try {
-					if (await canExecuteInRecordedContainer(environment)) break;
-				} catch (error) {
-					throw new E2eCapabilityError(
-						capability,
-						error instanceof Error ? error.message : String(error),
-					);
-				}
-				throw new E2eCapabilityError(
-					capability,
-					`${LOCAL_CONTAINER_ID_ENV} is not reachable by the container runtime`,
-				);
+				// Provisioning a network and two image containers has no cheap faithful
+				// pre-probe. createStreamingStandbyTopology turns every provisioning
+				// failure into E2eCapabilityError('standby-topology', ...).
+				break;
 			}
 			default: {
 				const exhaustive: never = capability;

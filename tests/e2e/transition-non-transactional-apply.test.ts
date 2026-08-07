@@ -1,9 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import type { ModelIR } from '@dbsp/core';
 import type { PoolClient } from 'pg';
 import { describe, expect, it } from 'vitest';
-import { runApply } from '../../packages/cli/src/commands/apply.js';
+import {
+	exitCodeForApplyOutcome,
+	runApply,
+} from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { runRecover } from '../../packages/cli/src/commands/recover.js';
 import {
@@ -16,7 +20,6 @@ import { createSchema, getTestPool } from './testkit/index.js';
 const indexName = 'idx_users_email';
 const POLL_INTERVAL_MS = 100;
 const WAIT_TIMEOUT_MS = 45_000;
-const CLEANUP_TIMEOUT_MS = 4_000;
 const CHILD_TERM_TIMEOUT_MS = 1_500;
 
 interface ManagedResource {
@@ -49,7 +52,12 @@ function waitFor<T>(
 		promise,
 		new Promise<T>((_resolve, reject) => {
 			timeout = setTimeout(
-				() => reject(new Error(`timed out waiting for ${label}`)),
+				() =>
+					reject(
+						new Error(
+							`timed out waiting for ${label}; the operation may still be running`,
+						),
+					),
 				timeoutMs,
 			);
 		}),
@@ -114,20 +122,20 @@ class ResourceStack {
 
 	async dispose(): Promise<Error | undefined> {
 		const failures: Error[] = [];
+		// Each registered disposer owns a separate child process, PostgreSQL backend,
+		// client connection, metadata rows, or schema. A failed bounded disposer is
+		// recorded, but it must not prevent attempts to clean those independent
+		// resources; client/session disposers destroy their connection before schema
+		// cleanup can run.
 		for (const resource of [...this.#resources].reverse()) {
 			try {
-				await waitFor(
-					`disposal of ${resource.name}`,
-					resource.dispose(),
-					CLEANUP_TIMEOUT_MS,
-				);
+				await resource.dispose();
 			} catch (error) {
 				failures.push(
 					new Error(
 						`failed to dispose ${resource.name}: ${errorDetail(error)}; resource remains pending`,
 					),
 				);
-				if (String(error).includes('timed out')) break;
 			}
 		}
 		if (failures.length === 0) return undefined;
@@ -158,17 +166,25 @@ interface BackendIdentity {
 
 async function terminateBackend(backend: BackendIdentity): Promise<void> {
 	const pool = await getTestPool();
-	const terminated = await pool.query<{ terminated: boolean }>(
-		'SELECT pg_catalog.pg_terminate_backend(activity.pid, $3::bigint) AS terminated ' +
-			'FROM pg_catalog.pg_stat_activity activity ' +
-			'WHERE activity.pid = $1 AND activity.backend_start = $2::timestamptz ' +
-			"AND activity.datname = current_database() AND activity.backend_type = 'client backend'",
-		[backend.pid, backend.backendStart, CHILD_TERM_TIMEOUT_MS],
+	const terminated = await waitFor(
+		`termination of PostgreSQL backend ${backend.pid}`,
+		pool.query<{ terminated: boolean }>(
+			'SELECT pg_catalog.pg_terminate_backend(activity.pid, $3::bigint) AS terminated ' +
+				'FROM pg_catalog.pg_stat_activity activity ' +
+				'WHERE activity.pid = $1 AND activity.backend_start = $2::timestamptz ' +
+				"AND activity.datname = current_database() AND activity.backend_type = 'client backend'",
+			[backend.pid, backend.backendStart, CHILD_TERM_TIMEOUT_MS],
+		),
+		CHILD_TERM_TIMEOUT_MS,
 	);
 	if (terminated.rows[0]?.terminated === true) return;
-	const stillActive = await pool.query<{ active: boolean }>(
-		"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE pid = $1 AND backend_start = $2::timestamptz AND datname = current_database() AND backend_type = 'client backend') AS active",
-		[backend.pid, backend.backendStart],
+	const stillActive = await waitFor(
+		`PostgreSQL backend ${backend.pid} activity check`,
+		pool.query<{ active: boolean }>(
+			"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_stat_activity WHERE pid = $1 AND backend_start = $2::timestamptz AND datname = current_database() AND backend_type = 'client backend') AS active",
+			[backend.pid, backend.backendStart],
+		),
+		CHILD_TERM_TIMEOUT_MS,
 	);
 	if (stillActive.rows[0]?.active === true) {
 		throw new Error(`pg_terminate_backend(${backend.pid}) returned false`);
@@ -195,34 +211,23 @@ async function terminateSchemaLockBackends(schema: string): Promise<void> {
 
 async function dropSchemaWithTimeout(schema: string): Promise<void> {
 	const pool = await getTestPool();
-	const resources = new ResourceStack();
-	let client: PoolClient | undefined;
-	let primaryError: unknown;
-	let cleanupError: Error | undefined;
+	const client = await pool.connect();
+	let released = false;
 	try {
-		client = await pool.connect();
-		resources.register('short-timeout schema-drop client', async () => {
-			client?.release();
-		});
 		await client.query('BEGIN');
 		await client.query("SET LOCAL lock_timeout = '750ms'");
 		await client.query("SET LOCAL statement_timeout = '2s'");
 		await client.query(`DROP SCHEMA IF EXISTS ${quoteIdent(schema)} CASCADE`);
 		await client.query('COMMIT');
 	} catch (error) {
-		primaryError = error;
-		await client?.query('ROLLBACK').catch(() => undefined);
+		// Closing the pinned session aborts any open transaction without an
+		// unbounded rollback await.
+		client.release(true);
+		released = true;
+		throw error;
 	} finally {
-		cleanupError = await resources.dispose();
+		if (!released) client.release(true);
 	}
-	if (primaryError !== undefined && cleanupError !== undefined) {
-		throw new AggregateError(
-			[asError(primaryError), cleanupError],
-			'schema-drop operation and cleanup both failed',
-		);
-	}
-	if (primaryError !== undefined) throw primaryError;
-	if (cleanupError !== undefined) throw cleanupError;
 }
 
 async function schemaBlockingDiagnostics(schema: string): Promise<string> {
@@ -320,8 +325,9 @@ class Scenario {
 		const resource = this.#resources.register(
 			'snapshot blocker session',
 			async () => {
-				await client.query('ROLLBACK').catch(() => undefined);
-				client.release();
+				// Destroying this owned session is a bounded rollback and avoids leaving
+				// a lock-bearing query alive if a cleanup await is interrupted.
+				client.release(true);
 			},
 		);
 		await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');
@@ -338,7 +344,7 @@ class Scenario {
 		const pool = await getTestPool();
 		const client = await pool.connect();
 		const resource = this.#resources.register('writer client', async () => {
-			client.release();
+			client.release(true);
 		});
 		return { client, resource };
 	}
@@ -348,8 +354,12 @@ class Scenario {
 	): CheckpointChild {
 		this.observeRunId(plan.runId);
 		const child = spawnCheckpointChild(
-			new URL('./transition-non-transactional-apply-child.ts', import.meta.url)
-				.pathname,
+			fileURLToPath(
+				new URL(
+					'./transition-non-transactional-apply-child.ts',
+					import.meta.url,
+				),
+			),
 			{
 				args: [plan.runId, plan.planDigest, this.schema],
 				env: {
@@ -565,7 +575,7 @@ describe('SC-03 #481 non-transactional durable admission', () => {
 });
 
 describeWithE2eCapabilities(
-	[],
+	['backend-termination'],
 	'SC-02, SC-04, SC-05 and SC-06 #481 non-transactional recovery',
 	() => {
 		it('SC-02: accepts a 200k-row segment while a writer commits in its witnessed window', async () => {
@@ -586,12 +596,18 @@ describeWithE2eCapabilities(
 				await writer.resource.dispose();
 				await child.acknowledge('after-statement-sent');
 				await blocker.resource.dispose();
-				expect(
-					await waitFor('successful apply child exit', child.exited),
-				).toMatchObject({
+				const childExit = await waitFor(
+					'successful apply child exit',
+					child.exited,
+				);
+				expect(childExit).toMatchObject({
 					code: 0,
 					signal: null,
 				});
+				// The child maps the durable outcome it observed to the apply contract's
+				// exact exit code, so this is evidence of "completed", not merely a
+				// process that happened to exit cleanly.
+				expect(childExit.code).toBe(exitCodeForApplyOutcome('completed'));
 				await waitForIndex(
 					scenario.schema,
 					(row) => row.indisvalid && row.indisready,

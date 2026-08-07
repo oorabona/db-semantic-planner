@@ -51,39 +51,14 @@ function qualified(schema: string, name: string): string {
 	return `${quoteIdentifier(schema)}.${quoteIdentifier(name)}`;
 }
 
-async function dropFailpointObjects(
-	queryable: SqlQueryable,
-	triggerName: string,
-	tableReference: string,
-	functionReference: string,
-	sequence: string,
-): Promise<void> {
-	const failures: Error[] = [];
-	for (const statement of [
-		`DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference}`,
-		`DROP FUNCTION IF EXISTS ${functionReference}()`,
-		`DROP SEQUENCE IF EXISTS ${sequence}`,
-	]) {
-		try {
-			await queryable.query(statement);
-		} catch (error) {
-			failures.push(error instanceof Error ? error : new Error(String(error)));
-		}
-	}
-	if (failures.length > 0) {
-		throw new AggregateError(
-			failures,
-			'failed to remove E2E failpoint objects',
-		);
-	}
-}
-
 /**
  * Install a server-side, one-shot trigger for one exact inserted column value.
  *
  * The sequence is intentional: nextval is not rolled back when the trigger
  * raises, so the targeted failed INSERT consumes the only firing value. A
- * second matching INSERT reaches the trigger but cannot fire it again.
+ * second matching INSERT reaches the trigger but cannot fire it again. The
+ * trigger function is SECURITY DEFINER, so an application role needs INSERT on
+ * the target table but not USAGE on this private harness sequence.
  */
 export async function armOneShotInsertFailpoint(
 	queryable: SqlQueryable,
@@ -99,13 +74,16 @@ export async function armOneShotInsertFailpoint(
 	const functionReference = qualified(target.schema, functionName);
 	const tableReference = qualified(target.schema, target.table);
 
-	try {
-		await queryable.query('BEGIN');
-		await queryable.query(`CREATE SEQUENCE ${sequence} START WITH 1`);
-		await queryable.query(`
+	// A Pool checks out a client for each query. One simple multi-statement query
+	// is therefore deliberately used here: PostgreSQL executes it in one implicit
+	// transaction without pinning a pooled client or leaving a failed arm behind.
+	await queryable.query(`
+		CREATE SEQUENCE ${sequence} START WITH 1;
 		CREATE FUNCTION ${functionReference}()
 		RETURNS trigger
 		LANGUAGE plpgsql
+		SECURITY DEFINER
+		SET search_path = pg_catalog
 		AS $dbsp_failpoint$
 		BEGIN
 			IF nextval(${quoteLiteral(sequence)}::regclass) = 1 THEN
@@ -113,39 +91,13 @@ export async function armOneShotInsertFailpoint(
 			END IF;
 			RETURN NEW;
 		END;
-		$dbsp_failpoint$
-		`);
-		await queryable.query(`
+		$dbsp_failpoint$;
 		CREATE TRIGGER ${quoteIdentifier(triggerName)}
 		BEFORE INSERT ON ${tableReference}
 		FOR EACH ROW
 		WHEN (NEW.${quoteIdentifier(target.column)} IS NOT DISTINCT FROM ${sqlLiteral(target.value)})
-		EXECUTE FUNCTION ${functionReference}()
+		EXECUTE FUNCTION ${functionReference}();
 		`);
-		await queryable.query('COMMIT');
-	} catch (error) {
-		await queryable.query('ROLLBACK').catch(() => undefined);
-		try {
-			await dropFailpointObjects(
-				queryable,
-				triggerName,
-				tableReference,
-				functionReference,
-				sequence,
-			);
-		} catch (cleanupError) {
-			throw new AggregateError(
-				[
-					error instanceof Error ? error : new Error(String(error)),
-					cleanupError instanceof Error
-						? cleanupError
-						: new Error(String(cleanupError)),
-				],
-				'failed to arm E2E failpoint and remove partial objects',
-			);
-		}
-		throw error;
-	}
 
 	const hasFired = async (): Promise<boolean> => {
 		const result = await queryable.query<{ is_called: boolean }>(
@@ -164,13 +116,11 @@ export async function armOneShotInsertFailpoint(
 			throw new Error(`E2E failpoint "${name}" was armed but did not fire`);
 		},
 		async disarm(): Promise<void> {
-			await dropFailpointObjects(
-				queryable,
-				triggerName,
-				tableReference,
-				functionReference,
-				sequence,
-			);
+			await queryable.query(`
+				DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference};
+				DROP FUNCTION IF EXISTS ${functionReference}();
+				DROP SEQUENCE IF EXISTS ${sequence};
+			`);
 		},
 	};
 }

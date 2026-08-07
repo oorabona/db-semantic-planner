@@ -26,7 +26,7 @@ function commandFailure(
 	result: ExecResult,
 ): ContainerCommandFailure {
 	const error = new Error(
-		`E2E container exec failed with exit ${result.exitCode}: ${command.join(' ')}\n${result.stderr}`,
+		`E2E container exec failed with exit ${result.exitCode} (${command[0] ?? 'empty command'}; ${command.length} arguments)\n${result.stderr}`,
 	) as ContainerCommandFailure;
 	Object.defineProperty(error, 'result', { value: result, enumerable: true });
 	return error;

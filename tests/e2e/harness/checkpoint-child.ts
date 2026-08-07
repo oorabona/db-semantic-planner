@@ -54,7 +54,8 @@ export async function checkpoint(name: string): Promise<void> {
 	if (name.length === 0) {
 		throw new Error('E2E checkpoint names must not be empty');
 	}
-	if (typeof process.send !== 'function' || !process.connected) {
+	const send = process.send;
+	if (typeof send !== 'function' || !process.connected) {
 		throw new Error(
 			`E2E checkpoint "${name}" requires a child_process.fork IPC channel`,
 		);
@@ -83,10 +84,19 @@ export async function checkpoint(name: string): Promise<void> {
 
 		process.on('message', onMessage);
 		process.once('disconnect', onDisconnect);
-		process.send?.({ type: CHECKPOINT_REACHED, checkpoint: name }, (error) => {
-			if (error === null || error === undefined) return;
+		try {
+			send.call(
+				process,
+				{ type: CHECKPOINT_REACHED, checkpoint: name },
+				(error) => {
+					if (error === null || error === undefined) return;
+					cleanup();
+					reject(error);
+				},
+			);
+		} catch (error) {
 			cleanup();
 			reject(error);
-		});
+		}
 	});
 }

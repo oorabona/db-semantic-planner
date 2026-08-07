@@ -65,7 +65,6 @@ export function spawnCheckpointChild(
 	} satisfies ForkOptions);
 
 	let activeCheckpoint: string | undefined;
-	let acknowledging = false;
 	let exitState: CheckpointChildExit | undefined;
 	let checkpointWaiter:
 		| {
@@ -85,7 +84,7 @@ export function spawnCheckpointChild(
 			checkpointWaiter.reject(
 				reason ??
 					checkpointProtocolError(
-						`child exited before reaching "${checkpointWaiter.expected}"`,
+						`child exited before reaching "${checkpointWaiter.expected}" (exit code ${exit.code}, signal ${exit.signal})`,
 					),
 			);
 			checkpointWaiter = undefined;
@@ -140,7 +139,7 @@ export function spawnCheckpointChild(
 		}
 		if (exitState !== undefined) {
 			throw checkpointProtocolError(
-				`child exited before reaching "${expected}"`,
+				`child exited before reaching "${expected}" (exit code ${exitState.code}, signal ${exitState.signal})`,
 			);
 		}
 		await new Promise<void>((resolveWait, rejectWait) => {
@@ -158,28 +157,19 @@ export function spawnCheckpointChild(
 				`cannot acknowledge "${checkpoint}" while child is at "${activeCheckpoint ?? 'no checkpoint'}"`,
 			);
 		}
-		if (acknowledging) {
-			throw checkpointProtocolError(`already acknowledging "${checkpoint}"`);
-		}
 		const message: CheckpointAckMessage = {
 			type: CHECKPOINT_ACK,
 			checkpoint,
 		};
-		acknowledging = true;
+		// The child can reach its next checkpoint as soon as it receives this
+		// message. Queueing is the acknowledgement boundary; no send callback is
+		// involved in checkpoint state, so the next receipt cannot overwrite it.
+		activeCheckpoint = undefined;
 		try {
-			await new Promise<void>((resolveAck, rejectAck) => {
-				try {
-					child.send(message, (error) => {
-						if (error === null || error === undefined) resolveAck();
-						else rejectAck(error);
-					});
-				} catch (error) {
-					rejectAck(error);
-				}
-			});
-			activeCheckpoint = undefined;
-		} finally {
-			acknowledging = false;
+			child.send(message);
+		} catch (error) {
+			if (activeCheckpoint === undefined) activeCheckpoint = checkpoint;
+			throw error;
 		}
 	};
 

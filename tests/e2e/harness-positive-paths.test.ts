@@ -82,7 +82,7 @@ describeWithE2eCapabilities(
 			const topology = await createStreamingStandbyTopology();
 			try {
 				const state = await topology.standbyPool.query<{ streaming: boolean }>(
-					'SELECT pg_catalog.pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_catalog.pg_stat_wal_receiver) AS streaming',
+					"SELECT pg_catalog.pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_catalog.pg_stat_wal_receiver WHERE status = 'streaming') AS streaming",
 				);
 				expect(state.rows[0]?.streaming).toBe(true);
 			} finally {

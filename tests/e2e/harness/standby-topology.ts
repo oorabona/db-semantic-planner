@@ -48,7 +48,7 @@ async function checkedExec(
 	const result = await container.exec([...command]);
 	if (result.exitCode === 0) return;
 	throw new Error(
-		`container command failed with exit ${result.exitCode}: ${command.join(' ')}\n${result.stderr}`,
+		`container command failed with exit ${result.exitCode} (${command[0] ?? 'empty command'}; ${command.length} arguments)\n${result.stderr}`,
 	);
 }
 
@@ -140,14 +140,14 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			'-d',
 			POSTGRES_DATABASE,
 			'-c',
-			`CREATE ROLE ${REPLICATION_ROLE} WITH REPLICATION LOGIN PASSWORD '${password}'`,
+			`SET password_encryption = 'scram-sha-256'; CREATE ROLE ${REPLICATION_ROLE} WITH REPLICATION LOGIN PASSWORD '${password}'`,
 		]);
 		await checkedExec(primary, [
 			'bash',
 			'-lc',
 			[
 				`hba_file="$(psql -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE} -Atc 'SHOW hba_file')"`,
-				`printf '%s\\n' 'host replication ${REPLICATION_ROLE} all trust' >> "$hba_file"`,
+				`printf '%s\\n' 'host replication ${REPLICATION_ROLE} all scram-sha-256' >> "$hba_file"`,
 				`psql -v ON_ERROR_STOP=1 -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE} -c 'SELECT pg_reload_conf()'`,
 			].join('\n'),
 		]);
@@ -174,7 +174,7 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			.withHealthCheck({
 				test: [
 					'CMD-SHELL',
-					'psql -U postgres -d postgres -tAc "SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver)" | grep -qx t',
+					`psql -U postgres -d postgres -tAc "SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming')" | grep -qx t`,
 				],
 				interval: 500,
 				timeout: 1_000,
@@ -189,10 +189,10 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 		standbyPool = postgresPool(standby, password);
 		const [primaryState, standbyState] = await Promise.all([
 			primaryPool.query<{ receiving: boolean }>(
-				'SELECT EXISTS (SELECT 1 FROM pg_stat_replication) AS receiving',
+				"SELECT EXISTS (SELECT 1 FROM pg_stat_replication WHERE state = 'streaming') AS receiving",
 			),
 			standbyPool.query<{ streaming: boolean }>(
-				'SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver) AS streaming',
+				"SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming') AS streaming",
 			),
 		]);
 		if (
