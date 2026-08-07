@@ -240,6 +240,12 @@ export {
 	type LedgerChainProjectionInput,
 	projectLedgerChain,
 } from './lifecycle-interpreter.js';
+export {
+	admitOutcomeClaim,
+	claimIdForToken,
+	consumeClaimToken,
+	mintClaimToken,
+} from './outcome-protocol.js';
 export { transitionPlanDigest } from './plan-digest.js';
 export { createProver } from './prover.js';
 export {

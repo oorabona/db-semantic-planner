@@ -14,6 +14,7 @@ export * from './json.js';
 export * from './ledger.js';
 export * from './observation.js';
 export * from './operation.js';
+export * from './outcome-protocol.js';
 export * from './plan.js';
 export * from './policy.js';
 export * from './projection.js';

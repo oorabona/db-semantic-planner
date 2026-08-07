@@ -37,14 +37,17 @@ describe('SC-30 lifecycle producer inventory', () => {
 			producerFiles(/export function projectLedgerChain\b/),
 		).resolves.toEqual(['lifecycle-interpreter.ts']);
 
-		// Units 7 and 11 add these producers. Until then the inventory enforces
-		// uniqueness whenever a producer exists without pretending it exists now.
-		for (const pattern of [
+		// Unit 7 supplies the token producer. Its module may consume the grammar,
+		// but no second layer may mint an execution capability.
+		await expect(
+			producerFiles(/export function mintClaimToken\b/),
+		).resolves.toEqual(['outcome-protocol.ts']);
+
+		// Unit 11 adds this producer later; retain its conditional inventory until
+		// that layer exists without pretending it exists today.
+		const destructive = await producerFiles(
 			/export function (?:create|decide)DestructiveDecision\b/,
-			/export function (?:create|mint)ClaimToken\b/,
-		]) {
-			const producers = await producerFiles(pattern);
-			if (producers.length > 0) expect(producers).toHaveLength(1);
-		}
+		);
+		if (destructive.length > 0) expect(destructive).toHaveLength(1);
 	});
 });
