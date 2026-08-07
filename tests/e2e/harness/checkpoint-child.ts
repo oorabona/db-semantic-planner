@@ -21,6 +21,8 @@ export interface CheckpointAckMessage {
 
 export type CheckpointMessage = CheckpointReachedMessage | CheckpointAckMessage;
 
+let activeCheckpoint: string | undefined;
+
 export function isCheckpointReachedMessage(
 	message: unknown,
 ): message is CheckpointReachedMessage {
@@ -54,6 +56,11 @@ export async function checkpoint(name: string): Promise<void> {
 	if (name.length === 0) {
 		throw new Error('E2E checkpoint names must not be empty');
 	}
+	if (activeCheckpoint !== undefined) {
+		throw new Error(
+			`E2E checkpoint "${name}" cannot run while "${activeCheckpoint}" is awaiting acknowledgement`,
+		);
+	}
 	const send = process.send;
 	if (typeof send !== 'function' || !process.connected) {
 		throw new Error(
@@ -61,42 +68,47 @@ export async function checkpoint(name: string): Promise<void> {
 		);
 	}
 
-	await new Promise<void>((resolve, reject) => {
-		const onMessage = (message: unknown): void => {
-			if (!isCheckpointAckMessage(message) || message.checkpoint !== name) {
-				return;
-			}
-			cleanup();
-			resolve();
-		};
-		const onDisconnect = (): void => {
-			cleanup();
-			reject(
-				new Error(
-					`E2E checkpoint "${name}" lost its parent before acknowledgement`,
-				),
-			);
-		};
-		const cleanup = (): void => {
-			process.off('message', onMessage);
-			process.off('disconnect', onDisconnect);
-		};
+	activeCheckpoint = name;
+	try {
+		await new Promise<void>((resolve, reject) => {
+			const onMessage = (message: unknown): void => {
+				if (!isCheckpointAckMessage(message) || message.checkpoint !== name) {
+					return;
+				}
+				cleanup();
+				resolve();
+			};
+			const onDisconnect = (): void => {
+				cleanup();
+				reject(
+					new Error(
+						`E2E checkpoint "${name}" lost its parent before acknowledgement`,
+					),
+				);
+			};
+			const cleanup = (): void => {
+				process.off('message', onMessage);
+				process.off('disconnect', onDisconnect);
+			};
 
-		process.on('message', onMessage);
-		process.once('disconnect', onDisconnect);
-		try {
-			send.call(
-				process,
-				{ type: CHECKPOINT_REACHED, checkpoint: name },
-				(error) => {
-					if (error === null || error === undefined) return;
-					cleanup();
-					reject(error);
-				},
-			);
-		} catch (error) {
-			cleanup();
-			reject(error);
-		}
-	});
+			process.on('message', onMessage);
+			process.once('disconnect', onDisconnect);
+			try {
+				send.call(
+					process,
+					{ type: CHECKPOINT_REACHED, checkpoint: name },
+					(error) => {
+						if (error === null || error === undefined) return;
+						cleanup();
+						reject(error);
+					},
+				);
+			} catch (error) {
+				cleanup();
+				reject(error);
+			}
+		});
+	} finally {
+		activeCheckpoint = undefined;
+	}
 }

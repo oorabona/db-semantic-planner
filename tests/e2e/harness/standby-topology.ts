@@ -17,6 +17,11 @@ const POSTGRES_USER = 'postgres';
 const POSTGRES_DATABASE = 'postgres';
 const REPLICATION_ROLE = 'dbsp_e2e_replication';
 const LOG_TAIL_MAX_CHARS = 8_000;
+const STANDBY_STARTUP_TIMEOUT_MS = 30_000;
+const STANDBY_HEALTH_INTERVAL_MS = 500;
+// 60 x 500 ms covers the full declared 30 s startup budget.
+const STANDBY_HEALTH_RETRIES =
+	STANDBY_STARTUP_TIMEOUT_MS / STANDBY_HEALTH_INTERVAL_MS;
 
 export interface StreamingStandbyTopology {
 	readonly primary: StartedTestContainer;
@@ -176,11 +181,11 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 					'CMD-SHELL',
 					`psql -U postgres -d postgres -tAc "SELECT pg_is_in_recovery() AND EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming')" | grep -qx t`,
 				],
-				interval: 500,
+				interval: STANDBY_HEALTH_INTERVAL_MS,
 				timeout: 1_000,
-				retries: 20,
+				retries: STANDBY_HEALTH_RETRIES,
 			})
-			.withStartupTimeout(30_000)
+			.withStartupTimeout(STANDBY_STARTUP_TIMEOUT_MS)
 			.withWaitStrategy(Wait.forHealthCheck())
 			.start();
 		starting = undefined;
@@ -271,12 +276,17 @@ export async function createStreamingStandbyTopology(): Promise<StreamingStandby
 			cleanupError = cleanupFailure;
 		}
 		if (cleanupError !== undefined) {
-			throw new AggregateError(
+			const combinedFailure = new AggregateError(
 				[
 					error instanceof Error ? error : new Error(String(error)),
 					cleanupError,
 				],
 				'failed to create and clean up streaming standby topology',
+			);
+			throw new E2eCapabilityError(
+				'standby-topology',
+				`${error instanceof Error ? error.message : String(error)}${readinessLogTail}; cleanup also failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,
+				combinedFailure,
 			);
 		}
 		if (error instanceof E2eCapabilityError) throw error;

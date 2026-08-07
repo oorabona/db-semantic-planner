@@ -66,6 +66,7 @@ export function spawnCheckpointChild(
 
 	let activeCheckpoint: string | undefined;
 	let exitState: CheckpointChildExit | undefined;
+	let childError: Error | undefined;
 	let checkpointWaiter:
 		| {
 				readonly expected: string;
@@ -119,13 +120,15 @@ export function spawnCheckpointChild(
 		settleExit({ code, signal });
 	});
 	child.once('error', (error) => {
-		settleExit(
-			{ code: null, signal: null },
-			checkpointProtocolError(`failed to spawn child: ${error.message}`),
-		);
+		childError = error;
+		if (checkpointWaiter !== undefined) {
+			checkpointWaiter.reject(error);
+			checkpointWaiter = undefined;
+		}
 	});
 
 	const waitForCheckpoint = async (expected: string): Promise<void> => {
+		if (childError !== undefined) throw childError;
 		if (activeCheckpoint === expected) return;
 		if (activeCheckpoint !== undefined) {
 			throw checkpointProtocolError(
@@ -152,6 +155,7 @@ export function spawnCheckpointChild(
 	};
 
 	const acknowledge = async (checkpoint: string): Promise<void> => {
+		if (childError !== undefined) throw childError;
 		if (activeCheckpoint !== checkpoint) {
 			throw checkpointProtocolError(
 				`cannot acknowledge "${checkpoint}" while child is at "${activeCheckpoint ?? 'no checkpoint'}"`,

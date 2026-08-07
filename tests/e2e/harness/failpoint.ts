@@ -116,11 +116,26 @@ export async function armOneShotInsertFailpoint(
 			throw new Error(`E2E failpoint "${name}" was armed but did not fire`);
 		},
 		async disarm(): Promise<void> {
-			await queryable.query(`
-				DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference};
-				DROP FUNCTION IF EXISTS ${functionReference}();
-				DROP SEQUENCE IF EXISTS ${sequence};
-			`);
+			const cleanup = await Promise.allSettled([
+				queryable.query(`
+					DO $dbsp_failpoint_cleanup$
+					BEGIN
+						IF to_regclass(${quoteLiteral(tableReference)}) IS NOT NULL THEN
+							EXECUTE ${quoteLiteral(`DROP TRIGGER IF EXISTS ${quoteIdentifier(triggerName)} ON ${tableReference}`)};
+						END IF;
+					END
+					$dbsp_failpoint_cleanup$;
+				`),
+				queryable.query(`DROP FUNCTION IF EXISTS ${functionReference}()`),
+				queryable.query(`DROP SEQUENCE IF EXISTS ${sequence}`),
+			]);
+			const failures = cleanup.flatMap((result) =>
+				result.status === 'rejected' ? [result.reason] : [],
+			);
+			if (failures.length === 1) throw failures[0];
+			if (failures.length > 1) {
+				throw new AggregateError(failures, 'E2E failpoint cleanup failed');
+			}
 		},
 	};
 }

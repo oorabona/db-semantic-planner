@@ -2191,15 +2191,17 @@ export function createApplier(
 					'run has prior step-attempt events; run dbsp recover instead',
 				);
 			}
-			const nonTransactionalAssumption = plan.assumptions.find(
+			const nonTransactionalAssumptions = plan.assumptions.filter(
 				(assumption) => assumption.class === 'non-transactional-segment',
 			);
 			if (
 				plan.segments.some(
 					(segment) => segment.transaction === 'forbids-transaction',
 				) &&
-				(!nonTransactionalAssumption ||
-					!assumptionAccepted(nonTransactionalAssumption, input.policy))
+				(nonTransactionalAssumptions.length === 0 ||
+					!nonTransactionalAssumptions.every((assumption) =>
+						assumptionAccepted(assumption, input.policy),
+					))
 			) {
 				return durableRefusal(
 					'transactional-only-refusal',

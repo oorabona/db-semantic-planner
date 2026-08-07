@@ -21,6 +21,9 @@ const indexName = 'idx_users_email';
 const POLL_INTERVAL_MS = 100;
 const WAIT_TIMEOUT_MS = 45_000;
 const CHILD_TERM_TIMEOUT_MS = 1_500;
+// Worst case: four sequential 45 s waits (checkpoints, witness/index polling,
+// child exit, and final catalog polling) plus one minute for setup and cleanup.
+const SCENARIO_TIMEOUT_MS = 4 * WAIT_TIMEOUT_MS + 60_000;
 
 interface ManagedResource {
 	readonly dispose: () => Promise<void>;
@@ -692,4 +695,5 @@ describeWithE2eCapabilities(
 			});
 		});
 	},
+	SCENARIO_TIMEOUT_MS,
 );

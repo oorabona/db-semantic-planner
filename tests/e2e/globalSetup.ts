@@ -46,6 +46,10 @@ export async function setup(): Promise<void> {
 		);
 		return;
 	}
+	// This branch owns local-container provenance. Clear inherited values before
+	// probing so any later failure cannot expose an unrelated prior container.
+	delete process.env[LOCAL_CONTAINER_ENV];
+	delete process.env[LOCAL_CONTAINER_ID_ENV];
 
 	// Check Docker/Podman availability (works with or without DOCKER_HOST)
 	const dockerAvailable = await isDockerAvailable();
@@ -95,6 +99,8 @@ export async function setup(): Promise<void> {
 
 		console.log(`✅ PostgreSQL container started at ${connectionUri}\n`);
 	} catch (error) {
+		delete process.env[LOCAL_CONTAINER_ENV];
+		delete process.env[LOCAL_CONTAINER_ID_ENV];
 		console.error('\n❌ Failed to start PostgreSQL container:', error);
 		console.warn('\n⚠️  E2E database tests will be skipped.\n');
 		return;

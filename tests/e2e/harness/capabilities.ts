@@ -15,9 +15,10 @@ export type E2eCapability = (typeof E2E_CAPABILITIES)[number];
 export class E2eCapabilityError extends Error {
 	readonly capability: E2eCapability;
 
-	constructor(capability: E2eCapability, reason: string) {
+	constructor(capability: E2eCapability, reason: string, cause?: unknown) {
 		super(
 			`E2E capability "${capability}" is required but unavailable: ${reason}`,
+			{ cause },
 		);
 		this.name = 'E2eCapabilityError';
 		this.capability = capability;
@@ -148,10 +149,18 @@ export async function requireE2eCapabilities(
 				const reason = localContainerReason(environment);
 				if (reason !== undefined)
 					throw new E2eCapabilityError(capability, reason);
-				// Provisioning a network and two image containers has no cheap faithful
-				// pre-probe. createStreamingStandbyTopology turns every provisioning
-				// failure into E2eCapabilityError('standby-topology', ...).
-				break;
+				try {
+					if (await canExecuteInRecordedContainer(environment)) break;
+				} catch (error) {
+					throw new E2eCapabilityError(
+						capability,
+						error instanceof Error ? error.message : String(error),
+					);
+				}
+				throw new E2eCapabilityError(
+					capability,
+					`${LOCAL_CONTAINER_ID_ENV} is not reachable by the container runtime`,
+				);
 			}
 			default: {
 				const exhaustive: never = capability;
@@ -170,11 +179,16 @@ export function describeWithE2eCapabilities(
 	requirements: readonly E2eCapability[],
 	name: string,
 	define: () => void,
+	timeout?: number,
 ): void {
-	describe(name, () => {
-		beforeAll(async () => {
-			await requireE2eCapabilities(requirements);
-		});
-		define();
-	});
+	describe(
+		name,
+		() => {
+			beforeAll(async () => {
+				await requireE2eCapabilities(requirements);
+			});
+			define();
+		},
+		timeout,
+	);
 }
