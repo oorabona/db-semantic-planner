@@ -1150,10 +1150,21 @@ describe('resumeTransitionRun', () => {
 		expect(result.assessment.decision).toBe('blocked');
 	});
 
-	it('fails closed on non-atomic intent without confirmable completion', async () => {
+	it('reports an unknown non-atomic outcome despite an unaccepted execution-admission assumption', async () => {
 		const base = planShape();
 		const plan: ProvenPlanShape = {
 			...base,
+			assumptions: [
+				...base.assumptions,
+				{
+					id: 'mock.non-transactional-segment' as Assumption['id'],
+					class: 'non-transactional-segment',
+					asserter: { kind: 'pack', artifact },
+					statement:
+						'The plan contains a segment that must execute outside a transaction block.',
+					scope: base.assumptions[0]!.scope,
+				},
+			],
 			segments: [
 				{
 					...base.segments[0]!,
