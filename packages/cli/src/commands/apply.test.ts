@@ -128,6 +128,78 @@ describe('dbsp apply contract and policy', () => {
 		).toThrow('acceptance[1].withinScope[0].within.kind');
 	});
 
+	it('accepts an opaque versioned catalogue identity envelope without interpreting its payload', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'other-engine',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'other-engine',
+								format: 2,
+								value: { opaque: ['payload'] },
+							},
+						},
+					},
+				],
+			}),
+		).not.toThrow();
+	});
+
+	it('rejects a malformed catalogue identity envelope with its address path', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'postgresql',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'postgresql',
+								format: 0,
+								value: {},
+							},
+						},
+					},
+				],
+			}),
+		).toThrow('acceptance.withinScope[0].within.catalogueIdentity.format');
+	});
+
+	it('rejects an extraneous catalogue identity field as catalogue identity input', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'postgresql',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'postgresql',
+								format: 1,
+								value: {},
+								oid: '100',
+							},
+						},
+					},
+				],
+			}),
+		).toThrow(
+			'acceptance.withinScope[0].within.catalogueIdentity.oid is not a valid catalogue identity field',
+		);
+	});
+
 	it('mutation: policy digest changes with object spelling or duplicate selector order', () => {
 		const first = canonicalApplyPolicy([
 			{

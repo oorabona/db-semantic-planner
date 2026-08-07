@@ -102,9 +102,17 @@ export async function readPgCatalogueIdentity(
 				...address,
 				parent: {
 					...address.parent,
-					catalogueIdentity: { kind: 'oid', oid: parentOid },
+					catalogueIdentity: {
+						engine: 'postgresql',
+						format: 1,
+						value: { oid: parentOid },
+					},
 				},
-				catalogueIdentity: { kind: 'column', parentOid, name: address.name },
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { parentOid, name: address.name },
+				},
 			};
 		}
 		default:
@@ -118,5 +126,12 @@ export async function readPgCatalogueIdentity(
 		throw new Error(
 			`PostgreSQL returned an invalid OID for ${address.kind} ${address.name}`,
 		);
-	return { ...address, catalogueIdentity: { kind: 'oid', oid: value } };
+	return {
+		...address,
+		catalogueIdentity: {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: value },
+		},
+	};
 }

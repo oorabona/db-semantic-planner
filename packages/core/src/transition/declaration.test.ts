@@ -106,13 +106,48 @@ describe('managed declaration slicing', () => {
 			schema: 'public',
 			kind: 'table',
 			name: 'users',
-			catalogueIdentity: { kind: 'oid' as const, oid: '100' },
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '100' },
+			},
 		};
 		const result = admitRecordedIdentity(recorded, {
 			...recorded,
-			catalogueIdentity: { kind: 'oid', oid: '200' },
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '200' },
+			},
 		});
 		expect(result).toEqual({
+			ok: false,
+			detail: expect.stringContaining('identity drift for table users'),
+		});
+	});
+
+	it('SC-24: refuses admission when the adapter identity format changes', () => {
+		const recorded = {
+			engine: 'postgresql',
+			database: 'db',
+			schema: 'public',
+			kind: 'table',
+			name: 'users',
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '100' },
+			},
+		};
+		expect(
+			admitRecordedIdentity(recorded, {
+				...recorded,
+				catalogueIdentity: {
+					...recorded.catalogueIdentity,
+					format: 2,
+				},
+			}),
+		).toEqual({
 			ok: false,
 			detail: expect.stringContaining('identity drift for table users'),
 		});

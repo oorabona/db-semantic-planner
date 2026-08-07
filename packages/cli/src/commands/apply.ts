@@ -95,12 +95,11 @@ function exactKeys(
 	record: Record<string, unknown>,
 	allowed: readonly string[],
 	path: string,
+	subject = 'AssumptionAcceptance',
 ): void {
 	for (const key of Object.keys(record)) {
 		if (!allowed.includes(key))
-			throw new Error(
-				`${path}.${key} is not a valid AssumptionAcceptance field`,
-			);
+			throw new Error(`${path}.${key} is not a valid ${subject} field`);
 	}
 }
 
@@ -140,20 +139,31 @@ function validateResourceAddress(
 			candidate.catalogueIdentity,
 			`${path}.catalogueIdentity`,
 		);
-		nonEmptyString(identity.kind, `${path}.catalogueIdentity.kind`);
-		if (identity.kind === 'oid') {
-			exactKeys(identity, ['kind', 'oid'], `${path}.catalogueIdentity`);
-			nonEmptyString(identity.oid, `${path}.catalogueIdentity.oid`);
-		} else if (identity.kind === 'column') {
-			exactKeys(
-				identity,
-				['kind', 'parentOid', 'name'],
-				`${path}.catalogueIdentity`,
+		exactKeys(
+			identity,
+			['engine', 'format', 'value'],
+			`${path}.catalogueIdentity`,
+			'catalogue identity',
+		);
+		nonEmptyString(identity.engine, `${path}.catalogueIdentity.engine`);
+		if (
+			typeof identity.format !== 'number' ||
+			!Number.isInteger(identity.format) ||
+			identity.format <= 0
+		)
+			throw new Error(
+				`${path}.catalogueIdentity.format must be a positive integer`,
 			);
-			nonEmptyString(identity.parentOid, `${path}.catalogueIdentity.parentOid`);
-			nonEmptyString(identity.name, `${path}.catalogueIdentity.name`);
-		} else {
-			throw new Error(`${path}.catalogueIdentity.kind must be oid or column`);
+		const identityValue = record(
+			identity.value,
+			`${path}.catalogueIdentity.value`,
+		);
+		try {
+			canonicalJson(identityValue);
+		} catch (error) {
+			throw new Error(
+				`${path}.catalogueIdentity.value must be a canonicalizable JSON object: ${errorDetail(error)}`,
+			);
 		}
 	}
 	if (candidate.qualifiedBy !== undefined) {

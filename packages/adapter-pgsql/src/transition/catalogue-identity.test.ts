@@ -38,7 +38,11 @@ describe('PostgreSQL managed catalogue identities', () => {
 			name: `${kind}_name`,
 			...(kind === 'index' || kind === 'constraint' ? { parent: table } : {}),
 		});
-		expect(result?.catalogueIdentity).toEqual({ kind: 'oid', oid: row.oid });
+		expect(result?.catalogueIdentity).toEqual({
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: row.oid },
+		});
 		expect(query.calls).toHaveLength(1);
 	});
 
@@ -52,11 +56,17 @@ describe('PostgreSQL managed catalogue identities', () => {
 		});
 		expect(result).toMatchObject({
 			catalogueIdentity: {
-				kind: 'column',
-				parentOid: '42',
-				name: 'customer_id',
+				engine: 'postgresql',
+				format: 1,
+				value: { parentOid: '42', name: 'customer_id' },
 			},
-			parent: { catalogueIdentity: { kind: 'oid', oid: '42' } },
+			parent: {
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
+			},
 		});
 	});
 });

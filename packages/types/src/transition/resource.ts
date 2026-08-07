@@ -1,3 +1,5 @@
+import type { JsonObject } from './json.js';
+
 /** The managed catalogue kinds. This union is intentionally closed. */
 export type DeclarableKind =
 	| 'table'
@@ -8,20 +10,12 @@ export type DeclarableKind =
 	| 'sequence'
 	| 'extension';
 
-/** PostgreSQL identifies every managed object except a column by its OID. */
-export interface OidCatalogueIdentity {
-	readonly kind: 'oid';
-	readonly oid: string;
+/** Adapter-owned, versioned durable catalogue identity. */
+export interface CatalogueIdentity {
+	readonly engine: string;
+	readonly format: number;
+	readonly value: JsonObject;
 }
-
-/** Columns have no independent durable OID: their parent identity and name are it. */
-export interface ColumnCatalogueIdentity {
-	readonly kind: 'column';
-	readonly parentOid: string;
-	readonly name: string;
-}
-
-export type CatalogueIdentity = OidCatalogueIdentity | ColumnCatalogueIdentity;
 
 export interface ResourceAddress {
 	readonly engine: string;

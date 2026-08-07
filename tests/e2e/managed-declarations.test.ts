@@ -184,17 +184,30 @@ describeWithE2eCapabilities(
 					name: 'plpgsql',
 				}),
 			]);
-			expect(leftConstraint?.catalogueIdentity).toMatchObject({ kind: 'oid' });
-			expect(rightConstraint?.catalogueIdentity).toMatchObject({ kind: 'oid' });
+			expect(leftConstraint?.catalogueIdentity).toMatchObject({
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: expect.any(String) },
+			});
+			expect(rightConstraint?.catalogueIdentity).toMatchObject({
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: expect.any(String) },
+			});
 			expect(leftConstraint?.catalogueIdentity).not.toEqual(
 				rightConstraint?.catalogueIdentity,
 			);
 			expect(column?.catalogueIdentity).toMatchObject({
-				kind: 'column',
-				name: 'id',
+				engine: 'postgresql',
+				format: 1,
+				value: { parentOid: expect.any(String), name: 'id' },
 			});
 			for (const address of [index, sequence, enumeration, extension])
-				expect(address?.catalogueIdentity).toMatchObject({ kind: 'oid' });
+				expect(address?.catalogueIdentity).toMatchObject({
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: expect.any(String) },
+				});
 		});
 
 		it('SC-24: refuses a same-name table recreated outside the recorded run', async () => {
