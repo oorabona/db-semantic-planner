@@ -16,8 +16,9 @@ import {
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
-	DBSP_LEDGER_RESERVATION_TABLE,
+	DBSP_LEDGER_TABLES,
 	DBSP_META_SCHEMA,
+	isDbspLedgerInfrastructureTable,
 } from './constants.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
@@ -62,12 +63,7 @@ export interface PgReinitializePreflightOptions {
 	readonly observer?: ReinitializePreflightObserver;
 }
 
-const LEDGER_TABLES = [
-	DBSP_LEDGER_EVENT_TABLE,
-	DBSP_LEDGER_RESERVATION_TABLE,
-	DBSP_LEDGER_IDENTITY_TABLE,
-	DBSP_LEDGER_MARKER_TABLE,
-] as const;
+const LEDGER_TABLES = DBSP_LEDGER_TABLES;
 
 /** Bound every PostgreSQL object-lock wait made by one preflight scope. */
 export const REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL =
@@ -613,7 +609,12 @@ export function selectReinitializeAdoptionCandidates(
 			} as LedgerAddress,
 			declaration: { value: declaration.fragment, digest: declaration.digest },
 		}))
-		.filter((candidate) => !chainAddresses.has(addressKey(candidate.address)));
+		.filter(
+			(candidate) =>
+				(candidate.address.kind !== 'table' ||
+					!isDbspLedgerInfrastructureTable(candidate.address.name)) &&
+				!chainAddresses.has(addressKey(candidate.address)),
+		);
 }
 
 /** Completes a report without inventing an outcome outside the closed set. */

@@ -246,6 +246,7 @@ export {
 	classifyOutcomeRecovery,
 	consumeClaimToken,
 	mintClaimToken,
+	outcomeClaimId,
 } from './outcome-protocol.js';
 export { transitionPlanDigest } from './plan-digest.js';
 export { createProver } from './prover.js';
@@ -255,6 +256,8 @@ export {
 	type ExecutionCoordinator,
 	type GuardExecutionResult,
 	isOperationRuntime,
+	type ManagedOutcomeExecutionRequest,
+	type ManagedOutcomePreflightRequest,
 	type NonRollbackableExecutionTracker,
 	type OperationFingerprints,
 	type OperationObservation,

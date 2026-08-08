@@ -18,6 +18,7 @@ import type {
 	OutcomeClaimPlan,
 	OutcomeProtocolRefusal,
 	OutcomeRecoveryClassification,
+	OutcomeRecoveryEffect,
 	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
 } from '@dbsp/types';
@@ -61,6 +62,10 @@ export interface PgOutcomeExecutionRequest {
 
 export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
 	readonly resolution: PgOutcomeResolution;
+	/** Core has already opened the segment transaction; never nest BEGIN. */
+	readonly transactionOpen?: boolean;
+	/** Operation-owned terminal read-back; generic catalogue identity is not evidence. */
+	readonly readBack?: () => Promise<LedgerPayload>;
 	/** Required for creations; the reader runs after the claim and before SQL. */
 	readonly vacancy?: (
 		executor: TransitionJournalQueryable,
@@ -84,6 +89,24 @@ export type PgOutcomeReadBackFactory = (
 	>['catalogueIdentity'],
 ) => Promise<LedgerPayload>;
 
+/**
+ * A postcondition read owned by the operation itself.  Catalogue identity is
+ * still retained when present for the ledger, but effect classification comes
+ * from the operation's value-level observation rather than object presence.
+ */
+export type PgOutcomeOperationReadBackFactory = (
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	catalogueIdentity:
+		| NonNullable<
+				Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+		  >['catalogueIdentity']
+		| undefined,
+) => Promise<{
+	readonly observed: LedgerPayload;
+	readonly effect: OutcomeRecoveryEffect;
+}>;
+
 export interface PgOutcomeRecoveryRequest {
 	readonly address: LedgerAddress;
 	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
@@ -91,6 +114,7 @@ export interface PgOutcomeRecoveryRequest {
 	readonly acceptedExternalDdlExclusion: boolean;
 	readonly resolveIndeterminate?: boolean;
 	readonly readBack: PgOutcomeReadBackFactory;
+	readonly operationReadBack?: PgOutcomeOperationReadBackFactory;
 	readonly lockTimeoutMs?: number;
 }
 
@@ -257,6 +281,33 @@ function canonicalJson(value: unknown): string {
 		.join(',')}}`;
 }
 
+async function observedResolutionMember(
+	claim: AdmittedOutcomeClaim,
+	resolution: PgOutcomeResolution,
+	predecessor: string,
+	readBack: () => Promise<LedgerPayload>,
+): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
+	return {
+		...resolutionMember(claim, resolution, predecessor),
+		observed: await readBack(),
+	};
+}
+
+async function terminalResolutionMember(
+	request: PgOutcomeTransactionalRequest,
+	claim: AdmittedOutcomeClaim,
+	predecessor: string,
+): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
+	if (!request.readBack)
+		return resolutionMember(claim, request.resolution, predecessor);
+	return observedResolutionMember(
+		claim,
+		request.resolution,
+		predecessor,
+		request.readBack,
+	);
+}
+
 function sameResolutionPayload(
 	left: Omit<LedgerChainMember, 'controller' | 'recordedAt'>,
 	right: LedgerChainMember,
@@ -344,13 +395,24 @@ export async function readPgOutcomeRecoveryReadBack(
 	executor: TransitionJournalQueryable,
 	address: LedgerAddress,
 	readBack: PgOutcomeReadBackFactory,
+	operationReadBack?: PgOutcomeOperationReadBackFactory,
 ): Promise<OutcomeRecoveryReadBack> {
 	const resource = await readPgCatalogueIdentity(executor, address);
-	if (!resource?.catalogueIdentity) return { kind: 'absent' };
+	const operation = operationReadBack
+		? await operationReadBack(executor, address, resource?.catalogueIdentity)
+		: undefined;
+	if (!resource?.catalogueIdentity)
+		return {
+			kind: 'absent',
+			...(operation === undefined ? {} : { effect: operation.effect }),
+		};
 	return {
 		kind: 'present',
 		catalogueIdentity: resource.catalogueIdentity,
-		observed: await readBack(executor, address, resource.catalogueIdentity),
+		observed:
+			operation?.observed ??
+			(await readBack(executor, address, resource.catalogueIdentity)),
+		...(operation === undefined ? {} : { effect: operation.effect }),
 	};
 }
 
@@ -456,7 +518,7 @@ async function verifyCreationVacancy(
 	claim: AdmittedOutcomeClaim,
 	reader: PgOutcomeTransactionalRequest['vacancy'],
 ): Promise<OutcomeProtocolRefusal | undefined> {
-	if (claim.stableStateBeforeClaim === 'managed') return undefined;
+	if (claim.plan.requiresVacancy === false) return undefined;
 	if (!reader)
 		return refusal(
 			`creation claim ${claim.plan.claimId} has no vacancy reader`,
@@ -493,12 +555,15 @@ export async function runPgTransactionalOutcome(
 	request: PgOutcomeTransactionalRequest,
 ): Promise<PgOutcomeResult> {
 	let begun = false;
+	const ownsTransaction = !request.transactionOpen;
 	try {
-		await begin(executor, request.lockTimeoutMs);
-		begun = true;
+		if (ownsTransaction) {
+			await begin(executor, request.lockTimeoutMs);
+			begun = true;
+		}
 		const lock = await acquirePgLedgerLocks(executor, homesFor(request));
 		if (lock.kind !== 'acquired') {
-			await executor.query('ROLLBACK');
+			if (ownsTransaction) await executor.query('ROLLBACK');
 			begun = false;
 			return refusal('ledger advisory lock is busy');
 		}
@@ -513,7 +578,7 @@ export async function runPgTransactionalOutcome(
 			projection: projectLedgerChain(chain),
 		});
 		if (admission.kind !== 'admitted-outcome-claim') {
-			await executor.query('ROLLBACK');
+			if (ownsTransaction) await executor.query('ROLLBACK');
 			begun = false;
 			return admission;
 		}
@@ -536,7 +601,7 @@ export async function runPgTransactionalOutcome(
 				request.resolution.eventId,
 				request.plan.claimId,
 			);
-			await executor.query('COMMIT');
+			if (ownsTransaction) await executor.query('COMMIT');
 			begun = false;
 			return vacancy;
 		}
@@ -549,11 +614,11 @@ export async function runPgTransactionalOutcome(
 		await appendOutcomeTerminal(
 			executor,
 			target,
-			resolutionMember(admission, request.resolution, request.plan.claimId),
+			await terminalResolutionMember(request, admission, request.plan.claimId),
 			request.plan.claimId,
 			request.reservations,
 		);
-		await executor.query('COMMIT');
+		if (ownsTransaction) await executor.query('COMMIT');
 		begun = false;
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
@@ -610,7 +675,11 @@ export async function runPgNonTransactionalOutcome(
 		await appendOutcomeTerminal(
 			executor,
 			targetForPlan(request.plan),
-			resolutionMember(admission, request.resolution, request.executingEventId),
+			await terminalResolutionMember(
+				request,
+				admission,
+				request.executingEventId,
+			),
 			request.plan.claimId,
 			request.reservations,
 		);
@@ -673,6 +742,7 @@ export async function recoverPgOutcomeClaim(
 						executor,
 						address,
 						request.readBack,
+						request.operationReadBack,
 					);
 				} catch (error) {
 					return { kind: 'catalogue-unavailable', reason: detail(error) };

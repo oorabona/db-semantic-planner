@@ -21,12 +21,14 @@ import type { ExecutionContract } from './execution-contract.js';
 import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
 import type { ApplyGuard, GuardProtocol, RecoveryArtefact } from './guard.js';
+import type { LedgerClaimKind } from './ledger.js';
 import type { EvidenceId, IssuedObservation } from './observation.js';
 import type {
 	ClaimSelector,
 	OperationExecutionSemantics,
 	PhysicalOperation,
 } from './operation.js';
+import type { ClaimStatementBundle } from './outcome-protocol.js';
 import type {
 	Assumption,
 	AssumptionId,
@@ -34,7 +36,23 @@ import type {
 	ProofClaim,
 	Proposition,
 } from './proof.js';
-import type { ResourceAddress } from './resource.js';
+import type { DeclarableResourceAddress, ResourceAddress } from './resource.js';
+
+/**
+ * Immutable managed-outcome material carried by a plan step.  It is produced
+ * while proving, covered by the plan digest, and is the only source an
+ * executor may use for the address or statement bundle of a managed claim.
+ */
+export interface ManagedStepClaimMaterial {
+	readonly claimId: string;
+	readonly address: DeclarableResourceAddress & {
+		readonly scope: 'schema' | 'database';
+	};
+	readonly claimKind: LedgerClaimKind;
+	readonly statementBundle: ClaimStatementBundle;
+	/** True only when the plan writes an address it did not read. */
+	readonly requiresVacancy: boolean;
+}
 
 export interface ExecutableAssertion {
 	readonly proposition: Proposition;
@@ -176,6 +194,8 @@ export interface GuardedPlanStep {
 	readonly guards: readonly ApplyGuard[];
 	readonly restsOnAssumptions: readonly AssumptionId[];
 	readonly selectionRationale: RuleSelectionRationale;
+	/** Present exactly for a managed DDL operation with a fixed plan-time sink. */
+	readonly managedClaim?: ManagedStepClaimMaterial;
 }
 
 export interface GuardedPlanSegment {

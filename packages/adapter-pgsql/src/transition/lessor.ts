@@ -148,12 +148,24 @@ export async function withPgTransitionRunLock<T>(
 	let locked = false;
 	let bodyFailed = false;
 	let cleanupFailure: Error | undefined;
+	let deadConnectionFailure: Error | undefined;
 	let value: T | undefined;
 	let callbackLive = false;
 	let planOperationViolatedInvariant = false;
+	const query = async (sql: string, params?: unknown) => {
+		try {
+			return (await client.query(sql, params as never)) as {
+				readonly rows: readonly Record<string, unknown>[];
+			};
+		} catch (error) {
+			if (isDeadPgConnectionError(error))
+				deadConnectionFailure = asError(error);
+			throw error;
+		}
+	};
 	try {
-		await configurePgUtf8(client);
-		const result = await client.query(
+		await configurePgUtf8({ query });
+		const result = await query(
 			'SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked',
 			[key.toString()],
 		);
@@ -164,10 +176,7 @@ export async function withPgTransitionRunLock<T>(
 				({
 					// This channel is adapter-owned infrastructure: execution-contract
 					// setup, authorization, journals, and lock cleanup are not plan SQL.
-					query: (sql: string, params?: unknown) =>
-						client.query(sql, params as never) as Promise<{
-							readonly rows: readonly Record<string, unknown>[];
-						}>,
+					query: (sql: string, params?: unknown) => query(sql, params),
 					// Core only selects this channel for executeOperation().  Guarding
 					// the origin rather than parsing SQL means every spelling reaches the
 					// same invariant check, while our own SET/SHOW contract clauses do not.
@@ -187,9 +196,7 @@ export async function withPgTransitionRunLock<T>(
 							| undefined;
 						let queryFailure: unknown;
 						try {
-							result = await (client.query(sql, params as never) as Promise<{
-								readonly rows: readonly Record<string, unknown>[];
-							}>);
+							result = await query(sql, params);
 						} catch (error) {
 							queryFailure = error;
 						}
@@ -218,7 +225,7 @@ export async function withPgTransitionRunLock<T>(
 		callbackLive = false;
 		if (locked) {
 			try {
-				const unlock = await client.query(
+				const unlock = await query(
 					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
 					[key.toString()],
 				);
@@ -237,6 +244,7 @@ export async function withPgTransitionRunLock<T>(
 		// safe cleanup because PostgreSQL releases session locks on disconnect.
 		client.release(
 			cleanupFailure ??
+				deadConnectionFailure ??
 				(planOperationViolatedInvariant
 					? new Error(
 							'PostgreSQL transition plan operation violated the exclusive session invariants',
@@ -246,6 +254,35 @@ export async function withPgTransitionRunLock<T>(
 	}
 	if (cleanupFailure && !bodyFailed) throw cleanupFailure;
 	return { kind: 'acquired', value: value as T };
+}
+
+/** pg-pool only evicts a checked-out client when release receives a truthy error. */
+function isDeadPgConnectionError(error: unknown): boolean {
+	if (
+		error == null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return false;
+	const candidate = error as {
+		readonly code?: unknown;
+		readonly message?: unknown;
+	};
+	if (
+		candidate.code === '57P01' ||
+		candidate.code === '57P02' ||
+		candidate.code === '57P03'
+	)
+		return true;
+	return (
+		typeof candidate.message === 'string' &&
+		/connection (?:terminated|ended|closed|lost)|client has encountered a connection error/iu.test(
+			candidate.message,
+		)
+	);
+}
+
+function asError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
 }
 
 /**

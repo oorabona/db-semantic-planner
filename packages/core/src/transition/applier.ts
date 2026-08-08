@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -11,6 +12,7 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
+	LedgerPayload,
 	ObservationContext,
 	OperationEffectAssessment,
 	OutcomeReason,
@@ -264,6 +266,31 @@ function evidenceIds(
 	return observations
 		.filter((observation) => observation.role === 'evidence')
 		.map((observation) => observation.id);
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const record = value as Record<string, unknown>;
+	return `{${Object.keys(record)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+		.join(',')}}`;
+}
+
+function managedOutcomeReadBack(
+	observations: readonly IssuedObservation[],
+): LedgerPayload {
+	const value = {
+		observations: observations.map((observation) => ({
+			request: observation.request,
+			result: observation.result,
+		})),
+	} as unknown as LedgerPayload['value'];
+	return {
+		value,
+		digest: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+	};
 }
 
 function recordedAt(): string {
@@ -1278,6 +1305,52 @@ export function createApplier(
 							}
 							return preIntentRefusal(mismatch);
 						}
+						if (entry.step.managedClaim) {
+							const preflightManagedOutcome =
+								entry.semantics.preflightManagedOutcome;
+							if (preflightManagedOutcome) {
+								const detail = await preflightManagedOutcome(executionClient, {
+									claim: entry.step.managedClaim,
+									run,
+									transactional,
+									lockTimeoutMs: lockTimeoutMs(
+										entry.semantics,
+										entry.step,
+										stepContext,
+									),
+								});
+								if (detail) {
+									if (transactionStarted && !committed) {
+										try {
+											await rollbackAndPrepareObservedJournalWrite(
+												segmentCoordinator,
+												executionClient,
+												lockTimeoutMs(
+													entry.semantics,
+													entry.step,
+													activeContext,
+												),
+											);
+										} catch (cleanupError) {
+											return preIntentRefusal(
+												operationFailedNotAppliedReason(
+													entry.step,
+													errorDetail(
+														applyAndRollbackFailure(
+															new Error(detail),
+															cleanupError,
+														),
+													),
+												),
+											);
+										}
+									}
+									return preIntentRefusal(
+										operationFailedNotAppliedReason(entry.step, detail),
+									);
+								}
+							}
+						}
 
 						// Mark before awaiting: a write error can still mean the intent
 						// reached durable storage, so downstream recovery must remain
@@ -1362,19 +1435,62 @@ export function createApplier(
 								activeNonRollbackableOperationExecuted = true;
 							},
 						};
-						const executionOutcome = await entry.semantics.executeOperation(
-							{
-								opaqueClient: planOperationSession(
-									executionClient.opaqueClient,
-								),
-							},
-							entry.step.operation,
-							stepContext,
-							entry.step.guards.filter(
-								(guard) => guard.phase === 'during-operation',
-							),
-							nonRollbackableExecutionTracker,
-						);
+						const executionOutcome = entry.step.managedClaim
+							? await (() => {
+									const executeManagedOutcome =
+										entry.semantics.executeManagedOutcome;
+									if (!executeManagedOutcome)
+										throw new Error(
+											`managed claim ${entry.step.managedClaim.claimId} has no outcome execution adapter`,
+										);
+									return executeManagedOutcome(executionClient, {
+										claim: entry.step.managedClaim,
+										run,
+										transactional,
+										lockTimeoutMs: lockTimeoutMs(
+											entry.semantics,
+											entry.step,
+											stepContext,
+										),
+										readBack: async () => {
+											const observed = await entry.semantics.observeOperation(
+												executionClient,
+												entry.step.operation,
+												stepContext,
+												'after',
+												entry.operationIssuer,
+											);
+											return managedOutcomeReadBack(observed.observations);
+										},
+										executeUnmanaged: () =>
+											entry.semantics.executeOperation(
+												{
+													opaqueClient: planOperationSession(
+														executionClient.opaqueClient,
+													),
+												},
+												entry.step.operation,
+												stepContext,
+												entry.step.guards.filter(
+													(guard) => guard.phase === 'during-operation',
+												),
+												nonRollbackableExecutionTracker,
+											),
+									});
+								})()
+							: await entry.semantics.executeOperation(
+									{
+										opaqueClient: planOperationSession(
+											executionClient.opaqueClient,
+										),
+									},
+									entry.step.operation,
+									stepContext,
+									entry.step.guards.filter(
+										(guard) => guard.phase === 'during-operation',
+									),
+									nonRollbackableExecutionTracker,
+								);
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
 								await rollbackAndPrepareObservedJournalWrite(
@@ -1720,7 +1836,7 @@ export function createApplier(
 									journals: [...journals, unknown],
 									observations,
 								};
-								return resultWithObservedJournal({
+								return await resultWithObservedJournal({
 									semantics: entry.semantics,
 									client: executionClient,
 									journal: unknown,

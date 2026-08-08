@@ -92,6 +92,7 @@ export {
 	type PgLedgerLockResult,
 	PgLedgerStorageUnsupportedError,
 	type PgLedgerTarget,
+	readPgLedgerReservationsForExecution,
 	recordPgLedgerIdentity,
 	renderCreateLedgerEventTableSql,
 	renderCreateLedgerIdentityTableSql,
@@ -109,11 +110,13 @@ export {
 	type PgTransitionRunLockResult,
 	withPgTransitionRunLock,
 } from './lessor.js';
-// The …FromClient helpers stay internal: the supported entry points acquire and
-// release their own lease, so a caller never has to hold one to read context.
+// Most callers should use the …FromLessor helpers, which acquire and release a
+// lease themselves.  Reconciliation already owns an exclusive session, so it
+// uses the client helper to keep its context read on that same live session.
 export {
 	createPgObservationIssuer,
 	executePgObservationFromLessor,
+	readPgObservationContextFromClient,
 	readPgObservationContextFromLessor,
 } from './observation-issuer.js';
 export {
@@ -163,6 +166,7 @@ export {
 	type PgOutcomeClaimRequest,
 	type PgOutcomeExecutionRequest,
 	type PgOutcomeNonTransactionalRequest,
+	type PgOutcomeOperationReadBackFactory,
 	type PgOutcomeReadBackFactory,
 	type PgOutcomeRecoveryRequest,
 	type PgOutcomeRecoveryResult,

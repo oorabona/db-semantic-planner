@@ -6,6 +6,8 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
+	LedgerPayload,
+	ManagedStepClaimMaterial,
 	ModelIR,
 	ObservationContext,
 	ObservationIssuer,
@@ -112,6 +114,28 @@ export interface NonRollbackableExecutionTracker {
 	markNonRollbackableOperationExecuted(): void;
 }
 
+/**
+ * Adapter boundary for a plan-carried managed statement bundle.  Core owns the
+ * immutable material and the run link; the adapter owns claim admission,
+ * token-gated SQL, and the INV-07 transaction composition.
+ */
+export interface ManagedOutcomeExecutionRequest {
+	readonly claim: ManagedStepClaimMaterial;
+	readonly run: TransitionRunMetadata;
+	readonly transactional: boolean;
+	readonly lockTimeoutMs: number;
+	/** The operation's own live postcondition observation, never a generic identity probe. */
+	readBack(): Promise<LedgerPayload>;
+	/** Used only when the adapter finds no managed ledger material at all. */
+	executeUnmanaged(): Promise<OperationExecutionOutcome>;
+}
+
+/** The plan and session facts an adapter may inspect before the step intent. */
+export type ManagedOutcomePreflightRequest = Pick<
+	ManagedOutcomeExecutionRequest,
+	'claim' | 'run' | 'transactional' | 'lockTimeoutMs'
+>;
+
 export interface ExecutionCoordinator {
 	readonly transactionDomain: string;
 	/**
@@ -203,6 +227,23 @@ export interface OperationRuntime extends RegisteredOperationSemantics {
 		duringGuards?: readonly ApplyGuard[],
 		executionTracker?: NonRollbackableExecutionTracker,
 	): Promise<OperationExecutionOutcome>;
+	/**
+	 * Required when a plan step carries managed claim material.  The applier
+	 * never falls back to `executeOperation` for such a step.
+	 */
+	executeManagedOutcome?(
+		client: TransitionExecutionClient,
+		request: ManagedOutcomeExecutionRequest,
+	): Promise<OperationExecutionOutcome>;
+	/**
+	 * Refuses a managed outcome before its durable step intent is recorded.
+	 * This boundary is for adapter-owned prerequisites such as an incompatible
+	 * ledger marker; it must not execute DDL or append ledger members.
+	 */
+	preflightManagedOutcome?(
+		client: TransitionExecutionClient,
+		request: ManagedOutcomePreflightRequest,
+	): Promise<string | undefined>;
 	writeCompletionJournal(
 		client: TransitionExecutionClient,
 		operation: PhysicalOperation,

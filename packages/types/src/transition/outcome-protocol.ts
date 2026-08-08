@@ -36,6 +36,11 @@ export interface OutcomeClaimPlan {
 	readonly address: LedgerAddress;
 	readonly claimKind: LedgerClaimKind;
 	readonly statementBundle: ClaimStatementBundle;
+	/**
+	 * A creation verifies that its target address remains vacant before DDL.
+	 * Absent only on plans written before this material was introduced.
+	 */
+	readonly requiresVacancy?: boolean;
 	readonly declared?: LedgerPayload;
 	readonly pairId?: string;
 }
@@ -70,13 +75,17 @@ export interface OutcomeClaimAdmissionInput {
 }
 
 /** Typed catalogue evidence used by outcome-protocol recovery. */
+export type OutcomeRecoveryEffect = 'applied' | 'no-effect' | 'unverifiable';
+
 export type OutcomeRecoveryReadBack =
-	| { readonly kind: 'absent' }
+	| { readonly kind: 'absent'; readonly effect?: OutcomeRecoveryEffect }
 	| {
 			readonly kind: 'present';
 			readonly catalogueIdentity: CatalogueIdentity;
 			/** The canonical shape read from the live catalogue. */
 			readonly observed: LedgerPayload;
+			/** Operation-specific read-back when the catalogue presence is insufficient. */
+			readonly effect?: OutcomeRecoveryEffect;
 	  };
 
 /** A failed read is evidence of nothing, and therefore permits no append. */

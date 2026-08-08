@@ -91,6 +91,24 @@ export const DBSP_LEDGER_EVENT_TABLE = 'dbsp_ledger_event';
 export const DBSP_LEDGER_RESERVATION_TABLE = 'dbsp_ledger_reservation';
 export const DBSP_LEDGER_IDENTITY_TABLE = 'dbsp_ledger_identity';
 export const DBSP_LEDGER_MARKER_TABLE = 'dbsp_ledger_marker';
+/**
+ * The ledger may live in a managed schema, but it is never part of that
+ * schema's user model. Keep the family in one exported definition so every
+ * model-vs-live surface makes the same exclusion.
+ */
+export const DBSP_LEDGER_TABLES = [
+	DBSP_LEDGER_EVENT_TABLE,
+	DBSP_LEDGER_RESERVATION_TABLE,
+	DBSP_LEDGER_IDENTITY_TABLE,
+	DBSP_LEDGER_MARKER_TABLE,
+] as const;
+
+/** True exactly for dbsp's schema-local ledger infrastructure. */
+export function isDbspLedgerInfrastructureTable(
+	tableName: string,
+): tableName is (typeof DBSP_LEDGER_TABLES)[number] {
+	return (DBSP_LEDGER_TABLES as readonly string[]).includes(tableName);
+}
 export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
 export const DBSP_LOGICAL_IDENTITY_MARKER_COLUMN = 'dbsp_managed_by';
 export const DBSP_LOGICAL_IDENTITY_MARKER_VALUE = `${PG_OPERATION_PACK_ARTIFACT.id}@${PG_OPERATION_PACK_ARTIFACT.version}`;

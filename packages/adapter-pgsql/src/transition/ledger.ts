@@ -78,6 +78,46 @@ export type PgLedgerLockResult =
 
 export type PgLedgerTarget = LedgerHome;
 
+/** Read only reservations explicitly linked to one durable execution/run. */
+export async function readPgLedgerReservationsForExecution(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	executionId: string,
+): Promise<readonly LedgerReservationRow[]> {
+	const result = await executor.query(
+		`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} WHERE execution_id = $1 ORDER BY root_claim_id, address_kind, address_name`,
+		[executionId],
+	);
+	return result.rows.map((row) => {
+		const schema = String(row.address_schema ?? '');
+		const homeSchema = String(row.home_ledger_schema ?? '');
+		const parent = row.address_parent;
+		return {
+			address: {
+				scope: target.scope,
+				engine: String(row.address_engine),
+				database: String(row.address_database),
+				...(schema ? { schema } : {}),
+				...(parent == null
+					? {}
+					: {
+							parent: typeof parent === 'string' ? JSON.parse(parent) : parent,
+						}),
+				kind: String(row.address_kind),
+				name: String(row.address_name),
+			},
+			claimKind: String(row.claim_kind) as LedgerReservationRow['claimKind'],
+			executionId: String(row.execution_id),
+			...(row.pair_id == null ? {} : { pairId: String(row.pair_id) }),
+			rootClaimId: String(row.root_claim_id),
+			homeLedger:
+				row.home_ledger_scope === 'database'
+					? { scope: 'database' }
+					: { scope: 'schema', schema: homeSchema },
+		};
+	});
+}
+
 type LedgerWriteMember = Omit<LedgerChainMember, 'controller' | 'recordedAt'>;
 
 function quoteIdent(value: string, type: 'schema' | 'table' | 'alias'): string {
@@ -248,7 +288,7 @@ export function renderCreateLedgerMarkerTableSql(
 ): string {
 	return (
 		`CREATE TABLE IF NOT EXISTS ${qualified(ledgerSchema(target), DBSP_LEDGER_MARKER_TABLE)} (` +
-		`id boolean PRIMARY KEY DEFAULT true CHECK (id), version integer NOT NULL CHECK (version = ${PG_LEDGER_SHAPE_VERSION})` +
+		'id boolean PRIMARY KEY DEFAULT true CHECK (id), version integer NOT NULL CHECK (version >= 1)' +
 		')'
 	);
 }

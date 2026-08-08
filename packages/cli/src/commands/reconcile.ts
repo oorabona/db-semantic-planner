@@ -1,14 +1,26 @@
-/**
- * Reconcile is intentionally a separate writer from inspect.  This initial
- * command foundation loads the durable run and reports the candidate addresses
- * it can safely classify; outcome appends remain delegated to the unit-8
- * adapter primitive, never to a hand-written CLI insert.
- */
+/** Resolve only the open managed claims durably linked to one run. */
+import { createHash } from 'node:crypto';
 import {
+	createPgTransitionPack,
+	readPgLedgerMarker,
+	readPgLedgerReservationsForExecution,
+	readPgObservationContextFromClient,
 	readTransitionJournal,
+	recoverPgOutcomeClaim,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
-import { acquireExclusiveTransitionLease } from '@dbsp/core';
+import {
+	acquireExclusiveTransitionLease,
+	createPackRegistry,
+	isOperationRuntime,
+	type TransitionExecutionClient,
+} from '@dbsp/core';
+import type {
+	LedgerHome,
+	LedgerPayload,
+	LedgerReservationRow,
+	ProvenPlanStep,
+} from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 
@@ -20,17 +32,159 @@ export interface ReconcileOptions {
 export interface ReconcileResult {
 	readonly outcome:
 		| 'reconcile-claim-selection-unavailable'
-		| 'reconcile-run-unavailable';
+		| 'reconcile-run-unavailable'
+		| 'reconcile-unresolved'
+		| 'reconcile-completed';
 	readonly runId: string;
 	readonly addresses: readonly unknown[];
 	readonly detail?: string;
+	/** One entry per selected root claim; non-appends retain their reason. */
+	readonly recovery?: readonly ReconcileRecoveryReport[];
+}
+
+export interface ReconcileRecoveryReport {
+	readonly address: LedgerReservationRow['address'];
+	readonly outcome: PgRecoveryReportKind;
+	readonly reason?: string;
+}
+
+type PgRecoveryReportKind =
+	| 'appended'
+	| 'already-appended'
+	| 'no-open-claim'
+	| 'pending'
+	| 'blocked'
+	| 'malformed-chain'
+	| 'protocol-refused';
+
+function ledgerHome(address: LedgerReservationRow['address']): LedgerHome {
+	if (address.scope === 'database') return { scope: 'database' };
+	if (!address.schema)
+		throw new Error(
+			`schema-scoped managed claim ${address.name} has no schema`,
+		);
+	return { scope: 'schema', schema: address.schema };
+}
+
+function recoveryPayload(
+	identity: Parameters<
+		NonNullable<Parameters<typeof recoverPgOutcomeClaim>[1]['readBack']>
+	>[2],
+): LedgerPayload {
+	const value = JSON.parse(
+		JSON.stringify({ catalogueIdentity: identity }),
+	) as LedgerPayload['value'];
+	return {
+		value,
+		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+	};
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const record = value as Record<string, unknown>;
+	return `{${Object.keys(record)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+		.join(',')}}`;
+}
+
+function recoveryObservationReader(step: ProvenPlanStep) {
+	const registry = createPackRegistry([createPgTransitionPack({})]);
+	const resolution = registry.resolveOperation(step.operation);
+	const issuer = registry.resolveIssuer(step.operation.operationKind.artifact);
+	if (!resolution.ok || !isOperationRuntime(resolution.semantics) || !issuer)
+		return undefined;
+	const semantics = resolution.semantics;
+	return async (executor: {
+		query: TransitionExecutionClient['opaqueClient']['query'];
+	}) => {
+		const client: TransitionExecutionClient = {
+			opaqueClient: executor as TransitionExecutionClient['opaqueClient'],
+		};
+		const liveContext = await readPgObservationContextFromClient(
+			client.opaqueClient,
+			step.managedClaim?.address.schema,
+		);
+		const context = registry.contextWithDerivedCapabilities(
+			await semantics.observeContext(client, step.operation, liveContext),
+		);
+		const result = await semantics.observeOperation(
+			client,
+			step.operation,
+			context,
+			'before',
+			issuer,
+		);
+		const value = {
+			observations: result.observations.map((observation) => ({
+				request: observation.request,
+				result: observation.result,
+			})),
+		} as unknown as LedgerPayload['value'];
+		return {
+			observed: {
+				value,
+				digest: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+			},
+			effect:
+				result.fingerprint.digest === step.expectedAfter.digest
+					? ('applied' as const)
+					: result.fingerprint.digest === step.expectedBefore.digest
+						? ('no-effect' as const)
+						: ('unverifiable' as const),
+		};
+	};
+}
+
+function recoveryReport(
+	address: LedgerReservationRow['address'],
+	result: Awaited<ReturnType<typeof recoverPgOutcomeClaim>>,
+): ReconcileRecoveryReport {
+	if (result.kind === 'outcome-recovery-appended') {
+		return {
+			address,
+			outcome:
+				result.append.kind === 'already-appended-outcome-resolution'
+					? 'already-appended'
+					: 'appended',
+			reason: result.classification.resolution.reason,
+		};
+	}
+	if (result.kind === 'outcome-recovery-no-open-claim')
+		return { address, outcome: 'no-open-claim' };
+	if (result.kind === 'outcome-recovery-pending')
+		return { address, outcome: 'pending', reason: result.reason };
+	if (result.kind === 'outcome-recovery-blocked')
+		return { address, outcome: 'blocked', reason: result.reason };
+	if (result.kind === 'outcome-recovery-malformed-chain')
+		return { address, outcome: 'malformed-chain', reason: result.reason };
+	return { address, outcome: 'protocol-refused', reason: result.reason };
+}
+
+function unresolvedRecoveryDetail(
+	reports: readonly ReconcileRecoveryReport[],
+): string | undefined {
+	const unresolved = reports.filter(
+		(report) =>
+			report.outcome === 'pending' ||
+			report.outcome === 'blocked' ||
+			report.outcome === 'malformed-chain' ||
+			report.outcome === 'protocol-refused',
+	);
+	if (unresolved.length === 0) return undefined;
+	return unresolved
+		.map(
+			(report) => `${report.address.name}: ${report.reason ?? report.outcome}`,
+		)
+		.join('; ');
 }
 
 /**
- * The run journal is the authority for selecting reconciliation work. It is
- * read with ensure:false, so a diagnostic invocation cannot create legacy
- * journal storage. Claim-to-run linkage is supplied by the managed applier;
- * until a run has emitted claims there is deliberately nothing to append.
+ * Reservations are the claim-to-run relation.  The plan only provides the
+ * finite ledger scopes to inspect; a claim is eligible only after its stored
+ * execution_id equals the requested run id.
  */
 export async function runReconcile(
 	runId: string,
@@ -44,9 +198,102 @@ export async function runReconcile(
 			async (target) => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
-					return await readTransitionJournal(lease.session, runId, {
+					const journal = await readTransitionJournal(lease.session, runId, {
 						ensure: false,
 					});
+					const material = journal.plan.steps
+						.map((step) => step.managedClaim)
+						.filter(
+							(claim): claim is NonNullable<typeof claim> =>
+								claim !== undefined,
+						);
+					if (material.length === 0)
+						return {
+							kind: 'selection-unavailable' as const,
+							addresses:
+								journal.plan.declarations?.declarations.map(
+									(declaration) => declaration.address,
+								) ?? [],
+						};
+					const stepByClaimId = new Map<string, ProvenPlanStep>();
+					for (const step of journal.plan.steps) {
+						if (step.managedClaim)
+							stepByClaimId.set(step.managedClaim.claimId, step);
+					}
+					const homes = new Map<string, LedgerHome>();
+					for (const claim of material) {
+						const home = ledgerHome(claim.address);
+						homes.set(`${home.scope}:${home.schema ?? ''}`, home);
+					}
+					const reservations = (
+						await Promise.all(
+							[...homes.values()].map((home) =>
+								readPgLedgerReservationsForExecution(
+									lease.session,
+									home,
+									runId,
+								),
+							),
+						)
+					).flat();
+					if (reservations.length === 0)
+						return {
+							kind: 'selection-unavailable' as const,
+							addresses: material.map((x) => x.address),
+						};
+					for (const home of homes.values()) {
+						const marker = await readPgLedgerMarker(lease.session, home);
+						if (marker.kind !== 'current')
+							return {
+								kind: 'unresolved' as const,
+								addresses: reservations.map((item) => item.address),
+								detail: `ledger marker ${marker.kind}; run dbsp preflight --reinitialize`,
+								recovery: reservations.map((item) => ({
+									address: item.address,
+									outcome: 'blocked' as const,
+									reason: `ledger marker ${marker.kind}; run dbsp preflight --reinitialize`,
+								})),
+							};
+					}
+					const byRoot = new Map<string, LedgerReservationRow[]>();
+					for (const row of reservations)
+						byRoot.set(row.rootClaimId, [
+							...(byRoot.get(row.rootClaimId) ?? []),
+							row,
+						]);
+					const recovery: ReconcileRecoveryReport[] = [];
+					for (const rows of byRoot.values()) {
+						const first = rows[0];
+						if (!first) continue;
+						const step = stepByClaimId.get(first.rootClaimId);
+						const operationReadBack = step
+							? recoveryObservationReader(step)
+							: undefined;
+						const recovered = await recoverPgOutcomeClaim(lease.session, {
+							address: first.address,
+							reservations: rows,
+							resolutionEventId: `${first.rootClaimId}:reconcile:${runId}`,
+							acceptedExternalDdlExclusion: false,
+							resolveIndeterminate: true,
+							readBack: async (_executor, _address, identity) =>
+								recoveryPayload(identity),
+							...(operationReadBack === undefined ? {} : { operationReadBack }),
+						});
+						recovery.push(recoveryReport(first.address, recovered));
+					}
+					const unresolved = unresolvedRecoveryDetail(recovery);
+					if (unresolved)
+						return {
+							kind: 'unresolved' as const,
+							addresses: reservations.map((item) => item.address),
+							detail: unresolved,
+							recovery,
+						};
+					return {
+						kind: 'completed' as const,
+						addresses: reservations.map((item) => item.address),
+						recovery,
+					};
 				} finally {
 					await lease.release();
 				}
@@ -54,13 +301,25 @@ export async function runReconcile(
 		);
 		if (locked.kind === 'busy')
 			return { outcome: 'reconcile-run-unavailable', runId, addresses: [] };
-		const declarations = locked.value.plan.declarations?.declarations ?? [];
+		if (locked.value.kind === 'selection-unavailable')
+			return {
+				outcome: 'reconcile-claim-selection-unavailable',
+				runId,
+				addresses: locked.value.addresses,
+			};
+		if (locked.value.kind === 'unresolved')
+			return {
+				outcome: 'reconcile-unresolved',
+				runId,
+				addresses: locked.value.addresses,
+				...(locked.value.detail ? { detail: locked.value.detail } : {}),
+				...(locked.value.recovery ? { recovery: locked.value.recovery } : {}),
+			};
 		return {
-			outcome: 'reconcile-claim-selection-unavailable',
+			outcome: 'reconcile-completed',
 			runId,
-			addresses: declarations.map((declaration) => declaration.address),
-			detail:
-				'run journal has no claim-to-run linkage; refusing to resolve a claim that may belong to another run',
+			addresses: locked.value.addresses,
+			...(locked.value.recovery ? { recovery: locked.value.recovery } : {}),
 		};
 	} catch {
 		return { outcome: 'reconcile-run-unavailable', runId, addresses: [] };
@@ -78,5 +337,5 @@ export const reconcileCommand = new Command('reconcile')
 		const result = await runReconcile(runId, options);
 		if (options.format === 'json') console.log(JSON.stringify(result, null, 2));
 		else console.log(`${result.outcome}: ${runId}`);
-		process.exitCode = 1;
+		process.exitCode = result.outcome === 'reconcile-completed' ? 0 : 1;
 	});

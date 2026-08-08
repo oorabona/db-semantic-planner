@@ -110,10 +110,16 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 	it('SC-32: backend termination inside the transactional claim window leaves no event, reservation, or catalogue effect', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();
-		client.on('error', (error: Error) => {
-			if (error.message === 'Connection terminated unexpectedly') return;
+		const expectedTerminationError = (error: Error & { code?: string }) => {
+			if (
+				error.code === '57P01' ||
+				error.message === 'Connection terminated unexpectedly'
+			)
+				return;
 			throw error;
-		});
+		};
+		client.on('error', expectedTerminationError);
+		pool.on('error', expectedTerminationError);
 		const input = claim(schema, 'killed_create', 'killed-claim');
 		let atCheckpoint!: () => void;
 		const checkpoint = new Promise<void>((resolve) => {
@@ -160,6 +166,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 				]),
 			).resolves.toMatchObject({ rows: [{ object: null }] });
 		} finally {
+			pool.off('error', expectedTerminationError);
 			client.release(true);
 		}
 	});

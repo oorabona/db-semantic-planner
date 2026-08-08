@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import type {
 	ClaimBundleStatement,
 	ClaimStatementBundle,
 	ClaimToken,
+	LedgerAddress,
 	LedgerChainMember,
 	OutcomeClaimAdmission,
 	OutcomeClaimAdmissionInput,
@@ -12,6 +14,7 @@ import type {
 	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
+import { stableJson } from './stable-json.js';
 
 interface ClaimTokenRecord {
 	readonly claimId: string;
@@ -20,6 +23,19 @@ interface ClaimTokenRecord {
 }
 
 const tokenRecords = new WeakMap<object, ClaimTokenRecord>();
+
+/**
+ * The sole durable identity builder for a managed outcome claim.  An outcome
+ * chain is per canonical ledger address, so the address — rather than a
+ * rendered operation object — is its stable root.  Hashing the canonical
+ * representation keeps the persisted identifier opaque, compact, and free of
+ * serializer type tags.
+ */
+export function outcomeClaimId(address: LedgerAddress): string {
+	return `dbsp.transition.outcome.${createHash('sha256')
+		.update(stableJson(address))
+		.digest('hex')}`;
+}
 
 function refusal(reason: string): OutcomeProtocolRefusal {
 	return { kind: 'outcome-protocol-refused', reason };
@@ -302,6 +318,23 @@ export async function classifyOutcomeRecovery(
 		);
 
 	if (claim.kind === 'intent') {
+		// A managed alteration can keep its catalogue object while doing nothing.
+		// When the operation's own postcondition observation proves its expected
+		// before-state, that is stronger than generic catalogue presence.
+		if (readBack.effect === 'no-effect')
+			return appendRecovery(
+				input,
+				readBack,
+				'refused',
+				'recovery operation read-back proves no effect after executing',
+			);
+		if (readBack.effect === 'unverifiable')
+			return appendRecovery(
+				input,
+				readBack,
+				'indeterminate',
+				'recovery operation read-back cannot verify effect after executing',
+			);
 		if (readBack.kind === 'absent')
 			return appendRecovery(
 				input,

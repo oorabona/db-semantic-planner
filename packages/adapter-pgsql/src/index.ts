@@ -318,6 +318,8 @@ export {
 	readPgExecutionTargetFromClient,
 	readPgLedgerAddressChain,
 	readPgLedgerMarker,
+	readPgLedgerReservationsForExecution,
+	readPgObservationContextFromClient,
 	readPgObservationContextFromLessor,
 	readPgOutcomeRecoveryReadBack,
 	readTransitionJournal,
