@@ -102,6 +102,10 @@ export interface LedgerPayload {
 
 export interface LedgerChainMember {
 	readonly eventId: string;
+	readonly executionId?: string;
+	readonly plannedClaimKey?: string;
+	readonly claimGroupId?: string;
+	readonly rootClaimId?: string;
 	readonly address: LedgerAddress;
 	readonly catalogueIdentity?: CatalogueIdentity;
 	readonly eventKind: LedgerEventKind;

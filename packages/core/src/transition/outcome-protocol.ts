@@ -14,6 +14,7 @@ import type {
 	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
 import { sameLedgerAddress } from '@dbsp/types';
+import { admitRecordedIdentity } from './declaration.js';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
 import { stableJson } from './stable-json.js';
 
@@ -32,9 +33,23 @@ const tokenRecords = new WeakMap<object, ClaimTokenRecord>();
  * representation keeps the persisted identifier opaque, compact, and free of
  * serializer type tags.
  */
-export function outcomeClaimId(address: LedgerAddress): string {
+export function outcomeClaimId(
+	executionId: string,
+	plannedClaimKey: string,
+	address: LedgerAddress,
+	closureMemberKey?: string,
+): string {
 	return `dbsp.transition.outcome.${createHash('sha256')
-		.update(stableJson(address))
+		.update(
+			stableJson({ executionId, plannedClaimKey, address, closureMemberKey }),
+		)
+		.digest('hex')}`;
+}
+
+/** Resolution and progress ids cannot collide across execution attempts either. */
+export function outcomeClaimEventId(claimId: string, role: string): string {
+	return `dbsp.transition.outcome.${createHash('sha256')
+		.update(stableJson({ claimId, role }))
 		.digest('hex')}`;
 }
 
@@ -154,6 +169,33 @@ export function admitOutcomeClaim(
 		return refusal(
 			`${plan.claimKind} cannot open from stable state ${projection.stableState}`,
 		);
+	if (projection.stableState === 'managed' && plan.requiresVacancy !== true) {
+		const terminal = projection.events.find(
+			(event) =>
+				!projection.events.some(
+					(candidate) => candidate.predecessor === event.eventId,
+				),
+		);
+		if (!terminal)
+			return refusal(
+				`claim ${plan.claimId} refuses managed chain without terminal`,
+			);
+		if (!input.currentUser)
+			return refusal(`claim ${plan.claimId} refuses unreadable current_user`);
+		if (terminal.controller !== input.currentUser)
+			return refusal(
+				`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
+			);
+		if (!input.liveAddress)
+			return refusal(
+				`claim ${plan.claimId} refuses missing live identity admission`,
+			);
+		const recorded = terminal.catalogueIdentity
+			? { ...plan.address, catalogueIdentity: terminal.catalogueIdentity }
+			: plan.address;
+		const identity = admitRecordedIdentity(recorded, input.liveAddress);
+		if (!identity.ok) return refusal(identity.detail);
+	}
 	return {
 		kind: 'admitted-outcome-claim',
 		plan,
@@ -304,6 +346,18 @@ export async function classifyOutcomeRecovery(
 		);
 
 	if (claim.kind === 'intent') {
+		// A committed executing marker records only that the sender was allowed to
+		// proceed; it does not prove that SQL left the process.  Catalogue absence
+		// is therefore decisive evidence that this creation was not issued.  Test
+		// this before an operation-specific verifier: a verifier can only call the
+		// present-object case unverifiable (for example an invalid concurrent index).
+		if (readBack.kind === 'absent')
+			return appendRecovery(
+				input,
+				readBack,
+				'refused',
+				'recovery read-back proves no effect after executing',
+			);
 		// A managed alteration can keep its catalogue object while doing nothing.
 		// When the operation's own postcondition observation proves its expected
 		// before-state, that is stronger than generic catalogue presence.
@@ -315,18 +369,9 @@ export async function classifyOutcomeRecovery(
 				'recovery operation read-back proves no effect after executing',
 			);
 		if (readBack.effect === 'unverifiable')
-			return appendRecovery(
+			return recoveryPending(
 				input,
-				readBack,
-				'indeterminate',
 				'recovery operation read-back cannot verify effect after executing',
-			);
-		if (readBack.kind === 'absent')
-			return appendRecovery(
-				input,
-				readBack,
-				'refused',
-				'recovery read-back proves no effect after executing',
 			);
 		if (
 			claim.stableStateBeforeClaim !== 'managed' &&
@@ -345,15 +390,19 @@ export async function classifyOutcomeRecovery(
 			'recovery observed the live catalogue read-back after executing',
 		);
 	}
-	if (claim.kind === 'retire-intent')
-		return appendRecovery(
+	if (claim.kind === 'retire-intent') {
+		if (readBack.kind === 'absent')
+			return appendRecovery(
+				input,
+				readBack,
+				'absent',
+				'recovery observed retirement absence after executing',
+			);
+		return recoveryPending(
 			input,
-			readBack,
-			readBack.kind === 'absent' ? 'absent' : 'indeterminate',
-			readBack.kind === 'absent'
-				? 'recovery observed retirement absence after executing'
-				: 'retirement remains indeterminate because the catalogue object is present',
+			'retirement remains unverifiable because the catalogue object is present',
 		);
+	}
 
 	// Readdress and adopt never have an executing edge in their own grammar.
 	return recoveryPending(

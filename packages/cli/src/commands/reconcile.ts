@@ -1,13 +1,13 @@
 /** Resolve only the open managed claims durably linked to one run. */
 import { createHash } from 'node:crypto';
 import {
+	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	assertPgDatabaseWritable,
-	createPgTransitionPack,
 	isPgDatabaseReadOnlyError,
+	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
 	readPgLedgerReservationsForPair,
 	readPgLedgerScopeCurrency,
-	readPgObservationContextFromClient,
 	readTransitionJournal,
 	recoverPgOutcomeClaim,
 	recoverPgReaddressPair,
@@ -15,15 +15,12 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	acquireExclusiveTransitionLease,
-	createPackRegistry,
-	isOperationRuntime,
-	type TransitionExecutionClient,
+	projectLedgerChain,
 } from '@dbsp/core';
 import type {
 	LedgerHome,
 	LedgerPayload,
 	LedgerReservationRow,
-	ProvenPlanStep,
 } from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
@@ -87,64 +84,6 @@ function recoveryPayload(
 	return {
 		value,
 		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
-	};
-}
-
-function canonicalJson(value: unknown): string {
-	if (value === null || typeof value !== 'object') return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-	const record = value as Record<string, unknown>;
-	return `{${Object.keys(record)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-		.join(',')}}`;
-}
-
-function recoveryObservationReader(step: ProvenPlanStep) {
-	const registry = createPackRegistry([createPgTransitionPack({})]);
-	const resolution = registry.resolveOperation(step.operation);
-	const issuer = registry.resolveIssuer(step.operation.operationKind.artifact);
-	if (!resolution.ok || !isOperationRuntime(resolution.semantics) || !issuer)
-		return undefined;
-	const semantics = resolution.semantics;
-	return async (executor: {
-		query: TransitionExecutionClient['opaqueClient']['query'];
-	}) => {
-		const client: TransitionExecutionClient = {
-			opaqueClient: executor as TransitionExecutionClient['opaqueClient'],
-		};
-		const liveContext = await readPgObservationContextFromClient(
-			client.opaqueClient,
-			step.managedClaim?.address.schema,
-		);
-		const context = registry.contextWithDerivedCapabilities(
-			await semantics.observeContext(client, step.operation, liveContext),
-		);
-		const result = await semantics.observeOperation(
-			client,
-			step.operation,
-			context,
-			'before',
-			issuer,
-		);
-		const value = {
-			observations: result.observations.map((observation) => ({
-				request: observation.request,
-				result: observation.result,
-			})),
-		} as unknown as LedgerPayload['value'];
-		return {
-			observed: {
-				value,
-				digest: createHash('sha256').update(canonicalJson(value)).digest('hex'),
-			},
-			effect:
-				result.fingerprint.digest === step.expectedAfter.digest
-					? ('applied' as const)
-					: result.fingerprint.digest === step.expectedBefore.digest
-						? ('no-effect' as const)
-						: ('unverifiable' as const),
-		};
 	};
 }
 
@@ -220,6 +159,34 @@ function unresolvedRecoveryDetail(
 }
 
 /**
+ * The durable run identifies reviewed material; its intent events identify
+ * actual apply attempts. Older/manual fixtures did not record an execution id,
+ * so retain the run-id fallback only when no recorded attempt is available.
+ */
+function executionIdsForRun(
+	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
+): readonly string[] {
+	const executionIds = new Set<string>();
+	for (const event of journal.events) {
+		const record = event.record;
+		if (
+			event.event === 'intent' &&
+			'executionId' in record &&
+			typeof record.executionId === 'string'
+		)
+			executionIds.add(record.executionId);
+		if (
+			event.event === 'observed' &&
+			'intent' in record &&
+			record.intent &&
+			typeof record.intent.executionId === 'string'
+		)
+			executionIds.add(record.intent.executionId);
+	}
+	return executionIds.size > 0 ? [...executionIds] : [journal.run.runId];
+}
+
+/**
  * Reservations are the claim-to-run relation.  The plan only provides the
  * finite ledger scopes to inspect; a claim is eligible only after its stored
  * execution_id equals the requested run id.
@@ -264,23 +231,21 @@ export async function runReconcile(
 									(declaration) => declaration.address,
 								) ?? [],
 						};
-					const stepByClaimId = new Map<string, ProvenPlanStep>();
-					for (const step of journal.plan.steps) {
-						if (step.managedClaim)
-							stepByClaimId.set(step.managedClaim.claimId, step);
-					}
 					const homes = new Map<string, LedgerHome>();
 					for (const claim of material) {
 						const home = ledgerHome(claim.address);
 						homes.set(`${home.scope}:${home.schema ?? ''}`, home);
 					}
+					const executionIds = executionIdsForRun(journal);
 					const reservations = (
 						await Promise.all(
-							[...homes.values()].map((home) =>
-								readPgLedgerReservationsForExecution(
-									lease.session,
-									home,
-									runId,
+							[...homes.values()].flatMap((home) =>
+								executionIds.map((executionId) =>
+									readPgLedgerReservationsForExecution(
+										lease.session,
+										home,
+										executionId,
+									),
 								),
 							),
 						)
@@ -322,8 +287,9 @@ export async function runReconcile(
 							row.claimKind === 'readdress-intent' &&
 							row.pairId !== undefined
 						) {
-							readdressPairs.set(row.pairId, [
-								...(readdressPairs.get(row.pairId) ?? []),
+							const pairKey = `${row.executionId}:${row.pairId}`;
+							readdressPairs.set(pairKey, [
+								...(readdressPairs.get(pairKey) ?? []),
 								row,
 							]);
 							continue;
@@ -334,36 +300,128 @@ export async function runReconcile(
 						]);
 					}
 					const recovery: ReconcileRecoveryReport[] = [];
-					for (const [pairId, _rows] of readdressPairs) {
+					for (const [_pairKey, pairRows] of readdressPairs) {
+						const pairId = pairRows[0]?.pairId;
+						const executionId = pairRows[0]?.executionId;
+						if (!pairId || !executionId) continue;
 						const closure = await readPgLedgerReservationsForPair(
 							lease.session,
 							pairId,
 						);
 						const recovered = await recoverPgReaddressPair(lease.session, {
 							pairId,
-							executionId: runId,
+							executionId,
 							reservations: closure,
 						});
 						recovery.push(readdressRecoveryReport(closure, recovered));
 					}
 					for (const rows of byRoot.values()) {
-						const first = rows[0];
-						if (!first) continue;
-						const step = stepByClaimId.get(first.rootClaimId);
-						const operationReadBack = step
-							? recoveryObservationReader(step)
-							: undefined;
+						const rootClaimId = rows[0]?.rootClaimId;
+						if (!rootClaimId) continue;
+						if (
+							rows.some(
+								(row) =>
+									!executionIds.includes(row.executionId) ||
+									row.rootClaimId !== rootClaimId,
+							)
+						)
+							return {
+								kind: 'selection-unavailable' as const,
+								addresses: rows.map((row) => row.address),
+								detail: `reservation disagreement for root claim ${rootClaimId}`,
+							};
+						const rootCandidates: Array<{
+							readonly row: LedgerReservationRow;
+							readonly plannedClaimKey?: string;
+						}> = [];
+						for (const row of rows) {
+							const chain = await readPgLedgerAddressChain(
+								lease.session,
+								ledgerHome(row.address),
+								row.address,
+							);
+							const projection = projectLedgerChain(chain);
+							if (
+								projection.kind !== 'projected-ledger-chain' ||
+								projection.openClaim === undefined
+							)
+								continue;
+							const open = projection.openClaim.event;
+							const openRoot = open.rootClaimId ?? open.eventId;
+							if (
+								open.executionId !== row.executionId ||
+								openRoot !== rootClaimId
+							)
+								return {
+									kind: 'selection-unavailable' as const,
+									addresses: rows.map((item) => item.address),
+									detail: `open chain member disagrees with reservation root ${rootClaimId}`,
+								};
+							if (open.eventId === rootClaimId)
+								rootCandidates.push({
+									row,
+									...(open.plannedClaimKey === undefined
+										? {}
+										: { plannedClaimKey: open.plannedClaimKey }),
+								});
+						}
+						if (rootCandidates.length !== 1)
+							return {
+								kind: 'selection-unavailable' as const,
+								addresses: rows.map((row) => row.address),
+								detail: `execution ${runId} has ${rootCandidates.length} open root members for ${rootClaimId}`,
+							};
+						const selected = rootCandidates[0];
+						if (!selected) continue;
+						if (
+							!selected.plannedClaimKey ||
+							!material.some(
+								(claim) => claim.plannedClaimKey === selected.plannedClaimKey,
+							)
+						)
+							return {
+								kind: 'selection-unavailable' as const,
+								addresses: rows.map((row) => row.address),
+								detail: `open root ${rootClaimId} has no matching persisted managed step`,
+							};
+						// Recovery follows execution_id -> reservation root_claim_id -> the
+						// single open root member. It never reuses an address-only plan id.
+						const step = journal.plan.steps.find(
+							(candidate) =>
+								candidate.managedClaim?.plannedClaimKey ===
+								selected.plannedClaimKey,
+						);
+						const operationReadBack =
+							step?.operation.operationKind.name ===
+							'CreateUniqueIndexConcurrently'
+								? async (
+										executor: Parameters<
+											typeof assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid
+										>[0],
+										_address: LedgerReservationRow['address'],
+										identity: Parameters<typeof recoveryPayload>[0],
+									) => {
+										await assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid(
+											executor,
+											step.operation,
+										);
+										return {
+											observed: recoveryPayload(identity),
+											effect: 'unverifiable' as const,
+										};
+									}
+								: undefined;
 						const recovered = await recoverPgOutcomeClaim(lease.session, {
-							address: first.address,
+							address: selected.row.address,
 							reservations: rows,
-							resolutionEventId: `${first.rootClaimId}:reconcile:${runId}`,
+							resolutionEventId: `${rootClaimId}:reconcile:${runId}`,
 							acceptedExternalDdlExclusion: false,
 							resolveIndeterminate: true,
 							readBack: async (_executor, _address, identity) =>
 								recoveryPayload(identity),
 							...(operationReadBack === undefined ? {} : { operationReadBack }),
 						});
-						recovery.push(recoveryReport(first.address, recovered));
+						recovery.push(recoveryReport(selected.row.address, recovered));
 					}
 					const unresolved = unresolvedRecoveryDetail(recovery);
 					if (unresolved)
@@ -390,6 +448,7 @@ export async function runReconcile(
 				outcome: 'reconcile-claim-selection-unavailable',
 				runId,
 				addresses: locked.value.addresses,
+				...(locked.value.detail ? { detail: locked.value.detail } : {}),
 			};
 		if (locked.value.kind === 'database-read-only')
 			return {

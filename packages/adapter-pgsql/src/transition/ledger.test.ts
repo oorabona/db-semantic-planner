@@ -116,6 +116,31 @@ describe('managed ledger storage', () => {
 		expect(query.mock.calls[0]?.[0]).toContain('DELETE FROM');
 	});
 
+	it('binds the reservation root after every expanded event value', async () => {
+		const query = vi.fn(async (_sql: string, _params?: readonly unknown[]) => ({
+			rows: [],
+		}));
+		await appendPgLedgerResolution(
+			{ query },
+			target,
+			{
+				...claim,
+				eventId: 'observed-with-provenance',
+				eventKind: 'observed',
+				predecessor: 'claim-1',
+				executionId: 'execution-1',
+				plannedClaimKey: 'step:1/root',
+				claimGroupId: 'claim-1',
+				rootClaimId: 'claim-1',
+			},
+			'claim-1',
+			[reservation],
+		);
+		const [sql, params] = query.mock.calls[0] ?? [];
+		expect(String(sql)).toContain('r.root_claim_id = $20');
+		expect(params?.[19]).toBe('claim-1');
+	});
+
 	it('locks dbsp_meta before schema names and turns a lock error into a refusal', async () => {
 		const query = vi.fn(async () => ({ rows: [{ locked: true }] }));
 		await expect(

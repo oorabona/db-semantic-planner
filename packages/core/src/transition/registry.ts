@@ -122,12 +122,12 @@ export interface NonRollbackableExecutionTracker {
 export interface ManagedOutcomeExecutionRequest {
 	readonly claim: ManagedStepClaimMaterial;
 	readonly run: TransitionRunMetadata;
+	/** Minted once by apply(), never reused when a recorded run is applied again. */
+	readonly executionId: string;
 	readonly transactional: boolean;
 	readonly lockTimeoutMs: number;
 	/** The operation's own live postcondition observation, never a generic identity probe. */
 	readBack(): Promise<LedgerPayload>;
-	/** Used only when the adapter finds no managed ledger material at all. */
-	executeUnmanaged(): Promise<OperationExecutionOutcome>;
 }
 
 /** The plan and session facts an adapter may inspect before the step intent. */

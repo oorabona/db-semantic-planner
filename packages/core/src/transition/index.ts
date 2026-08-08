@@ -257,6 +257,7 @@ export {
 	classifyOutcomeRecovery,
 	consumeClaimToken,
 	mintClaimToken,
+	outcomeClaimEventId,
 	outcomeClaimId,
 } from './outcome-protocol.js';
 export { transitionPlanDigest } from './plan-digest.js';

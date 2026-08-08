@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
 
 const schemaName = 'apply_command_enum_add_value';
 
@@ -28,7 +29,12 @@ function enumModel(values: readonly string[]): ModelIR {
 describe('dbsp apply: enum-add-value', () => {
 	let runId: string | undefined;
 
-	beforeAll(async () => createSchema(schemaName));
+	beforeAll(async () => {
+		await createSchema(schemaName);
+		const preflight = await runPreflight([schemaName]);
+		if (preflight.scopes.some((scope) => scope.outcome === 'failed'))
+			throw new Error('fixture could not initialize a current ledger');
+	});
 
 	afterEach(async () => {
 		const pool = await getTestPool();

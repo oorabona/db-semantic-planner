@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import {
 	appendPgLedgerResolution,
-	ensurePgLedger,
 	executePgManagedBundle,
 	openPgOutcomeClaim,
+	runPgReinitializePreflight,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
+import { outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerAddress,
 	LedgerReservationRow,
@@ -73,7 +74,14 @@ async function fixture(): Promise<{
 	const schema = `ledger_outcome_${randomUUID().replaceAll('-', '')}`;
 	schemas.push(schema);
 	await pool.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
-	await ensurePgLedger(pool, { scope: 'schema', schema });
+	const preflight = await runPgReinitializePreflight({
+		pool,
+		schemas: [schema],
+		declarations: { version: 1, digest: `fixture:${schema}`, declarations: [] },
+		writeAdoptionFile: async () => {},
+	});
+	if (preflight.scopes.some((scope) => scope.outcome === 'failed'))
+		throw new Error('fixture could not initialize a current ledger lineage');
 	return { pool, schema };
 }
 
@@ -101,6 +109,99 @@ afterEach(async () => {
 });
 
 describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () => {
+	it('extends one address through two completed execution-scoped lifecycles', async () => {
+		const { pool, schema } = await fixture();
+		const value = address(schema, 'twice_mutated');
+		const firstExecution = 'e2e-execution-1';
+		const secondExecution = 'e2e-execution-2';
+		const firstId = outcomeClaimId(firstExecution, 'step:0/root', value);
+		const secondId = outcomeClaimId(secondExecution, 'step:0/root', value);
+		const firstObserved = outcomeClaimEventId(firstId, 'observed');
+		const secondObserved = outcomeClaimEventId(secondId, 'observed');
+		expect(secondId).not.toBe(firstId);
+		const first = fixtureOutcomeClaim({
+			claimId: firstId,
+			executionId: firstExecution,
+			plannedClaimKey: 'step:0/root',
+			claimGroupId: firstId,
+			rootClaimId: firstId,
+			address: value,
+			claimKind: 'intent',
+			requiresVacancy: true,
+			statements: [
+				`CREATE TABLE ${quoteIdent(schema)}."twice_mutated" (id integer)`,
+			],
+			reservations: [
+				{
+					address: value,
+					claimKind: 'intent',
+					executionId: firstExecution,
+					rootClaimId: firstId,
+					homeLedger: { scope: 'schema', schema },
+				},
+			],
+		});
+		const second = fixtureOutcomeClaim({
+			claimId: secondId,
+			executionId: secondExecution,
+			plannedClaimKey: 'step:0/root',
+			claimGroupId: secondId,
+			rootClaimId: secondId,
+			address: value,
+			claimKind: 'intent',
+			requiresVacancy: false,
+			statements: [
+				`ALTER TABLE ${quoteIdent(schema)}."twice_mutated" ADD COLUMN note text`,
+			],
+			reservations: [
+				{
+					address: value,
+					claimKind: 'intent',
+					executionId: secondExecution,
+					rootClaimId: secondId,
+					homeLedger: { scope: 'schema', schema },
+				},
+			],
+		});
+		await expect(
+			runPgTransactionalOutcome(pool, {
+				...first,
+				resolution: { eventId: firstObserved, eventKind: 'observed' },
+				recordCatalogueIdentity: true,
+				vacancy: async () => ({ kind: 'vacant' }),
+				readBack: async () => ({
+					value: { table: 'twice_mutated', cycle: 1 },
+					digest: 'twice-mutated-cycle-1',
+				}),
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+		await expect(
+			runPgTransactionalOutcome(pool, {
+				...second,
+				resolution: { eventId: secondObserved, eventKind: 'observed' },
+				readBack: async () => ({
+					value: { table: 'twice_mutated', cycle: 2 },
+					digest: 'twice-mutated-cycle-2',
+				}),
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+		const events = await pool.query<{
+			event_id: string;
+			predecessor: string | null;
+		}>(
+			`SELECT event_id, predecessor FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = 'twice_mutated' ORDER BY event_id`,
+		);
+		expect(events.rows).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ event_id: firstId }),
+				expect.objectContaining({
+					event_id: secondId,
+					predecessor: firstObserved,
+				}),
+			]),
+		);
+	});
+
 	it('SC-32: backend termination inside the transactional claim window leaves no event, reservation, or catalogue effect', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();
@@ -170,11 +271,15 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 		const client = await pool.connect();
 		const input = claim(schema, 'externally_created', 'vacancy-claim');
 		try {
+			await pool.query(
+				`CREATE TABLE ${quoteIdent(schema)}."externally_created" (id integer)`,
+			);
 			const adoption = fixtureOutcomeClaim({
 				claimId: 'prior-adopt',
 				address: input.plan.address,
 				claimKind: 'adopt-intent',
 				statements: ['SELECT 1'],
+				requiresVacancy: false,
 				reservations: input.reservations.map((reservation) => ({
 					...reservation,
 					claimKind: 'adopt-intent' as const,
@@ -182,22 +287,17 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 					rootClaimId: 'prior-adopt',
 				})),
 			});
-			const admittedAdoption = await openPgOutcomeClaim(client, adoption);
-			if (admittedAdoption.kind !== 'admitted-outcome-claim')
-				throw new Error('absent fixture adoption did not admit');
-			await appendPgLedgerResolution(
-				client,
-				{ scope: 'schema', schema },
-				{
-					eventId: 'prior-adopted',
-					address: input.plan.address,
-					eventKind: 'adopt',
-					predecessor: 'prior-adopt',
-					observed: { value: { table: 'externally_created' }, digest: 'prior' },
-				},
-				'prior-adopt',
-				adoption.reservations,
-			);
+			const adopted = await runPgTransactionalOutcome(client, {
+				...adoption,
+				resolution: { eventId: 'prior-adopted', eventKind: 'adopt' },
+				readBack: async () => ({
+					value: { table: 'externally_created' },
+					digest: 'prior',
+				}),
+				recordCatalogueIdentity: true,
+			});
+			if (adopted.kind !== 'executed-outcome-claim')
+				throw new Error('present fixture adoption did not complete');
 			const retirement = fixtureOutcomeClaim({
 				claimId: 'prior-retire',
 				address: input.plan.address,
@@ -229,9 +329,6 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 				...input,
 				resolution: { eventId: 'vacancy-refused', eventKind: 'refused' },
 				vacancy: async () => {
-					await pool.query(
-						`CREATE TABLE ${quoteIdent(schema)}."externally_created" (id integer)`,
-					);
 					return vacancy(pool, schema, 'externally_created');
 				},
 			});

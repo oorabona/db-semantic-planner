@@ -25,6 +25,10 @@ interface PgLedgerEventRow {
 	readonly address_parent: unknown;
 	readonly address_kind: unknown;
 	readonly address_name: unknown;
+	readonly execution_id: unknown;
+	readonly planned_claim_key: unknown;
+	readonly claim_group_id: unknown;
+	readonly root_claim_id: unknown;
 	readonly catalogue_identity: unknown;
 	readonly event_kind: unknown;
 	readonly predecessor: unknown;
@@ -108,10 +112,21 @@ function memberFromRow(
 	const declared = payload(row.declared, row.declared_digest, 'declared');
 	const observed = payload(row.observed, row.observed_digest, 'observed');
 	const predecessor = nullableString(row.predecessor, 'predecessor');
+	const executionId = nullableString(row.execution_id, 'execution_id');
+	const plannedClaimKey = nullableString(
+		row.planned_claim_key,
+		'planned_claim_key',
+	);
+	const claimGroupId = nullableString(row.claim_group_id, 'claim_group_id');
+	const rootClaimId = nullableString(row.root_claim_id, 'root_claim_id');
 	const pairId = nullableString(row.pair_id, 'pair_id');
 	const recordedAt = nullableString(row.recorded_at, 'recorded_at');
 	return {
 		eventId: asString(row.event_id, 'event_id'),
+		...(executionId === undefined ? {} : { executionId }),
+		...(plannedClaimKey === undefined ? {} : { plannedClaimKey }),
+		...(claimGroupId === undefined ? {} : { claimGroupId }),
+		...(rootClaimId === undefined ? {} : { rootClaimId }),
 		address: {
 			scope,
 			engine: asString(row.address_engine, 'address_engine'),
@@ -180,7 +195,7 @@ export async function readPgLedgerAddressChain(
 			`ledger schema ${String(ledger.schema)} does not match address schema ${String(address.schema)} for ${address.name}`,
 		);
 	const result = await executor.query(
-		`SELECT event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, controller::text AS controller, recorded_at::text AS recorded_at FROM ${eventTable(ledger)} WHERE address_engine = $1 AND address_database = $2 AND address_schema = $3 AND address_parent = $4::jsonb AND address_kind = $5 AND address_name = $6`,
+		`SELECT event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, controller::text AS controller, recorded_at::text AS recorded_at FROM ${eventTable(ledger)} WHERE address_engine = $1 AND address_database = $2 AND address_schema = $3 AND address_parent = $4::jsonb AND address_kind = $5 AND address_name = $6`,
 		addressParameters(address),
 	);
 	const events = result.rows.map((row) =>

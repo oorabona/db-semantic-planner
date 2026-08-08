@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import {
 	appendPgLedgerProgress,
 	appendPgOutcomeResolution,
-	ensurePgLedger,
 	openPgOutcomeClaim,
 	recoverPgOutcomeClaim,
 	runPgNonTransactionalOutcome,
+	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
@@ -57,7 +57,14 @@ async function fixture() {
 	const schema = `ledger_recovery_${randomUUID().replaceAll('-', '')}`;
 	schemas.push(schema);
 	await pool.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
-	await ensurePgLedger(pool, { scope: 'schema', schema });
+	const preflight = await runPgReinitializePreflight({
+		pool,
+		schemas: [schema],
+		declarations: { version: 1, digest: `fixture:${schema}`, declarations: [] },
+		writeAdoptionFile: async () => {},
+	});
+	if (preflight.scopes.some((scope) => scope.outcome === 'failed'))
+		throw new Error('fixture could not initialize a current ledger lineage');
 	return { pool, schema };
 }
 

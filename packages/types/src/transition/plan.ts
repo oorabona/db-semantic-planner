@@ -44,7 +44,10 @@ import type { DeclarableResourceAddress, ResourceAddress } from './resource.js';
  * executor may use for the address or statement bundle of a managed claim.
  */
 export interface ManagedStepClaimMaterial {
+	/** Legacy plan-local label retained for serialized-plan compatibility; never a ledger event id. */
 	readonly claimId: string;
+	/** Stable only inside this persisted plan; execution mints the claim id. */
+	readonly plannedClaimKey: string;
 	readonly address: DeclarableResourceAddress & {
 		readonly scope: 'schema' | 'database';
 	};
@@ -62,6 +65,8 @@ export interface ExecutableAssertion {
 export interface DurableIntentRecord {
 	readonly runId?: string;
 	readonly run?: TransitionRunMetadata;
+	/** One apply attempt, deliberately distinct from the durable reviewed run. */
+	readonly executionId?: string;
 	readonly stepId: string;
 	readonly operation: PhysicalOperation;
 	readonly recordedAt: string;

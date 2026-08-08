@@ -10,10 +10,11 @@ import {
 	readTransitionJournal,
 	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
-import type { ModelIR } from '@dbsp/core';
+import { type ModelIR, outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerReservationRow,
 	ManagedStepClaimMaterial,
+	OutcomeClaimPlan,
 } from '@dbsp/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
@@ -134,8 +135,27 @@ function onlyManagedClaim(plan: PlannedRun['plan']): ManagedStepClaimMaterial {
 	return claim;
 }
 
-function reservation(
+/** Materialize the plan-local claim position for one durable execution scope. */
+function executionClaim(
 	claim: ManagedStepClaimMaterial,
+	executionId: string,
+): OutcomeClaimPlan {
+	const claimId = outcomeClaimId(
+		executionId,
+		claim.plannedClaimKey,
+		claim.address,
+	);
+	return {
+		...claim,
+		claimId,
+		executionId,
+		claimGroupId: claimId,
+		rootClaimId: claimId,
+	};
+}
+
+function reservation(
+	claim: OutcomeClaimPlan,
 	runId: string,
 ): LedgerReservationRow {
 	if (claim.address.scope === 'database') {
@@ -361,12 +381,13 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			expect(applied.outcome).toBe('completed');
 
 			const members = await ledgerChain(schema, claim.address.name);
+			const executed = executionClaim(claim, planned.runId);
 			expect(members.map((member) => member.eventKind)).toEqual([
 				'intent',
 				'observed',
 			]);
 			expect(members[1]).toMatchObject({
-				predecessor: claim.claimId,
+				predecessor: executed.claimId,
 				observedDigest: expect.any(String),
 			});
 			expect(
@@ -415,14 +436,15 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			expect(applied.outcome).toBe('completed');
 			expect(claim.statementBundle.statements).toHaveLength(1);
 			const members = await ledgerChain(schema, claim.address.name);
+			const executed = executionClaim(claim, planned.runId);
 			expect(members.map((member) => member.eventKind)).toEqual([
 				'intent',
 				'executing',
 				'observed',
 			]);
-			expect(members[1]).toMatchObject({ predecessor: claim.claimId });
+			expect(members[1]).toMatchObject({ predecessor: executed.claimId });
 			expect(members[2]).toMatchObject({
-				predecessor: `${claim.claimId}:executing`,
+				predecessor: outcomeClaimEventId(executed.claimId, 'executing'),
 				observedDigest: expect.any(String),
 			});
 		});
@@ -440,6 +462,14 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			);
 			const interruptedClaim = onlyManagedClaim(interrupted.plan);
 			const untouchedClaim = onlyManagedClaim(untouched.plan);
+			const interruptedExecutionClaim = executionClaim(
+				interruptedClaim,
+				interrupted.runId,
+			);
+			const untouchedExecutionClaim = executionClaim(
+				untouchedClaim,
+				untouched.runId,
+			);
 			const pool = await getTestPool();
 			const client = await pool.connect();
 			client.on('error', () => undefined);
@@ -457,11 +487,19 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 				).rows[0]?.pid;
 				if (!pid) throw new Error('executing gate client has no backend pid');
 				const running = runPgNonTransactionalOutcome(client, {
-					plan: interruptedClaim,
-					reservations: [reservation(interruptedClaim, interrupted.runId)],
-					executingEventId: `${interruptedClaim.claimId}:executing`,
+					plan: interruptedExecutionClaim,
+					reservations: [
+						reservation(interruptedExecutionClaim, interrupted.runId),
+					],
+					executingEventId: outcomeClaimEventId(
+						interruptedExecutionClaim.claimId,
+						'executing',
+					),
 					resolution: {
-						eventId: `${interruptedClaim.claimId}:observed`,
+						eventId: outcomeClaimEventId(
+							interruptedExecutionClaim.claimId,
+							'observed',
+						),
 						eventKind: 'observed',
 					},
 					vacancy: async () => ({ kind: 'vacant' }),
@@ -498,8 +536,8 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					'intent,executing',
 			);
 			const admitted = await openPgOutcomeClaim(pool, {
-				plan: untouchedClaim,
-				reservations: [reservation(untouchedClaim, untouched.runId)],
+				plan: untouchedExecutionClaim,
+				reservations: [reservation(untouchedExecutionClaim, untouched.runId)],
 			});
 			expect(admitted.kind).toBe('admitted-outcome-claim');
 

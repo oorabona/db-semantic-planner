@@ -407,6 +407,7 @@ export {
 	mintClaimToken,
 	normalizedIndex,
 	observationContextDigest,
+	outcomeClaimEventId,
 	outcomeClaimId,
 	PackRegistry,
 	planOperationSession,

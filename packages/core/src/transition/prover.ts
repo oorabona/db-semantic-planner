@@ -51,7 +51,6 @@ import {
 import { assumptionId, claimId, semanticArtifactId } from './ids.js';
 import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
 import { mintInProcessPlan } from './minting.js';
-import { outcomeClaimId } from './outcome-protocol.js';
 import type { PackRegistry, RegisteredOperationSemantics } from './registry.js';
 import { stableJson } from './stable-json.js';
 import {
@@ -144,7 +143,8 @@ function managedClaimMaterial(
 		.map((read) => claimAddressFromSelector(read, context))
 		.some((read) => read !== undefined && sameLedgerAddress(address, read));
 	return {
-		claimId: claimId(outcomeClaimId(address)),
+		claimId: claimId(`dbsp.transition.plan.${operation.ref}`),
+		plannedClaimKey: `step:${operation.ref}/root`,
 		address,
 		claimKind: 'intent',
 		statementBundle: { statements: [{ ordinal: 0, sql }] },
@@ -2122,37 +2122,37 @@ async function proveTransitions(
 	}
 	const primaryClaim =
 		planClaims[0]?.id ?? claimId('dbsp.transition.claim.plan');
-	const guardedPlan: ProvenPlanShape = {
-		observations: planEvidence,
-		claims: planClaims,
-		assumptions,
-		preconditions: fragments.flatMap((fragment) =>
-			fragment.obligations.map((obligation) => ({
-				proposition: obligation.proposition,
-				scope: obligation.scope,
-			})),
-		),
-		segments: composition.segments,
-		steps: composition.operations.map((entry) => {
-			const input = stepInputs.get(entry.operation.ref);
-			if (!input) {
-				throw new Error(
-					`internal error: missing composed operation ${entry.operation.ref}`,
-				);
-			}
-			const currentStepId = `step:${entry.operation.ref}`;
-			const segmentId = segmentByStepId.get(currentStepId);
-			if (!segmentId) {
-				throw new Error(
-					`internal error: composed step ${currentStepId} has no segment`,
-				);
-			}
-			const managedClaim = managedClaimMaterial(
-				input.semantics,
-				input.operation,
-				sharedProofContext ?? context,
+	const guardedSteps = composition.operations.map((entry) => {
+		const input = stepInputs.get(entry.operation.ref);
+		if (!input) {
+			throw new Error(
+				`internal error: missing composed operation ${entry.operation.ref}`,
 			);
+		}
+		const currentStepId = `step:${entry.operation.ref}`;
+		const segmentId = segmentByStepId.get(currentStepId);
+		if (!segmentId) {
+			throw new Error(
+				`internal error: composed step ${currentStepId} has no segment`,
+			);
+		}
+		const managedClaim = managedClaimMaterial(
+			input.semantics,
+			input.operation,
+			sharedProofContext ?? context,
+		);
+		if (
+			input.semantics.executionContractEligibility?.eligible === true &&
+			managedClaim === undefined
+		) {
 			return {
+				kind: 'underivable-managed-claim' as const,
+				operation: input.operation,
+			};
+		}
+		return {
+			kind: 'step' as const,
+			step: {
 				stepId: currentStepId,
 				segmentId,
 				operation: input.operation,
@@ -2165,7 +2165,36 @@ async function proveTransitions(
 				restsOnAssumptions: input.restsOnAssumptions,
 				selectionRationale: input.fragment.selectionRationale,
 				...(managedClaim === undefined ? {} : { managedClaim }),
-			};
+			},
+		};
+	});
+	const underivable = guardedSteps.find(
+		(step) => step.kind === 'underivable-managed-claim',
+	);
+	if (underivable) {
+		return {
+			kind: 'blocked',
+			assessment: uncomposable(
+				fragments,
+				`managed-eligible operation ${underivable.operation.ref} cannot derive immutable managed claim material`,
+			),
+		};
+	}
+	const guardedPlan: ProvenPlanShape = {
+		observations: planEvidence,
+		claims: planClaims,
+		assumptions,
+		preconditions: fragments.flatMap((fragment) =>
+			fragment.obligations.map((obligation) => ({
+				proposition: obligation.proposition,
+				scope: obligation.scope,
+			})),
+		),
+		segments: composition.segments,
+		steps: guardedSteps.map((entry) => {
+			if (entry.kind !== 'step')
+				throw new Error('internal error: blocked managed claim reached plan');
+			return entry.step;
 		}),
 		postconditions: [],
 	};

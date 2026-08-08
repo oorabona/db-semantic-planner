@@ -1,7 +1,11 @@
 /** Explicit, token-gated admission of a pre-existing object into management. */
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { projectLedgerChain } from '@dbsp/core';
+import {
+	outcomeClaimEventId,
+	outcomeClaimId,
+	projectLedgerChain,
+} from '@dbsp/core';
 import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
@@ -11,12 +15,14 @@ import { runPgTransactionalOutcome } from './outcome-protocol.js';
 export type PgAdoptionResult =
 	| { readonly outcome: 'completed' }
 	| { readonly outcome: 'no-op' }
-	| { readonly outcome: 'adoption-refused'; readonly detail: string };
+	| { readonly outcome: 'adoption-refused'; readonly detail: string }
+	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 export type PgAdoptionPreflightResult =
 	| { readonly outcome: 'ready' }
 	| { readonly outcome: 'no-op' }
-	| { readonly outcome: 'adoption-refused'; readonly detail: string };
+	| { readonly outcome: 'adoption-refused'; readonly detail: string }
+	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 export interface PgDeclaredAdoptionInput {
 	readonly executor: TransitionJournalQueryable;
@@ -27,7 +33,9 @@ export interface PgDeclaredAdoptionInput {
 	readonly expectedCatalogueIdentity: NonNullable<
 		LedgerAddress['catalogueIdentity']
 	>;
-	readonly shapeMatches: () => Promise<boolean>;
+	readonly shapeMatches: (
+		executor: TransitionJournalQueryable,
+	) => Promise<boolean>;
 	readonly executionId?: string;
 }
 
@@ -59,7 +67,7 @@ export async function preflightPgDeclaredAdoption(
 				outcome: 'adoption-refused',
 				detail: `declared adoption for ${input.address.name} refuses malformed ledger chain: ${projection.reason.code}`,
 			};
-		if (!(await input.shapeMatches()))
+		if (!(await input.shapeMatches(input.executor)))
 			return {
 				outcome: 'adoption-refused',
 				detail: `declared adoption for ${input.address.name} refuses live shape mismatch`,
@@ -83,7 +91,7 @@ export async function preflightPgDeclaredAdoption(
 		return { outcome: 'ready' };
 	} catch (error) {
 		return {
-			outcome: 'adoption-refused',
+			outcome: 'execution-failed',
 			detail: error instanceof Error ? error.message : String(error),
 		};
 	}
@@ -98,12 +106,21 @@ export async function executePgDeclaredAdoption(
 	input: PgDeclaredAdoptionInput,
 ): Promise<PgAdoptionResult> {
 	try {
+		// This explanatory preflight does not mint authority: the same facts are
+		// re-read by verifyLiveAdmission after the claim/reservation is open.
 		const preflight = await preflightPgDeclaredAdoption(input);
 		if (preflight.outcome !== 'ready') return preflight;
-		const claimId = `dbsp.adoption.${randomUUID()}`;
+		const executionId =
+			input.executionId ?? `dbsp.adoption.execution.${randomUUID()}`;
+		const plannedClaimKey = `adoption:${input.address.kind}:${input.address.name}`;
+		const claimId = outcomeClaimId(executionId, plannedClaimKey, input.address);
 		const result = await runPgTransactionalOutcome(input.executor, {
 			plan: {
 				claimId,
+				executionId,
+				plannedClaimKey,
+				claimGroupId: claimId,
+				rootClaimId: claimId,
 				address: input.address,
 				claimKind: 'adopt-intent',
 				statementBundle: { statements: [] },
@@ -116,21 +133,64 @@ export async function executePgDeclaredAdoption(
 				{
 					address: input.address,
 					claimKind: 'adopt-intent',
-					executionId: input.executionId ?? claimId,
+					executionId,
 					rootClaimId: claimId,
 					homeLedger: input.home,
 				},
 			],
-			resolution: { eventId: `${claimId}:adopt`, eventKind: 'adopt' },
+			resolution: {
+				eventId: outcomeClaimEventId(claimId, 'adopt'),
+				eventKind: 'adopt',
+			},
+			verifyLiveAdmission: async (executor) => {
+				if (!(await input.shapeMatches(executor)))
+					return {
+						kind: 'outcome-protocol-refused',
+						reason: `declared adoption for ${input.address.name} refuses live shape mismatch`,
+					};
+				const live = await readPgCatalogueIdentity(executor, input.address);
+				if (!live?.catalogueIdentity)
+					return {
+						kind: 'outcome-protocol-refused',
+						reason: `declared adoption for ${input.address.name} refuses absent live identity`,
+					};
+				if (
+					!isDeepStrictEqual(
+						live.catalogueIdentity,
+						input.expectedCatalogueIdentity,
+					)
+				)
+					return {
+						kind: 'outcome-protocol-refused',
+						reason: `declared adoption for ${input.address.name} refuses live identity mismatch`,
+					};
+				return undefined;
+			},
 			readBack: async () => input.declaration,
 			recordCatalogueIdentity: true,
 		});
-		return result.kind === 'executed-outcome-claim'
-			? { outcome: 'completed' }
-			: { outcome: 'adoption-refused', detail: result.reason };
+		// The initial preflight is intentionally outside the claim transaction so
+		// it can short-circuit an already-complete adoption. If a concurrent
+		// closer wins after that read, the token gate is the authoritative signal;
+		// re-read the completed lifecycle before reporting a refusal.
+		if (
+			result.kind === 'outcome-protocol-refused' &&
+			result.reason.includes('claim token for') &&
+			result.reason.includes('claim is closed')
+		) {
+			const completed = await preflightPgDeclaredAdoption(input);
+			if (completed.outcome === 'no-op') return completed;
+		}
+		if (result.kind === 'executed-outcome-claim')
+			return { outcome: 'completed' };
+		return result.reason.startsWith(
+			`declared adoption for ${input.address.name} refuses `,
+		)
+			? { outcome: 'adoption-refused', detail: result.reason }
+			: { outcome: 'execution-failed', detail: result.reason };
 	} catch (error) {
 		return {
-			outcome: 'adoption-refused',
+			outcome: 'execution-failed',
 			detail: error instanceof Error ? error.message : String(error),
 		};
 	}

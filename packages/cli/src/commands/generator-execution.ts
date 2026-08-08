@@ -17,9 +17,10 @@ import {
 	reservationsForRemovalClosure,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
+import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
 import {
-	attachDestructiveAuthorityPermit,
 	decideDestructiveDecision,
+	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
 } from '@dbsp/core';
@@ -178,9 +179,18 @@ async function databaseId(pool: Pool): Promise<string> {
 	return database;
 }
 
-async function managed(pool: Pool, address: LedgerAddress): Promise<boolean> {
+type LedgerQueryable = Parameters<typeof readPgLedgerAddressChain>[0];
+
+async function managed(
+	executor: LedgerQueryable,
+	address: LedgerAddress,
+): Promise<boolean> {
 	try {
-		const chain = await readPgLedgerAddressChain(pool, home(address), address);
+		const chain = await readPgLedgerAddressChain(
+			executor,
+			home(address),
+			address,
+		);
 		const projection = projectLedgerChain(chain);
 		return (
 			projection.kind === 'projected-ledger-chain' &&
@@ -189,6 +199,31 @@ async function managed(pool: Pool, address: LedgerAddress): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+/**
+ * A generator document is re-evaluated against live state on every delivery.
+ * Once a creation claim has already reached its managed terminal state, its
+ * address being present is evidence of that earlier delivery, not permission to
+ * send its fixed bundle again. An unmanaged occupant still follows the normal
+ * vacancy refusal path.
+ */
+async function alreadyAppliedCreation(
+	executor: LedgerQueryable,
+	address: LedgerAddress,
+): Promise<boolean> {
+	const live = await readPgCatalogueIdentity(executor, address);
+	return live?.catalogueIdentity !== undefined && managed(executor, address);
+}
+
+function creationRequiresVacancy(change: GeneratedChange): boolean {
+	return (
+		change.kind === 'create_table' ||
+		change.kind === 'add_column' ||
+		change.kind === 'create_extension' ||
+		change.kind === 'create_enum' ||
+		change.kind === 'create_sequence'
+	);
 }
 
 function observed(address: LedgerAddress): LedgerPayload {
@@ -213,7 +248,7 @@ function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
 }
 
 async function destructiveEvidence(input: {
-	readonly pool: Pool;
+	readonly executor: LedgerQueryable;
 	readonly address: LedgerAddress;
 	readonly change: GeneratedChange;
 	readonly planDigest: string;
@@ -224,14 +259,18 @@ async function destructiveEvidence(input: {
 		ReturnType<typeof readPgRemovalEffectsClosure>
 	>;
 }> {
-	const { pool, address, change } = input;
+	const { executor, address, change } = input;
 	let ownership: DestructiveAuthorityEvidence['ownership'] = 'uncomputable';
 	let catalogueIdentity: DestructiveAuthorityEvidence['catalogueIdentity'] =
 		'catalogue-unavailable';
 	let ledgerLineage: DestructiveAuthorityEvidence['ledgerLineage'] =
 		'unreadable';
 	try {
-		const chain = await readPgLedgerAddressChain(pool, home(address), address);
+		const chain = await readPgLedgerAddressChain(
+			executor,
+			home(address),
+			address,
+		);
 		const projection = projectLedgerChain(chain);
 		ownership =
 			projection.kind === 'projected-ledger-chain'
@@ -241,7 +280,7 @@ async function destructiveEvidence(input: {
 						? 'unknown'
 						: 'blocked'
 				: 'uncomputable';
-		const live = await readPgCatalogueIdentity(pool, address);
+		const live = await readPgCatalogueIdentity(executor, address);
 		const recorded = chain.terminalMember?.catalogueIdentity;
 		catalogueIdentity = !live
 			? 'object-absent'
@@ -250,7 +289,7 @@ async function destructiveEvidence(input: {
 				: isDeepStrictEqual(live.catalogueIdentity, recorded)
 					? 'matches-recorded'
 					: 'differs';
-		const currency = await readPgLedgerScopeCurrency(pool, home(address));
+		const currency = await readPgLedgerScopeCurrency(executor, home(address));
 		ledgerLineage =
 			currency.kind === 'current' ? 'matches-database' : 'differs';
 	} catch {
@@ -262,9 +301,9 @@ async function destructiveEvidence(input: {
 	let containmentOutcome: ContainmentClosureDestructiveOutcome | undefined;
 	if (change.classification === 'removal') {
 		containment = await readPgRemovalEffectsClosure({
-			executor: pool,
+			executor,
 			root: address,
-			isManaged: (candidate) => managed(pool, candidate),
+			isManaged: (candidate) => managed(executor, candidate),
 		});
 		containmentOutcome = containment.kind;
 	}
@@ -287,6 +326,21 @@ async function destructiveEvidence(input: {
 }
 
 /**
+ * Closure discovery is needed before the group can be reserved. It deliberately
+ * does not decide destructive authority; the locked admission callback does.
+ */
+async function removalContainment(
+	executor: LedgerQueryable,
+	address: LedgerAddress,
+): Promise<Awaited<ReturnType<typeof readPgRemovalEffectsClosure>>> {
+	return readPgRemovalEffectsClosure({
+		executor,
+		root: address,
+		isManaged: (candidate) => managed(executor, candidate),
+	});
+}
+
+/**
  * Executes the in-memory, just-presented generator material.  It never reads
  * a generator run back by id: that persisted row remains review-only.
  */
@@ -301,6 +355,7 @@ export async function executeGeneratorPlan(input: {
 }): Promise<GeneratorExecutionResult> {
 	try {
 		const database = await databaseId(input.pool);
+		const executionId = `dbsp.generator.execution.${randomUUID()}`;
 		// Refusal preflight deliberately precedes replacement/authority checks and
 		// every outcome claim. A declared adoption that diverged after review is
 		// the actionable fault; an unrelated DROP must not invite its acceptance.
@@ -311,28 +366,33 @@ export async function executeGeneratorPlan(input: {
 					detail: `declared adoption for ${change.table} refuses live shape mismatch`,
 				};
 			if (change.kind !== 'adopt_table') continue;
-			if (!change.adoption)
+			const adoption = change.adoption;
+			if (!adoption)
 				return {
-					outcome: 'adoption-refused',
+					outcome: 'execution-failed',
 					detail: 'adoption generator change has no declaration',
 				};
 			const address = addressFor(change, database, input.schema);
 			if (!address)
 				return {
-					outcome: 'adoption-refused',
+					outcome: 'execution-failed',
 					detail: `adoption generator change ${change.table} has no managed address`,
 				};
 			const preflight = await preflightPgDeclaredAdoption({
 				executor: input.pool,
 				home: home(address),
 				address,
-				declaration: change.adoption.declaration,
-				expectedCatalogueIdentity: change.adoption.catalogueIdentity,
+				declaration: adoption.declaration,
+				expectedCatalogueIdentity: adoption.catalogueIdentity,
 				shapeMatches: () =>
-					adoptionShapeMatches(input.pool, input.schema, change.adoption!),
-				executionId: input.runId,
-			});
-			if (preflight.outcome === 'adoption-refused') return preflight;
+					adoptionShapeMatches(input.pool, input.schema, adoption),
+				executionId,
+			} as never);
+			if (preflight.outcome === 'ready' || preflight.outcome === 'no-op')
+				continue;
+			return preflight.outcome === 'adoption-refused'
+				? { outcome: 'adoption-refused', detail: preflight.detail }
+				: { outcome: 'execution-failed', detail: preflight.detail };
 		}
 		if (
 			input.plan.generator.changes.some(
@@ -353,7 +413,10 @@ export async function executeGeneratorPlan(input: {
 					detail: `replacement ${selector} was not requested by the reviewed plan`,
 				};
 		}
-		for (const change of input.plan.generator.changes) {
+		for (const [
+			changeIndex,
+			change,
+		] of input.plan.generator.changes.entries()) {
 			if (change.kind === 'adoption_refused') continue;
 			if (change.kind === 'replace_table') {
 				const address = addressFor(change, database, input.schema);
@@ -363,29 +426,17 @@ export async function executeGeneratorPlan(input: {
 						detail: `replacement generator change ${change.table} has incomplete reviewed material`,
 					};
 				if (!replacementRequested(input.replaces, address)) continue;
-				const authority = await destructiveEvidence({
-					pool: input.pool,
+				const retireId = outcomeClaimId(
+					executionId,
+					`generator:${changeIndex}:replacement-retire`,
 					address,
-					change,
-					planDigest: input.planDigest,
-					accepts: input.accepts,
-				});
-				const decision = decideDestructiveDecision(
-					{ kind: 'removal', address },
-					{
-						...authority.evidence,
-						declaration: 'replacement-requested-by-plan',
-						replacementAddress: address,
-					},
 				);
-				if (decision.kind !== 'destructive-decision-permitted')
-					return {
-						outcome: 'destructive-authority-refused',
-						detail: decision.reasons.join('; '),
-					};
-				const retireId = `dbsp.replacement.retire.${randomUUID()}`;
 				const retirement = {
 					claimId: retireId,
+					executionId,
+					plannedClaimKey: `generator:${changeIndex}:replacement-retire`,
+					claimGroupId: retireId,
+					rootClaimId: retireId,
 					address,
 					claimKind: 'retire-intent' as const,
 					statementBundle: {
@@ -400,24 +451,43 @@ export async function executeGeneratorPlan(input: {
 				const reservation = {
 					address,
 					claimKind: 'retire-intent' as const,
-					executionId: input.runId,
+					executionId,
 					rootClaimId: retireId,
 					homeLedger: home(address),
 				};
 				const admitted = await openPgOutcomeClaim(input.pool, {
 					plan: retirement,
 					reservations: [reservation],
+					destructiveDecision: async (executor) => {
+						const authority = await destructiveEvidence({
+							executor,
+							address,
+							change,
+							planDigest: input.planDigest,
+							accepts: input.accepts,
+						});
+						return decideDestructiveDecision(
+							{ kind: 'removal', address },
+							{
+								...authority.evidence,
+								declaration: 'replacement-requested-by-plan',
+								replacementAddress: address,
+							},
+						);
+					},
 				});
 				if (admitted.kind !== 'admitted-outcome-claim')
-					return { outcome: 'execution-failed', detail: admitted.reason };
-				const permitted = attachDestructiveAuthorityPermit({
-					decision,
-					claim: admitted,
-				});
-				if (permitted.kind === 'outcome-protocol-refused')
-					return { outcome: 'execution-failed', detail: permitted.reason };
+					return {
+						outcome: 'destructive-authority-refused',
+						detail: admitted.reason,
+					};
+				if (!('destructivePermit' in admitted))
+					return {
+						outcome: 'execution-failed',
+						detail: 'destructive admission did not mint an authority permit',
+					};
 				const sent = await executePgDestructiveBundle(input.pool, {
-					claim: permitted,
+					claim: admitted as AdmittedDestructiveOutcomeClaim,
 					statements: retirement.statementBundle.statements,
 				});
 				if (sent) return { outcome: 'execution-failed', detail: sent.reason };
@@ -430,7 +500,11 @@ export async function executeGeneratorPlan(input: {
 					input.pool,
 					home(address),
 					{
-						eventId: `${retireId}:absent`,
+						eventId: outcomeClaimEventId(retireId, 'absent'),
+						executionId,
+						plannedClaimKey: `generator:${changeIndex}:replacement-retire`,
+						claimGroupId: retireId,
+						rootClaimId: retireId,
 						address,
 						eventKind: 'absent',
 						predecessor: retireId,
@@ -438,10 +512,18 @@ export async function executeGeneratorPlan(input: {
 					retireId,
 					[reservation],
 				);
-				const createId = `dbsp.replacement.create.${randomUUID()}`;
+				const createId = outcomeClaimId(
+					executionId,
+					`generator:${changeIndex}:replacement-create`,
+					address,
+				);
 				const created = await runPgTransactionalOutcome(input.pool, {
 					plan: {
 						claimId: createId,
+						executionId,
+						plannedClaimKey: `generator:${changeIndex}:replacement-create`,
+						claimGroupId: createId,
+						rootClaimId: createId,
 						address,
 						claimKind: 'intent',
 						requiresVacancy: true,
@@ -458,13 +540,13 @@ export async function executeGeneratorPlan(input: {
 						{
 							address,
 							claimKind: 'intent',
-							executionId: input.runId,
+							executionId,
 							rootClaimId: createId,
 							homeLedger: home(address),
 						},
 					],
 					resolution: {
-						eventId: `${createId}:observed`,
+						eventId: outcomeClaimEventId(createId, 'observed'),
 						eventKind: 'observed',
 					},
 					readBack: async () => observed(address),
@@ -482,7 +564,8 @@ export async function executeGeneratorPlan(input: {
 				continue;
 			}
 			if (change.kind === 'adopt_table') {
-				if (!change.adoption)
+				const adoption = change.adoption;
+				if (!adoption)
 					return {
 						outcome: 'execution-failed',
 						detail: 'adoption generator change has no declaration',
@@ -497,15 +580,21 @@ export async function executeGeneratorPlan(input: {
 					executor: input.pool,
 					home: home(address),
 					address,
-					declaration: change.adoption.declaration,
-					expectedCatalogueIdentity: change.adoption.catalogueIdentity,
+					declaration: adoption.declaration,
+					expectedCatalogueIdentity: adoption.catalogueIdentity,
 					shapeMatches: () =>
-						adoptionShapeMatches(input.pool, input.schema, change.adoption!),
-					executionId: input.runId,
+						adoptionShapeMatches(input.pool, input.schema, adoption),
+					executionId,
 				} as never);
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op')
 					continue;
-				return { outcome: 'adoption-refused', detail: adopted.detail };
+				const failedAdoption = adopted as {
+					readonly outcome: 'adoption-refused' | 'execution-failed';
+					readonly detail: string;
+				};
+				return failedAdoption.outcome === 'adoption-refused'
+					? { outcome: 'adoption-refused', detail: failedAdoption.detail }
+					: { outcome: 'execution-failed', detail: failedAdoption.detail };
 			}
 			if (change.kind === 'readdress_table') {
 				if (!change.readdress)
@@ -517,7 +606,7 @@ export async function executeGeneratorPlan(input: {
 					database,
 					targetSchema: input.schema,
 					declaration: change.readdress,
-					executionId: input.runId,
+					executionId,
 				});
 				if (result.outcome === 'completed') continue;
 				if (result.outcome === 'no-op') continue;
@@ -530,10 +619,25 @@ export async function executeGeneratorPlan(input: {
 					outcome: 'destructive-authority-refused',
 					detail: `generator mutation ${change.kind} has no managed address`,
 				};
+			if (
+				change.classification === 'non-destructive' &&
+				creationRequiresVacancy(change) &&
+				(await alreadyAppliedCreation(input.pool, address))
+			)
+				continue;
 			const claimKind: LedgerClaimKind =
 				change.classification === 'removal' ? 'retire-intent' : 'intent';
+			const rootClaimId = outcomeClaimId(
+				executionId,
+				`generator:${changeIndex}:root`,
+				address,
+			);
 			const claim = {
-				claimId: outcomeClaimId(address),
+				claimId: rootClaimId,
+				executionId,
+				plannedClaimKey: `generator:${changeIndex}:root`,
+				claimGroupId: rootClaimId,
+				rootClaimId,
 				address,
 				claimKind,
 				statementBundle: {
@@ -542,14 +646,12 @@ export async function executeGeneratorPlan(input: {
 						sql,
 					})),
 				},
-				...(change.kind === 'create_table' || change.kind === 'add_column'
-					? { requiresVacancy: true }
-					: {}),
+				...(creationRequiresVacancy(change) ? { requiresVacancy: true } : {}),
 			};
 			const baseReservation = {
 				address,
 				claimKind,
-				executionId: input.runId,
+				executionId,
 				rootClaimId: claim.claimId,
 				homeLedger: home(address),
 			};
@@ -558,7 +660,7 @@ export async function executeGeneratorPlan(input: {
 					plan: claim,
 					reservations: [baseReservation],
 					resolution: {
-						eventId: `${claim.claimId}:observed`,
+						eventId: outcomeClaimEventId(claim.claimId, 'observed'),
 						eventKind: 'observed',
 					},
 					readBack: async () => observed(address),
@@ -575,35 +677,17 @@ export async function executeGeneratorPlan(input: {
 					return { outcome: 'execution-failed', detail: result.reason };
 				continue;
 			}
-			const authority = await destructiveEvidence({
-				pool: input.pool,
-				address,
-				change,
-				planDigest: input.planDigest,
-				accepts: input.accepts,
-			});
-			const decision = decideDestructiveDecision(
-				{
-					kind:
-						change.classification === 'removal'
-							? 'removal'
-							: 'data-destructive',
-					address,
-				},
-				authority.evidence,
-			);
-			if (decision.kind !== 'destructive-decision-permitted')
-				return {
-					outcome: 'destructive-authority-refused',
-					detail: decision.reasons.join('; '),
-				};
+			const containment =
+				change.classification === 'removal'
+					? await removalContainment(input.pool, address)
+					: undefined;
 			const reservations =
-				authority.containment?.kind === 'all-contained-or-managed'
+				containment?.kind === 'all-contained-or-managed'
 					? [
 							baseReservation,
 							...reservationsForRemovalClosure({
-								closure: authority.containment,
-								executionId: input.runId,
+								closure: containment,
+								executionId,
 								rootClaimId: claim.claimId,
 								claimKind,
 								homeLedger: home(address),
@@ -618,11 +702,16 @@ export async function executeGeneratorPlan(input: {
 				readonly claimId: string;
 				readonly reservation: typeof baseReservation;
 			}> = [];
-			if (authority.containment?.kind === 'all-contained-or-managed') {
-				for (const effect of authority.containment.effects) {
+			if (containment?.kind === 'all-contained-or-managed') {
+				for (const effect of containment.effects) {
 					if (!containedBy(address, effect.address)) continue;
 					if (!(await managed(input.pool, effect.address))) continue;
-					const childClaimId = outcomeClaimId(effect.address);
+					const childClaimId = outcomeClaimId(
+						executionId,
+						`generator:${changeIndex}:root`,
+						effect.address,
+						`closure:${effect.address.kind}:${effect.address.name}`,
+					);
 					const childReservation = {
 						...baseReservation,
 						address: effect.address,
@@ -648,17 +737,38 @@ export async function executeGeneratorPlan(input: {
 			const admitted = await openPgOutcomeClaim(input.pool, {
 				plan: claim,
 				reservations,
+				destructiveDecision: async (executor) => {
+					const lockedAuthority = await destructiveEvidence({
+						executor,
+						address,
+						change,
+						planDigest: input.planDigest,
+						accepts: input.accepts,
+					});
+					return decideDestructiveDecision(
+						{
+							kind:
+								change.classification === 'removal'
+									? 'removal'
+									: 'data-destructive',
+							address,
+						},
+						lockedAuthority.evidence,
+					);
+				},
 			});
 			if (admitted.kind !== 'admitted-outcome-claim')
-				return { outcome: 'execution-failed', detail: admitted.reason };
-			const permitted = attachDestructiveAuthorityPermit({
-				decision,
-				claim: admitted,
-			});
-			if (permitted.kind === 'outcome-protocol-refused')
-				return { outcome: 'execution-failed', detail: permitted.reason };
+				return {
+					outcome: 'destructive-authority-refused',
+					detail: admitted.reason,
+				};
+			if (!('destructivePermit' in admitted))
+				return {
+					outcome: 'execution-failed',
+					detail: 'destructive admission did not mint an authority permit',
+				};
 			const sent = await executePgDestructiveBundle(input.pool, {
-				claim: permitted,
+				claim: admitted as AdmittedDestructiveOutcomeClaim,
 				statements: claim.statementBundle.statements,
 			});
 			if (sent) return { outcome: 'execution-failed', detail: sent.reason };
@@ -672,7 +782,14 @@ export async function executeGeneratorPlan(input: {
 				input.pool,
 				home(address),
 				{
-					eventId: `${claim.claimId}:${change.classification === 'removal' ? 'absent' : 'observed'}`,
+					eventId: outcomeClaimEventId(
+						claim.claimId,
+						change.classification === 'removal' ? 'absent' : 'observed',
+					),
+					executionId,
+					plannedClaimKey: claim.plannedClaimKey,
+					claimGroupId: claim.claimGroupId,
+					rootClaimId: claim.rootClaimId,
 					address,
 					eventKind:
 						change.classification === 'removal' ? 'absent' : 'observed',
@@ -697,7 +814,7 @@ export async function executeGeneratorPlan(input: {
 					input.pool,
 					home(child.address),
 					{
-						eventId: `${child.claimId}:absent`,
+						eventId: outcomeClaimEventId(child.claimId, 'absent'),
 						address: child.address,
 						eventKind: 'absent',
 						predecessor: child.claimId,

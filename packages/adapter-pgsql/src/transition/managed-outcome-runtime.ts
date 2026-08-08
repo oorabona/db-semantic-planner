@@ -3,9 +3,11 @@ import type {
 	ManagedOutcomePreflightRequest,
 	TransitionExecutionClient,
 } from '@dbsp/core';
+import { outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerReservationRow,
 	OperationExecutionOutcome,
+	OutcomeClaimPlan,
 	ProvenPlanShape,
 } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -31,12 +33,13 @@ function queryable(client: TransitionExecutionClient): Queryable {
 
 function reservation(
 	request: ManagedOutcomeExecutionRequest,
+	claim: OutcomeClaimPlan,
 ): LedgerReservationRow {
-	const { address, claimId, claimKind } = request.claim;
+	const { address, claimId, claimKind } = claim;
 	return {
 		address,
 		claimKind,
-		executionId: request.run.runId,
+		executionId: request.executionId,
 		rootClaimId: claimId,
 		homeLedger: ledgerHome(request),
 	};
@@ -47,24 +50,9 @@ function ledgerHome(request: ManagedOutcomePreflightRequest) {
 	if (address.scope === 'database') return { scope: 'database' } as const;
 	if (!address.schema)
 		throw new Error(
-			`managed claim ${request.claim.claimId} has no schema ledger`,
+			`managed claim ${request.claim.plannedClaimKey} has no schema ledger`,
 		);
 	return { scope: 'schema', schema: address.schema } as const;
-}
-
-async function currentMarker(
-	executor: Queryable,
-	request: ManagedOutcomePreflightRequest,
-): Promise<'absent' | string | undefined> {
-	const currency = await readPgLedgerScopeCurrency(
-		executor,
-		ledgerHome(request),
-	);
-	if (currency.kind === 'absent') return 'absent';
-	if (currency.kind === 'current') return undefined;
-	return currency.reason === 'lineage'
-		? `managed claim ${request.claim.claimId} refuses ledger lineage mismatch; run dbsp preflight --reinitialize`
-		: `managed claim ${request.claim.claimId} refuses ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
 }
 
 /**
@@ -88,15 +76,15 @@ export async function validatePgManagedLedgerCurrency(
 					? ({ scope: 'schema', schema: claim.address.schema } as const)
 					: undefined;
 		if (!home)
-			return `managed claim ${claim.claimId} has no schema ledger; run dbsp preflight --reinitialize`;
+			return `managed claim ${claim.plannedClaimKey} has no schema ledger; run dbsp preflight --reinitialize`;
 		const key = `${home.scope}:${home.schema ?? ''}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
 		const currency = await readPgLedgerScopeCurrency(executor, home);
-		if (currency.kind === 'absent' || currency.kind === 'current') continue;
-		return currency.reason === 'lineage'
-			? `managed claim ${claim.claimId} refuses ledger lineage mismatch; run dbsp preflight --reinitialize`
-			: `managed claim ${claim.claimId} refuses ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
+		if (currency.kind === 'current') continue;
+		return currency.kind === 'not-current' && currency.reason === 'lineage'
+			? 'managed-ledger-not-current: ledger lineage mismatch; run dbsp preflight --reinitialize'
+			: `managed-ledger-not-current: ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
 	}
 	return undefined;
 }
@@ -121,21 +109,31 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 	return {
 		...runtime,
 		async preflightManagedOutcome(
-			client: TransitionExecutionClient,
-			request: ManagedOutcomePreflightRequest,
+			_client: TransitionExecutionClient,
+			_request: ManagedOutcomePreflightRequest,
 		): Promise<string | undefined> {
-			const marker = await currentMarker(queryable(client), request);
-			return marker === 'absent' ? undefined : (marker ?? undefined);
+			// Live currency is checked by the transaction-owned evaluator, after it
+			// has serialized the ledger. Plan-time preflight remains explanatory only.
+			return undefined;
 		},
 		async executeManagedOutcome(
 			client: TransitionExecutionClient,
 			request: ManagedOutcomeExecutionRequest,
 		): Promise<OperationExecutionOutcome> {
 			const executor = queryable(client);
-			const marker = await currentMarker(executor, request);
-			if (marker === 'absent') return request.executeUnmanaged();
-			if (marker) return refused(marker);
-			const reservations = [reservation(request)];
+			const claimId = outcomeClaimId(
+				request.executionId,
+				request.claim.plannedClaimKey,
+				request.claim.address,
+			);
+			const claim = {
+				...request.claim,
+				claimId,
+				executionId: request.executionId,
+				claimGroupId: claimId,
+				rootClaimId: claimId,
+			};
+			const reservations = [reservation(request, claim)];
 			const vacancy = async () => {
 				const live = await readPgCatalogueIdentity(
 					executor,
@@ -144,16 +142,16 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 				return live?.catalogueIdentity
 					? {
 							kind: 'occupied' as const,
-							reason: `creation claim ${request.claim.claimId} refuses occupied live address ${request.claim.address.name}`,
+							reason: `creation claim ${claimId} refuses occupied live address ${request.claim.address.name}`,
 						}
 					: { kind: 'vacant' as const };
 			};
 			const base = {
-				plan: request.claim,
+				plan: claim,
 				reservations,
 				lockTimeoutMs: request.lockTimeoutMs,
 				resolution: {
-					eventId: `${request.claim.claimId}:observed`,
+					eventId: outcomeClaimEventId(claimId, 'observed'),
 					eventKind: 'observed' as const,
 				},
 				readBack: request.readBack,
@@ -166,7 +164,7 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 					})
 				: await runPgNonTransactionalOutcome(executor, {
 						...base,
-						executingEventId: `${request.claim.claimId}:executing`,
+						executingEventId: outcomeClaimEventId(claimId, 'executing'),
 					});
 			return result.kind === 'executed-outcome-claim'
 				? { kind: 'completed' }

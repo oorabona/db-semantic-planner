@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -89,6 +89,11 @@ type DurableExecutionCarrier = {
 	readonly plan: InProcessProvenPlan;
 	readonly assessment: ApplicableAssessment;
 	readonly __durableRun?: TransitionRunMetadata;
+	/**
+	 * The first delivery attempt remains run-scoped for durable journal and
+	 * recovery compatibility. A replay receives a fresh attempt identity.
+	 */
+	readonly __executionId?: string;
 	readonly __executionBoundary?: Extract<
 		ExecutionContextBoundary,
 		{ readonly kind: 'durable-contract' }
@@ -329,10 +334,12 @@ function fingerprintMatches(
 function intentRecord(
 	step: ProvenPlanStep,
 	run: TransitionRunMetadata,
+	executionId: string,
 ): DurableIntentRecord {
 	return {
 		runId: run.runId,
 		run,
+		executionId,
 		stepId: step.stepId,
 		operation: step.operation,
 		recordedAt: recordedAt(),
@@ -794,6 +801,13 @@ export function createApplier(
 				}
 			}
 			const run = carrier.__durableRun ?? createTransitionRunMetadata(plan);
+			// A durable run is the reviewed plan, not one of its replay attempts.
+			// The first attempt keeps the historical run-scoped identity; a durable
+			// replay supplies a fresh identity so it cannot reuse a closed claim.
+			const executionId =
+				carrier.__executionId ??
+				carrier.__durableRun?.runId ??
+				`dbsp.transition.execution.${randomUUID()}`;
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
@@ -1018,7 +1032,7 @@ export function createApplier(
 						step,
 						semantics,
 						operationIssuer,
-						intent: intentRecord(step, run),
+						intent: intentRecord(step, run, executionId),
 						coordinatorBinding: registry.transactionCoordinatorFor(semantics),
 					});
 				}
@@ -1315,12 +1329,28 @@ export function createApplier(
 							}
 							return preIntentRefusal(mismatch);
 						}
-						if (entry.step.managedClaim) {
+						const managedClaim =
+							executionBoundary.kind === 'durable-contract'
+								? entry.step.managedClaim
+								: undefined;
+						if (
+							executionBoundary.kind === 'durable-contract' &&
+							entry.semantics.executionContractEligibility?.eligible === true &&
+							!managedClaim
+						) {
+							return preIntentRefusal(
+								operationFailedNotAppliedReason(
+									entry.step,
+									'managed-eligible step has no immutable managed claim material',
+								),
+							);
+						}
+						if (managedClaim) {
 							const preflightManagedOutcome =
 								entry.semantics.preflightManagedOutcome;
 							if (preflightManagedOutcome) {
 								const detail = await preflightManagedOutcome(executionClient, {
-									claim: entry.step.managedClaim,
+									claim: managedClaim,
 									run,
 									transactional,
 									lockTimeoutMs: lockTimeoutMs(
@@ -1445,17 +1475,18 @@ export function createApplier(
 								activeNonRollbackableOperationExecuted = true;
 							},
 						};
-						const executionOutcome = entry.step.managedClaim
+						const executionOutcome = managedClaim
 							? await (() => {
 									const executeManagedOutcome =
 										entry.semantics.executeManagedOutcome;
 									if (!executeManagedOutcome)
 										throw new Error(
-											`managed claim ${entry.step.managedClaim.claimId} has no outcome execution adapter`,
+											`managed claim ${managedClaim.plannedClaimKey} has no outcome execution adapter`,
 										);
 									return executeManagedOutcome(executionClient, {
-										claim: entry.step.managedClaim,
+										claim: managedClaim,
 										run,
+										executionId,
 										transactional,
 										lockTimeoutMs: lockTimeoutMs(
 											entry.semantics,
@@ -1472,20 +1503,6 @@ export function createApplier(
 											);
 											return managedOutcomeReadBack(observed.observations);
 										},
-										executeUnmanaged: () =>
-											entry.semantics.executeOperation(
-												{
-													opaqueClient: planOperationSession(
-														executionClient.opaqueClient,
-													),
-												},
-												entry.step.operation,
-												stepContext,
-												entry.step.guards.filter(
-													(guard) => guard.phase === 'during-operation',
-												),
-												nonRollbackableExecutionTracker,
-											),
 									});
 								})()
 							: await entry.semantics.executeOperation(

@@ -5,7 +5,11 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { projectLedgerChain } from './lifecycle-interpreter.js';
-import { admitOutcomeClaim, consumeClaimToken } from './outcome-protocol.js';
+import {
+	admitOutcomeClaim,
+	consumeClaimToken,
+	outcomeClaimId,
+} from './outcome-protocol.js';
 
 const address: LedgerAddress = {
 	scope: 'schema',
@@ -50,6 +54,19 @@ function admit(value = plan(), events: readonly LedgerChainMember[] = []) {
 	return admitOutcomeClaim({
 		plan: value,
 		projection: projectLedgerChain({ ledger, address, events }),
+		...(events.length > 0
+			? {
+					currentUser: 'deployment',
+					liveAddress: {
+						...address,
+						catalogueIdentity: {
+							engine: 'postgresql',
+							format: 1,
+							value: { oid: '42' },
+						},
+					},
+				}
+			: {}),
 	});
 }
 
@@ -59,6 +76,11 @@ describe('outcome claim admission (SC-30, SC-42)', () => {
 			event('adopt-intent', 'adopt-intent'),
 			{
 				...event('adopt', 'adopt', 'adopt-intent'),
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
 				observed: { value: { table: 'accounts' }, digest: 'observed' },
 			},
 		];
@@ -71,6 +93,31 @@ describe('outcome claim admission (SC-30, SC-42)', () => {
 		expect(admit(plan('adopt', 'adopt-intent'), managed)).toMatchObject({
 			kind: 'outcome-protocol-refused',
 			reason: 'adopt-intent cannot open from stable state managed',
+		});
+	});
+
+	it('scopes repeated lifecycles to execution and extends the address chain', () => {
+		const first = outcomeClaimId('execution-1', 'step:0/root', address);
+		const second = outcomeClaimId('execution-2', 'step:0/root', address);
+		expect(second).not.toBe(first);
+		const managed = [
+			event(first, 'intent'),
+			{
+				...event('first-observed', 'observed', first),
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
+				observed: { value: { table: 'accounts' }, digest: 'first' },
+			},
+		];
+		const admitted = admit(plan(second), managed);
+		if (admitted.kind === 'outcome-protocol-refused')
+			throw new Error(admitted.reason);
+		expect(admitted).toMatchObject({
+			kind: 'admitted-outcome-claim',
+			plan: { claimId: second },
 		});
 	});
 

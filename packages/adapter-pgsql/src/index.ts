@@ -233,6 +233,7 @@ export {
 	appendPgLedgerResolution,
 	appendPgOutcomeResolution,
 	appendTransitionAuthorization,
+	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	assertPgDatabaseWritable,
 	COLUMN_EXISTS_OBSERVATION,
 	classifyPgDatabaseWritability,

@@ -26,6 +26,7 @@ function request(claimId: string): {
 	return {
 		plan: {
 			claimId,
+			plannedClaimKey: `step:${claimId}/root`,
 			address,
 			claimKind: 'intent',
 			statementBundle: {
@@ -53,6 +54,37 @@ function recorder(failSql?: string) {
 		sql,
 		query: vi.fn(async (statement: string, params?: readonly unknown[]) => {
 			sql.push(statement);
+			if (statement.startsWith('SELECT to_regclass'))
+				return { rows: [{ relation: 'tenant.dbsp_ledger_marker' }] };
+			if (
+				statement.includes('SELECT version FROM') &&
+				statement.includes('dbsp_ledger_marker')
+			)
+				return { rows: [{ version: 1 }] };
+			if (statement.includes('dbsp_ledger_identity'))
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'test-system',
+							database_oid: '5',
+							namespace_oid: '2200',
+						},
+					],
+				};
+			if (
+				statement.startsWith(
+					'SELECT (pg_catalog.pg_control_system()).system_identifier::text',
+				)
+			)
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'test-system',
+							database_oid: '5',
+							namespace_oid: '2200',
+						},
+					],
+				};
 			if (statement.includes('pg_try_advisory_xact_lock'))
 				return { rows: [{ locked: true }] };
 			if (statement.startsWith('SELECT event_id')) {
@@ -116,6 +148,64 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		);
 		expect(claim).toBeGreaterThan(-1);
 		expect(ddl).toBeGreaterThan(claim);
+	});
+
+	it('pins a pool-supplied claim lifecycle to one checked-out PostgreSQL client', async () => {
+		const session = recorder();
+		const release = vi.fn();
+		const pool = {
+			query: vi.fn(async () => {
+				throw new Error('a pool query must not enter the outcome transaction');
+			}),
+			connect: vi.fn(async () => ({ ...session, release })),
+		};
+		const result = await runPgTransactionalOutcome(pool, {
+			...request('pinned-session'),
+			resolution: { eventId: 'pinned-session-observed', eventKind: 'observed' },
+			vacancy: async () => ({ kind: 'vacant' }),
+		});
+		expect(result.kind).toBe('executed-outcome-claim');
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalled();
+		expect(release).toHaveBeenCalledOnce();
+	});
+
+	it('uses a caller-supplied checked-out client without reconnecting it', async () => {
+		const executor = {
+			...recorder(),
+			connect: vi.fn(async () => {
+				throw new Error('a checked-out client must not reconnect');
+			}),
+			release: vi.fn(),
+		};
+		const result = await runPgTransactionalOutcome(executor, {
+			...request('caller-session'),
+			resolution: { eventId: 'caller-session-observed', eventKind: 'observed' },
+			vacancy: async () => ({ kind: 'vacant' }),
+		});
+		expect(result.kind).toBe('executed-outcome-claim');
+		expect(executor.connect).not.toHaveBeenCalled();
+		expect(executor.release).not.toHaveBeenCalled();
+	});
+
+	it('names the reviewed claim when a token sees a closed chain', async () => {
+		const source = recorder();
+		const executor = {
+			query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+				if (sql.startsWith('SELECT event_id')) return { rows: [] };
+				return source.query(sql, params);
+			}),
+		};
+		const result = await runPgTransactionalOutcome(executor, {
+			...request('opaque-hash'),
+			resolution: { eventId: 'opaque-hash-observed', eventKind: 'observed' },
+			vacancy: async () => ({ kind: 'vacant' }),
+		});
+		expect(result).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason:
+				'claim token for opaque-hash (plannedClaimKey step:opaque-hash/root; claim kind intent; address accounts) is no longer valid because its claim is closed',
+		});
 	});
 
 	it('commits executing before the observable gate and first non-transactional send', async () => {

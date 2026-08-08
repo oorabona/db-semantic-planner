@@ -16,6 +16,7 @@ import {
 	spawnCheckpointChild,
 } from './harness/index.js';
 import { createSchema, getTestPool } from './testkit/index.js';
+import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
 
 const indexName = 'idx_users_email';
 const POLL_INTERVAL_MS = 100;
@@ -296,6 +297,9 @@ class Scenario {
 	static async create(label: string): Promise<Scenario> {
 		const scenario = new Scenario(testSchemaName(label));
 		await createSchema(scenario.schema);
+		const preflight = await runPreflight([scenario.schema]);
+		if (preflight.scopes.some((scope) => scope.outcome === 'failed'))
+			throw new Error('fixture could not initialize a current ledger');
 		scenario.#resources.register(`schema ${scenario.schema}`, () =>
 			cleanupSchema(scenario.schema),
 		);

@@ -33,6 +33,13 @@ export interface ClaimToken {
 /** The fixed plan-time material that becomes one ledger claim. */
 export interface OutcomeClaimPlan {
 	readonly claimId: string;
+	/** One actual apply attempt; deliberately distinct from the persisted run id. */
+	readonly executionId?: string;
+	/** Digest-covered logical position of this claim in the reviewed plan. */
+	readonly plannedClaimKey?: string;
+	/** The atomic closure identity; a single-address claim uses its root claim id. */
+	readonly claimGroupId?: string;
+	readonly rootClaimId?: string;
 	readonly address: LedgerAddress;
 	readonly claimKind: LedgerClaimKind;
 	readonly statementBundle: ClaimStatementBundle;
@@ -72,6 +79,10 @@ export type OutcomeVacancy =
 export interface OutcomeClaimAdmissionInput {
 	readonly plan: OutcomeClaimPlan;
 	readonly projection: LedgerChainProjection;
+	/** Read exactly once by the adapter in the claiming transaction. */
+	readonly currentUser?: string;
+	/** Fresh locked catalogue identity for an existing managed address. */
+	readonly liveAddress?: LedgerAddress;
 }
 
 /** Typed catalogue evidence used by outcome-protocol recovery. */

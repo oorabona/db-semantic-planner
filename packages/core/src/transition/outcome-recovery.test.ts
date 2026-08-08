@@ -109,7 +109,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		}
 	});
 
-	it('classifies executing creates from the read-back without re-issuing DDL', async () => {
+	it('records an indeterminate create until the read-back is authorized to verify it', async () => {
 		expect(
 			await recover(openClaim('intent', 'executing'), { kind: 'absent' }),
 		).toMatchObject({
@@ -129,6 +129,21 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		).toMatchObject({
 			kind: 'outcome-recovery-append',
 			resolution: { eventKind: 'observed', readBack: present },
+		});
+	});
+
+	it('refuses a not-issued creation before an operation verifier can call it unverifiable', async () => {
+		expect(
+			await recover(openClaim('intent', 'executing'), {
+				kind: 'absent',
+				effect: 'unverifiable',
+			}),
+		).toMatchObject({
+			kind: 'outcome-recovery-append',
+			resolution: {
+				eventKind: 'refused',
+				reason: 'recovery read-back proves no effect after executing',
+			},
 		});
 	});
 
@@ -153,8 +168,9 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 				present,
 			),
 		).toMatchObject({
-			kind: 'outcome-recovery-append',
-			resolution: { eventKind: 'indeterminate' },
+			kind: 'outcome-recovery-pending',
+			reason:
+				'retirement remains unverifiable because the catalogue object is present',
 		});
 	});
 

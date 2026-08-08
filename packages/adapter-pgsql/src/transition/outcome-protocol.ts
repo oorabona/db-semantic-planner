@@ -1,5 +1,6 @@
 import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
 import {
+	admitDestructiveOutcomeClaim,
 	admitOutcomeClaim,
 	claimIdForToken,
 	classifyOutcomeRecovery,
@@ -11,6 +12,7 @@ import type {
 	AdmittedOutcomeClaim,
 	ClaimBundleStatement,
 	ClaimToken,
+	DestructiveDecision,
 	LedgerAddress,
 	LedgerChainMember,
 	LedgerEventKind,
@@ -35,13 +37,60 @@ import {
 	appendPgLedgerResolution,
 	type PgLedgerTarget,
 } from './ledger.js';
+import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+
+type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
+	release(): void;
+};
+
+type PoolTransitionJournalQueryable = TransitionJournalQueryable & {
+	connect(): Promise<ReleasableTransitionJournalQueryable>;
+};
+
+function isPoolQueryable(
+	executor: TransitionJournalQueryable,
+): executor is PoolTransitionJournalQueryable {
+	// node-postgres exposes `connect()` on both Pool and Client. A checked-out
+	// Client also has `release()`, and is already the session that the caller
+	// deliberately selected (including for concurrent and kill scenarios).
+	// Only a pool may be checked out here.
+	return (
+		'connect' in executor &&
+		typeof executor.connect === 'function' &&
+		!('release' in executor && typeof executor.release === 'function')
+	);
+}
+
+/**
+ * A pool is not a transaction session: each `query()` may use a different
+ * PostgreSQL connection.  Claim append, token validation, DDL and terminal
+ * append must therefore share a checked-out client whenever the caller gives
+ * this protocol a pool.
+ */
+async function withOutcomeSession<T>(
+	executor: TransitionJournalQueryable,
+	work: (session: TransitionJournalQueryable) => Promise<T>,
+): Promise<T> {
+	if (!isPoolQueryable(executor)) return work(executor);
+	const session = await executor.connect();
+	try {
+		return await work(session);
+	} finally {
+		session.release();
+	}
+}
 
 export interface PgOutcomeClaimRequest {
 	readonly plan: OutcomeClaimPlan;
 	readonly reservations: readonly LedgerReservationRow[];
 	readonly lockTimeoutMs?: number;
+	/** Destructive authority is evaluated under these same ledger locks. */
+	readonly destructiveDecision?: (
+		executor: TransitionJournalQueryable,
+		plan: OutcomeClaimPlan,
+	) => Promise<DestructiveDecision>;
 }
 
 export interface PgOutcomeResolution {
@@ -80,6 +129,11 @@ export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
 		executor: TransitionJournalQueryable,
 		plan: OutcomeClaimPlan,
 	) => Promise<OutcomeVacancy>;
+	/** Re-check operation-specific live facts after the claim/reservation opens. */
+	readonly verifyLiveAdmission?: (
+		executor: TransitionJournalQueryable,
+		plan: OutcomeClaimPlan,
+	) => Promise<OutcomeProtocolRefusal | undefined>;
 	/** Record the post-DDL catalogue identity on a present terminal member. */
 	readonly recordCatalogueIdentity?: boolean;
 }
@@ -207,6 +261,101 @@ function boundedLockTimeout(value: number | undefined): number {
 	);
 }
 
+/**
+ * The only adapter-to-core live-admission bridge. It reads controller and
+ * catalogue identity on the claiming connection after ledger serialization;
+ * callers never manufacture managed-by-me from a projected state.
+ */
+async function liveAdmission(
+	executor: TransitionJournalQueryable,
+	plan: OutcomeClaimPlan,
+	chain: Awaited<ReturnType<typeof readPgLedgerAddressChain>>,
+) {
+	const projection = projectLedgerChain(chain);
+	if (
+		projection.kind !== 'projected-ledger-chain' ||
+		projection.stableState !== 'managed' ||
+		plan.requiresVacancy === true
+	)
+		return { plan, projection };
+	const role = await executor.query('SELECT current_user AS current_user');
+	const currentUser = role.rows[0]?.current_user;
+	const live = await readPgCatalogueIdentity(executor, plan.address);
+	return {
+		plan,
+		projection,
+		...(typeof currentUser === 'string' ? { currentUser } : {}),
+		liveAddress: {
+			...plan.address,
+			...(live?.catalogueIdentity
+				? { catalogueIdentity: live.catalogueIdentity }
+				: {}),
+		},
+	};
+}
+
+function currencyRefusal(
+	currency: Awaited<ReturnType<typeof readPgLedgerScopeCurrency>>,
+): OutcomeProtocolRefusal {
+	return refusal(
+		currency.kind === 'not-current' && currency.reason === 'lineage'
+			? 'managed-ledger-not-current: ledger lineage mismatch; run dbsp preflight --reinitialize'
+			: `managed-ledger-not-current: ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
+	);
+}
+
+/**
+ * The sole claim-admission route: after the caller has begun and serialized
+ * the claim transaction, it re-reads ledger currency, evaluates the core
+ * lifecycle/controller/identity interpreter, and appends the claim.
+ */
+async function admitPgOutcomeClaim(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimRequest,
+): Promise<{
+	readonly admission: OutcomeClaimAdmission;
+	readonly chain?: Awaited<ReturnType<typeof readPgLedgerAddressChain>>;
+}> {
+	const seen = new Set<string>();
+	for (const home of homesFor(request)) {
+		const key = `${home.scope}:${home.schema ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const currency = await readPgLedgerScopeCurrency(executor, home);
+		if (currency.kind !== 'current')
+			return { admission: currencyRefusal(currency) };
+	}
+	const target = targetForPlan(request.plan);
+	const chain = await readPgLedgerAddressChain(
+		executor,
+		target,
+		request.plan.address,
+	);
+	const admissionInput = await liveAdmission(executor, request.plan, chain);
+	const admission = request.destructiveDecision
+		? await (async () => {
+				const decision = await request.destructiveDecision!(
+					executor,
+					request.plan,
+				);
+				if (decision.kind !== 'destructive-decision-permitted')
+					return refusal(decision.reasons.join('; '));
+				return admitDestructiveOutcomeClaim({
+					decision,
+					admission: admissionInput,
+				});
+			})()
+		: admitOutcomeClaim(admissionInput);
+	if (admission.kind !== 'admitted-outcome-claim') return { admission, chain };
+	await appendPgLedgerClaim(
+		executor,
+		target,
+		claimMember(request, chain.terminalMember?.eventId),
+		request.reservations,
+	);
+	return { admission, chain };
+}
+
 async function begin(
 	executor: TransitionJournalQueryable,
 	timeout: number | undefined,
@@ -231,6 +380,18 @@ function claimMember(
 ): Omit<LedgerChainMember, 'controller' | 'recordedAt'> {
 	return {
 		eventId: request.plan.claimId,
+		...(request.plan.executionId === undefined
+			? {}
+			: { executionId: request.plan.executionId }),
+		...(request.plan.plannedClaimKey === undefined
+			? {}
+			: { plannedClaimKey: request.plan.plannedClaimKey }),
+		...(request.plan.claimGroupId === undefined
+			? {}
+			: { claimGroupId: request.plan.claimGroupId }),
+		...(request.plan.rootClaimId === undefined
+			? {}
+			: { rootClaimId: request.plan.rootClaimId }),
 		address: request.plan.address,
 		eventKind: request.plan.claimKind,
 		...(predecessor === undefined ? {} : { predecessor }),
@@ -250,6 +411,18 @@ function resolutionMember(
 ): Omit<LedgerChainMember, 'controller' | 'recordedAt'> {
 	return {
 		eventId: resolution.eventId,
+		...(claim.plan.executionId === undefined
+			? {}
+			: { executionId: claim.plan.executionId }),
+		...(claim.plan.plannedClaimKey === undefined
+			? {}
+			: { plannedClaimKey: claim.plan.plannedClaimKey }),
+		...(claim.plan.claimGroupId === undefined
+			? {}
+			: { claimGroupId: claim.plan.claimGroupId }),
+		...(claim.plan.rootClaimId === undefined
+			? {}
+			: { rootClaimId: claim.plan.rootClaimId }),
 		address: claim.plan.address,
 		eventKind: resolution.eventKind,
 		predecessor,
@@ -439,7 +612,7 @@ export async function readPgOutcomeRecoveryReadBack(
 }
 
 /** Opens a claim under its closure locks and commits it with its reservations. */
-export async function openPgOutcomeClaim(
+async function openPgOutcomeClaimOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimRequest,
 ): Promise<OutcomeClaimAdmission> {
@@ -457,27 +630,12 @@ export async function openPgOutcomeClaim(
 					: detail(lock.error),
 			);
 		}
-		const target = targetForPlan(request.plan);
-		const chain = await readPgLedgerAddressChain(
-			executor,
-			target,
-			request.plan.address,
-		);
-		const admission = admitOutcomeClaim({
-			plan: request.plan,
-			projection: projectLedgerChain(chain),
-		});
+		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
 			await executor.query('ROLLBACK');
 			begun = false;
 			return admission;
 		}
-		await appendPgLedgerClaim(
-			executor,
-			target,
-			claimMember(request, chain.terminalMember?.eventId),
-			request.reservations,
-		);
 		await executor.query('COMMIT');
 		begun = false;
 		return admission;
@@ -485,6 +643,16 @@ export async function openPgOutcomeClaim(
 		if (begun) await rollback(executor);
 		return refusal(detail(error));
 	}
+}
+
+/** Opens a claim on one connection when supplied a PostgreSQL pool. */
+export async function openPgOutcomeClaim(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimRequest,
+): Promise<OutcomeClaimAdmission> {
+	return withOutcomeSession(executor, (session) =>
+		openPgOutcomeClaimOnSession(session, request),
+	);
 }
 
 async function claimIsOpen(
@@ -499,13 +667,22 @@ async function claimIsOpen(
 	const projection = projectLedgerChain(chain);
 	if (projection.kind !== 'projected-ledger-chain')
 		return refusal(
-			`claim ${claim.plan.claimId} refuses malformed ledger chain: ${projection.reason.code}`,
+			`${claimSubject(claim.plan)} refuses malformed ledger chain: ${projection.reason.code}`,
 		);
 	if (projection.openClaim?.event.eventId !== claim.plan.claimId)
 		return refusal(
-			`claim token for ${claim.plan.claimId} is no longer valid because its claim is closed`,
+			`claim token for ${claimSubject(claim.plan)} is no longer valid because its claim is closed`,
 		);
 	return undefined;
+}
+
+/**
+ * Keep the reviewed claim's stable identity beside its opaque execution hash
+ * on every token-gate failure. The hash alone cannot identify the failed
+ * generator change when one reviewed run contains multiple claims.
+ */
+function claimSubject(plan: OutcomeClaimPlan): string {
+	return `${plan.claimId} (plannedClaimKey ${plan.plannedClaimKey ?? 'unknown'}; claim kind ${plan.claimKind}; address ${plan.address.name})`;
 }
 
 /**
@@ -520,8 +697,8 @@ export async function executePgManagedBundle(
 	if (tokenClaimId !== request.claim.plan.claimId)
 		return refusal(
 			tokenClaimId === undefined
-				? 'claim token was not minted by claim admission'
-				: `claim token belongs to claim ${tokenClaimId}, not ${request.claim.plan.claimId}`,
+				? `claim token for ${claimSubject(request.claim.plan)} was not minted by claim admission`
+				: `claim token belongs to claim ${tokenClaimId}, not ${claimSubject(request.claim.plan)}`,
 		);
 	const open = await claimIsOpen(executor, request.claim);
 	if (open) return open;
@@ -579,19 +756,21 @@ async function refuseClaim(
 	await appendPgLedgerResolution(
 		executor,
 		targetForPlan(claim.plan),
-		{
-			eventId,
-			address: claim.plan.address,
-			eventKind: 'refused',
+		resolutionMember(
+			claim,
+			{
+				eventId,
+				eventKind: 'refused',
+			},
 			predecessor,
-		},
+		),
 		claim.plan.claimId,
 		request.reservations,
 	);
 }
 
 /** Claim, vacancy read, bundle send and resolution share one transaction. */
-export async function runPgTransactionalOutcome(
+async function runPgTransactionalOutcomeOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeTransactionalRequest,
 ): Promise<PgOutcomeResult> {
@@ -609,26 +788,27 @@ export async function runPgTransactionalOutcome(
 			return refusal('ledger advisory lock is busy');
 		}
 		const target = targetForPlan(request.plan);
-		const chain = await readPgLedgerAddressChain(
-			executor,
-			target,
-			request.plan.address,
-		);
-		const admission = admitOutcomeClaim({
-			plan: request.plan,
-			projection: projectLedgerChain(chain),
-		});
+		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
 			if (ownsTransaction) await executor.query('ROLLBACK');
 			begun = false;
 			return admission;
 		}
-		await appendPgLedgerClaim(
-			executor,
-			target,
-			claimMember(request, chain.terminalMember?.eventId),
-			request.reservations,
-		);
+		const liveAdmissionRefusal = request.verifyLiveAdmission
+			? await request.verifyLiveAdmission(executor, admission.plan)
+			: undefined;
+		if (liveAdmissionRefusal) {
+			await refuseClaim(
+				executor,
+				admission,
+				request,
+				request.resolution.eventId,
+				request.plan.claimId,
+			);
+			if (ownsTransaction) await executor.query('COMMIT');
+			begun = false;
+			return liveAdmissionRefusal;
+		}
 		const vacancy = await verifyCreationVacancy(
 			executor,
 			admission,
@@ -646,11 +826,17 @@ export async function runPgTransactionalOutcome(
 			begun = false;
 			return vacancy;
 		}
-		const sent = await executePgManagedBundle(executor, {
-			token: admission.token,
-			claim: admission,
-			statements: admission.plan.statementBundle.statements,
-		});
+		const sent =
+			'destructivePermit' in admission
+				? await executePgDestructiveBundle(executor, {
+						claim: admission as AdmittedDestructiveOutcomeClaim,
+						statements: admission.plan.statementBundle.statements,
+					})
+				: await executePgManagedBundle(executor, {
+						token: admission.token,
+						claim: admission,
+						statements: admission.plan.statementBundle.statements,
+					});
 		if (sent) throw new Error(sent.reason);
 		await appendOutcomeTerminal(
 			executor,
@@ -674,15 +860,30 @@ export async function runPgTransactionalOutcome(
 }
 
 /**
+ * Runs the transactional outcome protocol on a connection pinned for its
+ * whole claim/token/terminal lifecycle.
+ */
+export async function runPgTransactionalOutcome(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeTransactionalRequest,
+): Promise<PgOutcomeResult> {
+	if (request.transactionOpen)
+		return runPgTransactionalOutcomeOnSession(executor, request);
+	return withOutcomeSession(executor, (session) =>
+		runPgTransactionalOutcomeOnSession(session, request),
+	);
+}
+
+/**
  * Commits claim first, then commits executing before invoking the token-gated
  * sender. The optional checkpoint makes that inter-commit/send boundary
  * observable to recovery tests without changing the production sequence.
  */
-export async function runPgNonTransactionalOutcome(
+async function runPgNonTransactionalOutcomeOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeNonTransactionalRequest,
 ): Promise<PgOutcomeResult> {
-	const admission = await openPgOutcomeClaim(executor, request);
+	const admission = await openPgOutcomeClaimOnSession(executor, request);
 	if (admission.kind !== 'admitted-outcome-claim') return admission;
 	try {
 		const vacancy = await verifyCreationVacancy(
@@ -705,6 +906,18 @@ export async function runPgNonTransactionalOutcome(
 		await begin(executor, request.lockTimeoutMs);
 		await appendPgLedgerProgress(executor, targetForPlan(request.plan), {
 			eventId: request.executingEventId,
+			...(admission.plan.executionId === undefined
+				? {}
+				: { executionId: admission.plan.executionId }),
+			...(admission.plan.plannedClaimKey === undefined
+				? {}
+				: { plannedClaimKey: admission.plan.plannedClaimKey }),
+			...(admission.plan.claimGroupId === undefined
+				? {}
+				: { claimGroupId: admission.plan.claimGroupId }),
+			...(admission.plan.rootClaimId === undefined
+				? {}
+				: { rootClaimId: admission.plan.rootClaimId }),
 			address: request.plan.address,
 			eventKind: 'executing',
 			predecessor: request.plan.claimId,
@@ -736,6 +949,16 @@ export async function runPgNonTransactionalOutcome(
 		await rollback(executor);
 		return refusal(detail(error));
 	}
+}
+
+/** Pins every non-transactional protocol checkpoint to one checked-out client. */
+export async function runPgNonTransactionalOutcome(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeNonTransactionalRequest,
+): Promise<PgOutcomeResult> {
+	return withOutcomeSession(executor, (session) =>
+		runPgNonTransactionalOutcomeOnSession(session, request),
+	);
 }
 
 /**

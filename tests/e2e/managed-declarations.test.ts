@@ -14,6 +14,7 @@ import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { describeWithE2eCapabilities } from './harness/index.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
+import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
 
 const schemaName = `managed_declarations_${randomUUID().replaceAll('-', '').slice(0, 10)}`;
 let runId: string | undefined;
@@ -56,7 +57,12 @@ describeWithE2eCapabilities(
 	[],
 	'managed declarations and catalogue identities (SC-20…26)',
 	() => {
-		beforeAll(async () => createSchema(schemaName));
+		beforeAll(async () => {
+			await createSchema(schemaName);
+			const preflight = await runPreflight([schemaName]);
+			if (preflight.scopes.some((scope) => scope.outcome === 'failed'))
+				throw new Error('fixture could not initialize a current ledger');
+		});
 
 		afterEach(async () => {
 			const pool = await getTestPool();

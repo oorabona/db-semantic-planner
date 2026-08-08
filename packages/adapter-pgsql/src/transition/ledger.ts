@@ -281,6 +281,10 @@ function memberValues(member: LedgerWriteMember): readonly unknown[] {
 	return [
 		member.eventId,
 		...addressValues(member),
+		member.executionId ?? null,
+		member.plannedClaimKey ?? null,
+		member.claimGroupId ?? null,
+		member.rootClaimId ?? null,
 		member.catalogueIdentity ? JSON.stringify(member.catalogueIdentity) : null,
 		member.eventKind,
 		member.predecessor ?? null,
@@ -293,7 +297,7 @@ function memberValues(member: LedgerWriteMember): readonly unknown[] {
 }
 
 function eventInsertSql(target: PgLedgerTarget): string {
-	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb, $13, $14::jsonb, $15) RETURNING event_id`;
+	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18::jsonb, $19) RETURNING event_id`;
 }
 
 export function renderCreateLedgerEventTableSql(
@@ -305,7 +309,7 @@ export function renderCreateLedgerEventTableSql(
 		`CREATE TABLE IF NOT EXISTS ${table} (` +
 		'event_id text PRIMARY KEY, ' +
 		'address_engine text NOT NULL, address_database text NOT NULL, address_schema text NOT NULL, address_parent jsonb NOT NULL, address_kind text NOT NULL, address_name text NOT NULL, ' +
-		'catalogue_identity jsonb, event_kind text NOT NULL, predecessor text, pair_id text, ' +
+		'execution_id text, planned_claim_key text, claim_group_id text, root_claim_id text, catalogue_identity jsonb, event_kind text NOT NULL, predecessor text, pair_id text, ' +
 		'declared jsonb, declared_digest text, observed jsonb, observed_digest text, controller name NOT NULL DEFAULT current_user, recorded_at timestamptz NOT NULL DEFAULT now(), ' +
 		`CONSTRAINT dbsp_ledger_event_kind_closed CHECK (event_kind IN (${LEDGER_EVENT_KINDS_SQL})), ` +
 		'CONSTRAINT dbsp_ledger_declared_digest_pair CHECK ((declared IS NULL) = (declared_digest IS NULL)), ' +
@@ -553,6 +557,7 @@ export async function appendPgLedgerResolution(
 		);
 	}
 	const values = [...memberValues(member), rootClaimId] as unknown[];
+	const rootClaimIdParameter = values.length;
 	const reservationsByLedger = new Map<
 		string,
 		{
@@ -578,7 +583,7 @@ export async function appendPgLedgerResolution(
 			);
 			return `(${addressColumns('r.')}) = ($${start}, $${start + 1}, $${start + 2}, $${start + 3}::jsonb, $${start + 4}, $${start + 5})`;
 		});
-		return `DELETE FROM ${reservationTable(group.target)} r WHERE r.root_claim_id = $16 AND (${addressPredicates.join(' OR ')}) RETURNING r.root_claim_id`;
+		return `DELETE FROM ${reservationTable(group.target)} r WHERE r.root_claim_id = $${rootClaimIdParameter} AND (${addressPredicates.join(' OR ')}) RETURNING r.root_claim_id`;
 	});
 	const [lastReservationDelete] = reservationDeletes.slice(-1);
 	const leadingReservationDeletes = reservationDeletes.slice(0, -1);

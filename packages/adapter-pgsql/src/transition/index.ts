@@ -170,6 +170,7 @@ export {
 	renderInsertLogicalIdentitySql,
 } from './operations/attach-logical-identity.js';
 export {
+	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	type CreateUniqueIndexConcurrentlyPayload,
 	createCreateUniqueIndexConcurrentlyOperationRuntime,
 	type IndexSet,
