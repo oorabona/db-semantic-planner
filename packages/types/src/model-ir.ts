@@ -458,6 +458,15 @@ export interface TableIR {
 	 */
 	readonly readdress?: TableReaddressDeclaration;
 
+	/**
+	 * Declare that this named, pre-existing table is to enter managed state.
+	 * Existing objects are otherwise drift; adoption is never inferred.
+	 */
+	readonly adopt?: true;
+
+	/** Request a reviewed retire-and-create replacement of this unchanged table. */
+	readonly replace?: true;
+
 	/** Stable logical identity, when attached by an engine-neutral carrier. */
 	readonly logicalIdentity?: LogicalIdentity;
 

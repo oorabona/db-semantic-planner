@@ -1,4 +1,11 @@
 export {
+	executePgDeclaredAdoption,
+	type PgAdoptionPreflightResult,
+	type PgAdoptionResult,
+	type PgDeclaredAdoptionInput,
+	preflightPgDeclaredAdoption,
+} from './adoption.js';
+export {
 	type PgCatalogueIdentityQueryable,
 	readPgCatalogueIdentity,
 } from './catalogue-identity.js';
@@ -92,6 +99,7 @@ export {
 	acquirePgLedgerLocks,
 	appendPgLedgerClaim,
 	appendPgLedgerProgress,
+	appendPgLedgerRelease,
 	appendPgLedgerResolution,
 	ensureDbspMetaLedger,
 	ensurePgLedger,
@@ -222,6 +230,10 @@ export {
 	runPgReinitializePreflight,
 	selectReinitializeAdoptionCandidates,
 } from './reinitialize-preflight.js';
+export {
+	type PgReleaseResult,
+	releasePgManagedAddress,
+} from './release.js';
 export {
 	classifyRemovalEffectsClosure,
 	containmentAuthorityOutcome,

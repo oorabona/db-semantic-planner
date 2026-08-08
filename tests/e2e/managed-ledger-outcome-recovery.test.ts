@@ -7,14 +7,11 @@ import {
 	recoverPgOutcomeClaim,
 	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
-import type {
-	LedgerAddress,
-	LedgerReservationRow,
-	OutcomeClaimPlan,
-} from '@dbsp/types';
+import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
 import { armOneShotInsertFailpoint } from './harness/index.js';
+import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
@@ -32,29 +29,23 @@ function makeClaim(schema: string, name: string, claimId: string) {
 		kind: 'table',
 		name,
 	};
-	const plan: OutcomeClaimPlan = {
+	return fixtureOutcomeClaim({
 		claimId,
 		address,
 		claimKind: 'intent',
-		statementBundle: {
-			statements: [
-				{
-					ordinal: 0,
-					sql: `CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer)`,
-				},
-			],
-		},
-	};
-	const reservations: readonly LedgerReservationRow[] = [
-		{
-			address,
-			claimKind: 'intent',
-			executionId: `${claimId}-execution`,
-			rootClaimId: claimId,
-			homeLedger: { scope: 'schema', schema },
-		},
-	];
-	return { plan, reservations };
+		statements: [
+			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer)`,
+		],
+		reservations: [
+			{
+				address,
+				claimKind: 'intent',
+				executionId: `${claimId}-execution`,
+				rootClaimId: claimId,
+				homeLedger: { scope: 'schema', schema },
+			},
+		],
+	});
 }
 
 async function fixture() {

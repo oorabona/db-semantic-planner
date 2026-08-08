@@ -225,6 +225,10 @@ export interface SchemaTableOptions {
 	foreignKeys?: RefDefinition[];
 	/** Explicit rename or schema move for this desired table. */
 	readdress?: TableReaddressDeclaration;
+	/** Explicitly bring this existing table under managed state. */
+	adopt?: true;
+	/** Request a reviewed retire-and-create replacement of this table. */
+	replace?: true;
 }
 
 /**
@@ -1568,6 +1572,12 @@ function buildTables(
 
 		const table: TableIR = {
 			name: tableName,
+			...(constraints?.[tableName]?.adopt === true
+				? { adopt: true as const }
+				: {}),
+			...(constraints?.[tableName]?.replace === true
+				? { replace: true as const }
+				: {}),
 			...(constraints?.[tableName]?.readdress
 				? { readdress: constraints[tableName].readdress }
 				: {}),

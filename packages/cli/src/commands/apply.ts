@@ -58,6 +58,8 @@ export interface ApplyOptions {
 	readonly schema?: string;
 	readonly yes?: boolean;
 	readonly dryRun?: boolean;
+	/** Reviewed replacement selector(s) for the no-argument generator path. */
+	readonly replace?: readonly string[];
 }
 
 function errorDetail(error: unknown): string {
@@ -473,6 +475,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 		'a live destructive authority did not permit the generated mutation',
 	],
 	[
+		'adoption-refused',
+		62,
+		'a declared adoption no longer matches the live object reviewed for admission',
+	],
+	[
 		'readdress-unsupported',
 		60,
 		'declared re-addressing is supported only for tables in one database; declare the move as a retirement and a creation',
@@ -701,7 +708,7 @@ export async function runNoArgumentApply(
 	// becomes the producer of the generated, journalled plan.  `plan <file>`
 	// remains transition-only; this bridge is deliberately scoped to `apply`.
 	const effectivePlan =
-		plan.proveKind === 'blocked'
+		plan.proveKind === 'blocked' || plan.proveKind === 'no-drift'
 			? await runGeneratorPlan({
 					db: options.db,
 					schemaFile: options.schemaFile,
@@ -760,6 +767,7 @@ export async function runNoArgumentApply(
 				planDigest: effectivePlan.planDigest,
 				schema: options.schema ?? 'public',
 				...(options.accept === undefined ? {} : { accepts: options.accept }),
+				...(options.replace === undefined ? {} : { replaces: options.replace }),
 				runId: effectivePlan.runId,
 			});
 		} finally {
@@ -958,6 +966,11 @@ export const applyCommand = new Command('apply')
 	.option(
 		'--accept <class>',
 		'Accept an assumption class broadly; repeatable',
+		(value, previous: string[] = []) => [...previous, value],
+	)
+	.option(
+		'--replace <address>',
+		'Replace exactly this address when the presented plan requested it; repeatable',
 		(value, previous: string[] = []) => [...previous, value],
 	)
 	.option(

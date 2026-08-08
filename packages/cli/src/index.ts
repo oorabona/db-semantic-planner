@@ -16,6 +16,8 @@ import { preflightCommand } from './commands/preflight.js';
 import { pushCommand } from './commands/push.js';
 import { reconcileCommand } from './commands/reconcile.js';
 import { recoverCommand } from './commands/recover.js';
+
+import { releaseCommand } from './commands/release.js';
 import { replCommand } from './commands/repl.js';
 import { verifyCommand } from './commands/verify.js';
 
@@ -69,6 +71,7 @@ program.addCommand(preflightCommand);
 program.addCommand(applyCommand);
 program.addCommand(inspectCommand);
 program.addCommand(recoverCommand);
+program.addCommand(releaseCommand);
 program.addCommand(reconcileCommand);
 program.addCommand(pushCommand);
 program.addCommand(replCommand);

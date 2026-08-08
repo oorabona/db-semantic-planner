@@ -1,10 +1,15 @@
 /** Live-only executor for the no-argument schema-differ plan. */
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	appendPgLedgerResolution,
+	compareSchemata,
+	createPgsqlAdapter,
+	executePgDeclaredAdoption,
 	executePgDestructiveBundle,
 	executePgTableReaddress,
 	openPgOutcomeClaim,
+	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
@@ -25,12 +30,14 @@ import type {
 	LedgerClaimKind,
 	LedgerHome,
 	LedgerPayload,
+	ModelIR,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
 import type { GeneratorDurablePlan } from './generator-plan.js';
 
 export type GeneratorExecutionResult =
 	| { readonly outcome: 'completed' }
+	| { readonly outcome: 'adoption-refused'; readonly detail: string }
 	| {
 			readonly outcome: 'readdress-unsupported' | 'readdress-refused';
 			readonly detail: string;
@@ -42,6 +49,57 @@ export type GeneratorExecutionResult =
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 type GeneratedChange = GeneratorDurablePlan['generator']['changes'][number];
+
+function modelForAdoption(
+	table: NonNullable<GeneratedChange['adoption']>['shape'],
+): ModelIR {
+	const tables = new Map([[table.name, table]]);
+	const relations = new Map();
+	return {
+		tables,
+		relations,
+		getTable: (name) => tables.get(name),
+		getRelation: (name) => relations.get(name),
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+/** Adoption uses the established schema differ; it has no bespoke comparator. */
+async function adoptionShapeMatches(
+	pool: Pool,
+	schema: string,
+	adoption: NonNullable<GeneratedChange['adoption']>,
+): Promise<boolean> {
+	const live = await createPgsqlAdapter(pool).introspect({ schema });
+	const diff = compareSchemata(modelForAdoption(adoption.shape), live);
+	return !diff.changes.some((change) => change.table === adoption.shape.name);
+}
+
+function replacementRequested(
+	selectors: readonly string[] | undefined,
+	address: LedgerAddress,
+): boolean {
+	return (
+		selectors?.some(
+			(selector) =>
+				selector === address.name ||
+				selector === `${address.kind}:${address.name}`,
+		) === true
+	);
+}
+
+function namedReplacement(
+	plan: GeneratorDurablePlan,
+	selector: string,
+): boolean {
+	return plan.generator.changes.some(
+		(change) =>
+			change.kind === 'replace_table' &&
+			(selector === change.table || selector === `table:${change.table}`),
+	);
+}
 
 function addressFor(
 	change: GeneratedChange,
@@ -56,6 +114,8 @@ function addressFor(
 	};
 	const table = { ...base, kind: 'table' as const, name: change.table };
 	switch (change.kind) {
+		case 'adopt_table':
+		case 'replace_table':
 		case 'create_table':
 		case 'drop_table':
 			return table;
@@ -236,11 +296,217 @@ export async function executeGeneratorPlan(input: {
 	readonly planDigest: string;
 	readonly schema: string;
 	readonly accepts?: readonly string[];
+	readonly replaces?: readonly string[];
 	readonly runId: string;
 }): Promise<GeneratorExecutionResult> {
 	try {
 		const database = await databaseId(input.pool);
+		// Refusal preflight deliberately precedes replacement/authority checks and
+		// every outcome claim. A declared adoption that diverged after review is
+		// the actionable fault; an unrelated DROP must not invite its acceptance.
 		for (const change of input.plan.generator.changes) {
+			if (change.kind === 'adoption_refused')
+				return {
+					outcome: 'adoption-refused',
+					detail: `declared adoption for ${change.table} refuses live shape mismatch`,
+				};
+			if (change.kind !== 'adopt_table') continue;
+			if (!change.adoption)
+				return {
+					outcome: 'adoption-refused',
+					detail: 'adoption generator change has no declaration',
+				};
+			const address = addressFor(change, database, input.schema);
+			if (!address)
+				return {
+					outcome: 'adoption-refused',
+					detail: `adoption generator change ${change.table} has no managed address`,
+				};
+			const preflight = await preflightPgDeclaredAdoption({
+				executor: input.pool,
+				home: home(address),
+				address,
+				declaration: change.adoption.declaration,
+				expectedCatalogueIdentity: change.adoption.catalogueIdentity,
+				shapeMatches: () =>
+					adoptionShapeMatches(input.pool, input.schema, change.adoption!),
+				executionId: input.runId,
+			});
+			if (preflight.outcome === 'adoption-refused') return preflight;
+		}
+		if (
+			input.plan.generator.changes.some(
+				(change) => change.kind === 'replace_table',
+			) &&
+			(input.replaces === undefined || input.replaces.length === 0)
+		) {
+			return {
+				outcome: 'destructive-authority-refused',
+				detail:
+					'replacement requires a named --replace selector from the reviewed plan',
+			};
+		}
+		for (const selector of input.replaces ?? []) {
+			if (!namedReplacement(input.plan, selector))
+				return {
+					outcome: 'destructive-authority-refused',
+					detail: `replacement ${selector} was not requested by the reviewed plan`,
+				};
+		}
+		for (const change of input.plan.generator.changes) {
+			if (change.kind === 'adoption_refused') continue;
+			if (change.kind === 'replace_table') {
+				const address = addressFor(change, database, input.schema);
+				if (!change.replacement || !address)
+					return {
+						outcome: 'execution-failed',
+						detail: `replacement generator change ${change.table} has incomplete reviewed material`,
+					};
+				if (!replacementRequested(input.replaces, address)) continue;
+				const authority = await destructiveEvidence({
+					pool: input.pool,
+					address,
+					change,
+					planDigest: input.planDigest,
+					accepts: input.accepts,
+				});
+				const decision = decideDestructiveDecision(
+					{ kind: 'removal', address },
+					{
+						...authority.evidence,
+						declaration: 'replacement-requested-by-plan',
+						replacementAddress: address,
+					},
+				);
+				if (decision.kind !== 'destructive-decision-permitted')
+					return {
+						outcome: 'destructive-authority-refused',
+						detail: decision.reasons.join('; '),
+					};
+				const retireId = `dbsp.replacement.retire.${randomUUID()}`;
+				const retirement = {
+					claimId: retireId,
+					address,
+					claimKind: 'retire-intent' as const,
+					statementBundle: {
+						statements: change.replacement.retireStatements.map(
+							(sql, ordinal) => ({
+								ordinal,
+								sql,
+							}),
+						),
+					},
+				};
+				const reservation = {
+					address,
+					claimKind: 'retire-intent' as const,
+					executionId: input.runId,
+					rootClaimId: retireId,
+					homeLedger: home(address),
+				};
+				const admitted = await openPgOutcomeClaim(input.pool, {
+					plan: retirement,
+					reservations: [reservation],
+				});
+				if (admitted.kind !== 'admitted-outcome-claim')
+					return { outcome: 'execution-failed', detail: admitted.reason };
+				const permitted = attachDestructiveAuthorityPermit({
+					decision,
+					claim: admitted,
+				});
+				if (permitted.kind === 'outcome-protocol-refused')
+					return { outcome: 'execution-failed', detail: permitted.reason };
+				const sent = await executePgDestructiveBundle(input.pool, {
+					claim: permitted,
+					statements: retirement.statementBundle.statements,
+				});
+				if (sent) return { outcome: 'execution-failed', detail: sent.reason };
+				if (await readPgCatalogueIdentity(input.pool, address))
+					return {
+						outcome: 'execution-failed',
+						detail: `replacement retirement ${address.name} left the object present`,
+					};
+				await appendPgLedgerResolution(
+					input.pool,
+					home(address),
+					{
+						eventId: `${retireId}:absent`,
+						address,
+						eventKind: 'absent',
+						predecessor: retireId,
+					},
+					retireId,
+					[reservation],
+				);
+				const createId = `dbsp.replacement.create.${randomUUID()}`;
+				const created = await runPgTransactionalOutcome(input.pool, {
+					plan: {
+						claimId: createId,
+						address,
+						claimKind: 'intent',
+						requiresVacancy: true,
+						statementBundle: {
+							statements: change.replacement.createStatements.map(
+								(sql, ordinal) => ({
+									ordinal,
+									sql,
+								}),
+							),
+						},
+					},
+					reservations: [
+						{
+							address,
+							claimKind: 'intent',
+							executionId: input.runId,
+							rootClaimId: createId,
+							homeLedger: home(address),
+						},
+					],
+					resolution: {
+						eventId: `${createId}:observed`,
+						eventKind: 'observed',
+					},
+					readBack: async () => observed(address),
+					recordCatalogueIdentity: true,
+					vacancy: async (executor) =>
+						(await readPgCatalogueIdentity(executor, address))
+							? {
+									kind: 'occupied',
+									reason: `replacement creation refuses occupied live address ${address.name}`,
+								}
+							: { kind: 'vacant' },
+				});
+				if (created.kind !== 'executed-outcome-claim')
+					return { outcome: 'execution-failed', detail: created.reason };
+				continue;
+			}
+			if (change.kind === 'adopt_table') {
+				if (!change.adoption)
+					return {
+						outcome: 'execution-failed',
+						detail: 'adoption generator change has no declaration',
+					};
+				const address = addressFor(change, database, input.schema);
+				if (!address)
+					return {
+						outcome: 'execution-failed',
+						detail: `adoption generator change ${change.table} has no managed address`,
+					};
+				const adopted = await executePgDeclaredAdoption({
+					executor: input.pool,
+					home: home(address),
+					address,
+					declaration: change.adoption.declaration,
+					expectedCatalogueIdentity: change.adoption.catalogueIdentity,
+					shapeMatches: () =>
+						adoptionShapeMatches(input.pool, input.schema, change.adoption!),
+					executionId: input.runId,
+				} as never);
+				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op')
+					continue;
+				return { outcome: 'adoption-refused', detail: adopted.detail };
+			}
 			if (change.kind === 'readdress_table') {
 				if (!change.readdress)
 					return {

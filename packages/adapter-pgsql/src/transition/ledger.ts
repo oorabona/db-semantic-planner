@@ -590,6 +590,24 @@ export async function appendPgLedgerResolution(
 	);
 }
 
+/**
+ * `released` has no claim spelling in the closed event grammar. It is the
+ * deliberate atomic managed-to-unknown transition, so it must not invent an
+ * empty reservation closure merely to reuse ordinary claim resolution.
+ */
+export async function appendPgLedgerRelease(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	member: LedgerWriteMember,
+): Promise<void> {
+	assertTargetMatchesAddress(target, member);
+	if (member.eventKind !== 'released')
+		throw new Error('ledger release append requires a released event');
+	await classifyPgWrite(() =>
+		executor.query(eventInsertSql(target), memberValues(member)),
+	);
+}
+
 function orderedLedgerHomes(
 	homes: readonly LedgerHome[],
 ): readonly LedgerHome[] {

@@ -13,6 +13,7 @@ import type {
 } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
+import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
@@ -41,20 +42,13 @@ function claim(
 	readonly reservations: readonly LedgerReservationRow[];
 } {
 	const value = address(schema, name);
-	return {
-		plan: {
-			claimId,
-			address: value,
-			claimKind: 'intent',
-			statementBundle: {
-				statements: [
-					{
-						ordinal: 0,
-						sql: `CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer)`,
-					},
-				],
-			},
-		},
+	return fixtureOutcomeClaim({
+		claimId,
+		address: value,
+		claimKind: 'intent',
+		statements: [
+			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer)`,
+		],
 		reservations: [
 			{
 				address: value,
@@ -64,7 +58,7 @@ function claim(
 				homeLedger: { scope: 'schema', schema },
 			},
 		],
-	};
+	});
 }
 
 async function fixture(): Promise<{
@@ -176,20 +170,18 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 		const client = await pool.connect();
 		const input = claim(schema, 'externally_created', 'vacancy-claim');
 		try {
-			const adoption = {
-				plan: {
-					...input.plan,
-					claimId: 'prior-adopt',
-					claimKind: 'adopt-intent' as const,
-					statementBundle: { statements: [] },
-				},
+			const adoption = fixtureOutcomeClaim({
+				claimId: 'prior-adopt',
+				address: input.plan.address,
+				claimKind: 'adopt-intent',
+				statements: [],
 				reservations: input.reservations.map((reservation) => ({
 					...reservation,
 					claimKind: 'adopt-intent' as const,
 					executionId: 'prior-adopt-execution',
 					rootClaimId: 'prior-adopt',
 				})),
-			};
+			});
 			const admittedAdoption = await openPgOutcomeClaim(client, adoption);
 			if (admittedAdoption.kind !== 'admitted-outcome-claim')
 				throw new Error('absent fixture adoption did not admit');
@@ -206,22 +198,18 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 				'prior-adopt',
 				adoption.reservations,
 			);
-			const retirement = {
-				plan: {
-					...input.plan,
-					claimId: 'prior-retire',
-					claimKind: 'retire-intent' as const,
-					statementBundle: {
-						statements: [{ ordinal: 0, sql: 'DROP TABLE ignored' }],
-					},
-				},
+			const retirement = fixtureOutcomeClaim({
+				claimId: 'prior-retire',
+				address: input.plan.address,
+				claimKind: 'retire-intent',
+				statements: ['DROP TABLE ignored'],
 				reservations: input.reservations.map((reservation) => ({
 					...reservation,
 					claimKind: 'retire-intent' as const,
 					executionId: 'prior-retire-execution',
 					rootClaimId: 'prior-retire',
 				})),
-			};
+			});
 			const admittedRetirement = await openPgOutcomeClaim(client, retirement);
 			if (admittedRetirement.kind !== 'admitted-outcome-claim')
 				throw new Error('absent fixture retirement did not admit');

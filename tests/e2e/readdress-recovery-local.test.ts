@@ -19,6 +19,7 @@ import type {
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';
+import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -71,12 +72,6 @@ function reservation(
 	};
 }
 
-function statementBundle(statements: readonly string[]) {
-	return {
-		statements: statements.map((sql, ordinal) => ({ ordinal, sql })),
-	};
-}
-
 async function admitFixtureOutcomeClaim(input: {
 	readonly claimId: string;
 	readonly address: LedgerAddress;
@@ -88,25 +83,26 @@ async function admitFixtureOutcomeClaim(input: {
 }): Promise<void> {
 	const pool = await getTestPool();
 	const rootClaimId = input.rootClaimId ?? input.claimId;
-	const admission = await openPgOutcomeClaim(pool, {
-		plan: {
+	const admission = await openPgOutcomeClaim(
+		pool,
+		fixtureOutcomeClaim({
 			claimId: input.claimId,
 			address: input.address,
 			claimKind: input.claimKind,
-			statementBundle: statementBundle(input.statements),
+			statements: input.statements,
 			...(input.pairId === undefined ? {} : { pairId: input.pairId }),
-		},
-		reservations: [
-			{
-				address: input.address,
-				claimKind: input.claimKind,
-				executionId: input.executionId ?? input.claimId,
-				rootClaimId,
-				...(input.pairId === undefined ? {} : { pairId: input.pairId }),
-				homeLedger: { scope: 'schema', schema: input.address.schema! },
-			},
-		],
-	});
+			reservations: [
+				{
+					address: input.address,
+					claimKind: input.claimKind,
+					executionId: input.executionId ?? input.claimId,
+					rootClaimId,
+					...(input.pairId === undefined ? {} : { pairId: input.pairId }),
+					homeLedger: { scope: 'schema', schema: input.address.schema! },
+				},
+			],
+		}),
+	);
 	if (admission.kind !== 'admitted-outcome-claim')
 		throw new Error(admission.reason);
 }

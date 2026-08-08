@@ -16,6 +16,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
+import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -90,15 +91,16 @@ function reservation(
 async function adopt(address: LedgerAddress): Promise<void> {
 	const pool = await getTestPool();
 	const claimId = `adopt:${address.name}:${randomUUID()}`;
-	const admission = await openPgOutcomeClaim(pool, {
-		plan: {
+	const admission = await openPgOutcomeClaim(
+		pool,
+		fixtureOutcomeClaim({
 			claimId,
 			address,
 			claimKind: 'adopt-intent',
-			statementBundle: { statements: [] },
-		},
-		reservations: [reservation(address, claimId, 'adopt-intent')],
-	});
+			statements: [],
+			reservations: [reservation(address, claimId, 'adopt-intent')],
+		}),
+	);
 	if (admission.kind !== 'admitted-outcome-claim')
 		throw new Error(admission.reason);
 	const live = await readPgCatalogueIdentity(pool, address);
