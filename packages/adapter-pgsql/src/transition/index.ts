@@ -174,6 +174,7 @@ export {
 } from './operations/manual-sql.js';
 export {
 	appendPgOutcomeResolution,
+	executePgDestructiveBundle,
 	executePgManagedBundle,
 	openPgOutcomeClaim,
 	type PgOutcomeClaimRequest,
@@ -209,6 +210,14 @@ export {
 	runPgReinitializePreflight,
 	selectReinitializeAdoptionCandidates,
 } from './reinitialize-preflight.js';
+export {
+	classifyRemovalEffectsClosure,
+	containmentAuthorityOutcome,
+	type PgRemovalEffectAddress,
+	type PgRemovalEffectsClosure,
+	readPgRemovalEffectsClosure,
+	reservationsForRemovalClosure,
+} from './removal-containment.js';
 export {
 	type AddCheckMatch,
 	type AddCheckRuleOptions,

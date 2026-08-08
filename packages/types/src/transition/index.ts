@@ -3,6 +3,7 @@ export * from './artifact.js';
 export * from './assessment.js';
 export * from './contracts.js';
 export * from './declaration.js';
+export * from './destructive-authority.js';
 export * from './equivalence.js';
 export * from './evidence-access.js';
 export * from './execution-contract.js';

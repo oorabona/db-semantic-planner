@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
 	appendTransitionAuthorization,
+	createPgTransitionLessor,
 	createPgTransitionPack,
 	preparePgExecutionSession,
 	readTransitionJournal,
@@ -12,6 +13,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	acquireExclusiveTransitionLease,
+	acquireTransitionLease,
 	createApplier,
 	createPackRegistry,
 	type PackRegistry,
@@ -30,6 +32,12 @@ import type {
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
+import {
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
+} from './generator-execution.js';
+import type { GeneratorDurablePlan } from './generator-plan.js';
+import { runGeneratorPlan } from './generator-plan.js';
 import {
 	exitCodeForPlanResult,
 	formatPlanHuman,
@@ -422,6 +430,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 		'operator-reviewed plan digest does not match the stored plan',
 	],
 	[
+		'non-replayable-generator-run',
+		35,
+		'generator removal runs require a fresh no-argument apply against live state',
+	],
+	[
 		'prior-step-events-refusal',
 		19,
 		'attempted runs must be classified by recover',
@@ -455,6 +468,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 	],
 	['database-read-only', 34, 'target cannot accept managed writes'],
 	[
+		'destructive-authority-refused',
+		59,
+		'a live destructive authority did not permit the generated mutation',
+	],
+	[
 		'confirmation-required',
 		57,
 		'no-argument apply requires an interactive confirmation or --yes',
@@ -475,7 +493,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 export type ApplyOutcome = (typeof APPLY_OUTCOME_CONTRACT)[number][0];
 type ApplyExecutionOutcome = Exclude<
 	ApplyOutcome,
-	'run-busy' | 'plan-digest-required' | 'policy-invalid' | 'apply-failed'
+	| 'run-busy'
+	| 'plan-digest-required'
+	| 'non-replayable-generator-run'
+	| 'policy-invalid'
+	| 'apply-failed'
 >;
 
 const applyExitCodes = new Map<ApplyOutcome, number>(
@@ -572,13 +594,20 @@ export type ApplyCommandResult = (
 	| {
 			readonly outcome: Exclude<
 				ApplyOutcome,
-				'run-busy' | 'plan-digest-required' | 'policy-invalid' | 'apply-failed'
+				| 'run-busy'
+				| 'plan-digest-required'
+				| 'non-replayable-generator-run'
+				| 'policy-invalid'
+				| 'apply-failed'
 			>;
 			readonly runId: string;
 			readonly result: ApplyResult;
 	  }
 	| {
-			readonly outcome: 'run-busy' | 'plan-digest-required';
+			readonly outcome:
+				| 'run-busy'
+				| 'plan-digest-required'
+				| 'non-replayable-generator-run';
 			readonly runId: string;
 	  }
 ) & { readonly cleanupError?: string };
@@ -599,8 +628,20 @@ export type NoArgumentApplyResult =
 			readonly plan: PlanResult;
 			readonly runId: string;
 			readonly planDigest: string;
-			readonly result: ApplyCommandResult;
+			readonly result: ApplyCommandResult | GeneratorExecutionResult;
 	  };
+
+function isGeneratorPlan(
+	plan: PlanResult['plan'] | undefined,
+): plan is GeneratorDurablePlan {
+	return (
+		plan !== undefined &&
+		typeof plan === 'object' &&
+		'generator' in plan &&
+		(plan as { generator?: { kind?: unknown } }).generator?.kind ===
+			'schema-differ-generator'
+	);
+}
 
 export type ApplyConfirmation = (
 	runId: string,
@@ -645,55 +686,100 @@ export async function runNoArgumentApply(
 		dryRun: options.dryRun === true,
 		format: options.format === 'json' ? 'json' : 'sql',
 	});
+	// The transition planner intentionally has no removal mapping.  A blocked
+	// no-argument plan is therefore the one point where the live schema differ
+	// becomes the producer of the generated, journalled plan.  `plan <file>`
+	// remains transition-only; this bridge is deliberately scoped to `apply`.
+	const effectivePlan =
+		plan.proveKind === 'blocked'
+			? await runGeneratorPlan({
+					db: options.db,
+					schemaFile: options.schemaFile,
+					...(options.schema === undefined ? {} : { schema: options.schema }),
+					dryRun: options.dryRun === true,
+				})
+			: plan;
 	if (options.dryRun === true)
 		return {
 			outcome: 'dry-run',
-			plan,
+			plan: effectivePlan,
 			runId: null,
 			planDigest: null,
 		};
 	if (
-		plan.proveKind !== 'proven' ||
-		plan.persisted !== true ||
-		!plan.runId ||
-		!plan.planDigest
+		effectivePlan.proveKind !== 'proven' ||
+		effectivePlan.persisted !== true ||
+		!effectivePlan.runId ||
+		!effectivePlan.planDigest
 	) {
 		// A blocked/no-drift plan has no executable durable record. Its existing
 		// presentation is the complete result; do not invent an apply attempt.
 		return {
 			outcome: 'not-executable',
-			plan,
-			runId: plan.runId,
-			planDigest: plan.planDigest,
+			plan: effectivePlan,
+			runId: effectivePlan.runId,
+			planDigest: effectivePlan.planDigest,
 		};
 	}
 	if (options.yes !== true && process.stdin.isTTY !== true) {
 		return {
 			outcome: 'confirmation-required',
-			plan,
-			runId: plan.runId,
-			planDigest: plan.planDigest,
+			plan: effectivePlan,
+			runId: effectivePlan.runId,
+			planDigest: effectivePlan.planDigest,
 		};
 	}
-	if (options.yes !== true && !(await confirm(plan.runId, plan.planDigest))) {
+	if (
+		options.yes !== true &&
+		!(await confirm(effectivePlan.runId, effectivePlan.planDigest))
+	) {
 		return {
 			outcome: 'confirmation-declined',
-			plan,
-			runId: plan.runId,
-			planDigest: plan.planDigest,
+			plan: effectivePlan,
+			runId: effectivePlan.runId,
+			planDigest: effectivePlan.planDigest,
 		};
 	}
-	const result = await execute(plan.runId, {
-		...options,
-		planDigest: plan.planDigest,
-	});
+	let result: ApplyCommandResult | GeneratorExecutionResult;
+	if (isGeneratorPlan(effectivePlan.plan)) {
+		const { pool } = await createDbConnection(options.db);
+		try {
+			result = await executeGeneratorPlan({
+				pool,
+				plan: effectivePlan.plan,
+				planDigest: effectivePlan.planDigest,
+				schema: options.schema ?? 'public',
+				...(options.accept === undefined ? {} : { accepts: options.accept }),
+				runId: effectivePlan.runId,
+			});
+		} finally {
+			await pool.end();
+		}
+	} else {
+		result = await execute(effectivePlan.runId, {
+			...options,
+			planDigest: effectivePlan.planDigest,
+		});
+	}
 	return {
 		outcome: result.outcome,
-		plan,
-		runId: plan.runId,
-		planDigest: plan.planDigest,
+		plan: effectivePlan,
+		runId: effectivePlan.runId,
+		planDigest: effectivePlan.planDigest,
 		result,
 	};
+}
+
+async function loadOnLessor(
+	target: Parameters<typeof acquireTransitionLease>[0],
+	runId: string,
+) {
+	const lease = await acquireTransitionLease(target);
+	try {
+		return await readTransitionJournal(lease.session, runId, { ensure: false });
+	} finally {
+		await lease.release();
+	}
 }
 
 async function loadOnTarget(
@@ -718,6 +804,30 @@ export async function runApply(
 	const policy = await effectiveApplyPolicy(options);
 	const owned =
 		pool === undefined ? (await createDbConnection(options.db)).pool : pool;
+	// SC-52: this is deliberately before authorization, preflight, or a step
+	// attempt. A persisted generator removal is reviewable, not replayable.
+	let persisted: Awaited<ReturnType<typeof loadOnTarget>>;
+	try {
+		persisted = await loadOnLessor(createPgTransitionLessor(owned), runId);
+	} catch (error) {
+		if (pool === undefined) {
+			try {
+				await owned.end();
+			} catch {
+				// The load failure is the primary command outcome.
+			}
+		}
+		throw error;
+	}
+	if (persisted.run.replayability === 'non-replayable-generator-removal') {
+		const refusal: ApplyCommandResult = {
+			outcome: 'non-replayable-generator-run',
+			runId,
+		};
+		return pool === undefined
+			? withPoolCleanupReported(refusal, () => owned.end())
+			: refusal;
+	}
 	let result: ApplyCommandResult;
 	try {
 		const locked = await withPgTransitionRunLock(
@@ -896,7 +1006,13 @@ export const applyCommand = new Command('apply')
 				else if (result.outcome === 'not-executable') {
 					// The planner already rendered the concrete no-drift/blocked reason.
 				} else if (result.outcome !== 'dry-run' && 'result' in result)
-					console.log(formatApplyHuman(result.result));
+					console.log(
+						'runId' in result.result
+							? formatApplyHuman(result.result)
+							: `${result.result.outcome}${
+									'detail' in result.result ? `: ${result.result.detail}` : ''
+								}`,
+					);
 			}
 			process.exitCode = exitCode;
 			return;

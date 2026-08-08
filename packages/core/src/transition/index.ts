@@ -153,6 +153,10 @@ export type {
 	CapabilityDescriptor,
 	Comparator,
 	CompareOutcome,
+	DestructiveAction,
+	DestructiveAuthorityEvidence,
+	DestructiveAuthorityPermit,
+	DestructiveDecision,
 	DurableIntentRecord,
 	ExclusiveTransitionTarget,
 	FingerprintManifest,
@@ -195,6 +199,13 @@ export {
 	declarationSetFromModel,
 	validateDeclarationModel,
 } from './declaration.js';
+export {
+	type AdmittedDestructiveOutcomeClaim,
+	admitDestructiveOutcomeClaim,
+	attachDestructiveAuthorityPermit,
+	decideDestructiveDecision,
+	isDestructiveAuthorityPermit,
+} from './destructive-authority.js';
 export {
 	type EnumAddDelta,
 	type EnumAddDeltaOptions,
@@ -289,7 +300,10 @@ export {
 	resumeTransitionRun,
 	type VerifiedRecoveryJournal,
 } from './resume.js';
-export { createTransitionRunMetadata } from './run-metadata.js';
+export {
+	createTransitionRunMetadata,
+	markGeneratorRemovalNonReplayable,
+} from './run-metadata.js';
 export {
 	createStagedTransitionOrchestrator,
 	type StagedTransitionInput,

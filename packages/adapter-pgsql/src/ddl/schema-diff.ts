@@ -373,10 +373,17 @@ export function compareSchemata(
 		}
 	}
 
+	// `destructive` is a compatibility projection for legacy renderers. It is
+	// deliberately not an authority input: generator orchestration classifies
+	// every mutation independently through its total classifier.
+	const classifiedChanges = changes.map((change) => ({
+		...change,
+		destructive: change.destructive,
+	}));
 	return {
-		changes,
-		hasDestructive: changes.some((c) => c.destructive),
-		summary: buildSummary(changes),
+		changes: classifiedChanges,
+		hasDestructive: classifiedChanges.some((c) => c.destructive),
+		summary: buildSummary(classifiedChanges),
 	};
 }
 

@@ -1,0 +1,71 @@
+import type { ChangeKind } from './schema-diff.js';
+
+/** EFF-04's closed generated-mutation result domain. */
+export type GeneratedMutationClassification =
+	| 'non-destructive'
+	| 'removal'
+	| 'data-destructive';
+
+const NON_DESTRUCTIVE_KINDS: ReadonlySet<ChangeKind> = new Set([
+	'create_table',
+	'add_column',
+	'alter_column_nullable',
+	'alter_column_default',
+	'alter_column_unique',
+	'add_primary_key',
+	'add_foreign_key',
+	'validate_constraint',
+	'create_index',
+	'add_check_constraint',
+	'create_enum',
+	'alter_enum_add_value',
+	'alter_column_collation',
+	'alter_column_identity',
+	'add_comment',
+	'drop_comment',
+	'create_extension',
+	'create_sequence',
+	'alter_sequence',
+	'enable_rls',
+	'disable_rls',
+	'create_policy',
+	'drop_policy',
+]);
+
+const REMOVAL_KINDS: ReadonlySet<ChangeKind> = new Set([
+	'drop_table',
+	'drop_column',
+	'drop_primary_key',
+	'drop_foreign_key',
+	'alter_foreign_key',
+	'drop_index',
+	'drop_check_constraint',
+	'drop_enum',
+	'drop_extension',
+	'drop_sequence',
+]);
+
+/**
+ * Total, fail-closed classifier for generator mutations. `string` is deliberate:
+ * a newly-added ChangeKind cannot silently become safe before this table names it.
+ */
+export function classifyGeneratedMutation(
+	kind: ChangeKind | string,
+): GeneratedMutationClassification {
+	if (REMOVAL_KINDS.has(kind as ChangeKind)) return 'removal';
+	if (NON_DESTRUCTIVE_KINDS.has(kind as ChangeKind)) return 'non-destructive';
+	// alter_column_type is deliberately here: it must be proven non-lossy by a
+	// later authority reader; otherwise a type rewrite destroys stored values.
+	return 'data-destructive';
+}
+
+export function isGeneratedMutationDestructive(
+	kind: ChangeKind | string,
+): boolean {
+	return classifyGeneratedMutation(kind) !== 'non-destructive';
+}
+
+/** All removal statements remain generator-only; no transition operation maps one. */
+export function refusesRecordedPlanRemoval(kind: ChangeKind | string): boolean {
+	return classifyGeneratedMutation(kind) === 'removal';
+}

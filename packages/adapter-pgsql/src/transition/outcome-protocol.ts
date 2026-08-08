@@ -1,8 +1,10 @@
+import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
 import {
 	admitOutcomeClaim,
 	claimIdForToken,
 	classifyOutcomeRecovery,
 	consumeClaimToken,
+	isDestructiveAuthorityPermit,
 	projectLedgerChain,
 } from '@dbsp/core';
 import type {
@@ -58,6 +60,12 @@ export interface PgOutcomeResolution {
 export interface PgOutcomeExecutionRequest {
 	readonly token: ClaimToken;
 	readonly claim: AdmittedOutcomeClaim;
+	readonly statements: readonly ClaimBundleStatement[];
+}
+
+/** The destructive DDL sink cannot be called with raw evidence or a bare token. */
+export interface PgDestructiveOutcomeExecutionRequest {
+	readonly claim: AdmittedDestructiveOutcomeClaim;
 	readonly statements: readonly ClaimBundleStatement[];
 }
 
@@ -512,6 +520,25 @@ export async function executePgManagedBundle(
 	if ('kind' in consumption) return consumption;
 	for (const statement of consumption.statements)
 		await classifyPgWrite(() => executor.query(statement.sql));
+}
+
+/**
+ * EFF-03 bridge endpoint for generator removals. Its required admission value
+ * was minted by the sole authority interpreter and carries the claim token.
+ */
+export async function executePgDestructiveBundle(
+	executor: TransitionJournalQueryable,
+	request: PgDestructiveOutcomeExecutionRequest,
+): Promise<undefined | OutcomeProtocolRefusal> {
+	if (!isDestructiveAuthorityPermit(request.claim.destructivePermit))
+		return refusal(
+			'destructive authority permit was not minted by the interpreter',
+		);
+	return executePgManagedBundle(executor, {
+		token: request.claim.token,
+		claim: request.claim,
+		statements: request.statements,
+	});
 }
 
 async function verifyCreationVacancy(

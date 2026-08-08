@@ -11,6 +11,12 @@ export {
 	generateDDL,
 } from './ddl-generator.js';
 export {
+	classifyGeneratedMutation,
+	type GeneratedMutationClassification,
+	isGeneratedMutationDestructive,
+	refusesRecordedPlanRemoval,
+} from './destructive-classification.js';
+export {
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
 	type IndexCapabilityContext,

@@ -87,6 +87,8 @@ export interface TransitionRunMetadata {
 	readonly databaseId: string;
 	readonly coreVersion: string;
 	readonly startedAt: string;
+	/** Generator removal runs are inspectable but must be freshly re-planned. */
+	readonly replayability?: 'replayable' | 'non-replayable-generator-removal';
 }
 
 export type TransitionJournalEventName = 'intent' | 'completion' | 'observed';

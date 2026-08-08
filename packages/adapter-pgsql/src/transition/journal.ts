@@ -93,6 +93,7 @@ export function renderCreateTransitionRunTableSql(): string {
 		'target_context_digest text NOT NULL, ' +
 		'database_id text NOT NULL, ' +
 		'core_version text NOT NULL, ' +
+		"replayability text NOT NULL DEFAULT 'replayable', " +
 		'started_at timestamptz NOT NULL DEFAULT now()' +
 		')'
 	);
@@ -271,15 +272,17 @@ function assertRunTableShape(row: JournalTableShapeRow | undefined): void {
 		throw new Error('dbsp transition run journal table has invalid shape');
 	}
 	const columns = jsonRecord(row.columns);
+	const legacyColumns = {
+		run_id: 'text',
+		plan_digest: 'text',
+		target_context_digest: 'text',
+		database_id: 'text',
+		core_version: 'text',
+		started_at: 'timestamp with time zone',
+	};
 	if (
-		!columnsMatch(columns, {
-			run_id: 'text',
-			plan_digest: 'text',
-			target_context_digest: 'text',
-			database_id: 'text',
-			core_version: 'text',
-			started_at: 'timestamp with time zone',
-		})
+		!columnsMatch(columns, legacyColumns) &&
+		!columnsMatch(columns, { ...legacyColumns, replayability: 'text' })
 	) {
 		throw new Error('dbsp transition run journal table columns drifted');
 	}
@@ -517,7 +520,7 @@ async function ensureRun(
 	run: TransitionRunMetadata,
 ): Promise<void> {
 	const existing = await executor.query(
-		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
+		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, replayability, started_at ` +
 			`FROM ${transitionRunTable()} WHERE run_id = $1`,
 		[run.runId],
 	);
@@ -531,6 +534,8 @@ async function ensureRun(
 		current.targetContextDigest !== run.targetContextDigest ||
 		current.databaseId !== run.databaseId ||
 		current.coreVersion !== run.coreVersion ||
+		(current.replayability ?? 'replayable') !==
+			(run.replayability ?? 'replayable') ||
 		!sameInstant(current.startedAt, run.startedAt)
 	) {
 		throw new Error(
@@ -694,12 +699,16 @@ export function createPgTransitionRunPersister(
 				);
 			}
 			const serialized = serializedPlan(plan);
+			const replayability =
+				run.replayability === 'non-replayable-generator-removal'
+					? 'non-replayable-generator-removal'
+					: 'replayable';
 			await ensureTransitionJournal(executor);
 			await executor.query(
 				`WITH ins_run AS (` +
 					`INSERT INTO ${transitionRunTable()} ` +
-					'(run_id, plan_digest, target_context_digest, database_id, core_version, started_at) ' +
-					'VALUES ($1, $2, $3, $4, $5, $6::timestamptz) ' +
+					'(run_id, plan_digest, target_context_digest, database_id, core_version, replayability, started_at) ' +
+					`VALUES ($1, $2, $3, $4, $5, '${replayability}', $6::timestamptz) ` +
 					'ON CONFLICT (run_id) DO NOTHING ' +
 					'RETURNING run_id' +
 					`) INSERT INTO ${transitionRunPlanTable()} (run_id, plan) ` +
@@ -833,6 +842,7 @@ function runMetadataFromRow(
 		target_context_digest,
 		database_id,
 		core_version,
+		replayability,
 		started_at,
 	} = row;
 	if (
@@ -857,6 +867,10 @@ function runMetadataFromRow(
 		databaseId: database_id,
 		coreVersion: core_version,
 		startedAt,
+		...(replayability === 'non-replayable-generator-removal' ||
+		replayability === 'replayable'
+			? { replayability }
+			: {}),
 	};
 }
 
@@ -911,7 +925,7 @@ export async function readTransitionJournal(
 	if (options.ensure !== false) await ensureTransitionJournal(executor);
 	else await verifyTransitionJournalShape(executor);
 	const run = await executor.query(
-		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
+		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, replayability, started_at ` +
 			`FROM ${transitionRunTable()} WHERE run_id = $1`,
 		[runId],
 	);
