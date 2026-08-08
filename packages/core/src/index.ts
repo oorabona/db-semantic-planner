@@ -40,6 +40,8 @@ export type {
 	RelationType,
 	RequiredEnumLabelIR,
 	TableIR,
+	TableReaddressAddress,
+	TableReaddressDeclaration,
 } from './model-ir.js';
 
 // CLI-NQL: Relation kind helpers and pseudo-column factory

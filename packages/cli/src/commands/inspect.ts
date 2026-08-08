@@ -25,6 +25,11 @@ export interface InspectResult {
 		| Awaited<ReturnType<typeof readPgLedgerMarker>>
 		| { readonly kind: 'unreadable'; readonly reason: string };
 	readonly projection?: ReturnType<typeof projectLedgerChain>;
+	/** A selected address exposes an interrupted re-address pair without repair. */
+	readonly readdressPair?: {
+		readonly pairId: string;
+		readonly state: 'open';
+	};
 	readonly live:
 		| { readonly kind: 'not-requested' }
 		| { readonly kind: 'present'; readonly catalogueIdentity: unknown }
@@ -178,11 +183,23 @@ export async function runInspect(
 			}
 			try {
 				const live = await readPgCatalogueIdentity(lease.session, address);
+				const openReaddress =
+					projection?.kind === 'projected-ledger-chain' &&
+					projection.openClaim?.kind === 'readdress-intent' &&
+					projection.openClaim.event.pairId
+						? {
+								pairId: projection.openClaim.event.pairId,
+								state: 'open' as const,
+							}
+						: undefined;
 				return {
 					address,
 					ledger,
 					marker,
 					projection,
+					...(openReaddress === undefined
+						? {}
+						: { readdressPair: openReaddress }),
 					live: live?.catalogueIdentity
 						? { kind: 'present', catalogueIdentity: live.catalogueIdentity }
 						: { kind: 'absent' },

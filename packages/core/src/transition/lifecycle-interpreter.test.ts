@@ -140,6 +140,28 @@ describe('ledger lifecycle interpreter', () => {
 		});
 	});
 
+	it('closes an untracked contained member after a paired re-address', () => {
+		const result = project([
+			{
+				...event('contained-readdress', 'readdress-intent'),
+				pairId: 'pair-1',
+			},
+			{
+				...event(
+					'contained-readdressed-to',
+					'readdressed-to',
+					'contained-readdress',
+				),
+				pairId: 'pair-1',
+			},
+		]);
+		expect(result).toMatchObject({
+			kind: 'projected-ledger-chain',
+			stableState: 'unknown',
+			reportedState: { kind: 'unknown' },
+		});
+	});
+
 	it('draws resolved outcomes from the originating claim column', () => {
 		const created = project([
 			...claimed('unknown', 'intent'),

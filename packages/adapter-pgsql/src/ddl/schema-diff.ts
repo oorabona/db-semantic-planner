@@ -55,6 +55,7 @@ export type ChangeKind =
 	// Tables
 	| 'create_table'
 	| 'drop_table'
+	| 'readdress_table'
 	// Columns
 	| 'add_column'
 	| 'drop_column'
@@ -243,6 +244,16 @@ export function compareSchemata(
 		? normalizeTableMap(schema.tables, plugin)
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
+	const declaredReaddresses = new Map(
+		[...schemaTables]
+			.filter(([, table]) => table.readdress !== undefined)
+			.map(([name, table]) => [name, table.readdress!] as const),
+	);
+	const readdressSources = new Set(
+		[...declaredReaddresses.values()].map(
+			(declaration) => declaration.from.name,
+		),
+	);
 	const externalTables = new Set(
 		[...(schema.externalTables ?? [])].map((name) =>
 			plugin ? plugin.toDatabase(name) : name,
@@ -268,6 +279,17 @@ export function compareSchemata(
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
 		if (!dbTables.has(name)) {
+			const readdress = declaredReaddresses.get(name);
+			if (readdress && dbTables.has(readdress.from.name)) {
+				changes.push({
+					kind: 'readdress_table',
+					table: name,
+					destructive: false,
+					details: `Re-address table "${readdress.from.name}" to "${name}"`,
+					meta: { readdress, table: schemaTable },
+				});
+				continue;
+			}
 			changes.push({
 				kind: 'create_table',
 				table: name,
@@ -363,7 +385,11 @@ export function compareSchemata(
 
 	// 2. Tables that exist in DB but not in schema → drop_table
 	for (const [name] of dbTables) {
-		if (!schemaTables.has(name) && !externalTables.has(name)) {
+		if (
+			!schemaTables.has(name) &&
+			!externalTables.has(name) &&
+			!readdressSources.has(name)
+		) {
 			changes.push({
 				kind: 'drop_table',
 				table: name,

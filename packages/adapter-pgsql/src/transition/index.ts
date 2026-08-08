@@ -102,6 +102,7 @@ export {
 	PgLedgerStorageUnsupportedError,
 	type PgLedgerTarget,
 	readPgLedgerReservationsForExecution,
+	readPgLedgerReservationsForPair,
 	recordPgLedgerIdentity,
 	renderCreateLedgerEventTableSql,
 	renderCreateLedgerIdentityTableSql,
@@ -197,6 +198,17 @@ export {
 	createPgTransitionPack,
 	type PgTransitionPackOptions,
 } from './pack.js';
+export {
+	classifyPgReaddressRecovery,
+	classifyPgReaddressSupport,
+	executePgTableReaddress,
+	type PgReaddressPairRecoveryResult,
+	type PgReaddressRequest,
+	type PgReaddressResult,
+	type ReaddressRecoveryAnswer,
+	recoverPgReaddressPair,
+	renderPgTableReaddressStatements,
+} from './readdress.js';
 export {
 	assembleReinitializePreflightScopeReports,
 	classifyPgLedgerMarker,

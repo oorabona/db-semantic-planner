@@ -658,6 +658,7 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'alter_sequence':
 			return 8;
 		case 'create_table':
+		case 'readdress_table':
 			return 6;
 		case 'add_column':
 			return 7;
@@ -1029,6 +1030,11 @@ function changeToUpSQL(
 			const table = change.meta?.table as TableIR | undefined;
 			return table ? generateCreateTableSQL(table, schemaName) : undefined;
 		}
+		case 'readdress_table':
+			// The generator executor owns the paired-ledger protocol and emits the
+			// transactional ALTER TABLE itself.  This renderer must not offer a raw
+			// statement that could bypass that protocol.
+			return undefined;
 		case 'drop_table':
 			return `DROP TABLE IF EXISTS ${qualifyTable(change.table, schemaName)} CASCADE;`;
 		case 'add_column':
@@ -1160,6 +1166,12 @@ function changeToDownSQL(
 		case 'create_table':
 			return {
 				sql: `DROP TABLE IF EXISTS ${qualifyTable(change.table, schemaName)} CASCADE;`,
+				destructive: true,
+			};
+
+		case 'readdress_table':
+			return {
+				sql: `-- WARNING: Cannot reverse readdress_table "${sanitizeCommentText(change.table)}" without a new declared re-addressing`,
 				destructive: true,
 			};
 

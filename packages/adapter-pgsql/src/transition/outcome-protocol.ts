@@ -80,6 +80,8 @@ export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
 		executor: TransitionJournalQueryable,
 		plan: OutcomeClaimPlan,
 	) => Promise<OutcomeVacancy>;
+	/** Record the post-DDL catalogue identity on a present terminal member. */
+	readonly recordCatalogueIdentity?: boolean;
 }
 
 export interface PgOutcomeNonTransactionalRequest
@@ -291,18 +293,27 @@ function canonicalJson(value: unknown): string {
 }
 
 async function observedResolutionMember(
+	executor: TransitionJournalQueryable,
 	claim: AdmittedOutcomeClaim,
 	resolution: PgOutcomeResolution,
 	predecessor: string,
 	readBack: () => Promise<LedgerPayload>,
+	recordCatalogueIdentity: boolean | undefined,
 ): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
+	const live = recordCatalogueIdentity
+		? await readPgCatalogueIdentity(executor, claim.plan.address)
+		: undefined;
 	return {
 		...resolutionMember(claim, resolution, predecessor),
+		...(live?.catalogueIdentity
+			? { catalogueIdentity: live.catalogueIdentity }
+			: {}),
 		observed: await readBack(),
 	};
 }
 
 async function terminalResolutionMember(
+	executor: TransitionJournalQueryable,
 	request: PgOutcomeTransactionalRequest,
 	claim: AdmittedOutcomeClaim,
 	predecessor: string,
@@ -310,10 +321,12 @@ async function terminalResolutionMember(
 	if (!request.readBack)
 		return resolutionMember(claim, request.resolution, predecessor);
 	return observedResolutionMember(
+		executor,
 		claim,
 		request.resolution,
 		predecessor,
 		request.readBack,
+		request.recordCatalogueIdentity,
 	);
 }
 
@@ -642,7 +655,12 @@ export async function runPgTransactionalOutcome(
 		await appendOutcomeTerminal(
 			executor,
 			target,
-			await terminalResolutionMember(request, admission, request.plan.claimId),
+			await terminalResolutionMember(
+				executor,
+				request,
+				admission,
+				request.plan.claimId,
+			),
 			request.plan.claimId,
 			request.reservations,
 		);
@@ -704,6 +722,7 @@ export async function runPgNonTransactionalOutcome(
 			executor,
 			targetForPlan(request.plan),
 			await terminalResolutionMember(
+				executor,
 				request,
 				admission,
 				request.executingEventId,

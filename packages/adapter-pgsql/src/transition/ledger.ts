@@ -119,6 +119,68 @@ export async function readPgLedgerReservationsForExecution(
 	});
 }
 
+/**
+ * A re-address pair can cross ledger homes. Discover every existing reservation
+ * table before reading the pair so recovery cannot accidentally treat one side
+ * of a cross-schema closure as the entire operation.
+ */
+export async function readPgLedgerReservationsForPair(
+	executor: TransitionJournalQueryable,
+	pairId: string,
+): Promise<readonly LedgerReservationRow[]> {
+	const homes = await executor.query(
+		`SELECT namespace.nspname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = $1 AND relation.relkind = 'r' ORDER BY namespace.nspname`,
+		[DBSP_LEDGER_RESERVATION_TABLE],
+	);
+	const rows = await Promise.all(
+		homes.rows.map(async (row) => {
+			if (typeof row.nspname !== 'string')
+				throw new Error('ledger reservation schema is unreadable');
+			const target: PgLedgerTarget =
+				row.nspname === DBSP_META_SCHEMA
+					? { scope: 'database' }
+					: { scope: 'schema', schema: row.nspname };
+			const result = await executor.query(
+				`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} WHERE pair_id = $1 ORDER BY root_claim_id, address_kind, address_name`,
+				[pairId],
+			);
+			return result.rows.map((value) => {
+				const schema = String(value.address_schema ?? '');
+				const homeSchema = String(value.home_ledger_schema ?? '');
+				return {
+					address: {
+						scope: target.scope,
+						engine: String(value.address_engine),
+						database: String(value.address_database),
+						...(schema ? { schema } : {}),
+						...(value.address_parent == null
+							? {}
+							: {
+									parent:
+										typeof value.address_parent === 'string'
+											? JSON.parse(value.address_parent)
+											: value.address_parent,
+								}),
+						kind: String(value.address_kind),
+						name: String(value.address_name),
+					},
+					claimKind: String(
+						value.claim_kind,
+					) as LedgerReservationRow['claimKind'],
+					executionId: String(value.execution_id),
+					...(value.pair_id == null ? {} : { pairId: String(value.pair_id) }),
+					rootClaimId: String(value.root_claim_id),
+					homeLedger:
+						value.home_ledger_scope === 'database'
+							? { scope: 'database' as const }
+							: { scope: 'schema' as const, schema: homeSchema },
+				};
+			});
+		}),
+	);
+	return rows.flat();
+}
+
 type LedgerWriteMember = Omit<LedgerChainMember, 'controller' | 'recordedAt'>;
 
 function quoteIdent(value: string, type: 'schema' | 'table' | 'alias'): string {
@@ -231,7 +293,7 @@ function memberValues(member: LedgerWriteMember): readonly unknown[] {
 }
 
 function eventInsertSql(target: PgLedgerTarget): string {
-	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11::jsonb, $12, $13, $14::jsonb, $15) RETURNING event_id`;
+	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, $9, $10, $11, $12::jsonb, $13, $14::jsonb, $15) RETURNING event_id`;
 }
 
 export function renderCreateLedgerEventTableSql(

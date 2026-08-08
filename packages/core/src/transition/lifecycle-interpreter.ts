@@ -11,6 +11,7 @@ import {
 	type LedgerReportedState,
 	type LedgerStableState,
 	type ProjectedLedgerChain,
+	sameLedgerAddress,
 	type UnprojectableChainReason,
 	type UnprojectableLedgerChain,
 } from '@dbsp/types';
@@ -83,33 +84,6 @@ export interface LedgerChainProjectionInput {
 
 function isLedgerEventKind(value: string): boolean {
 	return (LEDGER_EVENT_KINDS as readonly string[]).includes(value);
-}
-
-function sameAddress(left: LedgerAddress, right: LedgerAddress): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		sameOptionalAddress(left.parent, right.parent)
-	);
-}
-
-function sameOptionalAddress(
-	left: LedgerAddress['parent'],
-	right: LedgerAddress['parent'],
-): boolean {
-	if (left === undefined || right === undefined) return left === right;
-	return (
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		sameOptionalAddress(left.parent, right.parent)
-	);
 }
 
 function invalid(detail: string): LifecycleStep {
@@ -241,8 +215,10 @@ export function interpretLedgerLifecycle(
 			return { kind: 'ok', frame: { stableState: 'managed' } };
 		}
 		case 'readdressed-to':
-			if (claim.stableStateBeforeClaim !== 'managed')
-				return invalid('readdressed-to resolves only the managed source');
+			if (!['managed', 'unknown'].includes(claim.stableStateBeforeClaim))
+				return invalid(
+					'readdressed-to resolves only a managed or untracked source',
+				);
 			if (event.pairId !== claim.event.pairId)
 				return invalid('readdressed-to pair id does not match its claim');
 			return { kind: 'ok', frame: { stableState: 'unknown' } };
@@ -321,7 +297,7 @@ export function projectLedgerChain(
 	const byId = new Map<string, LedgerChainMember>();
 	const children = new Map<string | undefined, LedgerChainMember[]>();
 	for (const event of input.events) {
-		if (!sameAddress(input.address, event.address))
+		if (!sameLedgerAddress(input.address, event.address))
 			return unprojectable(input, {
 				code: 'address-mismatch',
 				eventId: event.eventId,

@@ -4,26 +4,14 @@ import type {
 	DestructiveAuthorityEvidence,
 	DestructiveAuthorityPermit,
 	DestructiveDecision,
-	LedgerAddress,
 	OutcomeClaimAdmission,
 	OutcomeClaimAdmissionInput,
 	OutcomeProtocolRefusal,
 } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import { admitOutcomeClaim } from './outcome-protocol.js';
 
 const permits = new WeakSet<object>();
-
-function sameAddress(left: LedgerAddress, right: LedgerAddress): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		JSON.stringify(left.parent ?? null) === JSON.stringify(right.parent ?? null)
-	);
-}
 
 function declarationPermits(
 	action: DestructiveAction,
@@ -34,7 +22,7 @@ function declarationPermits(
 			evidence.declaration === 'requires-removal' ||
 			(evidence.declaration === 'replacement-requested-by-plan' &&
 				evidence.replacementAddress !== undefined &&
-				sameAddress(evidence.replacementAddress, action.address))
+				sameLedgerAddress(evidence.replacementAddress, action.address))
 		);
 	return evidence.declaration === 'requires-lossy-change';
 }
@@ -111,7 +99,10 @@ export function admitDestructiveOutcomeClaim(input: {
 		};
 	}
 	if (
-		!sameAddress(input.decision.action.address, input.admission.plan.address)
+		!sameLedgerAddress(
+			input.decision.action.address,
+			input.admission.plan.address,
+		)
 	) {
 		return {
 			kind: 'outcome-protocol-refused',
@@ -136,7 +127,9 @@ export function attachDestructiveAuthorityPermit(input: {
 			kind: 'outcome-protocol-refused',
 			reason: 'destructive authority permit was not minted by the interpreter',
 		};
-	if (!sameAddress(input.decision.action.address, input.claim.plan.address))
+	if (
+		!sameLedgerAddress(input.decision.action.address, input.claim.plan.address)
+	)
 		return {
 			kind: 'outcome-protocol-refused',
 			reason: 'destructive authority address does not match the claim address',

@@ -17,7 +17,11 @@ import {
 } from '@dbsp/adapter-pgsql';
 import type { InProcessProvenPlan } from '@dbsp/core';
 import { acquireTransitionLease, transitionPlanDigest } from '@dbsp/core';
-import type { PlanAssessment, TransitionRunMetadata } from '@dbsp/types';
+import type {
+	PlanAssessment,
+	TableReaddressDeclaration,
+	TransitionRunMetadata,
+} from '@dbsp/types';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';
@@ -33,6 +37,8 @@ export interface GeneratorPlanMaterial {
 		readonly details: string;
 		/** Exact SQL attributed to this change for its token-gated claim. */
 		readonly statements: readonly string[];
+		/** Present only for the paired table re-addressing executor. */
+		readonly readdress?: TableReaddressDeclaration;
 	}[];
 	readonly statements: readonly string[];
 }
@@ -151,6 +157,11 @@ export async function runGeneratorPlan(input: {
 					{ ...diff, changes: [change] },
 					{ includeDestructive: true, schemaName: schema },
 				),
+				...(change.kind === 'readdress_table' && change.meta?.readdress
+					? {
+							readdress: change.meta.readdress as TableReaddressDeclaration,
+						}
+					: {}),
 			})),
 			statements: generateMigrationSQL(diff, {
 				includeDestructive: true,

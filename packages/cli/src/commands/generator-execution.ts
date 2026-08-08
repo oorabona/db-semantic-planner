@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
 	appendPgLedgerResolution,
 	executePgDestructiveBundle,
+	executePgTableReaddress,
 	openPgOutcomeClaim,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
@@ -30,6 +31,10 @@ import type { GeneratorDurablePlan } from './generator-plan.js';
 
 export type GeneratorExecutionResult =
 	| { readonly outcome: 'completed' }
+	| {
+			readonly outcome: 'readdress-unsupported' | 'readdress-refused';
+			readonly detail: string;
+	  }
 	| {
 			readonly outcome: 'destructive-authority-refused';
 			readonly detail: string;
@@ -236,6 +241,22 @@ export async function executeGeneratorPlan(input: {
 	try {
 		const database = await databaseId(input.pool);
 		for (const change of input.plan.generator.changes) {
+			if (change.kind === 'readdress_table') {
+				if (!change.readdress)
+					return {
+						outcome: 'execution-failed',
+						detail: 're-address generator change has no declaration',
+					};
+				const result = await executePgTableReaddress(input.pool, {
+					database,
+					targetSchema: input.schema,
+					declaration: change.readdress,
+					executionId: input.runId,
+				});
+				if (result.outcome === 'completed') continue;
+				if (result.outcome === 'no-op') continue;
+				return result;
+			}
 			if (change.statements.length === 0) continue;
 			const address = addressFor(change, database, input.schema);
 			if (!address)
@@ -275,6 +296,7 @@ export async function executeGeneratorPlan(input: {
 						eventKind: 'observed',
 					},
 					readBack: async () => observed(address),
+					recordCatalogueIdentity: true,
 					vacancy: async (executor) =>
 						(await readPgCatalogueIdentity(executor, address))
 							? {
@@ -389,6 +411,9 @@ export async function executeGeneratorPlan(input: {
 					eventKind:
 						change.classification === 'removal' ? 'absent' : 'observed',
 					predecessor: claim.claimId,
+					...(live?.catalogueIdentity
+						? { catalogueIdentity: live.catalogueIdentity }
+						: {}),
 					...(change.classification === 'removal'
 						? {}
 						: { observed: observed(address) }),

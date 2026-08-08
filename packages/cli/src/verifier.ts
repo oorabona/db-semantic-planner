@@ -93,6 +93,7 @@ const CHANGE_TO_DRIFT: Record<
 > = {
 	create_table: { type: 'missing_table_in_db', severity: 'error' },
 	drop_table: { type: 'missing_table_in_schema', severity: 'warning' },
+	readdress_table: { type: 'type_mismatch', severity: 'warning' },
 	add_column: { type: 'missing_column_in_db', severity: 'error' },
 	drop_column: { type: 'missing_column_in_schema', severity: 'info' },
 	alter_column_type: { type: 'type_mismatch', severity: 'error' },

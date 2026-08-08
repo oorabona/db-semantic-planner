@@ -473,6 +473,16 @@ export const APPLY_OUTCOME_CONTRACT = [
 		'a live destructive authority did not permit the generated mutation',
 	],
 	[
+		'readdress-unsupported',
+		60,
+		'declared re-addressing is supported only for tables in one database; declare the move as a retirement and a creation',
+	],
+	[
+		'readdress-refused',
+		61,
+		'declared re-addressing could not verify its source identity or target vacancy',
+	],
+	[
 		'confirmation-required',
 		57,
 		'no-argument apply requires an interactive confirmation or --yes',

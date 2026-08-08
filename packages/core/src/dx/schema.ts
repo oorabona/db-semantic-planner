@@ -32,6 +32,7 @@ import type {
 	RelationIR,
 	RelationType,
 	TableIR,
+	TableReaddressDeclaration,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
 import type { InferTables } from './schema-tables-types.js';
@@ -222,6 +223,8 @@ export interface SchemaTableOptions {
 	}>;
 	/** Composite foreign keys for this table (use ref() with columns/references) */
 	foreignKeys?: RefDefinition[];
+	/** Explicit rename or schema move for this desired table. */
+	readdress?: TableReaddressDeclaration;
 }
 
 /**
@@ -1565,6 +1568,9 @@ function buildTables(
 
 		const table: TableIR = {
 			name: tableName,
+			...(constraints?.[tableName]?.readdress
+				? { readdress: constraints[tableName].readdress }
+				: {}),
 			columns,
 			...(finalPk !== undefined ? { primaryKey: finalPk } : {}),
 			foreignKeys: [...foreignKeys, ...extraForeignKeys],

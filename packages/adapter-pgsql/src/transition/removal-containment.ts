@@ -5,6 +5,7 @@ import type {
 	LedgerHome,
 	LedgerReservationRow,
 } from '@dbsp/types';
+import { ledgerAddressKey, sameLedgerAddress } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 
 type Queryable = {
@@ -43,21 +44,9 @@ export type PgRemovalEffectsClosure =
 	  }
 	| { readonly kind: 'undecidable'; readonly reason: string };
 
-function sameAddress(left: LedgerAddress, right: LedgerAddress): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		JSON.stringify(left.parent ?? null) === JSON.stringify(right.parent ?? null)
-	);
-}
-
 function within(root: LedgerAddress, candidate: LedgerAddress): boolean {
 	for (let parent = candidate.parent; parent; parent = parent.parent) {
-		if (sameAddress(root, { ...parent, scope: root.scope })) return true;
+		if (sameLedgerAddress(root, { ...parent, scope: root.scope })) return true;
 	}
 	return false;
 }
@@ -203,14 +192,14 @@ export async function readPgRemovalEffectsClosure(input: {
 			if (effect.extensionMember && input.root.kind === 'extension') continue;
 			if (within(input.root, effect.address)) continue;
 			ownership.set(
-				JSON.stringify(effect.address),
+				ledgerAddressKey(effect.address),
 				await input.isManaged(effect.address),
 			);
 		}
 		return classifyRemovalEffectsClosure({
 			root: input.root,
 			effects,
-			isManaged: (address) => ownership.get(JSON.stringify(address)) === true,
+			isManaged: (address) => ownership.get(ledgerAddressKey(address)) === true,
 		});
 	} catch (error) {
 		return {

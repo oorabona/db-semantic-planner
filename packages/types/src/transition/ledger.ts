@@ -34,6 +34,67 @@ export interface LedgerAddress extends ResourceAddress {
 	readonly scope: 'schema' | 'database';
 }
 
+/**
+ * JSON-compatible structural serialization whose object-member order is stable.
+ * Ledger parents are persisted through PostgreSQL jsonb, which normalizes that
+ * order before a later read-back.
+ */
+function canonicalJson(value: unknown): string {
+	if (value === null) return 'null';
+	if (value === undefined) return 'null';
+	if (Array.isArray(value)) {
+		const entries: string[] = [];
+		for (let index = 0; index < value.length; index += 1)
+			entries.push(
+				Object.hasOwn(value, index) ? canonicalJson(value[index]) : 'null',
+			);
+		return `[${entries.join(',')}]`;
+	}
+	if (typeof value === 'object') {
+		const entries = Object.entries(value as Record<string, unknown>)
+			.filter(([, item]) => item !== undefined)
+			.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+			.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`);
+		return `{${entries.join(',')}}`;
+	}
+	return JSON.stringify(value);
+}
+
+function normalizedParent(
+	parent: ResourceAddress | null | undefined,
+): Record<string, unknown> | null {
+	if (parent === null || parent === undefined) return null;
+	return { ...parent, parent: normalizedParent(parent.parent) };
+}
+
+/**
+ * The sole structural equality for a ledger address.  Parent absence is
+ * canonicalized so `undefined` and `null` mean the same root address.
+ */
+export function sameLedgerAddress(
+	left: LedgerAddress,
+	right: LedgerAddress,
+): boolean {
+	return (
+		left.scope === right.scope &&
+		left.engine === right.engine &&
+		left.database === right.database &&
+		left.schema === right.schema &&
+		left.kind === right.kind &&
+		left.name === right.name &&
+		canonicalJson(normalizedParent(left.parent)) ===
+			canonicalJson(normalizedParent(right.parent))
+	);
+}
+
+/** A canonical map key with the same key-order-insensitive parent semantics. */
+export function ledgerAddressKey(address: LedgerAddress): string {
+	return canonicalJson({
+		...address,
+		parent: normalizedParent(address.parent),
+	});
+}
+
 export interface LedgerPayload {
 	readonly value: JsonValue;
 	readonly digest: string;

@@ -5,10 +5,12 @@ import {
 	createPgTransitionPack,
 	isPgDatabaseReadOnlyError,
 	readPgLedgerReservationsForExecution,
+	readPgLedgerReservationsForPair,
 	readPgLedgerScopeCurrency,
 	readPgObservationContextFromClient,
 	readTransitionJournal,
 	recoverPgOutcomeClaim,
+	recoverPgReaddressPair,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -49,6 +51,8 @@ export interface ReconcileRecoveryReport {
 	readonly address: LedgerReservationRow['address'];
 	readonly outcome: PgRecoveryReportKind;
 	readonly reason?: string;
+	/** Re-address recovery is reported and resolved as one reserved closure. */
+	readonly pairId?: string;
 }
 
 type PgRecoveryReportKind =
@@ -58,7 +62,9 @@ type PgRecoveryReportKind =
 	| 'pending'
 	| 'blocked'
 	| 'malformed-chain'
-	| 'protocol-refused';
+	| 'protocol-refused'
+	| 'refused-pair'
+	| 'indeterminate-pair';
 
 function ledgerHome(address: LedgerReservationRow['address']): LedgerHome {
 	if (address.scope === 'database') return { scope: 'database' };
@@ -166,6 +172,33 @@ function recoveryReport(
 	return { address, outcome: 'protocol-refused', reason: result.reason };
 }
 
+function readdressRecoveryReport(
+	reservations: readonly LedgerReservationRow[],
+	result: Awaited<ReturnType<typeof recoverPgReaddressPair>>,
+): ReconcileRecoveryReport {
+	const first = reservations[0];
+	if (!first) throw new Error('re-address recovery has no reservation');
+	if (result.kind === 'readdress-recovery-refused-pair')
+		return {
+			address: first.address,
+			outcome: 'refused-pair',
+			pairId: result.pairId,
+		};
+	if (result.kind === 'readdress-recovery-indeterminate-pair')
+		return {
+			address: first.address,
+			outcome: 'indeterminate-pair',
+			reason: result.reason,
+			pairId: result.pairId,
+		};
+	return {
+		address: first.address,
+		outcome: 'pending',
+		reason: result.reason,
+		pairId: result.pairId,
+	};
+}
+
 function unresolvedRecoveryDetail(
 	reports: readonly ReconcileRecoveryReport[],
 ): string | undefined {
@@ -174,7 +207,8 @@ function unresolvedRecoveryDetail(
 			report.outcome === 'pending' ||
 			report.outcome === 'blocked' ||
 			report.outcome === 'malformed-chain' ||
-			report.outcome === 'protocol-refused',
+			report.outcome === 'protocol-refused' ||
+			report.outcome === 'indeterminate-pair',
 	);
 	if (unresolved.length === 0) return undefined;
 	return unresolved
@@ -280,13 +314,37 @@ export async function runReconcile(
 								})),
 							};
 					}
+					const readdressPairs = new Map<string, LedgerReservationRow[]>();
 					const byRoot = new Map<string, LedgerReservationRow[]>();
-					for (const row of reservations)
+					for (const row of reservations) {
+						if (
+							row.claimKind === 'readdress-intent' &&
+							row.pairId !== undefined
+						) {
+							readdressPairs.set(row.pairId, [
+								...(readdressPairs.get(row.pairId) ?? []),
+								row,
+							]);
+							continue;
+						}
 						byRoot.set(row.rootClaimId, [
 							...(byRoot.get(row.rootClaimId) ?? []),
 							row,
 						]);
+					}
 					const recovery: ReconcileRecoveryReport[] = [];
+					for (const [pairId, _rows] of readdressPairs) {
+						const closure = await readPgLedgerReservationsForPair(
+							lease.session,
+							pairId,
+						);
+						const recovered = await recoverPgReaddressPair(lease.session, {
+							pairId,
+							executionId: runId,
+							reservations: closure,
+						});
+						recovery.push(readdressRecoveryReport(closure, recovered));
+					}
 					for (const rows of byRoot.values()) {
 						const first = rows[0];
 						if (!first) continue;

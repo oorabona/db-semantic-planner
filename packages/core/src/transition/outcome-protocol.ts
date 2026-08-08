@@ -13,6 +13,7 @@ import type {
 	OutcomeRecoveryInput,
 	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
 import { stableJson } from './stable-json.js';
 
@@ -39,21 +40,6 @@ export function outcomeClaimId(address: LedgerAddress): string {
 
 function refusal(reason: string): OutcomeProtocolRefusal {
 	return { kind: 'outcome-protocol-refused', reason };
-}
-
-function sameAddress(
-	left: OutcomeClaimPlan['address'],
-	right: OutcomeClaimPlan['address'],
-): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		JSON.stringify(left.parent ?? null) === JSON.stringify(right.parent ?? null)
-	);
 }
 
 function bundleRefusal(
@@ -155,7 +141,7 @@ export function admitOutcomeClaim(
 		return refusal(
 			`claim ${plan.claimId} refuses malformed ledger chain: ${projection.reason.code}`,
 		);
-	if (!sameAddress(plan.address, projection.address))
+	if (!sameLedgerAddress(plan.address, projection.address))
 		return refusal(
 			`claim ${plan.claimId} address does not match its ledger chain`,
 		);

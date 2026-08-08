@@ -34,6 +34,7 @@ import type {
 	TransitionSessionClient,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import { transitionCompareCurrentModel } from './comparator.js';
 import {
 	type CompositionOperation,
@@ -112,21 +113,6 @@ function claimAddressFromSelector(
 	};
 }
 
-function sameClaimAddress(
-	left: import('@dbsp/types').ManagedStepClaimMaterial['address'],
-	right: import('@dbsp/types').ManagedStepClaimMaterial['address'],
-): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		JSON.stringify(left.parent ?? null) === JSON.stringify(right.parent ?? null)
-	);
-}
-
 /**
  * A managed claim is deliberately derived only while the plan is being
  * proved.  The executor receives this immutable material and never parses SQL
@@ -156,7 +142,7 @@ function managedClaimMaterial(
 	if (!address) return undefined;
 	const readsAddress = effects.reads
 		.map((read) => claimAddressFromSelector(read, context))
-		.some((read) => read !== undefined && sameClaimAddress(address, read));
+		.some((read) => read !== undefined && sameLedgerAddress(address, read));
 	return {
 		claimId: claimId(outcomeClaimId(address)),
 		address,
