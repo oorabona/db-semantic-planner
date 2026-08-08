@@ -70,6 +70,11 @@ describe('no-argument apply pipeline', () => {
 
 	it('keeps a declined durable run and its presented digest retrievable', async () => {
 		runPlan.mockResolvedValue(provenPlan);
+		const execute = vi.fn(async () => ({
+			outcome: 'completed' as const,
+			runId: 'run-1',
+			result: {} as never,
+		}));
 		const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
 		Object.defineProperty(process.stdin, 'isTTY', {
 			configurable: true,
@@ -79,12 +84,14 @@ describe('no-argument apply pipeline', () => {
 			const result = await runNoArgumentApply(
 				{ db: 'postgres://test', schemaFile: 'schema.ts' },
 				async () => false,
+				execute,
 			);
 			expect(result).toMatchObject({
 				outcome: 'confirmation-declined',
 				runId: 'run-1',
 				planDigest: 'digest-1',
 			});
+			expect(execute).not.toHaveBeenCalled();
 		} finally {
 			if (descriptor) Object.defineProperty(process.stdin, 'isTTY', descriptor);
 			else delete (process.stdin as { isTTY?: boolean }).isTTY;

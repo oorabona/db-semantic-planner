@@ -1,8 +1,8 @@
 /**
  * DDL Executor — Transaction-wrapped DDL execution.
  *
- * Shared by `dbsp push` and `dbsp migrate apply`.
- * Executes an array of SQL statements inside a single transaction.
+ * Test and caller-owned DDL helper. Executes an array of SQL statements inside
+ * a single transaction; it is not a managed CLI execution path.
  */
 
 import type { Pool, PoolClient } from 'pg';

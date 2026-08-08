@@ -23,6 +23,7 @@ import type {
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
+import { printCliJson } from '../utils/output.js';
 import {
 	authorizationDigest,
 	canonicalApplyPolicy,
@@ -360,8 +361,7 @@ export const recoverCommand = new Command('recover')
 				...result,
 				exitCode: exitCodeForRecoverOutcome(result.outcome),
 			};
-			if (options.format === 'json')
-				console.log(JSON.stringify(document, null, 2));
+			if (options.format === 'json') printCliJson(document);
 			else console.log(`${result.outcome}: ${runId}`);
 			process.exitCode = document.exitCode;
 		},

@@ -6,6 +6,7 @@ import {
 import { acquireTransitionLease } from '@dbsp/core';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
+import { printCliJson } from '../utils/output.js';
 import { inspectAddress } from './inspect.js';
 
 export interface ReleaseOptions {
@@ -53,8 +54,7 @@ export const releaseCommand = new Command('release')
 	.action(async (address: string, options: ReleaseOptions) => {
 		try {
 			const result = await runRelease(address, options);
-			if (options.format === 'json')
-				console.log(JSON.stringify(result, null, 2));
+			if (options.format === 'json') printCliJson(result);
 			else
 				console.log(
 					result.outcome === 'released'
@@ -65,9 +65,7 @@ export const releaseCommand = new Command('release')
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			if (options.format === 'json')
-				console.log(
-					JSON.stringify({ outcome: 'release-refused', detail }, null, 2),
-				);
+				printCliJson({ outcome: 'release-refused', detail });
 			else console.error(`release-refused: ${detail}`);
 			process.exitCode = 1;
 		}

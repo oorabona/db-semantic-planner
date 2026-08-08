@@ -38,26 +38,10 @@ export {
 	RawIndexPredicateFallbackError,
 } from './live-diff.js';
 export {
-	generateMigrationFile,
-	isDestructiveDown,
-	type ParsedMigrationFile,
-	parseMigrationFile,
-} from './migration-file.js';
-export {
 	generateDownSQL,
 	generateMigrationSQL,
 	type MigrationSQLOptions,
 } from './migration-sql.js';
-export {
-	ensureMigrationsTable,
-	getAppliedMigrations,
-	getNextSchemaVersion,
-	isMigrationApplied,
-	type MigrationRecord,
-	recordMigration,
-	removeMigrationRecord,
-	withMigrationLock,
-} from './migration-tracker.js';
 export {
 	type ChangeKind,
 	type CompareSchemataOptions,

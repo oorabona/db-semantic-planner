@@ -1,7 +1,8 @@
 /** Shared construction for E2E outcome claims; the harness stays uninvolved. */
+import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql';
 import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
 
-export function fixtureOutcomeClaim(input: {
+export interface FixtureOutcomeClaimInput {
 	readonly claimId: string;
 	readonly address: OutcomeClaimPlan['address'];
 	readonly claimKind: OutcomeClaimPlan['claimKind'];
@@ -10,7 +11,9 @@ export function fixtureOutcomeClaim(input: {
 	readonly declared?: OutcomeClaimPlan['declared'];
 	readonly pairId?: string;
 	readonly requiresVacancy?: boolean;
-}): {
+}
+
+export function fixtureOutcomeClaim(input: FixtureOutcomeClaimInput): {
 	readonly plan: OutcomeClaimPlan;
 	readonly reservations: readonly LedgerReservationRow[];
 } {
@@ -30,4 +33,12 @@ export function fixtureOutcomeClaim(input: {
 		},
 		reservations: input.reservations,
 	};
+}
+
+/** Opens an E2E fixture claim after constructing its canonical request. */
+export function openFixtureOutcomeClaim(
+	executor: Parameters<typeof openPgOutcomeClaim>[0],
+	input: FixtureOutcomeClaimInput,
+) {
+	return openPgOutcomeClaim(executor, fixtureOutcomeClaim(input));
 }

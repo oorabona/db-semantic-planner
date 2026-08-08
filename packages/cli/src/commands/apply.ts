@@ -32,6 +32,7 @@ import type {
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
+import { printCliJson } from '../utils/output.js';
 import {
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
@@ -575,8 +576,23 @@ function formatApplyHuman(result: {
 	readonly outcome: string;
 	readonly runId: string;
 	readonly result?: ApplyResult;
+	readonly refusal?: {
+		readonly cause: string;
+		readonly state: string;
+		readonly withheldAuthority: string;
+		readonly resolvingCommand: string;
+	};
 }): string {
 	const line = `${result.outcome}: ${result.runId}`;
+	if (result.refusal) {
+		return [
+			line,
+			`refusal: ${result.refusal.cause}`,
+			`state: ${result.refusal.state}`,
+			`withheld authority: ${result.refusal.withheldAuthority}`,
+			`resolving command: ${result.refusal.resolvingCommand}`,
+		].join('\n');
+	}
 	if (result.outcome !== 'plan-digest-mismatch' || !result.result) return line;
 	const detail = result.result.assessment.reasons[0]?.detail;
 	return detail ? `${line}\n${detail}` : line;
@@ -621,11 +637,19 @@ export type ApplyCommandResult = (
 			readonly result: ApplyResult;
 	  }
 	| {
-			readonly outcome:
-				| 'run-busy'
-				| 'plan-digest-required'
-				| 'non-replayable-generator-run';
+			readonly outcome: 'run-busy' | 'plan-digest-required';
 			readonly runId: string;
+	  }
+	| {
+			/** ERR-10: a removal-bearing generator run cannot be replayed by id. */
+			readonly outcome: 'non-replayable-generator-run';
+			readonly runId: string;
+			readonly refusal: {
+				readonly cause: 'non-replayable-generator-removal';
+				readonly state: 'recorded-plan';
+				readonly withheldAuthority: 'recorded-plan removal execution';
+				readonly resolvingCommand: 'dbsp apply';
+			};
 	  }
 ) & { readonly cleanupError?: string };
 
@@ -841,6 +865,12 @@ export async function runApply(
 		const refusal: ApplyCommandResult = {
 			outcome: 'non-replayable-generator-run',
 			runId,
+			refusal: {
+				cause: 'non-replayable-generator-removal',
+				state: 'recorded-plan',
+				withheldAuthority: 'recorded-plan removal execution',
+				resolvingCommand: 'dbsp apply',
+			},
 		};
 		return pool === undefined
 			? withPoolCleanupReported(refusal, () => owned.end())
@@ -990,9 +1020,7 @@ export const applyCommand = new Command('apply')
 			}
 			if ('error' in result) {
 				if (options.format === 'json')
-					console.log(
-						JSON.stringify({ outcome: 'apply-failed', ...result }, null, 2),
-					);
+					printCliJson({ outcome: 'apply-failed', ...result });
 				else console.error(`❌ ${result.error}`);
 				process.exitCode = exitCodeForApplyOutcome('apply-failed');
 				return;
@@ -1002,22 +1030,16 @@ export const applyCommand = new Command('apply')
 					? exitCodeForPlanResult(result.plan)
 					: exitCodeForApplyOutcome(result.outcome);
 			if (options.format === 'json') {
-				console.log(
-					JSON.stringify(
-						{
-							outcome: result.outcome,
-							exitCode,
-							plan: formatPlanJson(result.plan, options.dryRun === true),
-							...(result.runId === null ? {} : { runId: result.runId }),
-							...(result.planDigest === null
-								? {}
-								: { planDigest: result.planDigest }),
-							...('result' in result ? { apply: result.result } : {}),
-						},
-						null,
-						2,
-					),
-				);
+				printCliJson({
+					outcome: result.outcome,
+					exitCode,
+					plan: formatPlanJson(result.plan, options.dryRun === true),
+					...(result.runId === null ? {} : { runId: result.runId }),
+					...(result.planDigest === null
+						? {}
+						: { planDigest: result.planDigest }),
+					...('result' in result ? { apply: result.result } : {}),
+				});
 			} else {
 				console.log(formatPlanHuman(result.plan, options.dryRun === true));
 				if (result.outcome === 'confirmation-required')
@@ -1067,8 +1089,7 @@ export const applyCommand = new Command('apply')
 		}
 		const exitCode = exitCodeForApplyOutcome(result.outcome);
 		const document = { ...result, exitCode };
-		if (options.format === 'json')
-			console.log(JSON.stringify(document, null, 2));
+		if (options.format === 'json') printCliJson(document);
 		else console.log(formatApplyHuman(result));
 		process.exitCode = exitCode;
 	})

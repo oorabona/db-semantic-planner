@@ -6,7 +6,6 @@ import {
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
 	createPgTransitionRunPersister,
-	openPgOutcomeClaim,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -16,7 +15,7 @@ import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
-import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -91,16 +90,13 @@ function reservation(
 async function adopt(address: LedgerAddress): Promise<void> {
 	const pool = await getTestPool();
 	const claimId = `adopt:${address.name}:${randomUUID()}`;
-	const admission = await openPgOutcomeClaim(
-		pool,
-		fixtureOutcomeClaim({
-			claimId,
-			address,
-			claimKind: 'adopt-intent',
-			statements: [],
-			reservations: [reservation(address, claimId, 'adopt-intent')],
-		}),
-	);
+	const admission = await openFixtureOutcomeClaim(pool, {
+		claimId,
+		address,
+		claimKind: 'adopt-intent',
+		statements: ['SELECT 1'],
+		reservations: [reservation(address, claimId, 'adopt-intent')],
+	});
 	if (admission.kind !== 'admitted-outcome-claim')
 		throw new Error(admission.reason);
 	const live = await readPgCatalogueIdentity(pool, address);
@@ -339,6 +335,14 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		);
 		await expect(
 			runApply(runId, { db: 'postgres://fixture', planDigest: digest }, pool),
-		).resolves.toMatchObject({ outcome: 'non-replayable-generator-run' });
+		).resolves.toMatchObject({
+			outcome: 'non-replayable-generator-run',
+			refusal: {
+				cause: 'non-replayable-generator-removal',
+				state: 'recorded-plan',
+				withheldAuthority: 'recorded-plan removal execution',
+				resolvingCommand: 'dbsp apply',
+			},
+		});
 	});
 });

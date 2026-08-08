@@ -29,8 +29,6 @@ import { Command, CommanderError } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateCommand } from './generate.js';
 import { introspectCommand } from './introspect.js';
-import { migrateCommand } from './migrate.js';
-import { pushCommand } from './push.js';
 import { replCommand } from './repl.js';
 import { verifyCommand } from './verify.js';
 
@@ -51,8 +49,6 @@ function buildProgram(): Command {
 	for (const cmd of [
 		generateCommand,
 		introspectCommand,
-		migrateCommand,
-		pushCommand,
 		replCommand,
 		verifyCommand,
 	]) {
@@ -220,5 +216,28 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.status).toBe(1);
 		expect(completed.stdout).toBe('');
 		expect(completed.stderr).toContain("unknown command 'plna'");
+	});
+
+	it.each([
+		'push',
+		'migrate',
+	] as const)('SC-63: %s remains an unknown command after the greenfield surface removal', (command) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, command],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).toBe('');
+		expect(completed.stderr).toContain(`unknown command '${command}'`);
 	});
 });

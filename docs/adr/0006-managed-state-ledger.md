@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. It decides what ADR 0005 left open: the recorded-state model, the atomicity of the
+Accepted. It decides what ADR 0005 left open: the recorded-state model, the atomicity of the
 change/record couple, and — because they turn out to be the same decision — how many commands may
 write DDL. It supersedes three rules of ADR 0005, named in "What ADR 0005 no longer says".
 
@@ -25,13 +25,13 @@ extension removes its member objects, which PostgreSQL defines and which may inc
 DSL cannot declare — those members are inside the extension's containment, adopted and removed
 with it, and they are the one place an undeclarable object is touched by a managed plan.
 
-Outside that path, `migrate` executes SQL this decision cannot attribute,
-and the adapter's runtime DDL helpers execute what their caller asks. Neither is constrained; what
-they do to a managed object surfaces as drift at the next plan or inspect. Every execution sink is
-labelled: token-gated managed DDL, explicitly unmanaged API, or removed. A sink that is none of
-the three is a defect.
+Outside that path, the adapter's runtime DDL helpers execute what their caller
+asks. They are explicitly unmanaged; what they do to a managed object surfaces
+as drift at the next plan or inspect. Every execution sink is labelled:
+token-gated managed DDL, explicitly unmanaged API, or removed. A sink that is
+none of the three is a defect.
 
-Changing what the DSL cannot declare is done through `migrate` today. An attested-statement
+Changing what the DSL cannot declare awaits an attested-statement
 surface — a native statement with an author-declared blast radius, riding a reservation lifecycle
 that touches no managed state — is decided in principle as the mechanism for that and for data
 steps, and ships with the data-steps decision, not here. The unwired operation it builds on
@@ -431,8 +431,9 @@ must precede any competing writer, so it is appended first, and a failed precond
 `refused` — the run stays pristine because nothing ran, which is what the old ordering achieved
 by writing nothing.
 
-**"`dbsp migrate apply` is unchanged and stays file-based."** It stays file-based; its audit
-event is deferred with #490.
+**Direct `push`, and file-based execution, remain available.** Both are
+deleted. Managed DDL has one apply path; caller-owned DDL remains explicitly
+unmanaged.
 
 ## Delivery
 

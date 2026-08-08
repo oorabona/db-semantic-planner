@@ -174,7 +174,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 				claimId: 'prior-adopt',
 				address: input.plan.address,
 				claimKind: 'adopt-intent',
-				statements: [],
+				statements: ['SELECT 1'],
 				reservations: input.reservations.map((reservation) => ({
 					...reservation,
 					claimKind: 'adopt-intent' as const,

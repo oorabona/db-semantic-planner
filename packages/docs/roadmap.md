@@ -12,8 +12,8 @@ db-semantic-planner's core is **adapter-agnostic** — the schema DSL, query bui
 |---------|--------|
 | Core: schema DSL, planner, query builders, NQL | <span class="status-badge status-stable">Stable</span> |
 | PostgreSQL adapter (native pg Pool) | <span class="status-badge status-stable">Stable</span> |
-| DDL: introspection, comparison, migrations | <span class="status-badge status-stable">Stable</span> |
-| CLI: generate, verify, migrate, REPL | <span class="status-badge status-stable">Stable</span> |
+| DDL: introspection, comparison, managed plans | <span class="status-badge status-stable">Stable</span> |
+| CLI: plan, apply, inspect, verify, REPL | <span class="status-badge status-stable">Stable</span> |
 | Extensions: pgvector, ParadeDB BM25 | <span class="status-badge status-stable">Stable</span> |
 | MCP Server for AI assistants | <span class="status-badge status-stable">Stable</span> |
 

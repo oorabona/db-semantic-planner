@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import {
 	appendPgLedgerResolution,
 	executePgTableReaddress,
-	openPgOutcomeClaim,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	recoverPgReaddressPair,
@@ -19,7 +18,7 @@ import type {
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';
-import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -83,26 +82,23 @@ async function admitFixtureOutcomeClaim(input: {
 }): Promise<void> {
 	const pool = await getTestPool();
 	const rootClaimId = input.rootClaimId ?? input.claimId;
-	const admission = await openPgOutcomeClaim(
-		pool,
-		fixtureOutcomeClaim({
-			claimId: input.claimId,
-			address: input.address,
-			claimKind: input.claimKind,
-			statements: input.statements,
-			...(input.pairId === undefined ? {} : { pairId: input.pairId }),
-			reservations: [
-				{
-					address: input.address,
-					claimKind: input.claimKind,
-					executionId: input.executionId ?? input.claimId,
-					rootClaimId,
-					...(input.pairId === undefined ? {} : { pairId: input.pairId }),
-					homeLedger: { scope: 'schema', schema: input.address.schema! },
-				},
-			],
-		}),
-	);
+	const admission = await openFixtureOutcomeClaim(pool, {
+		claimId: input.claimId,
+		address: input.address,
+		claimKind: input.claimKind,
+		statements: input.statements,
+		...(input.pairId === undefined ? {} : { pairId: input.pairId }),
+		reservations: [
+			{
+				address: input.address,
+				claimKind: input.claimKind,
+				executionId: input.executionId ?? input.claimId,
+				rootClaimId,
+				...(input.pairId === undefined ? {} : { pairId: input.pairId }),
+				homeLedger: { scope: 'schema', schema: input.address.schema! },
+			},
+		],
+	});
 	if (admission.kind !== 'admitted-outcome-claim')
 		throw new Error(admission.reason);
 }
@@ -149,7 +145,7 @@ async function adopt(value: LedgerAddress): Promise<void> {
 		claimId,
 		address: value,
 		claimKind: 'adopt-intent',
-		statements: [],
+		statements: ['SELECT 1'],
 	});
 	const live = await readPgCatalogueIdentity(pool, value);
 	if (!live?.catalogueIdentity) throw new Error(`cannot adopt ${value.name}`);

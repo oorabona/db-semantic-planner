@@ -16,7 +16,7 @@ This guide helps you transition from Prisma to db-semantic-planner. Both tools o
 | Filtering | `where: { active: true }` | `.where(eq('active', true))` |
 | Observability | Logging middleware | `.dump()` (plan + SQL + params) |
 | Multi-tenant | Manual schema switching | `.withSchema('tenant')` built-in |
-| Migrations | `prisma migrate` | `dbsp verify` + `generateMigrationSQL()` |
+| Schema change workflow | Prisma file workflow | `dbsp plan` + `dbsp apply` |
 
 ## Quick Translation Reference
 
@@ -31,4 +31,3 @@ This guide helps you transition from Prisma to db-semantic-planner. Both tools o
 | `prisma.user.delete({ where })` | `orm.delete('users').where(...).execute()` |
 | `include: { posts: true }` | `.include('posts')` |
 | `select: { name: true }` | `.columns(['name'])` |
-

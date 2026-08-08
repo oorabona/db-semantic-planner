@@ -7,9 +7,15 @@ import {
 	readPgLedgerMarker,
 } from '@dbsp/adapter-pgsql';
 import { acquireTransitionLease, projectLedgerChain } from '@dbsp/core';
-import type { LedgerAddress, LedgerHome } from '@dbsp/types';
+import type {
+	LedgerAddress,
+	LedgerChainProjection,
+	LedgerHome,
+	LedgerStableState,
+} from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
+import { printCliJson, serializeCliJson } from '../utils/output.js';
 
 export interface InspectOptions {
 	readonly db: string;
@@ -25,6 +31,18 @@ export interface InspectResult {
 		| Awaited<ReturnType<typeof readPgLedgerMarker>>
 		| { readonly kind: 'unreadable'; readonly reason: string };
 	readonly projection?: ReturnType<typeof projectLedgerChain>;
+	/**
+	 * A terminal ledger refusal remains a diagnostic after its claim is closed.
+	 * It is deliberately derived from the immutable chain: inspect must not
+	 * append a second event merely to explain an earlier refusal.
+	 */
+	readonly refusal?: {
+		readonly cause: string;
+		readonly address: LedgerAddress;
+		readonly state: LedgerStableState;
+		readonly withheldAuthority: string;
+		readonly resolvingCommand: string;
+	};
 	/** A selected address exposes an interrupted re-address pair without repair. */
 	readonly readdressPair?: {
 		readonly pairId: string;
@@ -37,6 +55,37 @@ export interface InspectResult {
 		| { readonly kind: 'catalogue-unavailable'; readonly reason: string };
 	/** Present for an unqualified inspect; no read path creates or repairs it. */
 	readonly addresses?: readonly LedgerAddress[];
+}
+
+/**
+ * Make a terminal `refused` event actionable without inventing mutable state.
+ * A refused claim closes the chain at its prior stable state, so a fresh
+ * generator-path apply is the only command that can seek new authority.
+ */
+export function inspectRefusal(
+	projection: LedgerChainProjection | undefined,
+): InspectResult['refusal'] | undefined {
+	if (projection?.kind !== 'projected-ledger-chain') return undefined;
+	const refused = projection.events.find(
+		(event) => event.eventKind === 'refused',
+	);
+	if (!refused) return undefined;
+	const claim = projection.events.find(
+		(event) => event.eventId === refused.predecessor,
+	);
+	return {
+		cause:
+			claim === undefined
+				? `ledger event ${refused.eventId} recorded a refusal`
+				: `claim ${claim.eventId} recorded a refusal`,
+		address: projection.address,
+		state: projection.stableState,
+		withheldAuthority:
+			claim === undefined
+				? 'managed mutation'
+				: `${claim.eventKind} execution authority`,
+		resolvingCommand: 'dbsp apply',
+	};
 }
 
 function quoteIdentifier(value: string): string {
@@ -183,6 +232,7 @@ export async function runInspect(
 			}
 			try {
 				const live = await readPgCatalogueIdentity(lease.session, address);
+				const refusal = inspectRefusal(projection);
 				const openReaddress =
 					projection?.kind === 'projected-ledger-chain' &&
 					projection.openClaim?.kind === 'readdress-intent' &&
@@ -197,6 +247,7 @@ export async function runInspect(
 					ledger,
 					marker,
 					projection,
+					...(refusal === undefined ? {} : { refusal }),
 					...(openReaddress === undefined
 						? {}
 						: { readdressPair: openReaddress }),
@@ -236,19 +287,12 @@ export const inspectCommand = new Command('inspect')
 	.action(async (address: string | undefined, options: InspectOptions) => {
 		try {
 			const result = await runInspect(address, options);
-			if (options.format === 'json')
-				console.log(JSON.stringify(result, null, 2));
-			else console.log(JSON.stringify(result, null, 2));
+			if (options.format === 'json') printCliJson(result);
+			else console.log(serializeCliJson(result));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (options.format === 'json')
-				console.log(
-					JSON.stringify(
-						{ outcome: 'inspect-failed', error: message },
-						null,
-						2,
-					),
-				);
+				printCliJson({ outcome: 'inspect-failed', error: message });
 			else console.error(`inspect-failed: ${message}`);
 			process.exitCode = 1;
 		}

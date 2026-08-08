@@ -10,16 +10,15 @@ import { applyCommand } from './commands/apply.js';
 import { generateCommand } from './commands/generate.js';
 import { inspectCommand } from './commands/inspect.js';
 import { introspectCommand } from './commands/introspect.js';
-import { migrateCommand } from './commands/migrate.js';
 import { planCommand } from './commands/plan.js';
 import { preflightCommand } from './commands/preflight.js';
-import { pushCommand } from './commands/push.js';
 import { reconcileCommand } from './commands/reconcile.js';
 import { recoverCommand } from './commands/recover.js';
 
 import { releaseCommand } from './commands/release.js';
 import { replCommand } from './commands/repl.js';
 import { verifyCommand } from './commands/verify.js';
+import { printCliJson } from './utils/output.js';
 
 const program = new Command();
 
@@ -65,7 +64,6 @@ program
 // Register commands
 program.addCommand(generateCommand);
 program.addCommand(introspectCommand);
-program.addCommand(migrateCommand);
 program.addCommand(planCommand);
 program.addCommand(preflightCommand);
 program.addCommand(applyCommand);
@@ -73,7 +71,6 @@ program.addCommand(inspectCommand);
 program.addCommand(recoverCommand);
 program.addCommand(releaseCommand);
 program.addCommand(reconcileCommand);
-program.addCommand(pushCommand);
 program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 
@@ -103,7 +100,7 @@ try {
 	}
 	const message = err instanceof Error ? err.message : 'Command parse error';
 	if (process.argv.includes('--json') || planJsonRequested) {
-		console.log(JSON.stringify({ status: 'error', error: message }, null, 2));
+		printCliJson({ status: 'error', error: message });
 	} else {
 		console.error(`❌ ${message}`);
 	}

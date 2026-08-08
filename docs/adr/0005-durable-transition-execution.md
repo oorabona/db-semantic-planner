@@ -4,6 +4,10 @@
 
 Accepted. It is the execution decision ADR 0003 deferred.
 
+> ADR 0006 (Accepted) replaces this ADR's transactional-only admission rule,
+> intent-after-observation ordering rule, and separate direct/file-based DDL
+> execution rule.
+
 ## Decision
 
 `dbsp apply <run-id>` executes a plan that `dbsp plan` proved and recorded.

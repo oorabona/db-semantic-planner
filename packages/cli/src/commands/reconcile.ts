@@ -27,6 +27,7 @@ import type {
 } from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
+import { printCliJson } from '../utils/output.js';
 
 export interface ReconcileOptions {
 	readonly db: string;
@@ -425,7 +426,7 @@ export const reconcileCommand = new Command('reconcile')
 	.option('--format <format>', 'Output format: text or json', 'text')
 	.action(async (runId: string, options: ReconcileOptions) => {
 		const result = await runReconcile(runId, options);
-		if (options.format === 'json') console.log(JSON.stringify(result, null, 2));
+		if (options.format === 'json') printCliJson(result);
 		else console.log(`${result.outcome}: ${runId}`);
 		process.exitCode = result.outcome === 'reconcile-completed' ? 0 : 1;
 	});

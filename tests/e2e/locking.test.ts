@@ -13,7 +13,6 @@ import {
 } from '@dbsp/adapter-pgsql';
 import { createOrm, eq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MIGRATION_LOCK_KEY } from '../../packages/adapter-pgsql/src/ddl/migration-tracker.js';
 import { createSchema, dropSchema } from './testkit/db.js';
 import {
 	closeTestDb,
@@ -171,16 +170,6 @@ describe('E15 — Row-level locking', () => {
 				after.release();
 			}
 		}
-	});
-
-	it('pins the migration advisory key to PostgreSQL hashtext', async () => {
-		const pool = await getTestPool();
-
-		const result = await pool.query<{ key: string | number }>(
-			"SELECT hashtext('dbsp_migrate')::bigint AS key",
-		);
-
-		expect(BigInt(String(result.rows[0]?.key))).toBe(MIGRATION_LOCK_KEY);
 	});
 
 	it('FOR SHARE executes without error', async () => {

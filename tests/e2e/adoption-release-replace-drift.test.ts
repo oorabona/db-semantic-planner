@@ -5,7 +5,6 @@ import { unlink, writeFile } from 'node:fs/promises';
 import {
 	appendPgLedgerResolution,
 	executePgDeclaredAdoption,
-	openPgOutcomeClaim,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -19,7 +18,7 @@ import {
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';
 import type { PlanResult } from '../../packages/cli/src/commands/plan.js';
 import { runRelease } from '../../packages/cli/src/commands/release.js';
-import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -163,16 +162,13 @@ async function leaveOpenClaim(
 		rootClaimId: claimId,
 		homeLedger: { scope: 'schema' as const, schema: value.schema! },
 	};
-	const opened = await openPgOutcomeClaim(
-		pool,
-		fixtureOutcomeClaim({
-			claimId,
-			address: value,
-			claimKind: 'intent',
-			statements: ['SELECT 1'],
-			reservations: [reservation],
-		}),
-	);
+	const opened = await openFixtureOutcomeClaim(pool, {
+		claimId,
+		address: value,
+		claimKind: 'intent',
+		statements: ['SELECT 1'],
+		reservations: [reservation],
+	});
 	if (opened.kind !== 'admitted-outcome-claim') throw new Error(opened.reason);
 	if (!blocked) return;
 	await appendPgLedgerResolution(
