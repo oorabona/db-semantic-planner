@@ -51,7 +51,13 @@ const REMOVAL_KINDS: ReadonlySet<ChangeKind> = new Set([
  */
 export function classifyGeneratedMutation(
 	kind: ChangeKind | string,
+	change?: { readonly destructive?: boolean },
 ): GeneratedMutationClassification {
+	// The ChangeKind names both directions of a unique alteration.  Its
+	// producer carries the direction, so removing the backing constraint is a
+	// removal rather than the formerly unsafe non-destructive default.
+	if (kind === 'alter_column_unique' && change?.destructive === true)
+		return 'removal';
 	if (REMOVAL_KINDS.has(kind as ChangeKind)) return 'removal';
 	if (NON_DESTRUCTIVE_KINDS.has(kind as ChangeKind)) return 'non-destructive';
 	// alter_column_type is deliberately here: it must be proven non-lossy by a

@@ -6,6 +6,7 @@ export type DeclarableKind =
 	| 'column'
 	| 'index'
 	| 'constraint'
+	| 'policy'
 	| 'enum'
 	| 'sequence'
 	| 'extension';

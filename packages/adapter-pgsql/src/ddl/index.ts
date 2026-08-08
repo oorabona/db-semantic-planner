@@ -37,6 +37,7 @@ export {
 	PartialIndexPredicateNewEnumValueError,
 	RawIndexPredicateFallbackError,
 } from './live-diff.js';
+export { createPgsqlGeneratedManagedStep } from './managed-step-manifest.js';
 export {
 	generateDownSQL,
 	generateMigrationSQL,

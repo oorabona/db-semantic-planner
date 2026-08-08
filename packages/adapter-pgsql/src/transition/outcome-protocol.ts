@@ -33,8 +33,10 @@ import type { TransitionJournalQueryable } from './journal.js';
 import {
 	acquirePgLedgerLocks,
 	appendPgLedgerClaim,
+	appendPgLedgerClaimGroup,
 	appendPgLedgerProgress,
 	appendPgLedgerResolution,
+	appendPgLedgerResolutionGroup,
 	type PgLedgerTarget,
 } from './ledger.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
@@ -91,6 +93,29 @@ export interface PgOutcomeClaimRequest {
 		executor: TransitionJournalQueryable,
 		plan: OutcomeClaimPlan,
 	) => Promise<DestructiveDecision>;
+}
+
+/** One root claim plus its token-free destructive-closure members. */
+export interface PgOutcomeClaimGroupRequest extends PgOutcomeClaimRequest {
+	readonly members: readonly Omit<
+		PgOutcomeClaimRequest,
+		'destructiveDecision'
+	>[];
+}
+
+export interface PgOutcomeClaimGroupAdmission {
+	readonly root: OutcomeClaimAdmission;
+	readonly members: readonly OutcomeClaimAdmission[];
+}
+
+export interface PgOutcomeClaimGroupResolution {
+	readonly rootClaimId: string;
+	readonly members: readonly {
+		readonly target: PgLedgerTarget;
+		readonly member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>;
+	}[];
+	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
+	readonly lockTimeoutMs?: number;
 }
 
 export interface PgOutcomeResolution {
@@ -251,6 +276,10 @@ function homesFor(request: PgOutcomeClaimRequest) {
 			);
 	}
 	return homes;
+}
+
+function homesForGroup(request: PgOutcomeClaimGroupRequest) {
+	return [request, ...request.members].flatMap((member) => homesFor(member));
 }
 
 function boundedLockTimeout(value: number | undefined): number {
@@ -653,6 +682,117 @@ export async function openPgOutcomeClaim(
 	return withOutcomeSession(executor, (session) =>
 		openPgOutcomeClaimOnSession(session, request),
 	);
+}
+
+/**
+ * Opens a root and all closure claims under globally ordered ledger locks in
+ * one transaction.  No child is ever durable before its root group commits.
+ */
+export async function openPgOutcomeClaimGroup(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimGroupRequest,
+): Promise<PgOutcomeClaimGroupAdmission> {
+	return withOutcomeSession(executor, async (session) => {
+		let begun = false;
+		try {
+			await begin(session, request.lockTimeoutMs);
+			begun = true;
+			const lock = await acquirePgLedgerLocks(session, homesForGroup(request));
+			if (lock.kind !== 'acquired') {
+				await session.query('ROLLBACK');
+				begun = false;
+				return { root: refusal('ledger advisory lock is busy'), members: [] };
+			}
+			const all = [request, ...request.members];
+			const currencyHomes = homesForGroup(request);
+			const seen = new Set<string>();
+			for (const home of currencyHomes) {
+				const key = `${home.scope}:${home.schema ?? ''}`;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				const currency = await readPgLedgerScopeCurrency(session, home);
+				if (currency.kind !== 'current') {
+					await session.query('ROLLBACK');
+					begun = false;
+					return { root: currencyRefusal(currency), members: [] };
+				}
+			}
+			const admissions: OutcomeClaimAdmission[] = [];
+			const claims: Omit<LedgerChainMember, 'controller' | 'recordedAt'>[] = [];
+			for (const item of all) {
+				const chain = await readPgLedgerAddressChain(
+					session,
+					targetForPlan(item.plan),
+					item.plan.address,
+				);
+				const input = await liveAdmission(session, item.plan, chain);
+				const admission =
+					item === request && request.destructiveDecision
+						? await (async () => {
+								const decision = await request.destructiveDecision!(
+									session,
+									request.plan,
+								);
+								return decision.kind === 'destructive-decision-permitted'
+									? admitDestructiveOutcomeClaim({ decision, admission: input })
+									: refusal(decision.reasons.join('; '));
+							})()
+						: admitOutcomeClaim(input);
+				if (admission.kind !== 'admitted-outcome-claim') {
+					await session.query('ROLLBACK');
+					begun = false;
+					return { root: admission, members: admissions.slice(1) };
+				}
+				admissions.push(admission);
+				claims.push(claimMember(item, chain.terminalMember?.eventId));
+			}
+			await appendPgLedgerClaimGroup(session, claims[0]!, claims.slice(1), [
+				...request.reservations,
+				...request.members.flatMap((member) => member.reservations),
+			]);
+			await session.query('COMMIT');
+			begun = false;
+			return { root: admissions[0]!, members: admissions.slice(1) };
+		} catch (error) {
+			if (begun) await rollback(session);
+			return { root: refusal(detail(error)), members: [] };
+		}
+	});
+}
+
+/** Resolves every member terminal atomically under the same ordered locks. */
+export async function resolvePgOutcomeClaimGroup(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimGroupResolution,
+): Promise<undefined | OutcomeProtocolRefusal> {
+	return withOutcomeSession(executor, async (session) => {
+		let begun = false;
+		try {
+			await begin(session, request.lockTimeoutMs);
+			begun = true;
+			const lock = await acquirePgLedgerLocks(
+				session,
+				request.members.map(({ member }) => targetForAddress(member.address)),
+			);
+			if (lock.kind !== 'acquired') {
+				await session.query('ROLLBACK');
+				begun = false;
+				return refusal('ledger advisory lock is busy');
+			}
+			await appendPgLedgerResolutionGroup(
+				session,
+				request.rootClaimId,
+				request.members.map(({ member }) => member),
+				request.reservations,
+			);
+			await session.query('COMMIT');
+			begun = false;
+			return undefined;
+		} catch (error) {
+			if (begun) await rollback(session);
+			return refusal(detail(error));
+		}
+	});
 }
 
 async function claimIsOpen(

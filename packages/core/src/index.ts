@@ -425,6 +425,7 @@ export {
 	transitionPlanDigest,
 	validateDeclarationModel,
 	validateExecutionContract,
+	validateNormalizedManagedStepManifest,
 	validateTransitionRelationalInvariants,
 } from './transition/index.js';
 

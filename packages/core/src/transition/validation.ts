@@ -1,6 +1,7 @@
 import type {
 	Assumption,
 	GuardedPlanStep,
+	NormalizedManagedStep,
 	ObservationContext,
 	OperationEffectAssessment,
 	PhysicalOperation,
@@ -30,6 +31,64 @@ export type TransitionRelationalValidationInput =
 export type TransitionRelationalValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly detail: string };
+
+/**
+ * Generic lifecycle invariants for adapter-produced normalized managed steps.
+ * Mapping a concrete DDL kind remains adapter work; core only validates the
+ * durable protocol shape before it becomes digest-covered plan material.
+ */
+export function validateNormalizedManagedStepManifest(
+	steps: readonly NormalizedManagedStep[],
+): TransitionRelationalValidationResult {
+	const keys = new Set<string>();
+	for (const [index, step] of steps.entries()) {
+		if (step.order !== index)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has non-contiguous order`,
+			};
+		if (keys.has(step.stepKey))
+			return {
+				ok: false,
+				detail: `duplicate managed step key ${step.stepKey}`,
+			};
+		keys.add(step.stepKey);
+		if ((step.address === undefined) === (step.closure === undefined))
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} must have exactly one address or closure root`,
+			};
+		if (step.plannedClaimKeys.length === 0)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has no planned claim key`,
+			};
+		if (
+			step.statementBundle.statements.some(
+				(statement, ordinal) =>
+					statement.ordinal !== ordinal || statement.sql.length === 0,
+			)
+		)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has an invalid statement bundle`,
+			};
+		if (
+			step.classification === 'removal' &&
+			step.replayPolicy !== 'fresh-live-only'
+		)
+			return {
+				ok: false,
+				detail: `removal step ${step.stepKey} is not fresh-live-only`,
+			};
+		if (step.classification !== 'removal' && step.replayPolicy !== 'recorded')
+			return {
+				ok: false,
+				detail: `non-removal step ${step.stepKey} is not recorded-replayable`,
+			};
+	}
+	return { ok: true };
+}
 
 function sameTrustRoot(
 	left: Assumption['asserter'],

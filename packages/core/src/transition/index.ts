@@ -334,5 +334,6 @@ export {
 export {
 	type TransitionRelationalValidationInput,
 	type TransitionRelationalValidationResult,
+	validateNormalizedManagedStepManifest,
 	validateTransitionRelationalInvariants,
 } from './validation.js';

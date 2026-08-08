@@ -9,12 +9,13 @@ import {
 	executePgDestructiveBundle,
 	executePgTableReaddress,
 	openPgOutcomeClaim,
+	openPgOutcomeClaimGroup,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	reservationsForRemovalClosure,
+	resolvePgOutcomeClaimGroup,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
 import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
@@ -28,16 +29,54 @@ import type {
 	ContainmentClosureDestructiveOutcome,
 	DestructiveAuthorityEvidence,
 	LedgerAddress,
+	LedgerChainMember,
 	LedgerClaimKind,
 	LedgerHome,
 	LedgerPayload,
 	ModelIR,
+	NormalizedManagedStep,
+	TableIR,
 } from '@dbsp/types';
+import { ledgerAddressKey } from '@dbsp/types';
 import type { Pool } from 'pg';
-import type { GeneratorDurablePlan } from './generator-plan.js';
+
+function managedSteps(plan: { readonly steps: readonly unknown[] }) {
+	return plan.steps as readonly NormalizedManagedStep[];
+}
+
+/**
+ * A reviewed replacement selector is canonicalized as `table:<name>`, while
+ * the CLI has always accepted the unqualified table name as a shorthand. Keep
+ * the comparison at the reviewed manifest boundary so every subsequent
+ * authority decision sees the same selected set.
+ */
+function matchesReviewedReplacementSelector(
+	reviewed: string,
+	provided: string,
+): boolean {
+	return (
+		provided === reviewed ||
+		(reviewed.startsWith('table:') &&
+			provided === reviewed.slice('table:'.length))
+	);
+}
 
 export type GeneratorExecutionResult =
 	| { readonly outcome: 'completed' }
+	| {
+			readonly outcome: 'partially-applied';
+			readonly detail: string;
+			readonly completedStepKeys: readonly string[];
+			readonly notStartedStepKeys: readonly string[];
+	  }
+	| { readonly outcome: 'selection-incomplete'; readonly detail: string }
+	| {
+			readonly outcome: 'partially-applied';
+			readonly detail: string;
+			readonly completedStepKeys: readonly string[];
+			readonly notStartedStepKeys: readonly string[];
+	  }
+	| { readonly outcome: 'selection-incomplete'; readonly detail: string }
 	| { readonly outcome: 'adoption-refused'; readonly detail: string }
 	| {
 			readonly outcome: 'readdress-unsupported' | 'readdress-refused';
@@ -49,11 +88,7 @@ export type GeneratorExecutionResult =
 	  }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
-type GeneratedChange = GeneratorDurablePlan['generator']['changes'][number];
-
-function modelForAdoption(
-	table: NonNullable<GeneratedChange['adoption']>['shape'],
-): ModelIR {
+function modelForAdoption(table: TableIR): ModelIR {
 	const tables = new Map([[table.name, table]]);
 	const relations = new Map();
 	return {
@@ -71,81 +106,26 @@ function modelForAdoption(
 async function adoptionShapeMatches(
 	pool: Pool,
 	schema: string,
-	adoption: NonNullable<GeneratedChange['adoption']>,
+	shape: TableIR,
 ): Promise<boolean> {
 	const live = await createPgsqlAdapter(pool).introspect({ schema });
-	const diff = compareSchemata(modelForAdoption(adoption.shape), live);
-	return !diff.changes.some((change) => change.table === adoption.shape.name);
+	const diff = compareSchemata(modelForAdoption(shape), live);
+	return !diff.changes.some((change) => change.table === shape.name);
 }
 
-function replacementRequested(
-	selectors: readonly string[] | undefined,
-	address: LedgerAddress,
-): boolean {
-	return (
-		selectors?.some(
-			(selector) =>
-				selector === address.name ||
-				selector === `${address.kind}:${address.name}`,
-		) === true
-	);
-}
-
-function namedReplacement(
-	plan: GeneratorDurablePlan,
-	selector: string,
-): boolean {
-	return plan.generator.changes.some(
-		(change) =>
-			change.kind === 'replace_table' &&
-			(selector === change.table || selector === `table:${change.table}`),
-	);
-}
-
-function addressFor(
-	change: GeneratedChange,
+function _lifecycleTableAddress(
 	database: string,
 	schema: string,
-): LedgerAddress | undefined {
-	const base = {
-		scope: 'schema' as const,
+	table: string,
+): LedgerAddress {
+	return {
+		scope: 'schema',
 		engine: 'postgresql',
 		database,
 		schema,
+		kind: 'table',
+		name: table,
 	};
-	const table = { ...base, kind: 'table' as const, name: change.table };
-	switch (change.kind) {
-		case 'adopt_table':
-		case 'replace_table':
-		case 'create_table':
-		case 'drop_table':
-			return table;
-		case 'add_column':
-		case 'drop_column':
-		case 'alter_column_type':
-		case 'alter_column_nullable':
-		case 'alter_column_default':
-			return change.column
-				? { ...base, kind: 'column', name: change.column, parent: table }
-				: undefined;
-		case 'create_extension':
-		case 'drop_extension':
-			return {
-				scope: 'database',
-				engine: 'postgresql',
-				database,
-				kind: 'extension',
-				name: change.table,
-			};
-		case 'create_enum':
-		case 'drop_enum':
-			return { ...base, kind: 'enum', name: change.table };
-		case 'create_sequence':
-		case 'drop_sequence':
-			return { ...base, kind: 'sequence', name: change.table };
-		default:
-			return undefined;
-	}
 }
 
 function home(address: LedgerAddress): LedgerHome {
@@ -216,16 +196,6 @@ async function alreadyAppliedCreation(
 	return live?.catalogueIdentity !== undefined && managed(executor, address);
 }
 
-function creationRequiresVacancy(change: GeneratedChange): boolean {
-	return (
-		change.kind === 'create_table' ||
-		change.kind === 'add_column' ||
-		change.kind === 'create_extension' ||
-		change.kind === 'create_enum' ||
-		change.kind === 'create_sequence'
-	);
-}
-
 function observed(address: LedgerAddress): LedgerPayload {
 	return {
 		value: { kind: address.kind, name: address.name },
@@ -250,7 +220,8 @@ function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
 async function destructiveEvidence(input: {
 	readonly executor: LedgerQueryable;
 	readonly address: LedgerAddress;
-	readonly change: GeneratedChange;
+	readonly classification: import('@dbsp/types').ManagedStepClassification;
+	readonly selection?: NormalizedManagedStep['selection'];
 	readonly planDigest: string;
 	readonly accepts: readonly string[] | undefined;
 }): Promise<{
@@ -259,7 +230,7 @@ async function destructiveEvidence(input: {
 		ReturnType<typeof readPgRemovalEffectsClosure>
 	>;
 }> {
-	const { executor, address, change } = input;
+	const { executor, address } = input;
 	let ownership: DestructiveAuthorityEvidence['ownership'] = 'uncomputable';
 	let catalogueIdentity: DestructiveAuthorityEvidence['catalogueIdentity'] =
 		'catalogue-unavailable';
@@ -299,7 +270,7 @@ async function destructiveEvidence(input: {
 		| Awaited<ReturnType<typeof readPgRemovalEffectsClosure>>
 		| undefined;
 	let containmentOutcome: ContainmentClosureDestructiveOutcome | undefined;
-	if (change.classification === 'removal') {
+	if (input.classification === 'removal') {
 		containment = await readPgRemovalEffectsClosure({
 			executor,
 			root: address,
@@ -310,9 +281,14 @@ async function destructiveEvidence(input: {
 	return {
 		evidence: {
 			declaration:
-				change.classification === 'removal'
-					? 'requires-removal'
+				input.classification === 'removal'
+					? input.selection?.kind === 'replacement'
+						? 'replacement-requested-by-plan'
+						: 'requires-removal'
 					: 'requires-lossy-change',
+			...(input.selection?.kind === 'replacement'
+				? { replacementAddress: address }
+				: {}),
 			ownership,
 			catalogueIdentity,
 			operatorAcceptance: acceptance(input.planDigest, input.accepts),
@@ -346,307 +322,165 @@ async function removalContainment(
  */
 export async function executeGeneratorPlan(input: {
 	readonly pool: Pool;
-	readonly plan: GeneratorDurablePlan;
+	readonly plan: { readonly steps: readonly unknown[] };
 	readonly planDigest: string;
 	readonly schema: string;
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
 	readonly runId: string;
 }): Promise<GeneratorExecutionResult> {
+	const completedStepKeys: string[] = [];
+	const partial = (detail: string): GeneratorExecutionResult =>
+		completedStepKeys.length === 0
+			? { outcome: 'execution-failed', detail }
+			: {
+					outcome: 'partially-applied',
+					detail,
+					completedStepKeys,
+					notStartedStepKeys: managedSteps(input.plan)
+						.filter((step) => !completedStepKeys.includes(step.stepKey))
+						.map((step) => step.stepKey),
+				};
 	try {
 		const database = await databaseId(input.pool);
 		const executionId = `dbsp.generator.execution.${randomUUID()}`;
-		// Refusal preflight deliberately precedes replacement/authority checks and
-		// every outcome claim. A declared adoption that diverged after review is
-		// the actionable fault; an unrelated DROP must not invite its acceptance.
-		for (const change of input.plan.generator.changes) {
-			if (change.kind === 'adoption_refused')
+		const steps = managedSteps(input.plan);
+		for (const step of steps) {
+			if (step.lifecycle?.kind === 'adoption-refused')
 				return {
 					outcome: 'adoption-refused',
-					detail: `declared adoption for ${change.table} refuses live shape mismatch`,
+					detail: `declared adoption for ${step.address?.name ?? step.stepKey} refuses live shape mismatch`,
 				};
-			if (change.kind !== 'adopt_table') continue;
-			const adoption = change.adoption;
-			if (!adoption)
+			const lifecycle = step.lifecycle;
+			if (lifecycle?.kind !== 'adoption') continue;
+			const address = step.address;
+			if (
+				!address ||
+				!step.expectedDeclaration ||
+				!step.expectedCatalogueIdentity
+			)
 				return {
 					outcome: 'execution-failed',
-					detail: 'adoption generator change has no declaration',
-				};
-			const address = addressFor(change, database, input.schema);
-			if (!address)
-				return {
-					outcome: 'execution-failed',
-					detail: `adoption generator change ${change.table} has no managed address`,
+					detail: `adoption step ${step.stepKey} has incomplete normalized material`,
 				};
 			const preflight = await preflightPgDeclaredAdoption({
 				executor: input.pool,
 				home: home(address),
 				address,
-				declaration: adoption.declaration,
-				expectedCatalogueIdentity: adoption.catalogueIdentity,
+				declaration: step.expectedDeclaration,
+				expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 				shapeMatches: () =>
-					adoptionShapeMatches(input.pool, input.schema, adoption),
+					adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
 				executionId,
-			} as never);
-			if (preflight.outcome === 'ready' || preflight.outcome === 'no-op')
-				continue;
-			return preflight.outcome === 'adoption-refused'
-				? { outcome: 'adoption-refused', detail: preflight.detail }
-				: { outcome: 'execution-failed', detail: preflight.detail };
+			});
+			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
+				return preflight.outcome === 'adoption-refused'
+					? { outcome: 'adoption-refused', detail: preflight.detail }
+					: { outcome: 'execution-failed', detail: preflight.detail };
 		}
-		if (
-			input.plan.generator.changes.some(
-				(change) => change.kind === 'replace_table',
-			) &&
-			(input.replaces === undefined || input.replaces.length === 0)
-		) {
+		const replacementSelectors = steps
+			.filter((step) => step.selection?.kind === 'replacement')
+			.map((step) => step.selection?.selector)
+			.filter((selector): selector is string => selector !== undefined);
+		if (replacementSelectors.length > 0 && !input.replaces?.length)
 			return {
 				outcome: 'destructive-authority-refused',
 				detail:
 					'replacement requires a named --replace selector from the reviewed plan',
 			};
-		}
-		for (const selector of input.replaces ?? []) {
-			if (!namedReplacement(input.plan, selector))
+		for (const selector of input.replaces ?? [])
+			if (
+				!replacementSelectors.some((reviewed) =>
+					matchesReviewedReplacementSelector(reviewed, selector),
+				)
+			)
 				return {
 					outcome: 'destructive-authority-refused',
 					detail: `replacement ${selector} was not requested by the reviewed plan`,
 				};
-		}
-		for (const [
-			changeIndex,
-			change,
-		] of input.plan.generator.changes.entries()) {
-			if (change.kind === 'adoption_refused') continue;
-			if (change.kind === 'replace_table') {
-				const address = addressFor(change, database, input.schema);
-				if (!change.replacement || !address)
+		if (
+			replacementSelectors.some(
+				(reviewed) =>
+					!input.replaces?.some((provided) =>
+						matchesReviewedReplacementSelector(reviewed, provided),
+					),
+			)
+		)
+			return {
+				outcome: 'selection-incomplete',
+				detail:
+					'replacement selection does not cover every reviewed replacement',
+			};
+		for (const step of steps) {
+			if (step.lifecycle?.kind === 'adoption-refused') continue;
+			if (step.lifecycle?.kind === 'adoption') {
+				const lifecycle = step.lifecycle;
+				const address = step.address;
+				if (
+					!address ||
+					!step.expectedDeclaration ||
+					!step.expectedCatalogueIdentity
+				)
 					return {
 						outcome: 'execution-failed',
-						detail: `replacement generator change ${change.table} has incomplete reviewed material`,
-					};
-				if (!replacementRequested(input.replaces, address)) continue;
-				const retireId = outcomeClaimId(
-					executionId,
-					`generator:${changeIndex}:replacement-retire`,
-					address,
-				);
-				const retirement = {
-					claimId: retireId,
-					executionId,
-					plannedClaimKey: `generator:${changeIndex}:replacement-retire`,
-					claimGroupId: retireId,
-					rootClaimId: retireId,
-					address,
-					claimKind: 'retire-intent' as const,
-					statementBundle: {
-						statements: change.replacement.retireStatements.map(
-							(sql, ordinal) => ({
-								ordinal,
-								sql,
-							}),
-						),
-					},
-				};
-				const reservation = {
-					address,
-					claimKind: 'retire-intent' as const,
-					executionId,
-					rootClaimId: retireId,
-					homeLedger: home(address),
-				};
-				const admitted = await openPgOutcomeClaim(input.pool, {
-					plan: retirement,
-					reservations: [reservation],
-					destructiveDecision: async (executor) => {
-						const authority = await destructiveEvidence({
-							executor,
-							address,
-							change,
-							planDigest: input.planDigest,
-							accepts: input.accepts,
-						});
-						return decideDestructiveDecision(
-							{ kind: 'removal', address },
-							{
-								...authority.evidence,
-								declaration: 'replacement-requested-by-plan',
-								replacementAddress: address,
-							},
-						);
-					},
-				});
-				if (admitted.kind !== 'admitted-outcome-claim')
-					return {
-						outcome: 'destructive-authority-refused',
-						detail: admitted.reason,
-					};
-				if (!('destructivePermit' in admitted))
-					return {
-						outcome: 'execution-failed',
-						detail: 'destructive admission did not mint an authority permit',
-					};
-				const sent = await executePgDestructiveBundle(input.pool, {
-					claim: admitted as AdmittedDestructiveOutcomeClaim,
-					statements: retirement.statementBundle.statements,
-				});
-				if (sent) return { outcome: 'execution-failed', detail: sent.reason };
-				if (await readPgCatalogueIdentity(input.pool, address))
-					return {
-						outcome: 'execution-failed',
-						detail: `replacement retirement ${address.name} left the object present`,
-					};
-				await appendPgLedgerResolution(
-					input.pool,
-					home(address),
-					{
-						eventId: outcomeClaimEventId(retireId, 'absent'),
-						executionId,
-						plannedClaimKey: `generator:${changeIndex}:replacement-retire`,
-						claimGroupId: retireId,
-						rootClaimId: retireId,
-						address,
-						eventKind: 'absent',
-						predecessor: retireId,
-					},
-					retireId,
-					[reservation],
-				);
-				const createId = outcomeClaimId(
-					executionId,
-					`generator:${changeIndex}:replacement-create`,
-					address,
-				);
-				const created = await runPgTransactionalOutcome(input.pool, {
-					plan: {
-						claimId: createId,
-						executionId,
-						plannedClaimKey: `generator:${changeIndex}:replacement-create`,
-						claimGroupId: createId,
-						rootClaimId: createId,
-						address,
-						claimKind: 'intent',
-						requiresVacancy: true,
-						statementBundle: {
-							statements: change.replacement.createStatements.map(
-								(sql, ordinal) => ({
-									ordinal,
-									sql,
-								}),
-							),
-						},
-					},
-					reservations: [
-						{
-							address,
-							claimKind: 'intent',
-							executionId,
-							rootClaimId: createId,
-							homeLedger: home(address),
-						},
-					],
-					resolution: {
-						eventId: outcomeClaimEventId(createId, 'observed'),
-						eventKind: 'observed',
-					},
-					readBack: async () => observed(address),
-					recordCatalogueIdentity: true,
-					vacancy: async (executor) =>
-						(await readPgCatalogueIdentity(executor, address))
-							? {
-									kind: 'occupied',
-									reason: `replacement creation refuses occupied live address ${address.name}`,
-								}
-							: { kind: 'vacant' },
-				});
-				if (created.kind !== 'executed-outcome-claim')
-					return { outcome: 'execution-failed', detail: created.reason };
-				continue;
-			}
-			if (change.kind === 'adopt_table') {
-				const adoption = change.adoption;
-				if (!adoption)
-					return {
-						outcome: 'execution-failed',
-						detail: 'adoption generator change has no declaration',
-					};
-				const address = addressFor(change, database, input.schema);
-				if (!address)
-					return {
-						outcome: 'execution-failed',
-						detail: `adoption generator change ${change.table} has no managed address`,
+						detail: `adoption step ${step.stepKey} has incomplete normalized material`,
 					};
 				const adopted = await executePgDeclaredAdoption({
 					executor: input.pool,
 					home: home(address),
 					address,
-					declaration: adoption.declaration,
-					expectedCatalogueIdentity: adoption.catalogueIdentity,
+					declaration: step.expectedDeclaration,
+					expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 					shapeMatches: () =>
-						adoptionShapeMatches(input.pool, input.schema, adoption),
+						adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
 					executionId,
-				} as never);
+				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op')
 					continue;
-				const failedAdoption = adopted as {
-					readonly outcome: 'adoption-refused' | 'execution-failed';
-					readonly detail: string;
-				};
-				return failedAdoption.outcome === 'adoption-refused'
-					? { outcome: 'adoption-refused', detail: failedAdoption.detail }
-					: { outcome: 'execution-failed', detail: failedAdoption.detail };
+				return adopted.outcome === 'adoption-refused'
+					? { outcome: 'adoption-refused', detail: adopted.detail }
+					: { outcome: 'execution-failed', detail: adopted.detail };
 			}
-			if (change.kind === 'readdress_table') {
-				if (!change.readdress)
-					return {
-						outcome: 'execution-failed',
-						detail: 're-address generator change has no declaration',
-					};
+			if (step.lifecycle?.kind === 'readdress') {
 				const result = await executePgTableReaddress(input.pool, {
 					database,
 					targetSchema: input.schema,
-					declaration: change.readdress,
+					declaration: step.lifecycle.declaration,
 					executionId,
 				});
-				if (result.outcome === 'completed') continue;
-				if (result.outcome === 'no-op') continue;
+				if (result.outcome === 'completed' || result.outcome === 'no-op')
+					continue;
 				return result;
 			}
-			if (change.statements.length === 0) continue;
-			const address = addressFor(change, database, input.schema);
+			if (step.statementBundle.statements.length === 0) continue;
+			const address = step.address ?? step.closure?.root;
 			if (!address)
 				return {
-					outcome: 'destructive-authority-refused',
-					detail: `generator mutation ${change.kind} has no managed address`,
+					outcome: 'execution-failed',
+					detail: `managed step ${step.stepKey} has no address`,
 				};
 			if (
-				change.classification === 'non-destructive' &&
-				creationRequiresVacancy(change) &&
+				step.classification === 'non-destructive' &&
+				step.requiresVacancy &&
 				(await alreadyAppliedCreation(input.pool, address))
 			)
 				continue;
-			const claimKind: LedgerClaimKind =
-				change.classification === 'removal' ? 'retire-intent' : 'intent';
+			const claimKind: LedgerClaimKind = step.claimKind;
 			const rootClaimId = outcomeClaimId(
 				executionId,
-				`generator:${changeIndex}:root`,
+				step.plannedClaimKeys[0]!,
 				address,
 			);
 			const claim = {
 				claimId: rootClaimId,
 				executionId,
-				plannedClaimKey: `generator:${changeIndex}:root`,
+				plannedClaimKey: step.plannedClaimKeys[0]!,
 				claimGroupId: rootClaimId,
 				rootClaimId,
 				address,
 				claimKind,
-				statementBundle: {
-					statements: change.statements.map((sql, ordinal) => ({
-						ordinal,
-						sql,
-					})),
-				},
-				...(creationRequiresVacancy(change) ? { requiresVacancy: true } : {}),
+				statementBundle: step.statementBundle,
+				requiresVacancy: step.requiresVacancy,
 			};
 			const baseReservation = {
 				address,
@@ -655,7 +489,7 @@ export async function executeGeneratorPlan(input: {
 				rootClaimId: claim.claimId,
 				homeLedger: home(address),
 			};
-			if (change.classification === 'non-destructive') {
+			if (step.classification === 'non-destructive') {
 				const result = await runPgTransactionalOutcome(input.pool, {
 					plan: claim,
 					reservations: [baseReservation],
@@ -674,81 +508,91 @@ export async function executeGeneratorPlan(input: {
 							: { kind: 'vacant' },
 				});
 				if (result.kind !== 'executed-outcome-claim')
-					return { outcome: 'execution-failed', detail: result.reason };
+					return partial(result.reason);
+				completedStepKeys.push(step.stepKey);
 				continue;
 			}
 			const containment =
-				change.classification === 'removal'
+				step.classification === 'removal'
 					? await removalContainment(input.pool, address)
 					: undefined;
-			const reservations =
-				containment?.kind === 'all-contained-or-managed'
-					? [
-							baseReservation,
-							...reservationsForRemovalClosure({
-								closure: containment,
-								executionId,
-								rootClaimId: claim.claimId,
-								claimKind,
-								homeLedger: home(address),
-							}),
-						]
-					: [baseReservation];
-			// PostgreSQL removes contained children as part of the root DROP.  They
-			// nevertheless retain independent ledger facts: open their claims before
-			// the root statement and close each only after its own catalogue absence.
-			const containedClaims: Array<{
-				readonly address: LedgerAddress;
-				readonly claimId: string;
-				readonly reservation: typeof baseReservation;
-			}> = [];
+			const closureMembers = new Map<
+				string,
+				{
+					readonly address: LedgerAddress;
+					readonly plannedClaimKey: string;
+				}
+			>();
+			// A normalized closure is digest-covered execution material.  Its
+			// members must receive their own claims and terminal `absent` facts;
+			// PostgreSQL's single DROP statement does not make those ledger facts
+			// optional.  The live closure remains the authority-time cascade guard
+			// and supplements legacy root-only manifests.
+			for (const member of step.closure?.members ?? []) {
+				closureMembers.set(ledgerAddressKey(member.address), {
+					address: member.address,
+					plannedClaimKey: member.plannedClaimKey,
+				});
+			}
 			if (containment?.kind === 'all-contained-or-managed') {
 				for (const effect of containment.effects) {
 					if (!containedBy(address, effect.address)) continue;
 					if (!(await managed(input.pool, effect.address))) continue;
-					const childClaimId = outcomeClaimId(
-						executionId,
-						`generator:${changeIndex}:root`,
-						effect.address,
-						`closure:${effect.address.kind}:${effect.address.name}`,
-					);
-					const childReservation = {
-						...baseReservation,
+					const key = ledgerAddressKey(effect.address);
+					if (closureMembers.has(key)) continue;
+					closureMembers.set(key, {
 						address: effect.address,
-						rootClaimId: childClaimId,
-					};
-					const child = await openPgOutcomeClaim(input.pool, {
-						plan: {
-							...claim,
-							claimId: childClaimId,
-							address: effect.address,
-						},
-						reservations: [childReservation],
-					});
-					if (child.kind !== 'admitted-outcome-claim')
-						return { outcome: 'execution-failed', detail: child.reason };
-					containedClaims.push({
-						address: effect.address,
-						claimId: childClaimId,
-						reservation: childReservation,
+						plannedClaimKey: `closure:${effect.address.kind}:${effect.address.name}`,
 					});
 				}
 			}
-			const admitted = await openPgOutcomeClaim(input.pool, {
+			const containedClaims: Array<{
+				readonly plan: typeof claim;
+				readonly reservation: typeof baseReservation;
+			}> = [];
+			for (const member of closureMembers.values()) {
+				const effect = member.address;
+				const childClaimId = outcomeClaimId(
+					executionId,
+					step.plannedClaimKeys[0]!,
+					effect,
+					member.plannedClaimKey,
+				);
+				const childReservation = {
+					...baseReservation,
+					address: effect as typeof address,
+					rootClaimId: claim.claimId,
+				};
+				containedClaims.push({
+					plan: {
+						...claim,
+						claimId: childClaimId,
+						address: effect as typeof address,
+						plannedClaimKey: member.plannedClaimKey,
+					},
+					reservation: childReservation,
+				});
+			}
+			const admitRequest = {
 				plan: claim,
-				reservations,
-				destructiveDecision: async (executor) => {
+				reservations: [baseReservation],
+				members: containedClaims.map(({ plan, reservation }) => ({
+					plan,
+					reservations: [reservation],
+				})),
+				destructiveDecision: async (executor: LedgerQueryable) => {
 					const lockedAuthority = await destructiveEvidence({
 						executor,
 						address,
-						change,
+						classification: step.classification,
+						selection: step.selection,
 						planDigest: input.planDigest,
 						accepts: input.accepts,
 					});
 					return decideDestructiveDecision(
 						{
 							kind:
-								change.classification === 'removal'
+								step.classification === 'removal'
 									? 'removal'
 									: 'data-destructive',
 							address,
@@ -756,7 +600,11 @@ export async function executeGeneratorPlan(input: {
 						lockedAuthority.evidence,
 					);
 				},
-			});
+			};
+			const admitted =
+				containedClaims.length > 0
+					? (await openPgOutcomeClaimGroup(input.pool, admitRequest)).root
+					: await openPgOutcomeClaim(input.pool, admitRequest);
 			if (admitted.kind !== 'admitted-outcome-claim')
 				return {
 					outcome: 'destructive-authority-refused',
@@ -773,62 +621,84 @@ export async function executeGeneratorPlan(input: {
 			});
 			if (sent) return { outcome: 'execution-failed', detail: sent.reason };
 			const live = await readPgCatalogueIdentity(input.pool, address);
-			if (change.classification === 'removal' && live)
+			if (step.classification === 'removal' && live)
 				return {
 					outcome: 'execution-failed',
 					detail: `destructive claim ${claim.claimId} executed but ${address.name} remains present`,
 				};
-			await appendPgLedgerResolution(
-				input.pool,
-				home(address),
+			const terminals: Array<{
+				readonly target: LedgerHome;
+				readonly member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>;
+			}> = [
 				{
-					eventId: outcomeClaimEventId(
-						claim.claimId,
-						change.classification === 'removal' ? 'absent' : 'observed',
-					),
-					executionId,
-					plannedClaimKey: claim.plannedClaimKey,
-					claimGroupId: claim.claimGroupId,
-					rootClaimId: claim.rootClaimId,
-					address,
-					eventKind:
-						change.classification === 'removal' ? 'absent' : 'observed',
-					predecessor: claim.claimId,
-					...(live?.catalogueIdentity
-						? { catalogueIdentity: live.catalogueIdentity }
-						: {}),
-					...(change.classification === 'removal'
-						? {}
-						: { observed: observed(address) }),
+					target: home(address),
+					member: {
+						eventId: outcomeClaimEventId(
+							claim.claimId,
+							step.classification === 'removal' ? 'absent' : 'observed',
+						),
+						executionId,
+						plannedClaimKey: claim.plannedClaimKey,
+						claimGroupId: claim.claimGroupId,
+						rootClaimId: claim.rootClaimId,
+						address,
+						eventKind:
+							step.classification === 'removal' ? 'absent' : 'observed',
+						predecessor: claim.claimId,
+						...(live?.catalogueIdentity
+							? { catalogueIdentity: live.catalogueIdentity }
+							: {}),
+						...(step.classification === 'removal'
+							? {}
+							: { observed: observed(address) }),
+					},
 				},
-				claim.claimId,
-				reservations,
-			);
+			];
 			for (const child of containedClaims) {
-				if (await readPgCatalogueIdentity(input.pool, child.address))
+				if (await readPgCatalogueIdentity(input.pool, child.plan.address))
 					return {
 						outcome: 'execution-failed',
-						detail: `destructive claim ${claim.claimId} executed but contained ${child.address.name} remains present`,
+						detail: `destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
 					};
+				terminals.push({
+					target: home(child.plan.address),
+					member: {
+						eventId: outcomeClaimEventId(child.plan.claimId, 'absent'),
+						executionId,
+						plannedClaimKey: child.plan.plannedClaimKey,
+						claimGroupId: claim.claimId,
+						rootClaimId: claim.claimId,
+						address: child.plan.address,
+						eventKind: 'absent' as const,
+						predecessor: child.plan.claimId,
+					},
+				});
+			}
+			if (containedClaims.length > 0) {
+				const resolved = await resolvePgOutcomeClaimGroup(input.pool, {
+					rootClaimId: claim.claimId,
+					members: terminals,
+					reservations: [
+						baseReservation,
+						...containedClaims.map(({ reservation }) => reservation),
+					],
+				});
+				if (resolved)
+					return { outcome: 'execution-failed', detail: resolved.reason };
+			} else {
+				const terminal = terminals[0]!;
 				await appendPgLedgerResolution(
 					input.pool,
-					home(child.address),
-					{
-						eventId: outcomeClaimEventId(child.claimId, 'absent'),
-						address: child.address,
-						eventKind: 'absent',
-						predecessor: child.claimId,
-					},
-					child.claimId,
-					[child.reservation],
+					terminal.target,
+					terminal.member,
+					claim.claimId,
+					[baseReservation],
 				);
 			}
+			completedStepKeys.push(step.stepKey);
 		}
 		return { outcome: 'completed' };
 	} catch (error) {
-		return {
-			outcome: 'execution-failed',
-			detail: error instanceof Error ? error.message : String(error),
-		};
+		return partial(error instanceof Error ? error.message : String(error));
 	}
 }

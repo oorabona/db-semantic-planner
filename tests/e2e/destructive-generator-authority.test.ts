@@ -5,6 +5,7 @@ import {
 	appendPgLedgerResolution,
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
+	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
@@ -123,6 +124,8 @@ async function adopt(address: LedgerAddress): Promise<void> {
 
 function generatorPlan(
 	change: GeneratorDurablePlan['generator']['changes'][number],
+	database?: string,
+	schema?: string,
 ): GeneratorDurablePlan {
 	return {
 		observations: [],
@@ -130,7 +133,24 @@ function generatorPlan(
 		assumptions: [],
 		preconditions: [],
 		segments: [],
-		steps: [],
+		steps:
+			database && schema
+				? [
+						createPgsqlGeneratedManagedStep({
+							change: {
+								...change,
+								destructive: change.classification !== 'non-destructive',
+							} as Parameters<
+								typeof createPgsqlGeneratedManagedStep
+							>[0]['change'],
+							database,
+							schema,
+							stepKey: 'generator:0',
+							order: 0,
+							statements: change.statements,
+						}),
+					]
+				: [],
 		postconditions: [],
 		generator: {
 			kind: 'schema-differ-generator',
@@ -146,13 +166,17 @@ async function executeDrop(input: {
 	name: string;
 	accepts?: readonly string[];
 }) {
-	const plan = generatorPlan({
-		kind: 'drop_table',
-		table: input.name,
-		classification: 'removal',
-		details: `drop ${input.name}`,
-		statements: [`DROP TABLE ${quote(input.schema)}.${quote(input.name)}`],
-	});
+	const plan = generatorPlan(
+		{
+			kind: 'drop_table',
+			table: input.name,
+			classification: 'removal',
+			details: `drop ${input.name}`,
+			statements: [`DROP TABLE ${quote(input.schema)}.${quote(input.name)}`],
+		},
+		input.database,
+		input.schema,
+	);
 	const digest = transitionPlanDigest(plan);
 	return executeGeneratorPlan({
 		pool: await getTestPool(),
@@ -230,16 +254,20 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			parent: address,
 		};
 		await adopt(column);
-		const plan = generatorPlan({
-			kind: 'alter_column_type',
-			table: 'narrow',
-			column: 'value',
-			classification: 'data-destructive',
-			details: 'integer to smallint',
-			statements: [
-				`ALTER TABLE ${quote(schema)}.narrow ALTER COLUMN value TYPE smallint`,
-			],
-		});
+		const plan = generatorPlan(
+			{
+				kind: 'alter_column_type',
+				table: 'narrow',
+				column: 'value',
+				classification: 'data-destructive',
+				details: 'integer to smallint',
+				statements: [
+					`ALTER TABLE ${quote(schema)}.narrow ALTER COLUMN value TYPE smallint`,
+				],
+			},
+			databaseId,
+			schema,
+		);
 		const result = await executeGeneratorPlan({
 			pool,
 			plan,
@@ -276,13 +304,17 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		await adopt(parent);
 		await adopt(identifier);
 		await adopt(child);
-		const probe = generatorPlan({
-			kind: 'drop_table',
-			table: 'managed_parent',
-			classification: 'removal',
-			details: 'drop managed_parent',
-			statements: [`DROP TABLE ${quote(schema)}.managed_parent`],
-		});
+		const probe = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: 'managed_parent',
+				classification: 'removal',
+				details: 'drop managed_parent',
+				statements: [`DROP TABLE ${quote(schema)}.managed_parent`],
+			},
+			databaseId,
+			schema,
+		);
 		const digest = transitionPlanDigest(probe);
 		const result = await executeGeneratorPlan({
 			pool,

@@ -471,6 +471,7 @@ export async function appendPgLedgerClaim(
 	target: PgLedgerTarget,
 	member: LedgerWriteMember,
 	reservations: readonly LedgerReservationRow[],
+	reservationRootClaimId = member.eventId,
 ): Promise<void> {
 	assertTargetMatchesAddress(target, member);
 	ensureClaimEvent(member.eventKind);
@@ -492,9 +493,9 @@ export async function appendPgLedgerClaim(
 				`ledger reservation ${reservation.address.name} claim kind does not match claim ${member.eventId}`,
 			);
 		}
-		if (reservation.rootClaimId !== member.eventId) {
+		if (reservation.rootClaimId !== reservationRootClaimId) {
 			throw new Error(
-				`ledger reservation ${reservation.address.name} is not anchored to claim ${member.eventId}`,
+				`ledger reservation ${reservation.address.name} is not anchored to claim group ${reservationRootClaimId}`,
 			);
 		}
 		if (
@@ -539,6 +540,104 @@ export async function appendPgLedgerClaim(
 			values,
 		),
 	);
+}
+
+/**
+ * Appends an entire destructive closure as one ledger group.  The caller owns
+ * the surrounding locked transaction; consequently a failed member insert
+ * rolls back the root, every member and every reservation together.
+ */
+export async function appendPgLedgerClaimGroup(
+	executor: TransitionJournalQueryable,
+	root: LedgerWriteMember,
+	members: readonly LedgerWriteMember[],
+	reservations: readonly LedgerReservationRow[],
+): Promise<void> {
+	const claims = [root, ...members];
+	if (claims.length < 2)
+		throw new Error(
+			'ledger claim group requires a root and at least one member',
+		);
+	if (reservations.length !== claims.length)
+		throw new Error(
+			'ledger claim group requires exactly one reservation per claim',
+		);
+	const byAddress = new Map<string, LedgerWriteMember>();
+	const addressKey = (member: Pick<LedgerWriteMember, 'address'>) =>
+		JSON.stringify(addressValues(member as LedgerWriteMember));
+	for (const claim of claims) {
+		ensureClaimEvent(claim.eventKind);
+		assertTargetMatchesAddress(targetForAddress(claim.address), claim);
+		const key = addressKey(claim);
+		if (byAddress.has(key))
+			throw new Error(
+				`ledger claim group repeats address ${claim.address.name}`,
+			);
+		byAddress.set(key, claim);
+	}
+	for (const reservation of reservations) {
+		const claim = byAddress.get(addressKey({ address: reservation.address }));
+		if (!claim)
+			throw new Error(
+				`ledger claim group reservation ${reservation.address.name} has no claim`,
+			);
+		if (reservation.rootClaimId !== root.eventId)
+			throw new Error(
+				`ledger claim group reservation ${reservation.address.name} is not anchored to root ${root.eventId}`,
+			);
+		if (reservation.claimKind !== claim.eventKind)
+			throw new Error(
+				`ledger claim group reservation ${reservation.address.name} claim kind does not match its claim`,
+			);
+	}
+	for (const claim of claims) {
+		const reservation = reservations.find(
+			(candidate) =>
+				addressKey({ address: candidate.address }) === addressKey(claim),
+		);
+		if (!reservation)
+			throw new Error(
+				`ledger claim group claim ${claim.eventId} has no reservation`,
+			);
+		await appendPgLedgerClaim(
+			executor,
+			targetForAddress(claim.address),
+			claim,
+			[reservation],
+			root.eventId,
+		);
+	}
+}
+
+/** Resolves every closure terminal in the caller's one locked transaction. */
+export async function appendPgLedgerResolutionGroup(
+	executor: TransitionJournalQueryable,
+	rootClaimId: string,
+	members: readonly LedgerWriteMember[],
+	reservations: readonly Pick<LedgerReservationRow, 'address'>[],
+): Promise<void> {
+	if (members.length < 2)
+		throw new Error(
+			'ledger resolution group requires a root and at least one member',
+		);
+	if (reservations.length !== members.length)
+		throw new Error(
+			'ledger resolution group requires exactly one reservation per terminal',
+		);
+	for (const member of members) {
+		ensureResolutionEvent(member.eventKind);
+		await appendPgLedgerResolution(
+			executor,
+			targetForAddress(member.address),
+			member,
+			member.predecessor ?? rootClaimId,
+			[
+				{
+					address: member.address,
+				},
+			],
+		);
+	}
 }
 
 /** Appends a terminal member and releases its closure reservations atomically. */

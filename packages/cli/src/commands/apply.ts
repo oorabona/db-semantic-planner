@@ -438,6 +438,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 		'generator removal runs require a fresh no-argument apply against live state',
 	],
 	[
+		'selection-incomplete',
+		63,
+		'reviewed optional actions were not selected exactly before execution',
+	],
+	[
 		'prior-step-events-refusal',
 		19,
 		'attempted runs must be classified by recover',
@@ -672,11 +677,10 @@ export type NoArgumentApplyResult =
 			readonly result: ApplyCommandResult | GeneratorExecutionResult;
 	  };
 
-function isGeneratorPlan(
-	plan: PlanResult['plan'] | undefined,
-): plan is GeneratorDurablePlan {
+function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
 	return (
 		plan !== undefined &&
+		plan !== null &&
 		typeof plan === 'object' &&
 		'generator' in plan &&
 		(plan as { generator?: { kind?: unknown } }).generator?.kind ===
@@ -875,6 +879,25 @@ export async function runApply(
 		return pool === undefined
 			? withPoolCleanupReported(refusal, () => owned.end())
 			: refusal;
+	}
+	if (isGeneratorPlan(persisted.plan)) {
+		const execution = await executeGeneratorPlan({
+			pool: owned,
+			plan: persisted.plan,
+			planDigest: expectedPlanDigest,
+			schema: options.schema ?? 'public',
+			...(options.accept === undefined ? {} : { accepts: options.accept }),
+			...(options.replace === undefined ? {} : { replaces: options.replace }),
+			runId,
+		});
+		const generatorResult = {
+			outcome: execution.outcome as ApplyOutcome,
+			runId,
+			result: execution as unknown as ApplyResult,
+		} as ApplyCommandResult;
+		return pool === undefined
+			? withPoolCleanupReported(generatorResult, () => owned.end())
+			: generatorResult;
 	}
 	let result: ApplyCommandResult;
 	try {

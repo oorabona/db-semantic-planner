@@ -11,6 +11,7 @@ import {
 	classifyGeneratedMutation,
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
+	createPgsqlGeneratedManagedStep,
 	createPgTransitionLessor,
 	createPgTransitionRunPersister,
 	generateMigrationSQL,
@@ -18,10 +19,15 @@ import {
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import type { InProcessProvenPlan } from '@dbsp/core';
-import { acquireTransitionLease, transitionPlanDigest } from '@dbsp/core';
+import {
+	acquireTransitionLease,
+	transitionPlanDigest,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
 import type {
 	CatalogueIdentity,
 	LedgerPayload,
+	NormalizedManagedStep,
 	PlanAssessment,
 	TableIR,
 	TableReaddressDeclaration,
@@ -34,6 +40,7 @@ import type { PlanResult } from './plan.js';
 
 export interface GeneratorPlanMaterial {
 	readonly kind: 'schema-differ-generator';
+	/** Diagnostic provenance only. Execution reads plan.steps, never this list. */
 	readonly changes: readonly {
 		readonly kind: string;
 		readonly table: string;
@@ -57,7 +64,6 @@ export interface GeneratorPlanMaterial {
 			readonly createStatements: readonly string[];
 		};
 	}[];
-	readonly statements: readonly string[];
 }
 
 /** Extra persisted material is digest-covered; the regular applier never executes it. */
@@ -107,6 +113,60 @@ function replacementStatements(table: TableIR, schema: string) {
 	};
 }
 
+function lifecycleStep(input: {
+	readonly stepKey: string;
+	readonly order: number;
+	readonly database: string;
+	readonly schema: string;
+	readonly table: string;
+	readonly classification: ReturnType<typeof classifyGeneratedMutation>;
+	readonly statements?: readonly string[];
+	readonly selection?: NormalizedManagedStep['selection'];
+	readonly lifecycle?: NormalizedManagedStep['lifecycle'];
+	readonly expectedDeclaration?: LedgerPayload;
+	readonly expectedCatalogueIdentity?: CatalogueIdentity;
+	readonly requiresVacancy?: boolean;
+	readonly claimKind?: NormalizedManagedStep['claimKind'];
+}): NormalizedManagedStep {
+	const address = {
+		scope: 'schema' as const,
+		engine: 'postgresql',
+		database: input.database,
+		schema: input.schema,
+		kind: 'table' as const,
+		name: input.table,
+	};
+	return {
+		stepKey: input.stepKey,
+		order: input.order,
+		segmentId: `generator-segment-${input.order}`,
+		dependencyOrder: input.order === 0 ? [] : [`generator:${input.order - 1}`],
+		address,
+		claimKind:
+			input.claimKind ??
+			(input.classification === 'removal' ? 'retire-intent' : 'intent'),
+		plannedClaimKeys: [`${input.stepKey}:root`],
+		statementBundle: {
+			statements: (input.statements ?? []).map((sql, ordinal) => ({
+				ordinal,
+				sql,
+			})),
+		},
+		classification: input.classification,
+		requiresVacancy: input.requiresVacancy ?? false,
+		...(input.expectedDeclaration === undefined
+			? {}
+			: { expectedDeclaration: input.expectedDeclaration }),
+		...(input.expectedCatalogueIdentity === undefined
+			? {}
+			: { expectedCatalogueIdentity: input.expectedCatalogueIdentity }),
+		...(input.selection === undefined ? {} : { selection: input.selection }),
+		...(input.lifecycle === undefined ? {} : { lifecycle: input.lifecycle }),
+		replayPolicy:
+			input.classification === 'removal' ? 'fresh-live-only' : 'recorded',
+	};
+}
+
 function assessment(): PlanAssessment {
 	return {
 		decision: 'applicable',
@@ -119,33 +179,40 @@ function assessment(): PlanAssessment {
 
 function asDurableGeneratorPlan(
 	material: GeneratorPlanMaterial,
+	steps: readonly NormalizedManagedStep[],
 ): GeneratorDurablePlan {
-	// This is intentionally an empty transition operation graph.  It is an audit
-	// carrier for a generator run, not an attempt to teach the transition planner
-	// how to map a DROP.  `apply <run-id>` rejects this replayability class before
-	// its normal serialized-plan adoption boundary.
+	const validation = validateNormalizedManagedStepManifest(steps);
+	if (!validation.ok)
+		throw new Error(
+			`generator planning refuses invalid managed-step manifest: ${validation.detail}`,
+		);
 	return {
 		observations: [],
 		claims: [],
 		assumptions: [],
 		preconditions: [],
 		segments: [],
-		steps: [],
+		steps,
 		postconditions: [],
 		generator: material,
 	} as unknown as GeneratorDurablePlan;
 }
 
-function render(material: GeneratorPlanMaterial, planDigest: string): string {
-	const destructive = material.changes.filter(
-		(change) => change.classification !== 'non-destructive',
+function render(
+	plan: { readonly steps: readonly NormalizedManagedStep[] },
+	planDigest: string,
+): string {
+	const destructive = plan.steps.filter(
+		(step) => step.classification !== 'non-destructive',
 	);
 	return [
-		'-- dbsp schema-differ generator plan; this run is reviewable and is not replayable by id.',
-		...material.changes.map(
-			(change) => `-- ${change.classification}: ${change.details}`,
-		),
-		...material.statements.map((statement) => `${statement};`),
+		'-- dbsp schema-differ generator plan; apply by id executes this exact normalized manifest unless a removal requires fresh live planning.',
+		...plan.steps.flatMap((step) => [
+			`-- ${step.classification}: ${step.stepKey}`,
+			...step.statementBundle.statements.map((statement) =>
+				statement.sql.endsWith(';') ? statement.sql : `${statement.sql};`,
+			),
+		]),
 		...(destructive.length === 0
 			? []
 			: [
@@ -249,25 +316,24 @@ export async function runGeneratorPlan(input: {
 					!replacementTables.has(change.table),
 			),
 		};
+		const ordinaryChanges = executableDiff.changes.map((change) => ({
+			kind: change.kind,
+			table: change.table,
+			...(change.column ? { column: change.column } : {}),
+			classification: classifyGeneratedMutation(change.kind, change),
+			details: change.details,
+			statements: generateMigrationSQL(
+				{ ...executableDiff, changes: [change] },
+				{ includeDestructive: true, schemaName: schema },
+			),
+			...(change.kind === 'readdress_table' && change.meta?.readdress
+				? { readdress: change.meta.readdress as TableReaddressDeclaration }
+				: {}),
+		}));
 		const material: GeneratorPlanMaterial = {
 			kind: 'schema-differ-generator',
 			changes: [
-				...executableDiff.changes.map((change) => ({
-					kind: change.kind,
-					table: change.table,
-					...(change.column ? { column: change.column } : {}),
-					classification: classifyGeneratedMutation(change.kind),
-					details: change.details,
-					statements: generateMigrationSQL(
-						{ ...executableDiff, changes: [change] },
-						{ includeDestructive: true, schemaName: schema },
-					),
-					...(change.kind === 'readdress_table' && change.meta?.readdress
-						? {
-								readdress: change.meta.readdress as TableReaddressDeclaration,
-							}
-						: {}),
-				})),
+				...ordinaryChanges,
 				...[...loaded.model.tables.values()]
 					.filter((table) => adoptionMismatches.has(table.name))
 					.map((table) => ({
@@ -309,13 +375,101 @@ export async function runGeneratorPlan(input: {
 						replacement: replacementStatements(table, schema),
 					})),
 			],
-			statements: generateMigrationSQL(executableDiff, {
-				includeDestructive: true,
-				schemaName: schema,
-			}),
 		};
-		const plan = asDurableGeneratorPlan(material);
-		const planDigest = transitionPlanDigest(plan);
+		const ordinarySteps = executableDiff.changes.map((change, order) =>
+			createPgsqlGeneratedManagedStep({
+				change,
+				database,
+				schema,
+				stepKey: `generator:${order}`,
+				order,
+				dependencyOrder: order === 0 ? [] : [`generator:${order - 1}`],
+				// biome-ignore lint/style/noNonNullAssertion: order indexes ordinaryChanges by construction (same length).
+				statements: ordinaryChanges[order]!.statements,
+			}),
+		);
+		const lifecycleSteps: NormalizedManagedStep[] = [];
+		for (const change of material.changes.slice(ordinaryChanges.length)) {
+			const base = {
+				order: ordinarySteps.length + lifecycleSteps.length,
+				database,
+				schema,
+				table: change.table,
+			};
+			if (change.kind === 'replace_table' && change.replacement) {
+				const selector = {
+					kind: 'replacement' as const,
+					selector: `table:${change.table}`,
+				};
+				lifecycleSteps.push(
+					lifecycleStep({
+						...base,
+						stepKey: `generator:${base.order}:replacement-retire`,
+						classification: 'removal',
+						statements: change.replacement.retireStatements,
+						selection: selector,
+					}),
+				);
+				lifecycleSteps.push(
+					lifecycleStep({
+						...base,
+						order: base.order + 1,
+						stepKey: `generator:${base.order}:replacement-create`,
+						classification: 'non-destructive',
+						statements: change.replacement.createStatements,
+						selection: selector,
+						requiresVacancy: true,
+					}),
+				);
+				continue;
+			}
+			if (change.kind === 'adopt_table' && change.adoption) {
+				lifecycleSteps.push(
+					lifecycleStep({
+						...base,
+						stepKey: `generator:${base.order}:adoption`,
+						classification: 'non-destructive',
+						selection: { kind: 'adoption', selector: `table:${change.table}` },
+						expectedDeclaration: change.adoption.declaration,
+						expectedCatalogueIdentity: change.adoption.catalogueIdentity,
+						claimKind: 'adopt-intent',
+						lifecycle: { kind: 'adoption', shape: change.adoption.shape },
+					}),
+				);
+				continue;
+			}
+			lifecycleSteps.push(
+				lifecycleStep({
+					...base,
+					stepKey: `generator:${base.order}`,
+					classification: change.classification,
+					...(change.kind === 'adoption_refused'
+						? { lifecycle: { kind: 'adoption-refused' as const } }
+						: {}),
+				}),
+			);
+		}
+		for (const step of ordinarySteps) {
+			if (step.address?.kind !== 'table') continue;
+			const change = executableDiff.changes[step.order];
+			if (change?.kind !== 'readdress_table' || !change.meta?.readdress)
+				continue;
+			Object.assign(step as object, {
+				selection: {
+					kind: 'readdress',
+					selector: `table:${step.address.name}`,
+				},
+				lifecycle: {
+					kind: 'readdress',
+					declaration: change.meta.readdress as TableReaddressDeclaration,
+				},
+			});
+		}
+		const steps = [...ordinarySteps, ...lifecycleSteps];
+		const plan = asDurableGeneratorPlan(material, steps);
+		const planDigest = transitionPlanDigest(
+			plan as unknown as InProcessProvenPlan,
+		);
 		const run: TransitionRunMetadata = {
 			runId: `dbsp-generator-${randomUUID()}`,
 			planDigest,
@@ -334,7 +488,10 @@ export async function runGeneratorPlan(input: {
 				createPgTransitionLessor(pool),
 			);
 			try {
-				await createPgTransitionRunPersister(lease.session).persist(run, plan);
+				await createPgTransitionRunPersister(lease.session).persist(
+					run,
+					plan as unknown as InProcessProvenPlan,
+				);
 			} finally {
 				await lease.release();
 			}
@@ -346,8 +503,8 @@ export async function runGeneratorPlan(input: {
 			persisted: !input.dryRun,
 			runId: input.dryRun ? null : run.runId,
 			planDigest,
-			plan,
-			sql: render(material, planDigest),
+			plan: plan as unknown as InProcessProvenPlan,
+			sql: render({ steps }, planDigest),
 		};
 	} finally {
 		await pool.end();

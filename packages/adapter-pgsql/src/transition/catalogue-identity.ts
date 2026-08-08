@@ -81,6 +81,14 @@ export async function readPgCatalogueIdentity(
 				)
 			).rows[0];
 			break;
+		case 'policy':
+			row = (
+				await executor.query(
+					`SELECT policy.oid::text AS oid FROM pg_catalog.pg_policy policy JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = policy.polrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND policy.polname = $2 AND ($3::text IS NULL OR parent_relation.relname = $3)`,
+					[schemaOf(address), address.name, address.parent?.name ?? null],
+				)
+			).rows[0];
+			break;
 		case 'column': {
 			if (!address.parent)
 				throw new Error(

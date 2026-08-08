@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	acquirePgLedgerLocks,
 	appendPgLedgerClaim,
+	appendPgLedgerClaimGroup,
 	appendPgLedgerResolution,
+	appendPgLedgerResolutionGroup,
 	ensurePgLedger,
 	PgLedgerStorageUnsupportedError,
 	renderCreateLedgerEventTableSql,
@@ -93,6 +95,61 @@ describe('managed ledger storage', () => {
 		expect(query.mock.calls[0]?.[0]).toContain(
 			'INSERT INTO "tenant_a"."dbsp_ledger_reservation"',
 		);
+	});
+
+	it('appends and resolves a root plus contained member as one group transaction unit', async () => {
+		const child = {
+			...claim,
+			eventId: 'claim-child',
+			address: {
+				...claim.address,
+				kind: 'column',
+				name: 'accounts.id',
+				parent: claim.address,
+			},
+			eventKind: 'retire-intent' as const,
+			claimGroupId: 'claim-1',
+			rootClaimId: 'claim-1',
+		};
+		const childReservation: LedgerReservationRow = {
+			...reservation,
+			address: child.address,
+			claimKind: 'retire-intent',
+			rootClaimId: 'claim-1',
+		};
+		const query = vi.fn(async () => ({ rows: [] }));
+		await appendPgLedgerClaimGroup(
+			{ query },
+			{
+				...claim,
+				eventKind: 'retire-intent',
+				claimGroupId: 'claim-1',
+				rootClaimId: 'claim-1',
+			},
+			[child],
+			[{ ...reservation, claimKind: 'retire-intent' }, childReservation],
+		);
+		expect(query).toHaveBeenCalledTimes(2);
+		await appendPgLedgerResolutionGroup(
+			{ query },
+			'claim-1',
+			[
+				{
+					...claim,
+					eventId: 'absent-root',
+					eventKind: 'absent',
+					predecessor: 'claim-1',
+				},
+				{
+					...child,
+					eventId: 'absent-child',
+					eventKind: 'absent',
+					predecessor: 'claim-child',
+				},
+			],
+			[{ address: claim.address }, { address: child.address }],
+		);
+		expect(query).toHaveBeenCalledTimes(4);
 	});
 
 	it('makes a resolution append and its reservation release one statement', async () => {
