@@ -70,7 +70,7 @@ catalog:
   ink-table: ^3.1.0
   jsdom: ^29.1.1
   lucide-react: ^1.23.0
-  mermaid: ^11.16.0
+  mermaid: ^11.16.1
   monaco-editor: ^0.55.1
   # Also the published peer range of @dbsp/cli: 8.21 is where pg records
   # _txStatus, which the adapter reads. Do not raise this floor without a
