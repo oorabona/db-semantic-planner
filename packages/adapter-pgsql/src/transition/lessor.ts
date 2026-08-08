@@ -9,6 +9,7 @@ import type {
 	TransitionQueryClient,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
+import { classifyPgWrite } from './database-writability.js';
 
 export type PgTransitionRunLockResult<T> =
 	| { readonly kind: 'acquired'; readonly value: T }
@@ -196,7 +197,7 @@ export async function withPgTransitionRunLock<T>(
 							| undefined;
 						let queryFailure: unknown;
 						try {
-							result = await query(sql, params);
+							result = await classifyPgWrite(() => query(sql, params));
 						} catch (error) {
 							queryFailure = error;
 						}

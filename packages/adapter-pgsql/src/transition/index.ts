@@ -50,6 +50,15 @@ export {
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 export {
+	assertPgDatabaseWritable,
+	classifyPgDatabaseWritability,
+	classifyPgWrite,
+	DATABASE_READ_ONLY_OUTCOME,
+	isPgDatabaseReadOnlyError,
+	PgDatabaseReadOnlyError,
+	type PgDatabaseWritability,
+} from './database-writability.js';
+export {
 	createPgExecutionContract,
 	evaluatePgExecutionContract,
 	forcePgUtf8Session,
@@ -110,6 +119,10 @@ export {
 	type PgTransitionRunLockResult,
 	withPgTransitionRunLock,
 } from './lessor.js';
+export {
+	validatePgManagedLedgerCurrency,
+	withPgManagedOutcomeRuntime,
+} from './managed-outcome-runtime.js';
 // Most callers should use the …FromLessor helpers, which acquire and release a
 // lease themselves.  Reconciliation already owns an exclusive session, so it
 // uses the client helper to keep its context read on that same live session.
@@ -186,11 +199,13 @@ export {
 export {
 	assembleReinitializePreflightScopeReports,
 	classifyPgLedgerMarker,
+	type PgLedgerScopeCurrency,
 	type PgReinitializePreflightOptions,
 	type PgReinitializePreflightPool,
 	type ReinitializePreflightCheckpoint,
 	type ReinitializePreflightObserver,
 	readPgLedgerMarker,
+	readPgLedgerScopeCurrency,
 	runPgReinitializePreflight,
 	selectReinitializeAdoptionCandidates,
 } from './reinitialize-preflight.js';

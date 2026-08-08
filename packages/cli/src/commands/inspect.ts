@@ -1,6 +1,7 @@
 /** Read managed-ledger state without appending an event or repairing storage. */
 import {
 	createPgTransitionLessor,
+	DBSP_LEDGER_EVENT_TABLE,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerMarker,
@@ -29,6 +30,54 @@ export interface InspectResult {
 		| { readonly kind: 'present'; readonly catalogueIdentity: unknown }
 		| { readonly kind: 'absent' }
 		| { readonly kind: 'catalogue-unavailable'; readonly reason: string };
+	/** Present for an unqualified inspect; no read path creates or repairs it. */
+	readonly addresses?: readonly LedgerAddress[];
+}
+
+function quoteIdentifier(value: string): string {
+	return `"${value.replaceAll('"', '""')}"`;
+}
+
+async function readLedgerAddresses(
+	lease: {
+		query(
+			sql: string,
+			params?: unknown,
+		): Promise<{ rows: readonly Record<string, unknown>[] }>;
+	},
+	ledger: LedgerHome,
+): Promise<readonly LedgerAddress[]> {
+	const schema = ledger.scope === 'database' ? 'dbsp_meta' : ledger.schema;
+	if (!schema) throw new Error('schema ledger target is missing its schema');
+	const rows = await lease.query(
+		`SELECT DISTINCT address_engine, address_database, address_schema, address_parent, address_kind, address_name FROM ${quoteIdentifier(schema)}.${quoteIdentifier(DBSP_LEDGER_EVENT_TABLE)} ORDER BY address_engine, address_database, address_schema, address_kind, address_name`,
+	);
+	return rows.rows.map((row) => {
+		if (
+			typeof row.address_engine !== 'string' ||
+			typeof row.address_database !== 'string' ||
+			typeof row.address_schema !== 'string' ||
+			typeof row.address_kind !== 'string' ||
+			typeof row.address_name !== 'string'
+		)
+			throw new Error('ledger address is unreadable');
+		return {
+			scope: ledger.scope,
+			engine: row.address_engine,
+			database: row.address_database,
+			...(row.address_schema === '' ? {} : { schema: row.address_schema }),
+			...(row.address_parent == null
+				? {}
+				: {
+						parent:
+							typeof row.address_parent === 'string'
+								? JSON.parse(row.address_parent)
+								: (row.address_parent as LedgerAddress),
+					}),
+			kind: row.address_kind as LedgerAddress['kind'],
+			name: row.address_name,
+		};
+	});
 }
 
 function addressParts(
@@ -82,7 +131,26 @@ export async function runInspect(
 					reason: error instanceof Error ? error.message : String(error),
 				};
 			}
-			if (!selector) return { ledger, marker, live: { kind: 'not-requested' } };
+			if (!selector) {
+				try {
+					return {
+						ledger,
+						marker,
+						addresses: await readLedgerAddresses(lease.session, ledger),
+						live: { kind: 'not-requested' },
+					};
+				} catch (error) {
+					return {
+						ledger,
+						marker,
+						addresses: [],
+						live: {
+							kind: 'catalogue-unavailable',
+							reason: error instanceof Error ? error.message : String(error),
+						},
+					};
+				}
+			}
 			const databaseRow = await lease.session.query(
 				'SELECT pg_catalog.current_database() AS database',
 			);

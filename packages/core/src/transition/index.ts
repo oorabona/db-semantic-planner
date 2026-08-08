@@ -107,7 +107,7 @@ export interface DurableApplyInput {
 		| {
 				readonly ok: false;
 				/** Omitted by legacy adapters; treated as a contract refusal. */
-				readonly kind?: 'refused' | 'failed';
+				readonly kind?: 'refused' | 'failed' | 'read-only';
 				readonly detail: string;
 		  }
 	>;

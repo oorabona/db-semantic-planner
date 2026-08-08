@@ -15,6 +15,7 @@ import {
 	DBSP_LEDGER_RESERVATION_TABLE,
 	DBSP_META_SCHEMA,
 } from './constants.js';
+import { classifyPgWrite } from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
 
 const LEDGER_EVENT_KINDS_SQL = [
@@ -389,7 +390,9 @@ export async function appendPgLedgerProgress(
 			`ledger event ${member.eventKind} changes reservation state; use the claim or resolution append primitive`,
 		);
 	}
-	await executor.query(eventInsertSql(target), memberValues(member));
+	await classifyPgWrite(() =>
+		executor.query(eventInsertSql(target), memberValues(member)),
+	);
 }
 
 /**
@@ -464,9 +467,11 @@ export async function appendPgLedgerClaim(
 	});
 	const [lastReservationInsert] = reservationInserts.slice(-1);
 	const leadingReservationInserts = reservationInserts.slice(0, -1);
-	await executor.query(
-		`WITH appended AS (${eventInsertSql(target)})${leadingReservationInserts.map((insert, index) => `, reserved_${index} AS (${insert})`).join('')} ${lastReservationInsert}`,
-		values,
+	await classifyPgWrite(() =>
+		executor.query(
+			`WITH appended AS (${eventInsertSql(target)})${leadingReservationInserts.map((insert, index) => `, reserved_${index} AS (${insert})`).join('')} ${lastReservationInsert}`,
+			values,
+		),
 	);
 }
 
@@ -515,9 +520,11 @@ export async function appendPgLedgerResolution(
 	});
 	const [lastReservationDelete] = reservationDeletes.slice(-1);
 	const leadingReservationDeletes = reservationDeletes.slice(0, -1);
-	await executor.query(
-		`WITH appended AS (${eventInsertSql(target)})${leadingReservationDeletes.map((deletion, index) => `, released_${index} AS (${deletion})`).join('')} ${lastReservationDelete}`,
-		values,
+	await classifyPgWrite(() =>
+		executor.query(
+			`WITH appended AS (${eventInsertSql(target)})${leadingReservationDeletes.map((deletion, index) => `, released_${index} AS (${deletion})`).join('')} ${lastReservationDelete}`,
+			values,
+		),
 	);
 }
 

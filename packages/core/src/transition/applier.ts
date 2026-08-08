@@ -134,7 +134,17 @@ export type DurableApplyRefusalCode =
 	| 'transactional-only-refusal'
 	| 'operation-unavailable'
 	| 'assumption-not-accepted'
-	| 'authorization-write-failed';
+	| 'authorization-write-failed'
+	| 'database-read-only';
+
+function isDatabaseReadOnlyError(error: unknown): boolean {
+	return (
+		error !== null &&
+		typeof error === 'object' &&
+		'code' in error &&
+		(error as { readonly code?: unknown }).code === 'database-read-only'
+	);
+}
 
 function durableRefusal(
 	code: DurableApplyRefusalCode,
@@ -2416,9 +2426,11 @@ export function createApplier(
 				}
 				if (!prepared.ok)
 					return durableRefusal(
-						prepared.kind === 'failed'
-							? 'execution-preflight-failed'
-							: 'execution-contract-refused',
+						prepared.kind === 'read-only'
+							? 'database-read-only'
+							: prepared.kind === 'failed'
+								? 'execution-preflight-failed'
+								: 'execution-contract-refused',
 						prepared.detail,
 					);
 				try {
@@ -2461,7 +2473,9 @@ export function createApplier(
 					return { ...result, durableOutcome: durableExecutionOutcome(result) };
 				} catch (error) {
 					return durableRefusal(
-						'execution-failed',
+						isDatabaseReadOnlyError(error)
+							? 'database-read-only'
+							: 'execution-failed',
 						`execution phase failed: ${errorDetail(error)}`,
 					);
 				}

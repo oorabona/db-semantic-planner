@@ -261,6 +261,16 @@ describe('reinitialize-preflight pure decisions', () => {
 	it('bounds object-lock waits and preserves the PostgreSQL timeout refusal', async () => {
 		const lockTimeout = new Error('canceling statement due to lock timeout');
 		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_is_in_recovery'))
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'off',
+							transaction_read_only: 'off',
+						},
+					],
+				};
 			if (sql.startsWith('SELECT to_regclass'))
 				return { rows: [{ relation: null }] };
 			if (sql.includes('pg_try_advisory_xact_lock'))

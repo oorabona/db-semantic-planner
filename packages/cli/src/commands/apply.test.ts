@@ -82,6 +82,14 @@ describe('dbsp apply contract and policy', () => {
 		]);
 	});
 
+	it('publishes a distinct outcome when PostgreSQL cannot accept writes', () => {
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'database-read-only',
+			34,
+			'target cannot accept managed writes',
+		]);
+	});
+
 	it.each([
 		['operation-failed-not-applied', 'planned', 'operation-failed-not-applied'],
 		['partially-applied', 'partially-applied', 'partially-applied'],

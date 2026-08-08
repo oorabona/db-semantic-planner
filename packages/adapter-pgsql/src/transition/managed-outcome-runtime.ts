@@ -6,13 +6,14 @@ import type {
 import type {
 	LedgerReservationRow,
 	OperationExecutionOutcome,
+	ProvenPlanShape,
 } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import {
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './outcome-protocol.js';
-import { readPgLedgerMarker } from './reinitialize-preflight.js';
+import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 type Queryable = {
 	query(
@@ -55,11 +56,49 @@ async function currentMarker(
 	executor: Queryable,
 	request: ManagedOutcomePreflightRequest,
 ): Promise<'absent' | string | undefined> {
-	const marker = await readPgLedgerMarker(executor, ledgerHome(request));
-	if (marker.kind === 'absent') return 'absent';
-	return marker.kind === 'current'
-		? undefined
-		: `managed claim ${request.claim.claimId} refuses ledger marker ${marker.kind}; run dbsp preflight --reinitialize`;
+	const currency = await readPgLedgerScopeCurrency(
+		executor,
+		ledgerHome(request),
+	);
+	if (currency.kind === 'absent') return 'absent';
+	if (currency.kind === 'current') return undefined;
+	return currency.reason === 'lineage'
+		? `managed claim ${request.claim.claimId} refuses ledger lineage mismatch; run dbsp preflight --reinitialize`
+		: `managed claim ${request.claim.claimId} refuses ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
+}
+
+/**
+ * Check every existing managed ledger before ordinary apply reaches the
+ * execution-contract comparison. A restored plan's physical-target clause is
+ * necessarily different too, but the ledger's fresh-ledger path is the
+ * actionable refusal and must win that ordering.
+ */
+export async function validatePgManagedLedgerCurrency(
+	executor: Queryable,
+	plan: ProvenPlanShape,
+): Promise<string | undefined> {
+	const seen = new Set<string>();
+	for (const step of plan.steps) {
+		const claim = step.managedClaim;
+		if (!claim) continue;
+		const home =
+			claim.address.scope === 'database'
+				? ({ scope: 'database' } as const)
+				: claim.address.schema
+					? ({ scope: 'schema', schema: claim.address.schema } as const)
+					: undefined;
+		if (!home)
+			return `managed claim ${claim.claimId} has no schema ledger; run dbsp preflight --reinitialize`;
+		const key = `${home.scope}:${home.schema ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const currency = await readPgLedgerScopeCurrency(executor, home);
+		if (currency.kind === 'absent' || currency.kind === 'current') continue;
+		return currency.reason === 'lineage'
+			? `managed claim ${claim.claimId} refuses ledger lineage mismatch; run dbsp preflight --reinitialize`
+			: `managed claim ${claim.claimId} refuses ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
+	}
+	return undefined;
 }
 
 function refused(detail: string): OperationExecutionOutcome {

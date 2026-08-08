@@ -26,7 +26,8 @@ export type DurableApplyOutcome =
 	| 'plan-validation-failed'
 	| 'run-id-mismatch'
 	| 'load-failed'
-	| 'plan-digest-mismatch';
+	| 'plan-digest-mismatch'
+	| 'database-read-only';
 
 /** Stable phase-owned result of recovery classification. */
 export type RecoveryOutcome =

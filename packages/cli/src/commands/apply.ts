@@ -7,6 +7,7 @@ import {
 	createPgTransitionPack,
 	preparePgExecutionSession,
 	readTransitionJournal,
+	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -452,6 +453,7 @@ export const APPLY_OUTCOME_CONTRACT = [
 		56,
 		'execution phase failed after preflight; inspect the run with recover',
 	],
+	['database-read-only', 34, 'target cannot accept managed writes'],
 	[
 		'confirmation-required',
 		57,
@@ -473,7 +475,7 @@ export const APPLY_OUTCOME_CONTRACT = [
 export type ApplyOutcome = (typeof APPLY_OUTCOME_CONTRACT)[number][0];
 type ApplyExecutionOutcome = Exclude<
 	ApplyOutcome,
-	'run-busy' | 'policy-invalid' | 'apply-failed'
+	'run-busy' | 'plan-digest-required' | 'policy-invalid' | 'apply-failed'
 >;
 
 const applyExitCodes = new Map<ApplyOutcome, number>(
@@ -734,7 +736,15 @@ export async function runApply(
 					runId,
 					expectedPlanDigest,
 					loadCurrent,
-					prepareExecutionSession: preparePgExecutionSession,
+					prepareExecutionSession: async (session, contract, plan) => {
+						const currency = await validatePgManagedLedgerCurrency(
+							session,
+							plan,
+						);
+						if (currency)
+							return { ok: false, kind: 'refused' as const, detail: currency };
+						return preparePgExecutionSession(session, contract, plan);
+					},
 					policy,
 					target,
 					authorize: async (run, plan, session) => {

@@ -100,6 +100,7 @@ export type ReinitializePreflightScopeOutcome =
 	| 'not-attempted';
 
 export type ReinitializePreflightRefusalCode =
+	| 'database-read-only'
 	| 'reinitialize-preflight-marker-not-current'
 	| 'reinitialize-preflight-advisory-lock'
 	| 'reinitialize-preflight-ownership'

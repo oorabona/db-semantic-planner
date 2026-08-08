@@ -20,6 +20,10 @@ import {
 	DBSP_META_SCHEMA,
 	isDbspLedgerInfrastructureTable,
 } from './constants.js';
+import {
+	assertPgDatabaseWritable,
+	isPgDatabaseReadOnlyError,
+} from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	acquirePgLedgerLocks,
@@ -211,6 +215,20 @@ export interface ReinitializePreflightScopeInspection {
 	readonly accessFailure?: string;
 }
 
+/**
+ * Ordinary mutating commands consume this read-only admission result.  It
+ * intentionally delegates equality to the preflight's recorded-vs-live
+ * comparison, keeping that pair as the only ledger lineage comparison.
+ */
+export type PgLedgerScopeCurrency =
+	| { readonly kind: 'absent'; readonly marker: LedgerMarkerState }
+	| { readonly kind: 'current'; readonly marker: LedgerMarkerState }
+	| {
+			readonly kind: 'not-current';
+			readonly marker: LedgerMarkerState;
+			readonly reason: 'marker' | 'lineage';
+	  };
+
 async function readIdentity(
 	executor: TransitionJournalQueryable,
 	home: LedgerHome,
@@ -264,6 +282,21 @@ function sameIdentity(left: LedgerIdentity, right: LedgerIdentity): boolean {
 		left.databaseOid === right.databaseOid &&
 		left.namespaceOid === right.namespaceOid
 	);
+}
+
+export async function readPgLedgerScopeCurrency(
+	executor: TransitionJournalQueryable,
+	home: LedgerHome,
+): Promise<PgLedgerScopeCurrency> {
+	const marker = await readPgLedgerMarker(executor, home);
+	if (marker.kind === 'absent') return { kind: 'absent', marker };
+	if (marker.kind !== 'current')
+		return { kind: 'not-current', marker, reason: 'marker' };
+	const recorded = await readIdentity(executor, home);
+	const live = await readLiveIdentity(executor, home);
+	return sameIdentity(recorded, live)
+		? { kind: 'current', marker }
+		: { kind: 'not-current', marker, reason: 'lineage' };
 }
 
 async function inspectScope(
@@ -445,6 +478,7 @@ async function processScope(
 	try {
 		await client.query('BEGIN');
 		begun = true;
+		await assertPgDatabaseWritable(client);
 		await client.query(REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL);
 		const lock = await acquirePgLedgerLocks(client, [inspection.home]);
 		if (lock.kind !== 'acquired') {
@@ -540,7 +574,9 @@ async function processScope(
 		return refusal(
 			inspection.home,
 			inspection.marker,
-			failureCode(errorDetail(error)),
+			isPgDatabaseReadOnlyError(error)
+				? 'database-read-only'
+				: failureCode(errorDetail(error)),
 			errorDetail(error),
 			failureStep,
 		);

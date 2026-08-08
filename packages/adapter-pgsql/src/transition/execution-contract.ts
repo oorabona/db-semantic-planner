@@ -19,6 +19,7 @@ import {
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
 } from './constants.js';
+import { assertPgDatabaseWritable } from './database-writability.js';
 import { readPgObservationContextFromClient } from './observation-issuer.js';
 import { createPgTransitionPack } from './pack.js';
 
@@ -550,10 +551,20 @@ export async function preparePgExecutionSession(
 	  }
 	| {
 			readonly ok: false;
-			readonly kind: 'refused' | 'failed';
+			readonly kind: 'refused' | 'failed' | 'read-only';
 			readonly detail: string;
 	  }
 > {
+	try {
+		await assertPgDatabaseWritable(target);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		return {
+			ok: false,
+			kind: detail.startsWith('database-read-only:') ? 'read-only' : 'failed',
+			detail,
+		};
+	}
 	const derivation = validatePgExecutionContractDerivation(plan, contract);
 	if (!derivation.ok)
 		return { ok: false, kind: 'refused', detail: derivation.detail };

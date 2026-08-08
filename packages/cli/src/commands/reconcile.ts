@@ -1,9 +1,11 @@
 /** Resolve only the open managed claims durably linked to one run. */
 import { createHash } from 'node:crypto';
 import {
+	assertPgDatabaseWritable,
 	createPgTransitionPack,
-	readPgLedgerMarker,
+	isPgDatabaseReadOnlyError,
 	readPgLedgerReservationsForExecution,
+	readPgLedgerScopeCurrency,
 	readPgObservationContextFromClient,
 	readTransitionJournal,
 	recoverPgOutcomeClaim,
@@ -31,6 +33,7 @@ export interface ReconcileOptions {
 
 export interface ReconcileResult {
 	readonly outcome:
+		| 'database-read-only'
 		| 'reconcile-claim-selection-unavailable'
 		| 'reconcile-run-unavailable'
 		| 'reconcile-unresolved'
@@ -189,15 +192,26 @@ function unresolvedRecoveryDetail(
 export async function runReconcile(
 	runId: string,
 	options: ReconcileOptions,
+	pool?: import('pg').Pool,
 ): Promise<ReconcileResult> {
-	const { pool } = await createDbConnection(options.db);
+	const owned = pool ?? (await createDbConnection(options.db)).pool;
 	try {
 		const locked = await withPgTransitionRunLock(
-			pool,
+			owned,
 			runId,
 			async (target) => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
+					try {
+						await assertPgDatabaseWritable(lease.session);
+					} catch (error) {
+						if (isPgDatabaseReadOnlyError(error))
+							return {
+								kind: 'database-read-only' as const,
+								detail: error.message,
+							};
+						throw error;
+					}
 					const journal = await readTransitionJournal(lease.session, runId, {
 						ensure: false,
 					});
@@ -242,16 +256,27 @@ export async function runReconcile(
 							addresses: material.map((x) => x.address),
 						};
 					for (const home of homes.values()) {
-						const marker = await readPgLedgerMarker(lease.session, home);
-						if (marker.kind !== 'current')
+						const currency = await readPgLedgerScopeCurrency(
+							lease.session,
+							home,
+						);
+						if (currency.kind !== 'current')
 							return {
 								kind: 'unresolved' as const,
 								addresses: reservations.map((item) => item.address),
-								detail: `ledger marker ${marker.kind}; run dbsp preflight --reinitialize`,
+								detail:
+									currency.kind === 'not-current' &&
+									currency.reason === 'lineage'
+										? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
+										: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
 								recovery: reservations.map((item) => ({
 									address: item.address,
 									outcome: 'blocked' as const,
-									reason: `ledger marker ${marker.kind}; run dbsp preflight --reinitialize`,
+									reason:
+										currency.kind === 'not-current' &&
+										currency.reason === 'lineage'
+											? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
+											: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
 								})),
 							};
 					}
@@ -307,6 +332,13 @@ export async function runReconcile(
 				runId,
 				addresses: locked.value.addresses,
 			};
+		if (locked.value.kind === 'database-read-only')
+			return {
+				outcome: 'database-read-only',
+				runId,
+				addresses: [],
+				detail: locked.value.detail,
+			};
 		if (locked.value.kind === 'unresolved')
 			return {
 				outcome: 'reconcile-unresolved',
@@ -324,7 +356,7 @@ export async function runReconcile(
 	} catch {
 		return { outcome: 'reconcile-run-unavailable', runId, addresses: [] };
 	} finally {
-		await pool.end();
+		if (pool === undefined) await owned.end();
 	}
 }
 

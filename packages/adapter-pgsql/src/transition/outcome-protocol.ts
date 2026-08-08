@@ -24,6 +24,7 @@ import type {
 } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
+import { classifyPgWrite } from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	acquirePgLedgerLocks,
@@ -510,7 +511,7 @@ export async function executePgManagedBundle(
 	);
 	if ('kind' in consumption) return consumption;
 	for (const statement of consumption.statements)
-		await executor.query(statement.sql);
+		await classifyPgWrite(() => executor.query(statement.sql));
 }
 
 async function verifyCreationVacancy(
