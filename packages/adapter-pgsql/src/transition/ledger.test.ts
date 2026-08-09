@@ -78,7 +78,13 @@ function createdLedgerColumnRows() {
 		['dbsp_ledger_event', 'declared_digest', 'text', false],
 		['dbsp_ledger_event', 'observed', 'jsonb', false],
 		['dbsp_ledger_event', 'observed_digest', 'text', false],
+		['dbsp_ledger_event', 'refusal_code', 'text', false],
+		['dbsp_ledger_event', 'refusal_cause', 'text', false],
+		['dbsp_ledger_event', 'refusal_state', 'text', false],
+		['dbsp_ledger_event', 'refusal_withheld_authority', 'text', false],
+		['dbsp_ledger_event', 'refusal_resolving_command', 'text', false],
 		['dbsp_ledger_event', 'controller', 'name', true],
+		['dbsp_ledger_event', 'controller_oid', 'oid', true],
 		['dbsp_ledger_event', 'recorded_at', 'timestamp with time zone', true],
 		['dbsp_ledger_reservation', 'address_engine', 'text', true],
 		['dbsp_ledger_reservation', 'address_database', 'text', true],
@@ -118,6 +124,7 @@ function createdLedgerInvariantConstraintRows() {
 	];
 	return [
 		['dbsp_ledger_event', 'p'],
+		['dbsp_ledger_event', 'c'],
 		['dbsp_ledger_event', 'c'],
 		['dbsp_ledger_event', 'c'],
 		['dbsp_ledger_event', 'c'],
@@ -184,6 +191,8 @@ describe('managed ledger storage', () => {
 		expect(sql).toContain('FOREIGN KEY (address_engine, address_database');
 		expect(sql).toContain('REFERENCES "tenant_a"."dbsp_ledger_event"');
 		expect(sql).toContain("'readdressed-from'");
+		expect(sql).toContain('refusal_code');
+		expect(sql).toContain('dbsp_ledger_refusal_payload');
 		expect(sql).not.toContain('sequence');
 	});
 
@@ -434,8 +443,8 @@ describe('managed ledger storage', () => {
 			[reservation],
 		);
 		const [sql, params] = query.mock.calls[0] ?? [];
-		expect(String(sql)).toContain('r.root_claim_id = $20');
-		expect(params?.[19]).toBe('claim-1');
+		expect(String(sql)).toContain('r.root_claim_id = $25');
+		expect(params?.[24]).toBe('claim-1');
 	});
 
 	it('locks dbsp_meta before schema names and turns a lock error into a refusal', async () => {

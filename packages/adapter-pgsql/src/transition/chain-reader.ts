@@ -37,6 +37,11 @@ interface PgLedgerEventRow {
 	readonly declared_digest: unknown;
 	readonly observed: unknown;
 	readonly observed_digest: unknown;
+	readonly refusal_code: unknown;
+	readonly refusal_cause: unknown;
+	readonly refusal_state: unknown;
+	readonly refusal_withheld_authority: unknown;
+	readonly refusal_resolving_command: unknown;
 	readonly controller: unknown;
 	readonly recorded_at: unknown;
 }
@@ -67,6 +72,9 @@ function addressParameters(address: LedgerAddress): readonly unknown[] {
 		address.name,
 	];
 }
+
+const EVENT_COLUMNS =
+	'event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, refusal_code, refusal_cause, refusal_state, refusal_withheld_authority, refusal_resolving_command, controller::text AS controller, recorded_at::text AS recorded_at';
 
 function asString(value: unknown, column: string): string {
 	if (typeof value !== 'string')
@@ -121,6 +129,29 @@ function memberFromRow(
 	const rootClaimId = nullableString(row.root_claim_id, 'root_claim_id');
 	const pairId = nullableString(row.pair_id, 'pair_id');
 	const recordedAt = nullableString(row.recorded_at, 'recorded_at');
+	const refusalCode = nullableString(row.refusal_code, 'refusal_code');
+	const refusalCause = nullableString(row.refusal_cause, 'refusal_cause');
+	const refusalState = nullableString(row.refusal_state, 'refusal_state');
+	const refusalWithheldAuthority = nullableString(
+		row.refusal_withheld_authority,
+		'refusal_withheld_authority',
+	);
+	const refusalResolvingCommand = nullableString(
+		row.refusal_resolving_command,
+		'refusal_resolving_command',
+	);
+	const refusalValues = [
+		refusalCode,
+		refusalCause,
+		refusalState,
+		refusalWithheldAuthority,
+		refusalResolvingCommand,
+	];
+	if (
+		refusalValues.some((value) => value === undefined) &&
+		refusalValues.some((value) => value !== undefined)
+	)
+		throw new Error('ledger refusal protocol is unreadable');
 	return {
 		eventId: asString(row.event_id, 'event_id'),
 		...(executionId === undefined ? {} : { executionId }),
@@ -157,6 +188,17 @@ function memberFromRow(
 		...(pairId === undefined ? {} : { pairId }),
 		...(declared === undefined ? {} : { declared }),
 		...(observed === undefined ? {} : { observed }),
+		...(refusalCode === undefined
+			? {}
+			: {
+					refusal: {
+						code: refusalCode as `ERR-${number}`,
+						cause: refusalCause!,
+						state: refusalState as 'unknown' | 'managed' | 'absent',
+						withheldAuthority: refusalWithheldAuthority!,
+						resolvingCommand: refusalResolvingCommand!,
+					},
+				}),
 		controller: asString(row.controller, 'controller'),
 		...(recordedAt === undefined ? {} : { recordedAt }),
 	};
@@ -195,7 +237,7 @@ export async function readPgLedgerAddressChain(
 			`ledger schema ${String(ledger.schema)} does not match address schema ${String(address.schema)} for ${address.name}`,
 		);
 	const result = await executor.query(
-		`SELECT event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, controller::text AS controller, recorded_at::text AS recorded_at FROM ${eventTable(ledger)} WHERE address_engine = $1 AND address_database = $2 AND address_schema = $3 AND address_parent = $4::jsonb AND address_kind = $5 AND address_name = $6`,
+		`SELECT ${EVENT_COLUMNS} FROM ${eventTable(ledger)} WHERE address_engine = $1 AND address_database = $2 AND address_schema = $3 AND address_parent = $4::jsonb AND address_kind = $5 AND address_name = $6`,
 		addressParameters(address),
 	);
 	const events = result.rows.map((row) =>
@@ -208,4 +250,20 @@ export async function readPgLedgerAddressChain(
 		events,
 		...(terminalMember === undefined ? {} : { terminalMember }),
 	};
+}
+
+/** Read the durable PostgreSQL role identity for the selected terminal event. */
+export async function readPgLedgerControllerOid(
+	executor: TransitionJournalQueryable,
+	ledger: LedgerHome,
+	eventId: string,
+): Promise<string> {
+	const result = await executor.query(
+		`SELECT controller_oid::text AS controller_oid FROM ${eventTable(ledger)} WHERE event_id = $1`,
+		[eventId],
+	);
+	const value = result.rows[0]?.controller_oid;
+	if (typeof value !== 'string')
+		throw new Error('ledger controller role identity is unreadable');
+	return value;
 }

@@ -13,6 +13,7 @@ export {
 	findPgLedgerTerminalMember,
 	type PgLedgerAddressChain,
 	readPgLedgerAddressChain,
+	readPgLedgerControllerOid,
 } from './chain-reader.js';
 export {
 	ADD_CHECK_RULE_ID,

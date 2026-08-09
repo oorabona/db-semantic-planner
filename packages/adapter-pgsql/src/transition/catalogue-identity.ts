@@ -44,7 +44,7 @@ export async function readPgCatalogueIdentity(
 		case 'index':
 			row = (
 				await executor.query(
-					`SELECT index_relation.oid::text AS oid FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2 AND index_relation.relkind = 'i' AND ($3::text IS NULL OR parent_relation.relname = $3)`,
+					`SELECT index_relation.oid::text AS oid FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2 AND index_relation.relkind IN ('i', 'I') AND ($3::text IS NULL OR parent_relation.relname = $3)`,
 					[schemaOf(address), address.name, address.parent?.name ?? null],
 				)
 			).rows[0];

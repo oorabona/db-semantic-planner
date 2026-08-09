@@ -8,7 +8,11 @@ import {
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
-import type { LedgerAddress, LedgerPayload } from '@dbsp/types';
+import {
+	type LedgerAddress,
+	type LedgerPayload,
+	REFUSAL_VOCABULARY,
+} from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import {
@@ -321,7 +325,13 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			runRelease('pending', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: 'release refuses pending address pending',
+			address: address(schema, databaseId, 'pending'),
+			detail: REFUSAL_VOCABULARY['ERR-08'].cause,
+			refusal: {
+				code: 'ERR-08',
+				state: 'managed',
+				...REFUSAL_VOCABULARY['ERR-08'],
+			},
 		});
 		await adopt(address(schema, databaseId, 'blocked'));
 		await leaveOpenClaim(address(schema, databaseId, 'blocked'), true);
@@ -329,7 +339,13 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			runRelease('blocked', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: 'release refuses blocked address blocked',
+			address: address(schema, databaseId, 'blocked'),
+			detail: REFUSAL_VOCABULARY['ERR-08'].cause,
+			refusal: {
+				code: 'ERR-08',
+				state: 'managed',
+				...REFUSAL_VOCABULARY['ERR-08'],
+			},
 		});
 		await adopt(address(schema, databaseId, 'other_controller'));
 		await pool.query(
@@ -339,7 +355,13 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			runRelease('other_controller', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: expect.stringContaining('address owned by dbsp_other_controller'),
+			address: address(schema, databaseId, 'other_controller'),
+			detail: REFUSAL_VOCABULARY['ERR-05'].cause,
+			refusal: {
+				code: 'ERR-05',
+				state: 'managed',
+				...REFUSAL_VOCABULARY['ERR-05'],
+			},
 		});
 		await adopt(address(schema, databaseId, 'lineage'));
 		await pool.query(
@@ -349,7 +371,13 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			runRelease('lineage', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: 'release refuses lineage not-current',
+			address: address(schema, databaseId, 'lineage'),
+			detail: REFUSAL_VOCABULARY['ERR-06'].cause,
+			refusal: {
+				code: 'ERR-06',
+				state: 'unknown',
+				...REFUSAL_VOCABULARY['ERR-06'],
+			},
 		});
 		await pool.query(
 			`UPDATE ${quote(schema)}.dbsp_ledger_identity SET database_oid = (SELECT oid::text FROM pg_catalog.pg_database WHERE datname = current_database())`,

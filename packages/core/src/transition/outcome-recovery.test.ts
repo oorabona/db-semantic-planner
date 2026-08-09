@@ -221,6 +221,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 			kind: 'outcome-recovery-pending',
 			address,
 			reason: 'connection terminated by administrator command',
+			reasonCode: 'catalogue-unavailable',
 		});
 	});
 });

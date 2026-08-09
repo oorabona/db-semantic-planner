@@ -100,6 +100,19 @@ export interface LedgerPayload {
 	readonly digest: string;
 }
 
+/**
+ * The durable, operator-facing explanation attached to a `refused` terminal.
+ * The address itself remains in the event's canonical address columns; these
+ * values preserve the other facts needed to explain a historic refusal.
+ */
+export interface LedgerRefusal {
+	readonly code: `ERR-${number}`;
+	readonly cause: string;
+	readonly state: 'unknown' | 'managed' | 'absent';
+	readonly withheldAuthority: string;
+	readonly resolvingCommand: string;
+}
+
 export interface LedgerChainMember {
 	readonly eventId: string;
 	readonly executionId?: string;
@@ -113,6 +126,8 @@ export interface LedgerChainMember {
 	readonly pairId?: string;
 	readonly declared?: LedgerPayload;
 	readonly observed?: LedgerPayload;
+	/** Present exactly on a durable `refused` terminal. */
+	readonly refusal?: LedgerRefusal;
 	readonly controller: string;
 	readonly recordedAt?: string;
 }

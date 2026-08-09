@@ -13,7 +13,7 @@ import type {
 	OutcomeRecoveryInput,
 	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
-import { sameLedgerAddress } from '@dbsp/types';
+import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { admitRecordedIdentity } from './declaration.js';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
 import { stableJson } from './stable-json.js';
@@ -209,11 +209,13 @@ export function admitOutcomeClaim(
 function recoveryPending(
 	input: OutcomeRecoveryInput,
 	reason: string,
+	reasonCode?: 'catalogue-unavailable',
 ): OutcomeRecoveryClassification {
 	return {
 		kind: 'outcome-recovery-pending',
 		address: input.projection.address,
 		reason,
+		...(reasonCode === undefined ? {} : { reasonCode }),
 	};
 }
 
@@ -260,6 +262,14 @@ function appendRecovery(
 			rootClaimId: claim.event.eventId,
 			reason,
 			readBack,
+			...(eventKind === 'refused'
+				? {
+						refusal: refusalFor('ERR-11', {
+							address: projection.address,
+							state: projection.stableState,
+						}),
+					}
+				: {}),
 		},
 	};
 }
@@ -290,7 +300,7 @@ export async function classifyOutcomeRecovery(
 	// read remains a pending claim, including a claim that has not reached DDL.
 	const readBack = await input.catalogue(projection.address);
 	if (readBack.kind === 'catalogue-unavailable')
-		return recoveryPending(input, readBack.reason);
+		return recoveryPending(input, readBack.reason, 'catalogue-unavailable');
 
 	const claim = projection.openClaim;
 	if (claim.phase === 'indeterminate') {

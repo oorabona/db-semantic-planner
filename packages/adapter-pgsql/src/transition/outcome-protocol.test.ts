@@ -3,6 +3,7 @@ import type {
 	LedgerReservationRow,
 	OutcomeClaimPlan,
 } from '@dbsp/types';
+import { refusalFor } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	appendPgOutcomeResolution,
@@ -239,6 +240,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			address,
 			eventKind: 'refused',
 			predecessor: 'resolution-retry',
+			refusal: refusalFor('ERR-11', { address, state: 'unknown' }),
 		};
 		const row = (value: LedgerChainMember) => ({
 			event_id: value.eventId,
@@ -256,6 +258,11 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			declared_digest: null,
 			observed: null,
 			observed_digest: null,
+			refusal_code: value.refusal?.code ?? null,
+			refusal_cause: value.refusal?.cause ?? null,
+			refusal_state: value.refusal?.state ?? null,
+			refusal_withheld_authority: value.refusal?.withheldAuthority ?? null,
+			refusal_resolving_command: value.refusal?.resolvingCommand ?? null,
 			controller: value.controller,
 			recorded_at: null,
 		});
@@ -305,6 +312,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			address,
 			eventKind: 'refused',
 			predecessor: 'failpoint-retry',
+			refusal: refusalFor('ERR-11', { address, state: 'unknown' }),
 		};
 		let failures = 1;
 		let appended = 0;

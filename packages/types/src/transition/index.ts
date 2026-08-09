@@ -20,4 +20,5 @@ export * from './plan.js';
 export * from './policy.js';
 export * from './projection.js';
 export * from './proof.js';
+export * from './refusal.js';
 export * from './resource.js';

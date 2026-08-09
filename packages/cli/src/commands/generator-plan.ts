@@ -177,6 +177,34 @@ function assessment(): PlanAssessment {
 	};
 }
 
+/** `SchemaChange.table` is overloaded for non-table resources; never use it alone. */
+function changeTargetsDeclaredTable(
+	change: SchemaDiff['changes'][number],
+	table: string,
+): boolean {
+	if (change.table !== table) return false;
+	return !new Set([
+		'create_extension',
+		'drop_extension',
+		'create_enum',
+		'drop_enum',
+		'alter_enum_add_value',
+		'create_sequence',
+		'drop_sequence',
+		'alter_sequence',
+	]).has(change.kind);
+}
+
+function requiredAdoptionIdentity(
+	identities: ReadonlyMap<string, CatalogueIdentity>,
+	table: string,
+): CatalogueIdentity {
+	const identity = identities.get(table);
+	if (!identity)
+		throw new Error(`declared adoption for ${table} has no live identity`);
+	return identity;
+}
+
 function asDurableGeneratorPlan(
 	material: GeneratorPlanMaterial,
 	steps: readonly NormalizedManagedStep[],
@@ -260,6 +288,13 @@ export async function runGeneratorPlan(input: {
 		const declaredLifecycleWork = [...loaded.model.tables.values()].some(
 			(table) => table.adopt === true || table.replace === true,
 		);
+		const contradictoryLifecycle = [...loaded.model.tables.values()].find(
+			(table) => table.adopt === true && table.replace === true,
+		);
+		if (contradictoryLifecycle)
+			throw new Error(
+				`declared lifecycle for ${contradictoryLifecycle.name} cannot set adopt and replace together`,
+			);
 		if (diff.changes.length === 0 && !declaredLifecycleWork) {
 			return {
 				compareKind: 'no-drift',
@@ -279,13 +314,10 @@ export async function runGeneratorPlan(input: {
 				.filter(
 					(table) =>
 						table.adopt === true &&
-						diff.changes.some((change) => change.table === table.name),
+						diff.changes.some((change) =>
+							changeTargetsDeclaredTable(change, table.name),
+						),
 				)
-				.map((table) => table.name),
-		);
-		const replacementTables = new Set(
-			[...loaded.model.tables.values()]
-				.filter((table) => table.replace === true)
 				.map((table) => table.name),
 		);
 		const database = await databaseId(pool);
@@ -312,8 +344,11 @@ export async function runGeneratorPlan(input: {
 			...diff,
 			changes: diff.changes.filter(
 				(change) =>
-					!adoptionMismatches.has(change.table) &&
-					!replacementTables.has(change.table),
+					![...loaded.model.tables.values()].some(
+						(table) =>
+							(table.adopt === true || table.replace === true) &&
+							changeTargetsDeclaredTable(change, table.name),
+					),
 			),
 		};
 		const ordinaryChanges = executableDiff.changes.map((change) => ({
@@ -350,7 +385,9 @@ export async function runGeneratorPlan(input: {
 					.filter(
 						(table) =>
 							table.adopt === true &&
-							!diff.changes.some((change) => change.table === table.name),
+							!diff.changes.some((change) =>
+								changeTargetsDeclaredTable(change, table.name),
+							),
 					)
 					.map((table) => ({
 						kind: 'adopt_table',
@@ -361,7 +398,10 @@ export async function runGeneratorPlan(input: {
 						adoption: {
 							declaration: adoptionDeclaration(table),
 							shape: table,
-							catalogueIdentity: adoptionIdentities.get(table.name)!,
+							catalogueIdentity: requiredAdoptionIdentity(
+								adoptionIdentities,
+								table.name,
+							),
 						},
 					})),
 				...[...loaded.model.tables.values()]

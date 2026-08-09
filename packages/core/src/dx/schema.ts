@@ -1558,6 +1558,13 @@ function buildTables(
 	for (const tableName of tableNames) {
 		const tableDef = definition[tableName];
 		if (!tableDef) continue;
+		if (
+			constraints?.[tableName]?.adopt === true &&
+			constraints[tableName].replace === true
+		)
+			throw new Error(
+				`schema table ${tableName} cannot set adopt and replace together`,
+			);
 
 		const { columns, foreignKeys, primaryKey } = buildColumnsForTable(
 			tableName,

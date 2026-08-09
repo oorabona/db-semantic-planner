@@ -307,7 +307,7 @@ chain, otherwise the stable state.
 
 | Entity | Change | Migration needed |
 |--------|--------|------------------|
-| per-schema ledger | new in each managed schema: address columns, per-kind `catalogue_identity`, `event_kind` over the closed set, `predecessor`, `pair_id`, `declared jsonb` + digest, `observed jsonb` + digest, `controller`, `recorded_at`; `UNIQUE (address…, predecessor) NULLS NOT DISTINCT`; same-address predecessor reference; terminal-member index | Yes |
+| per-schema ledger | new in each managed schema: address columns, per-kind `catalogue_identity`, `event_kind` over the closed set, `predecessor`, `pair_id`, `declared jsonb` + digest, `observed jsonb` + digest, durable refusal fields, `controller`, `recorded_at`; `UNIQUE (address…, predecessor) NULLS NOT DISTINCT`; same-address predecessor reference; terminal-member index (fork-prevention constraint support, not a terminal-only hot read) | Yes |
 | reservation relation per ledger | one row per reserved address (PK), carrying claim kind, execution, pair id; inserted with the claim append, deleted with its resolution, same transactions; ownership and grants as the ledger | Yes |
 | `dbsp_meta` ledger | the same shape, for database-scoped addresses | Yes |
 | ledger identity + shape marker | database and namespace identity, and a version marker, per ledger | Yes |

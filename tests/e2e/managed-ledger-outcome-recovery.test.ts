@@ -13,7 +13,10 @@ import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
 import { armOneShotInsertFailpoint } from './harness/index.js';
-import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import {
+	fixtureOutcomeClaim,
+	fixtureRefusedResolutionMember,
+} from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
@@ -231,12 +234,12 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 		const input = makeClaim(schema, 'equal_retry', 'equal-retry-claim');
 		await openExecuting(pool, input);
 		const target = { scope: 'schema' as const, schema };
-		const member = {
+		const member = fixtureRefusedResolutionMember({
 			eventId: 'equal-retry-refused',
 			address: input.plan.address,
-			eventKind: 'refused' as const,
 			predecessor: 'equal-retry-claim-executing',
-		};
+			code: 'ERR-11',
+		});
 		await expect(
 			appendPgOutcomeResolution(
 				pool,

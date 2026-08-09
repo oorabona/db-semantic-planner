@@ -25,6 +25,7 @@ import type {
 	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
 } from '@dbsp/types';
+import { refusalFor } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { classifyPgWrite } from './database-writability.js';
@@ -128,6 +129,8 @@ export interface PgOutcomeResolution {
 		| 'executing'
 	>;
 	readonly observed?: LedgerChainMember['observed'];
+	/** Required by the ledger writer when this resolution is `refused`. */
+	readonly refusal?: LedgerChainMember['refusal'];
 }
 
 export interface PgOutcomeExecutionRequest {
@@ -505,6 +508,9 @@ function resolutionMember(
 		...(resolution.observed === undefined
 			? {}
 			: { observed: resolution.observed }),
+		...(resolution.refusal === undefined
+			? {}
+			: { refusal: resolution.refusal }),
 	};
 }
 
@@ -522,6 +528,9 @@ function recoveryResolutionMember(
 		address,
 		eventKind: resolution.eventKind,
 		predecessor: resolution.predecessor,
+		...(resolution.refusal === undefined
+			? {}
+			: { refusal: resolution.refusal }),
 		...(readBack.kind === 'present'
 			? {
 					catalogueIdentity: readBack.catalogueIdentity,
@@ -592,7 +601,8 @@ function sameResolutionPayload(
 		canonicalJson(left.declared ?? null) ===
 			canonicalJson(right.declared ?? null) &&
 		canonicalJson(left.observed ?? null) ===
-			canonicalJson(right.observed ?? null)
+			canonicalJson(right.observed ?? null) &&
+		canonicalJson(left.refusal ?? null) === canonicalJson(right.refusal ?? null)
 	);
 }
 
@@ -939,6 +949,7 @@ async function refuseClaim(
 	request: PgOutcomeClaimRequest,
 	eventId: string,
 	predecessor: string,
+	code: 'ERR-02' | 'ERR-05',
 ): Promise<void> {
 	await appendPgLedgerResolution(
 		executor,
@@ -948,6 +959,10 @@ async function refuseClaim(
 			{
 				eventId,
 				eventKind: 'refused',
+				refusal: refusalFor(code, {
+					address: claim.plan.address,
+					state: claim.stableStateBeforeClaim,
+				}),
 			},
 			predecessor,
 		),
@@ -991,6 +1006,7 @@ async function runPgTransactionalOutcomeOnSession(
 				request,
 				request.resolution.eventId,
 				request.plan.claimId,
+				'ERR-05',
 			);
 			if (ownsTransaction) await executor.query('COMMIT');
 			begun = false;
@@ -1008,6 +1024,7 @@ async function runPgTransactionalOutcomeOnSession(
 				request,
 				request.resolution.eventId,
 				request.plan.claimId,
+				'ERR-02',
 			);
 			if (ownsTransaction) await executor.query('COMMIT');
 			begun = false;
@@ -1086,6 +1103,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 				request,
 				request.resolution.eventId,
 				request.plan.claimId,
+				'ERR-02',
 			);
 			await executor.query('COMMIT');
 			return vacancy;

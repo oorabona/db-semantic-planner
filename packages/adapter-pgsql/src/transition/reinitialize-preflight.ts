@@ -788,7 +788,7 @@ async function readChainAddresses(
 			const marker = await readPgLedgerMarker(client, home);
 			if (marker.kind !== 'current') continue;
 			const rows = await client.query(
-				`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name FROM ${qualified(home, DBSP_LEDGER_EVENT_TABLE)}`,
+				`SELECT DISTINCT address_engine, address_database, address_schema, address_parent, address_kind, address_name FROM ${qualified(home, DBSP_LEDGER_EVENT_TABLE)}`,
 			);
 			for (const row of rows.rows) {
 				if (

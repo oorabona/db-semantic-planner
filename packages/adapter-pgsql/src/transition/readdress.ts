@@ -9,6 +9,7 @@ import type {
 	ResourceAddress,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
+import { refusalFor } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
@@ -399,6 +400,10 @@ export async function recoverPgReaddressPair(
 					eventKind: 'refused',
 					predecessor: reservation.rootClaimId,
 					pairId: input.pairId,
+					refusal: refusalFor('ERR-11', {
+						address: reservation.address,
+						state: 'unknown',
+					}),
 				},
 				reservation.rootClaimId,
 				[reservation],

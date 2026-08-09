@@ -11,6 +11,7 @@ import {
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
+import { fixtureRefusedResolutionMember } from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 
@@ -189,12 +190,12 @@ describe('managed ledger effects closures (SC-11, SC-14)', () => {
 			await appendPgLedgerResolution(
 				pool,
 				{ scope: 'schema', schema },
-				{
+				fixtureRefusedResolutionMember({
 					eventId: `table_refused_${schema}`,
 					address: tableAddress,
-					eventKind: 'refused',
 					predecessor: `table_claim_${schema}`,
-				},
+					code: 'ERR-11',
+				}),
 				`table_claim_${schema}`,
 				[{ address: tableAddress }],
 			);

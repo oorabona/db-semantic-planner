@@ -147,11 +147,22 @@ const PG_LEDGER_TABLE_DEFINITIONS: readonly LedgerTableDefinition[] = [
 			{ name: 'declared_digest', type: 'text', nullable: NULLABLE },
 			{ name: 'observed', type: 'jsonb', nullable: NULLABLE },
 			{ name: 'observed_digest', type: 'text', nullable: NULLABLE },
+			{ name: 'refusal_code', type: 'text', nullable: NULLABLE },
+			{ name: 'refusal_cause', type: 'text', nullable: NULLABLE },
+			{ name: 'refusal_state', type: 'text', nullable: NULLABLE },
+			{ name: 'refusal_withheld_authority', type: 'text', nullable: NULLABLE },
+			{ name: 'refusal_resolving_command', type: 'text', nullable: NULLABLE },
 			{
 				name: 'controller',
 				type: 'name',
 				nullable: NOT_NULL,
 				defaultSql: 'current_user',
+			},
+			{
+				name: 'controller_oid',
+				type: 'oid',
+				nullable: NOT_NULL,
+				defaultSql: 'current_user::regrole::oid',
 			},
 			{
 				name: 'recorded_at',
@@ -180,6 +191,12 @@ const PG_LEDGER_TABLE_DEFINITIONS: readonly LedgerTableDefinition[] = [
 				name: 'dbsp_ledger_observed_digest_pair',
 				type: 'c',
 				render: () => 'CHECK ((observed IS NULL) = (observed_digest IS NULL))',
+			},
+			{
+				name: 'dbsp_ledger_refusal_payload',
+				type: 'c',
+				render: () =>
+					"CHECK ((event_kind = 'refused') = (refusal_code IS NOT NULL AND refusal_cause IS NOT NULL AND refusal_state IS NOT NULL AND refusal_withheld_authority IS NOT NULL AND refusal_resolving_command IS NOT NULL))",
 			},
 			{
 				name: 'dbsp_ledger_event_address_event_unique',
@@ -723,11 +740,16 @@ function memberValues(member: LedgerWriteMember): readonly unknown[] {
 		member.declared?.digest ?? null,
 		member.observed ? JSON.stringify(member.observed.value) : null,
 		member.observed?.digest ?? null,
+		member.refusal?.code ?? null,
+		member.refusal?.cause ?? null,
+		member.refusal?.state ?? null,
+		member.refusal?.withheldAuthority ?? null,
+		member.refusal?.resolvingCommand ?? null,
 	];
 }
 
 function eventInsertSql(target: PgLedgerTarget): string {
-	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18::jsonb, $19) RETURNING event_id`;
+	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, refusal_code, refusal_cause, refusal_state, refusal_withheld_authority, refusal_resolving_command) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18::jsonb, $19, $20, $21, $22, $23, $24) RETURNING event_id`;
 }
 
 function renderLedgerColumn(column: LedgerColumnDefinition): string {
@@ -1078,6 +1100,14 @@ export async function appendPgLedgerResolution(
 ): Promise<void> {
 	assertTargetMatchesAddress(target, member);
 	ensureResolutionEvent(member.eventKind);
+	if (member.eventKind === 'refused' && member.refusal === undefined)
+		throw new Error(
+			`ledger refusal ${member.eventId} is missing its durable refusal protocol`,
+		);
+	if (member.eventKind !== 'refused' && member.refusal !== undefined)
+		throw new Error(
+			`ledger event ${member.eventId} carries a refusal protocol but is not refused`,
+		);
 	if (reservations.length === 0) {
 		throw new Error(
 			`ledger resolution ${member.eventId} has an empty effects closure`,

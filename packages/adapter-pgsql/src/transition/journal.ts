@@ -860,6 +860,15 @@ function runMetadataFromRow(
 			: typeof started_at === 'string'
 				? started_at
 				: String(started_at);
+	const normalizedReplayability =
+		replayability === null || replayability === undefined
+			? 'replayable'
+			: replayability;
+	if (
+		normalizedReplayability !== 'non-replayable-generator-removal' &&
+		normalizedReplayability !== 'replayable'
+	)
+		throw new Error('dbsp transition run row has an invalid replayability');
 	return {
 		runId: run_id,
 		planDigest: plan_digest,
@@ -867,10 +876,9 @@ function runMetadataFromRow(
 		databaseId: database_id,
 		coreVersion: core_version,
 		startedAt,
-		...(replayability === 'non-replayable-generator-removal' ||
-		replayability === 'replayable'
-			? { replayability }
-			: {}),
+		...(replayability === null || replayability === undefined
+			? {}
+			: { replayability: normalizedReplayability }),
 	};
 }
 

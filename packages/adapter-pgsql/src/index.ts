@@ -328,6 +328,7 @@ export {
 	readPgCatalogueIdentity,
 	readPgExecutionTargetFromClient,
 	readPgLedgerAddressChain,
+	readPgLedgerControllerOid,
 	readPgLedgerMarker,
 	readPgLedgerReservationsForExecution,
 	readPgLedgerScopeCurrency,

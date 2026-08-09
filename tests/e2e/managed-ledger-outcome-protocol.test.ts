@@ -16,7 +16,10 @@ import type {
 } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
-import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import {
+	fixtureOutcomeClaim,
+	fixtureRefusedResolutionMember,
+} from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
@@ -438,12 +441,12 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 			await appendPgLedgerResolution(
 				client,
 				{ scope: 'schema', schema },
-				{
+				fixtureRefusedResolutionMember({
 					eventId: 'token-two-refused',
 					address: second.plan.address,
-					eventKind: 'refused',
 					predecessor: second.plan.claimId,
-				},
+					code: 'ERR-11',
+				}),
 				second.plan.claimId,
 				second.plan.address
 					? claim(schema, 'token_two', 'token-two').reservations

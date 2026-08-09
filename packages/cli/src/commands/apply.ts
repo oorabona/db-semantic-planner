@@ -24,11 +24,13 @@ import type {
 	ApplyPolicy,
 	ApplyResult,
 	AssumptionAcceptance,
+	LedgerAddress,
 	ResourceAddress,
 	ResourceSelector,
 	TransitionRunAuthorization,
 	TrustRoot,
 } from '@dbsp/types';
+import { REFUSAL_VOCABULARY } from '@dbsp/types';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
@@ -46,6 +48,11 @@ import {
 	type PlanResult,
 	runPlan,
 } from './plan.js';
+import {
+	formatPreAppendRefusalHuman,
+	type PreAppendRefusal,
+	preAppendRefusalFor,
+} from './refusal-output.js';
 
 export type ApplyFormat = 'text' | 'json';
 export interface ApplyOptions {
@@ -577,19 +584,16 @@ export function outcomeForApplyResult(
 	return 'context-mismatch';
 }
 
-function formatApplyHuman(result: {
+export function formatApplyHuman(result: {
 	readonly outcome: string;
 	readonly runId: string;
 	readonly result?: ApplyResult;
-	readonly refusal?: {
-		readonly cause: string;
-		readonly state: string;
-		readonly withheldAuthority: string;
-		readonly resolvingCommand: string;
-	};
+	readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
 }): string {
 	const line = `${result.outcome}: ${result.runId}`;
 	if (result.refusal) {
+		if ('address' in result.refusal)
+			return formatPreAppendRefusalHuman(line, result.refusal);
 		return [
 			line,
 			`refusal: ${result.refusal.cause}`,
@@ -628,6 +632,17 @@ function acceptanceMatches(
 	);
 }
 
+type RecordedPlanRefusal = {
+	readonly cause: string;
+	readonly state: 'recorded-plan';
+	readonly withheldAuthority: string;
+	readonly resolvingCommand: string;
+};
+
+function recordedPlanRefusal(): RecordedPlanRefusal {
+	return { ...REFUSAL_VOCABULARY['ERR-10'], state: 'recorded-plan' };
+}
+
 export type ApplyCommandResult = (
 	| {
 			readonly outcome: Exclude<
@@ -640,6 +655,7 @@ export type ApplyCommandResult = (
 			>;
 			readonly runId: string;
 			readonly result: ApplyResult;
+			readonly refusal?: PreAppendRefusal;
 	  }
 	| {
 			readonly outcome: 'run-busy' | 'plan-digest-required';
@@ -649,12 +665,7 @@ export type ApplyCommandResult = (
 			/** ERR-10: a removal-bearing generator run cannot be replayed by id. */
 			readonly outcome: 'non-replayable-generator-run';
 			readonly runId: string;
-			readonly refusal: {
-				readonly cause: 'non-replayable-generator-removal';
-				readonly state: 'recorded-plan';
-				readonly withheldAuthority: 'recorded-plan removal execution';
-				readonly resolvingCommand: 'dbsp apply';
-			};
+			readonly refusal: RecordedPlanRefusal;
 	  }
 ) & { readonly cleanupError?: string };
 
@@ -686,6 +697,53 @@ function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
 		(plan as { generator?: { kind?: unknown } }).generator?.kind ===
 			'schema-differ-generator'
 	);
+}
+
+/** Every mapped command refusal needs a real plan address; never invent one. */
+function firstPlanAddress(plan: unknown): LedgerAddress | undefined {
+	if (plan === null || typeof plan !== 'object' || !('steps' in plan))
+		return undefined;
+	const steps = (plan as { readonly steps?: unknown }).steps;
+	if (!Array.isArray(steps)) return undefined;
+	for (const step of steps) {
+		if (step === null || typeof step !== 'object') continue;
+		const candidate = step as {
+			readonly managedClaim?: { readonly address?: LedgerAddress };
+			readonly address?: LedgerAddress;
+			readonly closure?: { readonly root?: LedgerAddress };
+		};
+		const address =
+			candidate.managedClaim?.address ??
+			candidate.address ??
+			candidate.closure?.root;
+		if (address) return address;
+	}
+	return undefined;
+}
+
+function applyPreAppendRefusal(
+	outcome: ApplyOutcome,
+	plan: unknown,
+	result?: ApplyResult,
+): PreAppendRefusal | undefined {
+	const address = firstPlanAddress(plan);
+	if (!address) return undefined;
+	if (outcome === 'transactional-only-refusal')
+		return preAppendRefusalFor('ERR-01', { address, state: 'unknown' });
+	if (outcome === 'database-read-only')
+		return preAppendRefusalFor('ERR-07', { address, state: 'unknown' });
+	if (
+		outcome === 'execution-contract-refused' &&
+		result?.assessment.reasons[0]?.detail?.startsWith(
+			'managed-ledger-not-current:',
+		)
+	)
+		return preAppendRefusalFor('ERR-03', { address, state: 'unknown' });
+	if (outcome === 'destructive-authority-refused')
+		return preAppendRefusalFor('ERR-04', { address, state: 'managed' });
+	if (outcome === 'adoption-refused')
+		return preAppendRefusalFor('ERR-02', { address, state: 'unknown' });
+	return undefined;
 }
 
 export type ApplyConfirmation = (
@@ -869,12 +927,7 @@ export async function runApply(
 		const refusal: ApplyCommandResult = {
 			outcome: 'non-replayable-generator-run',
 			runId,
-			refusal: {
-				cause: 'non-replayable-generator-removal',
-				state: 'recorded-plan',
-				withheldAuthority: 'recorded-plan removal execution',
-				resolvingCommand: 'dbsp apply',
-			},
+			refusal: recordedPlanRefusal(),
 		};
 		return pool === undefined
 			? withPoolCleanupReported(refusal, () => owned.end())
@@ -890,10 +943,15 @@ export async function runApply(
 			...(options.replace === undefined ? {} : { replaces: options.replace }),
 			runId,
 		});
+		const preAppendRefusal = applyPreAppendRefusal(
+			execution.outcome as ApplyOutcome,
+			persisted.plan,
+		);
 		const generatorResult = {
 			outcome: execution.outcome as ApplyOutcome,
 			runId,
 			result: execution as unknown as ApplyResult,
+			...(preAppendRefusal === undefined ? {} : { refusal: preAppendRefusal }),
 		} as ApplyCommandResult;
 		return pool === undefined
 			? withPoolCleanupReported(generatorResult, () => owned.end())
@@ -971,14 +1029,23 @@ export async function runApply(
 				});
 			},
 		);
-		result =
-			locked.kind === 'busy'
-				? { outcome: 'run-busy', runId }
-				: {
-						outcome: outcomeForApplyResult(locked.value),
-						runId,
-						result: locked.value,
-					};
+		if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
+		else {
+			const outcome = outcomeForApplyResult(locked.value);
+			const preAppendRefusal = applyPreAppendRefusal(
+				outcome,
+				persisted.plan,
+				locked.value,
+			);
+			result = {
+				outcome,
+				runId,
+				result: locked.value,
+				...(preAppendRefusal === undefined
+					? {}
+					: { refusal: preAppendRefusal }),
+			};
+		}
 	} catch (error) {
 		if (pool === undefined) {
 			try {

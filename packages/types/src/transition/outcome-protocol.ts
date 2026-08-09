@@ -2,6 +2,7 @@ import type {
 	LedgerAddress,
 	LedgerClaimKind,
 	LedgerPayload,
+	LedgerRefusal,
 } from './ledger.js';
 import type { LedgerChainProjection, LedgerStableState } from './projection.js';
 import type { CatalogueIdentity } from './resource.js';
@@ -126,6 +127,8 @@ export interface OutcomeRecoveryResolution {
 	readonly rootClaimId: string;
 	readonly reason: string;
 	readonly readBack: OutcomeRecoveryReadBack;
+	/** Present exactly when recovery closes the open claim as refused. */
+	readonly refusal?: LedgerRefusal;
 }
 
 export type OutcomeRecoveryClassification =
@@ -138,6 +141,8 @@ export type OutcomeRecoveryClassification =
 			readonly kind: 'outcome-recovery-pending';
 			readonly address: LedgerAddress;
 			readonly reason: string;
+			/** A catalogue failure is a named pre-append refusal, not a retry hint. */
+			readonly reasonCode?: 'catalogue-unavailable';
 	  }
 	| {
 			readonly kind: 'outcome-recovery-blocked';

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
 	locks: vi.fn(),
 	currency: vi.fn(),
 	readChain: vi.fn(),
+	readControllerOid: vi.fn(),
 	appendRelease: vi.fn(),
 	project: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock('./reinitialize-preflight.js', () => ({
 }));
 vi.mock('./chain-reader.js', () => ({
 	readPgLedgerAddressChain: mocks.readChain,
+	readPgLedgerControllerOid: mocks.readControllerOid,
 }));
 
 import { releasePgManagedAddress } from './release.js';
@@ -31,22 +33,28 @@ const address = {
 	name: 'accounts',
 };
 
-function executor(currentUser = 'owner') {
+function executor(currentUser = 'owner', currentUserOid = '10') {
 	return {
 		query: vi.fn(async (sql: string) =>
-			sql === 'SELECT current_user AS current_user'
-				? { rows: [{ current_user: currentUser }] }
+			sql ===
+			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid'
+				? {
+						rows: [
+							{ current_user: currentUser, current_user_oid: currentUserOid },
+						],
+					}
 				: { rows: [] },
 		),
 	};
 }
 
-function currentManaged(controller = 'owner') {
+function currentManaged(controller = 'owner', controllerOid = '10') {
 	mocks.locks.mockResolvedValue({ kind: 'acquired' });
 	mocks.currency.mockResolvedValue({ kind: 'current' });
 	mocks.readChain.mockResolvedValue({
 		terminalMember: { eventId: 'observed', address, controller },
 	});
+	mocks.readControllerOid.mockResolvedValue(controllerOid);
 	mocks.project.mockReturnValue({
 		kind: 'projected-ledger-chain',
 		stableState: 'managed',
@@ -59,7 +67,7 @@ describe('PostgreSQL release admission', () => {
 	it.each([
 		['pending', { phase: 'claimed' }],
 		['blocked', { phase: 'indeterminate' }],
-	] as const)('refuses a %s address without appending release', async (word, openClaim) => {
+	] as const)('refuses a %s address without appending release', async (_word, openClaim) => {
 		currentManaged();
 		mocks.project.mockReturnValue({
 			kind: 'projected-ledger-chain',
@@ -73,9 +81,15 @@ describe('PostgreSQL release admission', () => {
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 			}),
-		).resolves.toEqual({
+		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: `release refuses ${word} address accounts`,
+			address,
+			refusal: {
+				code: 'ERR-08',
+				state: 'unknown',
+				withheldAuthority: 'managed mutation authority',
+				resolvingCommand: 'dbsp inspect',
+			},
 		});
 		expect(mocks.appendRelease).not.toHaveBeenCalled();
 		expect(client.query).not.toHaveBeenCalledWith('BEGIN');
@@ -92,11 +106,25 @@ describe('PostgreSQL release admission', () => {
 			}),
 		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail:
-				'release refuses controller owner for address owned by other-owner',
+			refusal: expect.objectContaining({ code: 'ERR-05', state: 'managed' }),
 		});
 		expect(mocks.appendRelease).not.toHaveBeenCalled();
 		expect(mocks.locks).not.toHaveBeenCalled();
+	});
+
+	it('refuses a dropped and recreated same-named controller role', async () => {
+		currentManaged('owner', '10');
+		await expect(
+			releasePgManagedAddress({
+				executor: executor('owner', '99'),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			refusal: expect.objectContaining({ code: 'ERR-05', state: 'managed' }),
+		});
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
 	});
 
 	it('refuses a non-current lineage before reading the address', async () => {
@@ -108,9 +136,10 @@ describe('PostgreSQL release admission', () => {
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 			}),
-		).resolves.toEqual({
+		).resolves.toMatchObject({
 			outcome: 'release-refused',
-			detail: 'release refuses lineage not-current',
+			address,
+			refusal: expect.objectContaining({ code: 'ERR-06', state: 'unknown' }),
 		});
 		expect(mocks.readChain).not.toHaveBeenCalled();
 		expect(mocks.locks).not.toHaveBeenCalled();
@@ -136,9 +165,9 @@ describe('PostgreSQL release admission', () => {
 			}),
 		);
 		expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
-			'SELECT current_user AS current_user',
+			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
 			'BEGIN',
-			'SELECT current_user AS current_user',
+			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
 			'COMMIT',
 		]);
 	});

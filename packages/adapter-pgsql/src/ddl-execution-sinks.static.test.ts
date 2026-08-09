@@ -16,8 +16,13 @@ const DDL_SINK_ALLOWLIST: Readonly<Record<string, string>> = {
 	'transition/operations/create-unique-index-concurrently.ts':
 		'token-gated managed DDL',
 	'transition/operations/manual-sql.ts': 'token-gated managed DDL',
-	'../cli/src/commands/generator-execution.ts': 'token-gated managed DDL',
+	'../../cli/src/commands/generator-execution.ts': 'token-gated managed DDL',
+	'../../cli/src/ddl-executor.ts': 'explicitly unmanaged test fixture API',
 	'pgsql-adapter.ts': 'explicitly unmanaged API',
+	'transition/ledger.ts': 'ledger bootstrap and explicitly managed storage API',
+	'transition/observation-issuer.ts': 'token-gated managed DDL',
+	'transition/reinitialize-preflight.ts':
+		'separately privileged ledger cutover',
 };
 
 async function sourceFiles(directory: string): Promise<readonly string[]> {
@@ -34,6 +39,8 @@ async function sourceFiles(directory: string): Promise<readonly string[]> {
 	return nested.flat();
 }
 
+const DDL_KEYWORD = /\b(?:alter|create|drop|grant|revoke|truncate)\b/iu;
+
 function hasDdlSink(source: string, file: string): boolean {
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	let found = false;
@@ -41,13 +48,23 @@ function hasDdlSink(source: string, file: string): boolean {
 		if (
 			ts.isMethodDeclaration(node) &&
 			(node.name.getText(tree) === 'executeOperation' ||
-				node.name.getText(tree) === 'executeDDL')
+				node.name.getText(tree) === 'executeDDL' ||
+				node.name.getText(tree) === 'executeDdl')
 		)
 			found = true;
 		if (
 			ts.isFunctionDeclaration(node) &&
 			(node.name?.text === 'executeGeneratorPlan' ||
-				node.name?.text === 'executeDDL')
+				node.name?.text === 'executeDDL' ||
+				node.name?.text === 'executeDdl')
+		)
+			found = true;
+		if (
+			ts.isCallExpression(node) &&
+			ts.isPropertyAccessExpression(node.expression) &&
+			node.expression.name.text === 'query' &&
+			node.arguments[0] !== undefined &&
+			DDL_KEYWORD.test(node.arguments[0].getText(tree))
 		)
 			found = true;
 		ts.forEachChild(node, visit);
@@ -59,11 +76,9 @@ function hasDdlSink(source: string, file: string): boolean {
 describe('SC-65 DDL execution sink inventory', () => {
 	it('AST-discovers only labelled managed or explicitly unmanaged DDL sinks', async () => {
 		const adapterFiles = await sourceFiles(adapterSource);
-		const generator = join(
-			repository,
-			'packages/cli/src/commands/generator-execution.ts',
-		);
-		const candidates = [...adapterFiles, generator];
+		const cliSource = join(repository, 'packages/cli/src');
+		const cliFiles = await sourceFiles(cliSource);
+		const candidates = [...adapterFiles, ...cliFiles];
 		const discovered = (
 			await Promise.all(
 				candidates.map(async (file) =>
@@ -72,17 +87,13 @@ describe('SC-65 DDL execution sink inventory', () => {
 			)
 		)
 			.filter((file): file is string => file !== undefined)
-			.map((file) =>
-				file === generator
-					? '../cli/src/commands/generator-execution.ts'
-					: relative(adapterSource, file),
-			)
+			.map((file) => relative(adapterSource, file))
 			.sort();
 
 		expect(discovered).toEqual(Object.keys(DDL_SINK_ALLOWLIST).sort());
 		for (const sink of discovered)
 			expect(DDL_SINK_ALLOWLIST[sink]).toMatch(
-				/token-gated managed DDL|explicitly unmanaged API/u,
+				/token-gated managed DDL|explicitly unmanaged(?: API| test fixture API)|ledger bootstrap and explicitly managed storage API|separately privileged ledger cutover/u,
 			);
 	});
 });

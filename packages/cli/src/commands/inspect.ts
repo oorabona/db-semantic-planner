@@ -21,6 +21,10 @@ export interface InspectOptions {
 	readonly db: string;
 	readonly schema?: string;
 	readonly kind?: string;
+	/** Parent selector for column/index/constraint resources, e.g. table:orders. */
+	readonly parent?: string;
+	/** Select the database ledger (currently for database-scoped extensions). */
+	readonly databaseLedger?: boolean;
 	readonly format?: 'text' | 'json';
 }
 
@@ -37,6 +41,7 @@ export interface InspectResult {
 	 * append a second event merely to explain an earlier refusal.
 	 */
 	readonly refusal?: {
+		readonly code: `ERR-${number}`;
 		readonly cause: string;
 		readonly address: LedgerAddress;
 		readonly state: LedgerStableState;
@@ -66,26 +71,32 @@ export function inspectRefusal(
 	projection: LedgerChainProjection | undefined,
 ): InspectResult['refusal'] | undefined {
 	if (projection?.kind !== 'projected-ledger-chain') return undefined;
-	const refused = projection.events.find(
-		(event) => event.eventKind === 'refused',
+	const predecessors = new Set(
+		projection.events
+			.map((event) => event.predecessor)
+			.filter(
+				(predecessor): predecessor is string => predecessor !== undefined,
+			),
 	);
-	if (!refused) return undefined;
-	const claim = projection.events.find(
-		(event) => event.eventId === refused.predecessor,
+	const terminals = projection.events.filter(
+		(event) => !predecessors.has(event.eventId),
 	);
+	const refused = terminals.length === 1 ? terminals[0] : undefined;
+	if (refused?.eventKind !== 'refused' || refused.refusal === undefined)
+		return undefined;
 	return {
-		cause:
-			claim === undefined
-				? `ledger event ${refused.eventId} recorded a refusal`
-				: `claim ${claim.eventId} recorded a refusal`,
+		code: refused.refusal.code,
+		cause: refused.refusal.cause,
 		address: projection.address,
-		state: projection.stableState,
-		withheldAuthority:
-			claim === undefined
-				? 'managed mutation'
-				: `${claim.eventKind} execution authority`,
-		resolvingCommand: 'dbsp apply',
+		state: refused.refusal.state,
+		withheldAuthority: refused.refusal.withheldAuthority,
+		resolvingCommand: refused.refusal.resolvingCommand,
 	};
+}
+
+/** Human inspect output is intentionally the same escaped document as JSON. */
+export function renderInspectHuman(result: InspectResult): string {
+	return serializeCliJson(result);
 }
 
 function quoteIdentifier(value: string): string {
@@ -152,15 +163,33 @@ export function inspectAddress(
 	schema: string,
 	selector: string,
 	kind = 'table',
+	parentSelector?: string,
+	scope: LedgerAddress['scope'] = 'schema',
 ): LedgerAddress {
 	const parsed = addressParts(selector, kind);
 	if (!parsed.name) throw new Error('inspect address name must not be empty');
 	if (!parsed.kind) throw new Error('inspect address kind must not be empty');
+	const parent = parentSelector
+		? addressParts(parentSelector, 'table')
+		: undefined;
+	if (parent && (!parent.kind || !parent.name))
+		throw new Error('inspect parent address must be kind:name');
 	return {
-		scope: 'schema',
+		scope,
 		engine: 'postgresql',
 		database,
-		schema,
+		...(scope === 'schema' ? { schema } : {}),
+		...(parent
+			? {
+					parent: {
+						engine: 'postgresql',
+						database,
+						...(scope === 'schema' ? { schema } : {}),
+						kind: parent.kind as LedgerAddress['kind'],
+						name: parent.name,
+					},
+				}
+			: {}),
 		kind: parsed.kind as LedgerAddress['kind'],
 		name: parsed.name,
 	};
@@ -172,7 +201,9 @@ export async function runInspect(
 ): Promise<InspectResult> {
 	const { pool } = await createDbConnection(options.db);
 	const schema = options.schema ?? 'public';
-	const ledger: LedgerHome = { scope: 'schema', schema };
+	const ledger: LedgerHome = options.databaseLedger
+		? { scope: 'database' }
+		: { scope: 'schema', schema };
 	try {
 		const lease = await acquireTransitionLease(createPgTransitionLessor(pool));
 		try {
@@ -211,7 +242,14 @@ export async function runInspect(
 			const database = databaseRow.rows[0]?.database;
 			if (typeof database !== 'string')
 				throw new Error('PostgreSQL current_database() is unreadable');
-			const address = inspectAddress(database, schema, selector, options.kind);
+			const address = inspectAddress(
+				database,
+				schema,
+				selector,
+				options.kind,
+				options.parent,
+				ledger.scope,
+			);
 			let projection: InspectResult['projection'];
 			try {
 				projection = projectLedgerChain(
@@ -283,12 +321,14 @@ export const inspectCommand = new Command('inspect')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--schema <name>', 'Schema ledger to read', 'public')
 	.option('--kind <kind>', 'Kind for an unqualified address', 'table')
+	.option('--parent <kind:name>', 'Parent for column, index, or constraint')
+	.option('--database-ledger', 'Read the database ledger (for extensions)')
 	.option('--format <format>', 'Output format: text or json', 'text')
 	.action(async (address: string | undefined, options: InspectOptions) => {
 		try {
 			const result = await runInspect(address, options);
 			if (options.format === 'json') printCliJson(result);
-			else console.log(serializeCliJson(result));
+			else console.log(renderInspectHuman(result));
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			if (options.format === 'json')

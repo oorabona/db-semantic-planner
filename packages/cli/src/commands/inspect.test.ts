@@ -1,8 +1,11 @@
 import { projectLedgerChain } from '@dbsp/core';
-import type { LedgerAddress } from '@dbsp/types';
+import { type LedgerAddress, refusalFor } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { serializeCliJson } from '../utils/output.js';
-import { inspectAddress, inspectRefusal } from './inspect.js';
+import {
+	inspectAddress,
+	inspectRefusal,
+	renderInspectHuman,
+} from './inspect.js';
 
 const address: LedgerAddress = {
 	scope: 'schema',
@@ -50,6 +53,10 @@ function refusalProjection(claimKind: 'intent' | 'retire-intent' = 'intent') {
 				address,
 				eventKind: 'refused',
 				predecessor: 'claim',
+				refusal: refusalFor('ERR-05', {
+					address,
+					state: claimKind === 'retire-intent' ? 'managed' : 'unknown',
+				}),
 				controller: 'deploy',
 			},
 		],
@@ -74,23 +81,66 @@ describe('inspect address selection', () => {
 			name: 'orders',
 		});
 	});
+
+	it('addresses a parented index and database-scoped extension without flattening either address', () => {
+		expect(
+			inspectAddress(
+				'app',
+				'tenant',
+				'index:orders_pkey',
+				'table',
+				'table:orders',
+			),
+		).toMatchObject({
+			kind: 'index',
+			name: 'orders_pkey',
+			parent: { kind: 'table', name: 'orders', schema: 'tenant' },
+		});
+		expect(
+			inspectAddress(
+				'app',
+				'tenant',
+				'extension:hstore',
+				'table',
+				undefined,
+				'database',
+			),
+		).toEqual({
+			scope: 'database',
+			engine: 'postgresql',
+			database: 'app',
+			kind: 'extension',
+			name: 'hstore',
+		});
+	});
 });
 
 describe('SC-64 inspect refusal rendering', () => {
 	it.each([
-		['intent', 'intent execution authority', 'unknown'],
-		['retire-intent', 'retire-intent execution authority', 'managed'],
-	] as const)('renders a terminal %s refusal with the four actionable fields', (claimKind, withheldAuthority, state) => {
+		['intent', 'unknown'],
+		['retire-intent', 'managed'],
+	] as const)('renders a terminal %s refusal with the four actionable fields', (claimKind, state) => {
 		const refusal = inspectRefusal(refusalProjection(claimKind));
+		if (!refusal) throw new Error('expected terminal refusal');
 		expect(refusal).toEqual({
-			cause: 'claim claim recorded a refusal',
+			code: 'ERR-05',
+			cause: 'recorded identity differs from the live object',
 			address,
 			state,
-			withheldAuthority,
+			withheldAuthority: 'managed mutation authority',
 			resolvingCommand: 'dbsp apply',
 		});
 		// Text and --format json use the same serializer boundary.
-		expect(JSON.parse(serializeCliJson({ refusal }))).toEqual({ refusal });
+		expect(
+			JSON.parse(
+				renderInspectHuman({
+					ledger: { scope: 'schema', schema: 'public' },
+					marker: { kind: 'current' },
+					refusal,
+					live: { kind: 'not-requested' },
+				}),
+			),
+		).toMatchObject({ refusal });
 	});
 
 	it('keeps ERR-02 as the prescribed unknown state, not a refusal', () => {
@@ -132,5 +182,27 @@ describe('SC-64 inspect refusal rendering', () => {
 			reason: { code: 'cycle' },
 		});
 		expect(inspectRefusal(projection)).toBeUndefined();
+	});
+});
+
+describe('SC-67 inspect object-name output', () => {
+	it('escapes a catalogue-derived object name in human output and emits parseable JSON', () => {
+		const escapedAddress = {
+			...address,
+			name: 'accounts\n\u001b[2J',
+		};
+		const result = {
+			address: escapedAddress,
+			ledger: { scope: 'schema' as const, schema: 'public' },
+			marker: { kind: 'current' as const },
+			live: {
+				kind: 'present' as const,
+				catalogueIdentity: { engine: 'postgresql', value: { oid: '42' } },
+			},
+		};
+		const human = renderInspectHuman(result);
+		expect(human).toContain('accounts\\n\\u001b[2J');
+		expect(human).not.toContain('\u001b[2J');
+		expect(JSON.parse(human)).toMatchObject({ address: escapedAddress });
 	});
 });

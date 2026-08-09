@@ -19,7 +19,6 @@ import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import {
 	describeWithE2eCapabilities,
 	dumpAndRestoreInLocalPostgresContainer,
-	execInLocalPostgresContainer,
 } from './harness/index.js';
 
 function quoteIdent(value: string): string {
@@ -294,11 +293,11 @@ describeWithE2eCapabilities(
 				});
 				await source.end();
 				source = undefined;
-				await execInLocalPostgresContainer([
-					'bash',
-					'-lc',
-					`set -o pipefail; pg_dump --format=custom --schema ${schema} --no-owner --no-privileges --username "${process.env.PG_USER ?? 'postgres'}" --dbname ${sourceDatabase} | pg_restore --no-owner --no-privileges --username "${process.env.PG_USER ?? 'postgres'}" --dbname ${targetDatabase}`,
-				]);
+				await dumpAndRestoreInLocalPostgresContainer({
+					sourceDatabase,
+					targetDatabase,
+					schema,
+				});
 				target = new pg.Pool({ connectionString: databaseUrl(targetDatabase) });
 				const planned = await planEnumAdd(
 					target,

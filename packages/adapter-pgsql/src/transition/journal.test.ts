@@ -568,6 +568,21 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/no persisted proven plan and is non-resumable/);
 	});
 
+	it('fails closed on a corrupt replayability value instead of defaulting it to replayable', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		const stored = executor.runs.get(metadata.runId);
+		if (!stored) throw new Error('expected persisted run');
+		executor.runs.set(metadata.runId, {
+			...stored,
+			replayability: 'tampered-non-replayable',
+		});
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow('invalid replayability');
+	});
+
 	it.each([
 		{},
 		{ observations: [] },

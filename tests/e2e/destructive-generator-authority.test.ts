@@ -370,7 +370,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		).resolves.toMatchObject({
 			outcome: 'non-replayable-generator-run',
 			refusal: {
-				cause: 'non-replayable-generator-removal',
+				cause: 'recorded-plan path cannot execute a removal',
 				state: 'recorded-plan',
 				withheldAuthority: 'recorded-plan removal execution',
 				resolvingCommand: 'dbsp apply',

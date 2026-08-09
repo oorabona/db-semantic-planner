@@ -1,6 +1,13 @@
 /** Shared construction for E2E outcome claims; the harness stays uninvolved. */
 import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
-import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
+import {
+	type LedgerAddress,
+	type LedgerRefusal,
+	type LedgerReservationRow,
+	type OutcomeClaimPlan,
+	type RefusalCode,
+	refusalFor,
+} from '@dbsp/types';
 
 export interface FixtureOutcomeClaimInput {
 	readonly claimId: string;
@@ -60,4 +67,24 @@ export function openFixtureOutcomeClaim(
 	input: FixtureOutcomeClaimInput,
 ) {
 	return openPgOutcomeClaim(executor, fixtureOutcomeClaim(input));
+}
+
+/** A direct E2E refused terminal still carries the full durable protocol. */
+export function fixtureRefusedResolutionMember(input: {
+	readonly eventId: string;
+	readonly address: LedgerAddress;
+	readonly predecessor: string;
+	readonly code: RefusalCode;
+	readonly state?: LedgerRefusal['state'];
+}) {
+	return {
+		eventId: input.eventId,
+		address: input.address,
+		eventKind: 'refused' as const,
+		predecessor: input.predecessor,
+		refusal: refusalFor(input.code, {
+			address: input.address,
+			state: input.state ?? 'unknown',
+		}),
+	};
 }

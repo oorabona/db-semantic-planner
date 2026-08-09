@@ -25,6 +25,11 @@ import type {
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
+import {
+	formatPreAppendRefusalHuman,
+	type PreAppendRefusal,
+	preAppendRefusalFor,
+} from './refusal-output.js';
 
 export interface ReconcileOptions {
 	readonly db: string;
@@ -43,12 +48,15 @@ export interface ReconcileResult {
 	readonly detail?: string;
 	/** One entry per selected root claim; non-appends retain their reason. */
 	readonly recovery?: readonly ReconcileRecoveryReport[];
+	/** Present when recovery refused before it could append a ledger outcome. */
+	readonly refusal?: PreAppendRefusal;
 }
 
 export interface ReconcileRecoveryReport {
 	readonly address: LedgerReservationRow['address'];
 	readonly outcome: PgRecoveryReportKind;
 	readonly reason?: string;
+	readonly refusal?: PreAppendRefusal;
 	/** Re-address recovery is reported and resolved as one reserved closure. */
 	readonly pairId?: string;
 }
@@ -104,11 +112,28 @@ function recoveryReport(
 	if (result.kind === 'outcome-recovery-no-open-claim')
 		return { address, outcome: 'no-open-claim' };
 	if (result.kind === 'outcome-recovery-pending')
-		return { address, outcome: 'pending', reason: result.reason };
+		return {
+			address,
+			outcome: 'pending',
+			reason: result.reason,
+			...(result.reasonCode === 'catalogue-unavailable'
+				? {
+						refusal: preAppendRefusalFor('ERR-09', {
+							address,
+							state: 'unknown',
+						}),
+					}
+				: {}),
+		};
 	if (result.kind === 'outcome-recovery-blocked')
 		return { address, outcome: 'blocked', reason: result.reason };
 	if (result.kind === 'outcome-recovery-malformed-chain')
-		return { address, outcome: 'malformed-chain', reason: result.reason };
+		return {
+			address,
+			outcome: 'malformed-chain',
+			reason: result.reason,
+			refusal: preAppendRefusalFor('ERR-08', { address, state: 'unknown' }),
+		};
 	return { address, outcome: 'protocol-refused', reason: result.reason };
 }
 
@@ -158,6 +183,13 @@ function unresolvedRecoveryDetail(
 		.join('; ');
 }
 
+export function formatReconcileHuman(result: ReconcileResult): string {
+	const line = `${result.outcome}: ${result.runId}`;
+	return result.refusal
+		? formatPreAppendRefusalHuman(line, result.refusal)
+		: line;
+}
+
 /**
  * The durable run identifies reviewed material; its intent events identify
  * actual apply attempts. Older/manual fixtures did not record an execution id,
@@ -204,16 +236,6 @@ export async function runReconcile(
 			async (target) => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
-					try {
-						await assertPgDatabaseWritable(lease.session);
-					} catch (error) {
-						if (isPgDatabaseReadOnlyError(error))
-							return {
-								kind: 'database-read-only' as const,
-								detail: error.message,
-							};
-						throw error;
-					}
 					const journal = await readTransitionJournal(lease.session, runId, {
 						ensure: false,
 					});
@@ -223,6 +245,17 @@ export async function runReconcile(
 							(claim): claim is NonNullable<typeof claim> =>
 								claim !== undefined,
 						);
+					try {
+						await assertPgDatabaseWritable(lease.session);
+					} catch (error) {
+						if (isPgDatabaseReadOnlyError(error))
+							return {
+								kind: 'database-read-only' as const,
+								detail: error.message,
+								addresses: material.map((claim) => claim.address),
+							};
+						throw error;
+					}
 					if (material.length === 0)
 						return {
 							kind: 'selection-unavailable' as const,
@@ -277,6 +310,10 @@ export async function runReconcile(
 										currency.reason === 'lineage'
 											? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
 											: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
+									refusal: preAppendRefusalFor('ERR-03', {
+										address: item.address,
+										state: 'unknown',
+									}),
 								})),
 							};
 					}
@@ -450,21 +487,43 @@ export async function runReconcile(
 				addresses: locked.value.addresses,
 				...(locked.value.detail ? { detail: locked.value.detail } : {}),
 			};
-		if (locked.value.kind === 'database-read-only')
+		if (locked.value.kind === 'database-read-only') {
+			const address = locked.value.addresses[0];
 			return {
 				outcome: 'database-read-only',
 				runId,
-				addresses: [],
+				addresses: locked.value.addresses,
 				detail: locked.value.detail,
+				...(address === undefined
+					? {}
+					: {
+							refusal: preAppendRefusalFor('ERR-07', {
+								address,
+								state: 'unknown',
+							}),
+						}),
 			};
-		if (locked.value.kind === 'unresolved')
+		}
+		if (locked.value.kind === 'unresolved') {
+			const address = locked.value.addresses[0];
+			const markerRefusal =
+				address !== undefined &&
+				locked.value.detail?.includes('run dbsp preflight --reinitialize')
+					? preAppendRefusalFor('ERR-03', { address, state: 'unknown' })
+					: undefined;
+			const recoveryRefusal = locked.value.recovery?.find(
+				(report) => report.refusal !== undefined,
+			)?.refusal;
+			const refusal = markerRefusal ?? recoveryRefusal;
 			return {
 				outcome: 'reconcile-unresolved',
 				runId,
 				addresses: locked.value.addresses,
 				...(locked.value.detail ? { detail: locked.value.detail } : {}),
 				...(locked.value.recovery ? { recovery: locked.value.recovery } : {}),
+				...(refusal === undefined ? {} : { refusal }),
 			};
+		}
 		return {
 			outcome: 'reconcile-completed',
 			runId,
@@ -486,6 +545,6 @@ export const reconcileCommand = new Command('reconcile')
 	.action(async (runId: string, options: ReconcileOptions) => {
 		const result = await runReconcile(runId, options);
 		if (options.format === 'json') printCliJson(result);
-		else console.log(`${result.outcome}: ${runId}`);
+		else console.log(formatReconcileHuman(result));
 		process.exitCode = result.outcome === 'reconcile-completed' ? 0 : 1;
 	});
