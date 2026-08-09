@@ -3,7 +3,9 @@ import type {
 	LedgerChainMember,
 	LedgerHome,
 	LedgerPayload,
+	RefusalCode,
 } from '@dbsp/types';
+import { REFUSAL_VOCABULARY } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import { DBSP_LEDGER_EVENT_TABLE, DBSP_META_SCHEMA } from './constants.js';
 import type { TransitionJournalQueryable } from './journal.js';
@@ -43,6 +45,7 @@ interface PgLedgerEventRow {
 	readonly refusal_withheld_authority: unknown;
 	readonly refusal_resolving_command: unknown;
 	readonly controller: unknown;
+	readonly controller_oid: unknown;
 	readonly recorded_at: unknown;
 }
 
@@ -74,7 +77,7 @@ function addressParameters(address: LedgerAddress): readonly unknown[] {
 }
 
 const EVENT_COLUMNS =
-	'event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, refusal_code, refusal_cause, refusal_state, refusal_withheld_authority, refusal_resolving_command, controller::text AS controller, recorded_at::text AS recorded_at';
+	'event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest, refusal_code, refusal_cause, refusal_state, refusal_withheld_authority, refusal_resolving_command, controller::text AS controller, controller_oid::text AS controller_oid, recorded_at::text AS recorded_at';
 
 function asString(value: unknown, column: string): string {
 	if (typeof value !== 'string')
@@ -85,6 +88,10 @@ function asString(value: unknown, column: string): string {
 function nullableString(value: unknown, column: string): string | undefined {
 	if (value === null || value === undefined) return undefined;
 	return asString(value, column);
+}
+
+function isRefusalCode(value: string): value is RefusalCode {
+	return Object.hasOwn(REFUSAL_VOCABULARY, value);
 }
 
 function jsonValue(value: unknown, column: string): unknown {
@@ -128,6 +135,7 @@ function memberFromRow(
 	const claimGroupId = nullableString(row.claim_group_id, 'claim_group_id');
 	const rootClaimId = nullableString(row.root_claim_id, 'root_claim_id');
 	const pairId = nullableString(row.pair_id, 'pair_id');
+	const controllerOid = nullableString(row.controller_oid, 'controller_oid');
 	const recordedAt = nullableString(row.recorded_at, 'recorded_at');
 	const refusalCode = nullableString(row.refusal_code, 'refusal_code');
 	const refusalCause = nullableString(row.refusal_cause, 'refusal_cause');
@@ -152,6 +160,8 @@ function memberFromRow(
 		refusalValues.some((value) => value !== undefined)
 	)
 		throw new Error('ledger refusal protocol is unreadable');
+	if (refusalCode !== undefined && !isRefusalCode(refusalCode))
+		throw new Error('ledger refusal protocol has an unknown code');
 	return {
 		eventId: asString(row.event_id, 'event_id'),
 		...(executionId === undefined ? {} : { executionId }),
@@ -192,7 +202,7 @@ function memberFromRow(
 			? {}
 			: {
 					refusal: {
-						code: refusalCode as `ERR-${number}`,
+						code: refusalCode,
 						cause: refusalCause!,
 						state: refusalState as 'unknown' | 'managed' | 'absent',
 						withheldAuthority: refusalWithheldAuthority!,
@@ -200,6 +210,7 @@ function memberFromRow(
 					},
 				}),
 		controller: asString(row.controller, 'controller'),
+		...(controllerOid === undefined ? {} : { controllerOid }),
 		...(recordedAt === undefined ? {} : { recordedAt }),
 	};
 }
@@ -208,15 +219,17 @@ function memberFromRow(
 export function findPgLedgerTerminalMember(
 	events: readonly LedgerChainMember[],
 ): LedgerChainMember | undefined {
-	const predecessors = new Set(
-		events
-			.map((event) => event.predecessor)
-			.filter(
-				(predecessor): predecessor is string => predecessor !== undefined,
-			),
-	);
-	const terminals = events.filter((event) => !predecessors.has(event.eventId));
-	return terminals.length === 1 ? terminals[0] : undefined;
+	const predecessors = new Set<string>();
+	for (const event of events) {
+		if (event.predecessor !== undefined) predecessors.add(event.predecessor);
+	}
+	let terminal: LedgerChainMember | undefined;
+	for (const event of events) {
+		if (predecessors.has(event.eventId)) continue;
+		if (terminal !== undefined) return undefined;
+		terminal = event;
+	}
+	return terminal;
 }
 
 /**

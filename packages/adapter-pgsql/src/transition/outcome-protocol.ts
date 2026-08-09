@@ -11,6 +11,7 @@ import type {
 	AdmittedOutcomeClaim,
 	ClaimBundleStatement,
 	ClaimToken,
+	ControllerIdentity,
 	DestructiveDecision,
 	LedgerAddress,
 	LedgerChainMember,
@@ -19,11 +20,13 @@ import type {
 	LedgerReservationRow,
 	OutcomeClaimAdmission,
 	OutcomeClaimPlan,
+	OutcomeIndeterminateRecoveryEvidence,
 	OutcomeProtocolRefusal,
 	OutcomeRecoveryClassification,
 	OutcomeRecoveryEffect,
 	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 import { refusalFor } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -38,10 +41,25 @@ import {
 	appendPgLedgerResolution,
 	appendPgLedgerResolutionGroup,
 	type PgLedgerTarget,
+	readPgLedgerReservationsForPair,
+	validatePgLedgerPhysicalShape,
 } from './ledger.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
+
+declare const admittedPermitBrand: unique symbol;
+interface AdmittedPermit {
+	readonly [admittedPermitBrand]: 'dbsp-admitted-permit';
+}
+
+interface ScopedApprovalSet {
+	readonly approvals: readonly {
+		readonly class: string;
+		readonly fromTrustRoot?: unknown;
+		readonly withinScope?: readonly unknown[];
+	}[];
+}
 
 type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
 	release(): void;
@@ -180,6 +198,97 @@ export interface PgOutcomeExecutionRequest {
 	readonly statements: readonly ClaimBundleStatement[];
 }
 
+/** The durable run already held by the caller's run-lock boundary. */
+export type PgLockedRun = Pick<TransitionRunMetadata, 'runId' | 'planDigest'>;
+
+/**
+ * The first admitted-operation shape. Later waves add single and paired
+ * operation variants without reopening the facade's authority boundary.
+ */
+export interface PgSingleAdmittedOperation {
+	readonly kind: 'single-outcome';
+	readonly request: PgOutcomeTransactionalRequest;
+}
+
+/**
+ * Readdress keeps its catalogue closure discovery in readdress.ts, while this
+ * facade owns the only claim/permit/DDL/terminal path for the resulting pair.
+ */
+export interface PgPairedReaddressOperation {
+	readonly kind: 'paired-readdress';
+	readonly request: {
+		readonly pairId: string;
+		readonly executionId: string;
+		readonly members: readonly {
+			readonly source: LedgerAddress;
+			readonly target: LedgerAddress;
+			readonly sourceClaimId: string;
+			readonly targetClaimId: string;
+			readonly sourceDeclared?: LedgerPayload;
+			readonly targetDeclared: LedgerPayload;
+			readonly targetObserved: LedgerPayload;
+		}[];
+		readonly reservations: readonly LedgerReservationRow[];
+		readonly statements: readonly ClaimBundleStatement[];
+		/** Re-read closure, source controller/identity and target vacancy under lock. */
+		readonly verifyLiveAdmission: (
+			executor: TransitionJournalQueryable,
+			currentController: ControllerIdentity,
+		) => Promise<OutcomeProtocolRefusal | undefined>;
+		readonly lockTimeoutMs?: number;
+	};
+}
+
+export interface PgDestructiveAdmittedOperation {
+	readonly kind: 'destructive-outcome';
+	readonly request: PgOutcomeClaimGroupRequest;
+	readonly readBackAndResolve: (
+		executor: TransitionJournalQueryable,
+		claim: AdmittedDestructiveOutcomeClaim,
+	) => Promise<PgOutcomeClaimGroupResolution>;
+}
+
+export type PgAdmittedOperation =
+	| PgSingleAdmittedOperation
+	| PgPairedReaddressOperation
+	| PgDestructiveAdmittedOperation;
+
+export type PgAdmittedOperationResult =
+	| PgOutcomeResult
+	| PgDestructiveOutcomeResult
+	| { readonly kind: 'executed-paired-readdress'; readonly pairId: string }
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
+
+interface AdmittedPermitRecord {
+	readonly claim?: AdmittedOutcomeClaim;
+	readonly paired?: {
+		readonly pairId: string;
+		readonly statements: readonly ClaimBundleStatement[];
+	};
+}
+const admittedPermitRecords = new WeakMap<object, AdmittedPermitRecord>();
+
+function mintAdmittedPermit(claim: AdmittedOutcomeClaim): AdmittedPermit {
+	const permit = Object.freeze({}) as AdmittedPermit;
+	admittedPermitRecords.set(permit, { claim });
+	return permit;
+}
+
+function mintPairedReaddressPermit(
+	pairId: string,
+	statements: readonly ClaimBundleStatement[],
+): AdmittedPermit {
+	const permit = Object.freeze({}) as AdmittedPermit;
+	admittedPermitRecords.set(permit, { paired: { pairId, statements } });
+	return permit;
+}
+
+function admittedClaim(
+	permit: AdmittedPermit,
+): AdmittedOutcomeClaim | undefined {
+	return admittedPermitRecords.get(permit)?.claim;
+}
+
 /** The destructive DDL sink cannot be called with raw evidence or a bare token. */
 export interface PgDestructiveOutcomeExecutionRequest {
 	readonly claim: AdmittedDestructiveOutcomeClaim;
@@ -228,7 +337,7 @@ export type PgDestructiveOutcomeResult =
  * token-gated PostgreSQL sender so callers cannot compose raw ledger writes
  * with a fabricated capability.
  */
-export async function executePgDestructiveOutcome(
+async function runPgDestructiveOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupRequest,
 	readBackAndResolve: (
@@ -301,6 +410,26 @@ export async function executePgDestructiveOutcome(
 			return refusal(detail(error));
 		}
 	});
+}
+
+/** Compatibility entrypoint: destructive execution always enters the facade. */
+export async function executePgDestructiveOutcome(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimGroupRequest,
+	readBackAndResolve: (
+		executor: TransitionJournalQueryable,
+		claim: AdmittedDestructiveOutcomeClaim,
+	) => Promise<PgOutcomeClaimGroupResolution>,
+): Promise<PgDestructiveOutcomeResult> {
+	const result = await executePgAdmittedOperation(executor, {
+		run: {
+			runId: request.plan.executionId ?? request.plan.claimId,
+			planDigest: request.plan.claimId,
+		},
+		approval: { approvals: [] },
+		operation: { kind: 'destructive-outcome', request, readBackAndResolve },
+	});
+	return result as PgDestructiveOutcomeResult;
 }
 
 /** Keeps terminal appends and reservation release behind the managed facade. */
@@ -390,6 +519,8 @@ export interface PgOutcomeRecoveryRequest {
 	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
 	readonly resolutionEventId: string;
 	readonly acceptedExternalDdlExclusion: boolean;
+	/** Durable claim-bound evidence re-matched by reconcile under the run lock. */
+	readonly indeterminateEvidence?: OutcomeIndeterminateRecoveryEvidence;
 	readonly resolveIndeterminate?: boolean;
 	readonly readBack: PgOutcomeReadBackFactory;
 	readonly operationReadBack?: PgOutcomeOperationReadBackFactory;
@@ -428,6 +559,147 @@ export type PgOutcomeResult =
 			readonly claim: AdmittedOutcomeClaim;
 	  }
 	| OutcomeProtocolRefusal;
+
+export type PgPairedReaddressRecoveryDecision =
+	| { readonly kind: 'refused'; readonly reason: string }
+	| { readonly kind: 'pending'; readonly reason: string }
+	| { readonly kind: 'indeterminate'; readonly reason: string };
+
+/**
+ * Recovery owns its reservation set: it re-reads every durable pair row,
+ * checks currency under the same locks, and appends only under a minted paired
+ * permit. A caller's selected rows are evidence to compare, never authority.
+ */
+export async function recoverPgAdmittedReaddressPair(
+	executor: TransitionJournalQueryable,
+	request: {
+		readonly pairId: string;
+		readonly executionId: string;
+		readonly reservations: readonly LedgerReservationRow[];
+		readonly assess: (
+			executor: TransitionJournalQueryable,
+			reservations: readonly LedgerReservationRow[],
+		) => Promise<PgPairedReaddressRecoveryDecision>;
+	},
+): Promise<PgPairedReaddressRecoveryDecision> {
+	return withPgOutcomeSession(executor, (session) =>
+		recoverPgAdmittedReaddressPairOnSession(session, request),
+	);
+}
+
+async function recoverPgAdmittedReaddressPairOnSession(
+	executor: TransitionJournalQueryable,
+	request: {
+		readonly pairId: string;
+		readonly executionId: string;
+		readonly reservations: readonly LedgerReservationRow[];
+		readonly assess: (
+			executor: TransitionJournalQueryable,
+			reservations: readonly LedgerReservationRow[],
+		) => Promise<PgPairedReaddressRecoveryDecision>;
+	},
+): Promise<PgPairedReaddressRecoveryDecision> {
+	let begun = false;
+	try {
+		await begin(executor, undefined);
+		begun = true;
+		const initial = await readPgLedgerReservationsForPair(
+			executor,
+			request.pairId,
+		);
+		const homes = initial.map((row) => row.homeLedger);
+		const lock = await acquirePgLedgerLocks(executor, homes);
+		if (lock.kind !== 'acquired') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return { kind: 'pending', reason: 'ledger advisory lock is busy' };
+		}
+		const durable = await readPgLedgerReservationsForPair(
+			executor,
+			request.pairId,
+		);
+		const key = (rows: readonly LedgerReservationRow[]) =>
+			rows
+				.map((row) => canonicalJson(row))
+				.sort()
+				.join('\n');
+		if (
+			durable.length === 0 ||
+			key(durable) !== key(request.reservations) ||
+			durable.some((row) => row.executionId !== request.executionId)
+		) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return {
+				kind: 'pending',
+				reason:
+					're-address recovery reservation subset is not the durable execution closure',
+			};
+		}
+		const seen = new Set<string>();
+		for (const home of homes) {
+			const homeKey = `${home.scope}:${home.schema ?? ''}`;
+			if (seen.has(homeKey)) continue;
+			seen.add(homeKey);
+			const currency = await readPgLedgerScopeCurrency(executor, home);
+			if (currency.kind !== 'current') {
+				await executor.query('ROLLBACK');
+				begun = false;
+				return { kind: 'pending', reason: currencyRefusal(currency).reason };
+			}
+		}
+		const decision = await request.assess(executor, durable);
+		if (decision.kind === 'pending') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return decision;
+		}
+		const permit = mintPairedReaddressPermit(request.pairId, []);
+		if (!admittedPermitRecords.get(permit)?.paired) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return {
+				kind: 'pending',
+				reason: 're-address recovery could not mint admission permit',
+			};
+		}
+		for (const reservation of durable) {
+			if (decision.kind === 'indeterminate') {
+				await appendPgLedgerProgress(executor, reservation.homeLedger, {
+					eventId: `${reservation.rootClaimId}:reconcile:${request.executionId}:indeterminate`,
+					address: reservation.address,
+					eventKind: 'indeterminate',
+					predecessor: reservation.rootClaimId,
+					pairId: request.pairId,
+				});
+			} else {
+				await appendPgLedgerResolution(
+					executor,
+					reservation.homeLedger,
+					{
+						eventId: `${reservation.rootClaimId}:reconcile:${request.executionId}:refused`,
+						address: reservation.address,
+						eventKind: 'refused',
+						predecessor: reservation.rootClaimId,
+						pairId: request.pairId,
+						refusal: refusalFor('ERR-11', {
+							address: reservation.address,
+							state: 'unknown',
+						}),
+					},
+					reservation.rootClaimId,
+					[reservation],
+				);
+			}
+		}
+		await executor.query('COMMIT');
+		begun = false;
+		return decision;
+	} catch (error) {
+		if (begun) await rollback(executor);
+		return { kind: 'pending', reason: detail(error) };
+	}
+}
 
 function refusal(reason: string): OutcomeProtocolRefusal {
 	return { kind: 'outcome-protocol-refused', reason };
@@ -495,13 +767,20 @@ async function liveAdmission(
 		plan.requiresVacancy === true
 	)
 		return { plan, projection };
-	const role = await executor.query('SELECT current_user AS current_user');
+	const role = await executor.query(
+		'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
+	);
 	const currentUser = role.rows[0]?.current_user;
+	const currentUserOid = role.rows[0]?.current_user_oid;
 	const live = await readPgCatalogueIdentity(executor, plan.address);
 	return {
 		plan,
 		projection,
-		...(typeof currentUser === 'string' ? { currentUser } : {}),
+		...(typeof currentUser === 'string' && typeof currentUserOid === 'string'
+			? {
+					currentController: { name: currentUser, oid: currentUserOid },
+				}
+			: {}),
 		liveAddress: {
 			...plan.address,
 			...(live?.catalogueIdentity
@@ -519,6 +798,28 @@ function currencyRefusal(
 			? 'managed-ledger-not-current: ledger lineage mismatch; run dbsp preflight --reinitialize'
 			: `managed-ledger-not-current: ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
 	);
+}
+
+/**
+ * The façade's runtime gate: validate the physical ledger and its marker /
+ * lineage currency on the same pinned execution session before it admits DDL.
+ * Callers must still take the ledger locks before claiming; this check avoids a
+ * preflight-only trust decision without widening the ledger DDL grammar.
+ */
+export async function validatePgLedgerRuntimeIntegrity(
+	executor: TransitionJournalQueryable,
+	homes: readonly PgLedgerTarget[],
+): Promise<OutcomeProtocolRefusal | undefined> {
+	const seen = new Set<string>();
+	for (const home of homes) {
+		const key = `${home.scope}:${home.schema ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		await validatePgLedgerPhysicalShape(executor, home);
+		const currency = await readPgLedgerScopeCurrency(executor, home);
+		if (currency.kind !== 'current') return currencyRefusal(currency);
+	}
+	return undefined;
 }
 
 /**
@@ -1031,7 +1332,7 @@ function claimSubject(plan: OutcomeClaimPlan): string {
  * The only managed DDL sink in this layer. A token parameter is mandatory, and
  * it is consumed immediately before the first statement is sent.
  */
-export async function executePgManagedBundle(
+async function executePgManagedBundle(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeExecutionRequest,
 ): Promise<undefined | OutcomeProtocolRefusal> {
@@ -1055,10 +1356,31 @@ export async function executePgManagedBundle(
 }
 
 /**
+ * The final PostgreSQL sender accepts only an opaque permit minted by live
+ * admission. Neither a caller-supplied claim nor a core claim token reaches
+ * this boundary directly.
+ */
+async function sendPgAdmittedBundle(
+	executor: TransitionJournalQueryable,
+	request: {
+		readonly permit: AdmittedPermit;
+		readonly statements: readonly ClaimBundleStatement[];
+	},
+): Promise<undefined | OutcomeProtocolRefusal> {
+	const claim = admittedClaim(request.permit);
+	if (!claim) return refusal('managed DDL sender refuses an unadmitted permit');
+	return executePgManagedBundle(executor, {
+		token: claim.token,
+		claim,
+		statements: request.statements,
+	});
+}
+
+/**
  * EFF-03 bridge endpoint for generator removals. Its required admission value
  * was minted by the sole authority interpreter and carries the claim token.
  */
-export async function executePgDestructiveBundle(
+async function executePgDestructiveBundle(
 	executor: TransitionJournalQueryable,
 	request: PgDestructiveOutcomeExecutionRequest,
 ): Promise<undefined | OutcomeProtocolRefusal> {
@@ -1148,6 +1470,7 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return admission;
 		}
+		const permit = mintAdmittedPermit(admission);
 		const liveAdmissionRefusal = request.verifyLiveAdmission
 			? await request.verifyLiveAdmission(executor, admission.plan)
 			: undefined;
@@ -1186,9 +1509,8 @@ async function runPgTransactionalOutcomeOnSession(
 						claim: admission as AdmittedDestructiveOutcomeClaim,
 						statements: admission.plan.statementBundle.statements,
 					})
-				: await executePgManagedBundle(executor, {
-						token: admission.token,
-						claim: admission,
+				: await sendPgAdmittedBundle(executor, {
+						permit,
 						statements: admission.plan.statementBundle.statements,
 					});
 		if (sent) throw new Error(sent.reason);
@@ -1230,6 +1552,261 @@ export async function runPgTransactionalOutcome(
 	return withPgOutcomeSession(executor, (session) =>
 		runPgTransactionalOutcomeOnSession(session, request),
 	);
+}
+
+function sameStatementBundle(
+	left: readonly ClaimBundleStatement[],
+	right: readonly ClaimBundleStatement[],
+): boolean {
+	return canonicalJson(left) === canonicalJson(right);
+}
+
+/** The paired sender accepts the same opaque permit boundary as every DDL sink. */
+async function sendPgPairedReaddressBundle(
+	executor: TransitionJournalQueryable,
+	permit: AdmittedPermit,
+	statements: readonly ClaimBundleStatement[],
+): Promise<OutcomeProtocolRefusal | undefined> {
+	const paired = admittedPermitRecords.get(permit)?.paired;
+	if (!paired)
+		return refusal('managed re-address sender refuses an unadmitted permit');
+	if (!sameStatementBundle(paired.statements, statements))
+		return refusal(
+			`managed re-address sender refuses a bundle outside admitted pair ${paired.pairId}`,
+		);
+	for (const statement of paired.statements)
+		await classifyPgWrite(() => executor.query(statement.sql));
+	return undefined;
+}
+
+function homesForPairedReaddress(
+	request: PgPairedReaddressOperation['request'],
+): PgLedgerTarget[] {
+	return request.members.flatMap((member) => [
+		targetForAddress(member.source),
+		targetForAddress(member.target),
+	]);
+}
+
+async function currentControllerIdentity(
+	executor: TransitionJournalQueryable,
+): Promise<ControllerIdentity | OutcomeProtocolRefusal> {
+	const role = await executor.query(
+		'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
+	);
+	const name = role.rows[0]?.current_user;
+	const oid = role.rows[0]?.current_user_oid;
+	return typeof name === 'string' && typeof oid === 'string'
+		? { name, oid }
+		: refusal('current controller identity is unreadable');
+}
+
+/** One paired admission, send and all paired terminals in one transaction. */
+async function runPgPairedReaddressOperation(
+	executor: TransitionJournalQueryable,
+	request: PgPairedReaddressOperation['request'],
+): Promise<PgAdmittedOperationResult> {
+	let begun = false;
+	try {
+		await begin(executor, request.lockTimeoutMs);
+		begun = true;
+		const homes = homesForPairedReaddress(request);
+		const lock = await acquirePgLedgerLocks(executor, homes);
+		if (lock.kind !== 'acquired') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal('ledger advisory lock is busy');
+		}
+		const seen = new Set<string>();
+		for (const home of homes) {
+			const key = `${home.scope}:${home.schema ?? ''}`;
+			if (seen.has(key)) continue;
+			seen.add(key);
+			const currency = await readPgLedgerScopeCurrency(executor, home);
+			if (currency.kind !== 'current') {
+				await executor.query('ROLLBACK');
+				begun = false;
+				return currencyRefusal(currency);
+			}
+		}
+		const controller = await currentControllerIdentity(executor);
+		if ('kind' in controller) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return controller;
+		}
+		const live = await request.verifyLiveAdmission(executor, controller);
+		if (live) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return live;
+		}
+		if (request.members.length === 0) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal('re-address has no closure members');
+		}
+		for (const member of request.members) {
+			for (const [address, eventId] of [
+				[member.source, member.sourceClaimId],
+				[member.target, member.targetClaimId],
+			] as const) {
+				const predecessor = await currentTerminalPredecessor(
+					executor,
+					targetForAddress(address),
+					address,
+				);
+				const reservation = request.reservations.find(
+					(candidate) =>
+						candidate.address === address && candidate.rootClaimId === eventId,
+				);
+				if (!reservation) {
+					await executor.query('ROLLBACK');
+					begun = false;
+					return refusal(
+						`re-address pair ${request.pairId} has no reservation for ${address.name}`,
+					);
+				}
+				await appendPgLedgerClaim(
+					executor,
+					targetForAddress(address),
+					{
+						eventId,
+						executionId: request.executionId,
+						rootClaimId: eventId,
+						address,
+						eventKind: 'readdress-intent',
+						...(predecessor === undefined ? {} : { predecessor }),
+						pairId: request.pairId,
+					},
+					[reservation],
+				);
+			}
+		}
+		const sent = await sendPgPairedReaddressBundle(
+			executor,
+			mintPairedReaddressPermit(request.pairId, request.statements),
+			request.statements,
+		);
+		if (sent) throw new Error(sent.reason);
+		for (const member of request.members) {
+			const liveTarget = await readPgCatalogueIdentity(executor, member.target);
+			if (!liveTarget?.catalogueIdentity)
+				throw new Error(
+					`re-address target read-back is absent for ${member.target.name}`,
+				);
+			const sourceReservation = request.reservations.find(
+				(candidate) =>
+					candidate.address === member.source &&
+					candidate.rootClaimId === member.sourceClaimId,
+			);
+			const targetReservation = request.reservations.find(
+				(candidate) =>
+					candidate.address === member.target &&
+					candidate.rootClaimId === member.targetClaimId,
+			);
+			if (!sourceReservation || !targetReservation) {
+				await executor.query('ROLLBACK');
+				begun = false;
+				return refusal(`re-address pair ${request.pairId} lost a reservation`);
+			}
+			await appendPgLedgerResolution(
+				executor,
+				targetForAddress(member.source),
+				{
+					eventId: `${member.sourceClaimId}:readdressed-to`,
+					executionId: request.executionId,
+					rootClaimId: member.sourceClaimId,
+					address: member.source,
+					eventKind: 'readdressed-to',
+					predecessor: member.sourceClaimId,
+					pairId: request.pairId,
+				},
+				member.sourceClaimId,
+				[sourceReservation],
+			);
+			await appendPgLedgerResolution(
+				executor,
+				targetForAddress(member.target),
+				{
+					eventId: `${member.targetClaimId}:readdressed-from`,
+					executionId: request.executionId,
+					rootClaimId: member.targetClaimId,
+					address: member.target,
+					eventKind: 'readdressed-from',
+					predecessor: member.targetClaimId,
+					pairId: request.pairId,
+					catalogueIdentity: liveTarget.catalogueIdentity,
+					declared: member.targetDeclared,
+					observed: member.targetObserved,
+				},
+				member.targetClaimId,
+				[targetReservation],
+			);
+		}
+		await executor.query('COMMIT');
+		begun = false;
+		return { kind: 'executed-paired-readdress', pairId: request.pairId };
+	} catch (error) {
+		if (begun) await rollback(executor);
+		return refusal(detail(error));
+	}
+}
+
+/**
+ * The public PostgreSQL admitted-execution boundary. It is intentionally not
+ * used by legacy paths yet: later dispatches bind their persisted runs and
+ * operation shapes here without changing this authority surface.
+ */
+export async function executePgAdmittedOperation(
+	session: TransitionJournalQueryable,
+	input: {
+		readonly run: PgLockedRun;
+		readonly operation: PgAdmittedOperation;
+		readonly approval: ScopedApprovalSet;
+	},
+): Promise<PgAdmittedOperationResult> {
+	try {
+		return await withPgOutcomeSession(session, async (pinnedSession) => {
+			// Runtime integrity is checked on the pinned, locked execution session.
+			// Scope/currency and operation admission are then re-read by the shared
+			// transactional evaluator under its ledger-home advisory locks.
+			const homes =
+				input.operation.kind === 'paired-readdress'
+					? homesForPairedReaddress(input.operation.request)
+					: input.operation.kind === 'destructive-outcome'
+						? homesForGroup(input.operation.request)
+						: homesFor(input.operation.request);
+			const integrity = await validatePgLedgerRuntimeIntegrity(
+				pinnedSession,
+				homes,
+			);
+			if (integrity) return integrity;
+			// The scoped object is deliberately retained at the capability boundary;
+			// dispatch 3 connects its individual approvals to operation admission.
+			void input.run;
+			void input.approval;
+			if (input.operation.kind === 'paired-readdress')
+				return runPgPairedReaddressOperation(
+					pinnedSession,
+					input.operation.request,
+				);
+			if (input.operation.kind === 'destructive-outcome')
+				return runPgDestructiveOutcome(
+					pinnedSession,
+					input.operation.request,
+					input.operation.readBackAndResolve,
+				);
+			return runPgTransactionalOutcomeOnSession(
+				pinnedSession,
+				input.operation.request,
+			);
+		});
+	} catch (error) {
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			return { kind: 'outcome-transport-ambiguous', reason: error.message };
+		return refusal(detail(error));
+	}
 }
 
 /**
@@ -1292,9 +1869,8 @@ async function runPgNonTransactionalOutcomeOnSession(
 		});
 		await executor.query('COMMIT');
 		await request.onExecutingCommitted?.();
-		const sent = await executePgManagedBundle(executor, {
-			token: admission.token,
-			claim: admission,
+		const sent = await sendPgAdmittedBundle(executor, {
+			permit: mintAdmittedPermit(admission),
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) return sent;
@@ -1346,6 +1922,15 @@ export async function recoverPgOutcomeClaim(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeRecoveryRequest,
 ): Promise<PgOutcomeRecoveryResult> {
+	return withPgOutcomeSession(executor, (session) =>
+		recoverPgOutcomeClaimOnSession(session, request),
+	);
+}
+
+async function recoverPgOutcomeClaimOnSession(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeRecoveryRequest,
+): Promise<PgOutcomeRecoveryResult> {
 	let begun = false;
 	try {
 		await begin(executor, request.lockTimeoutMs);
@@ -1372,6 +1957,18 @@ export async function recoverPgOutcomeClaim(
 					: detail(lock.error),
 			);
 		}
+		const currencyHomes = new Set<string>();
+		for (const home of homes) {
+			const homeKey = `${home.scope}:${home.schema ?? ''}`;
+			if (currencyHomes.has(homeKey)) continue;
+			currencyHomes.add(homeKey);
+			const currency = await readPgLedgerScopeCurrency(executor, home);
+			if (currency.kind !== 'current') {
+				await executor.query('ROLLBACK');
+				begun = false;
+				return currencyRefusal(currency);
+			}
+		}
 		const chain = await readPgLedgerAddressChain(
 			executor,
 			target,
@@ -1383,6 +1980,9 @@ export async function recoverPgOutcomeClaim(
 			...(request.resolveIndeterminate === undefined
 				? {}
 				: { resolveIndeterminate: request.resolveIndeterminate }),
+			...(request.indeterminateEvidence === undefined
+				? {}
+				: { indeterminateEvidence: request.indeterminateEvidence }),
 			catalogue: async (address) => {
 				try {
 					return await readPgOutcomeRecoveryReadBack(
@@ -1408,6 +2008,29 @@ export async function recoverPgOutcomeClaim(
 				begun = false;
 			}
 			return classification;
+		}
+		// Recovery is also an admitted resolution: bind the append to the live
+		// open claim and its complete reservation subset rather than accepting a
+		// caller-supplied terminal alone.
+		const projection = projectLedgerChain(chain);
+		const rootClaimId = classification.resolution.rootClaimId;
+		if (
+			projection.kind !== 'projected-ledger-chain' ||
+			projection.openClaim?.event.eventId !== rootClaimId ||
+			request.reservations.length === 0 ||
+			!request.reservations.some((row) => row.address === request.address)
+		) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal(
+				'outcome recovery reservation subset is not the live open claim',
+			);
+		}
+		const recoveryPermit = mintPairedReaddressPermit(rootClaimId, []);
+		if (!admittedPermitRecords.get(recoveryPermit)?.paired) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return refusal('outcome recovery could not mint an admitted permit');
 		}
 		const append = await appendPgOutcomeResolution(
 			executor,

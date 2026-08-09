@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { projectLedgerChain } from '@dbsp/core';
 import type { LedgerAddress, LedgerHome, LedgerRefusal } from '@dbsp/types';
+import * as transitionTypes from '@dbsp/types';
 import { refusalFor } from '@dbsp/types';
 import {
 	readPgLedgerAddressChain,
@@ -13,11 +14,35 @@ import {
 	appendPgLedgerRelease,
 	type PgLedgerTarget,
 } from './ledger.js';
-import { withPgTransitionTransaction } from './outcome-protocol.js';
+import {
+	validatePgLedgerRuntimeIntegrity,
+	withPgTransitionTransaction,
+} from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
+
+type ControllerIdentity = { readonly name: string; readonly oid: string };
+type ControllerIdentityHelper = (
+	recorded: ControllerIdentity,
+	current: ControllerIdentity,
+) => boolean;
+
+const sameControllerIdentity =
+	(
+		transitionTypes as typeof transitionTypes & {
+			readonly sameControllerIdentity?: ControllerIdentityHelper;
+		}
+	).sameControllerIdentity ??
+	((recorded, current) =>
+		recorded.name === current.name && recorded.oid === current.oid);
 
 export type PgReleaseResult =
 	| { readonly outcome: 'released' }
+	| {
+			/** Transport/query/read-only failure; never mislabel it malformed chain. */
+			readonly outcome: 'release-unavailable';
+			readonly detail: string;
+			readonly address: LedgerAddress;
+	  }
 	| {
 			readonly outcome: 'release-refused';
 			readonly detail: string;
@@ -80,14 +105,22 @@ async function preflightReleaseRefusal(input: {
 	const currentUserOid = user.rows[0]?.current_user_oid;
 	if (typeof currentUser !== 'string' || typeof currentUserOid !== 'string')
 		throw new Error('current_user role identity is unreadable');
-	const controllerOid = await readPgLedgerControllerOid(
-		input.executor,
-		input.home,
-		chain.terminalMember.eventId,
-	);
+	const controllerOid =
+		(
+			chain.terminalMember as typeof chain.terminalMember & {
+				readonly controllerOid?: string;
+			}
+		).controllerOid ??
+		(await readPgLedgerControllerOid(
+			input.executor,
+			input.home,
+			chain.terminalMember.eventId,
+		));
 	if (
-		chain.terminalMember.controller !== currentUser ||
-		controllerOid !== currentUserOid
+		!sameControllerIdentity(
+			{ name: chain.terminalMember.controller, oid: controllerOid },
+			{ name: currentUser, oid: currentUserOid },
+		)
 	)
 		return releaseRefusal(input.address, 'ERR-05', projection.stableState);
 	return undefined;
@@ -108,6 +141,11 @@ export async function releasePgManagedAddress(input: {
 				if (lock.kind !== 'acquired') {
 					return releaseRefusal(input.address, 'ERR-08', 'unknown');
 				}
+				const integrity = await validatePgLedgerRuntimeIntegrity(executor, [
+					input.home,
+				]);
+				if (integrity)
+					return releaseRefusal(input.address, 'ERR-06', 'unknown');
 				const currency = await readPgLedgerScopeCurrency(executor, input.home);
 				if (currency.kind !== 'current') {
 					return releaseRefusal(input.address, 'ERR-06', 'unknown');
@@ -145,14 +183,22 @@ export async function releasePgManagedAddress(input: {
 					typeof currentUserOid !== 'string'
 				)
 					throw new Error('current_user role identity is unreadable');
-				const controllerOid = await readPgLedgerControllerOid(
-					executor,
-					input.home,
-					chain.terminalMember.eventId,
-				);
+				const controllerOid =
+					(
+						chain.terminalMember as typeof chain.terminalMember & {
+							readonly controllerOid?: string;
+						}
+					).controllerOid ??
+					(await readPgLedgerControllerOid(
+						executor,
+						input.home,
+						chain.terminalMember.eventId,
+					));
 				if (
-					chain.terminalMember.controller !== currentUser ||
-					controllerOid !== currentUserOid
+					!sameControllerIdentity(
+						{ name: chain.terminalMember.controller, oid: controllerOid },
+						{ name: currentUser, oid: currentUserOid },
+					)
 				) {
 					return releaseRefusal(
 						input.address,
@@ -170,7 +216,11 @@ export async function releasePgManagedAddress(input: {
 				return { outcome: 'released' };
 			},
 		);
-	} catch (_error) {
-		return releaseRefusal(input.address, 'ERR-08', 'unknown');
+	} catch (error) {
+		return {
+			outcome: 'release-unavailable',
+			address: input.address,
+			detail: error instanceof Error ? error.message : String(error),
+		};
 	}
 }

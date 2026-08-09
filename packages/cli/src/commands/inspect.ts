@@ -14,6 +14,7 @@ import type {
 	LedgerChainProjection,
 	LedgerHome,
 	LedgerStableState,
+	RefusalCode,
 } from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
@@ -43,7 +44,7 @@ export interface InspectResult {
 	 * append a second event merely to explain an earlier refusal.
 	 */
 	readonly refusal?: {
-		readonly code: `ERR-${number}`;
+		readonly code: RefusalCode;
 		readonly cause: string;
 		readonly address: LedgerAddress;
 		readonly state: LedgerStableState;

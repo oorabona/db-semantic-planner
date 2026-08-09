@@ -93,6 +93,7 @@ function journalRunRow(run: TransitionRunMetadata) {
 		target_context_digest: run.targetContextDigest,
 		database_id: run.databaseId,
 		core_version: run.coreVersion,
+		replayability: 'replayable',
 		started_at: run.startedAt,
 	};
 }
@@ -107,6 +108,7 @@ function journalTableShape(table: string) {
 				target_context_digest: { type: 'text', notNull: true },
 				database_id: { type: 'text', notNull: true },
 				core_version: { type: 'text', notNull: true },
+				replayability: { type: 'text', notNull: true },
 				started_at: { type: 'timestamp with time zone', notNull: true },
 			},
 			primary_key: ['run_id'],

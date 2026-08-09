@@ -10,7 +10,10 @@ import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
-import { runPgTransactionalOutcome } from './outcome-protocol.js';
+import {
+	executePgAdmittedOperation,
+	type PgOutcomeTransactionalRequest,
+} from './outcome-protocol.js';
 
 export type PgAdoptionResult =
 	| { readonly outcome: 'completed' }
@@ -112,7 +115,7 @@ export async function executePgDeclaredAdoption(
 			input.executionId ?? `dbsp.adoption.execution.${randomUUID()}`;
 		const plannedClaimKey = `adoption:${input.address.kind}:${input.address.name}`;
 		const claimId = outcomeClaimId(executionId, plannedClaimKey, input.address);
-		const result = await runPgTransactionalOutcome(input.executor, {
+		const outcomeRequest: PgOutcomeTransactionalRequest = {
 			plan: {
 				claimId,
 				executionId,
@@ -166,6 +169,11 @@ export async function executePgDeclaredAdoption(
 			},
 			readBack: async () => input.declaration,
 			recordCatalogueIdentity: true,
+		};
+		const result = await executePgAdmittedOperation(input.executor, {
+			run: { runId: executionId, planDigest: claimId },
+			approval: { approvals: [] },
+			operation: { kind: 'single-outcome', request: outcomeRequest },
 		});
 		// The initial preflight is intentionally outside the claim transaction so
 		// it can short-circuit an already-complete adoption. If a concurrent
@@ -181,6 +189,11 @@ export async function executePgDeclaredAdoption(
 		}
 		if (result.kind === 'executed-outcome-claim')
 			return { outcome: 'completed' };
+		if (!('reason' in result))
+			return {
+				outcome: 'execution-failed',
+				detail: `declared adoption returned unexpected ${result.kind}`,
+			};
 		return result.reason.startsWith(
 			`declared adoption for ${input.address.name} refuses `,
 		)

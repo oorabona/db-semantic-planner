@@ -9,18 +9,15 @@ import type {
 	ResourceAddress,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
-import { refusalFor } from '@dbsp/types';
+import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
-	acquirePgLedgerLocks,
-	appendPgLedgerClaim,
-	appendPgLedgerProgress,
-	appendPgLedgerResolution,
-} from './ledger.js';
-import { withPgTransitionTransaction } from './outcome-protocol.js';
+	executePgAdmittedOperation,
+	recoverPgAdmittedReaddressPair,
+} from './outcome-protocol.js';
 
 export type ReaddressRecoveryAnswer =
 	| { readonly kind: 'refused-pair' }
@@ -183,6 +180,17 @@ async function closureAddresses(
 	root: LedgerAddress,
 	targetRoot: LedgerAddress,
 ): Promise<readonly { source: LedgerAddress; target: LedgerAddress }[]> {
+	// A foreign key owned by another table is outside the table's physical
+	// rename closure. Never silently move its root while a dependent could
+	// escape the reservation set; a future expanded paired shape may reserve it.
+	const escaping = await executor.query(
+		`WITH root AS (SELECT relation.oid FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND relation.relkind IN ('r', 'p', 'f')) SELECT 1 FROM root JOIN pg_catalog.pg_constraint dependent ON dependent.confrelid = root.oid WHERE dependent.contype = 'f' AND dependent.conrelid <> root.oid LIMIT 1`,
+		[root.schema, root.name],
+	);
+	if (escaping.rows.length > 0)
+		throw new Error(
+			`source ${root.name} has an escaping dependent outside the paired closure`,
+		);
 	const rows = await executor.query(
 		`WITH root AS (SELECT relation.oid FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND relation.relkind IN ('r', 'p', 'f')) SELECT 'table'::text AS kind, $2::text AS name, NULL::text AS parent_name UNION ALL SELECT 'column', attribute.attname, $2 FROM root JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = root.oid WHERE attribute.attnum > 0 AND NOT attribute.attisdropped UNION ALL SELECT 'index', index_relation.relname, $2 FROM root JOIN pg_catalog.pg_index index_definition ON index_definition.indrelid = root.oid JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_definition.indexrelid UNION ALL SELECT 'constraint', constraint_row.conname, $2 FROM root JOIN pg_catalog.pg_constraint constraint_row ON constraint_row.conrelid = root.oid UNION ALL SELECT 'sequence', sequence_relation.relname, $2 FROM root JOIN pg_catalog.pg_depend dependency ON dependency.refobjid = root.oid JOIN pg_catalog.pg_class sequence_relation ON sequence_relation.oid = dependency.objid AND sequence_relation.relkind = 'S' WHERE dependency.deptype IN ('a', 'i', 'n') ORDER BY kind, name`,
 		[root.schema, root.name],
@@ -302,27 +310,14 @@ export async function recoverPgReaddressPair(
 			pairId: input.pairId,
 			reason: 're-address pair has no reserved closure',
 		};
-	try {
-		return await withPgTransitionTransaction(executor, async (session) => {
-			const lock = await acquirePgLedgerLocks(
-				session,
-				reservations.map((reservation) => reservation.homeLedger),
-			);
-			if (lock.kind !== 'acquired') {
-				return {
-					kind: 'readdress-recovery-pending-pair',
-					pairId: input.pairId,
-					reason:
-						lock.kind === 'busy'
-							? 'ledger advisory lock is busy'
-							: lock.error instanceof Error
-								? lock.error.message
-								: String(lock.error),
-				};
-			}
+	const decision = await recoverPgAdmittedReaddressPair(executor, {
+		pairId: input.pairId,
+		executionId: input.executionId,
+		reservations,
+		assess: async (session, durable) => {
 			let unreadable = false;
-			let completeSourceClosure = reservations.length >= 2;
-			for (const reservation of reservations) {
+			let completeSourceClosure = durable.length >= 2;
+			for (const reservation of durable) {
 				try {
 					const side = readdressPairSide(input.pairId, reservation.rootClaimId);
 					const chain = await readPgLedgerAddressChain(
@@ -357,8 +352,12 @@ export async function recoverPgReaddressPair(
 					);
 					if (
 						!live?.catalogueIdentity ||
-						!predecessor?.catalogueIdentity ||
-						!sameIdentity(live.catalogueIdentity, predecessor.catalogueIdentity)
+						(predecessor !== undefined &&
+							(!predecessor.catalogueIdentity ||
+								!sameIdentity(
+									live.catalogueIdentity,
+									predecessor.catalogueIdentity,
+								)))
 					)
 						completeSourceClosure = false;
 				} catch {
@@ -369,61 +368,38 @@ export async function recoverPgReaddressPair(
 				unreadable,
 				completeSourceClosure,
 			});
-			if (answer.kind === 'pending-pair') {
-				return {
-					kind: 'readdress-recovery-pending-pair',
-					pairId: input.pairId,
-					reason: 're-address closure catalogue or ledger read is unavailable',
-				};
-			}
-			if (answer.kind === 'indeterminate-pair') {
-				// An observable split closure is durable evidence, not merely a
-				// transient reconcile report.  Keep every reservation open so a
-				// later recovery cannot silently re-admit the pair.
-				for (const reservation of reservations) {
-					await appendPgLedgerProgress(session, reservation.homeLedger, {
-						eventId: `${reservation.rootClaimId}:reconcile:${input.executionId}:indeterminate`,
-						address: reservation.address,
-						eventKind: 'indeterminate',
-						predecessor: reservation.rootClaimId,
-						pairId: input.pairId,
-					});
-				}
-				return {
+			return answer.kind === 'refused-pair'
+				? {
+						kind: 'refused' as const,
+						reason:
+							're-address closure is the complete original source closure',
+					}
+				: answer.kind === 'indeterminate-pair'
+					? {
+							kind: 'indeterminate' as const,
+							reason:
+								're-address closure is not the complete original source closure',
+						}
+					: {
+							kind: 'pending' as const,
+							reason:
+								're-address closure catalogue or ledger read is unavailable',
+						};
+		},
+	});
+	return decision.kind === 'refused'
+		? { kind: 'readdress-recovery-refused-pair', pairId: input.pairId }
+		: decision.kind === 'indeterminate'
+			? {
 					kind: 'readdress-recovery-indeterminate-pair',
 					pairId: input.pairId,
-					reason:
-						're-address closure is not the complete original source closure',
+					reason: decision.reason,
+				}
+			: {
+					kind: 'readdress-recovery-pending-pair',
+					pairId: input.pairId,
+					reason: decision.reason,
 				};
-			}
-			for (const reservation of reservations) {
-				await appendPgLedgerResolution(
-					session,
-					reservation.homeLedger,
-					{
-						eventId: `${reservation.rootClaimId}:reconcile:${input.executionId}:refused`,
-						address: reservation.address,
-						eventKind: 'refused',
-						predecessor: reservation.rootClaimId,
-						pairId: input.pairId,
-						refusal: refusalFor('ERR-11', {
-							address: reservation.address,
-							state: 'unknown',
-						}),
-					},
-					reservation.rootClaimId,
-					[reservation],
-				);
-			}
-			return { kind: 'readdress-recovery-refused-pair', pairId: input.pairId };
-		});
-	} catch (error) {
-		return {
-			kind: 'readdress-recovery-pending-pair',
-			pairId: input.pairId,
-			reason: error instanceof Error ? error.message : String(error),
-		};
-	}
 }
 
 /** Execute the ADR 0006 three-step protocol for one declared table address change. */
@@ -483,165 +459,168 @@ export async function executePgTableReaddress(
 			detail: `target ${target.name} is occupied`,
 		};
 
-	return withPgTransitionTransaction(executor, async (session) => {
-		const refuse = (detail: string): PgReaddressResult => ({
+	let members: readonly ClosureMember[];
+	try {
+		members = await readClosure(executor, source, target);
+	} catch (error) {
+		return {
 			outcome: 'readdress-refused',
-			detail,
-		});
-		// The root pair is serialized before its physical closure is enumerated;
-		// after expansion every member home is locked before it is claimed.
-		const rootLock = await acquirePgLedgerLocks(session, [
-			home(source),
-			home(target),
-		]);
-		if (rootLock.kind !== 'acquired')
-			return refuse('ledger advisory lock is busy');
-		const members = await readClosure(session, source, target);
-		if (members.length === 0)
-			return refuse(`source ${source.name} has no readable closure`);
-		const lock = await acquirePgLedgerLocks(
-			session,
-			members.flatMap((member) => [home(member.source), home(member.target)]),
-		);
-		if (lock.kind !== 'acquired') return refuse('ledger advisory lock is busy');
-		// A root lock precedes expansion, but a closure member can still appear
-		// while the additional homes are being acquired. Re-enumerate only after
-		// every member home is locked and reject any changed closure rather than
-		// claiming a stale subset.
-		const lockedMembers = await readClosure(session, source, target);
-		const closureKey = (member: ClosureMember) =>
-			JSON.stringify([member.source, member.target]);
-		if (
-			lockedMembers.length !== members.length ||
-			lockedMembers.some(
-				(member, index) => closureKey(member) !== closureKey(members[index]!),
-			)
-		)
-			return refuse(
-				'source closure changed while member ledger homes were locked',
-			);
-		for (const member of lockedMembers) {
-			const sourceProjection = projectLedgerChain(member.sourceChain);
-			const targetProjection = projectLedgerChain(member.targetChain);
-			if (sourceProjection.kind !== 'projected-ledger-chain')
-				return refuse(
-					`source ${member.source.kind} ${member.source.name} has an invalid chain`,
-				);
-			const sourceIsRoot = member.source.kind === 'table';
-			if (
-				(sourceIsRoot && sourceProjection.stableState !== 'managed') ||
-				(!sourceIsRoot &&
-					!['managed', 'unknown'].includes(sourceProjection.stableState))
-			)
-				return refuse(
-					`source ${member.source.kind} ${member.source.name} has no managed chain`,
-				);
-			if (
-				targetProjection.kind !== 'projected-ledger-chain' ||
-				!['unknown', 'absent'].includes(targetProjection.stableState)
-			)
-				return refuse(
-					`target ${member.target.kind} ${member.target.name} has a non-vacant chain`,
-				);
-			const live = await readPgCatalogueIdentity(session, member.source);
-			if (
-				!live ||
-				(sourceProjection.stableState === 'managed' &&
-					!sameIdentity(
-						live.catalogueIdentity,
-						member.sourceChain.terminalMember?.catalogueIdentity,
-					))
-			)
-				return refuse(
-					`source identity mismatch for ${member.source.kind} ${member.source.name}`,
-				);
-			const targetLive = await readPgCatalogueIdentity(session, member.target);
-			if (targetLive && !isPgReaddressSelfOccupancy(live, targetLive))
-				return refuse(
-					`target ${member.target.kind} ${member.target.name} is occupied`,
-				);
-		}
-		const pairId = `dbsp.readdress.${randomUUID()}`;
-		for (const member of lockedMembers) {
-			const id = claimId(pairId, 'source', member.source);
-			await appendPgLedgerClaim(
-				session,
-				home(member.source),
-				{
-					eventId: id,
-					address: member.source,
-					eventKind: 'readdress-intent',
-					...(member.sourceChain.terminalMember?.eventId
-						? { predecessor: member.sourceChain.terminalMember.eventId }
-						: {}),
-					pairId,
-				},
-				[reservation(member.source, request.executionId, pairId, id)],
-			);
-			const targetId = claimId(pairId, 'target', member.target);
-			await appendPgLedgerClaim(
-				session,
-				home(member.target),
-				{
-					eventId: targetId,
-					address: member.target,
-					eventKind: 'readdress-intent',
-					...(member.targetChain.terminalMember?.eventId
-						? { predecessor: member.targetChain.terminalMember.eventId }
-						: {}),
-					pairId,
-				},
-				[reservation(member.target, request.executionId, pairId, targetId)],
-			);
-		}
-		for (const statement of renderPgTableReaddressStatements(source, target))
-			await session.query(statement);
-		for (const member of lockedMembers) {
-			const sourceId = claimId(pairId, 'source', member.source);
-			const targetId = claimId(pairId, 'target', member.target);
-			const live = await readPgCatalogueIdentity(session, member.target);
-			if (!live)
-				throw new Error(
-					`re-address target read-back is absent for ${member.target.name}`,
-				);
-			await appendPgLedgerResolution(
-				session,
-				home(member.source),
-				{
-					eventId: `${sourceId}:readdressed-to`,
-					address: member.source,
-					eventKind: 'readdressed-to',
-					predecessor: sourceId,
-					pairId,
-				},
-				sourceId,
-				[reservation(member.source, request.executionId, pairId, sourceId)],
-			);
-			const sourceProjection = projectLedgerChain(member.sourceChain);
-			await appendPgLedgerResolution(
-				session,
-				home(member.target),
-				{
-					eventId: `${targetId}:readdressed-from`,
-					address: member.target,
-					...(live.catalogueIdentity
-						? { catalogueIdentity: live.catalogueIdentity }
-						: {}),
-					eventKind: 'readdressed-from',
-					predecessor: targetId,
-					pairId,
-					declared: rekeyDeclaration(
-						sourceProjection.kind === 'projected-ledger-chain'
-							? sourceProjection.declaration
-							: undefined,
-						member.target,
-					),
-					observed: observed(member.target),
-				},
-				targetId,
-				[reservation(member.target, request.executionId, pairId, targetId)],
-			);
-		}
-		return { outcome: 'completed', pairId };
+			detail: error instanceof Error ? error.message : String(error),
+		};
+	}
+	if (members.length === 0)
+		return {
+			outcome: 'readdress-refused',
+			detail: `source ${source.name} has no readable closure`,
+		};
+	const pairId = `dbsp.readdress.${randomUUID()}`;
+	const closureKey = (member: ClosureMember) =>
+		JSON.stringify([member.source, member.target]);
+	const operationMembers = members.map((member) => {
+		const sourceClaimId = claimId(pairId, 'source', member.source);
+		const targetClaimId = claimId(pairId, 'target', member.target);
+		const sourceProjection = projectLedgerChain(member.sourceChain);
+		return {
+			source: member.source,
+			target: member.target,
+			sourceClaimId,
+			targetClaimId,
+			...(sourceProjection.kind === 'projected-ledger-chain' &&
+			sourceProjection.declaration
+				? { sourceDeclared: sourceProjection.declaration }
+				: {}),
+			targetDeclared: rekeyDeclaration(
+				sourceProjection.kind === 'projected-ledger-chain'
+					? sourceProjection.declaration
+					: undefined,
+				member.target,
+			),
+			targetObserved: observed(member.target),
+		};
 	});
+	const result = await executePgAdmittedOperation(executor, {
+		run: { runId: request.executionId, planDigest: pairId },
+		approval: { approvals: [] },
+		operation: {
+			kind: 'paired-readdress',
+			request: {
+				pairId,
+				executionId: request.executionId,
+				members: operationMembers,
+				reservations: operationMembers.flatMap((member) => [
+					reservation(
+						member.source,
+						request.executionId,
+						pairId,
+						member.sourceClaimId,
+					),
+					reservation(
+						member.target,
+						request.executionId,
+						pairId,
+						member.targetClaimId,
+					),
+				]),
+				statements: renderPgTableReaddressStatements(source, target).map(
+					(sql, ordinal) => ({ ordinal, sql }),
+				),
+				verifyLiveAdmission: async (session, currentController) => {
+					const lockedMembers = await readClosure(session, source, target);
+					if (
+						lockedMembers.length !== members.length ||
+						lockedMembers.some(
+							(member, index) =>
+								closureKey(member) !== closureKey(members[index]!),
+						)
+					)
+						return {
+							kind: 'outcome-protocol-refused',
+							reason:
+								'source closure changed while member ledger homes were locked',
+						};
+					for (const member of lockedMembers) {
+						const sourceProjection = projectLedgerChain(member.sourceChain);
+						const targetProjection = projectLedgerChain(member.targetChain);
+						if (sourceProjection.kind !== 'projected-ledger-chain')
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `source ${member.source.kind} ${member.source.name} has an invalid chain`,
+							};
+						const sourceIsRoot = sameLedgerAddress(member.source, source);
+						if (sourceIsRoot && sourceProjection.stableState !== 'managed')
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `source ${member.source.kind} ${member.source.name} has no managed chain`,
+							};
+						// Closure members (constraints, indexes and owned sequences) do
+						// not require a pre-existing chain. An empty chain receives its
+						// first source-side pair event; an existing chain must be closable.
+						if (
+							!sourceIsRoot &&
+							member.sourceChain.events.length > 0 &&
+							!['managed', 'unknown'].includes(sourceProjection.stableState)
+						)
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `source ${member.source.kind} ${member.source.name} has no closable chain`,
+							};
+						const recorded = member.sourceChain.terminalMember;
+						if (
+							sourceIsRoot &&
+							(!recorded?.controllerOid ||
+								!sameControllerIdentity(
+									{ name: recorded.controller, oid: recorded.controllerOid },
+									currentController,
+								))
+						)
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `source ${member.source.kind} ${member.source.name} is managed by a different controller`,
+							};
+						if (
+							targetProjection.kind !== 'projected-ledger-chain' ||
+							!['unknown', 'absent'].includes(targetProjection.stableState)
+						)
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `target ${member.target.kind} ${member.target.name} has a non-vacant chain`,
+							};
+						const live = await readPgCatalogueIdentity(session, member.source);
+						if (
+							!live?.catalogueIdentity ||
+							(sourceProjection.stableState === 'managed' &&
+								(!recorded?.catalogueIdentity ||
+									!sameIdentity(
+										live.catalogueIdentity,
+										recorded.catalogueIdentity,
+									)))
+						)
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `source identity mismatch for ${member.source.kind} ${member.source.name}`,
+							};
+						const targetLive = await readPgCatalogueIdentity(
+							session,
+							member.target,
+						);
+						if (targetLive && !isPgReaddressSelfOccupancy(live, targetLive))
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `target ${member.target.kind} ${member.target.name} is occupied`,
+							};
+					}
+					return undefined;
+				},
+			},
+		},
+	});
+	if (result.kind === 'executed-paired-readdress')
+		return { outcome: 'completed', pairId };
+	return {
+		outcome: 'readdress-refused',
+		detail:
+			'reason' in result
+				? result.reason
+				: `unexpected admitted result ${result.kind}`,
+	};
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createPgsqlGeneratedManagedStep } from './managed-step-manifest.js';
+import {
+	assertDeclarableChangeKind,
+	createPgsqlGeneratedManagedStep,
+} from './managed-step-manifest.js';
 
 describe('PostgreSQL generated managed-step manifest', () => {
 	it('maps a foreign key to its named constraint address at planning time', () => {
@@ -48,6 +51,58 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			kind: 'index',
 			name: 'idx_orders_created_at',
 			parent: { kind: 'table', name: 'orders' },
+		});
+	});
+
+	it.each([
+		'enable_rls',
+		'disable_rls',
+		'create_policy',
+		'drop_policy',
+		'add_comment',
+		'drop_comment',
+	] as const)('refuses non-declarable %s before any manifest address exists', (kind) => {
+		expect(() => assertDeclarableChangeKind(kind)).toThrow(
+			'diagnostic-only and non-declarable',
+		);
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind,
+					table: 'orders',
+					destructive: false,
+					details: 'diagnostic only',
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:forbidden',
+				order: 0,
+				statements: ['SELECT 1'],
+			}),
+		).toThrow('diagnostic-only and non-declarable');
+	});
+
+	it('models a unique addition as constraint creation with a vacancy claim', () => {
+		const step = createPgsqlGeneratedManagedStep({
+			change: {
+				kind: 'alter_column_unique',
+				table: 'orders',
+				column: 'external_id',
+				destructive: false,
+				details: 'add unique',
+			},
+			database: 'app',
+			schema: 'public',
+			stepKey: 'generator:unique-add',
+			order: 0,
+			statements: [
+				'ALTER TABLE orders ADD CONSTRAINT orders_external_id_key UNIQUE (external_id)',
+			],
+		});
+		expect(step).toMatchObject({
+			address: { kind: 'constraint', name: 'orders_external_id_key' },
+			claimKind: 'intent',
+			requiresVacancy: true,
 		});
 	});
 });

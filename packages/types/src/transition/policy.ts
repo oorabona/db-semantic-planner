@@ -10,3 +10,12 @@ export interface AssumptionAcceptance {
 export interface ApplyPolicy {
 	readonly accepts: readonly AssumptionAcceptance[];
 }
+
+/**
+ * The scoped approvals carried into admitted execution.  This distinct input
+ * prevents execution boundaries from silently degrading reviewed scope to a
+ * bare list of approval-class strings.
+ */
+export interface ScopedApprovalSet {
+	readonly approvals: readonly AssumptionAcceptance[];
+}

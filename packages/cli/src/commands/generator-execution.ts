@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
 	compareSchemata,
 	createPgsqlAdapter,
+	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
 	executePgDestructiveOutcome,
 	executePgTableReaddress,
@@ -11,12 +12,13 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
+	type ValidatedManagedStepManifest,
+	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import { decideDestructiveDecision } from '@dbsp/core/internal';
 import type {
@@ -29,13 +31,14 @@ import type {
 	LedgerPayload,
 	ModelIR,
 	NormalizedManagedStep,
+	ScopedApprovalSet,
 	TableIR,
 } from '@dbsp/types';
 import { ledgerAddressKey } from '@dbsp/types';
 import type { Pool } from 'pg';
 
-function managedSteps(plan: { readonly steps: readonly unknown[] }) {
-	return plan.steps as readonly NormalizedManagedStep[];
+function managedSteps(manifest: ValidatedManagedStepManifest) {
+	return manifest.steps;
 }
 
 /**
@@ -107,21 +110,6 @@ async function adoptionShapeMatches(
 	return !diff.changes.some((change) => change.table === shape.name);
 }
 
-function _lifecycleTableAddress(
-	database: string,
-	schema: string,
-	table: string,
-): LedgerAddress {
-	return {
-		scope: 'schema',
-		engine: 'postgresql',
-		database,
-		schema,
-		kind: 'table',
-		name: table,
-	};
-}
-
 function home(address: LedgerAddress): LedgerHome {
 	return address.scope === 'database'
 		? ({ scope: 'database' } as const)
@@ -134,11 +122,10 @@ function home(address: LedgerAddress): LedgerHome {
 				})();
 }
 
-function acceptance(
-	planDigest: string,
-	accepts: readonly string[] | undefined,
-) {
-	return accepts?.includes(`destructive-plan-accepted:${planDigest}`) === true
+function acceptance(planDigest: string, approval: ScopedApprovalSet) {
+	return approval.approvals.some(
+		(grant) => grant.class === `destructive-plan-accepted:${planDigest}`,
+	) === true
 		? 'destructive-plan-accepted'
 		: 'absent';
 }
@@ -217,7 +204,7 @@ async function destructiveEvidence(input: {
 	readonly classification: import('@dbsp/types').ManagedStepClassification;
 	readonly selection?: NormalizedManagedStep['selection'];
 	readonly planDigest: string;
-	readonly accepts: readonly string[] | undefined;
+	readonly approval: ScopedApprovalSet;
 }): Promise<{
 	readonly evidence: DestructiveAuthorityEvidence;
 	readonly containment?: Awaited<
@@ -285,7 +272,7 @@ async function destructiveEvidence(input: {
 				: {}),
 			ownership,
 			catalogueIdentity,
-			operatorAcceptance: acceptance(input.planDigest, input.accepts),
+			operatorAcceptance: acceptance(input.planDigest, input.approval),
 			...(containmentOutcome === undefined
 				? {}
 				: { containment: containmentOutcome }),
@@ -316,13 +303,30 @@ async function removalContainment(
  */
 export async function executeGeneratorPlan(input: {
 	readonly pool: Pool;
-	readonly plan: { readonly steps: readonly unknown[] };
+	/** Bound by apply after validating the persisted durable manifest. */
+	readonly manifest?: ValidatedManagedStepManifest;
+	/** @deprecated Compatibility shim for direct fixtures; it is validated before use. */
+	readonly plan?: { readonly steps: readonly unknown[] };
 	readonly planDigest: string;
 	readonly schema: string;
+	/** Preserve scopes and trust roots until admission; never reduce to classes. */
+	readonly approval?: ScopedApprovalSet;
+	/** @deprecated Compatibility shim for old direct fixtures. */
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
 	readonly runId: string;
 }): Promise<GeneratorExecutionResult> {
+	const validation = input.manifest
+		? { ok: true as const, manifest: input.manifest }
+		: validateNormalizedManagedStepManifest(
+				(input.plan?.steps as readonly NormalizedManagedStep[]) ?? [],
+			);
+	if (!validation.ok)
+		return { outcome: 'execution-failed', detail: validation.detail };
+	const manifest = validation.manifest;
+	const approval: ScopedApprovalSet = input.approval ?? {
+		approvals: (input.accepts ?? []).map((value) => ({ class: value })),
+	};
 	const completedStepKeys: string[] = [];
 	const partial = (detail: string): GeneratorExecutionResult =>
 		completedStepKeys.length === 0
@@ -331,7 +335,7 @@ export async function executeGeneratorPlan(input: {
 					outcome: 'partially-applied',
 					detail,
 					completedStepKeys,
-					notStartedStepKeys: managedSteps(input.plan)
+					notStartedStepKeys: managedSteps(manifest)
 						.filter((step) => !completedStepKeys.includes(step.stepKey))
 						.map((step) => step.stepKey),
 				};
@@ -340,7 +344,7 @@ export async function executeGeneratorPlan(input: {
 		// Reconciliation selects reservations by the persisted run identity.  The
 		// execution scope is deterministic for that run, never a disconnected UUID.
 		const executionId = `dbsp.generator.execution.${input.runId}`;
-		const steps = managedSteps(input.plan);
+		const steps = managedSteps(manifest);
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
 				return {
@@ -492,25 +496,31 @@ export async function executeGeneratorPlan(input: {
 				homeLedger: home(address),
 			};
 			if (step.classification === 'non-destructive') {
-				const result = await runPgTransactionalOutcome(input.pool, {
-					plan: claim,
-					reservations: [baseReservation],
-					resolution: {
-						eventId: outcomeClaimEventId(claim.claimId, 'observed'),
-						eventKind: 'observed',
+				const result = await executePgAdmittedOperation(input.pool, {
+					run: { runId: input.runId, planDigest: input.planDigest },
+					approval,
+					operation: {
+						kind: 'single-outcome',
+						request: {
+							plan: claim,
+							reservations: [baseReservation],
+							resolution: {
+								eventId: outcomeClaimEventId(claim.claimId, 'observed'),
+								eventKind: 'observed',
+							},
+							readBack: async () => observed(address),
+							recordCatalogueIdentity: true,
+							vacancy: async (executor: LedgerQueryable) =>
+								(await readPgCatalogueIdentity(executor, address))
+									? {
+											kind: 'occupied',
+											reason: `creation claim ${claim.claimId} refuses occupied live address ${address.name}`,
+										}
+									: { kind: 'vacant' },
+						},
 					},
-					readBack: async () => observed(address),
-					recordCatalogueIdentity: true,
-					vacancy: async (executor) =>
-						(await readPgCatalogueIdentity(executor, address))
-							? {
-									kind: 'occupied',
-									reason: `creation claim ${claim.claimId} refuses occupied live address ${address.name}`,
-								}
-							: { kind: 'vacant' },
 				});
-				if (result.kind !== 'executed-outcome-claim')
-					return partial(result.reason);
+				if ('reason' in result) return partial(result.reason);
 				completedStepKeys.push(step.stepKey);
 				continue;
 			}
@@ -589,7 +599,7 @@ export async function executeGeneratorPlan(input: {
 						classification: step.classification,
 						selection: step.selection,
 						planDigest: input.planDigest,
-						accepts: input.accepts,
+						approval,
 					});
 					return decideDestructiveDecision(
 						{

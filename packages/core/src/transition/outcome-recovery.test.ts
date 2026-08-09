@@ -37,6 +37,9 @@ function event(
 		eventKind,
 		...(predecessor === undefined ? {} : { predecessor }),
 		controller: 'deployment',
+		...(eventId === 'claim'
+			? { executionId: 'execution-1', plannedClaimKey: 'claim-key' }
+			: {}),
 	};
 }
 
@@ -72,7 +75,11 @@ function openClaim(
 async function recover(
 	events: readonly LedgerChainMember[],
 	catalogue: OutcomeRecoveryCatalogueRead,
-	options: { readonly accepted?: boolean; readonly resolve?: boolean } = {},
+	options: {
+		readonly accepted?: boolean;
+		readonly resolve?: boolean;
+		readonly evidence?: boolean;
+	} = {},
 ) {
 	return classifyOutcomeRecovery({
 		projection: projectLedgerChain({ ledger, address, events }),
@@ -80,6 +87,28 @@ async function recover(
 		...(options.resolve === undefined
 			? {}
 			: { resolveIndeterminate: options.resolve }),
+		...(options.evidence
+			? {
+					indeterminateEvidence: {
+						runId: 'run-1',
+						planDigest: 'plan-digest',
+						executionId: 'execution-1',
+						claimId: 'claim',
+						plannedClaimKey: 'claim-key',
+						admittedBundleDigest: 'bundle-digest',
+						persistedBundleDigest: 'bundle-digest',
+						recordedPreState: events.some((item) => item.eventId === 'adopted')
+							? ('managed' as const)
+							: ('unknown' as const),
+						operationPostcondition: 'verified' as const,
+						externalDdlExclusion: {
+							planDigest: 'plan-digest',
+							address,
+							trustRoot: 'external-ddl-window',
+						},
+					},
+				}
+			: {}),
 		catalogue: async () => catalogue,
 	});
 }
@@ -125,6 +154,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		expect(
 			await recover(openClaim('intent', 'executing'), present, {
 				accepted: true,
+				evidence: true,
 			}),
 		).toMatchObject({
 			kind: 'outcome-recovery-append',
@@ -149,7 +179,9 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 
 	it('classifies executing modify and retire claims from the original grammar column', async () => {
 		expect(
-			await recover(openClaim('intent', 'executing', 'managed'), present),
+			await recover(openClaim('intent', 'executing', 'managed'), present, {
+				evidence: true,
+			}),
 		).toMatchObject({
 			kind: 'outcome-recovery-append',
 			resolution: { eventKind: 'observed' },
@@ -184,6 +216,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 				{ kind: 'absent' },
 				{
 					resolve: true,
+					evidence: true,
 				},
 			),
 		).toMatchObject({
@@ -196,6 +229,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 				present,
 				{
 					resolve: true,
+					evidence: true,
 				},
 			),
 		).toMatchObject({
@@ -206,7 +240,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 			await recover(
 				openClaim('intent', 'indeterminate', 'managed'),
 				{ kind: 'absent' },
-				{ resolve: true },
+				{ resolve: true, evidence: true },
 			),
 		).toMatchObject({ kind: 'outcome-recovery-blocked' });
 	});

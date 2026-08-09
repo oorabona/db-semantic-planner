@@ -22,6 +22,7 @@ export interface ReleaseOptions {
 
 export type ReleaseCommandResult =
 	| { readonly outcome: 'released' }
+	| { readonly outcome: 'release-unavailable'; readonly detail: string }
 	| {
 			readonly outcome: 'release-refused';
 			readonly detail: string;
@@ -71,6 +72,8 @@ export async function runRelease(
 
 export function formatReleaseHuman(result: ReleaseCommandResult): string {
 	if (result.outcome === 'released') return 'released';
+	if (result.outcome === 'release-unavailable')
+		return `release-unavailable: ${escapeDiagnosticText(result.detail)}`;
 	return [
 		`release-refused: ${escapeDiagnosticText(result.detail)}`,
 		`address: ${escapeDiagnosticText(JSON.stringify(result.address))}`,

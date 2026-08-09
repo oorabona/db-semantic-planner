@@ -19,12 +19,14 @@ import {
 	type PackRegistry,
 	selectorMatchesResource,
 	transitionPlanDigest,
+	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import type {
 	ApplyPolicy,
 	ApplyResult,
 	AssumptionAcceptance,
 	LedgerAddress,
+	NormalizedManagedStep,
 	ResourceAddress,
 	ResourceSelector,
 	TransitionRunAuthorization,
@@ -789,19 +791,24 @@ export async function runNoArgumentApply(
 		dryRun: options.dryRun === true,
 		format: options.format === 'json' ? 'json' : 'sql',
 	});
-	// The transition planner intentionally has no removal mapping.  A blocked
-	// no-argument plan is therefore the one point where the live schema differ
-	// becomes the producer of the generated, journalled plan.  `plan <file>`
-	// remains transition-only; this bridge is deliberately scoped to `apply`.
-	const effectivePlan =
-		plan.proveKind === 'blocked' || plan.proveKind === 'no-drift'
-			? await runGeneratorPlan({
-					db: options.db,
-					schemaFile: options.schemaFile,
-					...(options.schema === undefined ? {} : { schema: options.schema }),
-					dryRun: options.dryRun === true,
-				})
-			: plan;
+	// The transition planner intentionally has no removal mapping.  The live
+	// schema differ is therefore only a bridge for that exact unsupported
+	// comparison.  A capability refusal, no-drift result, or inapplicable plan
+	// retains its own meaning and must never become generated DDL.
+	const isUnsupportedRemoval =
+		plan.proveKind === 'blocked' &&
+		plan.compareKind === 'unsupported' &&
+		plan.assessment.decision === 'blocked' &&
+		plan.assessment.reasons.length === 1 &&
+		plan.assessment.reasons[0]?.code === 'unsupported-transition';
+	const effectivePlan = isUnsupportedRemoval
+		? await runGeneratorPlan({
+				db: options.db,
+				schemaFile: options.schemaFile,
+				...(options.schema === undefined ? {} : { schema: options.schema }),
+				dryRun: options.dryRun === true,
+			})
+		: plan;
 	if (options.dryRun === true)
 		return {
 			outcome: 'dry-run',
@@ -843,29 +850,12 @@ export async function runNoArgumentApply(
 			planDigest: effectivePlan.planDigest,
 		};
 	}
-	let result: ApplyCommandResult | GeneratorExecutionResult;
-	if (isGeneratorPlan(effectivePlan.plan)) {
-		const policy = await effectiveApplyPolicy(options);
-		const { pool } = await createDbConnection(options.db);
-		try {
-			result = await executeGeneratorPlan({
-				pool,
-				plan: effectivePlan.plan,
-				planDigest: effectivePlan.planDigest,
-				schema: options.schema ?? 'public',
-				accepts: policy.accepts.map((grant) => grant.class),
-				...(options.replace === undefined ? {} : { replaces: options.replace }),
-				runId: effectivePlan.runId,
-			});
-		} finally {
-			await pool.end();
-		}
-	} else {
-		result = await execute(effectivePlan.runId, {
-			...options,
-			planDigest: effectivePlan.planDigest,
-		});
-	}
+	const { schema: _schemaOverride, ...recordedRunOptions } = options;
+	void _schemaOverride;
+	const result = await execute(effectivePlan.runId, {
+		...recordedRunOptions,
+		planDigest: effectivePlan.planDigest,
+	});
 	return {
 		outcome: result.outcome,
 		plan: effectivePlan,
@@ -906,6 +896,10 @@ export async function runApply(
 ): Promise<ApplyCommandResult> {
 	const expectedPlanDigest = options.planDigest;
 	if (!expectedPlanDigest) return { outcome: 'plan-digest-required', runId };
+	if (options.schema !== undefined)
+		throw new Error(
+			'apply <run-id> refuses --schema: execution uses the recorded plan and context',
+		);
 	const policy = await effectiveApplyPolicy(options);
 	const owned =
 		pool === undefined ? (await createDbConnection(options.db)).pool : pool;
@@ -934,118 +928,156 @@ export async function runApply(
 			? withPoolCleanupReported(refusal, () => owned.end())
 			: refusal;
 	}
-	if (isGeneratorPlan(persisted.plan)) {
-		const execution = await executeGeneratorPlan({
-			pool: owned,
-			plan: persisted.plan,
-			planDigest: expectedPlanDigest,
-			schema: options.schema ?? 'public',
-			accepts: policy.accepts.map((grant) => grant.class),
-			...(options.replace === undefined ? {} : { replaces: options.replace }),
-			runId,
-		});
-		const preAppendRefusal = applyPreAppendRefusal(
-			execution.outcome as ApplyOutcome,
-			persisted.plan,
-		);
-		const generatorResult = {
-			outcome: execution.outcome as ApplyOutcome,
-			runId,
-			result: execution as unknown as ApplyResult,
-			...(preAppendRefusal === undefined ? {} : { refusal: preAppendRefusal }),
-		} as ApplyCommandResult;
-		return pool === undefined
-			? withPoolCleanupReported(generatorResult, () => owned.end())
-			: generatorResult;
-	}
 	let result: ApplyCommandResult;
 	try {
-		const locked = await withPgTransitionRunLock(
-			owned,
-			runId,
-			async (target) => {
-				const loadCurrent = async (id: string) => {
-					return loadOnTarget(target, id);
-				};
-				const applier = createApplier(registry(), {
-					// A durable apply only verifies the existing immutable row. The applier
-					// calls this before execution; a changed record remains a refusal.
-					persist: async () => undefined,
-				});
-				return applier.applyDurable({
-					runId,
-					expectedPlanDigest,
-					loadCurrent,
-					prepareExecutionSession: async (session, contract, plan) => {
-						const currency = await validatePgManagedLedgerCurrency(
-							session,
-							plan,
+		if (isGeneratorPlan(persisted.plan)) {
+			const locked = await withPgTransitionRunLock(
+				owned,
+				runId,
+				async (target) => {
+					const current = await loadOnTarget(target, runId);
+					if (!isGeneratorPlan(current.plan))
+						throw new Error(
+							'persisted run no longer contains a generator plan',
 						);
-						if (currency)
-							return { ok: false, kind: 'refused' as const, detail: currency };
-						return preparePgExecutionSession(session, contract, plan);
-					},
-					policy,
-					target,
-					authorize: async (run, plan, session) => {
-						const current = await loadOnTarget(target, run.runId);
-						const grants = plan.assumptions.map((assumption) => ({
-							assumptionId: assumption.id,
-							grant: policy.accepts.findIndex((grant) =>
-								acceptanceMatches(assumption, grant),
-							),
-						}));
-						// Crash after commit but before intent: reuse the exact prior approval.
-						if (
-							hasReusableAuthorization(
-								current.authorizations,
+					const manifest = validateNormalizedManagedStepManifest(
+						current.plan.steps as unknown as readonly NormalizedManagedStep[],
+					);
+					if (!manifest.ok)
+						throw new Error(
+							`persisted generator manifest is invalid: ${manifest.detail}`,
+						);
+					const actualDigest = transitionPlanDigest(current.plan);
+					if (
+						actualDigest !== current.run.planDigest ||
+						actualDigest !== expectedPlanDigest
+					)
+						throw new Error(
+							'persisted generator plan digest does not match the recorded review',
+						);
+					return executeGeneratorPlan({
+						pool: owned,
+						manifest: manifest.manifest,
+						planDigest: actualDigest,
+						schema: 'public',
+						approval: { approvals: policy.accepts },
+						...(options.replace === undefined
+							? {}
+							: { replaces: options.replace }),
+						runId,
+					});
+				},
+			);
+			if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
+			else {
+				const execution = locked.value;
+				const preAppendRefusal = applyPreAppendRefusal(
+					execution.outcome as ApplyOutcome,
+					persisted.plan,
+				);
+				result = {
+					outcome: execution.outcome as ApplyOutcome,
+					runId,
+					result: execution as unknown as ApplyResult,
+					...(preAppendRefusal === undefined
+						? {}
+						: { refusal: preAppendRefusal }),
+				} as ApplyCommandResult;
+			}
+		} else {
+			const locked = await withPgTransitionRunLock(
+				owned,
+				runId,
+				async (target) => {
+					const loadCurrent = async (id: string) => {
+						return loadOnTarget(target, id);
+					};
+					const applier = createApplier(registry(), {
+						// A durable apply only verifies the existing immutable row. The applier
+						// calls this before execution; a changed record remains a refusal.
+						persist: async () => undefined,
+					});
+					return applier.applyDurable({
+						runId,
+						expectedPlanDigest,
+						loadCurrent,
+						prepareExecutionSession: async (session, contract, plan) => {
+							const currency = await validatePgManagedLedgerCurrency(
+								session,
+								plan,
+							);
+							if (currency)
+								return {
+									ok: false,
+									kind: 'refused' as const,
+									detail: currency,
+								};
+							return preparePgExecutionSession(session, contract, plan);
+						},
+						policy,
+						target,
+						authorize: async (run, plan, session) => {
+							const current = await loadOnTarget(target, run.runId);
+							const grants = plan.assumptions.map((assumption) => ({
+								assumptionId: assumption.id,
+								grant: policy.accepts.findIndex((grant) =>
+									acceptanceMatches(assumption, grant),
+								),
+							}));
+							// Crash after commit but before intent: reuse the exact prior approval.
+							if (
+								hasReusableAuthorization(
+									current.authorizations,
+									run.runId,
+									transitionPlanDigest(plan),
+									policy.accepts,
+									grants,
+								)
+							)
+								return;
+							const actor =
+								process.env.USER ??
+								process.env.LOGNAME ??
+								'unknown-local-actor';
+							const authorizedAt = new Date().toISOString();
+							const digest = authorizationDigest(
 								run.runId,
 								transitionPlanDigest(plan),
 								policy.accepts,
 								grants,
-							)
-						)
-							return;
-						const actor =
-							process.env.USER ?? process.env.LOGNAME ?? 'unknown-local-actor';
-						const authorizedAt = new Date().toISOString();
-						const digest = authorizationDigest(
-							run.runId,
-							transitionPlanDigest(plan),
-							policy.accepts,
-							grants,
-							actor,
-							authorizedAt,
-						);
-						const record: TransitionRunAuthorization = {
-							runId: run.runId,
-							policy: policy.accepts,
-							grants,
-							digest,
-							actor,
-							authorizedAt,
-						};
-						await appendTransitionAuthorization(session, record);
-					},
-				});
-			},
-		);
-		if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
-		else {
-			const outcome = outcomeForApplyResult(locked.value);
-			const preAppendRefusal = applyPreAppendRefusal(
-				outcome,
-				persisted.plan,
-				locked.value,
+								actor,
+								authorizedAt,
+							);
+							const record: TransitionRunAuthorization = {
+								runId: run.runId,
+								policy: policy.accepts,
+								grants,
+								digest,
+								actor,
+								authorizedAt,
+							};
+							await appendTransitionAuthorization(session, record);
+						},
+					});
+				},
 			);
-			result = {
-				outcome,
-				runId,
-				result: locked.value,
-				...(preAppendRefusal === undefined
-					? {}
-					: { refusal: preAppendRefusal }),
-			};
+			if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
+			else {
+				const outcome = outcomeForApplyResult(locked.value);
+				const preAppendRefusal = applyPreAppendRefusal(
+					outcome,
+					persisted.plan,
+					locked.value,
+				);
+				result = {
+					outcome,
+					runId,
+					result: locked.value,
+					...(preAppendRefusal === undefined
+						? {}
+						: { refusal: preAppendRefusal }),
+				};
+			}
 		}
 	} catch (error) {
 		if (pool === undefined) {
@@ -1074,11 +1106,7 @@ export const applyCommand = new Command('apply')
 		'Plan digest printed by dbsp plan; required to anchor review outside the database',
 	)
 	.option('--schema-file <path>', 'Schema DSL file for no-argument apply')
-	.option(
-		'--schema <name>',
-		'Database schema name for no-argument apply',
-		'public',
-	)
+	.option('--schema <name>', 'Database schema name for no-argument apply')
 	.option('--yes', 'Confirm no-argument apply without an interactive prompt')
 	.option(
 		'--dry-run',

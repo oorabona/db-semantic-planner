@@ -179,7 +179,11 @@ export {
 	normalizeManualSqlPayload,
 } from './operations/manual-sql.js';
 export {
+	executePgAdmittedOperation,
 	executePgDestructiveOutcome,
+	type PgAdmittedOperation,
+	type PgAdmittedOperationResult,
+	type PgLockedRun,
 	type PgOutcomeClaimGroupAdmission,
 	type PgOutcomeClaimGroupRequest,
 	type PgOutcomeClaimGroupResolution,
@@ -198,7 +202,7 @@ export {
 	recoverPgOutcomeClaim,
 	resolvePgDestructiveOutcome,
 	runPgNonTransactionalOutcome,
-	runPgTransactionalOutcome,
+	validatePgLedgerRuntimeIntegrity,
 } from './outcome-protocol.js';
 export {
 	createPgTransitionPack,

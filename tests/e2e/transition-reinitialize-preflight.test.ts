@@ -235,6 +235,24 @@ describe('SC-15a #481 pre-existing ledger-shape admission', () => {
 		await resetDbspMeta();
 	});
 
+	it('accepts a ledger initialized in a random schema on the next validator pass', async () => {
+		const schema = uniqueName('reinitialize_reflexive');
+		schemas.push(schema);
+		await createPreflightSchema(schema);
+
+		const initialized = await runPreflight([schema]);
+		expect(
+			initialized.scopes.find((scope) => scope.ledger.schema === schema),
+		).toMatchObject({ outcome: 'current' });
+
+		// The second pass reaches validatePgLedgerPhysicalShape for the ledger
+		// created by the first pass; no fixture replays the DDL here.
+		const validated = await runPreflight([schema]);
+		expect(
+			validated.scopes.find((scope) => scope.ledger.schema === schema),
+		).toMatchObject({ outcome: 'unchanged', marker: { kind: 'current' } });
+	});
+
 	it('initializes a fresh ledger but refuses a foreign pre-existing ledger table', async () => {
 		const fresh = uniqueName('reinitialize_fresh');
 		const foreign = uniqueName('reinitialize_foreign');

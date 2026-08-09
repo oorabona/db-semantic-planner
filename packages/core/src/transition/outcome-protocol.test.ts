@@ -8,6 +8,7 @@ import { projectLedgerChain } from './lifecycle-interpreter.js';
 import {
 	admitOutcomeClaim,
 	consumeClaimToken,
+	findUniqueLedgerTerminal,
 	outcomeClaimId,
 } from './outcome-protocol.js';
 
@@ -71,6 +72,21 @@ function admit(value = plan(), events: readonly LedgerChainMember[] = []) {
 }
 
 describe('outcome claim admission (SC-30, SC-42)', () => {
+	it('selects exactly one terminal with one predecessor-set pass', () => {
+		expect(
+			findUniqueLedgerTerminal([
+				event('root', 'intent'),
+				event('terminal', 'observed', 'root'),
+			]),
+		).toMatchObject({ eventId: 'terminal' });
+		expect(
+			findUniqueLedgerTerminal([
+				event('left', 'intent'),
+				event('right', 'intent'),
+			]),
+		).toBeUndefined();
+	});
+
 	it('uses the lifecycle grammar rather than re-spelling its legal opening states', () => {
 		const managed = [
 			event('adopt-intent', 'adopt-intent'),

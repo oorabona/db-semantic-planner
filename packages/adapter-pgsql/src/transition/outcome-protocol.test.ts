@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	appendPgOutcomeResolution,
 	PgCommitAcknowledgementAmbiguousError,
+	recoverPgAdmittedReaddressPair,
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 	withPgTransitionTransaction,
@@ -185,6 +186,52 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(result.kind).toBe('executed-outcome-claim');
 		expect(pool.connect).toHaveBeenCalledOnce();
 		expect(pool.query).not.toHaveBeenCalled();
+		expect(release).toHaveBeenCalledOnce();
+	});
+
+	it('serializes every paired-recovery query on its checked-out client before release', async () => {
+		let inFlight = 0;
+		const overlap = new Error(
+			'client.query called while the prior query is active',
+		);
+		const session = {
+			query: vi.fn((_statement: string) => {
+				if (inFlight !== 0) return Promise.reject(overlap);
+				inFlight += 1;
+				return new Promise<{
+					readonly rows: readonly Record<string, unknown>[];
+				}>((resolve) => {
+					queueMicrotask(() => {
+						inFlight -= 1;
+						resolve({ rows: [] });
+					});
+				});
+			}),
+		};
+		const release = vi.fn(() => expect(inFlight).toBe(0));
+		const pool = {
+			query: vi.fn(async () => {
+				throw new Error('a pool query must not enter paired recovery');
+			}),
+			connect: vi.fn(async () => ({ ...session, release })),
+		};
+
+		await expect(
+			recoverPgAdmittedReaddressPair(pool, {
+				pairId: 'pair:serialized-recovery',
+				executionId: 'execution:serialized-recovery',
+				reservations: [],
+				assess: vi.fn(),
+			}),
+		).resolves.toEqual({
+			kind: 'pending',
+			reason:
+				're-address recovery reservation subset is not the durable execution closure',
+		});
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalled();
+		expect(session.query).toHaveBeenCalledWith('BEGIN');
+		expect(session.query).toHaveBeenCalledWith('ROLLBACK');
 		expect(release).toHaveBeenCalledOnce();
 	});
 

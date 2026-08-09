@@ -280,14 +280,32 @@ export function compareSchemata(
 	for (const [name, schemaTable] of schemaTables) {
 		if (!dbTables.has(name)) {
 			const readdress = declaredReaddresses.get(name);
-			if (readdress && dbTables.has(readdress.from.name)) {
-				changes.push({
-					kind: 'readdress_table',
-					table: name,
-					destructive: false,
-					details: `Re-address table "${readdress.from.name}" to "${name}"`,
-					meta: { readdress, table: schemaTable },
-				});
+			if (readdress) {
+				if (dbTables.has(readdress.from.name)) {
+					changes.push({
+						kind: 'readdress_table',
+						table: name,
+						destructive: false,
+						details: `Re-address table "${readdress.from.name}" to "${name}"`,
+						meta: { readdress, table: schemaTable },
+					});
+				} else {
+					// A declaration is not permission to turn a missing source into a
+					// fresh table. Keep the diagnostic visible to planning, which refuses
+					// it before any manifest can be built.
+					changes.push({
+						kind: 'readdress_table',
+						table: name,
+						destructive: false,
+						details: `Refuse re-address table "${readdress.from.name}" to "${name}": source is absent`,
+						meta: {
+							readdress,
+							readdressAssessment: 'source-missing',
+							sourcePresent: false,
+							targetPresent: false,
+						},
+					});
+				}
 				continue;
 			}
 			changes.push({
@@ -362,6 +380,26 @@ export function compareSchemata(
 					changes,
 				);
 			}
+			continue;
+		}
+
+		const readdress = declaredReaddresses.get(name);
+		if (readdress && dbTables.has(readdress.from.name)) {
+			// Do not declare success or silently suppress the source deletion when
+			// both names are occupied. This remains a planning refusal, not a ledger
+			// event: no executable readdress material exists for it.
+			changes.push({
+				kind: 'readdress_table',
+				table: name,
+				destructive: false,
+				details: `Refuse re-address table "${readdress.from.name}" to "${name}": target is occupied`,
+				meta: {
+					readdress,
+					readdressAssessment: 'target-occupied',
+					sourcePresent: true,
+					targetPresent: true,
+				},
+			});
 			continue;
 		}
 

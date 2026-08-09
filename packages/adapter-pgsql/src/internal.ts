@@ -14,9 +14,8 @@ export {
 } from './transition/ledger.js';
 export {
 	appendPgOutcomeResolution,
-	executePgDestructiveBundle,
-	executePgManagedBundle,
 	openPgOutcomeClaim,
 	openPgOutcomeClaimGroup,
 	resolvePgOutcomeClaimGroup,
+	runPgTransactionalOutcome,
 } from './transition/outcome-protocol.js';

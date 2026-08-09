@@ -151,6 +151,7 @@ class FakeEnumPool {
 					target_context_digest: { type: 'text', notNull: true },
 					database_id: { type: 'text', notNull: true },
 					core_version: { type: 'text', notNull: true },
+					replayability: { type: 'text', notNull: true },
 					started_at: { type: 'timestamp with time zone', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -311,6 +312,7 @@ class FakeEnumPool {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 				this.plans.set(String(run_id), {
@@ -336,6 +338,7 @@ class FakeEnumPool {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 			}

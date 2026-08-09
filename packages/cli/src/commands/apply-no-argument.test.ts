@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { runPlan } = vi.hoisted(() => ({ runPlan: vi.fn() }));
+const { runGeneratorPlan } = vi.hoisted(() => ({ runGeneratorPlan: vi.fn() }));
 vi.mock('./plan.js', () => ({
 	runPlan,
 	exitCodeForPlanResult: () => 0,
 	formatPlanHuman: () => '',
 	formatPlanJson: () => ({}),
 }));
+vi.mock('./generator-plan.js', () => ({ runGeneratorPlan }));
 
 import { runNoArgumentApply } from './apply.js';
 
@@ -117,5 +119,37 @@ describe('no-argument apply pipeline', () => {
 			expect.objectContaining({ planDigest: 'digest-1' }),
 		);
 		expect(result.outcome).toBe('completed');
+	});
+
+	it('does not send a blocked capability refusal to the generator planner', async () => {
+		const capabilityBlocked = {
+			...provenPlan,
+			compareKind: 'transitions' as const,
+			proveKind: 'blocked' as const,
+			persisted: false as const,
+			runId: null,
+			planDigest: null,
+			assessment: {
+				decision: 'blocked' as const,
+				assurance: 'unproven' as const,
+				lifecycle: 'planned' as const,
+				continuation: 'replan-required' as const,
+				reasons: [
+					{
+						code: 'unsupported-transition' as const,
+						changes: [],
+						scope: [],
+						detail: 'dialect capability is unavailable',
+					},
+				],
+			},
+		};
+		runPlan.mockResolvedValue(capabilityBlocked);
+		const result = await runNoArgumentApply({
+			db: 'postgres://test',
+			schemaFile: 'schema.ts',
+		});
+		expect(result.outcome).toBe('not-executable');
+		expect(runGeneratorPlan).not.toHaveBeenCalled();
 	});
 });

@@ -1,4 +1,5 @@
 import type { JsonValue } from './json.js';
+import type { RefusalCode } from './refusal.js';
 import type { CatalogueIdentity, ResourceAddress } from './resource.js';
 
 /** The outcome protocol is closed at the fourteen ADR 0006 event kinds. */
@@ -106,7 +107,8 @@ export interface LedgerPayload {
  * values preserve the other facts needed to explain a historic refusal.
  */
 export interface LedgerRefusal {
-	readonly code: `ERR-${number}`;
+	/** Closed durable vocabulary; stored strings are validated at the reader. */
+	readonly code: RefusalCode;
 	readonly cause: string;
 	readonly state: 'unknown' | 'managed' | 'absent';
 	readonly withheldAuthority: string;
@@ -129,6 +131,8 @@ export interface LedgerChainMember {
 	/** Present exactly on a durable `refused` terminal. */
 	readonly refusal?: LedgerRefusal;
 	readonly controller: string;
+	/** The durable OID paired with `controller` when the event was recorded. */
+	readonly controllerOid?: string;
 	readonly recordedAt?: string;
 }
 

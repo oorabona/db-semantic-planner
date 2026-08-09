@@ -32,6 +32,41 @@ export type TransitionRelationalValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly detail: string };
 
+declare const validatedManagedStepManifestBrand: unique symbol;
+
+/** A manifest normalized and accepted by the managed lifecycle boundary. */
+export interface ValidatedManagedStepManifest {
+	readonly steps: readonly NormalizedManagedStep[];
+	readonly [validatedManagedStepManifestBrand]: 'dbsp-validated-managed-step-manifest';
+}
+
+export type ValidatedManagedStepManifestResult =
+	| { readonly ok: true; readonly manifest: ValidatedManagedStepManifest }
+	| { readonly ok: false; readonly detail: string };
+
+function validatedManifest(
+	steps: readonly NormalizedManagedStep[],
+): ValidatedManagedStepManifest {
+	const normalized = Object.freeze(
+		steps.map((step) =>
+			Object.freeze({
+				...step,
+				dependencyOrder: Object.freeze([...step.dependencyOrder]),
+				plannedClaimKeys: Object.freeze([...step.plannedClaimKeys]),
+				statementBundle: Object.freeze({
+					...step.statementBundle,
+					statements: Object.freeze(
+						step.statementBundle.statements.map((statement) =>
+							Object.freeze({ ...statement }),
+						),
+					),
+				}),
+			}),
+		),
+	);
+	return Object.freeze({ steps: normalized }) as ValidatedManagedStepManifest;
+}
+
 /**
  * Generic lifecycle invariants for adapter-produced normalized managed steps.
  * Mapping a concrete DDL kind remains adapter work; core only validates the
@@ -39,8 +74,9 @@ export type TransitionRelationalValidationResult =
  */
 export function validateNormalizedManagedStepManifest(
 	steps: readonly NormalizedManagedStep[],
-): TransitionRelationalValidationResult {
+): ValidatedManagedStepManifestResult {
 	const keys = new Set<string>();
+	const plannedClaimKeys = new Set<string>();
 	for (const [index, step] of steps.entries()) {
 		if (step.order !== index)
 			return {
@@ -63,6 +99,14 @@ export function validateNormalizedManagedStepManifest(
 				ok: false,
 				detail: `managed step ${step.stepKey} has no planned claim key`,
 			};
+		for (const plannedClaimKey of step.plannedClaimKeys) {
+			if (plannedClaimKeys.has(plannedClaimKey))
+				return {
+					ok: false,
+					detail: `duplicate planned claim key ${plannedClaimKey}`,
+				};
+			plannedClaimKeys.add(plannedClaimKey);
+		}
 		if (
 			step.statementBundle.statements.some(
 				(statement, ordinal) =>
@@ -86,6 +130,27 @@ export function validateNormalizedManagedStepManifest(
 				ok: false,
 				detail: `non-removal step ${step.stepKey} is not recorded-replayable`,
 			};
+		if (
+			step.classification === 'removal' &&
+			(step.claimKind !== 'retire-intent' || step.requiresVacancy)
+		)
+			return {
+				ok: false,
+				detail: `removal step ${step.stepKey} has an invalid lifecycle claim`,
+			};
+		if (step.classification !== 'removal' && step.claimKind === 'retire-intent')
+			return {
+				ok: false,
+				detail: `non-removal step ${step.stepKey} cannot retire a managed address`,
+			};
+		if (
+			step.lifecycle?.kind === 'adoption' &&
+			step.claimKind !== 'adopt-intent'
+		)
+			return {
+				ok: false,
+				detail: `adoption step ${step.stepKey} must use adopt-intent`,
+			};
 	}
 	for (const step of steps) {
 		for (const dependency of step.dependencyOrder) {
@@ -99,9 +164,17 @@ export function validateNormalizedManagedStepManifest(
 					ok: false,
 					detail: `managed step ${step.stepKey} depends on itself`,
 				};
+			const dependencyStep = steps.find(
+				(candidate) => candidate.stepKey === dependency,
+			);
+			if (dependencyStep && dependencyStep.order >= step.order)
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} depends on a non-preceding step ${dependency}`,
+				};
 		}
 	}
-	return { ok: true };
+	return { ok: true, manifest: validatedManifest(steps) };
 }
 
 function sameTrustRoot(

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
 	readChain: vi.fn(),
 	readControllerOid: vi.fn(),
 	appendRelease: vi.fn(),
+	physicalIntegrity: vi.fn(),
 	project: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ vi.mock('@dbsp/core', () => ({ projectLedgerChain: mocks.project }));
 vi.mock('./ledger.js', () => ({
 	acquirePgLedgerLocks: mocks.locks,
 	appendPgLedgerRelease: mocks.appendRelease,
+	validatePgLedgerPhysicalShape: mocks.physicalIntegrity,
 }));
 vi.mock('./reinitialize-preflight.js', () => ({
 	readPgLedgerScopeCurrency: mocks.currency,
@@ -62,7 +64,10 @@ function currentManaged(controller = 'owner', controllerOid = '10') {
 }
 
 describe('PostgreSQL release admission', () => {
-	beforeEach(() => vi.clearAllMocks());
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.physicalIntegrity.mockResolvedValue(undefined);
+	});
 
 	it.each([
 		['pending', { phase: 'claimed' }],

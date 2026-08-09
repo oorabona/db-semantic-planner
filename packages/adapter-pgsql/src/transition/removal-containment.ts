@@ -34,11 +34,13 @@ export interface PgRemovalEffectAddress {
 export type PgRemovalEffectsClosure =
 	| {
 			readonly kind: 'all-contained-or-managed';
+			readonly root: LedgerAddress;
 			readonly effects: readonly PgRemovalEffectAddress[];
 			readonly managedDependents: readonly LedgerAddress[];
 	  }
 	| {
 			readonly kind: 'reaches-unmanaged';
+			readonly root: LedgerAddress;
 			readonly effects: readonly PgRemovalEffectAddress[];
 			readonly unmanaged: LedgerAddress;
 	  }
@@ -66,6 +68,7 @@ export function classifyRemovalEffectsClosure(input: {
 		if (!DECLARABLE_REMOVAL_KINDS.has(effect.address.kind))
 			return {
 				kind: 'reaches-unmanaged',
+				root: input.root,
 				effects: input.effects,
 				unmanaged: effect.address,
 			};
@@ -73,6 +76,7 @@ export function classifyRemovalEffectsClosure(input: {
 		if (!input.isManaged(effect.address))
 			return {
 				kind: 'reaches-unmanaged',
+				root: input.root,
 				effects: input.effects,
 				unmanaged: effect.address,
 			};
@@ -80,6 +84,7 @@ export function classifyRemovalEffectsClosure(input: {
 	}
 	return {
 		kind: 'all-contained-or-managed',
+		root: input.root,
 		effects: input.effects,
 		managedDependents,
 	};
@@ -102,7 +107,15 @@ export function reservationsForRemovalClosure(input: {
 	readonly claimKind?: LedgerClaimKind;
 	readonly homeLedger: LedgerHome;
 }): readonly LedgerReservationRow[] {
-	return input.closure.managedDependents.map((address) => ({
+	const addresses = [
+		input.closure.root,
+		...input.closure.managedDependents,
+	].filter(
+		(address, index, all) =>
+			all.findIndex((candidate) => sameLedgerAddress(candidate, address)) ===
+			index,
+	);
+	return addresses.map((address) => ({
 		address,
 		claimKind: input.claimKind ?? 'retire-intent',
 		executionId: input.executionId,
@@ -111,34 +124,74 @@ export function reservationsForRemovalClosure(input: {
 	}));
 }
 
+/**
+ * PostgreSQL relation-backed addresses carry their object OID, while a column
+ * carries its owning relation in `parentOid`. Both are valid pg_depend roots;
+ * anything else remains unreadable evidence.
+ */
 function oidFromAddress(address: LedgerAddress): string | undefined {
 	const value = address.catalogueIdentity?.value;
+	const field = address.kind === 'column' ? 'parentOid' : 'oid';
 	return value && typeof value === 'object' && !Array.isArray(value)
-		? typeof (value as Record<string, unknown>).oid === 'string'
-			? (value as Record<string, string>).oid
+		? typeof (value as Record<string, unknown>)[field] === 'string'
+			? (value as Record<string, string>)[field]
 			: undefined
 		: undefined;
 }
 
+/** pg_depend is keyed by the catalogue relation of the object being removed. */
+function rootCatalogueClass(address: LedgerAddress): string | undefined {
+	switch (address.kind) {
+		case 'table':
+		case 'index':
+		case 'sequence':
+		case 'column':
+			return 'pg_class';
+		case 'enum':
+			return 'pg_type';
+		case 'constraint':
+			return 'pg_constraint';
+		case 'extension':
+			return 'pg_extension';
+		default:
+			return undefined;
+	}
+}
+
 function addressFromRow(
 	root: LedgerAddress,
+	rootOid: string,
 	row: Record<string, unknown>,
 ): PgRemovalEffectAddress | undefined {
 	const kind = typeof row.kind === 'string' ? row.kind : undefined;
 	const name = typeof row.name === 'string' ? row.name : undefined;
 	if (!kind || !name) return undefined;
 	const schema = typeof row.schema === 'string' ? row.schema : root.schema;
-	const parentName =
-		typeof row.parent_name === 'string' ? row.parent_name : undefined;
+	const parentOid =
+		typeof row.parent_oid === 'string' ? row.parent_oid : undefined;
+	// A column name is meaningful only with its durable parent address.  Never
+	// manufacture that parent from pg_class.relname: a same-named table in a
+	// different scope must not acquire a reservation for this effect. The root
+	// address is a ledger key and need not itself carry a catalogue identity;
+	// rootOid is read from the live root instead.
+	const parent =
+		kind === 'column'
+			? parentOid && rootOid === parentOid && root.kind === 'table'
+				? root
+				: parentOid &&
+						root.parent &&
+						oidFromAddress({ ...root.parent, scope: root.scope }) === parentOid
+					? ({ ...root.parent, scope: root.scope } as LedgerAddress)
+					: undefined
+			: undefined;
+	if (kind === 'column' && !parent) return undefined;
 	return {
 		address: {
 			scope: root.scope,
 			engine: root.engine,
 			database: root.database,
 			...(schema ? { schema } : {}),
-			...(parentName
-				? { parent: { ...root, name: parentName, kind: 'table' } }
-				: {}),
+			...(parent ? { parent } : {}),
 			kind,
 			name,
 		},
@@ -163,23 +216,29 @@ export async function readPgRemovalEffectsClosure(input: {
 				kind: 'undecidable',
 				reason: 'removal root is absent or has no readable catalogue identity',
 			};
+		const rootClass = rootCatalogueClass(input.root);
+		if (!rootClass)
+			return {
+				kind: 'undecidable',
+				reason: `removal root ${input.root.kind} has no supported catalogue class`,
+			};
 		// Internal pg_depend edges are implementation artifacts (for example a
 		// table's implicit row type), not independently manageable cascade
 		// targets. Add the root relation's declared attributes because PostgreSQL
 		// does not represent their disappearance as dependency edges.
 		const cascades = await input.executor.query(
 			`WITH RECURSIVE cascade(classid, objid, objsubid) AS (` +
-				`SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = $1::oid AND d.deptype IN ('n', 'a', 'e') ` +
+				`SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d WHERE d.refclassid = $2::regclass AND d.refobjid = $1::oid AND d.deptype IN ('n', 'a', 'e') ` +
 				`UNION SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d JOIN cascade c ON d.refclassid = c.classid AND d.refobjid = c.objid WHERE d.deptype IN ('n', 'a', 'e')` +
 				`), removal_effects(classid, objid, objsubid) AS (` +
 				`SELECT classid, objid, objsubid FROM cascade ` +
 				`UNION SELECT 'pg_class'::regclass, attribute.attrelid, attribute.attnum FROM pg_catalog.pg_attribute attribute WHERE attribute.attrelid = $1::oid AND attribute.attnum > 0 AND NOT attribute.attisdropped` +
-				`) SELECT CASE WHEN c.classid = 'pg_class'::regclass AND c.objsubid <> 0 THEN 'column' WHEN c.classid = 'pg_class'::regclass THEN CASE relation.relkind WHEN 'i' THEN 'index' WHEN 'I' THEN 'index' WHEN 'S' THEN 'sequence' ELSE 'table' END WHEN c.classid = 'pg_constraint'::regclass THEN 'constraint' WHEN c.classid = 'pg_type'::regclass THEN CASE WHEN type.typtype = 'e' THEN 'enum' ELSE 'undeclarable' END ELSE 'undeclarable' END AS kind, namespace.nspname AS schema, COALESCE(attribute.attname::text, constraint_row.conname::text, type.typname::text, relation.relname::text, c.objid::text) AS name, parent_relation.relname::text AS parent_name, EXISTS (SELECT 1 FROM pg_catalog.pg_depend extension_member WHERE extension_member.classid = c.classid AND extension_member.objid = c.objid AND extension_member.refclassid = 'pg_extension'::regclass AND extension_member.deptype = 'e') AS extension_member FROM removal_effects c LEFT JOIN pg_catalog.pg_class relation ON c.classid = 'pg_class'::regclass AND relation.oid = c.objid LEFT JOIN pg_catalog.pg_constraint constraint_row ON c.classid = 'pg_constraint'::regclass AND constraint_row.oid = c.objid LEFT JOIN pg_catalog.pg_type type ON c.classid = 'pg_type'::regclass AND type.oid = c.objid LEFT JOIN pg_catalog.pg_attribute attribute ON c.classid = 'pg_class'::regclass AND c.objsubid <> 0 AND attribute.attrelid = c.objid AND attribute.attnum = c.objsubid LEFT JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = COALESCE(constraint_row.conrelid, attribute.attrelid) LEFT JOIN pg_catalog.pg_namespace namespace ON namespace.oid = COALESCE(relation.relnamespace, type.typnamespace, parent_relation.relnamespace) ORDER BY kind, schema, parent_name, name`,
-			[oid],
+				`) SELECT CASE WHEN c.classid = 'pg_class'::regclass AND c.objsubid <> 0 THEN 'column' WHEN c.classid = 'pg_class'::regclass THEN CASE relation.relkind WHEN 'i' THEN 'index' WHEN 'I' THEN 'index' WHEN 'S' THEN 'sequence' ELSE 'table' END WHEN c.classid = 'pg_constraint'::regclass THEN 'constraint' WHEN c.classid = 'pg_type'::regclass THEN CASE WHEN type.typtype = 'e' THEN 'enum' ELSE 'undeclarable' END WHEN c.classid = 'pg_extension'::regclass THEN 'extension' ELSE 'undeclarable' END AS kind, namespace.nspname AS schema, COALESCE(attribute.attname::text, constraint_row.conname::text, type.typname::text, relation.relname::text, extension.extname::text, c.objid::text) AS name, COALESCE(attribute.attrelid::text, constraint_row.conrelid::text) AS parent_oid, EXISTS (SELECT 1 FROM pg_catalog.pg_depend extension_member WHERE extension_member.classid = c.classid AND extension_member.objid = c.objid AND extension_member.refclassid = 'pg_extension'::regclass AND extension_member.deptype = 'e') AS extension_member FROM removal_effects c LEFT JOIN pg_catalog.pg_class relation ON c.classid = 'pg_class'::regclass AND relation.oid = c.objid LEFT JOIN pg_catalog.pg_constraint constraint_row ON c.classid = 'pg_constraint'::regclass AND constraint_row.oid = c.objid LEFT JOIN pg_catalog.pg_type type ON c.classid = 'pg_type'::regclass AND type.oid = c.objid LEFT JOIN pg_catalog.pg_extension extension ON c.classid = 'pg_extension'::regclass AND extension.oid = c.objid LEFT JOIN pg_catalog.pg_attribute attribute ON c.classid = 'pg_class'::regclass AND c.objsubid <> 0 AND attribute.attrelid = c.objid AND attribute.attnum = c.objsubid LEFT JOIN pg_catalog.pg_namespace namespace ON namespace.oid = COALESCE(relation.relnamespace, type.typnamespace) ORDER BY kind, schema, parent_oid, name`,
+			[oid, rootClass],
 		);
 		const effects: PgRemovalEffectAddress[] = [];
 		for (const row of cascades.rows) {
-			const effect = addressFromRow(input.root, row);
+			const effect = addressFromRow(input.root, oid, row);
 			if (!effect)
 				return {
 					kind: 'undecidable',

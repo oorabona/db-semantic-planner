@@ -41,8 +41,8 @@ describe('generated managed-step dependencies', () => {
 			['generator:1:replacement-retire'],
 			['generator:1:replacement-create'],
 		]);
-		expect(validateNormalizedManagedStepManifest(manifest)).toEqual({
-			ok: true,
-		});
+		// A successful validation now returns the opaque, normalized manifest that
+		// the executor binds to the recorded digest; do not discard that authority.
+		expect(validateNormalizedManagedStepManifest(manifest).ok).toBe(true);
 	});
 });

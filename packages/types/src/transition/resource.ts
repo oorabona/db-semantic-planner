@@ -6,7 +6,6 @@ export type DeclarableKind =
 	| 'column'
 	| 'index'
 	| 'constraint'
-	| 'policy'
 	| 'enum'
 	| 'sequence'
 	| 'extension';
@@ -16,6 +15,24 @@ export interface CatalogueIdentity {
 	readonly engine: string;
 	readonly format: number;
 	readonly value: JsonObject;
+}
+
+/**
+ * The durable PostgreSQL role identity which controls a managed ledger entry.
+ * A role name alone is reusable after DROP/CREATE; the OID binds the record to
+ * the role that was actually present when the event was written.
+ */
+export interface ControllerIdentity {
+	readonly name: string;
+	readonly oid: string;
+}
+
+/** Compare the complete durable controller identity in one place. */
+export function sameControllerIdentity(
+	recorded: ControllerIdentity,
+	current: ControllerIdentity,
+): boolean {
+	return recorded.name === current.name && recorded.oid === current.oid;
 }
 
 export interface ResourceAddress {

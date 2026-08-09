@@ -8,6 +8,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import {
+	assertDeclarableChangeKind,
 	classifyGeneratedMutation,
 	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
@@ -128,6 +129,9 @@ function lifecycleStep(input: {
 	readonly requiresVacancy?: boolean;
 	readonly claimKind?: NormalizedManagedStep['claimKind'];
 }): NormalizedManagedStep {
+	// Lifecycle-only table work has no SchemaChange, but it must pass the same
+	// sole declarable boundary as ordinary diff-produced manifest steps.
+	assertDeclarableChangeKind('create_table');
 	const address = {
 		scope: 'schema' as const,
 		engine: 'postgresql',
@@ -178,10 +182,15 @@ function lifecycleStep(input: {
 export function linearizeGeneratedManagedStepDependencies(
 	steps: readonly NormalizedManagedStep[],
 ): readonly NormalizedManagedStep[] {
-	return steps.map((step, index) => ({
-		...step,
-		dependencyOrder: index === 0 ? [] : [steps[index - 1]!.stepKey],
-	}));
+	const linearized: NormalizedManagedStep[] = [];
+	for (const step of steps) {
+		const previous = linearized.at(-1);
+		linearized.push({
+			...step,
+			dependencyOrder: previous === undefined ? [] : [previous.stepKey],
+		});
+	}
+	return linearized;
 }
 
 function assessment(): PlanAssessment {
@@ -312,6 +321,15 @@ export async function runGeneratorPlan(input: {
 			throw new Error(
 				`declared lifecycle for ${contradictoryLifecycle.name} cannot set adopt and replace together`,
 			);
+		const readdressRefusal = diff.changes.find(
+			(change) =>
+				change.kind === 'readdress_table' &&
+				typeof change.meta?.readdressAssessment === 'string',
+		);
+		if (readdressRefusal)
+			throw new Error(
+				`generator planning refuses ${readdressRefusal.details}; no re-address manifest was created`,
+			);
 		if (diff.changes.length === 0 && !declaredLifecycleWork) {
 			return {
 				compareKind: 'no-drift',
@@ -433,18 +451,77 @@ export async function runGeneratorPlan(input: {
 					})),
 			],
 		};
-		const ordinarySteps = executableDiff.changes.map((change, order) =>
-			createPgsqlGeneratedManagedStep({
+		// A foreign-key alteration is a replacement, not a removal that happens to
+		// recreate something afterwards. Keep its two addresses/claim keys visible
+		// in the durable manifest and let dependency linearisation order retirement
+		// before the target vacancy claim.
+		const ordinaryStepSources: Array<{
+			step: NormalizedManagedStep;
+			change: SchemaDiff['changes'][number];
+		}> = [];
+		for (const [changeIndex, change] of executableDiff.changes.entries()) {
+			const generated = ordinaryChanges[changeIndex];
+			if (!generated)
+				throw new Error(
+					'generator planning lost a generated statement bundle during lifecycle expansion',
+				);
+			const order = ordinaryStepSources.length;
+			if (change.kind === 'alter_foreign_key') {
+				const oldFk = change.meta?.oldFk;
+				if (!oldFk || typeof oldFk !== 'object' || Array.isArray(oldFk))
+					throw new Error(
+						'generator planning refuses alter_foreign_key: missing typed old foreign key',
+					);
+				const [retireStatement, ...createStatements] = generated.statements;
+				if (!retireStatement || createStatements.length === 0)
+					throw new Error(
+						'generator planning refuses alter_foreign_key: expected DROP then ADD bundle',
+					);
+				ordinaryStepSources.push({
+					change,
+					step: createPgsqlGeneratedManagedStep({
+						change: {
+							...change,
+							kind: 'drop_foreign_key',
+							destructive: true,
+							meta: { fk: oldFk },
+						},
+						database,
+						schema,
+						stepKey: `generator:${order}:alter-foreign-key-retire`,
+						order,
+						dependencyOrder: [],
+						statements: [retireStatement],
+					}),
+				});
+				ordinaryStepSources.push({
+					change,
+					step: createPgsqlGeneratedManagedStep({
+						change: { ...change, kind: 'add_foreign_key', destructive: false },
+						database,
+						schema,
+						stepKey: `generator:${order + 1}:alter-foreign-key-create`,
+						order: order + 1,
+						dependencyOrder: [],
+						statements: createStatements,
+					}),
+				});
+				continue;
+			}
+			ordinaryStepSources.push({
 				change,
-				database,
-				schema,
-				stepKey: `generator:${order}`,
-				order,
-				dependencyOrder: [],
-				// biome-ignore lint/style/noNonNullAssertion: order indexes ordinaryChanges by construction (same length).
-				statements: ordinaryChanges[order]!.statements,
-			}),
-		);
+				step: createPgsqlGeneratedManagedStep({
+					change,
+					database,
+					schema,
+					stepKey: `generator:${order}`,
+					order,
+					dependencyOrder: [],
+					statements: generated.statements,
+				}),
+			});
+		}
+		const ordinarySteps = ordinaryStepSources.map(({ step }) => step);
 		const lifecycleSteps: NormalizedManagedStep[] = [];
 		for (const change of material.changes.slice(ordinaryChanges.length)) {
 			const base = {
@@ -506,9 +583,8 @@ export async function runGeneratorPlan(input: {
 				}),
 			);
 		}
-		for (const step of ordinarySteps) {
+		for (const { step, change } of ordinaryStepSources) {
 			if (step.address?.kind !== 'table') continue;
-			const change = executableDiff.changes[step.order];
 			if (change?.kind !== 'readdress_table' || !change.meta?.readdress)
 				continue;
 			Object.assign(step as object, {

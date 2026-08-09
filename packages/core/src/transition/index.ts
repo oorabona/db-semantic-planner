@@ -247,6 +247,7 @@ export {
 } from './lifecycle-interpreter.js';
 export {
 	classifyOutcomeRecovery,
+	findUniqueLedgerTerminal,
 	outcomeClaimEventId,
 	outcomeClaimId,
 } from './outcome-protocol.js';
@@ -324,6 +325,8 @@ export {
 export {
 	type TransitionRelationalValidationInput,
 	type TransitionRelationalValidationResult,
+	type ValidatedManagedStepManifest,
+	type ValidatedManagedStepManifestResult,
 	validateNormalizedManagedStepManifest,
 	validateTransitionRelationalInvariants,
 } from './validation.js';

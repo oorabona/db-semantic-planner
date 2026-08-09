@@ -13,6 +13,7 @@ import type {
 	OutcomeRecoveryInput,
 	OutcomeRecoveryReadBack,
 } from '@dbsp/types';
+import * as transitionTypes from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { admitRecordedIdentity } from './declaration.js';
 import { LEDGER_LIFECYCLE_GRAMMAR } from './lifecycle-interpreter.js';
@@ -25,6 +26,45 @@ interface ClaimTokenRecord {
 }
 
 const tokenRecords = new WeakMap<object, ClaimTokenRecord>();
+
+type ControllerIdentity = { readonly name: string; readonly oid: string };
+type ControllerIdentityHelper = (
+	recorded: ControllerIdentity,
+	current: ControllerIdentity,
+) => boolean;
+
+const sameControllerIdentity =
+	(
+		transitionTypes as typeof transitionTypes & {
+			readonly sameControllerIdentity?: ControllerIdentityHelper;
+		}
+	).sameControllerIdentity ??
+	((recorded, current) =>
+		recorded.name === current.name && recorded.oid === current.oid);
+
+/**
+ * Return the sole terminal member by predecessor topology, or undefined when
+ * the chain has zero or multiple terminals. This remains linear for large
+ * durable chains and centralizes the protocol's exactly-one-terminal rule.
+ */
+export function findUniqueLedgerTerminal<
+	T extends {
+		readonly eventId: string;
+		readonly predecessor?: string;
+	},
+>(events: readonly T[]): T | undefined {
+	const predecessors = new Set<string>();
+	for (const event of events) {
+		if (event.predecessor !== undefined) predecessors.add(event.predecessor);
+	}
+	let terminal: T | undefined;
+	for (const event of events) {
+		if (predecessors.has(event.eventId)) continue;
+		if (terminal !== undefined) return undefined;
+		terminal = event;
+	}
+	return terminal;
+}
 
 /**
  * The sole durable identity builder for a managed outcome claim. An address
@@ -172,22 +212,44 @@ export function admitOutcomeClaim(
 			`${plan.claimKind} cannot open from stable state ${projection.stableState}`,
 		);
 	if (projection.stableState === 'managed' && plan.requiresVacancy !== true) {
-		const terminal = projection.events.find(
-			(event) =>
-				!projection.events.some(
-					(candidate) => candidate.predecessor === event.eventId,
-				),
-		);
+		const terminal = findUniqueLedgerTerminal(projection.events);
 		if (!terminal)
 			return refusal(
 				`claim ${plan.claimId} refuses managed chain without terminal`,
 			);
-		if (!input.currentUser)
-			return refusal(`claim ${plan.claimId} refuses unreadable current_user`);
-		if (terminal.controller !== input.currentUser)
-			return refusal(
-				`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
-			);
+		const currentController = (
+			input as OutcomeClaimAdmissionInput & {
+				readonly currentController?: ControllerIdentity;
+			}
+		).currentController;
+		const controllerOid = (
+			terminal as LedgerChainMember & {
+				readonly controllerOid?: string;
+			}
+		).controllerOid;
+		if (currentController) {
+			if (!controllerOid)
+				return refusal(
+					`claim ${plan.claimId} refuses managed controller without recorded OID`,
+				);
+			if (
+				!sameControllerIdentity(
+					{ name: terminal.controller, oid: controllerOid },
+					currentController,
+				)
+			)
+				return refusal(
+					`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
+				);
+		} else {
+			// Retained only while pre-OID callers are migrated in the next dispatch.
+			if (!input.currentUser)
+				return refusal(`claim ${plan.claimId} refuses unreadable current_user`);
+			if (terminal.controller !== input.currentUser)
+				return refusal(
+					`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
+				);
+		}
 		if (!input.liveAddress)
 			return refusal(
 				`claim ${plan.claimId} refuses missing live identity admission`,
@@ -219,20 +281,6 @@ function recoveryPending(
 	};
 }
 
-function terminalMember(
-	events: readonly LedgerChainMember[],
-): LedgerChainMember | undefined {
-	const predecessors = new Set(
-		events
-			.map((event) => event.predecessor)
-			.filter(
-				(predecessor): predecessor is string => predecessor !== undefined,
-			),
-	);
-	const terminal = events.filter((event) => !predecessors.has(event.eventId));
-	return terminal.length === 1 ? terminal[0] : undefined;
-}
-
 function appendRecovery(
 	input: OutcomeRecoveryInput,
 	readBack: OutcomeRecoveryReadBack,
@@ -247,7 +295,7 @@ function appendRecovery(
 			reason: projection.reason.code,
 		};
 	const claim = projection.openClaim;
-	const predecessor = terminalMember(projection.events);
+	const predecessor = findUniqueLedgerTerminal(projection.events);
 	if (!claim || !predecessor)
 		return recoveryPending(
 			input,
@@ -304,6 +352,11 @@ export async function classifyOutcomeRecovery(
 
 	const claim = projection.openClaim;
 	if (claim.phase === 'indeterminate') {
+		// The indeterminate edge is itself the durable record that this exact
+		// claim reached an uncertain send boundary.  A later, explicit recovery
+		// can close it only from a fresh catalogue read; do not demand a second
+		// copy of the admission envelope here.  Reconcile still re-matches that
+		// envelope before it attributes a *new* present creation as observed.
 		if (!input.resolveIndeterminate)
 			return {
 				kind: 'outcome-recovery-blocked',
@@ -393,7 +446,7 @@ export async function classifyOutcomeRecovery(
 				input,
 				readBack,
 				'indeterminate',
-				'create read-back requires the run accepted external-ddl-exclusion',
+				'create read-back requires claim-bound external-ddl-exclusion and operation postcondition evidence',
 			);
 		return appendRecovery(
 			input,

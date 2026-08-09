@@ -15,6 +15,65 @@ type Address = DeclarableResourceAddress & {
 
 type Meta = Readonly<Record<string, unknown>>;
 
+/**
+ * The only change-kind boundary between diagnostic schema diffing and managed
+ * execution.  Keep it at manifest construction: diagnostic-only controls must
+ * never acquire an address, claim, reservation, or DDL bundle.
+ */
+export function assertDeclarableChangeKind(
+	kind: ChangeKind,
+): asserts kind is Exclude<
+	ChangeKind,
+	| 'enable_rls'
+	| 'disable_rls'
+	| 'create_policy'
+	| 'drop_policy'
+	| 'add_comment'
+	| 'drop_comment'
+> {
+	switch (kind) {
+		case 'enable_rls':
+		case 'disable_rls':
+		case 'create_policy':
+		case 'drop_policy':
+		case 'add_comment':
+		case 'drop_comment':
+			throw new Error(
+				`generator planning refuses ${kind}: it is diagnostic-only and non-declarable`,
+			);
+		case 'create_table':
+		case 'drop_table':
+		case 'readdress_table':
+		case 'add_column':
+		case 'drop_column':
+		case 'alter_column_type':
+		case 'alter_column_nullable':
+		case 'alter_column_default':
+		case 'alter_column_unique':
+		case 'add_primary_key':
+		case 'drop_primary_key':
+		case 'add_foreign_key':
+		case 'drop_foreign_key':
+		case 'alter_foreign_key':
+		case 'validate_constraint':
+		case 'create_index':
+		case 'drop_index':
+		case 'add_check_constraint':
+		case 'drop_check_constraint':
+		case 'create_enum':
+		case 'alter_enum_add_value':
+		case 'drop_enum':
+		case 'alter_column_collation':
+		case 'alter_column_identity':
+		case 'create_extension':
+		case 'drop_extension':
+		case 'create_sequence':
+		case 'alter_sequence':
+		case 'drop_sequence':
+			return;
+	}
+}
+
 function text(value: unknown, label: string): string {
 	if (typeof value !== 'string' || value.length === 0)
 		throw new Error(`generator planning refuses ${label}: missing typed name`);
@@ -64,7 +123,7 @@ function tableAddress(
 function childAddress(
 	database: string,
 	schema: string,
-	kind: Extract<Address['kind'], 'column' | 'index' | 'constraint' | 'policy'>,
+	kind: Extract<Address['kind'], 'column' | 'index' | 'constraint'>,
 	name: string,
 	table: string,
 ): Address {
@@ -187,17 +246,10 @@ function addressForChange(input: {
 			};
 		case 'add_comment':
 		case 'drop_comment':
-			return meta?.target === 'column'
-				? column()
-				: tableAddress(database, schema, change.table);
 		case 'create_policy':
 		case 'drop_policy':
-			return childAddress(
-				database,
-				schema,
-				'policy',
-				nestedName(meta, 'policy', change.kind),
-				change.table,
+			throw new Error(
+				`generator planning refuses ${change.kind}: it is diagnostic-only and non-declarable`,
 			);
 		default: {
 			const exhaustive: never = change.kind;
@@ -208,7 +260,8 @@ function addressForChange(input: {
 	}
 }
 
-function createsAddress(kind: ChangeKind): boolean {
+function createsAddress(change: SchemaChange): boolean {
+	if (change.kind === 'alter_column_unique') return change.destructive !== true;
 	return new Set<ChangeKind>([
 		'create_table',
 		'add_column',
@@ -219,8 +272,7 @@ function createsAddress(kind: ChangeKind): boolean {
 		'create_enum',
 		'create_extension',
 		'create_sequence',
-		'create_policy',
-	]).has(kind);
+	]).has(change.kind);
 }
 
 /**
@@ -237,6 +289,7 @@ export function createPgsqlGeneratedManagedStep(input: {
 	readonly dependencyOrder?: readonly string[];
 	readonly statements: readonly string[];
 }): NormalizedManagedStep {
+	assertDeclarableChangeKind(input.change.kind);
 	const address = addressForChange(input);
 	if (input.statements.length === 0 && input.change.kind !== 'readdress_table')
 		throw new Error(
@@ -258,7 +311,7 @@ export function createPgsqlGeneratedManagedStep(input: {
 			statements: input.statements.map((sql, ordinal) => ({ ordinal, sql })),
 		},
 		classification,
-		requiresVacancy: createsAddress(input.change.kind),
+		requiresVacancy: createsAddress(input.change),
 		replayPolicy: classification === 'removal' ? 'fresh-live-only' : 'recorded',
 	};
 }

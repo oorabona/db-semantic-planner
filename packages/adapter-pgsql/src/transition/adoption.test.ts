@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
 	readChain: vi.fn(),
 	readIdentity: vi.fn(),
-	runOutcome: vi.fn(),
+	executeAdmitted: vi.fn(),
 }));
 
 vi.mock('./chain-reader.js', () => ({
@@ -13,7 +13,7 @@ vi.mock('./catalogue-identity.js', () => ({
 	readPgCatalogueIdentity: mocks.readIdentity,
 }));
 vi.mock('./outcome-protocol.js', () => ({
-	runPgTransactionalOutcome: mocks.runOutcome,
+	executePgAdmittedOperation: mocks.executeAdmitted,
 }));
 
 import { executePgDeclaredAdoption } from './adoption.js';
@@ -46,7 +46,7 @@ describe('declared PostgreSQL adoption admission', () => {
 			...address,
 			catalogueIdentity: identity,
 		});
-		mocks.runOutcome.mockResolvedValue({ kind: 'executed-outcome-claim' });
+		mocks.executeAdmitted.mockResolvedValue({ kind: 'executed-outcome-claim' });
 		const shapeMatches = vi.fn(async () => true);
 
 		await expect(
@@ -61,14 +61,18 @@ describe('declared PostgreSQL adoption admission', () => {
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
 		expect(shapeMatches).toHaveBeenCalledOnce();
-		expect(mocks.runOutcome).toHaveBeenCalledWith(
+		expect(mocks.executeAdmitted).toHaveBeenCalledWith(
 			executor,
 			expect.objectContaining({
-				plan: expect.objectContaining({
-					claimKind: 'adopt-intent',
-					declared: declaration,
+				operation: expect.objectContaining({
+					request: expect.objectContaining({
+						plan: expect.objectContaining({
+							claimKind: 'adopt-intent',
+							declared: declaration,
+						}),
+						recordCatalogueIdentity: true,
+					}),
 				}),
-				recordCatalogueIdentity: true,
 			}),
 		);
 	});
@@ -88,7 +92,7 @@ describe('declared PostgreSQL adoption admission', () => {
 			detail: 'declared adoption for accounts refuses live shape mismatch',
 		});
 		expect(mocks.readIdentity).not.toHaveBeenCalled();
-		expect(mocks.runOutcome).not.toHaveBeenCalled();
+		expect(mocks.executeAdmitted).not.toHaveBeenCalled();
 	});
 
 	it('refuses a changed physical identity before claiming', async () => {
@@ -109,7 +113,7 @@ describe('declared PostgreSQL adoption admission', () => {
 			outcome: 'adoption-refused',
 			detail: 'declared adoption for accounts refuses live identity mismatch',
 		});
-		expect(mocks.runOutcome).not.toHaveBeenCalled();
+		expect(mocks.executeAdmitted).not.toHaveBeenCalled();
 	});
 
 	it('treats an already managed adoption as an idempotent no-op', async () => {
@@ -183,7 +187,7 @@ describe('declared PostgreSQL adoption admission', () => {
 			...address,
 			catalogueIdentity: identity,
 		});
-		mocks.runOutcome.mockResolvedValue({
+		mocks.executeAdmitted.mockResolvedValue({
 			kind: 'outcome-protocol-refused',
 			reason:
 				'claim token for concurrent-claim is no longer valid because its claim is closed',
@@ -207,7 +211,7 @@ describe('declared PostgreSQL adoption admission', () => {
 			...address,
 			catalogueIdentity: identity,
 		});
-		mocks.runOutcome.mockResolvedValue({
+		mocks.executeAdmitted.mockResolvedValue({
 			kind: 'outcome-protocol-refused',
 			reason:
 				'claim token for another change is no longer valid because its claim is closed',

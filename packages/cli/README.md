@@ -42,7 +42,7 @@ npx dbsp repl --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
 npx dbsp verify --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
 
 # Prove and record a managed schema change
-npx dbsp plan --db postgres://user:pass@localhost/mydb --schema public
+npx dbsp plan ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb --schema public
 
 # Generate DDL SQL for provisioning
 npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
@@ -64,7 +64,7 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 `dbsp plan` prints a `Run id` and `Plan digest`. Apply carries both:
 
 ```bash
-dbsp apply <run-id> --plan-digest <sha256> --db <url>
+dbsp apply <run-id> --plan-digest <sha256> --db postgres://user:pass@localhost/mydb
 ```
 
 Before authorization or planned DDL, apply recomputes the stored plan's digest and compares it

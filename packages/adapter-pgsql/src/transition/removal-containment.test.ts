@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
 	classifyRemovalEffectsClosure,
+	readPgRemovalEffectsClosure,
 	reservationsForRemovalClosure,
 } from './removal-containment.js';
 
@@ -78,7 +79,7 @@ describe('removal effects closure', () => {
 		).toBe(true);
 	});
 
-	it('accounts contained children without separate claims and reserves managed dependents', () => {
+	it('accounts contained children and reserves the root plus every managed dependent', () => {
 		const closure = classifyRemovalEffectsClosure({
 			root,
 			effects: [{ address: child }, { address: dependent }],
@@ -93,8 +94,8 @@ describe('removal effects closure', () => {
 				executionId: 'run',
 				rootClaimId: 'claim',
 				homeLedger: { scope: 'schema', schema: 'public' },
-			}),
-		).toHaveLength(1);
+			}).map((reservation) => reservation.address),
+		).toEqual([root, dependent]);
 	});
 
 	it('refuses the whole removal when an unmanaged cascade escapes containment', () => {
@@ -124,4 +125,74 @@ describe('removal effects closure', () => {
 		});
 		expect(closure.kind).toBe('all-contained-or-managed');
 	});
+
+	it('derives a table attribute parent from the live root OID, not the ledger key', async () => {
+		const calls: (readonly unknown[] | undefined)[] = [];
+		const closure = await readPgRemovalEffectsClosure({
+			executor: {
+				query: async (_sql, params) => {
+					calls.push(params);
+					return calls.length === 1
+						? {
+								rows: [{ oid: '42' }],
+							}
+						: {
+								rows: [
+									{
+										kind: 'column',
+										name: 'id',
+										schema: 'public',
+										parent_oid: '42',
+									},
+								],
+							};
+				},
+			},
+			root,
+			isManaged: async () => false,
+		});
+		expect(calls[1]).toEqual(['42', 'pg_class']);
+		expect(closure).toMatchObject({
+			kind: 'all-contained-or-managed',
+			effects: [{ address: { kind: 'column', name: 'id', parent: root } }],
+		});
+	});
+
+	for (const [kind, catalogueClass] of [
+		['enum', 'pg_type'],
+		['constraint', 'pg_constraint'],
+		['extension', 'pg_extension'],
+		['column', 'pg_class'],
+	] as const)
+		it(`seeds ${kind} roots with ${catalogueClass}`, async () => {
+			const calls: (readonly unknown[] | undefined)[] = [];
+			const columnRoot = {
+				...root,
+				kind,
+				name: `${kind}_root`,
+				...(kind === 'column' ? { parent: root } : {}),
+			};
+			const closure = await readPgRemovalEffectsClosure({
+				executor: {
+					query: async (_sql, params) => {
+						calls.push(params);
+						return calls.length === 1
+							? {
+									rows: [
+										{
+											...(kind === 'column'
+												? { parent_oid: '43', name: columnRoot.name }
+												: { oid: '43' }),
+										},
+									],
+								}
+							: { rows: [] };
+					},
+				},
+				root: columnRoot,
+				isManaged: async () => false,
+			});
+			expect(calls[1]).toEqual(['43', catalogueClass]);
+			expect(closure.kind).toBe('all-contained-or-managed');
+		});
 });

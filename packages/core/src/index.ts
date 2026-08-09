@@ -356,6 +356,8 @@ export type {
 	TransitionRunMetadata,
 	TransitionRunPersister,
 	TransitionSessionClient,
+	ValidatedManagedStepManifest,
+	ValidatedManagedStepManifestResult,
 } from './transition/index.js';
 export {
 	acquireExclusiveTransitionLease,
@@ -387,6 +389,7 @@ export {
 	defaultIndexName,
 	enumAddDelta,
 	evidenceId,
+	findUniqueLedgerTerminal,
 	indexDelta,
 	interpretLedgerLifecycle,
 	isExclusiveTransitionTarget,

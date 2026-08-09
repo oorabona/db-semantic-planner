@@ -47,6 +47,10 @@ undeclarable kind is excluded from managed plans entirely, so the differ's `drop
 `drop_comment` outputs never reach managed execution. Widening the DSL widens the managed scope
 by itself.
 
+**Non-declarable means no manifest.** RLS controls, policies, and comments may
+remain schema-diff diagnostics, but the sole manifest-construction boundary
+refuses them before an address, claim, reservation, or DDL bundle exists.
+
 ### The ledger is partitioned by object scope, and tenant schemas are a trust boundary
 
 A schema-scoped object's events live in a ledger inside its own schema: tenant schemas are a

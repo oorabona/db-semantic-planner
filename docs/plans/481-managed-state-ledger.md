@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: in_progress
   scope: core
   type: specification
   target_project: /mnt/disk/dev/db-semantic-planner
@@ -20,6 +20,10 @@ done_when:
     verified_by: "tests/e2e/outcome-protocol.test.ts induces each failure against a real PostgreSQL and asserts the chain reaches a lawful member without DDL ever being re-issued"
   - outcome: "An operator restoring a dump into another database is refused rather than silently given management of objects dbsp has never seen"
     verified_by: "tests/e2e/lineage.test.ts restores a dump into a second database and asserts mutation refuses while inspect works"
+delivery_checklist:
+  - [x] "Manifest construction refuses non-declarable RLS, policy, and comment changes"
+  - [x] "Runtime integrity compares scratch deparses, defaults, and trigger/function definitions"
+  - [ ] "PostgreSQL-18 E2E recovery tests are run by the orchestrator"
 non_goals:
   - "Migrating data. Deferred deliberately; its mechanism is the attested statement and its reservation lifecycle, decided in principle in ADR 0006 and shipped with the data-steps decision"
   - "The attested-statement surface itself; nothing in this delivery wires the existing manual-sql operation to the DSL or CLI"
@@ -59,15 +63,15 @@ assumptions:
   - claim: "The applier computes transactional per segment and opens a transaction only when it holds; an end-to-end run with the admission check removed reached completed against PostgreSQL 18"
     basis: verified
     evidence: "packages/core/src/transition/applier.ts:997"
-  - claim: "push executes DDL and writes no record: its only reference to the migrations table excludes that table from the --drop pattern"
+  - claim: "The admitted façade is the managed DDL-capable boundary; removed push code is not an execution path"
     basis: verified
-    evidence: "packages/cli/src/commands/push.ts:85"
+    evidence: "packages/adapter-pgsql/src/transition/outcome-protocol.ts"
   - claim: "The schema differ emits eleven removal kinds and the generator renders them in a dedicated ordered phase; the transition operation set contains six operations and no removal"
     basis: verified
     evidence: "packages/adapter-pgsql/src/ddl/schema-diff.ts:368"
-  - claim: "An advisory-lock discipline for writers already exists on both write paths: migrate takes one, and the durable apply takes a run-scoped one"
+  - claim: "An advisory-lock discipline serializes the admitted façade and its ledger homes"
     basis: verified
-    evidence: "packages/adapter-pgsql/src/ddl/migration-tracker.ts:38"
+    evidence: "packages/adapter-pgsql/src/transition/outcome-protocol.ts"
   - claim: "A PostgreSQL object identifier is not permanent across a drop and recreate, so recording it detects recreation except where the identifier was reused"
     basis: assumed
     breaks_if_wrong: "If identifier reuse is common rather than rare in these deployments, identity matching is weaker than claimed and the authority needs a second signal such as a catalogue creation timestamp"
@@ -296,7 +300,7 @@ truth), and the deferred set (takeover, migrate audit, attested surface, rebase)
      └─ (readdress pair: verify → one transaction: DDL + read-back + both events)
 
  serialization: advisory lock per ledger (flow)
-                UNIQUE(address, predecessor) + one-open-claim index (truth)
+                UNIQUE(address, predecessor) + durable reservation primary key (truth)
                 durable open claim (blocks across crashes)
 ```
 

@@ -5,7 +5,7 @@ import type {
 	LedgerRefusal,
 } from './ledger.js';
 import type { LedgerChainProjection, LedgerStableState } from './projection.js';
-import type { CatalogueIdentity } from './resource.js';
+import type { CatalogueIdentity, ControllerIdentity } from './resource.js';
 
 /** A planned managed statement has a stable position inside its claim bundle. */
 export interface ClaimBundleStatement {
@@ -29,6 +29,15 @@ export interface ClaimStatementBundle {
 declare const claimTokenBrand: unique symbol;
 export interface ClaimToken {
 	readonly [claimTokenBrand]: 'dbsp-outcome-claim-token';
+}
+
+/**
+ * Opaque execution authority minted only after an adapter has admitted a live
+ * operation.  It deliberately has no structural fields a caller can supply.
+ */
+declare const admittedPermitBrand: unique symbol;
+export interface AdmittedPermit {
+	readonly [admittedPermitBrand]: 'dbsp-admitted-permit';
 }
 
 /** The fixed plan-time material that becomes one ledger claim. */
@@ -81,7 +90,10 @@ export interface OutcomeClaimAdmissionInput {
 	readonly plan: OutcomeClaimPlan;
 	readonly projection: LedgerChainProjection;
 	/** Read exactly once by the adapter in the claiming transaction. */
+	/** @deprecated Compatibility input for pre-controller-OID callers. */
 	readonly currentUser?: string;
+	/** Current role read by the adapter on the locked claiming session. */
+	readonly currentController?: ControllerIdentity;
 	/** Fresh locked catalogue identity for an existing managed address. */
 	readonly liveAddress?: LedgerAddress;
 }
@@ -159,11 +171,39 @@ export type OutcomeRecoveryClassification =
 			readonly reason: string;
 	  };
 
+/**
+ * Claim-bound evidence required before an interrupted creation or modification
+ * can be attributed to DBSP. The adapter reconstructs these values from the
+ * durable run, admitted operation and scoped authorization while holding its
+ * run and ledger locks; a same-name catalogue object is never this evidence.
+ */
+export interface OutcomeIndeterminateRecoveryEvidence {
+	readonly runId: string;
+	readonly planDigest: string;
+	readonly executionId: string;
+	readonly claimId: string;
+	readonly plannedClaimKey?: string;
+	/** Digest recorded when the exact admitted statement bundle was minted. */
+	readonly admittedBundleDigest: string;
+	/** Digest re-read from the persisted operation at resolution time. */
+	readonly persistedBundleDigest: string;
+	readonly recordedPreState: 'unknown' | 'managed' | 'absent';
+	/** Operation-owned read-back verified its declaration/identity postcondition. */
+	readonly operationPostcondition: 'verified';
+	readonly externalDdlExclusion: {
+		readonly planDigest: string;
+		readonly address: LedgerAddress;
+		readonly trustRoot: string;
+	};
+}
+
 export interface OutcomeRecoveryInput {
 	readonly projection: LedgerChainProjection;
 	readonly catalogue: OutcomeRecoveryCatalogueReader;
 	/** Accepted with the interrupted run, never inferred from a current policy. */
 	readonly acceptedExternalDdlExclusion: boolean;
+	/** Required for resolving an indeterminate creation or modification. */
+	readonly indeterminateEvidence?: OutcomeIndeterminateRecoveryEvidence;
 	/** Only an explicit reconciliation path may close an indeterminate claim. */
 	readonly resolveIndeterminate?: boolean;
 }

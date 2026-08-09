@@ -51,6 +51,7 @@ function run(): TransitionRunMetadata {
 		targetContextDigest: 'context-digest',
 		databaseId: 'database-id',
 		coreVersion: '0.1.0',
+		replayability: 'replayable',
 		startedAt: '2026-07-17T00:00:00.000Z',
 	};
 }
@@ -82,6 +83,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					target_context_digest: { type: 'text', notNull: true },
 					database_id: { type: 'text', notNull: true },
 					core_version: { type: 'text', notNull: true },
+					replayability: { type: 'text', notNull: true },
 					started_at: {
 						type: 'timestamp with time zone',
 						notNull: true,
@@ -194,6 +196,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 				this.plans.set(String(run_id), {
@@ -509,6 +512,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 
@@ -560,6 +564,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 
@@ -595,6 +600,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 		executor.plans.set(metadata.runId, {
@@ -802,6 +808,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 

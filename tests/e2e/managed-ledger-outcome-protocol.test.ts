@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+	executePgAdmittedOperation,
+	type PgOutcomeTransactionalRequest,
 	runPgReinitializePreflight,
-	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerResolution,
-	executePgManagedBundle,
 	openPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
 import { outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
@@ -16,13 +16,22 @@ import type {
 } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
-import {
-	fixtureOutcomeClaim,
-	fixtureRefusedResolutionMember,
-} from './outcome-claim-fixture.js';
+import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
+
+/** Fixture-only equivalent of the CLI's locked, permit-holding façade call. */
+function runAdmitted(
+	executor: pg.Pool | pg.PoolClient,
+	request: PgOutcomeTransactionalRequest,
+) {
+	return executePgAdmittedOperation(executor, {
+		run: { runId: 'e2e-fixture', planDigest: 'e2e-fixture' },
+		approval: { approvals: [] },
+		operation: { kind: 'single-outcome', request },
+	});
+}
 
 function quoteIdent(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
@@ -169,7 +178,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 			],
 		});
 		await expect(
-			runPgTransactionalOutcome(pool, {
+			runAdmitted(pool, {
 				...first,
 				resolution: { eventId: firstObserved, eventKind: 'observed' },
 				recordCatalogueIdentity: true,
@@ -181,7 +190,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 			}),
 		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
 		await expect(
-			runPgTransactionalOutcome(pool, {
+			runAdmitted(pool, {
 				...second,
 				resolution: { eventId: secondObserved, eventKind: 'observed' },
 				readBack: async () => ({
@@ -237,7 +246,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 			).rows[0]?.pg_backend_pid;
 			if (!pid)
 				throw new Error('transactional outcome client has no backend pid');
-			const running = runPgTransactionalOutcome(client, {
+			const running = runAdmitted(client, {
 				...input,
 				resolution: { eventId: 'killed-observed', eventKind: 'observed' },
 				vacancy: async () => {
@@ -292,7 +301,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 					rootClaimId: 'prior-adopt',
 				})),
 			});
-			const adopted = await runPgTransactionalOutcome(client, {
+			const adopted = await runAdmitted(client, {
 				...adoption,
 				resolution: { eventId: 'prior-adopted', eventKind: 'adopt' },
 				readBack: async () => ({
@@ -330,7 +339,7 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 				'prior-retire',
 				retirement.reservations,
 			);
-			const result = await runPgTransactionalOutcome(client, {
+			const result = await runAdmitted(client, {
 				...input,
 				resolution: { eventId: 'vacancy-refused', eventKind: 'refused' },
 				vacancy: async () => {
@@ -393,74 +402,25 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 		}
 	});
 
-	it('SC-42: another claim, duplicate use, a resolved claim, and an outside bundle all reject at the token-gated sink', async () => {
+	it('SC-42: the facade owns the bundle and rejects a repeated closed claim', async () => {
 		const { pool, schema } = await fixture();
-		const client = await pool.connect();
-		try {
-			const first = await openPgOutcomeClaim(
-				client,
-				claim(schema, 'token_one', 'token-one'),
-			);
-			const second = await openPgOutcomeClaim(
-				client,
-				claim(schema, 'token_two', 'token-two'),
-			);
-			if (
-				first.kind !== 'admitted-outcome-claim' ||
-				second.kind !== 'admitted-outcome-claim'
-			)
-				throw new Error('token fixtures did not admit');
-			await expect(
-				executePgManagedBundle(client, {
-					token: first.token,
-					claim: second,
-					statements: second.plan.statementBundle.statements,
-				}),
-			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
-			await expect(
-				executePgManagedBundle(client, {
-					token: first.token,
-					claim: first,
-					statements: [{ ordinal: 0, sql: 'DROP TABLE nowhere' }],
-				}),
-			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
-			await expect(
-				executePgManagedBundle(client, {
-					token: first.token,
-					claim: first,
-					statements: first.plan.statementBundle.statements,
-				}),
-			).resolves.toBeUndefined();
-			await expect(
-				executePgManagedBundle(client, {
-					token: first.token,
-					claim: first,
-					statements: first.plan.statementBundle.statements,
-				}),
-			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
-			await appendPgLedgerResolution(
-				client,
-				{ scope: 'schema', schema },
-				fixtureRefusedResolutionMember({
-					eventId: 'token-two-refused',
-					address: second.plan.address,
-					predecessor: second.plan.claimId,
-					code: 'ERR-11',
-				}),
-				second.plan.claimId,
-				second.plan.address
-					? claim(schema, 'token_two', 'token-two').reservations
-					: [],
-			);
-			await expect(
-				executePgManagedBundle(client, {
-					token: second.token,
-					claim: second,
-					statements: second.plan.statementBundle.statements,
-				}),
-			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
-		} finally {
-			client.release();
-		}
+		const input = claim(schema, 'token_one', 'token-one');
+		const request = {
+			...input,
+			resolution: {
+				eventId: 'token-one-observed',
+				eventKind: 'observed' as const,
+			},
+			// The facade executes the complete creation protocol, including its
+			// operation-owned vacancy admission. The former sink-only fixture never
+			// needed this reader because it did not execute the bundle itself.
+			vacancy: async () => vacancy(pool, schema, 'token_one'),
+		};
+		await expect(runAdmitted(pool, request)).resolves.toMatchObject({
+			kind: 'executed-outcome-claim',
+		});
+		await expect(runAdmitted(pool, request)).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+		});
 	});
 });

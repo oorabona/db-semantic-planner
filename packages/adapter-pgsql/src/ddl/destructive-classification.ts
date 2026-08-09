@@ -21,15 +21,9 @@ const NON_DESTRUCTIVE_KINDS: ReadonlySet<ChangeKind> = new Set([
 	'alter_enum_add_value',
 	'alter_column_collation',
 	'alter_column_identity',
-	'add_comment',
-	'drop_comment',
 	'create_extension',
 	'create_sequence',
 	'alter_sequence',
-	'enable_rls',
-	'disable_rls',
-	'create_policy',
-	'drop_policy',
 ]);
 
 const REMOVAL_KINDS: ReadonlySet<ChangeKind> = new Set([
@@ -53,6 +47,17 @@ export function classifyGeneratedMutation(
 	kind: ChangeKind | string,
 	change?: { readonly destructive?: boolean },
 ): GeneratedMutationClassification {
+	if (
+		kind === 'enable_rls' ||
+		kind === 'disable_rls' ||
+		kind === 'create_policy' ||
+		kind === 'drop_policy' ||
+		kind === 'add_comment' ||
+		kind === 'drop_comment'
+	)
+		throw new Error(
+			`generator planning refuses ${kind}: non-declarable changes have no execution classification`,
+		);
 	// The ChangeKind names both directions of a unique alteration.  Its
 	// producer carries the direction, so removing the backing constraint is a
 	// removal rather than the formerly unsafe non-destructive default.

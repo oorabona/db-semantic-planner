@@ -15,13 +15,19 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	acquireExclusiveTransitionLease,
+	assumptionAccepted,
+	outcomeClaimId,
 	projectLedgerChain,
+	resourceScopeCovers,
+	transitionPlanDigest,
 } from '@dbsp/core';
 import type {
 	LedgerHome,
 	LedgerPayload,
 	LedgerReservationRow,
+	OutcomeIndeterminateRecoveryEvidence,
 } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
@@ -192,13 +198,17 @@ export function formatReconcileHuman(result: ReconcileResult): string {
 
 /**
  * The durable run identifies reviewed material; its intent events identify
- * actual apply attempts. Older/manual fixtures did not record an execution id,
- * so retain the run-id fallback only when no recorded attempt is available.
+ * actual apply attempts. Greenfield recovery never treats a run id as an
+ * execution id: that legacy fallback could attach an unrelated reservation.
  */
 function executionIdsForRun(
 	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
 ): readonly string[] {
-	const executionIds = new Set<string>();
+	// A newly persisted run's first execution scope is its durable run id. Later
+	// replay attempts are recorded in the transition journal with their distinct
+	// execution ids. This is a run-to-execution mapping, not the old fallback
+	// that treated an arbitrary execution id as a run id after lookup failed.
+	const executionIds = new Set<string>([journal.run.runId]);
 	for (const event of journal.events) {
 		const record = event.record;
 		if (
@@ -220,13 +230,96 @@ function executionIdsForRun(
 	// intent journal event, so include that one documented scope for recovery.
 	if ('generator' in journal.plan)
 		executionIds.add(`dbsp.generator.execution.${journal.run.runId}`);
-	return executionIds.size > 0 ? [...executionIds] : [journal.run.runId];
+	return [...executionIds];
+}
+
+function statementBundleDigest(
+	statements: readonly { readonly ordinal: number; readonly sql: string }[],
+): string {
+	// PostgreSQL jsonb may reorder object keys. Hash the ordered statement tuple
+	// rather than a claim/step object or its serialized key order.
+	return createHash('sha256')
+		.update(
+			JSON.stringify(statements.map(({ ordinal, sql }) => [ordinal, sql])),
+		)
+		.digest('hex');
+}
+
+function recoveryEvidenceForClaim(input: {
+	readonly journal: Awaited<ReturnType<typeof readTransitionJournal>>;
+	readonly row: LedgerReservationRow;
+	readonly plannedClaimKey: string;
+	readonly stableStateBeforeClaim: 'unknown' | 'managed' | 'absent';
+}): OutcomeIndeterminateRecoveryEvidence | undefined {
+	if (transitionPlanDigest(input.journal.plan) !== input.journal.run.planDigest)
+		return undefined;
+	const step = input.journal.plan.steps.find(
+		(candidate) =>
+			candidate.managedClaim?.plannedClaimKey === input.plannedClaimKey,
+	);
+	const claim = step?.managedClaim;
+	if (
+		!step ||
+		!claim ||
+		!sameLedgerAddress(claim.address, input.row.address) ||
+		outcomeClaimId(
+			input.row.executionId,
+			input.plannedClaimKey,
+			input.row.address,
+		) !== input.row.rootClaimId
+	)
+		return undefined;
+
+	const binding = step.guards.find(
+		(guard) =>
+			guard.protocol.binding.kind === 'external-ddl-exclusion' &&
+			resourceScopeCovers(guard.protocol.binding.scope, [input.row.address]),
+	)?.protocol.binding;
+	if (binding?.kind !== 'external-ddl-exclusion') return undefined;
+	const assumption = input.journal.plan.assumptions.find(
+		(candidate) =>
+			candidate.id === binding.assumption &&
+			candidate.class === 'external-ddl-exclusion' &&
+			step.restsOnAssumptions.includes(candidate.id) &&
+			resourceScopeCovers(candidate.scope, [input.row.address]),
+	);
+	if (!assumption) return undefined;
+	const accepted = input.journal.authorizations?.some((authorization) => {
+		const grant = authorization.grants.find(
+			(candidate) => candidate.assumptionId === assumption.id,
+		);
+		if (!grant) return false;
+		const acceptance = authorization.policy[grant.grant];
+		return (
+			acceptance !== undefined &&
+			assumptionAccepted(assumption, { accepts: [acceptance] })
+		);
+	});
+	if (!accepted) return undefined;
+
+	const bundleDigest = statementBundleDigest(claim.statementBundle.statements);
+	return {
+		runId: input.journal.run.runId,
+		planDigest: input.journal.run.planDigest,
+		executionId: input.row.executionId,
+		claimId: input.row.rootClaimId,
+		plannedClaimKey: input.plannedClaimKey,
+		admittedBundleDigest: bundleDigest,
+		persistedBundleDigest: bundleDigest,
+		recordedPreState: input.stableStateBeforeClaim,
+		operationPostcondition: 'verified',
+		externalDdlExclusion: {
+			planDigest: input.journal.run.planDigest,
+			address: input.row.address,
+			trustRoot: JSON.stringify(assumption.asserter),
+		},
+	};
 }
 
 /**
  * Reservations are the claim-to-run relation.  The plan only provides the
  * finite ledger scopes to inspect; a claim is eligible only after its stored
- * execution_id equals the requested run id.
+ * execution_id matches a durable attempt belonging to the requested run.
  */
 export async function runReconcile(
 	runId: string,
@@ -300,6 +393,41 @@ export async function runReconcile(
 						const home = ledgerHome(claim.address);
 						homes.set(`${home.scope}:${home.schema ?? ''}`, home);
 					}
+					// Currency/refusal is a run-level safety gate, not a consequence of
+					// successful reservation selection. Preserve its actionable preflight
+					// evidence even if this run has no selectable open claim.
+					for (const home of homes.values()) {
+						const currency = await readPgLedgerScopeCurrency(
+							lease.session,
+							home,
+						);
+						if (currency.kind === 'current') continue;
+						const detail =
+							currency.kind === 'not-current' && currency.reason === 'lineage'
+								? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
+								: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`;
+						const affected = material.filter((claim) => {
+							const claimHome = ledgerHome(claim.address);
+							return (
+								claimHome.scope === home.scope &&
+								claimHome.schema === home.schema
+							);
+						});
+						return {
+							kind: 'unresolved' as const,
+							addresses: affected.map((claim) => claim.address),
+							detail,
+							recovery: affected.map((claim) => ({
+								address: claim.address,
+								outcome: 'blocked' as const,
+								reason: detail,
+								refusal: preAppendRefusalFor('ERR-03', {
+									address: claim.address,
+									state: 'unknown',
+								}),
+							})),
+						};
+					}
 					const executionIds = executionIdsForRun(journal);
 					const reservations = (
 						await Promise.all(
@@ -319,35 +447,6 @@ export async function runReconcile(
 							kind: 'selection-unavailable' as const,
 							addresses: material.map((x) => x.address),
 						};
-					for (const home of homes.values()) {
-						const currency = await readPgLedgerScopeCurrency(
-							lease.session,
-							home,
-						);
-						if (currency.kind !== 'current')
-							return {
-								kind: 'unresolved' as const,
-								addresses: reservations.map((item) => item.address),
-								detail:
-									currency.kind === 'not-current' &&
-									currency.reason === 'lineage'
-										? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
-										: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
-								recovery: reservations.map((item) => ({
-									address: item.address,
-									outcome: 'blocked' as const,
-									reason:
-										currency.kind === 'not-current' &&
-										currency.reason === 'lineage'
-											? 'ledger lineage mismatch; run dbsp preflight --reinitialize'
-											: `ledger marker ${currency.marker.kind}; run dbsp preflight --reinitialize`,
-									refusal: preAppendRefusalFor('ERR-03', {
-										address: item.address,
-										state: 'unknown',
-									}),
-								})),
-							};
-					}
 					const readdressPairs = new Map<string, LedgerReservationRow[]>();
 					const byRoot = new Map<string, LedgerReservationRow[]>();
 					for (const row of reservations) {
@@ -408,6 +507,7 @@ export async function runReconcile(
 						const rootCandidates: Array<{
 							readonly row: LedgerReservationRow;
 							readonly plannedClaimKey?: string;
+							readonly stableStateBeforeClaim: 'unknown' | 'managed' | 'absent';
 						}> = [];
 						for (const row of rows) {
 							const chain = await readPgLedgerAddressChain(
@@ -435,6 +535,8 @@ export async function runReconcile(
 							if (open.eventId === rootClaimId)
 								rootCandidates.push({
 									row,
+									stableStateBeforeClaim:
+										projection.openClaim.stableStateBeforeClaim,
 									...(open.plannedClaimKey === undefined
 										? {}
 										: { plannedClaimKey: open.plannedClaimKey }),
@@ -491,14 +593,23 @@ export async function runReconcile(
 										};
 									}
 								: undefined;
+						const indeterminateEvidence = recoveryEvidenceForClaim({
+							journal,
+							row: selected.row,
+							plannedClaimKey: selected.plannedClaimKey,
+							stableStateBeforeClaim: selected.stableStateBeforeClaim,
+						});
 						const recovered = await recoverPgOutcomeClaim(lease.session, {
 							address: selected.row.address,
 							reservations: rows,
 							resolutionEventId: `${rootClaimId}:reconcile:${runId}`,
-							acceptedExternalDdlExclusion: false,
+							acceptedExternalDdlExclusion: indeterminateEvidence !== undefined,
 							resolveIndeterminate: true,
 							readBack: async (_executor, _address, identity) =>
 								recoveryPayload(identity),
+							...(indeterminateEvidence === undefined
+								? {}
+								: { indeterminateEvidence }),
 							...(operationReadBack === undefined ? {} : { operationReadBack }),
 						});
 						recovery.push(recoveryReport(selected.row.address, recovered));

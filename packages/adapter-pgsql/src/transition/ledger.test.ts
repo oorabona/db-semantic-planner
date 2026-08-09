@@ -113,6 +113,21 @@ function createdLedgerColumnRows() {
 	}));
 }
 
+function createdLedgerDefaultRows() {
+	return [
+		{
+			table_name: 'dbsp_ledger_event',
+			column_name: 'controller',
+			default_definition: 'CURRENT_USER',
+		},
+		{
+			table_name: 'dbsp_ledger_event',
+			column_name: 'controller_oid',
+			default_definition: '(CURRENT_USER)::regrole::oid',
+		},
+	];
+}
+
 function createdLedgerInvariantConstraintRows() {
 	const addressColumns = [
 		'address_engine',
@@ -133,9 +148,9 @@ function createdLedgerInvariantConstraintRows() {
 			'dbsp_ledger_event',
 			'f',
 			false,
-			true,
 			[...addressColumns, 'predecessor'],
 			[...addressColumns, 'event_id'],
+			'dbsp_ledger_event',
 		],
 		['dbsp_ledger_reservation', 'p'],
 		['dbsp_ledger_reservation', 'c'],
@@ -146,23 +161,16 @@ function createdLedgerInvariantConstraintRows() {
 		['dbsp_ledger_marker', 'p'],
 		['dbsp_ledger_marker', 'c'],
 		['dbsp_ledger_marker', 'c'],
-		[
-			'dbsp_ledger_event',
-			'u',
-			true,
-			false,
-			[...addressColumns, 'predecessor'],
-			[],
-		],
+		['dbsp_ledger_event', 'u', true, [...addressColumns, 'predecessor'], []],
 	].map(
 		(
 			[
 				table_name,
 				contype,
 				connullsnotdistinct = false,
-				is_self_referential = false,
 				key_columns = [],
 				referenced_columns = [],
+				referenced_table_name = null,
 			],
 			index,
 		) => ({
@@ -205,12 +213,16 @@ function createdLedgerInvariantConstraintRows() {
 				'version >= 1',
 				undefined,
 			][index],
-			constraint_definition: `constraint-${String(index)}`,
 			contype,
 			connullsnotdistinct,
-			is_self_referential,
 			key_columns,
+			referenced_table_name,
 			referenced_columns,
+			confupdtype: 'a',
+			confdeltype: 'a',
+			condeferrable: false,
+			condeferred: false,
+			convalidated: true,
 		}),
 	);
 }
@@ -229,16 +241,25 @@ function createdLedgerTerminalIndexRows() {
 	];
 }
 
-function createdLedgerImmutabilityTriggerRows(schema: string) {
+function createdLedgerImmutabilityTriggerRows() {
 	return [
 		{
 			trigger_name: 'dbsp_ledger_event_immutable',
 			trigger_enabled: 'O',
-			trigger_type: 26,
+			trigger_type: '26',
+			trigger_arguments: '',
+			trigger_deferrable: false,
+			trigger_initially_deferred: false,
 			function_name: 'dbsp_ledger_reject_event_mutation',
-			function_schema: schema,
-			function_source:
-				" BEGIN RAISE EXCEPTION 'dbsp ledger events are append-only for address %', OLD.address_name USING ERRCODE = '55000'; END; ",
+			function_identity_arguments: '',
+			function_result: 'trigger',
+			function_language: 'plpgsql',
+			function_kind: 'f',
+			function_volatility: 'v',
+			function_is_strict: false,
+			function_is_security_definer: false,
+			function_is_leakproof: false,
+			function_config_is_null: true,
 		},
 	];
 }
@@ -305,10 +326,10 @@ describe('managed ledger storage', () => {
 				return { rows: [{ server_version_num: '180000' }] };
 			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
 				return {
-					rows: createdLedgerImmutabilityTriggerRows(
-						ledger.scope === 'database' ? 'dbsp_meta' : ledger.schema,
-					),
+					rows: createdLedgerImmutabilityTriggerRows(),
 				};
+			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
+				return { rows: createdLedgerDefaultRows() };
 			if (
 				sql.includes(
 					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
@@ -356,6 +377,22 @@ describe('managed ledger storage', () => {
 		expect(constraintQuery).toContain(
 			"constraint_item.contype IN ('p', 'c', 'u', 'f')",
 		);
+		expect(constraintQuery).toContain(
+			'referenced_relation.relname AS referenced_table_name',
+		);
+		expect(constraintQuery).toContain('constraint_item.confupdtype');
+		expect(constraintQuery).toContain('constraint_item.confdeltype');
+		expect(constraintQuery).toContain('constraint_item.condeferrable');
+		expect(constraintQuery).toContain('constraint_item.condeferred');
+		expect(constraintQuery).toContain('constraint_item.convalidated');
+		expect(constraintQuery).not.toContain('pg_get_constraintdef');
+		const triggerQuery = query.mock.calls.find(([sql]) =>
+			String(sql).includes('FROM pg_catalog.pg_trigger trigger_item'),
+		)?.[0];
+		expect(triggerQuery).toContain('trigger_item.tgtype::text');
+		expect(triggerQuery).toContain('procedure.proconfig IS NULL');
+		expect(triggerQuery).not.toContain('pg_get_triggerdef');
+		expect(triggerQuery).not.toContain('pg_get_functiondef');
 	});
 
 	it.each([
