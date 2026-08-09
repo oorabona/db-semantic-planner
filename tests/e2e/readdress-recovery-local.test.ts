@@ -5,6 +5,7 @@ import {
 	executePgTableReaddress,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
+	readPgLedgerReservationsForExecution,
 	recoverPgReaddressPair,
 	renderPgTableReaddressStatements,
 	runPgReinitializePreflight,
@@ -482,6 +483,24 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 				reservations: indeterminateRows,
 			}),
 		).toMatchObject({ kind: 'readdress-recovery-indeterminate-pair' });
+		for (const row of indeterminateRows) {
+			const chain = await readPgLedgerAddressChain(
+				pool,
+				{ scope: 'schema', schema },
+				row.address,
+			);
+			expect(chain.terminalMember).toMatchObject({
+				eventKind: 'indeterminate',
+				predecessor: row.rootClaimId,
+			});
+		}
+		expect(
+			await readPgLedgerReservationsForExecution(
+				pool,
+				{ scope: 'schema', schema },
+				indeterminateRows[0]!.executionId,
+			),
+		).toHaveLength(indeterminateRows.length);
 		await createManagedTable(schema, databaseId, 'pending_source');
 		const pendingTarget = address(schema, databaseId, 'pending_target', 'view');
 		const pendingRows = await appendInterruptedPair({

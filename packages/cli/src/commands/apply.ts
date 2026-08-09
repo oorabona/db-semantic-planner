@@ -845,6 +845,7 @@ export async function runNoArgumentApply(
 	}
 	let result: ApplyCommandResult | GeneratorExecutionResult;
 	if (isGeneratorPlan(effectivePlan.plan)) {
+		const policy = await effectiveApplyPolicy(options);
 		const { pool } = await createDbConnection(options.db);
 		try {
 			result = await executeGeneratorPlan({
@@ -852,7 +853,7 @@ export async function runNoArgumentApply(
 				plan: effectivePlan.plan,
 				planDigest: effectivePlan.planDigest,
 				schema: options.schema ?? 'public',
-				...(options.accept === undefined ? {} : { accepts: options.accept }),
+				accepts: policy.accepts.map((grant) => grant.class),
 				...(options.replace === undefined ? {} : { replaces: options.replace }),
 				runId: effectivePlan.runId,
 			});
@@ -939,7 +940,7 @@ export async function runApply(
 			plan: persisted.plan,
 			planDigest: expectedPlanDigest,
 			schema: options.schema ?? 'public',
-			...(options.accept === undefined ? {} : { accepts: options.accept }),
+			accepts: policy.accepts.map((grant) => grant.class),
 			...(options.replace === undefined ? {} : { replaces: options.replace }),
 			runId,
 		});

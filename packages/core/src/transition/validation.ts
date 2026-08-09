@@ -87,6 +87,20 @@ export function validateNormalizedManagedStepManifest(
 				detail: `non-removal step ${step.stepKey} is not recorded-replayable`,
 			};
 	}
+	for (const step of steps) {
+		for (const dependency of step.dependencyOrder) {
+			if (!keys.has(dependency))
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} references missing dependency ${dependency}`,
+				};
+			if (dependency === step.stepKey)
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} depends on itself`,
+				};
+		}
+	}
 	return { ok: true };
 }
 

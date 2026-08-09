@@ -51,7 +51,12 @@ export const LEDGER_LIFECYCLE_GRAMMAR: Readonly<
 	'readdress-intent': {
 		claimKind: 'readdress-intent',
 		opensFrom: ['unknown', 'managed', 'absent'],
-		resolvesThrough: ['refused', 'readdressed-to', 'readdressed-from'],
+		resolvesThrough: [
+			'refused',
+			'indeterminate',
+			'readdressed-to',
+			'readdressed-from',
+		],
 	},
 	'adopt-intent': {
 		claimKind: 'adopt-intent',
@@ -215,10 +220,8 @@ export function interpretLedgerLifecycle(
 			return { kind: 'ok', frame: { stableState: 'managed' } };
 		}
 		case 'readdressed-to':
-			if (!['managed', 'unknown'].includes(claim.stableStateBeforeClaim))
-				return invalid(
-					'readdressed-to resolves only a managed or untracked source',
-				);
+			if (claim.stableStateBeforeClaim !== 'managed')
+				return invalid('readdressed-to resolves only a managed source');
 			if (event.pairId !== claim.event.pairId)
 				return invalid('readdressed-to pair id does not match its claim');
 			return { kind: 'ok', frame: { stableState: 'unknown' } };
@@ -231,8 +234,6 @@ export function interpretLedgerLifecycle(
 				return invalid('readdressed-from pair id does not match its claim');
 			return { kind: 'ok', frame: { stableState: 'managed' } };
 		}
-		case 'released':
-			return { kind: 'ok', frame: { stableState: 'unknown' } };
 		default:
 			return invalid(`${event.eventKind} cannot resolve a claim`);
 	}

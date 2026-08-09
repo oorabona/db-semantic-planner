@@ -155,15 +155,57 @@ function createdLedgerInvariantConstraintRows() {
 			[],
 		],
 	].map(
-		([
+		(
+			[
+				table_name,
+				contype,
+				connullsnotdistinct = false,
+				is_self_referential = false,
+				key_columns = [],
+				referenced_columns = [],
+			],
+			index,
+		) => ({
 			table_name,
-			contype,
-			connullsnotdistinct = false,
-			is_self_referential = false,
-			key_columns = [],
-			referenced_columns = [],
-		]) => ({
-			table_name,
+			constraint_name: [
+				'dbsp_ledger_event_pkey',
+				'dbsp_ledger_event_kind_closed',
+				'dbsp_ledger_declared_digest_pair',
+				'dbsp_ledger_observed_digest_pair',
+				'dbsp_ledger_refusal_payload',
+				'dbsp_ledger_event_address_event_unique',
+				'dbsp_ledger_event_same_address_predecessor',
+				'dbsp_ledger_reservation_pkey',
+				'dbsp_ledger_reservation_claim_kind_check',
+				'dbsp_ledger_reservation_home_ledger_scope_check',
+				'dbsp_ledger_reservation_check',
+				'dbsp_ledger_identity_pkey',
+				'dbsp_ledger_identity_id_check',
+				'dbsp_ledger_marker_pkey',
+				'dbsp_ledger_marker_id_check',
+				'dbsp_ledger_marker_version_check',
+				'dbsp_ledger_event_one_child',
+			][index],
+			check_expression: [
+				undefined,
+				"event_kind IN ('adopt-intent', 'adopt', 'intent', 'retire-intent', 'readdress-intent', 'refused', 'executing', 'observed', 'absent', 'indeterminate', 'resolved', 'readdressed-to', 'readdressed-from', 'released')",
+				'(declared IS NULL) = (declared_digest IS NULL)',
+				'(observed IS NULL) = (observed_digest IS NULL)',
+				"(event_kind = 'refused') = (refusal_code IS NOT NULL AND refusal_cause IS NOT NULL AND refusal_state IS NOT NULL AND refusal_withheld_authority IS NOT NULL AND refusal_resolving_command IS NOT NULL)",
+				undefined,
+				undefined,
+				undefined,
+				"claim_kind IN ('adopt-intent', 'intent', 'retire-intent', 'readdress-intent')",
+				"home_ledger_scope IN ('schema', 'database')",
+				"(home_ledger_scope = 'database' AND home_ledger_schema IS NULL) OR (home_ledger_scope = 'schema' AND home_ledger_schema IS NOT NULL)",
+				undefined,
+				'id',
+				undefined,
+				'id',
+				'version >= 1',
+				undefined,
+			][index],
+			constraint_definition: `constraint-${String(index)}`,
 			contype,
 			connullsnotdistinct,
 			is_self_referential,
@@ -177,9 +219,26 @@ function createdLedgerTerminalIndexRows() {
 	return [
 		{
 			table_name: 'dbsp_ledger_event',
+			index_name: 'dbsp_ledger_event_terminal_member',
 			indisprimary: false,
 			indisunique: false,
+			indisvalid: true,
+			indisready: true,
 			index_columns: ['predecessor'],
+		},
+	];
+}
+
+function createdLedgerImmutabilityTriggerRows(schema: string) {
+	return [
+		{
+			trigger_name: 'dbsp_ledger_event_immutable',
+			trigger_enabled: 'O',
+			trigger_type: 26,
+			function_name: 'dbsp_ledger_reject_event_mutation',
+			function_schema: schema,
+			function_source:
+				" BEGIN RAISE EXCEPTION 'dbsp ledger events are append-only for address %', OLD.address_name USING ERRCODE = '55000'; END; ",
 		},
 	];
 }
@@ -244,6 +303,12 @@ describe('managed ledger storage', () => {
 		const query = vi.fn(async (sql: string) => {
 			if (sql === 'SHOW server_version_num')
 				return { rows: [{ server_version_num: '180000' }] };
+			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
+				return {
+					rows: createdLedgerImmutabilityTriggerRows(
+						ledger.scope === 'database' ? 'dbsp_meta' : ledger.schema,
+					),
+				};
 			if (
 				sql.includes(
 					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
@@ -366,7 +431,7 @@ describe('managed ledger storage', () => {
 			claimKind: 'retire-intent',
 			rootClaimId: 'claim-1',
 		};
-		const query = vi.fn(async () => ({ rows: [] }));
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await appendPgLedgerClaimGroup(
 			{ query },
 			{
@@ -399,6 +464,10 @@ describe('managed ledger storage', () => {
 			[{ address: claim.address }, { address: child.address }],
 		);
 		expect(query).toHaveBeenCalledTimes(4);
+		const [groupRootResolution, containedResolution] =
+			query.mock.calls.slice(2);
+		expect(groupRootResolution?.[0]).toContain('DELETE FROM');
+		expect(containedResolution?.[0]).not.toContain('DELETE FROM');
 	});
 
 	it('makes a resolution append and its reservation release one statement', async () => {

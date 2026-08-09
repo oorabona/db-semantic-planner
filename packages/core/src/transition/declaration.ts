@@ -198,7 +198,9 @@ export function declarationSetFromModel(
 			);
 		}
 		for (const [index, item] of table.indexes.entries()) {
-			const name = item.name ?? `index:${index}`;
+			// These addresses are physical PostgreSQL names, shared with the
+			// generator manifest. Positional pseudo-names cannot be adopted.
+			const name = item.name ?? `idx_${table.name}_${item.columns.join('_')}`;
 			declarations.push(
 				declaration(
 					context,
@@ -215,7 +217,7 @@ export function declarationSetFromModel(
 				declaration(
 					context,
 					'constraint',
-					'primary-key',
+					`pk_${table.name}`,
 					{ kind: 'primary-key', columns: table.primaryKey },
 					`${tablePath}.primaryKey`,
 					parent,
@@ -227,7 +229,7 @@ export function declarationSetFromModel(
 				declaration(
 					context,
 					'constraint',
-					`foreign-key:${index}`,
+					`fk_${table.name}_${item.columns.join('_')}`,
 					{ kind: 'foreign-key', ...item },
 					`${tablePath}.foreignKeys[${index}]`,
 					parent,

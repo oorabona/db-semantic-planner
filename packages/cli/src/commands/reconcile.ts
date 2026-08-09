@@ -215,6 +215,11 @@ function executionIdsForRun(
 		)
 			executionIds.add(record.intent.executionId);
 	}
+	// Generator executions deliberately use a deterministic execution scope
+	// derived from the durable run id. Its persisted plan has no ordinary core
+	// intent journal event, so include that one documented scope for recovery.
+	if ('generator' in journal.plan)
+		executionIds.add(`dbsp.generator.execution.${journal.run.runId}`);
 	return executionIds.size > 0 ? [...executionIds] : [journal.run.runId];
 }
 
@@ -239,8 +244,34 @@ export async function runReconcile(
 					const journal = await readTransitionJournal(lease.session, runId, {
 						ensure: false,
 					});
-					const material = journal.plan.steps
-						.map((step) => step.managedClaim)
+					const material: Array<{
+						readonly address: LedgerReservationRow['address'];
+						readonly plannedClaimKey?: string;
+					}> = journal.plan.steps
+						// Generator manifests deliberately persist their authoritative
+						// target at the step root, not under managedClaim. Reconcile by
+						// that same durable address so an interrupted generator run is
+						// recoverable by its documented run id.
+						.map((step) => {
+							const generatedStep = step as {
+								readonly address?: LedgerReservationRow['address'];
+								readonly plannedClaimKeys?: readonly string[];
+							};
+							const generated = generatedStep.address;
+							return (
+								step.managedClaim ??
+								(generated === undefined
+									? undefined
+									: {
+											address: generated,
+											...(generatedStep.plannedClaimKeys?.[0] === undefined
+												? {}
+												: {
+														plannedClaimKey: generatedStep.plannedClaimKeys[0],
+													}),
+										})
+							);
+						})
 						.filter(
 							(claim): claim is NonNullable<typeof claim> =>
 								claim !== undefined,
@@ -341,9 +372,16 @@ export async function runReconcile(
 						const pairId = pairRows[0]?.pairId;
 						const executionId = pairRows[0]?.executionId;
 						if (!pairId || !executionId) continue;
-						const closure = await readVerifiedPgLedgerReservationsForPair(
+						const readPairInSelectedHomes =
+							readVerifiedPgLedgerReservationsForPair as unknown as (
+								executor: typeof lease.session,
+								pair: string,
+								selectedHomes: readonly LedgerHome[],
+							) => Promise<readonly LedgerReservationRow[]>;
+						const closure = await readPairInSelectedHomes(
 							lease.session,
 							pairId,
+							[...homes.values()],
 						);
 						const recovered = await recoverPgReaddressPair(lease.session, {
 							pairId,
@@ -426,10 +464,15 @@ export async function runReconcile(
 						const step = journal.plan.steps.find(
 							(candidate) =>
 								candidate.managedClaim?.plannedClaimKey ===
-								selected.plannedClaimKey,
+									selected.plannedClaimKey ||
+								('plannedClaimKeys' in candidate &&
+									Array.isArray(candidate.plannedClaimKeys) &&
+									candidate.plannedClaimKeys.includes(
+										selected.plannedClaimKey,
+									)),
 						);
 						const operationReadBack =
-							step?.operation.operationKind.name ===
+							step?.operation?.operationKind.name ===
 							'CreateUniqueIndexConcurrently'
 								? async (
 										executor: Parameters<

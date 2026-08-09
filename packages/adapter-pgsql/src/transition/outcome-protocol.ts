@@ -71,7 +71,7 @@ function isPoolQueryable(
  * append must therefore share a checked-out client whenever the caller gives
  * this protocol a pool.
  */
-async function withOutcomeSession<T>(
+export async function withPgOutcomeSession<T>(
 	executor: TransitionJournalQueryable,
 	work: (session: TransitionJournalQueryable) => Promise<T>,
 ): Promise<T> {
@@ -81,6 +81,47 @@ async function withOutcomeSession<T>(
 		return await work(session);
 	} finally {
 		session.release();
+	}
+}
+
+/**
+ * The sole explicit-transition bracket for managed ledger work.  It checks a
+ * client out once when given a Pool, never checks out recursively, and keeps
+ * BEGIN, all work, COMMIT/ROLLBACK and release on that one session.
+ */
+export async function withPgTransitionTransaction<T>(
+	executor: TransitionJournalQueryable,
+	work: (session: TransitionJournalQueryable) => Promise<T>,
+): Promise<T> {
+	return withPgOutcomeSession(executor, async (session) => {
+		let committed = false;
+		let commitAttempted = false;
+		try {
+			await session.query('BEGIN');
+			const result = await work(session);
+			commitAttempted = true;
+			await session.query('COMMIT');
+			committed = true;
+			return result;
+		} catch (error) {
+			if (!committed && !commitAttempted) await rollback(session);
+			if (commitAttempted)
+				throw new PgCommitAcknowledgementAmbiguousError(error);
+			throw error;
+		}
+	});
+}
+
+/** A COMMIT write may have reached PostgreSQL even when its acknowledgement did not. */
+export class PgCommitAcknowledgementAmbiguousError extends Error {
+	constructor(cause: unknown) {
+		super(
+			`PostgreSQL COMMIT acknowledgement is transport-ambiguous: ${detail(cause)}`,
+			{
+				cause,
+			},
+		);
+		this.name = 'PgCommitAcknowledgementAmbiguousError';
 	}
 }
 
@@ -146,6 +187,43 @@ export interface PgDestructiveOutcomeExecutionRequest {
 }
 
 /**
+ * Predecessors are ledger facts, never lifecycle predictions.  Every managed
+ * successor reads the unique current terminal on the same pinned session and
+ * in the transaction that will append it; a previous append in that
+ * transaction is therefore visible here too.
+ */
+async function currentTerminalPredecessor(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	address: LedgerAddress,
+): Promise<string | undefined> {
+	return (await readPgLedgerAddressChain(executor, target, address))
+		.terminalMember?.eventId;
+}
+
+async function memberWithCurrentTerminalPredecessor(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>,
+): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
+	const predecessor = await currentTerminalPredecessor(
+		executor,
+		target,
+		member.address,
+	);
+	const { predecessor: _predicted, ...withoutPredictedPredecessor } = member;
+	return {
+		...withoutPredictedPredecessor,
+		...(predecessor === undefined ? {} : { predecessor }),
+	};
+}
+
+export type PgDestructiveOutcomeResult =
+	| { readonly kind: 'executed-destructive-outcome' }
+	| OutcomeProtocolRefusal
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
+
+/**
  * High-level managed destructive execution. It owns claim admission and the
  * token-gated PostgreSQL sender so callers cannot compose raw ledger writes
  * with a fabricated capability.
@@ -153,21 +231,76 @@ export interface PgDestructiveOutcomeExecutionRequest {
 export async function executePgDestructiveOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupRequest,
-): Promise<
-	{ readonly kind: 'executed-destructive-outcome' } | OutcomeProtocolRefusal
-> {
-	const admission =
-		request.members.length > 0
-			? (await openPgOutcomeClaimGroup(executor, request)).root
-			: await openPgOutcomeClaim(executor, request);
-	if (admission.kind !== 'admitted-outcome-claim') return admission;
-	if (!('destructivePermit' in admission))
-		return refusal('destructive admission did not mint an authority permit');
-	const sent = await executePgDestructiveBundle(executor, {
-		claim: admission as AdmittedDestructiveOutcomeClaim,
-		statements: request.plan.statementBundle.statements,
+	readBackAndResolve: (
+		executor: TransitionJournalQueryable,
+		claim: AdmittedDestructiveOutcomeClaim,
+	) => Promise<PgOutcomeClaimGroupResolution>,
+): Promise<PgDestructiveOutcomeResult> {
+	return withPgOutcomeSession(executor, async (session) => {
+		const admission =
+			request.members.length > 0
+				? (await openPgOutcomeClaimGroup(session, request)).root
+				: await openPgOutcomeClaim(session, request);
+		if (admission.kind !== 'admitted-outcome-claim') return admission;
+		if (!('destructivePermit' in admission))
+			return refusal('destructive admission did not mint an authority permit');
+		try {
+			// Persist the send boundary before the first autocommitted statement.
+			await begin(session, request.lockTimeoutMs);
+			const target = targetForPlan(request.plan);
+			const predecessor = await currentTerminalPredecessor(
+				session,
+				target,
+				admission.plan.address,
+			);
+			if (!predecessor)
+				throw new Error(
+					`claim ${admission.plan.claimId} has no current terminal`,
+				);
+			await appendPgLedgerProgress(session, target, {
+				eventId: `${request.plan.claimId}:executing`,
+				...(admission.plan.executionId === undefined
+					? {}
+					: { executionId: admission.plan.executionId }),
+				...(admission.plan.plannedClaimKey === undefined
+					? {}
+					: { plannedClaimKey: admission.plan.plannedClaimKey }),
+				...(admission.plan.claimGroupId === undefined
+					? {}
+					: { claimGroupId: admission.plan.claimGroupId }),
+				...(admission.plan.rootClaimId === undefined
+					? {}
+					: { rootClaimId: admission.plan.rootClaimId }),
+				address: admission.plan.address,
+				eventKind: 'executing',
+				predecessor,
+			});
+			try {
+				await session.query('COMMIT');
+			} catch (error) {
+				return {
+					kind: 'outcome-transport-ambiguous',
+					reason: new PgCommitAcknowledgementAmbiguousError(error).message,
+				};
+			}
+			const sent = await executePgDestructiveBundle(session, {
+				claim: admission as AdmittedDestructiveOutcomeClaim,
+				statements: request.plan.statementBundle.statements,
+			});
+			if (sent) return sent;
+			const resolution = await readBackAndResolve(
+				session,
+				admission as AdmittedDestructiveOutcomeClaim,
+			);
+			const resolved = await resolvePgDestructiveOutcome(session, resolution);
+			return resolved ?? { kind: 'executed-destructive-outcome' };
+		} catch (error) {
+			await rollback(session);
+			if (error instanceof PgCommitAcknowledgementAmbiguousError)
+				return { kind: 'outcome-transport-ambiguous', reason: error.message };
+			return refusal(detail(error));
+		}
 	});
-	return sent ?? { kind: 'executed-destructive-outcome' };
 }
 
 /** Keeps terminal appends and reservation release behind the managed facade. */
@@ -180,10 +313,15 @@ export async function resolvePgDestructiveOutcome(
 	const terminal = request.members[0];
 	if (!terminal) return refusal('destructive outcome has no terminal member');
 	try {
-		await appendPgLedgerResolution(
+		const member = await memberWithCurrentTerminalPredecessor(
 			executor,
 			terminal.target,
 			terminal.member,
+		);
+		await appendPgLedgerResolution(
+			executor,
+			terminal.target,
+			member,
 			request.rootClaimId,
 			request.reservations,
 		);
@@ -736,7 +874,7 @@ export async function openPgOutcomeClaim(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimRequest,
 ): Promise<OutcomeClaimAdmission> {
-	return withOutcomeSession(executor, (session) =>
+	return withPgOutcomeSession(executor, (session) =>
 		openPgOutcomeClaimOnSession(session, request),
 	);
 }
@@ -749,7 +887,7 @@ export async function openPgOutcomeClaimGroup(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupRequest,
 ): Promise<PgOutcomeClaimGroupAdmission> {
-	return withOutcomeSession(executor, async (session) => {
+	return withPgOutcomeSession(executor, async (session) => {
 		let begun = false;
 		try {
 			await begin(session, request.lockTimeoutMs);
@@ -801,6 +939,8 @@ export async function openPgOutcomeClaimGroup(
 					return { root: admission, members: admissions.slice(1) };
 				}
 				admissions.push(admission);
+				// This terminal comes from the locked transaction's live chain, not
+				// from a planned lifecycle position. Each group address is unique.
 				claims.push(claimMember(item, chain.terminalMember?.eventId));
 			}
 			await appendPgLedgerClaimGroup(session, claims[0]!, claims.slice(1), [
@@ -822,7 +962,7 @@ export async function resolvePgOutcomeClaimGroup(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupResolution,
 ): Promise<undefined | OutcomeProtocolRefusal> {
-	return withOutcomeSession(executor, async (session) => {
+	return withPgOutcomeSession(executor, async (session) => {
 		let begun = false;
 		try {
 			await begin(session, request.lockTimeoutMs);
@@ -836,10 +976,15 @@ export async function resolvePgOutcomeClaimGroup(
 				begun = false;
 				return refusal('ledger advisory lock is busy');
 			}
+			const members = await Promise.all(
+				request.members.map(async ({ target, member }) =>
+					memberWithCurrentTerminalPredecessor(session, target, member),
+				),
+			);
 			await appendPgLedgerResolutionGroup(
 				session,
 				request.rootClaimId,
-				request.members.map(({ member }) => member),
+				members,
 				request.reservations,
 			);
 			await session.query('COMMIT');
@@ -948,12 +1093,19 @@ async function refuseClaim(
 	claim: AdmittedOutcomeClaim,
 	request: PgOutcomeClaimRequest,
 	eventId: string,
-	predecessor: string,
 	code: 'ERR-02' | 'ERR-05',
 ): Promise<void> {
+	const target = targetForPlan(claim.plan);
+	const predecessor = await currentTerminalPredecessor(
+		executor,
+		target,
+		claim.plan.address,
+	);
+	if (!predecessor)
+		throw new Error(`claim ${claim.plan.claimId} has no current terminal`);
 	await appendPgLedgerResolution(
 		executor,
-		targetForPlan(claim.plan),
+		target,
 		resolutionMember(
 			claim,
 			{
@@ -1005,7 +1157,6 @@ async function runPgTransactionalOutcomeOnSession(
 				admission,
 				request,
 				request.resolution.eventId,
-				request.plan.claimId,
 				'ERR-05',
 			);
 			if (ownsTransaction) await executor.query('COMMIT');
@@ -1023,7 +1174,6 @@ async function runPgTransactionalOutcomeOnSession(
 				admission,
 				request,
 				request.resolution.eventId,
-				request.plan.claimId,
 				'ERR-02',
 			);
 			if (ownsTransaction) await executor.query('COMMIT');
@@ -1042,15 +1192,19 @@ async function runPgTransactionalOutcomeOnSession(
 						statements: admission.plan.statementBundle.statements,
 					});
 		if (sent) throw new Error(sent.reason);
+		const predecessor = await currentTerminalPredecessor(
+			executor,
+			target,
+			admission.plan.address,
+		);
+		if (!predecessor)
+			throw new Error(
+				`claim ${admission.plan.claimId} has no current terminal`,
+			);
 		await appendOutcomeTerminal(
 			executor,
 			target,
-			await terminalResolutionMember(
-				executor,
-				request,
-				admission,
-				request.plan.claimId,
-			),
+			await terminalResolutionMember(executor, request, admission, predecessor),
 			request.plan.claimId,
 			request.reservations,
 		);
@@ -1073,7 +1227,7 @@ export async function runPgTransactionalOutcome(
 ): Promise<PgOutcomeResult> {
 	if (request.transactionOpen)
 		return runPgTransactionalOutcomeOnSession(executor, request);
-	return withOutcomeSession(executor, (session) =>
+	return withPgOutcomeSession(executor, (session) =>
 		runPgTransactionalOutcomeOnSession(session, request),
 	);
 }
@@ -1102,14 +1256,23 @@ async function runPgNonTransactionalOutcomeOnSession(
 				admission,
 				request,
 				request.resolution.eventId,
-				request.plan.claimId,
 				'ERR-02',
 			);
 			await executor.query('COMMIT');
 			return vacancy;
 		}
 		await begin(executor, request.lockTimeoutMs);
-		await appendPgLedgerProgress(executor, targetForPlan(request.plan), {
+		const target = targetForPlan(request.plan);
+		const executingPredecessor = await currentTerminalPredecessor(
+			executor,
+			target,
+			admission.plan.address,
+		);
+		if (!executingPredecessor)
+			throw new Error(
+				`claim ${admission.plan.claimId} has no current terminal`,
+			);
+		await appendPgLedgerProgress(executor, target, {
 			eventId: request.executingEventId,
 			...(admission.plan.executionId === undefined
 				? {}
@@ -1125,7 +1288,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 				: { rootClaimId: admission.plan.rootClaimId }),
 			address: request.plan.address,
 			eventKind: 'executing',
-			predecessor: request.plan.claimId,
+			predecessor: executingPredecessor,
 		});
 		await executor.query('COMMIT');
 		await request.onExecutingCommitted?.();
@@ -1136,14 +1299,23 @@ async function runPgNonTransactionalOutcomeOnSession(
 		});
 		if (sent) return sent;
 		await begin(executor, request.lockTimeoutMs);
+		const terminalPredecessor = await currentTerminalPredecessor(
+			executor,
+			target,
+			admission.plan.address,
+		);
+		if (!terminalPredecessor)
+			throw new Error(
+				`claim ${admission.plan.claimId} has no current terminal`,
+			);
 		await appendOutcomeTerminal(
 			executor,
-			targetForPlan(request.plan),
+			target,
 			await terminalResolutionMember(
 				executor,
 				request,
 				admission,
-				request.executingEventId,
+				terminalPredecessor,
 			),
 			request.plan.claimId,
 			request.reservations,
@@ -1161,7 +1333,7 @@ export async function runPgNonTransactionalOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeNonTransactionalRequest,
 ): Promise<PgOutcomeResult> {
-	return withOutcomeSession(executor, (session) =>
+	return withPgOutcomeSession(executor, (session) =>
 		runPgNonTransactionalOutcomeOnSession(session, request),
 	);
 }

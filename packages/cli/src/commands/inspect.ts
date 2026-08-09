@@ -1,4 +1,6 @@
 /** Read managed-ledger state without appending an event or repairing storage. */
+
+import { isDeepStrictEqual } from 'node:util';
 import {
 	createPgTransitionLessor,
 	DBSP_LEDGER_EVENT_TABLE,
@@ -58,6 +60,15 @@ export interface InspectResult {
 		| { readonly kind: 'present'; readonly catalogueIdentity: unknown }
 		| { readonly kind: 'absent' }
 		| { readonly kind: 'catalogue-unavailable'; readonly reason: string };
+	/** Comparison is derived from reads only; inspect never repairs drift. */
+	readonly liveDrift?:
+		| { readonly kind: 'matches-ledger' }
+		| { readonly kind: 'catalogue-drift'; readonly detail: string }
+		| { readonly kind: 'not-comparable'; readonly detail: string };
+	/** Identifies the failed read path without mislabelling it as catalogue drift. */
+	readonly failedSubsystem?:
+		| { readonly subsystem: 'ledger'; readonly reason: string }
+		| { readonly subsystem: 'catalogue'; readonly reason: string };
 	/** Present for an unqualified inspect; no read path creates or repairs it. */
 	readonly addresses?: readonly LedgerAddress[];
 }
@@ -92,6 +103,39 @@ export function inspectRefusal(
 		withheldAuthority: refused.refusal.withheldAuthority,
 		resolvingCommand: refused.refusal.resolvingCommand,
 	};
+}
+
+function inspectLiveDrift(
+	projection: InspectResult['projection'],
+	live: Awaited<ReturnType<typeof readPgCatalogueIdentity>>,
+): NonNullable<InspectResult['liveDrift']> {
+	if (projection?.kind !== 'projected-ledger-chain')
+		return { kind: 'not-comparable', detail: 'ledger chain is unavailable' };
+	const terminalIds = new Set(
+		projection.events
+			.map((event) => event.predecessor)
+			.filter((value): value is string => value !== undefined),
+	);
+	const terminal = projection.events.find(
+		(event) => !terminalIds.has(event.eventId),
+	);
+	if (!terminal?.catalogueIdentity)
+		return {
+			kind: 'not-comparable',
+			detail: 'ledger terminal has no catalogue identity',
+		};
+	if (!live?.catalogueIdentity)
+		return {
+			kind: 'catalogue-drift',
+			detail:
+				'ledger records a present catalogue identity but the object is absent',
+		};
+	return isDeepStrictEqual(terminal.catalogueIdentity, live.catalogueIdentity)
+		? { kind: 'matches-ledger' }
+		: {
+				kind: 'catalogue-drift',
+				detail: 'live catalogue identity differs from the ledger terminal',
+			};
 }
 
 /** Human inspect output is intentionally the same escaped document as JSON. */
@@ -262,8 +306,13 @@ export async function runInspect(
 					address,
 					ledger,
 					marker,
-					live: {
-						kind: 'catalogue-unavailable',
+					live: { kind: 'not-requested' },
+					liveDrift: {
+						kind: 'not-comparable',
+						detail: 'ledger chain is unavailable',
+					},
+					failedSubsystem: {
+						subsystem: 'ledger',
 						reason: error instanceof Error ? error.message : String(error),
 					},
 				};
@@ -289,6 +338,7 @@ export async function runInspect(
 					...(openReaddress === undefined
 						? {}
 						: { readdressPair: openReaddress }),
+					liveDrift: inspectLiveDrift(projection, live),
 					live: live?.catalogueIdentity
 						? { kind: 'present', catalogueIdentity: live.catalogueIdentity }
 						: { kind: 'absent' },
@@ -301,6 +351,14 @@ export async function runInspect(
 					projection,
 					live: {
 						kind: 'catalogue-unavailable',
+						reason: error instanceof Error ? error.message : String(error),
+					},
+					liveDrift: {
+						kind: 'not-comparable',
+						detail: 'live catalogue read is unavailable',
+					},
+					failedSubsystem: {
+						subsystem: 'catalogue',
 						reason: error instanceof Error ? error.message : String(error),
 					},
 				};

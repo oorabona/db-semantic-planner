@@ -113,6 +113,10 @@ describe('declared PostgreSQL adoption admission', () => {
 	});
 
 	it('treats an already managed adoption as an idempotent no-op', async () => {
+		mocks.readIdentity.mockResolvedValue({
+			...address,
+			catalogueIdentity: identity,
+		});
 		mocks.readChain.mockResolvedValue({
 			ledger: { scope: 'schema', schema: 'tenant' },
 			address,
@@ -147,9 +151,7 @@ describe('declared PostgreSQL adoption admission', () => {
 				address,
 				declaration,
 				expectedCatalogueIdentity: identity,
-				shapeMatches: async () => {
-					throw new Error('must not compare a completed adoption');
-				},
+				shapeMatches: async () => true,
 			}),
 		).resolves.toEqual({ outcome: 'no-op' });
 	});

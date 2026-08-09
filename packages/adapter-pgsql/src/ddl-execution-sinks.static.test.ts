@@ -39,17 +39,97 @@ async function sourceFiles(directory: string): Promise<readonly string[]> {
 	return nested.flat();
 }
 
-const DDL_KEYWORD = /\b(?:alter|create|drop|grant|revoke|truncate)\b/iu;
+const DDL_SQL = /^\s*(?:alter|create|drop|grant|revoke|truncate)\b/iu;
+
+function isDdlSqlExpression(node: ts.Expression): boolean {
+	if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+		return DDL_SQL.test(node.text);
+	if (ts.isTemplateExpression(node)) return DDL_SQL.test(node.head.text);
+	if (
+		ts.isBinaryExpression(node) &&
+		node.operatorToken.kind === ts.SyntaxKind.PlusToken
+	)
+		return isDdlSqlExpression(node.left);
+	if (ts.isParenthesizedExpression(node))
+		return isDdlSqlExpression(node.expression);
+	return false;
+}
 
 function hasDdlSink(source: string, file: string): boolean {
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	let found = false;
+	const ddlBindings = new Set<string>();
+	const ddlForwarders = new Set<string>();
+	const collectBindings = (node: ts.Node): void => {
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer !== undefined &&
+			isDdlSqlExpression(node.initializer)
+		)
+			ddlBindings.add(node.name.text);
+		ts.forEachChild(node, collectBindings);
+	};
+	collectBindings(tree);
+	const collectForwarders = (node: ts.Node): void => {
+		if (
+			(ts.isFunctionDeclaration(node) && node.name !== undefined) ||
+			(ts.isVariableDeclaration(node) &&
+				ts.isIdentifier(node.name) &&
+				node.initializer !== undefined &&
+				(ts.isArrowFunction(node.initializer) ||
+					ts.isFunctionExpression(node.initializer)))
+		) {
+			const name = ts.isFunctionDeclaration(node)
+				? node.name!.text
+				: (node.name as ts.Identifier).text;
+			const fn = ts.isFunctionDeclaration(node)
+				? node
+				: (node.initializer! as ts.ArrowFunction | ts.FunctionExpression);
+			const params = new Set(
+				fn.parameters
+					.filter((parameter) => ts.isIdentifier(parameter.name))
+					.map((parameter) => (parameter.name as ts.Identifier).text),
+			);
+			let forwards = false;
+			const inspect = (child: ts.Node): void => {
+				const firstArgument = ts.isCallExpression(child)
+					? child.arguments[0]
+					: undefined;
+				if (
+					ts.isCallExpression(child) &&
+					ts.isPropertyAccessExpression(child.expression) &&
+					child.expression.name.text === 'query' &&
+					firstArgument !== undefined &&
+					ts.isIdentifier(firstArgument) &&
+					params.has(firstArgument.text)
+				)
+					forwards = true;
+				ts.forEachChild(child, inspect);
+			};
+			if (fn.body !== undefined) inspect(fn.body);
+			if (forwards) ddlForwarders.add(name);
+		}
+		ts.forEachChild(node, collectForwarders);
+	};
+	collectForwarders(tree);
 	const visit = (node: ts.Node): void => {
 		if (
 			ts.isMethodDeclaration(node) &&
 			(node.name.getText(tree) === 'executeOperation' ||
 				node.name.getText(tree) === 'executeDDL' ||
 				node.name.getText(tree) === 'executeDdl')
+		)
+			found = true;
+		if (
+			ts.isCallExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			ddlForwarders.has(node.expression.text) &&
+			node.arguments.some(
+				(argument) =>
+					isDdlSqlExpression(argument) ||
+					(ts.isIdentifier(argument) && ddlBindings.has(argument.text)),
+			)
 		)
 			found = true;
 		if (
@@ -64,7 +144,9 @@ function hasDdlSink(source: string, file: string): boolean {
 			ts.isPropertyAccessExpression(node.expression) &&
 			node.expression.name.text === 'query' &&
 			node.arguments[0] !== undefined &&
-			DDL_KEYWORD.test(node.arguments[0].getText(tree))
+			(isDdlSqlExpression(node.arguments[0]) ||
+				(ts.isIdentifier(node.arguments[0]) &&
+					ddlBindings.has(node.arguments[0].text)))
 		)
 			found = true;
 		ts.forEachChild(node, visit);
@@ -74,6 +156,15 @@ function hasDdlSink(source: string, file: string): boolean {
 }
 
 describe('SC-65 DDL execution sink inventory', () => {
+	it('rejects a DDL binding forwarded through executor.query', () => {
+		expect(
+			hasDdlSink(
+				"const statement = 'DROP TABLE tenant.accounts'; await executor.query(statement);",
+				'indirection.ts',
+			),
+		).toBe(true);
+	});
+
 	it('AST-discovers only labelled managed or explicitly unmanaged DDL sinks', async () => {
 		const adapterFiles = await sourceFiles(adapterSource);
 		const cliSource = join(repository, 'packages/cli/src');

@@ -169,8 +169,8 @@ export async function readPgRemovalEffectsClosure(input: {
 		// does not represent their disappearance as dependency edges.
 		const cascades = await input.executor.query(
 			`WITH RECURSIVE cascade(classid, objid, objsubid) AS (` +
-				`SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d WHERE d.refobjid = $1::oid AND d.deptype IN ('n', 'a') ` +
-				`UNION SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d JOIN cascade c ON d.refclassid = c.classid AND d.refobjid = c.objid WHERE d.deptype IN ('n', 'a')` +
+				`SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d WHERE d.refclassid = 'pg_class'::regclass AND d.refobjid = $1::oid AND d.deptype IN ('n', 'a', 'e') ` +
+				`UNION SELECT d.classid, d.objid, d.objsubid FROM pg_catalog.pg_depend d JOIN cascade c ON d.refclassid = c.classid AND d.refobjid = c.objid WHERE d.deptype IN ('n', 'a', 'e')` +
 				`), removal_effects(classid, objid, objsubid) AS (` +
 				`SELECT classid, objid, objsubid FROM cascade ` +
 				`UNION SELECT 'pg_class'::regclass, attribute.attrelid, attribute.attnum FROM pg_catalog.pg_attribute attribute WHERE attribute.attrelid = $1::oid AND attribute.attnum > 0 AND NOT attribute.attisdropped` +

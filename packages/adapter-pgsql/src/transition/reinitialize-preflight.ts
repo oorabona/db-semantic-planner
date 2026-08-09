@@ -16,7 +16,6 @@ import {
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
-	DBSP_LEDGER_RESERVATION_TABLE,
 	DBSP_LEDGER_TABLES,
 	DBSP_META_SCHEMA,
 	isDbspLedgerInfrastructureTable,
@@ -303,33 +302,23 @@ export async function readPgLedgerScopeCurrency(
 }
 
 /**
- * Pair recovery may discover several schemas, but a same-named user table is
- * never evidence of a ledger. Admit marker, lineage, and physical shape for
- * every discovered home before reading a reservation row from it.
+ * Pair recovery reads only homes already selected by the durable run.  A
+ * same-named user table in another schema is never discovery evidence for a
+ * pair; callers must first establish the finite candidate homes from reviewed
+ * material and then each home is admitted here.
  */
 export async function readVerifiedPgLedgerReservationsForPair(
 	executor: TransitionJournalQueryable,
 	pairId: string,
+	homes: readonly LedgerHome[],
 ) {
-	const relations = await executor.query(
-		`SELECT namespace.nspname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = $1 AND relation.relkind = 'r' ORDER BY namespace.nspname`,
-		[DBSP_LEDGER_RESERVATION_TABLE],
-	);
-	const homes: LedgerHome[] = [];
-	for (const relation of relations.rows) {
-		if (typeof relation.nspname !== 'string')
-			throw new Error('ledger reservation schema is unreadable');
-		const home: LedgerHome =
-			relation.nspname === DBSP_META_SCHEMA
-				? { scope: 'database' }
-				: { scope: 'schema', schema: relation.nspname };
+	for (const home of homes) {
 		const currency = await readPgLedgerScopeCurrency(executor, home);
 		if (currency.kind !== 'current')
 			throw new Error(
 				`reservation table in ${schemaFor(home)} is not a current ledger`,
 			);
 		await validatePgLedgerPhysicalShape(executor, home);
-		homes.push(home);
 	}
 	return readPgLedgerReservationsForPairInHomes(executor, pairId, homes);
 }

@@ -1,5 +1,4 @@
 /** Live-only executor for the no-argument schema-differ plan. */
-import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	compareSchemata,
@@ -12,7 +11,6 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	resolvePgDestructiveOutcome,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -339,7 +337,9 @@ export async function executeGeneratorPlan(input: {
 				};
 	try {
 		const database = await databaseId(input.pool);
-		const executionId = `dbsp.generator.execution.${randomUUID()}`;
+		// Reconciliation selects reservations by the persisted run identity.  The
+		// execution scope is deterministic for that run, never a disconnected UUID.
+		const executionId = `dbsp.generator.execution.${input.runId}`;
 		const steps = managedSteps(input.plan);
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
@@ -431,8 +431,10 @@ export async function executeGeneratorPlan(input: {
 						adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
 					executionId,
 				});
-				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op')
+				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {
+					completedStepKeys.push(step.stepKey);
 					continue;
+				}
 				return adopted.outcome === 'adoption-refused'
 					? { outcome: 'adoption-refused', detail: adopted.detail }
 					: { outcome: 'execution-failed', detail: adopted.detail };
@@ -444,8 +446,10 @@ export async function executeGeneratorPlan(input: {
 					declaration: step.lifecycle.declaration,
 					executionId,
 				});
-				if (result.outcome === 'completed' || result.outcome === 'no-op')
+				if (result.outcome === 'completed' || result.outcome === 'no-op') {
+					completedStepKeys.push(step.stepKey);
 					continue;
+				}
 				return result;
 			}
 			if (step.statementBundle.statements.length === 0) continue;
@@ -455,6 +459,12 @@ export async function executeGeneratorPlan(input: {
 					outcome: 'execution-failed',
 					detail: `managed step ${step.stepKey} has no address`,
 				};
+			const plannedClaimKey = step.plannedClaimKeys[0];
+			if (!plannedClaimKey)
+				return {
+					outcome: 'execution-failed',
+					detail: `managed step ${step.stepKey} has no planned claim key`,
+				};
 			if (
 				step.classification === 'non-destructive' &&
 				step.requiresVacancy &&
@@ -462,15 +472,11 @@ export async function executeGeneratorPlan(input: {
 			)
 				continue;
 			const claimKind: LedgerClaimKind = step.claimKind;
-			const rootClaimId = outcomeClaimId(
-				executionId,
-				step.plannedClaimKeys[0]!,
-				address,
-			);
+			const rootClaimId = outcomeClaimId(executionId, plannedClaimKey, address);
 			const claim = {
 				claimId: rootClaimId,
 				executionId,
-				plannedClaimKey: step.plannedClaimKeys[0]!,
+				plannedClaimKey,
 				claimGroupId: rootClaimId,
 				rootClaimId,
 				address,
@@ -550,7 +556,7 @@ export async function executeGeneratorPlan(input: {
 				const effect = member.address;
 				const childClaimId = outcomeClaimId(
 					executionId,
-					step.plannedClaimKeys[0]!,
+					plannedClaimKey,
 					effect,
 					member.plannedClaimKey,
 				);
@@ -597,81 +603,93 @@ export async function executeGeneratorPlan(input: {
 					);
 				},
 			};
-			const executed = await executePgDestructiveOutcome(
+			const executed = (await executePgDestructiveOutcome(
 				input.pool,
 				admitRequest,
-			);
+				async (session) => {
+					const live = await readPgCatalogueIdentity(session, address);
+					if (step.classification === 'removal' && live)
+						throw new Error(
+							`destructive claim ${claim.claimId} executed but ${address.name} remains present`,
+						);
+					const terminals: Array<{
+						readonly target: LedgerHome;
+						readonly member: Omit<
+							LedgerChainMember,
+							'controller' | 'recordedAt'
+						>;
+					}> = [
+						{
+							target: home(address),
+							member: {
+								eventId: outcomeClaimEventId(
+									claim.claimId,
+									step.classification === 'removal' ? 'absent' : 'observed',
+								),
+								executionId,
+								plannedClaimKey: claim.plannedClaimKey,
+								claimGroupId: claim.claimGroupId,
+								rootClaimId: claim.rootClaimId,
+								address,
+								eventKind:
+									step.classification === 'removal' ? 'absent' : 'observed',
+								// The append protocol reads this address's terminal on its
+								// pinned transaction session after the post-DDL read-back.
+								...(live?.catalogueIdentity
+									? { catalogueIdentity: live.catalogueIdentity }
+									: {}),
+								...(step.classification === 'removal'
+									? {}
+									: { observed: observed(address) }),
+							},
+						},
+					];
+					for (const child of containedClaims) {
+						if (await readPgCatalogueIdentity(session, child.plan.address))
+							throw new Error(
+								`destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
+							);
+						terminals.push({
+							target: home(child.plan.address),
+							member: {
+								eventId: outcomeClaimEventId(child.plan.claimId, 'absent'),
+								executionId,
+								plannedClaimKey: child.plan.plannedClaimKey,
+								claimGroupId: claim.claimId,
+								rootClaimId: claim.claimId,
+								address: child.plan.address,
+								eventKind: 'absent' as const,
+								predecessor: child.plan.claimId,
+							},
+						});
+					}
+					return {
+						rootClaimId: claim.claimId,
+						members: terminals,
+						reservations: [
+							baseReservation,
+							...containedClaims.map(({ reservation }) => reservation),
+						],
+					};
+				},
+			)) as
+				| { readonly kind: 'executed-destructive-outcome' }
+				| { readonly kind: 'outcome-protocol-refused'; readonly reason: string }
+				| {
+						readonly kind: 'outcome-transport-ambiguous';
+						readonly reason: string;
+				  };
+			if (executed.kind !== 'executed-destructive-outcome')
+				if (executed.kind === 'outcome-transport-ambiguous')
+					return {
+						outcome: 'execution-failed',
+						detail: executed.reason,
+					};
 			if (executed.kind !== 'executed-destructive-outcome')
 				return {
 					outcome: 'destructive-authority-refused',
 					detail: executed.reason,
 				};
-			const live = await readPgCatalogueIdentity(input.pool, address);
-			if (step.classification === 'removal' && live)
-				return {
-					outcome: 'execution-failed',
-					detail: `destructive claim ${claim.claimId} executed but ${address.name} remains present`,
-				};
-			const terminals: Array<{
-				readonly target: LedgerHome;
-				readonly member: Omit<LedgerChainMember, 'controller' | 'recordedAt'>;
-			}> = [
-				{
-					target: home(address),
-					member: {
-						eventId: outcomeClaimEventId(
-							claim.claimId,
-							step.classification === 'removal' ? 'absent' : 'observed',
-						),
-						executionId,
-						plannedClaimKey: claim.plannedClaimKey,
-						claimGroupId: claim.claimGroupId,
-						rootClaimId: claim.rootClaimId,
-						address,
-						eventKind:
-							step.classification === 'removal' ? 'absent' : 'observed',
-						predecessor: claim.claimId,
-						...(live?.catalogueIdentity
-							? { catalogueIdentity: live.catalogueIdentity }
-							: {}),
-						...(step.classification === 'removal'
-							? {}
-							: { observed: observed(address) }),
-					},
-				},
-			];
-			for (const child of containedClaims) {
-				if (await readPgCatalogueIdentity(input.pool, child.plan.address))
-					return {
-						outcome: 'execution-failed',
-						detail: `destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
-					};
-				terminals.push({
-					target: home(child.plan.address),
-					member: {
-						eventId: outcomeClaimEventId(child.plan.claimId, 'absent'),
-						executionId,
-						plannedClaimKey: child.plan.plannedClaimKey,
-						claimGroupId: claim.claimId,
-						rootClaimId: claim.claimId,
-						address: child.plan.address,
-						eventKind: 'absent' as const,
-						predecessor: child.plan.claimId,
-					},
-				});
-			}
-			{
-				const resolved = await resolvePgDestructiveOutcome(input.pool, {
-					rootClaimId: claim.claimId,
-					members: terminals,
-					reservations: [
-						baseReservation,
-						...containedClaims.map(({ reservation }) => reservation),
-					],
-				});
-				if (resolved)
-					return { outcome: 'execution-failed', detail: resolved.reason };
-			}
 			completedStepKeys.push(step.stepKey);
 		}
 		return { outcome: 'completed' };

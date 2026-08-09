@@ -210,10 +210,6 @@ interface NoTempRoleState {
 	readonly roleToGrantTableRead?: string;
 }
 
-interface TestContextLike {
-	readonly skip: (note?: string) => void;
-}
-
 function uniquePgName(prefix: string): string {
 	return `${prefix}_${randomUUID().replace(/-/gu, '').slice(0, 12)}`;
 }
@@ -233,21 +229,19 @@ async function canCreateDatabase(
 }
 
 async function setupNoTempRole(
-	ctx: TestContextLike,
 	pool: Awaited<ReturnType<typeof getTestPool>>,
 	role: string,
 	password: string,
 	schemaName: string,
-): Promise<NoTempRoleState | undefined> {
+): Promise<NoTempRoleState> {
 	const preconfiguredUrl = process.env[NO_TEMP_DATABASE_URL_ENV];
 	if (preconfiguredUrl) {
 		return setupPreconfiguredNoTempRole(preconfiguredUrl, schemaName);
 	}
 	if (!(await canCreateDatabase(pool))) {
-		ctx.skip(
+		throw new Error(
 			`restricted no-temp role requires CREATEDB or a preconfigured no-temp database via ${NO_TEMP_DATABASE_URL_ENV}`,
 		);
-		return undefined;
 	}
 	return setupDedicatedNoTempRole(pool, role, password, schemaName);
 }
@@ -1484,7 +1478,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			}
 		});
 
-		it('falls back to raw CHECK comparison with a warning when the role cannot create temp tables', async (ctx: TestContextLike) => {
+		it('falls back to raw CHECK comparison with a warning when the role cannot create temp tables', async () => {
 			const desired = schema(
 				{
 					jobs: {
@@ -1538,13 +1532,11 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 			try {
 				roleState = await setupNoTempRole(
-					ctx,
 					pool,
 					role,
 					password,
 					restrictedSchema,
 				);
-				if (roleState === undefined) return;
 				await executeDdl(
 					roleState.databasePool,
 					generateDDL(desired.model, { schemaName: roleState.schemaName }),

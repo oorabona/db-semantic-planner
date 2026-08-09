@@ -5872,7 +5872,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 			expect(diff.changes.some((c) => c.kind === 'enable_rls')).toBe(true);
 		});
 
-		it('existing table: rlsEnabled removed → disable_rls change', () => {
+		it('existing table: omitted rlsEnabled leaves live RLS unmanaged', () => {
 			const schemaTable = makeRlsTable({ name: 'documents' });
 			const dbTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
 			const schemaModel = new ModelIRImpl(
@@ -5884,7 +5884,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				new Map(),
 			);
 			const diff = compareSchemata(schemaModel, dbModel);
-			expect(diff.changes.some((c) => c.kind === 'disable_rls')).toBe(true);
+			expect(diff.changes.some((c) => c.kind === 'disable_rls')).toBe(false);
 		});
 
 		it('new policy → create_policy change', () => {
@@ -5907,7 +5907,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 			expect(diff.changes.some((c) => c.kind === 'create_policy')).toBe(true);
 		});
 
-		it('removed policy → drop_policy change', () => {
+		it('omitted policies leave live policies unmanaged', () => {
 			const policy: PolicyIR = { name: 'p', using: 'true' };
 			const schemaTable = makeRlsTable({ name: 'documents', rlsEnabled: true });
 			const dbTable = makeRlsTable({
@@ -5924,7 +5924,7 @@ describe('DDL-RLS: Row-Level Security', () => {
 				new Map(),
 			);
 			const diff = compareSchemata(schemaModel, dbModel);
-			expect(diff.changes.some((c) => c.kind === 'drop_policy')).toBe(true);
+			expect(diff.changes.some((c) => c.kind === 'drop_policy')).toBe(false);
 		});
 
 		it('changed policy → drop_policy + create_policy', () => {

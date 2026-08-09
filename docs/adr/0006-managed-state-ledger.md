@@ -49,8 +49,8 @@ by itself.
 
 ### The ledger is partitioned by object scope, and tenant schemas are a trust boundary
 
-A schema-scoped object's events live in a ledger inside its own schema, as `_dbsp_migrations`
-does and for the same reason: tenant schemas are a trust boundary in the deployments this serves.
+A schema-scoped object's events live in a ledger inside its own schema: tenant schemas are a
+trust boundary in the deployments this serves.
 A database-scoped object — an extension above all — cannot belong to a tenant schema; its events
 live in `dbsp_meta`, to which no tenant role holds a grant. An address is schema-scoped or
 database-scoped and never both, so exactly one ledger records any address.
@@ -70,8 +70,7 @@ table-wide maximum can name an earlier fact as the latest one.
 
 Three mechanisms share the serialization work, each doing the job the others cannot:
 
-- **An advisory lock per ledger** serializes live writers, the way `migrate` and the durable
-  apply already take one. Application code sees no retry path.
+- **An advisory lock per ledger** serializes live writers. Application code sees no retry path.
 - **A reservation relation** — one row per reserved address, primary-keyed on the canonical
   address — is inserted in the same transaction as the claim's append and deleted in the same
   transaction as its resolution. At most one open claim per address is then a primary-key fact.
@@ -110,12 +109,11 @@ and resolves only through its own column:
 | `retire-intent` | `managed` | `refused` | `executing` → `absent` \| `indeterminate` |
 | `readdress-intent` (paired, per closure member) | source `managed`; target `unknown` \| `absent` | `refused` on both | pair events, or `refused` on both — no `executing`, see below |
 | `adopt-intent` | `unknown` | `refused` | `adopt` (read-back, one transaction, no DDL) |
-| `release-intent` | `managed` | `refused` | `released` (no DDL, one transaction) |
 
 A replacement is not a kind: it is a `retire-intent` then an `intent` (create), two claims, two
-tokens. Adoption and release go through the same reservation as every claim — they change durable
-management state, so they are serialized, lineage-checked and owner-checked like any other; their
-DDL-free bodies ride one transaction, so a crash leaves nothing.
+tokens. Adoption goes through its reservation. Release is the one deliberate direct terminal:
+the closed fourteen-kind grammar contains no `release-intent`; it is still serialized,
+lineage-checked and owner-checked in one transaction before appending `released`.
 
 `resolved` closes an `indeterminate` and only an `indeterminate`. Its stable outcome is drawn
 from the original claim's column — `managed` or the prior stable state for an `intent`, `absent`
@@ -371,8 +369,9 @@ fact stands — it is why hand-written steps enter the managed model as attested
 
 A shape marker per ledger records its version; every command reads it before acting. There is
 no legacy upgrade path (greenfield decision, 2026-08-07): every scope initializes as new, and
-the preflight never reads a table it did not create — pre-ledger `dbsp_transition_*` tables in
-existing development databases are inert and ignored. The marker still versions the NEW ledger
+the preflight deliberately validates pre-existing candidate ledger tables before accepting them;
+counterfeit or incomplete shapes refuse. Unrelated pre-ledger `dbsp_transition_*` tables in
+existing development databases are inert. The marker still versions the NEW ledger
 shape: older, future, mixed, and unreadable markers all refuse in `dbsp preflight --reinitialize`.
 Cross-version marker upgrade is out of scope until a second ledger shape version exists
 (greenfield means no older marker exists today). The preflight's scope set is an explicit input:
@@ -408,7 +407,8 @@ across preflight, append, DDL and recovery write.
 ### Scale
 
 Chains accumulate on the order of 10^5–10^6 events a year at the stated workload. The terminal
-member is an indexed lookup; a tenant's projection reads only its own ledger. Full history is
+predecessor index supports the no-fork constraint; projection deliberately reads one address's
+complete chain because admission needs its lineage, not only the terminal. Full history is
 retained: archival would need a verified checkpoint first, and neither is built here.
 
 ### Observability
@@ -459,4 +459,5 @@ authority, why establishing `managed` requires a read-back, and why the outcome 
 Durable claims and non-transactional DDL still cannot share a transaction; the claim is durable
 before the DDL, an open claim blocks, and recovery resolves against live state — which is what
 was measured, and is weaker than atomicity. Returning a schema to an earlier state is not
-offered, and separating a plan identity from an execution identity is not decided here.
+offered. Plan identity names immutable reviewed material; execution identity names a concrete
+attempt and its reservations. They are separate by construction.

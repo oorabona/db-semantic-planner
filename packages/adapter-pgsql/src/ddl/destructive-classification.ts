@@ -67,11 +67,15 @@ export function classifyGeneratedMutation(
 
 export function isGeneratedMutationDestructive(
 	kind: ChangeKind | string,
+	change?: { readonly destructive?: boolean },
 ): boolean {
-	return classifyGeneratedMutation(kind) !== 'non-destructive';
+	return classifyGeneratedMutation(kind, change) !== 'non-destructive';
 }
 
 /** All removal statements remain generator-only; no transition operation maps one. */
-export function refusesRecordedPlanRemoval(kind: ChangeKind | string): boolean {
-	return classifyGeneratedMutation(kind) === 'removal';
+export function refusesRecordedPlanRemoval(
+	kind: ChangeKind | string,
+	change?: { readonly destructive?: boolean },
+): boolean {
+	return classifyGeneratedMutation(kind, change) === 'removal';
 }

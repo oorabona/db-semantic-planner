@@ -57,11 +57,9 @@ export async function preflightPgDeclaredAdoption(
 			input.address,
 		);
 		const projection = projectLedgerChain(chain);
-		if (
+		const alreadyManaged =
 			projection.kind === 'projected-ledger-chain' &&
-			projection.stableState === 'managed'
-		)
-			return { outcome: 'no-op' };
+			projection.stableState === 'managed';
 		if (projection.kind !== 'projected-ledger-chain')
 			return {
 				outcome: 'adoption-refused',
@@ -88,7 +86,7 @@ export async function preflightPgDeclaredAdoption(
 				outcome: 'adoption-refused',
 				detail: `declared adoption for ${input.address.name} refuses live identity mismatch`,
 			};
-		return { outcome: 'ready' };
+		return alreadyManaged ? { outcome: 'no-op' } : { outcome: 'ready' };
 	} catch (error) {
 		return {
 			outcome: 'execution-failed',

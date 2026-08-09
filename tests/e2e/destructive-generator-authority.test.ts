@@ -10,16 +10,28 @@ import {
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
-import { transitionPlanDigest } from '@dbsp/core';
-import type { LedgerAddress, LedgerReservationRow } from '@dbsp/types';
+import { outcomeClaimId, transitionPlanDigest } from '@dbsp/core';
+import type {
+	LedgerAddress,
+	LedgerReservationRow,
+	NormalizedManagedStep,
+	ProvenPlanStep,
+} from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
+import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
+
+function isNormalizedManagedStep(
+	step: ProvenPlanStep,
+): step is ProvenPlanStep & NormalizedManagedStep {
+	return 'plannedClaimKeys' in step && 'statementBundle' in step;
+}
 
 function quote(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
@@ -188,6 +200,46 @@ async function executeDrop(input: {
 	});
 }
 
+/** Assert topology, not timestamp order: every address is one closed line. */
+async function expectSingleChildChain(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	schema: string,
+	addressName: string,
+	expectedKinds: readonly string[],
+): Promise<void> {
+	const result = await pool.query<{
+		event_id: string;
+		event_kind: string;
+		predecessor: string | null;
+	}>(
+		`SELECT event_id, event_kind, predecessor FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = $1`,
+		[addressName],
+	);
+	const children = new Map<string, string[]>();
+	for (const event of result.rows) {
+		if (event.predecessor === null) continue;
+		const members = children.get(event.predecessor) ?? [];
+		members.push(event.event_id);
+		children.set(event.predecessor, members);
+	}
+	expect([...children.values()].every((members) => members.length === 1)).toBe(
+		true,
+	);
+	const roots = result.rows.filter((event) => event.predecessor === null);
+	expect(roots).toHaveLength(1);
+	const ordered = [] as typeof result.rows;
+	let current = roots[0];
+	while (current) {
+		ordered.push(current);
+		const [child] = children.get(current.event_id) ?? [];
+		current = child
+			? result.rows.find((event) => event.event_id === child)
+			: undefined;
+	}
+	expect(ordered).toHaveLength(result.rows.length);
+	expect(ordered.map((event) => event.event_kind)).toEqual(expectedKinds);
+}
+
 afterEach(async () => {
 	const schema = schemas.pop();
 	if (schema) await dropSchema(schema);
@@ -330,6 +382,34 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'managed_parent' ORDER BY recorded_at DESC LIMIT 1`,
 			),
 		).resolves.toMatchObject({ rows: [{ event_kind: 'absent' }] });
+		const rootChain = await pool.query<{
+			event_id: string;
+			event_kind: string;
+			predecessor: string | null;
+		}>(
+			`SELECT event_id, event_kind, predecessor FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'managed_parent' ORDER BY recorded_at`,
+		);
+		const lifecycle = rootChain.rows.slice(-3);
+		expect(lifecycle.map((event) => event.event_kind)).toEqual([
+			'retire-intent',
+			'executing',
+			'absent',
+		]);
+		expect(lifecycle[1]?.predecessor).toBe(lifecycle[0]?.event_id);
+		expect(lifecycle[2]?.predecessor).toBe(lifecycle[1]?.event_id);
+		await expectSingleChildChain(pool, schema, 'managed_parent', [
+			'adopt-intent',
+			'adopt',
+			'retire-intent',
+			'executing',
+			'absent',
+		]);
+		await expect(
+			pool.query(
+				`SELECT count(*)::int AS count FROM ${quote(schema)}.dbsp_ledger_reservation WHERE root_claim_id = $1`,
+				[lifecycle[0]?.event_id],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		await expect(
 			pool.query(
 				`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'obsolete' ORDER BY recorded_at DESC LIMIT 1`,
@@ -376,5 +456,79 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				resolvingCommand: 'dbsp apply',
 			},
 		});
+	});
+
+	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.interrupted_generator (id integer)`,
+		);
+		const address = tableAddress(schema, databaseId, 'interrupted_generator');
+		await adopt(address);
+		const plan = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: address.name,
+				classification: 'removal',
+				details: 'drop interrupted_generator',
+				statements: [`DROP TABLE ${quote(schema)}.${quote(address.name)}`],
+			},
+			databaseId,
+			schema,
+		);
+		const runId = `dbsp-generator-${randomUUID()}`;
+		const planDigest = transitionPlanDigest(plan);
+		await createPgTransitionRunPersister(pool).persist(
+			{
+				runId,
+				planDigest,
+				targetContextDigest: 'fixture',
+				databaseId,
+				coreVersion: 'fixture',
+				startedAt: new Date().toISOString(),
+				replayability: 'non-replayable-generator-removal',
+			},
+			plan,
+		);
+		const step = plan.steps[0]!;
+		if (!isNormalizedManagedStep(step))
+			throw new Error('generator plan step is not normalized');
+		const plannedClaimKey = step.plannedClaimKeys[0]!;
+		const executionId = `dbsp.generator.execution.${runId}`;
+		const claimId = outcomeClaimId(executionId, plannedClaimKey, address);
+		const opened = await openFixtureOutcomeClaim(pool, {
+			claimId,
+			executionId,
+			plannedClaimKey,
+			address,
+			claimKind: 'retire-intent',
+			statements: step.statementBundle.statements.map(
+				(statement) => statement.sql,
+			),
+			reservations: [
+				{
+					address,
+					claimKind: 'retire-intent',
+					executionId,
+					rootClaimId: claimId,
+					homeLedger: { scope: 'schema', schema },
+				},
+			],
+		});
+		expect(opened.kind).toBe('admitted-outcome-claim');
+		await expect(
+			runReconcile(runId, { db: 'postgres://fixture' }, pool),
+		).resolves.toMatchObject({
+			outcome: 'reconcile-completed',
+			runId,
+			addresses: [expect.objectContaining({ name: address.name })],
+		});
+		await expect(
+			pool.query(
+				`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE event_id = $1`,
+				[`${claimId}:reconcile:${runId}`],
+			),
+		).resolves.toMatchObject({ rows: [{ event_kind: 'refused' }] });
 	});
 });

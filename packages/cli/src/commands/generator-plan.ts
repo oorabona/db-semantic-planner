@@ -140,7 +140,10 @@ function lifecycleStep(input: {
 		stepKey: input.stepKey,
 		order: input.order,
 		segmentId: `generator-segment-${input.order}`,
-		dependencyOrder: input.order === 0 ? [] : [`generator:${input.order - 1}`],
+		// Dependencies are assigned once the complete manifest exists.  A numeric
+		// order is not itself a step key: replacement emits two differently named
+		// steps at adjacent orders.
+		dependencyOrder: [],
 		address,
 		claimKind:
 			input.claimKind ??
@@ -165,6 +168,20 @@ function lifecycleStep(input: {
 		replayPolicy:
 			input.classification === 'removal' ? 'fresh-live-only' : 'recorded',
 	};
+}
+
+/**
+ * The differ is deliberately sequential: each emitted step follows the exact
+ * previously emitted step, including both halves of a reviewed replacement.
+ * Assign the graph from concrete keys only after every lifecycle expansion.
+ */
+export function linearizeGeneratedManagedStepDependencies(
+	steps: readonly NormalizedManagedStep[],
+): readonly NormalizedManagedStep[] {
+	return steps.map((step, index) => ({
+		...step,
+		dependencyOrder: index === 0 ? [] : [steps[index - 1]!.stepKey],
+	}));
 }
 
 function assessment(): PlanAssessment {
@@ -423,7 +440,7 @@ export async function runGeneratorPlan(input: {
 				schema,
 				stepKey: `generator:${order}`,
 				order,
-				dependencyOrder: order === 0 ? [] : [`generator:${order - 1}`],
+				dependencyOrder: [],
 				// biome-ignore lint/style/noNonNullAssertion: order indexes ordinaryChanges by construction (same length).
 				statements: ordinaryChanges[order]!.statements,
 			}),
@@ -505,7 +522,10 @@ export async function runGeneratorPlan(input: {
 				},
 			});
 		}
-		const steps = [...ordinarySteps, ...lifecycleSteps];
+		const steps = linearizeGeneratedManagedStepDependencies([
+			...ordinarySteps,
+			...lifecycleSteps,
+		]);
 		const plan = asDurableGeneratorPlan(material, steps);
 		const planDigest = transitionPlanDigest(
 			plan as unknown as InProcessProvenPlan,

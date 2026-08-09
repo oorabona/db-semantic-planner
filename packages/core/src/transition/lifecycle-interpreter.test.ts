@@ -140,7 +140,7 @@ describe('ledger lifecycle interpreter', () => {
 		});
 	});
 
-	it('closes an untracked contained member after a paired re-address', () => {
+	it('rejects an untracked source member of a paired re-address', () => {
 		const result = project([
 			{
 				...event('contained-readdress', 'readdress-intent'),
@@ -156,9 +156,11 @@ describe('ledger lifecycle interpreter', () => {
 			},
 		]);
 		expect(result).toMatchObject({
-			kind: 'projected-ledger-chain',
-			stableState: 'unknown',
-			reportedState: { kind: 'unknown' },
+			kind: 'unprojectable-ledger-chain',
+			reason: {
+				code: 'invalid-lifecycle-edge',
+				detail: 'readdressed-to resolves only a managed source',
+			},
 		});
 	});
 

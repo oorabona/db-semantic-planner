@@ -7,8 +7,10 @@ import { refusalFor } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	appendPgOutcomeResolution,
+	PgCommitAcknowledgementAmbiguousError,
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
+	withPgTransitionTransaction,
 } from './outcome-protocol.js';
 
 const address = {
@@ -126,6 +128,21 @@ function recorder(failSql?: string) {
 }
 
 describe('PostgreSQL outcome protocol compositions', () => {
+	it('keeps a lost COMMIT acknowledgement transport-ambiguous without a rollback', async () => {
+		const sql: string[] = [];
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				sql.push(statement);
+				if (statement === 'COMMIT') throw new Error('connection reset');
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			withPgTransitionTransaction(executor, async () => 'completed'),
+		).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+		expect(sql).toEqual(['BEGIN', 'COMMIT']);
+	});
+
 	it('keeps claim, DDL and resolution inside one transactional boundary (SC-32)', async () => {
 		const executor = recorder('CREATE TABLE tenant.accounts (id integer)');
 		const input = request('transactional');

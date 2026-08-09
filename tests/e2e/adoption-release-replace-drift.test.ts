@@ -484,6 +484,44 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				`SELECT count(DISTINCT event_id) FILTER (WHERE event_kind IN ('retire-intent', 'intent'))::int AS tokens FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'replace_me'`,
 			),
 		).resolves.toMatchObject({ rows: [{ tokens: 2 }] });
+		const lifecycle = await pool.query<{
+			event_id: string;
+			event_kind: string;
+			predecessor: string | null;
+		}>(
+			`SELECT event_id, event_kind, predecessor FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'replace_me'`,
+		);
+		const children = new Map<string, string[]>();
+		for (const event of lifecycle.rows) {
+			if (event.predecessor === null) continue;
+			const members = children.get(event.predecessor) ?? [];
+			members.push(event.event_id);
+			children.set(event.predecessor, members);
+		}
+		expect(
+			[...children.values()].every((members) => members.length === 1),
+		).toBe(true);
+		const roots = lifecycle.rows.filter((event) => event.predecessor === null);
+		expect(roots).toHaveLength(1);
+		const ordered = [] as typeof lifecycle.rows;
+		let current = roots[0];
+		while (current) {
+			ordered.push(current);
+			const [child] = children.get(current.event_id) ?? [];
+			current = child
+				? lifecycle.rows.find((event) => event.event_id === child)
+				: undefined;
+		}
+		expect(ordered).toHaveLength(lifecycle.rows.length);
+		expect(ordered.map((event) => event.event_kind)).toEqual([
+			'adopt-intent',
+			'adopt',
+			'retire-intent',
+			'executing',
+			'absent',
+			'intent',
+			'observed',
+		]);
 	});
 
 	it('SC-62: an out-of-band SET SCHEMA is drift in both reviewed scopes and neither adoption proceeds while the source claim stands', async () => {

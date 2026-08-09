@@ -156,6 +156,9 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 				},
 				readBack: request.readBack,
 				vacancy,
+				// A managed terminal must carry the identity observed after SQL. The
+				// next lifecycle uses it as its anti-recreation admission evidence.
+				recordCatalogueIdentity: true,
 			};
 			const result = request.transactional
 				? await runPgTransactionalOutcome(executor, {

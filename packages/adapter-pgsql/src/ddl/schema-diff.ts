@@ -1657,18 +1657,25 @@ function comparePolicies(
 	db: TableIR,
 	changes: SchemaChange[],
 ): void {
-	const schemaRlsEnabled = schema.rlsEnabled ?? false;
+	// RLS and policies have no declarable managed representation.  An omitted
+	// property is therefore *not* a request to remove live access controls.
+	// Keep the two aspects independently opt-in so a future producer that can
+	// declare one of them does not accidentally start managing the other.
+	const managesRls = schema.rlsEnabled !== undefined;
+	const managesPolicies = schema.policies !== undefined;
+	if (!managesRls && !managesPolicies) return;
+	const schemaRlsEnabled = schema.rlsEnabled;
 	const dbRlsEnabled = db.rlsEnabled ?? false;
 
 	// RLS enabled state changed
-	if (schemaRlsEnabled && !dbRlsEnabled) {
+	if (managesRls && schemaRlsEnabled && !dbRlsEnabled) {
 		changes.push({
 			kind: 'enable_rls',
 			table: schema.name,
 			destructive: false,
 			details: `Enable RLS on table "${schema.name}"`,
 		});
-	} else if (!schemaRlsEnabled && dbRlsEnabled) {
+	} else if (managesRls && !schemaRlsEnabled && dbRlsEnabled) {
 		changes.push({
 			kind: 'disable_rls',
 			table: schema.name,
@@ -1677,7 +1684,8 @@ function comparePolicies(
 		});
 	}
 
-	const schemaPolicies = schema.policies ?? [];
+	if (!managesPolicies) return;
+	const schemaPolicies = schema.policies!;
 	const dbPolicies = db.policies ?? [];
 
 	const schemaMap = new Map<string, PolicyIR>(
