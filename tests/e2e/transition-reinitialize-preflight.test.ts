@@ -225,6 +225,46 @@ describe('SC-15 #481 reinitialize-preflight marker refusals', () => {
 	});
 });
 
+describe('SC-15a #481 pre-existing ledger-shape admission', () => {
+	const schemas: string[] = [];
+
+	beforeEach(resetDbspMeta);
+
+	afterEach(async () => {
+		for (const schema of schemas.splice(0)) await dropSchema(schema);
+		await resetDbspMeta();
+	});
+
+	it('initializes a fresh ledger but refuses a foreign pre-existing ledger table', async () => {
+		const fresh = uniqueName('reinitialize_fresh');
+		const foreign = uniqueName('reinitialize_foreign');
+		schemas.push(fresh, foreign);
+		await createPreflightSchema(fresh);
+		await createPreflightSchema(foreign);
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(foreign)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} (id text PRIMARY KEY)`,
+		);
+
+		const report = await runPreflight([fresh, foreign]);
+		expect(
+			report.scopes.find((scope) => scope.ledger.schema === fresh),
+		).toMatchObject({ outcome: 'current', marker: { kind: 'absent' } });
+		expect(
+			report.scopes.find((scope) => scope.ledger.schema === foreign),
+		).toMatchObject({
+			outcome: 'failed',
+			refusal: { code: 'reinitialize-preflight-failed' },
+			reason: { step: 'create' },
+		});
+		const foreignMarker = await pool.query<{ exists: boolean }>(
+			'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+			[`${quoteIdent(foreign)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)}`],
+		);
+		expect(foreignMarker.rows[0]?.exists).toBe(false);
+	});
+});
+
 describeWithE2eCapabilities(
 	['role-administration'],
 	'SC-16 #481 explicit reinitialize-preflight scope reports',

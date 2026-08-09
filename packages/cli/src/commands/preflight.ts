@@ -1,4 +1,5 @@
 /** Separately privileged ledger cutover; it never routes through apply. */
+import { createHash } from 'node:crypto';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
@@ -82,21 +83,36 @@ function declarationsForScopes(
 	// Database-scoped declarations (extensions) are shared by every tenant
 	// model, while their home ledger is singular. Keep one exact declaration.
 	const seen = new Set<string>();
+	const uniqueDeclarations = declarations.filter((declaration) => {
+		const key = JSON.stringify([
+			declaration.address.kind,
+			declaration.address.schema ?? null,
+			declaration.address.parent ?? null,
+			declaration.address.name,
+		]);
+		if (seen.has(key)) return false;
+		seen.add(key);
+		return true;
+	});
+	const canonical = stableJson({
+		version: 1,
+		declarations: uniqueDeclarations,
+	});
 	return {
 		version: 1,
-		digest: 'reinitialize-preflight-current-declaration-set',
-		declarations: declarations.filter((declaration) => {
-			const key = JSON.stringify([
-				declaration.address.kind,
-				declaration.address.schema ?? null,
-				declaration.address.parent ?? null,
-				declaration.address.name,
-			]);
-			if (seen.has(key)) return false;
-			seen.add(key);
-			return true;
-		}),
+		digest: createHash('sha256').update(canonical).digest('hex'),
+		declarations: uniqueDeclarations,
 	};
+}
+
+function stableJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+	const record = value as Record<string, unknown>;
+	return `{${Object.keys(record)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+		.join(',')}}`;
 }
 
 export async function runPreflight(

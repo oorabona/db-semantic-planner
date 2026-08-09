@@ -149,6 +149,9 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
 - INV-04: An address has a stable state — `unknown`, `managed`, `absent` — and at most one open
   claim. A claim that ends without establishing a new stable state leaves the previous one
   untouched.
+- INV-04b: The address is the stable chain key; each claim id is execution-scoped as
+  `hash(executionId, plannedClaimKey, address[, closureMemberKey])`, so a later lifecycle
+  appends after the prior terminal event instead of reusing an address-only identifier.
 - INV-05: The grammar is a matrix per claim kind: a claim opens only from the stable states its
   kind names and resolves only through its own column. `observed` after a retirement, or `absent`
   after a create, are unwritable.
@@ -195,8 +198,11 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
   appended.
 - INV-16: A chain that cannot be projected is a structured value naming ledger, address, events,
   reason and code version; every mutation refuses and inspect still reads.
-- INV-17: The lifecycle state, the destructive decision and the claim token have exactly one
-  producer.
+- INV-17: The lifecycle interpreter and total destructive classifier have exactly one producer;
+  the documented package API exposes neither managed DDL nor ledger-append primitives, while
+  capability checks prevent accidental bypass within supported integrations. This is not a
+  security boundary against in-process code or a database role already authorized to issue DDL
+  or write ledger tables.
 - INV-18: A name change or schema move is a re-addressing only when declared; undeclared, it is
   drift. A declared one reserves the full closure in both ledgers, verifies the source identity
   and every target's vacancy before DDL, then in one transaction performs the DDL, the read-backs,
@@ -307,7 +313,7 @@ chain, otherwise the stable state.
 | ledger identity + shape marker | database and namespace identity, and a version marker, per ledger | Yes |
 | declaration-set artifact | persisted by `plan` with the run, covered by the plan digest | Yes |
 | legacy `dbsp_meta` transition tables | ignored (greenfield 2026-08-07): no upgrade path, no archival, no reader; rows in existing dev databases are inert | No |
-| `_dbsp_migrations` | deleted with `migrate` at unit 14 (greenfield 2026-08-07); no reader remains | No |
+| `_dbsp_migrations` | deleted with `migrate` at unit 14 (greenfield 2026-08-07); legacy rows are ignored | No |
 | `Schema<T>` | retain `extras` and the schema options | No |
 | `Assumption.class` | new value `non-transactional-segment` | No |
 
@@ -345,7 +351,7 @@ tenant grants, and the preflight validates ownership and grants on every scope i
 | Execute a removal | a dropped table, column, index, constraint, enum, extension or sequence on the managed path; undeclarable kinds never reach it |
 | Execute a data-destructive transformation | a lossy type change, a truncation, any unclassified mutation |
 | Record an object absent | `executed` ∧ catalogue `absent`, per object including everything containment removed; `not-issued` · `failed` · `rolled-back` · `connection-lost` · `unknown` refuse |
-| Upgrade a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker in {`absent`→initialize, `older`→upgrade}; `current` no-op; `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse |
+| Initialize a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker `absent`; `current` no-op; `older` · `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse. Cross-version upgrade waits for a second ledger shape version. |
 
 The permitting combination is a value the interpreter returns; an emitter cannot be reached
 without it.
@@ -357,8 +363,7 @@ without it.
 | ledger shape and readers | `transition/journal.ts` (renderers + shape check `:410`), `transition/constants.ts`, `transition/index.ts`, `adapter-pgsql/src/index.ts`, `cli/commands/apply.ts`, `cli/commands/recover.ts`, `core/transition/resume.ts` | ledgers |
 | `transactional-only-refusal` reachability | `types/transition/apply-result.ts:16`, `core/transition/applier.ts:132`, `:2200`, `cli/commands/apply.ts:353` (exit 17), both test locks | non-transactional apply |
 | `Schema<T>` retaining `extras` + options | `core/dx/schema.ts:320`, `:652`, `cli/utils/schema-loader.ts`, `types/loaded-schema.ts:11` | addresses/declarations |
-| every sink executing DDL, labelled | `cli/commands/push.ts`, `cli/commands/generate.ts:142`, `adapter-pgsql/src/pgsql-adapter.ts:5666` + runtime DDL helpers, transition operation runtimes, `cli/commands/migrate.ts` | one apply |
-| `push` disappearing | `push.ts`, its three test files, `packages/docs/guide/cli-usage.md`, VitePress nav | one apply |
+| every sink executing DDL, labelled | `cli/commands/generate.ts:142`, `adapter-pgsql/src/pgsql-adapter.ts:5666` + runtime DDL helpers, transition operation runtimes | one apply |
 | journal shape assertions | `transition/journal.test.ts`, six operation suites, two rule suites, `__tests__/introspection.test.ts` | ledgers |
 
 ### 4.7 Degraded modes

@@ -2,29 +2,25 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
-	appendPgLedgerResolution,
 	compareSchemata,
 	createPgsqlAdapter,
 	executePgDeclaredAdoption,
-	executePgDestructiveBundle,
+	executePgDestructiveOutcome,
 	executePgTableReaddress,
-	openPgOutcomeClaim,
-	openPgOutcomeClaimGroup,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	resolvePgOutcomeClaimGroup,
+	resolvePgDestructiveOutcome,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
-import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
 import {
-	decideDestructiveDecision,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
 } from '@dbsp/core';
+import { decideDestructiveDecision } from '@dbsp/core/internal';
 import type {
 	ContainmentClosureDestructiveOutcome,
 	DestructiveAuthorityEvidence,
@@ -601,25 +597,15 @@ export async function executeGeneratorPlan(input: {
 					);
 				},
 			};
-			const admitted =
-				containedClaims.length > 0
-					? (await openPgOutcomeClaimGroup(input.pool, admitRequest)).root
-					: await openPgOutcomeClaim(input.pool, admitRequest);
-			if (admitted.kind !== 'admitted-outcome-claim')
+			const executed = await executePgDestructiveOutcome(
+				input.pool,
+				admitRequest,
+			);
+			if (executed.kind !== 'executed-destructive-outcome')
 				return {
 					outcome: 'destructive-authority-refused',
-					detail: admitted.reason,
+					detail: executed.reason,
 				};
-			if (!('destructivePermit' in admitted))
-				return {
-					outcome: 'execution-failed',
-					detail: 'destructive admission did not mint an authority permit',
-				};
-			const sent = await executePgDestructiveBundle(input.pool, {
-				claim: admitted as AdmittedDestructiveOutcomeClaim,
-				statements: claim.statementBundle.statements,
-			});
-			if (sent) return { outcome: 'execution-failed', detail: sent.reason };
 			const live = await readPgCatalogueIdentity(input.pool, address);
 			if (step.classification === 'removal' && live)
 				return {
@@ -674,8 +660,8 @@ export async function executeGeneratorPlan(input: {
 					},
 				});
 			}
-			if (containedClaims.length > 0) {
-				const resolved = await resolvePgOutcomeClaimGroup(input.pool, {
+			{
+				const resolved = await resolvePgDestructiveOutcome(input.pool, {
 					rootClaimId: claim.claimId,
 					members: terminals,
 					reservations: [
@@ -685,15 +671,6 @@ export async function executeGeneratorPlan(input: {
 				});
 				if (resolved)
 					return { outcome: 'execution-failed', detail: resolved.reason };
-			} else {
-				const terminal = terminals[0]!;
-				await appendPgLedgerResolution(
-					input.pool,
-					terminal.target,
-					terminal.member,
-					claim.claimId,
-					[baseReservation],
-				);
 			}
 			completedStepKeys.push(step.stepKey);
 		}

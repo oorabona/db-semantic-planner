@@ -53,8 +53,8 @@ function refusalReasons(
 }
 
 /**
- * The sole producer of positive destructive authority. Every closed outcome
- * other than the authority table's permitting cells produces a refusal value.
+ * The total destructive classifier produces a decision for every evidence
+ * tuple; only its permitting cells produce positive destructive authority.
  */
 export function decideDestructiveDecision(
 	action: DestructiveAction,

@@ -4,12 +4,12 @@ import {
 	createPgsqlAdapter,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
-	openPgOutcomeClaim,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
 	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
+import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import { type ModelIR, outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerReservationRow,

@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
-	appendPgLedgerProgress,
-	appendPgOutcomeResolution,
-	openPgOutcomeClaim,
 	recoverPgOutcomeClaim,
 	runPgNonTransactionalOutcome,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import {
+	appendPgLedgerProgress,
+	appendPgOutcomeResolution,
+	openPgOutcomeClaim,
+} from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';

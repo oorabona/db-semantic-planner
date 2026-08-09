@@ -1,6 +1,7 @@
 /** `dbsp release` stops managing one address and deliberately emits no DDL. */
 import {
 	createPgTransitionLessor,
+	escapeDiagnosticText,
 	releasePgManagedAddress,
 } from '@dbsp/adapter-pgsql';
 import { acquireTransitionLease } from '@dbsp/core';
@@ -59,14 +60,14 @@ export const releaseCommand = new Command('release')
 				console.log(
 					result.outcome === 'released'
 						? 'released'
-						: `release-refused: ${result.detail}`,
+						: `release-refused: ${escapeDiagnosticText(result.detail)}`,
 				);
 			process.exitCode = result.outcome === 'released' ? 0 : 1;
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			if (options.format === 'json')
 				printCliJson({ outcome: 'release-refused', detail });
-			else console.error(`release-refused: ${detail}`);
+			else console.error(`release-refused: ${escapeDiagnosticText(detail)}`);
 			process.exitCode = 1;
 		}
 	});

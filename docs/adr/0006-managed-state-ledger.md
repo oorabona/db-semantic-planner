@@ -373,11 +373,13 @@ A shape marker per ledger records its version; every command reads it before act
 no legacy upgrade path (greenfield decision, 2026-08-07): every scope initializes as new, and
 the preflight never reads a table it did not create — pre-ledger `dbsp_transition_*` tables in
 existing development databases are inert and ignored. The marker still versions the NEW ledger
-shape: an older marker upgrades, a future or unreadable one refuses. The preflight's scope set
-is an explicit input: the schemas the operator names, plus `dbsp_meta`. It proceeds per scope
-in its own transaction, marker written last, reports current / unchanged / failed /
-not-attempted per scope, and an interrupted scope repeats from its old marker. Ordinary
-commands refuse any scope that is not current. The cutover writes adoption declarations only
+shape: older, future, mixed, and unreadable markers all refuse in `dbsp preflight --reinitialize`.
+Cross-version marker upgrade is out of scope until a second ledger shape version exists
+(greenfield means no older marker exists today). The preflight's scope set is an explicit input:
+the schemas the operator names, plus `dbsp_meta`. It proceeds per scope in its own transaction,
+writes the marker only after creating and validating the fresh ledger shape, reports current /
+unchanged / failed / not-attempted per scope, and an interrupted scope repeats from its old
+marker. Ordinary commands refuse any scope that is not current. The cutover writes adoption declarations only
 for objects the current DSL declares that no chain covers — deriving candidates from
 introspection instead would offer to adopt everything in sight.
 

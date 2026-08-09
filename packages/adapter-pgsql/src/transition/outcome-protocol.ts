@@ -1,13 +1,12 @@
-import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core';
+import { classifyOutcomeRecovery, projectLedgerChain } from '@dbsp/core';
+import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core/internal';
 import {
 	admitDestructiveOutcomeClaim,
 	admitOutcomeClaim,
 	claimIdForToken,
-	classifyOutcomeRecovery,
 	consumeClaimToken,
 	isDestructiveAuthorityPermit,
-	projectLedgerChain,
-} from '@dbsp/core';
+} from '@dbsp/core/internal';
 import type {
 	AdmittedOutcomeClaim,
 	ClaimBundleStatement,
@@ -141,6 +140,54 @@ export interface PgOutcomeExecutionRequest {
 export interface PgDestructiveOutcomeExecutionRequest {
 	readonly claim: AdmittedDestructiveOutcomeClaim;
 	readonly statements: readonly ClaimBundleStatement[];
+}
+
+/**
+ * High-level managed destructive execution. It owns claim admission and the
+ * token-gated PostgreSQL sender so callers cannot compose raw ledger writes
+ * with a fabricated capability.
+ */
+export async function executePgDestructiveOutcome(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimGroupRequest,
+): Promise<
+	{ readonly kind: 'executed-destructive-outcome' } | OutcomeProtocolRefusal
+> {
+	const admission =
+		request.members.length > 0
+			? (await openPgOutcomeClaimGroup(executor, request)).root
+			: await openPgOutcomeClaim(executor, request);
+	if (admission.kind !== 'admitted-outcome-claim') return admission;
+	if (!('destructivePermit' in admission))
+		return refusal('destructive admission did not mint an authority permit');
+	const sent = await executePgDestructiveBundle(executor, {
+		claim: admission as AdmittedDestructiveOutcomeClaim,
+		statements: request.plan.statementBundle.statements,
+	});
+	return sent ?? { kind: 'executed-destructive-outcome' };
+}
+
+/** Keeps terminal appends and reservation release behind the managed facade. */
+export async function resolvePgDestructiveOutcome(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimGroupResolution,
+): Promise<undefined | OutcomeProtocolRefusal> {
+	if (request.members.length > 1)
+		return resolvePgOutcomeClaimGroup(executor, request);
+	const terminal = request.members[0];
+	if (!terminal) return refusal('destructive outcome has no terminal member');
+	try {
+		await appendPgLedgerResolution(
+			executor,
+			terminal.target,
+			terminal.member,
+			request.rootClaimId,
+			request.reservations,
+		);
+		return undefined;
+	} catch (error) {
+		return refusal(detail(error));
+	}
 }
 
 export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {

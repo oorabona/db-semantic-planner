@@ -13,6 +13,7 @@ import {
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
 	DBSP_LEDGER_RESERVATION_TABLE,
+	DBSP_LEDGER_TABLES,
 	DBSP_META_SCHEMA,
 } from './constants.js';
 import { classifyPgWrite } from './database-writability.js';
@@ -58,6 +59,425 @@ const RESOLUTION_EVENT_KINDS = new Set<LedgerEventKind>([
 
 export const PG_LEDGER_MIN_SERVER_VERSION_NUM = 150000;
 export const PG_LEDGER_SHAPE_VERSION = 1;
+
+type LedgerTableRow = {
+	readonly table_name: unknown;
+	readonly relation_kind: unknown;
+};
+
+type LedgerColumnRow = {
+	readonly table_name: unknown;
+	readonly column_name: unknown;
+	readonly column_type: unknown;
+	readonly is_not_null: unknown;
+};
+
+type LedgerConstraintRow = {
+	readonly table_name: unknown;
+	readonly contype: unknown;
+	readonly connullsnotdistinct: unknown;
+	readonly is_self_referential: unknown;
+	readonly key_columns: unknown;
+	readonly referenced_columns: unknown;
+};
+
+type LedgerIndexRow = {
+	readonly table_name: unknown;
+	readonly indisprimary: unknown;
+	readonly indisunique: unknown;
+	readonly index_columns: unknown;
+};
+
+type LedgerColumnDefinition = {
+	readonly name: string;
+	/** Use PostgreSQL's catalog spelling, so this is also the shape assertion. */
+	readonly type: string;
+	readonly nullable: boolean;
+	readonly defaultSql?: string;
+};
+
+type LedgerConstraintDefinition = {
+	readonly name: string;
+	readonly type: 'c' | 'f' | 'p' | 'u';
+	readonly render: (target: PgLedgerTarget) => string;
+	readonly nullsNotDistinct?: boolean;
+	readonly requiresForeignKeyPrefix?: boolean;
+};
+
+type LedgerIndexDefinition = {
+	readonly name: string;
+	readonly columnsSql: string;
+};
+
+type LedgerTableDefinition = {
+	readonly name: (typeof DBSP_LEDGER_TABLES)[number];
+	readonly columns: readonly LedgerColumnDefinition[];
+	readonly constraints: readonly LedgerConstraintDefinition[];
+	readonly indexes?: readonly LedgerIndexDefinition[];
+};
+
+const NOT_NULL = false;
+const NULLABLE = true;
+
+/**
+ * The single ledger DDL definition rendered by `ensurePgLedger`.
+ * Admission deliberately checks only the independent catalog invariants that
+ * protect chain closure, not PostgreSQL's normalized type or constraint names.
+ */
+const PG_LEDGER_TABLE_DEFINITIONS: readonly LedgerTableDefinition[] = [
+	{
+		name: DBSP_LEDGER_EVENT_TABLE,
+		columns: [
+			{ name: 'event_id', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_engine', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_database', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_schema', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_parent', type: 'jsonb', nullable: NOT_NULL },
+			{ name: 'address_kind', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_name', type: 'text', nullable: NOT_NULL },
+			{ name: 'execution_id', type: 'text', nullable: NULLABLE },
+			{ name: 'planned_claim_key', type: 'text', nullable: NULLABLE },
+			{ name: 'claim_group_id', type: 'text', nullable: NULLABLE },
+			{ name: 'root_claim_id', type: 'text', nullable: NULLABLE },
+			{ name: 'catalogue_identity', type: 'jsonb', nullable: NULLABLE },
+			{ name: 'event_kind', type: 'text', nullable: NOT_NULL },
+			{ name: 'predecessor', type: 'text', nullable: NULLABLE },
+			{ name: 'pair_id', type: 'text', nullable: NULLABLE },
+			{ name: 'declared', type: 'jsonb', nullable: NULLABLE },
+			{ name: 'declared_digest', type: 'text', nullable: NULLABLE },
+			{ name: 'observed', type: 'jsonb', nullable: NULLABLE },
+			{ name: 'observed_digest', type: 'text', nullable: NULLABLE },
+			{
+				name: 'controller',
+				type: 'name',
+				nullable: NOT_NULL,
+				defaultSql: 'current_user',
+			},
+			{
+				name: 'recorded_at',
+				type: 'timestamp with time zone',
+				nullable: NOT_NULL,
+				defaultSql: 'now()',
+			},
+		],
+		constraints: [
+			{
+				name: 'dbsp_ledger_event_pkey',
+				type: 'p',
+				render: () => 'PRIMARY KEY (event_id)',
+			},
+			{
+				name: 'dbsp_ledger_event_kind_closed',
+				type: 'c',
+				render: () => `CHECK (event_kind IN (${LEDGER_EVENT_KINDS_SQL}))`,
+			},
+			{
+				name: 'dbsp_ledger_declared_digest_pair',
+				type: 'c',
+				render: () => 'CHECK ((declared IS NULL) = (declared_digest IS NULL))',
+			},
+			{
+				name: 'dbsp_ledger_observed_digest_pair',
+				type: 'c',
+				render: () => 'CHECK ((observed IS NULL) = (observed_digest IS NULL))',
+			},
+			{
+				name: 'dbsp_ledger_event_address_event_unique',
+				type: 'u',
+				render: () => `UNIQUE (${addressColumns()}, event_id)`,
+			},
+			{
+				name: 'dbsp_ledger_event_one_child',
+				type: 'u',
+				nullsNotDistinct: true,
+				render: () =>
+					`UNIQUE NULLS NOT DISTINCT (${addressColumns()}, predecessor)`,
+			},
+			{
+				name: 'dbsp_ledger_event_same_address_predecessor',
+				type: 'f',
+				requiresForeignKeyPrefix: true,
+				render: (target) =>
+					`FOREIGN KEY (${addressColumns()}, predecessor) REFERENCES ${eventTable(target)} (${addressColumns()}, event_id)`,
+			},
+		],
+		indexes: [
+			{
+				name: 'dbsp_ledger_event_terminal_member',
+				columnsSql: '(predecessor)',
+			},
+		],
+	},
+	{
+		name: DBSP_LEDGER_RESERVATION_TABLE,
+		columns: [
+			{ name: 'address_engine', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_database', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_schema', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_parent', type: 'jsonb', nullable: NOT_NULL },
+			{ name: 'address_kind', type: 'text', nullable: NOT_NULL },
+			{ name: 'address_name', type: 'text', nullable: NOT_NULL },
+			{ name: 'claim_kind', type: 'text', nullable: NOT_NULL },
+			{ name: 'execution_id', type: 'text', nullable: NOT_NULL },
+			{ name: 'pair_id', type: 'text', nullable: NULLABLE },
+			{ name: 'root_claim_id', type: 'text', nullable: NOT_NULL },
+			{ name: 'home_ledger_scope', type: 'text', nullable: NOT_NULL },
+			{ name: 'home_ledger_schema', type: 'text', nullable: NULLABLE },
+		],
+		constraints: [
+			{
+				name: 'dbsp_ledger_reservation_pkey',
+				type: 'p',
+				render: () => `PRIMARY KEY (${addressColumns()})`,
+			},
+			{
+				name: 'dbsp_ledger_reservation_claim_kind_check',
+				type: 'c',
+				render: () =>
+					"CHECK (claim_kind IN ('adopt-intent', 'intent', 'retire-intent', 'readdress-intent'))",
+			},
+			{
+				name: 'dbsp_ledger_reservation_home_ledger_scope_check',
+				type: 'c',
+				render: () => "CHECK (home_ledger_scope IN ('schema', 'database'))",
+			},
+			{
+				name: 'dbsp_ledger_reservation_check',
+				type: 'c',
+				render: () =>
+					"CHECK ((home_ledger_scope = 'database' AND home_ledger_schema IS NULL) OR (home_ledger_scope = 'schema' AND home_ledger_schema IS NOT NULL))",
+			},
+		],
+	},
+	{
+		name: DBSP_LEDGER_IDENTITY_TABLE,
+		columns: [
+			{ name: 'id', type: 'boolean', nullable: NOT_NULL, defaultSql: 'true' },
+			{
+				name: 'cluster_system_identifier',
+				type: 'text',
+				nullable: NOT_NULL,
+			},
+			{ name: 'database_oid', type: 'text', nullable: NOT_NULL },
+			{ name: 'namespace_oid', type: 'text', nullable: NULLABLE },
+		],
+		constraints: [
+			{
+				name: 'dbsp_ledger_identity_pkey',
+				type: 'p',
+				render: () => 'PRIMARY KEY (id)',
+			},
+			{
+				name: 'dbsp_ledger_identity_id_check',
+				type: 'c',
+				render: () => 'CHECK (id)',
+			},
+		],
+	},
+	{
+		name: DBSP_LEDGER_MARKER_TABLE,
+		columns: [
+			{ name: 'id', type: 'boolean', nullable: NOT_NULL, defaultSql: 'true' },
+			{ name: 'version', type: 'integer', nullable: NOT_NULL },
+		],
+		constraints: [
+			{
+				name: 'dbsp_ledger_marker_pkey',
+				type: 'p',
+				render: () => 'PRIMARY KEY (id)',
+			},
+			{
+				name: 'dbsp_ledger_marker_id_check',
+				type: 'c',
+				render: () => 'CHECK (id)',
+			},
+			{
+				name: 'dbsp_ledger_marker_version_check',
+				type: 'c',
+				render: () => 'CHECK (version >= 1)',
+			},
+		],
+	},
+];
+
+function ledgerTableDefinition(
+	name: string,
+): LedgerTableDefinition | undefined {
+	return PG_LEDGER_TABLE_DEFINITIONS.find((table) => table.name === name);
+}
+
+function stringArray(value: unknown): readonly string[] | undefined {
+	if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+		return undefined;
+	return value;
+}
+
+function hasColumns(value: unknown, expected: readonly string[]): boolean {
+	const columns = stringArray(value);
+	return (
+		columns !== undefined &&
+		columns.length === expected.length &&
+		columns.every((column, index) => column === expected[index])
+	);
+}
+
+function hasExpectedConstraintFamilies(
+	rows: readonly LedgerConstraintRow[],
+	definition: LedgerTableDefinition,
+): boolean {
+	const expected = new Map<string, number>();
+	const actual = new Map<string, number>();
+	for (const constraint of definition.constraints)
+		expected.set(constraint.type, (expected.get(constraint.type) ?? 0) + 1);
+	for (const row of rows) {
+		if (typeof row.contype !== 'string') return false;
+		actual.set(row.contype, (actual.get(row.contype) ?? 0) + 1);
+	}
+	return (
+		expected.size === actual.size &&
+		[...expected].every(([type, count]) => actual.get(type) === count)
+	);
+}
+
+function ledgerPhysicalShapeError(
+	target: PgLedgerTarget,
+	table: string,
+	invariant: string,
+): Error {
+	return new Error(
+		`ledger physical shape: ${ledgerSchema(target)}.${table} ${invariant}; run dbsp preflight --reinitialize`,
+	);
+}
+
+/**
+ * Verify catalog facts before an existing relation is accepted as a ledger.
+ * CREATE ... IF NOT EXISTS is deliberately not evidence of this shape.
+ */
+export async function validatePgLedgerPhysicalShape(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+): Promise<void> {
+	const tables = await executor.query(
+		`SELECT relation.relname AS table_name, relation.relkind AS relation_kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) ORDER BY relation.relname`,
+		[ledgerSchema(target), DBSP_LEDGER_TABLES],
+	);
+	const tableRows = tables.rows as readonly LedgerTableRow[];
+	for (const table of DBSP_LEDGER_TABLES) {
+		const row = tableRows.find((candidate) => candidate.table_name === table);
+		if (!row) throw ledgerPhysicalShapeError(target, table, 'is missing');
+		if (row.relation_kind !== 'r')
+			throw ledgerPhysicalShapeError(target, table, 'is not an ordinary table');
+	}
+
+	const columns = await executor.query(
+		`SELECT relation.relname AS table_name, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND attribute.attnum > 0 AND NOT attribute.attisdropped ORDER BY relation.relname, attribute.attnum`,
+		[ledgerSchema(target), DBSP_LEDGER_TABLES],
+	);
+	const columnRows = columns.rows as readonly LedgerColumnRow[];
+	for (const definition of PG_LEDGER_TABLE_DEFINITIONS) {
+		const actual = columnRows.filter(
+			(row) => row.table_name === definition.name,
+		);
+		const hasExpectedColumns =
+			actual.length === definition.columns.length &&
+			definition.columns.every((expected, index) => {
+				const row = actual[index];
+				return (
+					row?.column_name === expected.name &&
+					row.column_type === expected.type &&
+					row.is_not_null === !expected.nullable
+				);
+			});
+		if (!hasExpectedColumns)
+			throw ledgerPhysicalShapeError(
+				target,
+				definition.name,
+				'has an unexpected column shape',
+			);
+	}
+
+	const constraints = await executor.query(
+		`SELECT relation.relname AS table_name, constraint_item.contype, constraint_index.indnullsnotdistinct AS connullsnotdistinct, constraint_item.conrelid = constraint_item.confrelid AS is_self_referential, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS referenced_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = referenced_column.attnum ORDER BY referenced_column.position) AS referenced_columns FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_index constraint_index ON constraint_index.indexrelid = constraint_item.conindid WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND constraint_item.contype IN ('p', 'c', 'u', 'f') ORDER BY relation.relname, constraint_item.oid`,
+		[ledgerSchema(target), DBSP_LEDGER_TABLES],
+	);
+	// PostgreSQL 18 records NOT NULL as pg_constraint rows with contype = 'n'.
+	// NOT NULL belongs to the column-shape assertion above, never this set.
+	const constraintRows = (
+		constraints.rows as readonly LedgerConstraintRow[]
+	).filter(
+		(row) =>
+			row.contype === 'p' ||
+			row.contype === 'c' ||
+			row.contype === 'u' ||
+			row.contype === 'f',
+	);
+	const predecessorKeyColumns = [
+		...addressColumns().split(', '),
+		'predecessor',
+	];
+	const predecessorReferenceColumns = [
+		...addressColumns().split(', '),
+		'event_id',
+	];
+	const hasPredecessorForeignKey = constraintRows.some(
+		(row) =>
+			row.table_name === DBSP_LEDGER_EVENT_TABLE &&
+			row.contype === 'f' &&
+			row.is_self_referential === true &&
+			hasColumns(row.key_columns, predecessorKeyColumns) &&
+			hasColumns(row.referenced_columns, predecessorReferenceColumns),
+	);
+	if (!hasPredecessorForeignKey)
+		throw ledgerPhysicalShapeError(
+			target,
+			DBSP_LEDGER_EVENT_TABLE,
+			'missing self-referential predecessor foreign key',
+		);
+
+	const hasOneChildConstraint = constraintRows.some(
+		(row) =>
+			row.table_name === DBSP_LEDGER_EVENT_TABLE &&
+			row.contype === 'u' &&
+			row.connullsnotdistinct === true &&
+			hasColumns(row.key_columns, predecessorKeyColumns),
+	);
+	if (!hasOneChildConstraint)
+		throw ledgerPhysicalShapeError(
+			target,
+			DBSP_LEDGER_EVENT_TABLE,
+			'missing UNIQUE NULLS NOT DISTINCT on address and predecessor',
+		);
+
+	for (const definition of PG_LEDGER_TABLE_DEFINITIONS) {
+		const actual = constraintRows.filter(
+			(row) => row.table_name === definition.name,
+		);
+		if (!hasExpectedConstraintFamilies(actual, definition))
+			throw ledgerPhysicalShapeError(
+				target,
+				definition.name,
+				'has unexpected primary, check, unique, or foreign-key constraints',
+			);
+	}
+
+	const indexes = await executor.query(
+		`SELECT relation.relname AS table_name, index_definition.indisprimary, index_definition.indisunique, ARRAY(SELECT attribute.attname::text FROM unnest(index_definition.indkey) WITH ORDINALITY AS index_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum = index_column.attnum ORDER BY index_column.position) AS index_columns FROM pg_catalog.pg_index index_definition JOIN pg_catalog.pg_class relation ON relation.oid = index_definition.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY index_definition.indexrelid`,
+		[ledgerSchema(target), DBSP_LEDGER_EVENT_TABLE],
+	);
+	const hasTerminalIndex = (indexes.rows as readonly LedgerIndexRow[]).some(
+		(row) =>
+			row.table_name === DBSP_LEDGER_EVENT_TABLE &&
+			row.indisprimary === false &&
+			row.indisunique === false &&
+			hasColumns(row.index_columns, ['predecessor']),
+	);
+	if (!hasTerminalIndex)
+		throw ledgerPhysicalShapeError(
+			target,
+			DBSP_LEDGER_EVENT_TABLE,
+			'missing terminal predecessor index',
+		);
+}
 
 export class PgLedgerStorageUnsupportedError extends Error {
 	constructor(observed: unknown) {
@@ -132,14 +552,24 @@ export async function readPgLedgerReservationsForPair(
 		`SELECT namespace.nspname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = $1 AND relation.relkind = 'r' ORDER BY namespace.nspname`,
 		[DBSP_LEDGER_RESERVATION_TABLE],
 	);
+	const targets = homes.rows.map((row) => {
+		if (typeof row.nspname !== 'string')
+			throw new Error('ledger reservation schema is unreadable');
+		return row.nspname === DBSP_META_SCHEMA
+			? ({ scope: 'database' } as const)
+			: ({ scope: 'schema', schema: row.nspname } as const);
+	});
+	return readPgLedgerReservationsForPairInHomes(executor, pairId, targets);
+}
+
+/** Read a re-address pair only from ledger homes already admitted by a caller. */
+export async function readPgLedgerReservationsForPairInHomes(
+	executor: TransitionJournalQueryable,
+	pairId: string,
+	targets: readonly PgLedgerTarget[],
+): Promise<readonly LedgerReservationRow[]> {
 	const rows = await Promise.all(
-		homes.rows.map(async (row) => {
-			if (typeof row.nspname !== 'string')
-				throw new Error('ledger reservation schema is unreadable');
-			const target: PgLedgerTarget =
-				row.nspname === DBSP_META_SCHEMA
-					? { scope: 'database' }
-					: { scope: 'schema', schema: row.nspname };
+		targets.map(async (target) => {
 			const result = await executor.query(
 				`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} WHERE pair_id = $1 ORDER BY root_claim_id, address_kind, address_name`,
 				[pairId],
@@ -300,64 +730,62 @@ function eventInsertSql(target: PgLedgerTarget): string {
 	return `INSERT INTO ${eventTable(target)} (event_id, ${addressColumns()}, execution_id, planned_claim_key, claim_group_id, root_claim_id, catalogue_identity, event_kind, predecessor, pair_id, declared, declared_digest, observed, observed_digest) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15, $16::jsonb, $17, $18::jsonb, $19) RETURNING event_id`;
 }
 
+function renderLedgerColumn(column: LedgerColumnDefinition): string {
+	return `${column.name} ${column.type}${column.nullable ? '' : ' NOT NULL'}${column.defaultSql ? ` DEFAULT ${column.defaultSql}` : ''}`;
+}
+
+function renderCreateLedgerTableSql(
+	target: PgLedgerTarget,
+	definition: LedgerTableDefinition,
+): string {
+	const columns = definition.columns.map(renderLedgerColumn);
+	const constraints = definition.constraints.map(
+		(constraint) =>
+			`CONSTRAINT ${quoteIdent(constraint.name, 'table')} ${constraint.render(target)}`,
+	);
+	return `CREATE TABLE IF NOT EXISTS ${qualified(ledgerSchema(target), definition.name)} (${[...columns, ...constraints].join(', ')})`;
+}
+
 export function renderCreateLedgerEventTableSql(
 	target: PgLedgerTarget,
 ): string {
-	const table = eventTable(target);
-	const address = addressColumns();
-	return (
-		`CREATE TABLE IF NOT EXISTS ${table} (` +
-		'event_id text PRIMARY KEY, ' +
-		'address_engine text NOT NULL, address_database text NOT NULL, address_schema text NOT NULL, address_parent jsonb NOT NULL, address_kind text NOT NULL, address_name text NOT NULL, ' +
-		'execution_id text, planned_claim_key text, claim_group_id text, root_claim_id text, catalogue_identity jsonb, event_kind text NOT NULL, predecessor text, pair_id text, ' +
-		'declared jsonb, declared_digest text, observed jsonb, observed_digest text, controller name NOT NULL DEFAULT current_user, recorded_at timestamptz NOT NULL DEFAULT now(), ' +
-		`CONSTRAINT dbsp_ledger_event_kind_closed CHECK (event_kind IN (${LEDGER_EVENT_KINDS_SQL})), ` +
-		'CONSTRAINT dbsp_ledger_declared_digest_pair CHECK ((declared IS NULL) = (declared_digest IS NULL)), ' +
-		'CONSTRAINT dbsp_ledger_observed_digest_pair CHECK ((observed IS NULL) = (observed_digest IS NULL)), ' +
-		`CONSTRAINT dbsp_ledger_event_address_event_unique UNIQUE (${address}, event_id), ` +
-		`CONSTRAINT dbsp_ledger_event_one_child UNIQUE NULLS NOT DISTINCT (${address}, predecessor), ` +
-		`CONSTRAINT dbsp_ledger_event_same_address_predecessor FOREIGN KEY (${address}, predecessor) REFERENCES ${table} (${address}, event_id)` +
-		')'
-	);
+	const definition = ledgerTableDefinition(DBSP_LEDGER_EVENT_TABLE);
+	if (!definition) throw new Error('ledger event definition is missing');
+	return renderCreateLedgerTableSql(target, definition);
 }
 
 export function renderCreateLedgerTerminalMemberIndexSql(
 	target: PgLedgerTarget,
 ): string {
-	return `CREATE INDEX IF NOT EXISTS ${quoteIdent('dbsp_ledger_event_terminal_member', 'table')} ON ${eventTable(target)} (predecessor)`;
+	const definition = ledgerTableDefinition(DBSP_LEDGER_EVENT_TABLE);
+	const index = definition?.indexes?.[0];
+	if (!index)
+		throw new Error('ledger terminal-member index definition is missing');
+	return `CREATE INDEX IF NOT EXISTS ${quoteIdent(index.name, 'table')} ON ${eventTable(target)} ${index.columnsSql}`;
 }
 
 export function renderCreateLedgerReservationTableSql(
 	target: PgLedgerTarget,
 ): string {
-	return (
-		`CREATE TABLE IF NOT EXISTS ${reservationTable(target)} (` +
-		'address_engine text NOT NULL, address_database text NOT NULL, address_schema text NOT NULL, address_parent jsonb NOT NULL, address_kind text NOT NULL, address_name text NOT NULL, ' +
-		`claim_kind text NOT NULL CHECK (claim_kind IN ('adopt-intent', 'intent', 'retire-intent', 'readdress-intent')), execution_id text NOT NULL, pair_id text, root_claim_id text NOT NULL, home_ledger_scope text NOT NULL CHECK (home_ledger_scope IN ('schema', 'database')), home_ledger_schema text, ` +
-		`PRIMARY KEY (${addressColumns()}), ` +
-		"CHECK ((home_ledger_scope = 'database' AND home_ledger_schema IS NULL) OR (home_ledger_scope = 'schema' AND home_ledger_schema IS NOT NULL))" +
-		')'
-	);
+	const definition = ledgerTableDefinition(DBSP_LEDGER_RESERVATION_TABLE);
+	if (!definition) throw new Error('ledger reservation definition is missing');
+	return renderCreateLedgerTableSql(target, definition);
 }
 
 export function renderCreateLedgerIdentityTableSql(
 	target: PgLedgerTarget,
 ): string {
-	return (
-		`CREATE TABLE IF NOT EXISTS ${qualified(ledgerSchema(target), DBSP_LEDGER_IDENTITY_TABLE)} (` +
-		'id boolean PRIMARY KEY DEFAULT true CHECK (id), cluster_system_identifier text NOT NULL, database_oid text NOT NULL, namespace_oid text' +
-		')'
-	);
+	const definition = ledgerTableDefinition(DBSP_LEDGER_IDENTITY_TABLE);
+	if (!definition) throw new Error('ledger identity definition is missing');
+	return renderCreateLedgerTableSql(target, definition);
 }
 
 export function renderCreateLedgerMarkerTableSql(
 	target: PgLedgerTarget,
 ): string {
-	return (
-		`CREATE TABLE IF NOT EXISTS ${qualified(ledgerSchema(target), DBSP_LEDGER_MARKER_TABLE)} (` +
-		'id boolean PRIMARY KEY DEFAULT true CHECK (id), version integer NOT NULL CHECK (version >= 1)' +
-		')'
-	);
+	const definition = ledgerTableDefinition(DBSP_LEDGER_MARKER_TABLE);
+	if (!definition) throw new Error('ledger marker definition is missing');
+	return renderCreateLedgerTableSql(target, definition);
 }
 
 export function renderCreateLedgerImmutabilityFunctionSql(

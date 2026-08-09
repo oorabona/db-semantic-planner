@@ -199,13 +199,7 @@ export {
 	declarationSetFromModel,
 	validateDeclarationModel,
 } from './declaration.js';
-export {
-	type AdmittedDestructiveOutcomeClaim,
-	admitDestructiveOutcomeClaim,
-	attachDestructiveAuthorityPermit,
-	decideDestructiveDecision,
-	isDestructiveAuthorityPermit,
-} from './destructive-authority.js';
+export type { AdmittedDestructiveOutcomeClaim } from './destructive-authority.js';
 export {
 	type EnumAddDelta,
 	type EnumAddDeltaOptions,
@@ -252,11 +246,7 @@ export {
 	projectLedgerChain,
 } from './lifecycle-interpreter.js';
 export {
-	admitOutcomeClaim,
-	claimIdForToken,
 	classifyOutcomeRecovery,
-	consumeClaimToken,
-	mintClaimToken,
 	outcomeClaimEventId,
 	outcomeClaimId,
 } from './outcome-protocol.js';

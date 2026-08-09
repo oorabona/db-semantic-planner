@@ -2,7 +2,6 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-	appendPgLedgerResolution,
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
 	createPgsqlGeneratedManagedStep,
@@ -10,6 +9,7 @@ import {
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
 import { transitionPlanDigest } from '@dbsp/core';
 import type { LedgerAddress, LedgerReservationRow } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';

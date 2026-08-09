@@ -27,11 +27,11 @@ interface ClaimTokenRecord {
 const tokenRecords = new WeakMap<object, ClaimTokenRecord>();
 
 /**
- * The sole durable identity builder for a managed outcome claim.  An outcome
- * chain is per canonical ledger address, so the address — rather than a
- * rendered operation object — is its stable root.  Hashing the canonical
- * representation keeps the persisted identifier opaque, compact, and free of
- * serializer type tags.
+ * The sole durable identity builder for a managed outcome claim. An address
+ * is the stable chain key, while the claim id is execution-scoped:
+ * hash(executionId, plannedClaimKey, address[, closureMemberKey]). Hashing the
+ * canonical representation keeps the persisted identifier opaque, compact,
+ * and free of serializer type tags.
  */
 export function outcomeClaimId(
 	executionId: string,
@@ -84,9 +84,11 @@ function fixedBundle(bundle: ClaimStatementBundle): ClaimStatementBundle {
 }
 
 /**
- * The sole token producer. The WeakMap makes a token opaque at runtime as well
- * as in its public type, and records its single-use state independently of a
- * transaction boundary.
+ * The sole token producer. The documented package API does not expose managed
+ * DDL or ledger-append primitives; capability checks prevent accidental
+ * bypass within supported integrations. This is not a security boundary
+ * against code already running in this Node process or a database role
+ * authorized to issue DDL or write ledger tables.
  */
 export function mintClaimToken(plan: OutcomeClaimPlan): ClaimToken {
 	const token = Object.freeze({}) as ClaimToken;

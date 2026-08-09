@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
 	acquirePgLedgerLocks,
-	appendPgLedgerClaim,
-	appendPgLedgerResolution,
 	ensureDbspMetaLedger,
 	ensurePgLedger,
 } from '@dbsp/adapter-pgsql';
+import {
+	appendPgLedgerClaim,
+	appendPgLedgerResolution,
+} from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';

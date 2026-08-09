@@ -2,7 +2,6 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-	appendPgLedgerResolution,
 	executePgTableReaddress,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
@@ -10,6 +9,7 @@ import {
 	renderPgTableReaddressStatements,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
 import type {
 	LedgerAddress,

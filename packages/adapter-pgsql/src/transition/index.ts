@@ -97,12 +97,6 @@ export {
 } from './journal.js';
 export {
 	acquirePgLedgerLocks,
-	appendPgLedgerClaim,
-	appendPgLedgerClaimGroup,
-	appendPgLedgerProgress,
-	appendPgLedgerRelease,
-	appendPgLedgerResolution,
-	appendPgLedgerResolutionGroup,
 	ensureDbspMetaLedger,
 	ensurePgLedger,
 	ensurePgLedgerStorageVersion,
@@ -112,7 +106,6 @@ export {
 	PgLedgerStorageUnsupportedError,
 	type PgLedgerTarget,
 	readPgLedgerReservationsForExecution,
-	readPgLedgerReservationsForPair,
 	recordPgLedgerIdentity,
 	renderCreateLedgerEventTableSql,
 	renderCreateLedgerIdentityTableSql,
@@ -185,11 +178,7 @@ export {
 	normalizeManualSqlPayload,
 } from './operations/manual-sql.js';
 export {
-	appendPgOutcomeResolution,
-	executePgDestructiveBundle,
-	executePgManagedBundle,
-	openPgOutcomeClaim,
-	openPgOutcomeClaimGroup,
+	executePgDestructiveOutcome,
 	type PgOutcomeClaimGroupAdmission,
 	type PgOutcomeClaimGroupRequest,
 	type PgOutcomeClaimGroupResolution,
@@ -206,7 +195,7 @@ export {
 	type PgOutcomeTransactionalRequest,
 	readPgOutcomeRecoveryReadBack,
 	recoverPgOutcomeClaim,
-	resolvePgOutcomeClaimGroup,
+	resolvePgDestructiveOutcome,
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './outcome-protocol.js';
@@ -235,6 +224,7 @@ export {
 	type ReinitializePreflightObserver,
 	readPgLedgerMarker,
 	readPgLedgerScopeCurrency,
+	readVerifiedPgLedgerReservationsForPair,
 	runPgReinitializePreflight,
 	selectReinitializeAdoptionCandidates,
 } from './reinitialize-preflight.js';

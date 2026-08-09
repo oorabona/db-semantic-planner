@@ -1,11 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import {
-	appendPgLedgerResolution,
-	executePgManagedBundle,
-	openPgOutcomeClaim,
 	runPgReinitializePreflight,
 	runPgTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
+import {
+	appendPgLedgerResolution,
+	executePgManagedBundle,
+	openPgOutcomeClaim,
+} from '@dbsp/adapter-pgsql/internal';
 import { outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerAddress,

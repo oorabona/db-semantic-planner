@@ -16,6 +16,7 @@ import {
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
+	DBSP_LEDGER_RESERVATION_TABLE,
 	DBSP_LEDGER_TABLES,
 	DBSP_META_SCHEMA,
 	isDbspLedgerInfrastructureTable,
@@ -30,7 +31,9 @@ import {
 	ensureDbspMetaLedger,
 	ensurePgLedger,
 	PG_LEDGER_SHAPE_VERSION,
+	readPgLedgerReservationsForPairInHomes,
 	recordPgLedgerIdentity,
+	validatePgLedgerPhysicalShape,
 	writePgLedgerShapeMarker,
 } from './ledger.js';
 
@@ -299,6 +302,38 @@ export async function readPgLedgerScopeCurrency(
 		: { kind: 'not-current', marker, reason: 'lineage' };
 }
 
+/**
+ * Pair recovery may discover several schemas, but a same-named user table is
+ * never evidence of a ledger. Admit marker, lineage, and physical shape for
+ * every discovered home before reading a reservation row from it.
+ */
+export async function readVerifiedPgLedgerReservationsForPair(
+	executor: TransitionJournalQueryable,
+	pairId: string,
+) {
+	const relations = await executor.query(
+		`SELECT namespace.nspname FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = $1 AND relation.relkind = 'r' ORDER BY namespace.nspname`,
+		[DBSP_LEDGER_RESERVATION_TABLE],
+	);
+	const homes: LedgerHome[] = [];
+	for (const relation of relations.rows) {
+		if (typeof relation.nspname !== 'string')
+			throw new Error('ledger reservation schema is unreadable');
+		const home: LedgerHome =
+			relation.nspname === DBSP_META_SCHEMA
+				? { scope: 'database' }
+				: { scope: 'schema', schema: relation.nspname };
+		const currency = await readPgLedgerScopeCurrency(executor, home);
+		if (currency.kind !== 'current')
+			throw new Error(
+				`reservation table in ${schemaFor(home)} is not a current ledger`,
+			);
+		await validatePgLedgerPhysicalShape(executor, home);
+		homes.push(home);
+	}
+	return readPgLedgerReservationsForPairInHomes(executor, pairId, homes);
+}
+
 async function inspectScope(
 	executor: TransitionJournalQueryable,
 	home: LedgerHome,
@@ -322,6 +357,22 @@ async function inspectScope(
 			marker: { kind: 'unreadable', reason: errorDetail(error) },
 		};
 	}
+}
+
+/**
+ * A relation bearing a ledger table name is not proof of a ledger. Capture
+ * that fact before CREATE ... IF NOT EXISTS so a pre-existing foreign or
+ * partial ledger cannot be silently completed and admitted as ours.
+ */
+async function hasPreexistingLedgerRelations(
+	executor: TransitionJournalQueryable,
+	home: LedgerHome,
+): Promise<boolean> {
+	const result = await executor.query(
+		`SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[])) AS present`,
+		[schemaFor(home), DBSP_LEDGER_TABLES],
+	);
+	return result.rows[0]?.present === true;
 }
 
 function inspectionAccessFailure(
@@ -427,11 +478,38 @@ async function archiveMismatchedLedger(
 		`CREATE OR REPLACE FUNCTION ${schema}."dbsp_ledger_reject_archive_mutation"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'dbsp archived ledger is read-only'; END; $$`,
 	);
 	for (const table of archived) {
+		await revokeArchivedTablePrivileges(executor, home, table);
 		await executor.query(
-			`REVOKE ALL ON TABLE ${qualified(home, table)} FROM PUBLIC`,
+			`CREATE TRIGGER "dbsp_ledger_archive_immutable_rows" BEFORE INSERT OR UPDATE OR DELETE ON ${qualified(home, table)} FOR EACH ROW EXECUTE FUNCTION ${schema}."dbsp_ledger_reject_archive_mutation"()`,
 		);
 		await executor.query(
-			`CREATE TRIGGER "dbsp_ledger_archive_immutable" BEFORE INSERT OR UPDATE OR DELETE ON ${qualified(home, table)} FOR EACH ROW EXECUTE FUNCTION ${schema}."dbsp_ledger_reject_archive_mutation"()`,
+			`CREATE TRIGGER "dbsp_ledger_archive_immutable_truncate" BEFORE TRUNCATE ON ${qualified(home, table)} FOR EACH STATEMENT EXECUTE FUNCTION ${schema}."dbsp_ledger_reject_archive_mutation"()`,
+		);
+	}
+}
+
+function quoteRole(role: string): string {
+	return `"${role.replaceAll('"', '""')}"`;
+}
+
+/** Remove PUBLIC and every explicit grantee before archived provenance remains. */
+async function revokeArchivedTablePrivileges(
+	executor: TransitionJournalQueryable,
+	home: LedgerHome,
+	table: string,
+): Promise<void> {
+	const grantees = await executor.query(
+		`SELECT DISTINCT role.rolname AS role FROM pg_catalog.pg_class relation CROSS JOIN LATERAL pg_catalog.aclexplode(relation.relacl) acl JOIN pg_catalog.pg_roles role ON role.oid = acl.grantee WHERE relation.oid = pg_catalog.to_regclass($1) AND acl.grantee <> 0 ORDER BY role`,
+		[qualified(home, table)],
+	);
+	await executor.query(
+		`REVOKE ALL ON TABLE ${qualified(home, table)} FROM PUBLIC`,
+	);
+	for (const grant of grantees.rows) {
+		if (typeof grant.role !== 'string')
+			throw new Error(`archived ledger grantee is unreadable for ${table}`);
+		await executor.query(
+			`REVOKE ALL ON TABLE ${qualified(home, table)} FROM ${quoteRole(grant.role)}`,
 		);
 	}
 }
@@ -512,6 +590,9 @@ async function processScope(
 				'marker',
 			);
 		}
+		const preexistingLedger =
+			current.marker.kind !== 'current' &&
+			(await hasPreexistingLedgerRelations(client, current.home));
 		// A fresh database ledger has no dbsp_meta namespace yet, so bootstrap it
 		// before reading that namespace's live OID. The marker remains deferred.
 		let initializedDatabaseLedger = false;
@@ -526,6 +607,8 @@ async function processScope(
 		const live = await readLiveIdentity(client, current.home);
 		if (current.marker.kind === 'current') {
 			if (current.identity && sameIdentity(current.identity, live)) {
+				failureStep = 'create';
+				await validatePgLedgerPhysicalShape(client, current.home);
 				failureStep = 'ownership-grants';
 				await validateOwnershipAndGrants(client, current.home);
 				await client.query('COMMIT');
@@ -543,6 +626,21 @@ async function processScope(
 			failureStep = 'archive';
 			await archiveMismatchedLedger(client, current.home);
 			await checkpoint(observer, 'archive', current.home);
+		}
+		if (preexistingLedger) {
+			// The tables existed before this preflight. Their catalog shape and
+			// lineage must be proved before CREATE ... IF NOT EXISTS can touch
+			// them. A ledger created above in this transaction is intentionally
+			// not subject to this admission path: this preflight writes its
+			// identity as part of initialization below.
+			failureStep = 'create';
+			await validatePgLedgerPhysicalShape(client, current.home);
+			failureStep = 'identity';
+			const recorded = await readIdentity(client, current.home);
+			if (!sameIdentity(recorded, live))
+				throw new Error(
+					`pre-existing ledger identity does not match ${schemaFor(current.home)}`,
+				);
 		}
 		failureStep = 'create';
 		if (!initializedDatabaseLedger && current.home.scope === 'database')

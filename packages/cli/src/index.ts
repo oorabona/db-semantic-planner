@@ -1,10 +1,12 @@
 #!/usr/bin/env node
+
 /**
  * ARCH-002 Block 3: CLI Scaffold
  *
  * dbsp CLI - Schema-first code generation for db-semantic-planner.
  */
 
+import { createRequire } from 'node:module';
 import { Command, CommanderError } from 'commander';
 import { applyCommand } from './commands/apply.js';
 import { generateCommand } from './commands/generate.js';
@@ -21,34 +23,38 @@ import { verifyCommand } from './commands/verify.js';
 import { printCliJson } from './utils/output.js';
 
 const program = new Command();
+const packageJson = createRequire(import.meta.url)('../package.json') as {
+	readonly version: string;
+};
 
-function selectedCommand(
-	argv: readonly string[],
-	commands: readonly Command[],
-): { readonly command: Command; readonly index: number } | undefined {
-	for (let index = 0; index < argv.length; index += 1) {
-		const argument = argv[index];
-		if (argument === '--') return undefined;
-		if (argument?.startsWith('-')) continue;
-		const command = commands.find((candidate) => candidate.name() === argument);
-		return command === undefined ? undefined : { command, index };
+const jsonFormatCommands = new Set([
+	'apply',
+	'inspect',
+	'plan',
+	'reconcile',
+	'release',
+]);
+
+function requestsJson(argv: readonly string[]): boolean {
+	// The initial positional token is the command Commander will try to run.
+	// Do not let a typo such as `plna --format json` opt into a JSON envelope.
+	let command: string | undefined;
+	for (const argument of argv) {
+		if (argument === '--') break;
+		if (!argument.startsWith('-')) {
+			command = argument;
+			break;
+		}
 	}
-	return undefined;
-}
+	if (command === undefined || !jsonFormatCommands.has(command)) return false;
 
-function requestsPlanJson(
-	argv: readonly string[],
-	commands: readonly Command[],
-): boolean {
-	const selected = selectedCommand(argv, commands);
-	if (selected?.command !== planCommand) return false;
-
-	for (let index = selected.index + 1; index < argv.length; index += 1) {
+	for (let index = 0; index < argv.length; index += 1) {
 		const argument = argv[index];
 		if (argument === '--') break;
 		if (
 			(argument === '--format' && argv[index + 1] === 'json') ||
-			argument === '--format=json'
+			argument === '--format=json' ||
+			argument === '--json'
 		) {
 			return true;
 		}
@@ -59,7 +65,7 @@ function requestsPlanJson(
 program
 	.name('dbsp')
 	.description('Schema-first code generation for db-semantic-planner')
-	.version('0.0.1');
+	.version(packageJson.version);
 
 // Register commands
 program.addCommand(generateCommand);
@@ -74,21 +80,18 @@ program.addCommand(reconcileCommand);
 program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 
-const planJsonRequested = requestsPlanJson(
-	process.argv.slice(2),
-	program.commands,
-);
+const jsonRequested = requestsJson(process.argv.slice(2));
 
-// Commander validates root options before transferring control to a subcommand.
-// For a resolved `plan --format json` invocation, avoid emitting its eager
-// plaintext diagnostic alongside the JSON error document produced below.
-if (planJsonRequested) {
-	program.configureOutput({ writeErr: () => {} });
+// Commander validates options before transferring control to a subcommand.
+// Suppress its eager plaintext diagnostic whenever the request chose JSON.
+if (jsonRequested) {
+	for (const command of [program, ...program.commands])
+		command.configureOutput({ writeErr: () => {} });
 }
 
-// CC-15: Intercept Commander parse errors so --json commands receive a JSON
-// error object on stdout instead of a plain-text usage message.
-program.exitOverride();
+// CC-15: Intercept parse errors so recognized JSON-capable commands receive a
+// JSON error object on stdout instead of a plain-text usage message.
+for (const command of [program, ...program.commands]) command.exitOverride();
 
 try {
 	program.parse();
@@ -99,7 +102,7 @@ try {
 		process.exit(0);
 	}
 	const message = err instanceof Error ? err.message : 'Command parse error';
-	if (process.argv.includes('--json') || planJsonRequested) {
+	if (jsonRequested) {
 		printCliJson({ status: 'error', error: message });
 	} else {
 		console.error(`❌ ${message}`);

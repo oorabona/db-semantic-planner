@@ -9,6 +9,7 @@ import {
 	ensurePgLedger,
 	PgLedgerStorageUnsupportedError,
 	renderCreateLedgerEventTableSql,
+	validatePgLedgerPhysicalShape,
 } from './ledger.js';
 
 const target = { scope: 'schema', schema: 'tenant_a' } as const;
@@ -33,6 +34,148 @@ const reservation: LedgerReservationRow = {
 	rootClaimId: 'claim-1',
 	homeLedger: target,
 };
+
+/** Catalog facts that are normalization-independent and protect chain closure. */
+function createdLedgerTableRows() {
+	return [
+		{
+			table_name: 'dbsp_ledger_event',
+			relation_kind: 'r',
+		},
+		{
+			table_name: 'dbsp_ledger_reservation',
+			relation_kind: 'r',
+		},
+		{
+			table_name: 'dbsp_ledger_identity',
+			relation_kind: 'r',
+		},
+		{
+			table_name: 'dbsp_ledger_marker',
+			relation_kind: 'r',
+		},
+	];
+}
+
+function createdLedgerColumnRows() {
+	const columns = [
+		['dbsp_ledger_event', 'event_id', 'text', true],
+		['dbsp_ledger_event', 'address_engine', 'text', true],
+		['dbsp_ledger_event', 'address_database', 'text', true],
+		['dbsp_ledger_event', 'address_schema', 'text', true],
+		['dbsp_ledger_event', 'address_parent', 'jsonb', true],
+		['dbsp_ledger_event', 'address_kind', 'text', true],
+		['dbsp_ledger_event', 'address_name', 'text', true],
+		['dbsp_ledger_event', 'execution_id', 'text', false],
+		['dbsp_ledger_event', 'planned_claim_key', 'text', false],
+		['dbsp_ledger_event', 'claim_group_id', 'text', false],
+		['dbsp_ledger_event', 'root_claim_id', 'text', false],
+		['dbsp_ledger_event', 'catalogue_identity', 'jsonb', false],
+		['dbsp_ledger_event', 'event_kind', 'text', true],
+		['dbsp_ledger_event', 'predecessor', 'text', false],
+		['dbsp_ledger_event', 'pair_id', 'text', false],
+		['dbsp_ledger_event', 'declared', 'jsonb', false],
+		['dbsp_ledger_event', 'declared_digest', 'text', false],
+		['dbsp_ledger_event', 'observed', 'jsonb', false],
+		['dbsp_ledger_event', 'observed_digest', 'text', false],
+		['dbsp_ledger_event', 'controller', 'name', true],
+		['dbsp_ledger_event', 'recorded_at', 'timestamp with time zone', true],
+		['dbsp_ledger_reservation', 'address_engine', 'text', true],
+		['dbsp_ledger_reservation', 'address_database', 'text', true],
+		['dbsp_ledger_reservation', 'address_schema', 'text', true],
+		['dbsp_ledger_reservation', 'address_parent', 'jsonb', true],
+		['dbsp_ledger_reservation', 'address_kind', 'text', true],
+		['dbsp_ledger_reservation', 'address_name', 'text', true],
+		['dbsp_ledger_reservation', 'claim_kind', 'text', true],
+		['dbsp_ledger_reservation', 'execution_id', 'text', true],
+		['dbsp_ledger_reservation', 'pair_id', 'text', false],
+		['dbsp_ledger_reservation', 'root_claim_id', 'text', true],
+		['dbsp_ledger_reservation', 'home_ledger_scope', 'text', true],
+		['dbsp_ledger_reservation', 'home_ledger_schema', 'text', false],
+		['dbsp_ledger_identity', 'id', 'boolean', true],
+		['dbsp_ledger_identity', 'cluster_system_identifier', 'text', true],
+		['dbsp_ledger_identity', 'database_oid', 'text', true],
+		['dbsp_ledger_identity', 'namespace_oid', 'text', false],
+		['dbsp_ledger_marker', 'id', 'boolean', true],
+		['dbsp_ledger_marker', 'version', 'integer', true],
+	] as const;
+	return columns.map(([table_name, column_name, column_type, is_not_null]) => ({
+		table_name,
+		column_name,
+		column_type,
+		is_not_null,
+	}));
+}
+
+function createdLedgerInvariantConstraintRows() {
+	const addressColumns = [
+		'address_engine',
+		'address_database',
+		'address_schema',
+		'address_parent',
+		'address_kind',
+		'address_name',
+	];
+	return [
+		['dbsp_ledger_event', 'p'],
+		['dbsp_ledger_event', 'c'],
+		['dbsp_ledger_event', 'c'],
+		['dbsp_ledger_event', 'c'],
+		['dbsp_ledger_event', 'u'],
+		[
+			'dbsp_ledger_event',
+			'f',
+			false,
+			true,
+			[...addressColumns, 'predecessor'],
+			[...addressColumns, 'event_id'],
+		],
+		['dbsp_ledger_reservation', 'p'],
+		['dbsp_ledger_reservation', 'c'],
+		['dbsp_ledger_reservation', 'c'],
+		['dbsp_ledger_reservation', 'c'],
+		['dbsp_ledger_identity', 'p'],
+		['dbsp_ledger_identity', 'c'],
+		['dbsp_ledger_marker', 'p'],
+		['dbsp_ledger_marker', 'c'],
+		['dbsp_ledger_marker', 'c'],
+		[
+			'dbsp_ledger_event',
+			'u',
+			true,
+			false,
+			[...addressColumns, 'predecessor'],
+			[],
+		],
+	].map(
+		([
+			table_name,
+			contype,
+			connullsnotdistinct = false,
+			is_self_referential = false,
+			key_columns = [],
+			referenced_columns = [],
+		]) => ({
+			table_name,
+			contype,
+			connullsnotdistinct,
+			is_self_referential,
+			key_columns,
+			referenced_columns,
+		}),
+	);
+}
+
+function createdLedgerTerminalIndexRows() {
+	return [
+		{
+			table_name: 'dbsp_ledger_event',
+			indisprimary: false,
+			indisunique: false,
+			index_columns: ['predecessor'],
+		},
+	];
+}
 
 describe('managed ledger storage', () => {
 	it('renders the closed, same-address append-only chain shape', () => {
@@ -83,6 +226,103 @@ describe('managed ledger storage', () => {
 				String(sql).includes('INSERT INTO "tenant_a"."dbsp_ledger_marker"'),
 			),
 		).toBe(false);
+	});
+
+	it.each([
+		{ scope: 'schema' as const, schema: 'tenant_shape' },
+		{ scope: 'database' as const },
+	])('accepts a legitimately-created ledger by structural invariants for $scope scope', async (ledger) => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'SHOW server_version_num')
+				return { rows: [{ server_version_num: '180000' }] };
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: createdLedgerTableRows() };
+			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+				return { rows: createdLedgerColumnRows() };
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return {
+					rows: [
+						...createdLedgerInvariantConstraintRows(),
+						...createdLedgerColumnRows()
+							.filter((row) => row.is_not_null)
+							.map(({ table_name, column_name }) => ({
+								table_name,
+								contype: 'n',
+								key_columns: [column_name],
+							})),
+					],
+				};
+			if (sql.includes('FROM pg_catalog.pg_index'))
+				return { rows: createdLedgerTerminalIndexRows() };
+			return { rows: [] };
+		});
+		await ensurePgLedger({ query }, ledger, { writeMarker: false });
+		await expect(
+			validatePgLedgerPhysicalShape({ query }, ledger),
+		).resolves.toBeUndefined();
+		expect(query).toHaveBeenCalledWith(
+			expect.stringContaining('CREATE TABLE IF NOT EXISTS'),
+		);
+		const constraintQuery = query.mock.calls.find(([sql]) =>
+			String(sql).includes('FROM pg_catalog.pg_constraint'),
+		)?.[0];
+		expect(constraintQuery).toContain(
+			'LEFT JOIN pg_catalog.pg_index constraint_index ON constraint_index.indexrelid = constraint_item.conindid',
+		);
+		expect(constraintQuery).toContain(
+			'constraint_index.indnullsnotdistinct AS connullsnotdistinct',
+		);
+		expect(constraintQuery).not.toContain(
+			'constraint_item.connullsnotdistinct',
+		);
+		expect(constraintQuery).toContain(
+			"constraint_item.contype IN ('p', 'c', 'u', 'f')",
+		);
+	});
+
+	it.each([
+		{
+			name: 'self-referential predecessor foreign key',
+			without: (
+				rows: ReturnType<typeof createdLedgerInvariantConstraintRows>,
+			) => rows.filter((row) => row.contype !== 'f'),
+			expected:
+				'dbsp_ledger_event missing self-referential predecessor foreign key',
+		},
+		{
+			name: 'UNIQUE NULLS NOT DISTINCT child constraint',
+			without: (
+				rows: ReturnType<typeof createdLedgerInvariantConstraintRows>,
+			) => rows.filter((row) => row.contype !== 'u'),
+			expected:
+				'dbsp_ledger_event missing UNIQUE NULLS NOT DISTINCT on address and predecessor',
+		},
+	])('refuses a pre-existing ledger missing its $name', async ({
+		without,
+		expected,
+	}) => {
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: createdLedgerTableRows() };
+			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+				return { rows: createdLedgerColumnRows() };
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return { rows: without(createdLedgerInvariantConstraintRows()) };
+			if (sql.includes('FROM pg_catalog.pg_index'))
+				return { rows: createdLedgerTerminalIndexRows() };
+			return { rows: [] };
+		});
+		await expect(
+			validatePgLedgerPhysicalShape({ query }, target),
+		).rejects.toThrow(expected);
 	});
 
 	it('makes a claim append and its closure reservations one statement', async () => {

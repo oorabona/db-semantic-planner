@@ -1,5 +1,5 @@
 /** Shared construction for E2E outcome claims; the harness stays uninvolved. */
-import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql';
+import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
 
 export interface FixtureOutcomeClaimInput {

@@ -3,11 +3,11 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
-	appendPgLedgerResolution,
 	executePgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress, LedgerPayload } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';

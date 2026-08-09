@@ -6,9 +6,9 @@ import {
 	isPgDatabaseReadOnlyError,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
-	readPgLedgerReservationsForPair,
 	readPgLedgerScopeCurrency,
 	readTransitionJournal,
+	readVerifiedPgLedgerReservationsForPair,
 	recoverPgOutcomeClaim,
 	recoverPgReaddressPair,
 	withPgTransitionRunLock,
@@ -304,7 +304,7 @@ export async function runReconcile(
 						const pairId = pairRows[0]?.pairId;
 						const executionId = pairRows[0]?.executionId;
 						if (!pairId || !executionId) continue;
-						const closure = await readPgLedgerReservationsForPair(
+						const closure = await readVerifiedPgLedgerReservationsForPair(
 							lease.session,
 							pairId,
 						);

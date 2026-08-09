@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { acquirePgLedgerLocks, ensurePgLedger } from '@dbsp/adapter-pgsql';
 import {
-	acquirePgLedgerLocks,
 	appendPgLedgerClaim,
 	appendPgLedgerProgress,
-	ensurePgLedger,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
 

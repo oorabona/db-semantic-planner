@@ -1,11 +1,13 @@
 import {
-	appendPgLedgerClaim,
-	appendPgLedgerResolution,
 	compareSchemata,
 	ensurePgLedger,
 	introspect,
 	readPgLedgerAddressChain,
 } from '@dbsp/adapter-pgsql';
+import {
+	appendPgLedgerClaim,
+	appendPgLedgerResolution,
+} from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
 import type {
 	LedgerAddress,
