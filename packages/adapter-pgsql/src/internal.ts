@@ -14,8 +14,13 @@ export {
 } from './transition/ledger.js';
 export {
 	appendPgOutcomeResolution,
+	executePgDestructiveOutcome,
 	openPgOutcomeClaim,
 	openPgOutcomeClaimGroup,
+	recoverPgOutcomeClaim,
+	resolvePgDestructiveOutcome,
 	resolvePgOutcomeClaimGroup,
+	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './transition/outcome-protocol.js';
+export { executePgTableReaddress } from './transition/readdress.js';

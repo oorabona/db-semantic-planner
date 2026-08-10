@@ -2,6 +2,7 @@ import type {
 	LedgerAddress,
 	LedgerChainMember,
 	OutcomeClaimPlan,
+	SqlBearingOutcomeClaimPlan,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { projectLedgerChain } from './lifecycle-interpreter.js';
@@ -40,9 +41,10 @@ function event(
 function plan(
 	claimId = 'claim-1',
 	claimKind: OutcomeClaimPlan['claimKind'] = 'intent',
-): OutcomeClaimPlan {
+): SqlBearingOutcomeClaimPlan {
 	return {
 		claimId,
+		claimSpecies: 'sql-bearing',
 		address,
 		claimKind,
 		statementBundle: {
@@ -51,7 +53,10 @@ function plan(
 	};
 }
 
-function admit(value = plan(), events: readonly LedgerChainMember[] = []) {
+function admit(
+	value: OutcomeClaimPlan = plan(),
+	events: readonly LedgerChainMember[] = [],
+) {
 	return admitOutcomeClaim({
 		plan: value,
 		projection: projectLedgerChain({ ledger, address, events }),
@@ -196,7 +201,7 @@ describe('outcome claim admission (SC-30, SC-42)', () => {
 		});
 	});
 
-	it('requires a contiguous, non-empty planned bundle for DDL claims', () => {
+	it('refuses a hollow sql-bearing claim and malformed SQL bundle', () => {
 		expect(
 			admit({ ...plan(), statementBundle: { statements: [] } }),
 		).toMatchObject({
@@ -213,6 +218,22 @@ describe('outcome claim admission (SC-30, SC-42)', () => {
 		).toMatchObject({
 			kind: 'outcome-protocol-refused',
 			reason: 'claim claim-1 has an invalid statement bundle at ordinal 0',
+		});
+	});
+
+	it('refuses SQL carried by a cascade-covered claim by name', () => {
+		const cascadeWithSql = {
+			...plan('covered-member'),
+			claimSpecies: 'cascade-covered',
+			rootClaimId: 'destructive-root',
+			statementBundle: {
+				statements: [{ ordinal: 0, sql: 'DROP TABLE accounts' }],
+			},
+		} as unknown as OutcomeClaimPlan;
+		expect(admit(cascadeWithSql)).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason:
+				'cascade-covered claim covered-member has a non-empty statement bundle',
 		});
 	});
 });

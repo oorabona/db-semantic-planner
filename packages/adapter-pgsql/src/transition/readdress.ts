@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { projectLedgerChain } from '@dbsp/core';
+import {
+	projectLedgerChain,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
 import type {
 	LedgerAddress,
 	LedgerHome,
@@ -498,9 +501,17 @@ export async function executePgTableReaddress(
 			targetObserved: observed(member.target),
 		};
 	});
+	// Re-addressing is a paired protocol rather than a managed-step claim. Its
+	// empty validated manifest is nevertheless the façade's explicit proof that
+	// this operation has no unpaired managed-step material to substitute.
+	const manifest = validateNormalizedManagedStepManifest([]);
+	if (!manifest.ok)
+		throw new Error(`re-address manifest is invalid: ${manifest.detail}`);
 	const result = await executePgAdmittedOperation(executor, {
 		run: { runId: request.executionId, planDigest: pairId },
 		approval: { approvals: [] },
+		manifest: manifest.manifest,
+		recomputedPlanDigest: pairId,
 		operation: {
 			kind: 'paired-readdress',
 			request: {

@@ -21,6 +21,11 @@ export interface ClaimStatementBundle {
 	readonly statements: readonly ClaimBundleStatement[];
 }
 
+/** A cascade-covered claim records a member fact but never executes SQL. */
+export interface EmptyClaimStatementBundle {
+	readonly statements: readonly [];
+}
+
 /**
  * Opaque capability minted only by the core claim-admission boundary.
  * Its members are intentionally not public: adapters present it to core rather
@@ -40,8 +45,8 @@ export interface AdmittedPermit {
 	readonly [admittedPermitBrand]: 'dbsp-admitted-permit';
 }
 
-/** The fixed plan-time material that becomes one ledger claim. */
-export interface OutcomeClaimPlan {
+/** Fields shared by every fixed plan-time outcome claim. */
+interface OutcomeClaimPlanBase {
 	readonly claimId: string;
 	/** One actual apply attempt; deliberately distinct from the persisted run id. */
 	readonly executionId?: string;
@@ -49,10 +54,8 @@ export interface OutcomeClaimPlan {
 	readonly plannedClaimKey?: string;
 	/** The atomic closure identity; a single-address claim uses its root claim id. */
 	readonly claimGroupId?: string;
-	readonly rootClaimId?: string;
 	readonly address: LedgerAddress;
 	readonly claimKind: LedgerClaimKind;
-	readonly statementBundle: ClaimStatementBundle;
 	/**
 	 * A creation verifies that its target address remains vacant before DDL.
 	 * Absent only on plans written before this material was introduced.
@@ -61,6 +64,26 @@ export interface OutcomeClaimPlan {
 	readonly declared?: LedgerPayload;
 	readonly pairId?: string;
 }
+
+/** A claim that owns a manifest-bound SQL bundle. */
+export interface SqlBearingOutcomeClaimPlan extends OutcomeClaimPlanBase {
+	readonly claimSpecies: 'sql-bearing';
+	readonly rootClaimId?: string;
+	readonly statementBundle: ClaimStatementBundle;
+}
+
+/** A closure member whose terminal fact is covered by its root claim's SQL. */
+export interface CascadeCoveredOutcomeClaimPlan extends OutcomeClaimPlanBase {
+	readonly claimSpecies: 'cascade-covered';
+	/** The SQL-bearing destructive root that covers this member. */
+	readonly rootClaimId: string;
+	readonly statementBundle: EmptyClaimStatementBundle;
+}
+
+/** The fixed plan-time material that becomes one ledger claim. */
+export type OutcomeClaimPlan =
+	| SqlBearingOutcomeClaimPlan
+	| CascadeCoveredOutcomeClaimPlan;
 
 /** The only successful result of admission, including its single-use token. */
 export interface AdmittedOutcomeClaim {
@@ -188,8 +211,6 @@ export interface OutcomeIndeterminateRecoveryEvidence {
 	/** Digest re-read from the persisted operation at resolution time. */
 	readonly persistedBundleDigest: string;
 	readonly recordedPreState: 'unknown' | 'managed' | 'absent';
-	/** Operation-owned read-back verified its declaration/identity postcondition. */
-	readonly operationPostcondition: 'verified';
 	readonly externalDdlExclusion: {
 		readonly planDigest: string;
 		readonly address: LedgerAddress;

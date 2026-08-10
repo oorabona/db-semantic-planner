@@ -575,4 +575,20 @@ describe('managed ledger storage', () => {
 			error: failing,
 		});
 	});
+
+	it('turns a held façade ledger lock into an immediate busy result', async () => {
+		const query = vi.fn(async () => ({ rows: [{ locked: false }] }));
+		await expect(
+			acquirePgLedgerLocks({ query }, [
+				{ scope: 'schema', schema: 'tenant_a' },
+			]),
+		).resolves.toEqual({
+			kind: 'busy',
+			ledger: { scope: 'schema', schema: 'tenant_a' },
+		});
+		expect(query).toHaveBeenCalledWith(
+			'SELECT pg_catalog.pg_try_advisory_xact_lock($1::bigint) AS locked',
+			expect.any(Array),
+		);
+	});
 });

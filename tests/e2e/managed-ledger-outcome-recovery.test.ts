@@ -1,13 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import {
-	recoverPgOutcomeClaim,
-	runPgNonTransactionalOutcome,
-	runPgReinitializePreflight,
-} from '@dbsp/adapter-pgsql';
+import { runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+// E2E deliberately exercises the outcome-protocol internals.
 import {
 	appendPgLedgerProgress,
 	appendPgOutcomeResolution,
 	openPgOutcomeClaim,
+	recoverPgOutcomeClaim,
+	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
@@ -34,13 +33,21 @@ function makeClaim(schema: string, name: string, claimId: string) {
 		kind: 'table',
 		name,
 	};
+	const declared = {
+		value: {
+			kind: 'table',
+			columns: [{ name: 'id', dataType: 'integer', nullable: false }],
+		},
+		digest: `declared-${name}-id-integer-not-null`,
+	} as const;
 	return fixtureOutcomeClaim({
 		claimId,
 		address,
 		claimKind: 'intent',
 		statements: [
-			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer)`,
+			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(name)} (id integer NOT NULL)`,
 		],
+		declared,
 		reservations: [
 			{
 				address,
@@ -51,6 +58,24 @@ function makeClaim(schema: string, name: string, claimId: string) {
 			},
 		],
 	});
+}
+
+function resolutionEvidence(input: ReturnType<typeof makeClaim>) {
+	return {
+		runId: 'fixture-run',
+		planDigest: 'fixture-plan',
+		executionId: input.plan.executionId!,
+		claimId: input.plan.claimId,
+		plannedClaimKey: input.plan.plannedClaimKey!,
+		admittedBundleDigest: 'fixture-bundle',
+		persistedBundleDigest: 'fixture-bundle',
+		recordedPreState: 'unknown' as const,
+		externalDdlExclusion: {
+			planDigest: 'fixture-plan',
+			address: input.plan.address,
+			trustRoot: 'fixture-external-ddl-window',
+		},
+	};
 }
 
 async function fixture() {
@@ -322,7 +347,7 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 		const input = makeClaim(schema, 'blocked_create', 'blocked-claim');
 		await openExecuting(pool, input);
 		await pool.query(
-			`CREATE TABLE ${quoteIdent(schema)}."blocked_create" (id integer)`,
+			`CREATE TABLE ${quoteIdent(schema)}."blocked_create" (id integer NOT NULL)`,
 		);
 		await expect(
 			recoverPgOutcomeClaim(pool, recovery(input, 'blocked-indeterminate')),
@@ -347,11 +372,47 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 			recoverPgOutcomeClaim(pool, {
 				...recovery(input, 'blocked-resolved'),
 				resolveIndeterminate: true,
+				indeterminateEvidence: resolutionEvidence(input),
+			}),
+		).resolves.toMatchObject({ kind: 'outcome-recovery-blocked' });
+		let operationReadBackCalls = 0;
+		await expect(
+			recoverPgOutcomeClaim(pool, {
+				...recovery(input, 'blocked-resolved'),
+				resolveIndeterminate: true,
+				indeterminateEvidence: resolutionEvidence(input),
+				operationReadBack: async (executor, address) => {
+					operationReadBackCalls += 1;
+					const live = await executor.query(
+						`SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 ORDER BY ordinal_position`,
+						[address.schema, address.name],
+					);
+					const columns = live.rows as readonly {
+						readonly column_name: string;
+						readonly data_type: string;
+						readonly is_nullable: string;
+					}[];
+					const expected = input.plan.declared!;
+					const matchesExpectedDeclaration =
+						address.schema === input.plan.address.schema &&
+						address.name === input.plan.address.name &&
+						columns.length === 1 &&
+						columns[0]?.column_name === 'id' &&
+						columns[0]?.data_type === 'integer' &&
+						columns[0]?.is_nullable === 'NO';
+					return {
+						observed: expected,
+						effect: matchesExpectedDeclaration
+							? ('applied' as const)
+							: ('no-effect' as const),
+					};
+				},
 			}),
 		).resolves.toMatchObject({
 			kind: 'outcome-recovery-appended',
 			classification: { resolution: { eventKind: 'resolved' } },
 		});
+		expect(operationReadBackCalls).toBe(1);
 		await expect(
 			pool.query(
 				`SELECT * FROM ${quoteIdent(schema)}."dbsp_ledger_reservation"`,

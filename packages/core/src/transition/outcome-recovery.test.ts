@@ -79,6 +79,7 @@ async function recover(
 		readonly accepted?: boolean;
 		readonly resolve?: boolean;
 		readonly evidence?: boolean;
+		readonly effect?: 'applied' | 'no-effect' | 'unverifiable';
 	} = {},
 ) {
 	return classifyOutcomeRecovery({
@@ -100,7 +101,6 @@ async function recover(
 						recordedPreState: events.some((item) => item.eventId === 'adopted')
 							? ('managed' as const)
 							: ('unknown' as const),
-						operationPostcondition: 'verified' as const,
 						externalDdlExclusion: {
 							planDigest: 'plan-digest',
 							address,
@@ -109,7 +109,10 @@ async function recover(
 					},
 				}
 			: {}),
-		catalogue: async () => catalogue,
+		catalogue: async () =>
+			options.effect === undefined
+				? catalogue
+				: { ...catalogue, effect: options.effect },
 	});
 }
 
@@ -211,17 +214,14 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 			await recover(openClaim('intent', 'indeterminate'), present),
 		).toMatchObject({ kind: 'outcome-recovery-blocked' });
 		expect(
-			await recover(
-				openClaim('intent', 'indeterminate'),
-				{ kind: 'absent' },
-				{
-					resolve: true,
-					evidence: true,
-				},
-			),
+			await recover(openClaim('intent', 'indeterminate'), present, {
+				resolve: true,
+				evidence: true,
+				effect: 'applied',
+			}),
 		).toMatchObject({
 			kind: 'outcome-recovery-append',
-			resolution: { eventKind: 'resolved', readBack: { kind: 'absent' } },
+			resolution: { eventKind: 'resolved', readBack: { kind: 'present' } },
 		});
 		expect(
 			await recover(
@@ -230,6 +230,7 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 				{
 					resolve: true,
 					evidence: true,
+					effect: 'applied',
 				},
 			),
 		).toMatchObject({
@@ -243,6 +244,37 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 				{ resolve: true, evidence: true },
 			),
 		).toMatchObject({ kind: 'outcome-recovery-blocked' });
+	});
+
+	it('checks an indeterminate envelope before it reads the operation postcondition', async () => {
+		let catalogueCalls = 0;
+		const events = openClaim('intent', 'indeterminate');
+		const result = await classifyOutcomeRecovery({
+			projection: projectLedgerChain({ ledger, address, events }),
+			acceptedExternalDdlExclusion: false,
+			resolveIndeterminate: true,
+			indeterminateEvidence: {
+				runId: 'run-1',
+				planDigest: 'plan-digest',
+				executionId: 'execution-1',
+				claimId: 'wrong-claim',
+				plannedClaimKey: 'claim-key',
+				admittedBundleDigest: 'bundle-digest',
+				persistedBundleDigest: 'bundle-digest',
+				recordedPreState: 'unknown',
+				externalDdlExclusion: {
+					planDigest: 'plan-digest',
+					address,
+					trustRoot: 'external-ddl-window',
+				},
+			},
+			catalogue: async () => {
+				catalogueCalls += 1;
+				return { ...present, effect: 'applied' };
+			},
+		});
+		expect(result).toMatchObject({ kind: 'outcome-recovery-blocked' });
+		expect(catalogueCalls).toBe(0);
 	});
 
 	it('returns pending and no append when the catalogue is unavailable', async () => {

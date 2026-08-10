@@ -7,9 +7,12 @@ import {
 	PG_LEDGER_SHAPE_VERSION,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
-	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql';
-import { openPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
+// E2E deliberately exercises the non-transactional outcome internal.
+import {
+	openPgOutcomeClaim,
+	runPgNonTransactionalOutcome,
+} from '@dbsp/adapter-pgsql/internal';
 import { type ModelIR, outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
 import type {
 	LedgerReservationRow,
@@ -148,6 +151,7 @@ function executionClaim(
 	return {
 		...claim,
 		claimId,
+		claimSpecies: 'sql-bearing',
 		executionId,
 		claimGroupId: claimId,
 		rootClaimId: claimId,
@@ -654,7 +658,10 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
 			);
 			const reconcileRun = await planEnumAdd(schema);
-			const reconcileClaim = onlyManagedClaim(reconcileRun.plan);
+			const reconcileClaim = executionClaim(
+				onlyManagedClaim(reconcileRun.plan),
+				reconcileRun.runId,
+			);
 			const admitted = await openPgOutcomeClaim(pool, {
 				plan: reconcileClaim,
 				reservations: [reservation(reconcileClaim, reconcileRun.runId)],

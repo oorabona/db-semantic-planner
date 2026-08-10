@@ -343,7 +343,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		await pool.query(
-			`CREATE TABLE ${quote(schema)}.managed_parent (id integer, obsolete text)`,
+			`CREATE TABLE ${quote(schema)}.managed_parent (id serial PRIMARY KEY, obsolete text, payload text); CREATE INDEX managed_parent_payload_idx ON ${quote(schema)}.managed_parent (payload)`,
 		);
 		const parent = tableAddress(schema, databaseId, 'managed_parent');
 		const child = {

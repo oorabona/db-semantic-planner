@@ -5,14 +5,16 @@ import {
 	createPgsqlAdapter,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
-	executePgDestructiveOutcome,
-	executePgTableReaddress,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
 } from '@dbsp/adapter-pgsql';
+// These legacy operation bridges have no public façade shape yet. The CLI is
+// their trusted in-process caller until their operation-specific admission is
+// expressed by executePgAdmittedOperation.
+import { executePgTableReaddress } from '@dbsp/adapter-pgsql/internal';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
@@ -22,6 +24,7 @@ import {
 } from '@dbsp/core';
 import { decideDestructiveDecision } from '@dbsp/core/internal';
 import type {
+	CascadeCoveredOutcomeClaimPlan,
 	ContainmentClosureDestructiveOutcome,
 	DestructiveAuthorityEvidence,
 	LedgerAddress,
@@ -110,7 +113,32 @@ async function adoptionShapeMatches(
 	return !diff.changes.some((change) => change.table === shape.name);
 }
 
+const SYSTEM_LEDGER_SCHEMAS = new Set([
+	'pg_toast',
+	'pg_catalog',
+	'information_schema',
+]);
+
+/** Preserves the candidate that made ledger-home evidence impossible. */
+class SystemSchemaLedgerHomeError extends Error {
+	readonly address: LedgerAddress;
+
+	constructor(address: LedgerAddress) {
+		super(
+			`SystemSchemaLedgerHomeError: ledger home is unavailable for system schema ${address.schema}: ${ledgerAddressKey(address)}`,
+		);
+		this.name = 'SystemSchemaLedgerHomeError';
+		this.address = address;
+	}
+}
+
 function home(address: LedgerAddress): LedgerHome {
+	if (
+		address.scope !== 'database' &&
+		address.schema &&
+		SYSTEM_LEDGER_SCHEMAS.has(address.schema)
+	)
+		throw new SystemSchemaLedgerHomeError(address);
 	return address.scope === 'database'
 		? ({ scope: 'database' } as const)
 		: address.schema
@@ -146,20 +174,19 @@ async function managed(
 	executor: LedgerQueryable,
 	address: LedgerAddress,
 ): Promise<boolean> {
-	try {
-		const chain = await readPgLedgerAddressChain(
-			executor,
-			home(address),
-			address,
-		);
-		const projection = projectLedgerChain(chain);
-		return (
-			projection.kind === 'projected-ledger-chain' &&
-			projection.stableState === 'managed'
-		);
-	} catch {
-		return false;
-	}
+	// Let a ledger read failure reach readPgRemovalEffectsClosure's catch so it
+	// remains an undecidable closure with its PostgreSQL reason, rather than
+	// misclassifying unreadable ownership as an unmanaged dependent.
+	const chain = await readPgLedgerAddressChain(
+		executor,
+		home(address),
+		address,
+	);
+	const projection = projectLedgerChain(chain);
+	return (
+		projection.kind === 'projected-ledger-chain' &&
+		projection.stableState === 'managed'
+	);
 }
 
 /**
@@ -276,6 +303,12 @@ async function destructiveEvidence(input: {
 			...(containmentOutcome === undefined
 				? {}
 				: { containment: containmentOutcome }),
+			...(containment?.kind === 'reaches-unmanaged'
+				? { containmentUnmanaged: containment.unmanaged }
+				: {}),
+			...(containment?.kind === 'undecidable'
+				? { containmentReason: containment.reason }
+				: {}),
 			ledgerLineage,
 		},
 		...(containment === undefined ? {} : { containment }),
@@ -479,6 +512,7 @@ export async function executeGeneratorPlan(input: {
 			const rootClaimId = outcomeClaimId(executionId, plannedClaimKey, address);
 			const claim = {
 				claimId: rootClaimId,
+				claimSpecies: 'sql-bearing' as const,
 				executionId,
 				plannedClaimKey,
 				claimGroupId: rootClaimId,
@@ -499,6 +533,8 @@ export async function executeGeneratorPlan(input: {
 				const result = await executePgAdmittedOperation(input.pool, {
 					run: { runId: input.runId, planDigest: input.planDigest },
 					approval,
+					manifest,
+					recomputedPlanDigest: input.planDigest,
 					operation: {
 						kind: 'single-outcome',
 						request: {
@@ -548,6 +584,7 @@ export async function executeGeneratorPlan(input: {
 			}
 			if (containment?.kind === 'all-contained-or-managed') {
 				for (const effect of containment.effects) {
+					if (effect.internalOwned) continue;
 					if (!containedBy(address, effect.address)) continue;
 					if (!(await managed(input.pool, effect.address))) continue;
 					const key = ledgerAddressKey(effect.address);
@@ -559,7 +596,9 @@ export async function executeGeneratorPlan(input: {
 				}
 			}
 			const containedClaims: Array<{
-				readonly plan: typeof claim;
+				readonly plan: CascadeCoveredOutcomeClaimPlan & {
+					readonly plannedClaimKey: string;
+				};
 				readonly reservation: typeof baseReservation;
 			}> = [];
 			for (const member of closureMembers.values()) {
@@ -579,8 +618,12 @@ export async function executeGeneratorPlan(input: {
 					plan: {
 						...claim,
 						claimId: childClaimId,
+						claimSpecies: 'cascade-covered',
 						address: effect as typeof address,
 						plannedClaimKey: member.plannedClaimKey,
+						// Each member contributes only its terminal absence fact; SQL is
+						// exclusively carried by the destructive root manifest claim.
+						statementBundle: { statements: [] },
 					},
 					reservation: childReservation,
 				});
@@ -601,6 +644,17 @@ export async function executeGeneratorPlan(input: {
 						planDigest: input.planDigest,
 						approval,
 					});
+					if (
+						step.classification === 'removal' &&
+						containment?.kind === 'all-contained-or-managed' &&
+						lockedAuthority.containment?.kind === 'all-contained-or-managed' &&
+						containment.closureDigest !==
+							lockedAuthority.containment.closureDigest
+					)
+						return decideDestructiveDecision(
+							{ kind: 'removal', address },
+							{ ...lockedAuthority.evidence, containment: 'undecidable' },
+						);
 					return decideDestructiveDecision(
 						{
 							kind:
@@ -608,81 +662,91 @@ export async function executeGeneratorPlan(input: {
 									? 'removal'
 									: 'data-destructive',
 							address,
+							...(step.classification === 'removal' &&
+							lockedAuthority.containment?.kind === 'all-contained-or-managed'
+								? { closureDigest: lockedAuthority.containment.closureDigest }
+								: {}),
 						},
 						lockedAuthority.evidence,
 					);
 				},
 			};
-			const executed = (await executePgDestructiveOutcome(
-				input.pool,
-				admitRequest,
-				async (session) => {
-					const live = await readPgCatalogueIdentity(session, address);
-					if (step.classification === 'removal' && live)
-						throw new Error(
-							`destructive claim ${claim.claimId} executed but ${address.name} remains present`,
-						);
-					const terminals: Array<{
-						readonly target: LedgerHome;
-						readonly member: Omit<
-							LedgerChainMember,
-							'controller' | 'recordedAt'
-						>;
-					}> = [
-						{
-							target: home(address),
-							member: {
-								eventId: outcomeClaimEventId(
-									claim.claimId,
-									step.classification === 'removal' ? 'absent' : 'observed',
-								),
-								executionId,
-								plannedClaimKey: claim.plannedClaimKey,
-								claimGroupId: claim.claimGroupId,
-								rootClaimId: claim.rootClaimId,
-								address,
-								eventKind:
-									step.classification === 'removal' ? 'absent' : 'observed',
-								// The append protocol reads this address's terminal on its
-								// pinned transaction session after the post-DDL read-back.
-								...(live?.catalogueIdentity
-									? { catalogueIdentity: live.catalogueIdentity }
-									: {}),
-								...(step.classification === 'removal'
-									? {}
-									: { observed: observed(address) }),
-							},
-						},
-					];
-					for (const child of containedClaims) {
-						if (await readPgCatalogueIdentity(session, child.plan.address))
+			const executed = (await executePgAdmittedOperation(input.pool, {
+				run: { runId: input.runId, planDigest: input.planDigest },
+				approval,
+				manifest,
+				recomputedPlanDigest: input.planDigest,
+				operation: {
+					kind: 'destructive-outcome',
+					request: admitRequest,
+					readBackAndResolve: async (session) => {
+						const live = await readPgCatalogueIdentity(session, address);
+						if (step.classification === 'removal' && live)
 							throw new Error(
-								`destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
+								`destructive claim ${claim.claimId} executed but ${address.name} remains present`,
 							);
-						terminals.push({
-							target: home(child.plan.address),
-							member: {
-								eventId: outcomeClaimEventId(child.plan.claimId, 'absent'),
-								executionId,
-								plannedClaimKey: child.plan.plannedClaimKey,
-								claimGroupId: claim.claimId,
-								rootClaimId: claim.claimId,
-								address: child.plan.address,
-								eventKind: 'absent' as const,
-								predecessor: child.plan.claimId,
+						const terminals: Array<{
+							readonly target: LedgerHome;
+							readonly member: Omit<
+								LedgerChainMember,
+								'controller' | 'recordedAt'
+							>;
+						}> = [
+							{
+								target: home(address),
+								member: {
+									eventId: outcomeClaimEventId(
+										claim.claimId,
+										step.classification === 'removal' ? 'absent' : 'observed',
+									),
+									executionId,
+									plannedClaimKey: claim.plannedClaimKey,
+									claimGroupId: claim.claimGroupId,
+									rootClaimId: claim.rootClaimId,
+									address,
+									eventKind:
+										step.classification === 'removal' ? 'absent' : 'observed',
+									// The append protocol reads this address's terminal on its
+									// pinned transaction session after the post-DDL read-back.
+									...(live?.catalogueIdentity
+										? { catalogueIdentity: live.catalogueIdentity }
+										: {}),
+									...(step.classification === 'removal'
+										? {}
+										: { observed: observed(address) }),
+								},
 							},
-						});
-					}
-					return {
-						rootClaimId: claim.claimId,
-						members: terminals,
-						reservations: [
-							baseReservation,
-							...containedClaims.map(({ reservation }) => reservation),
-						],
-					};
+						];
+						for (const child of containedClaims) {
+							if (await readPgCatalogueIdentity(session, child.plan.address))
+								throw new Error(
+									`destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
+								);
+							terminals.push({
+								target: home(child.plan.address),
+								member: {
+									eventId: outcomeClaimEventId(child.plan.claimId, 'absent'),
+									executionId,
+									plannedClaimKey: child.plan.plannedClaimKey,
+									claimGroupId: claim.claimId,
+									rootClaimId: claim.claimId,
+									address: child.plan.address,
+									eventKind: 'absent' as const,
+									predecessor: child.plan.claimId,
+								},
+							});
+						}
+						return {
+							rootClaimId: claim.claimId,
+							members: terminals,
+							reservations: [
+								baseReservation,
+								...containedClaims.map(({ reservation }) => reservation),
+							],
+						};
+					},
 				},
-			)) as
+			})) as
 				| { readonly kind: 'executed-destructive-outcome' }
 				| { readonly kind: 'outcome-protocol-refused'; readonly reason: string }
 				| {

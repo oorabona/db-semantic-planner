@@ -41,6 +41,8 @@ import type { PlanResult } from './plan.js';
 
 export interface GeneratorPlanMaterial {
 	readonly kind: 'schema-differ-generator';
+	/** Digest-covered execution context captured with the reviewed generator run. */
+	readonly planningSchema?: string;
 	/** Diagnostic provenance only. Execution reads plan.steps, never this list. */
 	readonly changes: readonly {
 		readonly kind: string;
@@ -246,7 +248,9 @@ function asDurableGeneratorPlan(
 		assumptions: [],
 		preconditions: [],
 		segments: [],
-		steps,
+		// Persist exactly the canonical manifest that the digest covers. The brand
+		// itself is in-memory only; its normalized step payload is durable JSON.
+		steps: validation.manifest.steps,
 		postconditions: [],
 		generator: material,
 	} as unknown as GeneratorDurablePlan;
@@ -402,6 +406,7 @@ export async function runGeneratorPlan(input: {
 		}));
 		const material: GeneratorPlanMaterial = {
 			kind: 'schema-differ-generator',
+			planningSchema: schema,
 			changes: [
 				...ordinaryChanges,
 				...[...loaded.model.tables.values()]

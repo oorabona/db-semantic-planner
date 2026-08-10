@@ -5,6 +5,7 @@ import {
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
+	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -118,11 +119,12 @@ export async function executePgDeclaredAdoption(
 		const outcomeRequest: PgOutcomeTransactionalRequest = {
 			plan: {
 				claimId,
+				claimSpecies: 'sql-bearing',
 				executionId,
 				plannedClaimKey,
 				claimGroupId: claimId,
 				rootClaimId: claimId,
-				address: input.address,
+				address: input.address as never,
 				claimKind: 'adopt-intent',
 				statementBundle: { statements: [] },
 				// An adoption deliberately claims a present object. It is not a
@@ -170,9 +172,29 @@ export async function executePgDeclaredAdoption(
 			readBack: async () => input.declaration,
 			recordCatalogueIdentity: true,
 		};
+		const manifest = validateNormalizedManagedStepManifest([
+			{
+				stepKey: plannedClaimKey,
+				order: 0,
+				segmentId: claimId,
+				dependencyOrder: [],
+				address: input.address as never,
+				claimKind: 'adopt-intent',
+				plannedClaimKeys: [plannedClaimKey],
+				statementBundle: outcomeRequest.plan.statementBundle,
+				classification: 'non-destructive',
+				requiresVacancy: false,
+				lifecycle: { kind: 'adoption', shape: {} as never },
+				replayPolicy: 'recorded',
+			},
+		]);
+		if (!manifest.ok)
+			return { outcome: 'execution-failed', detail: manifest.detail };
 		const result = await executePgAdmittedOperation(input.executor, {
 			run: { runId: executionId, planDigest: claimId },
 			approval: { approvals: [] },
+			manifest: manifest.manifest,
+			recomputedPlanDigest: claimId,
 			operation: { kind: 'single-outcome', request: outcomeRequest },
 		});
 		// The initial preflight is intentionally outside the claim transaction so

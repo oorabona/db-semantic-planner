@@ -11,7 +11,7 @@ import type {
 import { sameLedgerAddress } from '@dbsp/types';
 import { admitOutcomeClaim } from './outcome-protocol.js';
 
-const permits = new WeakSet<object>();
+const permits = new WeakMap<object, { readonly closureDigest?: string }>();
 
 function declarationPermits(
 	action: DestructiveAction,
@@ -45,7 +45,13 @@ function refusalReasons(
 		evidence.containment !== 'all-contained-or-managed'
 	)
 		reasons.push(
-			`containment closure is ${evidence.containment ?? 'undecidable'}`,
+			evidence.containment === 'reaches-unmanaged' &&
+				evidence.containmentUnmanaged !== undefined
+				? `containment closure is reaches-unmanaged: ${evidence.containmentUnmanaged.kind} ${evidence.containmentUnmanaged.schema ?? '<database>'}.${evidence.containmentUnmanaged.name}`
+				: evidence.containment === 'undecidable' &&
+						evidence.containmentReason !== undefined
+					? `containment closure is undecidable: ${evidence.containmentReason}`
+					: `containment closure is ${evidence.containment ?? 'undecidable'}`,
 		);
 	if (evidence.ledgerLineage !== 'matches-database')
 		reasons.push(`ledger lineage is ${evidence.ledgerLineage}`);
@@ -64,7 +70,12 @@ export function decideDestructiveDecision(
 	if (reasons.length > 0)
 		return { kind: 'destructive-decision-refused', action, reasons };
 	const permit = Object.freeze({}) as DestructiveAuthorityPermit;
-	permits.add(permit);
+	permits.set(
+		permit,
+		action.kind === 'removal' && action.closureDigest !== undefined
+			? { closureDigest: action.closureDigest }
+			: {},
+	);
 	return { kind: 'destructive-decision-permitted', action, permit };
 }
 
@@ -73,6 +84,13 @@ export function isDestructiveAuthorityPermit(
 	permit: DestructiveAuthorityPermit,
 ): boolean {
 	return permits.has(permit);
+}
+
+/** The adapter compares this immutable admission set after taking its locks. */
+export function closureDigestForDestructiveAuthorityPermit(
+	permit: DestructiveAuthorityPermit,
+): string | undefined {
+	return permits.get(permit)?.closureDigest;
 }
 
 /**

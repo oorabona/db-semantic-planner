@@ -1,6 +1,7 @@
 import { transitionPlanDigest } from '@dbsp/core';
 import type {
 	DurableIntentRecord,
+	NormalizedManagedStep,
 	PhysicalOperation,
 	ProvenPlanShape,
 	StepJournal,
@@ -43,6 +44,47 @@ const plan = {
 	postconditions: [],
 	persisted: true,
 } as unknown as ProvenPlanShape;
+
+const managedAddress = {
+	scope: 'schema' as const,
+	engine: 'postgresql' as const,
+	database: 'db',
+	schema: 'public',
+	kind: 'table' as const,
+	name: 'orders',
+};
+
+function managedPlan(step: NormalizedManagedStep): ProvenPlanShape {
+	return {
+		observations: [],
+		claims: [],
+		assumptions: [],
+		preconditions: [],
+		segments: [],
+		steps: [step],
+		postconditions: [],
+		generator: { kind: 'schema-differ-generator', changes: [] },
+	} as unknown as ProvenPlanShape;
+}
+
+function managedStep(
+	overrides: Partial<NormalizedManagedStep>,
+): NormalizedManagedStep {
+	return {
+		stepKey: 'generator:0',
+		order: 0,
+		segmentId: 'generator:0',
+		dependencyOrder: [],
+		address: managedAddress,
+		claimKind: 'intent',
+		plannedClaimKeys: ['generator:0:root'],
+		statementBundle: { statements: [{ ordinal: 0, sql: 'SELECT 1' }] },
+		classification: 'non-destructive',
+		requiresVacancy: false,
+		replayPolicy: 'recorded',
+		...overrides,
+	};
+}
 
 function run(): TransitionRunMetadata {
 	return {
@@ -291,6 +333,69 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it.each([
+		[
+			'adoption',
+			managedPlan(
+				managedStep({
+					claimKind: 'adopt-intent',
+					lifecycle: { kind: 'adoption', shape: {} as never },
+					expectedDeclaration: {
+						value: { table: 'orders' },
+						digest: 'declared',
+					},
+					expectedCatalogueIdentity: {
+						engine: 'postgresql',
+						format: 1,
+						value: { oid: '42' },
+					},
+				}),
+			),
+		],
+		['generator', managedPlan(managedStep({ requiresVacancy: true }))],
+		[
+			'removal',
+			managedPlan(
+				(() => {
+					const { address: _address, ...step } = managedStep({
+						closure: { root: managedAddress, members: [] },
+						claimKind: 'retire-intent',
+						classification: 'removal',
+						replayPolicy: 'fresh-live-only',
+					});
+					return step as NormalizedManagedStep;
+				})(),
+			),
+		],
+		[
+			'readdress',
+			managedPlan(
+				managedStep({
+					lifecycle: {
+						kind: 'readdress',
+						declaration: {
+							from: { database: 'db', name: 'orders' },
+							to: { database: 'db', name: 'orders_archive' },
+						},
+					},
+				}),
+			),
+		],
+	] as const)('is reflexive for a persisted %s managed plan', async (kind, value) => {
+		const executor = new FakeJournalExecutor();
+		const metadata = {
+			...run(),
+			runId: `run:reflexive:${kind}`,
+			planDigest: transitionPlanDigest(value),
+		};
+		await createPgTransitionRunPersister(asPool(executor)).persist(
+			metadata,
+			value,
+		);
+		const loaded = await readTransitionJournal(executor, metadata.runId);
+		expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
+	});
+
 	it('SC-22: keeps the declaration digest stable across the jsonb plan round trip', async () => {
 		const executor = new FakeJournalExecutor();
 		const declarationPlan = {

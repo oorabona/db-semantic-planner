@@ -101,6 +101,13 @@ function bundleRefusal(
 	plan: OutcomeClaimPlan,
 ): OutcomeProtocolRefusal | undefined {
 	const statements = plan.statementBundle.statements;
+	if (plan.claimSpecies === 'cascade-covered') {
+		if (statements.length !== 0)
+			return refusal(
+				`cascade-covered claim ${plan.claimId} has a non-empty statement bundle`,
+			);
+		return undefined;
+	}
 	if (statements.length === 0 && plan.claimKind !== 'adopt-intent')
 		return refusal(`claim ${plan.claimId} has an empty statement bundle`);
 	for (let index = 0; index < statements.length; index += 1) {
@@ -344,25 +351,53 @@ export async function classifyOutcomeRecovery(
 			address: projection.address,
 		};
 
-	// This is intentionally before every recovery append decision. A failed
-	// read remains a pending claim, including a claim that has not reached DDL.
-	const readBack = await input.catalogue(projection.address);
-	if (readBack.kind === 'catalogue-unavailable')
-		return recoveryPending(input, readBack.reason, 'catalogue-unavailable');
-
 	const claim = projection.openClaim;
 	if (claim.phase === 'indeterminate') {
-		// The indeterminate edge is itself the durable record that this exact
-		// claim reached an uncertain send boundary.  A later, explicit recovery
-		// can close it only from a fresh catalogue read; do not demand a second
-		// copy of the admission envelope here.  Reconcile still re-matches that
-		// envelope before it attributes a *new* present creation as observed.
 		if (!input.resolveIndeterminate)
 			return {
 				kind: 'outcome-recovery-blocked',
 				address: projection.address,
 				reason:
 					'indeterminate claim remains blocked until resolved with a read-back',
+			};
+		const evidence = input.indeterminateEvidence;
+		if (
+			evidence === undefined ||
+			evidence.claimId !== claim.event.eventId ||
+			evidence.executionId !== claim.event.executionId ||
+			evidence.plannedClaimKey !== claim.event.plannedClaimKey ||
+			evidence.persistedBundleDigest !== evidence.admittedBundleDigest ||
+			evidence.planDigest !== evidence.externalDdlExclusion.planDigest ||
+			!sameLedgerAddress(
+				evidence.externalDdlExclusion.address,
+				projection.address,
+			)
+		)
+			return {
+				kind: 'outcome-recovery-blocked',
+				address: projection.address,
+				reason:
+					'indeterminate claim refuses a missing or mismatched admission envelope',
+			};
+	}
+
+	// The envelope gates indeterminate reconciliation before it is allowed to
+	// consult an operation-specific read-back. A failed read remains pending,
+	// including a claim that has not reached DDL.
+	const readBack = await input.catalogue(projection.address);
+	if (readBack.kind === 'catalogue-unavailable')
+		return recoveryPending(input, readBack.reason, 'catalogue-unavailable');
+
+	if (claim.phase === 'indeterminate') {
+		// `applied` means the operation compared this claim's recorded expected
+		// declaration/identity to its own address's live shape field-by-field;
+		// generic same-name presence proves only that a name exists.
+		if (readBack.effect !== 'applied')
+			return {
+				kind: 'outcome-recovery-blocked',
+				address: projection.address,
+				reason:
+					'indeterminate claim requires an operation-specific applied read-back',
 			};
 		if (claim.kind === 'intent') {
 			if (readBack.kind === 'present')

@@ -38,6 +38,7 @@ export function fixtureOutcomeClaim(input: FixtureOutcomeClaimInput): {
 	return {
 		plan: {
 			claimId: input.claimId,
+			claimSpecies: 'sql-bearing',
 			executionId,
 			plannedClaimKey,
 			claimGroupId,

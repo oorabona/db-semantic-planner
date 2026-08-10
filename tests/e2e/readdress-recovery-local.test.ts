@@ -2,7 +2,6 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-	executePgTableReaddress,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
@@ -10,7 +9,11 @@ import {
 	renderPgTableReaddressStatements,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+// E2E deliberately exercises the readdress executor internal.
+import {
+	appendPgLedgerResolution,
+	executePgTableReaddress,
+} from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
 import type {
 	LedgerAddress,

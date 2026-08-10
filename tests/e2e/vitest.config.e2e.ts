@@ -8,6 +8,16 @@ const repositoryRoot = resolve(
 );
 
 export default defineConfig({
+	resolve: {
+		alias: {
+			'@dbsp/adapter-pgsql/internal': fileURLToPath(
+				new URL(
+					'../../packages/adapter-pgsql/src/internal.ts',
+					import.meta.url,
+				),
+			),
+		},
+	},
 	// This config lives in a workspace package solely so tsc checks the E2E
 	// sources. Pin Vitest's root to the repository: otherwise its include glob
 	// is evaluated from this package and falls back to Vitest's default suite.

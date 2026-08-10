@@ -8,7 +8,11 @@ import {
 	appendPgLedgerResolution,
 	openPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
-import { outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
+import {
+	outcomeClaimEventId,
+	outcomeClaimId,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
 import type {
 	LedgerAddress,
 	LedgerReservationRow,
@@ -26,9 +30,30 @@ function runAdmitted(
 	executor: pg.Pool | pg.PoolClient,
 	request: PgOutcomeTransactionalRequest,
 ) {
+	const classification =
+		request.plan.claimKind === 'retire-intent' ? 'removal' : 'non-destructive';
+	const manifest = validateNormalizedManagedStepManifest([
+		{
+			stepKey: request.plan.plannedClaimKey ?? request.plan.claimId,
+			order: 0,
+			segmentId: request.plan.claimId,
+			dependencyOrder: [],
+			address: request.plan.address as never,
+			claimKind: request.plan.claimKind,
+			plannedClaimKeys: [request.plan.plannedClaimKey ?? request.plan.claimId],
+			statementBundle: request.plan.statementBundle,
+			classification,
+			requiresVacancy: request.plan.requiresVacancy ?? false,
+			replayPolicy:
+				classification === 'removal' ? 'fresh-live-only' : 'recorded',
+		},
+	]);
+	if (!manifest.ok) throw new Error(manifest.detail);
 	return executePgAdmittedOperation(executor, {
 		run: { runId: 'e2e-fixture', planDigest: 'e2e-fixture' },
 		approval: { approvals: [] },
+		manifest: manifest.manifest,
+		recomputedPlanDigest: 'e2e-fixture',
 		operation: { kind: 'single-outcome', request },
 	});
 }

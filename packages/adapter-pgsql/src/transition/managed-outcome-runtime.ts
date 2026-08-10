@@ -129,6 +129,7 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 			const claim = {
 				...request.claim,
 				claimId,
+				claimSpecies: 'sql-bearing' as const,
 				executionId: request.executionId,
 				claimGroupId: claimId,
 				rootClaimId: claimId,

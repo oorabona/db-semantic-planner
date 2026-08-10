@@ -9,10 +9,12 @@ import {
 	readPgLedgerScopeCurrency,
 	readTransitionJournal,
 	readVerifiedPgLedgerReservationsForPair,
-	recoverPgOutcomeClaim,
 	recoverPgReaddressPair,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
+// Recovery's raw claim primitive is intentionally internal: this command owns
+// the durable envelope reconstruction and run lock that make it admissible.
+import { recoverPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	assumptionAccepted,
@@ -307,7 +309,6 @@ function recoveryEvidenceForClaim(input: {
 		admittedBundleDigest: bundleDigest,
 		persistedBundleDigest: bundleDigest,
 		recordedPreState: input.stableStateBeforeClaim,
-		operationPostcondition: 'verified',
 		externalDdlExclusion: {
 			planDigest: input.journal.run.planDigest,
 			address: input.row.address,

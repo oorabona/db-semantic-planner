@@ -1,4 +1,10 @@
-import { classifyOutcomeRecovery, projectLedgerChain } from '@dbsp/core';
+import {
+	classifyOutcomeRecovery,
+	projectLedgerChain,
+	selectorMatchesResource,
+	type ValidatedManagedStepManifest,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
 import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core/internal';
 import {
 	admitDestructiveOutcomeClaim,
@@ -18,6 +24,7 @@ import type {
 	LedgerEventKind,
 	LedgerPayload,
 	LedgerReservationRow,
+	NormalizedManagedStep,
 	OutcomeClaimAdmission,
 	OutcomeClaimPlan,
 	OutcomeIndeterminateRecoveryEvidence,
@@ -26,9 +33,10 @@ import type {
 	OutcomeRecoveryEffect,
 	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
+	ScopedApprovalSet,
 	TransitionRunMetadata,
 } from '@dbsp/types';
-import { refusalFor } from '@dbsp/types';
+import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { classifyPgWrite } from './database-writability.js';
@@ -53,12 +61,24 @@ interface AdmittedPermit {
 	readonly [admittedPermitBrand]: 'dbsp-admitted-permit';
 }
 
-interface ScopedApprovalSet {
-	readonly approvals: readonly {
-		readonly class: string;
-		readonly fromTrustRoot?: unknown;
-		readonly withinScope?: readonly unknown[];
-	}[];
+declare const digestBindingVerdictBrand: unique symbol;
+export interface DigestBindingVerdict {
+	readonly [digestBindingVerdictBrand]: 'dbsp-digest-binding-verdict';
+}
+
+declare const validatedManifestVerdictBrand: unique symbol;
+export interface ValidatedManifestVerdict {
+	readonly [validatedManifestVerdictBrand]: 'dbsp-validated-manifest-verdict';
+}
+
+declare const approvalScopeVerdictBrand: unique symbol;
+export interface ApprovalScopeVerdict {
+	readonly [approvalScopeVerdictBrand]: 'dbsp-approval-scope-verdict';
+}
+
+declare const liveAdmissionVerdictBrand: unique symbol;
+export interface LiveAdmissionVerdict {
+	readonly [liveAdmissionVerdictBrand]: 'dbsp-live-admission-verdict';
 }
 
 type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
@@ -268,7 +288,82 @@ interface AdmittedPermitRecord {
 }
 const admittedPermitRecords = new WeakMap<object, AdmittedPermitRecord>();
 
-function mintAdmittedPermit(claim: AdmittedOutcomeClaim): AdmittedPermit {
+type AdmissionOperationClassification = PgAdmittedOperation['kind'];
+
+interface ApprovalScopeRecord {
+	readonly address: LedgerAddress;
+	readonly classification: AdmissionOperationClassification;
+}
+
+const digestBindingVerdicts = new WeakSet<object>();
+const validatedManifestVerdicts = new WeakSet<object>();
+const approvalScopeVerdicts = new WeakMap<object, ApprovalScopeRecord>();
+const liveAdmissionVerdicts = new WeakSet<object>();
+
+function mintDigestBindingVerdict(): DigestBindingVerdict {
+	const verdict = Object.freeze({}) as DigestBindingVerdict;
+	digestBindingVerdicts.add(verdict);
+	return verdict;
+}
+
+function mintValidatedManifestVerdict(): ValidatedManifestVerdict {
+	const verdict = Object.freeze({}) as ValidatedManifestVerdict;
+	validatedManifestVerdicts.add(verdict);
+	return verdict;
+}
+
+function mintApprovalScopeVerdict(
+	address: LedgerAddress,
+	classification: AdmissionOperationClassification,
+): ApprovalScopeVerdict {
+	const verdict = Object.freeze({}) as ApprovalScopeVerdict;
+	approvalScopeVerdicts.set(verdict, { address, classification });
+	return verdict;
+}
+
+function mintLiveAdmissionVerdict(): LiveAdmissionVerdict {
+	const verdict = Object.freeze({}) as LiveAdmissionVerdict;
+	liveAdmissionVerdicts.add(verdict);
+	return verdict;
+}
+
+function requireAdmittedVerdicts(
+	digestBinding: DigestBindingVerdict,
+	validatedManifest: ValidatedManifestVerdict,
+	approvalScope: ApprovalScopeVerdict,
+	liveAdmission: LiveAdmissionVerdict,
+): void {
+	if (!digestBindingVerdicts.has(digestBinding))
+		throw new Error('admitted permit requires a digest-binding verdict');
+	if (!validatedManifestVerdicts.has(validatedManifest))
+		throw new Error('admitted permit requires a validated-manifest verdict');
+	if (!approvalScopeVerdicts.has(approvalScope))
+		throw new Error('admitted permit requires an approval-scope verdict');
+	if (!liveAdmissionVerdicts.has(liveAdmission))
+		throw new Error('admitted permit requires a live-admission verdict');
+}
+
+export function mintAdmittedPermit(
+	claim: AdmittedOutcomeClaim,
+	digestBinding: DigestBindingVerdict,
+	validatedManifest: ValidatedManifestVerdict,
+	approvalScope: ApprovalScopeVerdict,
+	liveAdmission: LiveAdmissionVerdict,
+): AdmittedPermit {
+	requireAdmittedVerdicts(
+		digestBinding,
+		validatedManifest,
+		approvalScope,
+		liveAdmission,
+	);
+	const approval = approvalScopeVerdicts.get(approvalScope);
+	if (
+		approval?.classification !== 'single-outcome' ||
+		!sameLedgerAddress(approval.address, claim.plan.address)
+	)
+		throw new Error(
+			'admitted permit refuses an approval scope verdict for another operation',
+		);
 	const permit = Object.freeze({}) as AdmittedPermit;
 	admittedPermitRecords.set(permit, { claim });
 	return permit;
@@ -277,7 +372,22 @@ function mintAdmittedPermit(claim: AdmittedOutcomeClaim): AdmittedPermit {
 function mintPairedReaddressPermit(
 	pairId: string,
 	statements: readonly ClaimBundleStatement[],
+	digestBinding: DigestBindingVerdict,
+	validatedManifest: ValidatedManifestVerdict,
+	approvalScope: ApprovalScopeVerdict,
+	liveAdmission: LiveAdmissionVerdict,
 ): AdmittedPermit {
+	requireAdmittedVerdicts(
+		digestBinding,
+		validatedManifest,
+		approvalScope,
+		liveAdmission,
+	);
+	const approval = approvalScopeVerdicts.get(approvalScope);
+	if (approval?.classification !== 'paired-readdress')
+		throw new Error(
+			'admitted permit refuses an approval scope verdict for another operation',
+		);
 	const permit = Object.freeze({}) as AdmittedPermit;
 	admittedPermitRecords.set(permit, { paired: { pairId, statements } });
 	return permit;
@@ -412,22 +522,30 @@ async function runPgDestructiveOutcome(
 	});
 }
 
-/** Compatibility entrypoint: destructive execution always enters the facade. */
+/**
+ * Internal compatibility bridge. Callers must bring the durable run and scoped
+ * approvals that the façade consumes; this bridge never invents either.
+ */
 export async function executePgDestructiveOutcome(
 	executor: TransitionJournalQueryable,
-	request: PgOutcomeClaimGroupRequest,
-	readBackAndResolve: (
-		executor: TransitionJournalQueryable,
-		claim: AdmittedDestructiveOutcomeClaim,
-	) => Promise<PgOutcomeClaimGroupResolution>,
+	input: {
+		readonly run: PgLockedRun;
+		readonly approval: ScopedApprovalSet;
+		readonly request: PgOutcomeClaimGroupRequest;
+		readonly readBackAndResolve: (
+			executor: TransitionJournalQueryable,
+			claim: AdmittedDestructiveOutcomeClaim,
+		) => Promise<PgOutcomeClaimGroupResolution>;
+	},
 ): Promise<PgDestructiveOutcomeResult> {
 	const result = await executePgAdmittedOperation(executor, {
-		run: {
-			runId: request.plan.executionId ?? request.plan.claimId,
-			planDigest: request.plan.claimId,
+		run: input.run,
+		approval: input.approval,
+		operation: {
+			kind: 'destructive-outcome',
+			request: input.request,
+			readBackAndResolve: input.readBackAndResolve,
 		},
-		approval: { approvals: [] },
-		operation: { kind: 'destructive-outcome', request, readBackAndResolve },
 	});
 	return result as PgDestructiveOutcomeResult;
 }
@@ -653,15 +771,6 @@ async function recoverPgAdmittedReaddressPairOnSession(
 			await executor.query('ROLLBACK');
 			begun = false;
 			return decision;
-		}
-		const permit = mintPairedReaddressPermit(request.pairId, []);
-		if (!admittedPermitRecords.get(permit)?.paired) {
-			await executor.query('ROLLBACK');
-			begun = false;
-			return {
-				kind: 'pending',
-				reason: 're-address recovery could not mint admission permit',
-			};
 		}
 		for (const reservation of durable) {
 			if (decision.kind === 'indeterminate') {
@@ -1449,6 +1558,7 @@ async function refuseClaim(
 async function runPgTransactionalOutcomeOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeTransactionalRequest,
+	verdicts: AdmissionVerdicts,
 ): Promise<PgOutcomeResult> {
 	let begun = false;
 	const ownsTransaction = !request.transactionOpen;
@@ -1470,7 +1580,6 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return admission;
 		}
-		const permit = mintAdmittedPermit(admission);
 		const liveAdmissionRefusal = request.verifyLiveAdmission
 			? await request.verifyLiveAdmission(executor, admission.plan)
 			: undefined;
@@ -1503,6 +1612,13 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return vacancy;
 		}
+		const permit = mintAdmittedPermit(
+			admission,
+			verdicts.digestBinding,
+			verdicts.validatedManifest,
+			verdicts.approvalScope,
+			verdicts.liveAdmission,
+		);
 		const sent =
 			'destructivePermit' in admission
 				? await executePgDestructiveBundle(executor, {
@@ -1543,15 +1659,73 @@ async function runPgTransactionalOutcomeOnSession(
  * Runs the transactional outcome protocol on a connection pinned for its
  * whole claim/token/terminal lifecycle.
  */
+async function checkDirectOutcomeAdmission(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeTransactionalRequest,
+): Promise<AdmissionVerdicts | OutcomeProtocolRefusal> {
+	const classification =
+		request.plan.claimKind === 'retire-intent' ? 'removal' : 'non-destructive';
+	const manifestResult = validateNormalizedManagedStepManifest([
+		{
+			stepKey: request.plan.plannedClaimKey ?? request.plan.claimId,
+			order: 0,
+			segmentId: request.plan.claimId,
+			dependencyOrder: [],
+			address: request.plan.address as Exclude<
+				NormalizedManagedStep['address'],
+				undefined
+			>,
+			claimKind: request.plan.claimKind,
+			plannedClaimKeys: [request.plan.plannedClaimKey ?? request.plan.claimId],
+			statementBundle: request.plan.statementBundle,
+			classification,
+			requiresVacancy: request.plan.requiresVacancy ?? false,
+			replayPolicy:
+				classification === 'removal' ? 'fresh-live-only' : 'recorded',
+		},
+	]);
+	if (!manifestResult.ok)
+		return refusal(
+			`direct outcome refuses an invalid managed-step manifest: ${manifestResult.detail}`,
+		);
+	const run = {
+		runId: request.plan.executionId ?? request.plan.claimId,
+		planDigest: request.plan.claimId,
+	};
+	const operation: PgSingleAdmittedOperation = {
+		kind: 'single-outcome',
+		request,
+	};
+	const digestBinding = checkDigestBinding({
+		run,
+		recomputedPlanDigest: request.plan.claimId,
+	});
+	if ('kind' in digestBinding) return digestBinding;
+	const validatedManifest = checkValidatedManifest({
+		manifest: manifestResult.manifest,
+		expectedPlans: [request.plan],
+	});
+	if ('kind' in validatedManifest) return validatedManifest;
+	const approvalScope = checkApprovalScope({
+		run,
+		approval: { approvals: [] },
+		operation,
+	});
+	if ('kind' in approvalScope) return approvalScope;
+	const liveAdmission = await checkDirectLiveAdmission(executor, request);
+	if ('kind' in liveAdmission) return liveAdmission;
+	return { digestBinding, validatedManifest, approvalScope, liveAdmission };
+}
+
 export async function runPgTransactionalOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeTransactionalRequest,
 ): Promise<PgOutcomeResult> {
-	if (request.transactionOpen)
-		return runPgTransactionalOutcomeOnSession(executor, request);
-	return withPgOutcomeSession(executor, (session) =>
-		runPgTransactionalOutcomeOnSession(session, request),
-	);
+	return withPgOutcomeSession(executor, async (session) => {
+		const verdicts = await checkDirectOutcomeAdmission(session, request);
+		if ('kind' in verdicts) return verdicts;
+		return runPgTransactionalOutcomeOnSession(session, request, verdicts);
+	});
 }
 
 function sameStatementBundle(
@@ -1605,6 +1779,7 @@ async function currentControllerIdentity(
 async function runPgPairedReaddressOperation(
 	executor: TransitionJournalQueryable,
 	request: PgPairedReaddressOperation['request'],
+	verdicts: AdmissionVerdicts,
 ): Promise<PgAdmittedOperationResult> {
 	let begun = false;
 	try {
@@ -1685,7 +1860,14 @@ async function runPgPairedReaddressOperation(
 		}
 		const sent = await sendPgPairedReaddressBundle(
 			executor,
-			mintPairedReaddressPermit(request.pairId, request.statements),
+			mintPairedReaddressPermit(
+				request.pairId,
+				request.statements,
+				verdicts.digestBinding,
+				verdicts.validatedManifest,
+				verdicts.approvalScope,
+				verdicts.liveAdmission,
+			),
 			request.statements,
 		);
 		if (sent) throw new Error(sent.reason);
@@ -1753,6 +1935,156 @@ async function runPgPairedReaddressOperation(
 	}
 }
 
+interface AdmissionVerdicts {
+	readonly digestBinding: DigestBindingVerdict;
+	readonly validatedManifest: ValidatedManifestVerdict;
+	readonly approvalScope: ApprovalScopeVerdict;
+	readonly liveAdmission: LiveAdmissionVerdict;
+}
+
+function operationApprovalSubject(operation: PgAdmittedOperation):
+	| {
+			readonly address: LedgerAddress;
+			readonly classification: AdmissionOperationClassification;
+	  }
+	| OutcomeProtocolRefusal {
+	if (operation.kind === 'single-outcome')
+		return {
+			address: operation.request.plan.address,
+			classification: operation.kind,
+		};
+	if (operation.kind === 'destructive-outcome')
+		return {
+			address: operation.request.plan.address,
+			classification: operation.kind,
+		};
+	const firstMember = operation.request.members[0];
+	if (!firstMember) return refusal('re-address has no closure members');
+	return {
+		address: firstMember.source,
+		classification: operation.kind,
+	};
+}
+
+export function checkDigestBinding(input: {
+	readonly run: PgLockedRun;
+	readonly recomputedPlanDigest?: string;
+}): DigestBindingVerdict | OutcomeProtocolRefusal {
+	if (input.recomputedPlanDigest !== input.run.planDigest)
+		return refusal(
+			'admitted operation refuses a mismatched recomputed plan digest',
+		);
+	return mintDigestBindingVerdict();
+}
+
+export function checkValidatedManifest(input: {
+	readonly manifest?: ValidatedManagedStepManifest;
+	/** Plans whose claim keys are declared by the reviewed manifest. */
+	readonly expectedPlans: readonly OutcomeClaimPlan[];
+	/**
+	 * Live closure members supplement legacy root-only manifests. They may record
+	 * absent facts, but they cannot introduce SQL outside the manifest.
+	 */
+	readonly supplementalPlans?: readonly OutcomeClaimPlan[];
+}): ValidatedManifestVerdict | OutcomeProtocolRefusal {
+	const supplementalNotCascadeCovered = input.supplementalPlans?.find(
+		(plan) => plan.claimSpecies !== 'cascade-covered',
+	);
+	if (supplementalNotCascadeCovered)
+		return refusal(
+			`admitted operation refuses supplemental closure member ${supplementalNotCascadeCovered.plannedClaimKey ?? supplementalNotCascadeCovered.address.name} that is not cascade-covered`,
+		);
+	const supplementalWithSql = input.supplementalPlans?.find(
+		(plan) => plan.statementBundle.statements.length !== 0,
+	);
+	if (supplementalWithSql)
+		return refusal(
+			`admitted operation refuses supplemental closure member ${supplementalWithSql.plannedClaimKey ?? supplementalWithSql.address.name} with a non-empty statement bundle`,
+		);
+	const manifest = input.manifest;
+	const manifestValid =
+		manifest !== undefined &&
+		input.expectedPlans.every((plan) =>
+			manifest.steps.some(
+				(step) =>
+					step.plannedClaimKeys.includes(plan.plannedClaimKey ?? '') &&
+					step.statementBundle.statements.length ===
+						plan.statementBundle.statements.length &&
+					step.statementBundle.statements.every(
+						(statement, index) =>
+							plan.statementBundle.statements[index]?.ordinal ===
+								statement.ordinal &&
+							plan.statementBundle.statements[index]?.sql === statement.sql,
+					),
+			),
+		);
+	if (!manifestValid)
+		return refusal(
+			'admitted operation refuses an unvalidated managed-step manifest',
+		);
+	return mintValidatedManifestVerdict();
+}
+
+export function checkApprovalScope(input: {
+	readonly run: PgLockedRun;
+	readonly approval: ScopedApprovalSet;
+	readonly operation: PgAdmittedOperation;
+}): ApprovalScopeVerdict | OutcomeProtocolRefusal {
+	const subject = operationApprovalSubject(input.operation);
+	if ('kind' in subject) return subject;
+	if (input.operation.kind === 'destructive-outcome') {
+		const destructiveAcceptances = input.approval.approvals.filter(
+			(grant) =>
+				grant.class === `destructive-plan-accepted:${input.run.planDigest}`,
+		);
+		if (destructiveAcceptances.length === 0)
+			return refusal('operator acceptance is absent');
+		const accepted = destructiveAcceptances.some((grant) => {
+			const scope = grant.withinScope;
+			const inScope =
+				scope === undefined ||
+				scope.length === 0 ||
+				scope.some((selector) =>
+					selectorMatchesResource(selector, subject.address),
+				);
+			const trustRootChecked =
+				grant.fromTrustRoot === undefined ||
+				grant.fromTrustRoot.kind.length > 0;
+			return inScope && trustRootChecked;
+		});
+		if (!accepted)
+			return refusal(
+				'admitted operation refuses destructive approval outside its scope or trust root',
+			);
+	}
+	return mintApprovalScopeVerdict(subject.address, subject.classification);
+}
+
+export async function checkLiveAdmission(
+	executor: TransitionJournalQueryable,
+	homes: readonly PgLedgerTarget[],
+): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
+	const integrity = await validatePgLedgerRuntimeIntegrity(executor, homes);
+	if (integrity) return integrity;
+	return mintLiveAdmissionVerdict();
+}
+
+/** Legacy direct calls bind their own actual ledger-home currency check. */
+async function checkDirectLiveAdmission(
+	executor: TransitionJournalQueryable,
+	request: PgOutcomeClaimRequest,
+): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
+	const seen = new Set<string>();
+	for (const home of homesFor(request)) {
+		const key = `${home.scope}:${home.schema ?? ''}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		const currency = await readPgLedgerScopeCurrency(executor, home);
+		if (currency.kind !== 'current') return currencyRefusal(currency);
+	}
+	return mintLiveAdmissionVerdict();
+}
+
 /**
  * The public PostgreSQL admitted-execution boundary. It is intentionally not
  * used by legacy paths yet: later dispatches bind their persisted runs and
@@ -1764,9 +2096,37 @@ export async function executePgAdmittedOperation(
 		readonly run: PgLockedRun;
 		readonly operation: PgAdmittedOperation;
 		readonly approval: ScopedApprovalSet;
+		/** Branded proof that the operation came from the normalized manifest. */
+		readonly manifest?: ValidatedManagedStepManifest;
+		/** Recomputed from the durable plan while the caller owns its run lock. */
+		readonly recomputedPlanDigest?: string;
 	},
 ): Promise<PgAdmittedOperationResult> {
 	try {
+		const { expectedPlans, supplementalPlans } =
+			input.operation.kind === 'paired-readdress'
+				? { expectedPlans: [], supplementalPlans: [] }
+				: input.operation.kind === 'destructive-outcome'
+					? {
+							expectedPlans: [input.operation.request.plan],
+							supplementalPlans: input.operation.request.members.map(
+								(member) => member.plan,
+							),
+						}
+					: {
+							expectedPlans: [input.operation.request.plan],
+							supplementalPlans: [],
+						};
+		const digestBinding = checkDigestBinding(input);
+		if ('kind' in digestBinding) return digestBinding;
+		const validatedManifest = checkValidatedManifest({
+			expectedPlans,
+			supplementalPlans,
+			...(input.manifest === undefined ? {} : { manifest: input.manifest }),
+		});
+		if ('kind' in validatedManifest) return validatedManifest;
+		const approvalScope = checkApprovalScope(input);
+		if ('kind' in approvalScope) return approvalScope;
 		return await withPgOutcomeSession(session, async (pinnedSession) => {
 			// Runtime integrity is checked on the pinned, locked execution session.
 			// Scope/currency and operation admission are then re-read by the shared
@@ -1777,19 +2137,19 @@ export async function executePgAdmittedOperation(
 					: input.operation.kind === 'destructive-outcome'
 						? homesForGroup(input.operation.request)
 						: homesFor(input.operation.request);
-			const integrity = await validatePgLedgerRuntimeIntegrity(
-				pinnedSession,
-				homes,
-			);
-			if (integrity) return integrity;
-			// The scoped object is deliberately retained at the capability boundary;
-			// dispatch 3 connects its individual approvals to operation admission.
-			void input.run;
-			void input.approval;
+			const liveAdmission = await checkLiveAdmission(pinnedSession, homes);
+			if ('kind' in liveAdmission) return liveAdmission;
+			const verdicts: AdmissionVerdicts = {
+				digestBinding,
+				validatedManifest,
+				approvalScope,
+				liveAdmission,
+			};
 			if (input.operation.kind === 'paired-readdress')
 				return runPgPairedReaddressOperation(
 					pinnedSession,
 					input.operation.request,
+					verdicts,
 				);
 			if (input.operation.kind === 'destructive-outcome')
 				return runPgDestructiveOutcome(
@@ -1800,6 +2160,7 @@ export async function executePgAdmittedOperation(
 			return runPgTransactionalOutcomeOnSession(
 				pinnedSession,
 				input.operation.request,
+				verdicts,
 			);
 		});
 	} catch (error) {
@@ -1817,6 +2178,7 @@ export async function executePgAdmittedOperation(
 async function runPgNonTransactionalOutcomeOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeNonTransactionalRequest,
+	verdicts: AdmissionVerdicts,
 ): Promise<PgOutcomeResult> {
 	const admission = await openPgOutcomeClaimOnSession(executor, request);
 	if (admission.kind !== 'admitted-outcome-claim') return admission;
@@ -1870,7 +2232,13 @@ async function runPgNonTransactionalOutcomeOnSession(
 		await executor.query('COMMIT');
 		await request.onExecutingCommitted?.();
 		const sent = await sendPgAdmittedBundle(executor, {
-			permit: mintAdmittedPermit(admission),
+			permit: mintAdmittedPermit(
+				admission,
+				verdicts.digestBinding,
+				verdicts.validatedManifest,
+				verdicts.approvalScope,
+				verdicts.liveAdmission,
+			),
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) return sent;
@@ -1909,9 +2277,11 @@ export async function runPgNonTransactionalOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeNonTransactionalRequest,
 ): Promise<PgOutcomeResult> {
-	return withPgOutcomeSession(executor, (session) =>
-		runPgNonTransactionalOutcomeOnSession(session, request),
-	);
+	return withPgOutcomeSession(executor, async (session) => {
+		const verdicts = await checkDirectOutcomeAdmission(session, request);
+		if ('kind' in verdicts) return verdicts;
+		return runPgNonTransactionalOutcomeOnSession(session, request, verdicts);
+	});
 }
 
 /**
@@ -2025,12 +2395,6 @@ async function recoverPgOutcomeClaimOnSession(
 			return refusal(
 				'outcome recovery reservation subset is not the live open claim',
 			);
-		}
-		const recoveryPermit = mintPairedReaddressPermit(rootClaimId, []);
-		if (!admittedPermitRecords.get(recoveryPermit)?.paired) {
-			await executor.query('ROLLBACK');
-			begun = false;
-			return refusal('outcome recovery could not mint an admitted permit');
 		}
 		const append = await appendPgOutcomeResolution(
 			executor,

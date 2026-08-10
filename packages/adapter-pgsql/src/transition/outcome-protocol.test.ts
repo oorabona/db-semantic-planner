@@ -1,3 +1,4 @@
+import { validateNormalizedManagedStepManifest } from '@dbsp/core';
 import type {
 	LedgerChainMember,
 	LedgerReservationRow,
@@ -7,6 +8,11 @@ import { refusalFor } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	appendPgOutcomeResolution,
+	checkApprovalScope,
+	checkDigestBinding,
+	checkLiveAdmission,
+	checkValidatedManifest,
+	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
 	recoverPgAdmittedReaddressPair,
 	runPgNonTransactionalOutcome,
@@ -30,6 +36,7 @@ function request(claimId: string): {
 	return {
 		plan: {
 			claimId,
+			claimSpecies: 'sql-bearing',
 			plannedClaimKey: `step:${claimId}/root`,
 			address,
 			claimKind: 'intent',
@@ -129,6 +136,253 @@ function recorder(failSql?: string) {
 }
 
 describe('PostgreSQL outcome protocol compositions', () => {
+	it('admits an empty live supplemental closure member beside its manifest-declared destructive root', () => {
+		const root = request('destructive-root').plan;
+		const validation = validateNormalizedManagedStepManifest([
+			{
+				stepKey: 'destructive-root',
+				order: 0,
+				segmentId: 'destructive-root-segment',
+				dependencyOrder: [],
+				address: { ...address, kind: 'table' as const },
+				claimKind: 'intent',
+				plannedClaimKeys: [root.plannedClaimKey ?? ''],
+				statementBundle: {
+					statements: root.statementBundle.statements.map((statement) => ({
+						...statement,
+					})),
+				},
+				classification: 'data-destructive',
+				requiresVacancy: false,
+				replayPolicy: 'recorded',
+			},
+		]);
+		if (!validation.ok) throw new Error(validation.detail);
+		const supplemental: OutcomeClaimPlan = {
+			...root,
+			claimId: 'live-supplemental-sequence',
+			claimSpecies: 'cascade-covered',
+			rootClaimId: root.claimId,
+			plannedClaimKey: 'closure:sequence:accounts_id_seq',
+			address: { ...address, kind: 'sequence', name: 'accounts_id_seq' },
+			statementBundle: { statements: [] },
+		};
+
+		expect(
+			checkValidatedManifest({
+				manifest: validation.manifest,
+				expectedPlans: [root],
+				supplementalPlans: [supplemental],
+			}),
+		).not.toHaveProperty('kind');
+	});
+
+	it('refuses a live supplemental closure member that smuggles SQL', () => {
+		const root = request('destructive-root').plan;
+		const validation = validateNormalizedManagedStepManifest([
+			{
+				stepKey: 'destructive-root',
+				order: 0,
+				segmentId: 'destructive-root-segment',
+				dependencyOrder: [],
+				address: { ...address, kind: 'table' as const },
+				claimKind: 'intent',
+				plannedClaimKeys: [root.plannedClaimKey ?? ''],
+				statementBundle: root.statementBundle,
+				classification: 'data-destructive',
+				requiresVacancy: false,
+				replayPolicy: 'recorded',
+			},
+		]);
+		if (!validation.ok) throw new Error(validation.detail);
+		const supplemental: OutcomeClaimPlan = {
+			...root,
+			claimId: 'live-supplemental-sequence',
+			claimSpecies: 'cascade-covered',
+			rootClaimId: root.claimId,
+			plannedClaimKey: 'closure:sequence:accounts_id_seq',
+			address: { ...address, kind: 'sequence', name: 'accounts_id_seq' },
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'DROP SEQUENCE tenant.accounts_id_seq' },
+				],
+			},
+		} as unknown as OutcomeClaimPlan;
+
+		expect(
+			checkValidatedManifest({
+				manifest: validation.manifest,
+				expectedPlans: [root],
+				supplementalPlans: [supplemental],
+			}),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason:
+				'admitted operation refuses supplemental closure member closure:sequence:accounts_id_seq with a non-empty statement bundle',
+		});
+	});
+
+	it('attributes a missing destructive acceptance before a scoped rejection', () => {
+		const planDigest = 'reviewed-plan';
+		const operation = {
+			kind: 'destructive-outcome' as const,
+			request: {
+				...request('destructive-claim'),
+				plan: { ...request('destructive-claim').plan, address },
+				members: [],
+			} as never,
+			readBackAndResolve: async () => ({
+				rootClaimId: 'destructive-claim',
+				members: [],
+				reservations: [],
+			}),
+		};
+		const run = { runId: 'reviewed-run', planDigest };
+
+		expect(
+			checkApprovalScope({
+				run,
+				approval: { approvals: [] },
+				operation,
+			}),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'operator acceptance is absent',
+		});
+		expect(
+			checkApprovalScope({
+				run,
+				approval: {
+					approvals: [
+						{
+							class: `destructive-plan-accepted:${planDigest}`,
+							withinScope: [{ schema: 'another_schema' }],
+						},
+					],
+				},
+				operation,
+			}),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason:
+				'admitted operation refuses destructive approval outside its scope or trust root',
+		});
+	});
+
+	it('does not let a table A approval-scope verdict mint a permit for table B', async () => {
+		const tableA = {
+			scope: 'schema' as const,
+			engine: 'postgresql' as const,
+			database: 'app',
+			schema: 'tenant',
+			kind: 'table' as const,
+			name: 'accounts',
+		};
+		const tableB = { ...tableA, name: 'audit_log' };
+		const planDigest = 'scope-bound-plan';
+		const planA: OutcomeClaimPlan = {
+			claimId: 'scope-bound-claim-a',
+			claimSpecies: 'sql-bearing',
+			plannedClaimKey: 'scope-bound-step-a/root',
+			address: tableA,
+			claimKind: 'intent',
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'ALTER TABLE tenant.accounts ADD x integer' },
+				],
+			},
+		};
+		const planB: OutcomeClaimPlan = {
+			claimId: 'scope-bound-claim-b',
+			claimSpecies: 'sql-bearing',
+			plannedClaimKey: 'scope-bound-step-b/root',
+			address: tableB,
+			claimKind: 'intent',
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'ALTER TABLE tenant.audit_log ADD x integer' },
+				],
+			},
+		};
+		const validation = validateNormalizedManagedStepManifest([
+			{
+				stepKey: 'scope-bound-step-b',
+				order: 0,
+				segmentId: 'scope-bound-segment',
+				dependencyOrder: [],
+				address: tableB,
+				claimKind: 'intent',
+				plannedClaimKeys: ['scope-bound-step-b/root'],
+				statementBundle: planB.statementBundle,
+				classification: 'non-destructive',
+				requiresVacancy: true,
+				replayPolicy: 'recorded',
+			},
+		]);
+		if (!validation.ok) throw new Error(validation.detail);
+		const run = { runId: 'scope-bound-run', planDigest };
+		const operationA = {
+			kind: 'single-outcome' as const,
+			request: {
+				...request(planA.claimId),
+				plan: planA,
+				resolution: {
+					eventId: 'scope-bound-a',
+					eventKind: 'observed' as const,
+				},
+			},
+		};
+		const operationB = {
+			kind: 'single-outcome' as const,
+			request: {
+				...request(planB.claimId),
+				plan: planB,
+				resolution: {
+					eventId: 'scope-bound-b',
+					eventKind: 'observed' as const,
+				},
+			},
+		};
+		const digestBinding = checkDigestBinding({
+			run,
+			recomputedPlanDigest: planDigest,
+		});
+		const validatedManifest = checkValidatedManifest({
+			manifest: validation.manifest,
+			expectedPlans: [planB],
+		});
+		const approvalScope = checkApprovalScope({
+			run,
+			approval: { approvals: [] },
+			operation: operationA,
+		});
+		const liveAdmission = await checkLiveAdmission({ query: vi.fn() }, []);
+		if (
+			'kind' in digestBinding ||
+			'kind' in validatedManifest ||
+			'kind' in approvalScope ||
+			'kind' in liveAdmission
+		)
+			throw new Error('scope-binding setup unexpectedly refused');
+
+		expect(() =>
+			mintAdmittedPermit(
+				{
+					...operationB.request,
+					token: {} as never,
+					kind: 'admitted-outcome-claim',
+					stableStateBeforeClaim: 'unknown',
+				},
+				digestBinding,
+				validatedManifest,
+				approvalScope,
+				liveAdmission,
+			),
+		).toThrow(
+			'admitted permit refuses an approval scope verdict for another operation',
+		);
+	});
+
 	it('keeps a lost COMMIT acknowledgement transport-ambiguous without a rollback', async () => {
 		const sql: string[] = [];
 		const executor = {

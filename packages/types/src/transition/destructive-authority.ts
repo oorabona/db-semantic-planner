@@ -2,7 +2,12 @@ import type { LedgerAddress } from './ledger.js';
 
 /** The two destructive effects defined by the managed-ledger authority table. */
 export type DestructiveAction =
-	| { readonly kind: 'removal'; readonly address: LedgerAddress }
+	| {
+			readonly kind: 'removal';
+			readonly address: LedgerAddress;
+			/** Digest of the exact cascade set admitted under the ledger locks. */
+			readonly closureDigest?: string;
+	  }
 	| { readonly kind: 'data-destructive'; readonly address: LedgerAddress };
 
 export type DeclarationDestructiveOutcome =
@@ -51,6 +56,10 @@ export interface DestructiveAuthorityEvidence {
 	readonly operatorAcceptance: OperatorAcceptanceDestructiveOutcome;
 	/** Required only for removals. */
 	readonly containment?: ContainmentClosureDestructiveOutcome;
+	/** The exact live cascade member that made `reaches-unmanaged` refuse. */
+	readonly containmentUnmanaged?: LedgerAddress;
+	/** The live catalogue error that made containment undecidable. */
+	readonly containmentReason?: string;
 	readonly ledgerLineage: LedgerLineageDestructiveOutcome;
 }
 

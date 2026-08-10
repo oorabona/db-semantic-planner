@@ -27,6 +27,52 @@ describe('destructive authority matrix', () => {
 		expect(decision.kind).toBe('destructive-decision-permitted');
 	});
 
+	it('names the live unmanaged cascade member in a containment refusal', () => {
+		const decision = decideDestructiveDecision(
+			{ kind: 'removal', address },
+			{
+				declaration: 'requires-removal',
+				ownership: 'managed-by-me',
+				catalogueIdentity: 'matches-recorded',
+				operatorAcceptance: 'destructive-plan-accepted',
+				containment: 'reaches-unmanaged',
+				containmentUnmanaged: {
+					...address,
+					kind: 'sequence',
+					name: 'orders_id_seq',
+				},
+				ledgerLineage: 'matches-database',
+			},
+		);
+		expect(decision).toMatchObject({
+			kind: 'destructive-decision-refused',
+			reasons: [
+				'containment closure is reaches-unmanaged: sequence public.orders_id_seq',
+			],
+		});
+	});
+
+	it('preserves the live catalogue reason in an undecidable containment refusal', () => {
+		const decision = decideDestructiveDecision(
+			{ kind: 'removal', address },
+			{
+				declaration: 'requires-removal',
+				ownership: 'managed-by-me',
+				catalogueIdentity: 'matches-recorded',
+				operatorAcceptance: 'destructive-plan-accepted',
+				containment: 'undecidable',
+				containmentReason: 'COALESCE types text and oid cannot be matched',
+				ledgerLineage: 'matches-database',
+			},
+		);
+		expect(decision).toMatchObject({
+			kind: 'destructive-decision-refused',
+			reasons: [
+				'containment closure is undecidable: COALESCE types text and oid cannot be matched',
+			],
+		});
+	});
+
 	it('refuses every non-permitting outcome in the closed removal matrix', () => {
 		const declarations: DestructiveAuthorityEvidence['declaration'][] = [
 			'requires-removal',

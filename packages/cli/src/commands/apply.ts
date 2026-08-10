@@ -70,6 +70,8 @@ export interface ApplyOptions {
 	readonly dryRun?: boolean;
 	/** Reviewed replacement selector(s) for the no-argument generator path. */
 	readonly replace?: readonly string[];
+	/** Private no-argument bridge: only the command that just persisted the run sets it. */
+	readonly freshGeneratorRemovalRunId?: string;
 }
 
 function errorDetail(error: unknown): string {
@@ -850,11 +852,15 @@ export async function runNoArgumentApply(
 			planDigest: effectivePlan.planDigest,
 		};
 	}
-	const { schema: _schemaOverride, ...recordedRunOptions } = options;
-	void _schemaOverride;
+	const recordedRunOptions = Object.fromEntries(
+		Object.entries(options).filter(([key]) => key !== 'schema'),
+	) as ApplyOptions;
 	const result = await execute(effectivePlan.runId, {
 		...recordedRunOptions,
 		planDigest: effectivePlan.planDigest,
+		...(isUnsupportedRemoval
+			? { freshGeneratorRemovalRunId: effectivePlan.runId }
+			: {}),
 	});
 	return {
 		outcome: result.outcome,
@@ -918,7 +924,10 @@ export async function runApply(
 		}
 		throw error;
 	}
-	if (persisted.run.replayability === 'non-replayable-generator-removal') {
+	if (
+		persisted.run.replayability === 'non-replayable-generator-removal' &&
+		options.freshGeneratorRemovalRunId !== runId
+	) {
 		const refusal: ApplyCommandResult = {
 			outcome: 'non-replayable-generator-run',
 			runId,
@@ -940,6 +949,11 @@ export async function runApply(
 						throw new Error(
 							'persisted run no longer contains a generator plan',
 						);
+					const recordedSchema = current.plan.generator.planningSchema;
+					if (!recordedSchema)
+						throw new Error(
+							'persisted generator run has no recorded planning schema and is non-resumable',
+						);
 					const manifest = validateNormalizedManagedStepManifest(
 						current.plan.steps as unknown as readonly NormalizedManagedStep[],
 					);
@@ -959,7 +973,7 @@ export async function runApply(
 						pool: owned,
 						manifest: manifest.manifest,
 						planDigest: actualDigest,
-						schema: 'public',
+						schema: recordedSchema,
 						approval: { approvals: policy.accepts },
 						...(options.replace === undefined
 							? {}
