@@ -1,4 +1,6 @@
 /** Shared command-output shape for refusals that do not append a ledger event. */
+
+import { escapeDiagnosticText } from '@dbsp/adapter-pgsql';
 import type { LedgerAddress, LedgerRefusal } from '@dbsp/types';
 import { REFUSAL_VOCABULARY, type RefusalCode } from '@dbsp/types';
 
@@ -40,10 +42,10 @@ export function formatPreAppendRefusalHuman(
 ): string {
 	return [
 		line,
-		`refusal: ${refusal.refusal.cause}`,
-		`address: ${JSON.stringify(refusal.address)}`,
-		`state: ${refusal.refusal.state}`,
-		`withheld authority: ${refusal.refusal.withheldAuthority}`,
-		`resolving command: ${refusal.refusal.resolvingCommand}`,
+		`refusal: ${escapeDiagnosticText(refusal.refusal.cause)}`,
+		`address: ${escapeDiagnosticText(JSON.stringify(refusal.address))}`,
+		`state: ${escapeDiagnosticText(refusal.refusal.state)}`,
+		`withheld authority: ${escapeDiagnosticText(refusal.refusal.withheldAuthority)}`,
+		`resolving command: ${escapeDiagnosticText(refusal.refusal.resolvingCommand)}`,
 	].join('\n');
 }

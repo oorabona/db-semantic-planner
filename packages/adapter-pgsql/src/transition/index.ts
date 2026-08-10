@@ -181,6 +181,7 @@ export {
 export {
 	executePgAdmittedOperation,
 	executePgDestructiveOutcome,
+	lockPgJournalRun,
 	type PgAdmittedOperation,
 	type PgAdmittedOperationResult,
 	type PgLockedRun,

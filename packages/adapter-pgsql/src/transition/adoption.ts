@@ -13,6 +13,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
+	lockPgJournalRun,
 	type PgOutcomeTransactionalRequest,
 } from './outcome-protocol.js';
 
@@ -119,7 +120,7 @@ export async function executePgDeclaredAdoption(
 		const outcomeRequest: PgOutcomeTransactionalRequest = {
 			plan: {
 				claimId,
-				claimSpecies: 'sql-bearing',
+				claimSpecies: 'adoption',
 				executionId,
 				plannedClaimKey,
 				claimGroupId: claimId,
@@ -191,7 +192,7 @@ export async function executePgDeclaredAdoption(
 		if (!manifest.ok)
 			return { outcome: 'execution-failed', detail: manifest.detail };
 		const result = await executePgAdmittedOperation(input.executor, {
-			run: { runId: executionId, planDigest: claimId },
+			run: lockPgJournalRun({ runId: executionId, planDigest: claimId }),
 			approval: { approvals: [] },
 			manifest: manifest.manifest,
 			recomputedPlanDigest: claimId,

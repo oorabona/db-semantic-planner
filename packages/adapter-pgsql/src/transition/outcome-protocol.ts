@@ -61,6 +61,36 @@ interface AdmittedPermit {
 	readonly [admittedPermitBrand]: 'dbsp-admitted-permit';
 }
 
+declare const pgLockedRunBrand: unique symbol;
+const lockedRuns = new WeakSet<object>();
+
+/**
+ * A run identity that was loaded while the caller owns its run lock.  This is
+ * deliberately not a structural `{ runId, planDigest }`: callers cannot bind
+ * the digest check to two independently supplied strings.
+ */
+export interface PgLockedRun {
+	readonly runId: string;
+	readonly planDigest: string;
+	readonly [pgLockedRunBrand]: 'dbsp-pg-locked-journal-run';
+}
+
+/**
+ * Adapter-only bridge from the journal-load/run-lock boundary.  Keep this
+ * beside the admitted facade; ordinary callers receive a `PgLockedRun`, never
+ * manufacture one from string fields.
+ */
+export function lockPgJournalRun(
+	run: Pick<TransitionRunMetadata, 'runId' | 'planDigest'>,
+): PgLockedRun {
+	const locked = Object.freeze({
+		runId: run.runId,
+		planDigest: run.planDigest,
+	}) as PgLockedRun;
+	lockedRuns.add(locked);
+	return locked;
+}
+
 declare const digestBindingVerdictBrand: unique symbol;
 export interface DigestBindingVerdict {
 	readonly [digestBindingVerdictBrand]: 'dbsp-digest-binding-verdict';
@@ -218,16 +248,15 @@ export interface PgOutcomeExecutionRequest {
 	readonly statements: readonly ClaimBundleStatement[];
 }
 
-/** The durable run already held by the caller's run-lock boundary. */
-export type PgLockedRun = Pick<TransitionRunMetadata, 'runId' | 'planDigest'>;
-
 /**
  * The first admitted-operation shape. Later waves add single and paired
  * operation variants without reopening the facade's authority boundary.
  */
 export interface PgSingleAdmittedOperation {
 	readonly kind: 'single-outcome';
-	readonly request: PgOutcomeTransactionalRequest;
+	readonly request:
+		| PgOutcomeTransactionalRequest
+		| PgOutcomeNonTransactionalRequest;
 }
 
 /**
@@ -250,6 +279,8 @@ export interface PgPairedReaddressOperation {
 		}[];
 		readonly reservations: readonly LedgerReservationRow[];
 		readonly statements: readonly ClaimBundleStatement[];
+		/** Digest-covered root material for this paired request; it is never empty. */
+		readonly manifestPlan: OutcomeClaimPlan;
 		/** Re-read closure, source controller/identity and target vacancy under lock. */
 		readonly verifyLiveAdmission: (
 			executor: TransitionJournalQueryable,
@@ -918,18 +949,51 @@ function currencyRefusal(
 export async function validatePgLedgerRuntimeIntegrity(
 	executor: TransitionJournalQueryable,
 	homes: readonly PgLedgerTarget[],
+	run?: PgLockedRun,
 ): Promise<OutcomeProtocolRefusal | undefined> {
+	const session = executor as object;
+	const cacheKey =
+		run === undefined ? undefined : `${run.runId}\u0000${run.planDigest}`;
+	const cachedByRun =
+		cacheKey === undefined
+			? undefined
+			: lockedLedgerIntegrity.get(session)?.get(cacheKey);
 	const seen = new Set<string>();
 	for (const home of homes) {
 		const key = `${home.scope}:${home.schema ?? ''}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
+		if (cachedByRun?.has(key)) continue;
+		// Compatibility-only direct runners have no durable run-lock witness.
+		// They still re-read currency in their own locked transaction, but the
+		// admitted facade is the sole route that can cache and trust shape proof.
+		if (run === undefined) {
+			const currency = await readPgLedgerScopeCurrency(executor, home);
+			if (currency.kind !== 'current') return currencyRefusal(currency);
+			continue;
+		}
 		await validatePgLedgerPhysicalShape(executor, home);
 		const currency = await readPgLedgerScopeCurrency(executor, home);
 		if (currency.kind !== 'current') return currencyRefusal(currency);
+		if (cacheKey !== undefined) {
+			let byRun = lockedLedgerIntegrity.get(session);
+			if (!byRun) {
+				byRun = new Map();
+				lockedLedgerIntegrity.set(session, byRun);
+			}
+			let homesForRun = byRun.get(cacheKey);
+			if (!homesForRun) {
+				homesForRun = new Set();
+				byRun.set(cacheKey, homesForRun);
+			}
+			homesForRun.add(key);
+		}
 	}
 	return undefined;
 }
+
+/** Cleared by object lifetime; a pooled client is additionally keyed by run id. */
+const lockedLedgerIntegrity = new WeakMap<object, Map<string, Set<string>>>();
 
 /**
  * The sole claim-admission route: after the caller has begun and serialized
@@ -1249,6 +1313,7 @@ export async function readPgOutcomeRecoveryReadBack(
 async function openPgOutcomeClaimOnSession(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimRequest,
+	run?: PgLockedRun,
 ): Promise<OutcomeClaimAdmission> {
 	let begun = false;
 	try {
@@ -1263,6 +1328,16 @@ async function openPgOutcomeClaimOnSession(
 					? `ledger advisory lock is busy for ${lock.ledger.scope}${lock.ledger.schema ? ` ${lock.ledger.schema}` : ''}`
 					: detail(lock.error),
 			);
+		}
+		const integrity = await validatePgLedgerRuntimeIntegrity(
+			executor,
+			homesFor(request),
+			run,
+		);
+		if (integrity) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return integrity;
 		}
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
@@ -1307,6 +1382,15 @@ export async function openPgOutcomeClaimGroup(
 				await session.query('ROLLBACK');
 				begun = false;
 				return { root: refusal('ledger advisory lock is busy'), members: [] };
+			}
+			const integrity = await validatePgLedgerRuntimeIntegrity(
+				session,
+				homesForGroup(request),
+			);
+			if (integrity) {
+				await session.query('ROLLBACK');
+				begun = false;
+				return { root: integrity, members: [] };
 			}
 			const all = [request, ...request.members];
 			const currencyHomes = homesForGroup(request);
@@ -1573,6 +1657,16 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return refusal('ledger advisory lock is busy');
 		}
+		const integrity = await validatePgLedgerRuntimeIntegrity(
+			executor,
+			homesFor(request),
+			verdicts.run,
+		);
+		if (integrity) {
+			if (ownsTransaction) await executor.query('ROLLBACK');
+			begun = false;
+			return integrity;
+		}
 		const target = targetForPlan(request.plan);
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
@@ -1688,10 +1782,10 @@ async function checkDirectOutcomeAdmission(
 		return refusal(
 			`direct outcome refuses an invalid managed-step manifest: ${manifestResult.detail}`,
 		);
-	const run = {
+	const run = lockPgJournalRun({
 		runId: request.plan.executionId ?? request.plan.claimId,
 		planDigest: request.plan.claimId,
-	};
+	});
 	const operation: PgSingleAdmittedOperation = {
 		kind: 'single-outcome',
 		request,
@@ -1791,6 +1885,16 @@ async function runPgPairedReaddressOperation(
 			await executor.query('ROLLBACK');
 			begun = false;
 			return refusal('ledger advisory lock is busy');
+		}
+		const integrity = await validatePgLedgerRuntimeIntegrity(
+			executor,
+			homes,
+			verdicts.run,
+		);
+		if (integrity) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return integrity;
 		}
 		const seen = new Set<string>();
 		for (const home of homes) {
@@ -1940,6 +2044,8 @@ interface AdmissionVerdicts {
 	readonly validatedManifest: ValidatedManifestVerdict;
 	readonly approvalScope: ApprovalScopeVerdict;
 	readonly liveAdmission: LiveAdmissionVerdict;
+	/** Enables one physical validation per locked run/home on this session. */
+	readonly run?: PgLockedRun;
 }
 
 function operationApprovalSubject(operation: PgAdmittedOperation):
@@ -1970,6 +2076,8 @@ export function checkDigestBinding(input: {
 	readonly run: PgLockedRun;
 	readonly recomputedPlanDigest?: string;
 }): DigestBindingVerdict | OutcomeProtocolRefusal {
+	if (!lockedRuns.has(input.run))
+		return refusal('admitted operation refuses an unbound locked journal run');
 	if (input.recomputedPlanDigest !== input.run.planDigest)
 		return refusal(
 			'admitted operation refuses a mismatched recomputed plan digest',
@@ -1986,7 +2094,16 @@ export function checkValidatedManifest(input: {
 	 * absent facts, but they cannot introduce SQL outside the manifest.
 	 */
 	readonly supplementalPlans?: readonly OutcomeClaimPlan[];
+	/** The façade, unlike a bare plan, knows which operation class is admitted. */
+	readonly expectedClassification?:
+		| 'non-destructive'
+		| 'removal'
+		| 'data-destructive';
 }): ValidatedManifestVerdict | OutcomeProtocolRefusal {
+	if (input.expectedPlans.length === 0)
+		return refusal(
+			'admitted operation refuses a manifest check without an expected plan',
+		);
 	const supplementalNotCascadeCovered = input.supplementalPlans?.find(
 		(plan) => plan.claimSpecies !== 'cascade-covered',
 	);
@@ -2005,9 +2122,15 @@ export function checkValidatedManifest(input: {
 	const manifestValid =
 		manifest !== undefined &&
 		input.expectedPlans.every((plan) =>
-			manifest.steps.some(
-				(step) =>
+			manifest.steps.some((step) => {
+				return (
 					step.plannedClaimKeys.includes(plan.plannedClaimKey ?? '') &&
+					step.address !== undefined &&
+					sameLedgerAddress(step.address, plan.address) &&
+					step.claimKind === plan.claimKind &&
+					(input.expectedClassification === undefined ||
+						step.classification === input.expectedClassification) &&
+					step.requiresVacancy === (plan.requiresVacancy ?? false) &&
 					step.statementBundle.statements.length ===
 						plan.statementBundle.statements.length &&
 					step.statementBundle.statements.every(
@@ -2015,8 +2138,9 @@ export function checkValidatedManifest(input: {
 							plan.statementBundle.statements[index]?.ordinal ===
 								statement.ordinal &&
 							plan.statementBundle.statements[index]?.sql === statement.sql,
-					),
-			),
+					)
+				);
+			}),
 		);
 	if (!manifestValid)
 		return refusal(
@@ -2047,9 +2171,12 @@ export function checkApprovalScope(input: {
 				scope.some((selector) =>
 					selectorMatchesResource(selector, subject.address),
 				);
+			const expectedRoot = input.approval.declaredTrustRoot;
 			const trustRootChecked =
-				grant.fromTrustRoot === undefined ||
-				grant.fromTrustRoot.kind.length > 0;
+				expectedRoot === undefined
+					? grant.fromTrustRoot === undefined
+					: grant.fromTrustRoot !== undefined &&
+						canonicalJson(grant.fromTrustRoot) === canonicalJson(expectedRoot);
 			return inScope && trustRootChecked;
 		});
 		if (!accepted)
@@ -2064,8 +2191,11 @@ export async function checkLiveAdmission(
 	executor: TransitionJournalQueryable,
 	homes: readonly PgLedgerTarget[],
 ): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
-	const integrity = await validatePgLedgerRuntimeIntegrity(executor, homes);
-	if (integrity) return integrity;
+	// Physical shape is intentionally *not* checked here. The caller has not
+	// acquired the transaction-scoped ledger-home locks yet, so a pre-lock read
+	// is not admission evidence. Each runner revalidates immediately after lock.
+	void executor;
+	void homes;
 	return mintLiveAdmissionVerdict();
 }
 
@@ -2105,7 +2235,10 @@ export async function executePgAdmittedOperation(
 	try {
 		const { expectedPlans, supplementalPlans } =
 			input.operation.kind === 'paired-readdress'
-				? { expectedPlans: [], supplementalPlans: [] }
+				? {
+						expectedPlans: [input.operation.request.manifestPlan],
+						supplementalPlans: [],
+					}
 				: input.operation.kind === 'destructive-outcome'
 					? {
 							expectedPlans: [input.operation.request.plan],
@@ -2144,6 +2277,7 @@ export async function executePgAdmittedOperation(
 				validatedManifest,
 				approvalScope,
 				liveAdmission,
+				run: input.run,
 			};
 			if (input.operation.kind === 'paired-readdress')
 				return runPgPairedReaddressOperation(
@@ -2157,11 +2291,17 @@ export async function executePgAdmittedOperation(
 					input.operation.request,
 					input.operation.readBackAndResolve,
 				);
-			return runPgTransactionalOutcomeOnSession(
-				pinnedSession,
-				input.operation.request,
-				verdicts,
-			);
+			return 'executingEventId' in input.operation.request
+				? runPgNonTransactionalOutcomeOnSession(
+						pinnedSession,
+						input.operation.request,
+						verdicts,
+					)
+				: runPgTransactionalOutcomeOnSession(
+						pinnedSession,
+						input.operation.request,
+						verdicts,
+					);
 		});
 	} catch (error) {
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
@@ -2183,6 +2323,21 @@ async function runPgNonTransactionalOutcomeOnSession(
 	const admission = await openPgOutcomeClaimOnSession(executor, request);
 	if (admission.kind !== 'admitted-outcome-claim') return admission;
 	try {
+		const liveAdmissionRefusal = request.verifyLiveAdmission
+			? await request.verifyLiveAdmission(executor, admission.plan)
+			: undefined;
+		if (liveAdmissionRefusal) {
+			await begin(executor, request.lockTimeoutMs);
+			await refuseClaim(
+				executor,
+				admission,
+				request,
+				request.resolution.eventId,
+				'ERR-05',
+			);
+			await executor.query('COMMIT');
+			return liveAdmissionRefusal;
+		}
 		const vacancy = await verifyCreationVacancy(
 			executor,
 			admission,

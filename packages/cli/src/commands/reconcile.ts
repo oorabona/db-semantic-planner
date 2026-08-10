@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
 	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	assertPgDatabaseWritable,
+	escapeDiagnosticText,
 	isPgDatabaseReadOnlyError,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
@@ -186,13 +187,14 @@ function unresolvedRecoveryDetail(
 	if (unresolved.length === 0) return undefined;
 	return unresolved
 		.map(
-			(report) => `${report.address.name}: ${report.reason ?? report.outcome}`,
+			(report) =>
+				`${escapeDiagnosticText(report.address.name)}: ${escapeDiagnosticText(report.reason ?? report.outcome)}`,
 		)
 		.join('; ');
 }
 
 export function formatReconcileHuman(result: ReconcileResult): string {
-	const line = `${result.outcome}: ${result.runId}`;
+	const line = `${escapeDiagnosticText(result.outcome)}: ${escapeDiagnosticText(result.runId)}`;
 	return result.refusal
 		? formatPreAppendRefusalHuman(line, result.refusal)
 		: line;
@@ -600,20 +602,34 @@ export async function runReconcile(
 							plannedClaimKey: selected.plannedClaimKey,
 							stableStateBeforeClaim: selected.stableStateBeforeClaim,
 						});
-						const recovered = await recoverPgOutcomeClaim(lease.session, {
-							address: selected.row.address,
-							reservations: rows,
-							resolutionEventId: `${rootClaimId}:reconcile:${runId}`,
-							acceptedExternalDdlExclusion: indeterminateEvidence !== undefined,
-							resolveIndeterminate: true,
-							readBack: async (_executor, _address, identity) =>
-								recoveryPayload(identity),
-							...(indeterminateEvidence === undefined
-								? {}
-								: { indeterminateEvidence }),
-							...(operationReadBack === undefined ? {} : { operationReadBack }),
-						});
-						recovery.push(recoveryReport(selected.row.address, recovered));
+						// A reservation is released only with the terminal for that exact
+						// member.  Resolving the root must never erase the discovery record
+						// for an unresolved child in the same durable closure.
+						for (const row of rows) {
+							const isRoot = sameLedgerAddress(
+								row.address,
+								selected.row.address,
+							);
+							const recovered = await recoverPgOutcomeClaim(owned, {
+								address: row.address,
+								reservations: [row],
+								resolutionEventId: isRoot
+									? `${rootClaimId}:reconcile:${runId}`
+									: `${rootClaimId}:reconcile:${runId}:${row.address.kind}:${row.address.name}`,
+								acceptedExternalDdlExclusion:
+									isRoot && indeterminateEvidence !== undefined,
+								resolveIndeterminate: true,
+								readBack: async (_executor, _address, identity) =>
+									recoveryPayload(identity),
+								...(isRoot && indeterminateEvidence !== undefined
+									? { indeterminateEvidence }
+									: {}),
+								...(isRoot && operationReadBack !== undefined
+									? { operationReadBack }
+									: {}),
+							});
+							recovery.push(recoveryReport(row.address, recovered));
+						}
 					}
 					const unresolved = unresolvedRecoveryDetail(recovery);
 					if (unresolved)

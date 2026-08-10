@@ -108,7 +108,14 @@ function bundleRefusal(
 			);
 		return undefined;
 	}
-	if (statements.length === 0 && plan.claimKind !== 'adopt-intent')
+	if (plan.claimSpecies === 'adoption') {
+		if (plan.claimKind !== 'adopt-intent' || statements.length !== 0)
+			return refusal(
+				`adoption claim ${plan.claimId} has an invalid statement bundle`,
+			);
+		return undefined;
+	}
+	if (statements.length === 0)
 		return refusal(`claim ${plan.claimId} has an empty statement bundle`);
 	for (let index = 0; index < statements.length; index += 1) {
 		const statement = statements[index];
@@ -248,15 +255,10 @@ export function admitOutcomeClaim(
 				return refusal(
 					`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
 				);
-		} else {
-			// Retained only while pre-OID callers are migrated in the next dispatch.
-			if (!input.currentUser)
-				return refusal(`claim ${plan.claimId} refuses unreadable current_user`);
-			if (terminal.controller !== input.currentUser)
-				return refusal(
-					`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
-				);
-		}
+		} else
+			return refusal(
+				`claim ${plan.claimId} refuses unreadable current controller identity`,
+			);
 		if (!input.liveAddress)
 			return refusal(
 				`claim ${plan.claimId} refuses missing live identity admission`,

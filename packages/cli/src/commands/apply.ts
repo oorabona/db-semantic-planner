@@ -6,6 +6,7 @@ import {
 	appendTransitionAuthorization,
 	createPgTransitionLessor,
 	createPgTransitionPack,
+	escapeDiagnosticText,
 	preparePgExecutionSession,
 	readTransitionJournal,
 	validatePgManagedLedgerCurrency,
@@ -76,6 +77,13 @@ export interface ApplyOptions {
 
 function errorDetail(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+class RecordedPlanDigestMismatchError extends Error {
+	constructor() {
+		super('persisted generator plan digest does not match the recorded review');
+		this.name = 'RecordedPlanDigestMismatchError';
+	}
 }
 
 /** A failed owned-pool cleanup supplements a computed command result. */
@@ -600,10 +608,10 @@ export function formatApplyHuman(result: {
 			return formatPreAppendRefusalHuman(line, result.refusal);
 		return [
 			line,
-			`refusal: ${result.refusal.cause}`,
-			`state: ${result.refusal.state}`,
-			`withheld authority: ${result.refusal.withheldAuthority}`,
-			`resolving command: ${result.refusal.resolvingCommand}`,
+			`refusal: ${escapeDiagnosticText(result.refusal.cause)}`,
+			`state: ${escapeDiagnosticText(result.refusal.state)}`,
+			`withheld authority: ${escapeDiagnosticText(result.refusal.withheldAuthority)}`,
+			`resolving command: ${escapeDiagnosticText(result.refusal.resolvingCommand)}`,
 		].join('\n');
 	}
 	if (result.outcome !== 'plan-digest-mismatch' || !result.result) return line;
@@ -755,6 +763,9 @@ export type ApplyConfirmation = (
 	planDigest: string,
 ) => Promise<boolean>;
 
+/** Rendering is injected so the public pipeline can prove presentation precedes consent. */
+export type ApplyPlanPresenter = (plan: PlanResult) => void;
+
 /** The sole interactive gate for no-argument apply. EOF and every non-y answer refuse. */
 export async function confirmNoArgumentApply(
 	runId: string,
@@ -783,6 +794,7 @@ export async function runNoArgumentApply(
 	options: ApplyOptions,
 	confirm: ApplyConfirmation = confirmNoArgumentApply,
 	execute: typeof runApply = runApply,
+	present: ApplyPlanPresenter = () => undefined,
 ): Promise<NoArgumentApplyResult> {
 	if (!options.schemaFile)
 		throw new Error('no-argument apply requires --schema-file <path>');
@@ -833,6 +845,8 @@ export async function runNoArgumentApply(
 			planDigest: effectivePlan.planDigest,
 		};
 	}
+	// Persisted material is shown before any confirmation requirement or prompt.
+	present(effectivePlan);
 	if (options.yes !== true && process.stdin.isTTY !== true) {
 		return {
 			outcome: 'confirmation-required',
@@ -966,9 +980,7 @@ export async function runApply(
 						actualDigest !== current.run.planDigest ||
 						actualDigest !== expectedPlanDigest
 					)
-						throw new Error(
-							'persisted generator plan digest does not match the recorded review',
-						);
+						throw new RecordedPlanDigestMismatchError();
 					return executeGeneratorPlan({
 						pool: owned,
 						manifest: manifest.manifest,
@@ -1094,14 +1106,26 @@ export async function runApply(
 			}
 		}
 	} catch (error) {
-		if (pool === undefined) {
-			try {
-				await owned.end();
-			} catch {
-				// The primary failure remains the command failure.
+		if (error instanceof RecordedPlanDigestMismatchError) {
+			result = {
+				outcome: 'plan-digest-mismatch',
+				runId,
+				result: {
+					assessment: {
+						reasons: [{ detail: error.message }],
+					},
+				} as unknown as ApplyResult,
+			};
+		} else {
+			if (pool === undefined) {
+				try {
+					await owned.end();
+				} catch {
+					// The primary failure remains the command failure.
+				}
 			}
+			throw error;
 		}
-		throw error;
 	}
 	if (pool === undefined) {
 		return withPoolCleanupReported(result, () => owned.end());
@@ -1145,7 +1169,12 @@ export const applyCommand = new Command('apply')
 		if (runId === undefined) {
 			let result: NoArgumentApplyResult | { readonly error: string };
 			try {
-				result = await runNoArgumentApply(options);
+				result = await runNoArgumentApply(
+					options,
+					confirmNoArgumentApply,
+					runApply,
+					(plan) => console.log(formatPlanHuman(plan, options.dryRun === true)),
+				);
 			} catch (error) {
 				result = {
 					error: error instanceof Error ? error.message : String(error),
@@ -1154,7 +1183,7 @@ export const applyCommand = new Command('apply')
 			if ('error' in result) {
 				if (options.format === 'json')
 					printCliJson({ outcome: 'apply-failed', ...result });
-				else console.error(`❌ ${result.error}`);
+				else console.error(`❌ ${escapeDiagnosticText(result.error)}`);
 				process.exitCode = exitCodeForApplyOutcome('apply-failed');
 				return;
 			}
@@ -1174,7 +1203,8 @@ export const applyCommand = new Command('apply')
 					...('result' in result ? { apply: result.result } : {}),
 				});
 			} else {
-				console.log(formatPlanHuman(result.plan, options.dryRun === true));
+				if (result.outcome === 'dry-run' || result.outcome === 'not-executable')
+					console.log(formatPlanHuman(result.plan, options.dryRun === true));
 				if (result.outcome === 'confirmation-required')
 					console.error(
 						'confirmation-required: rerun with --yes or from an interactive TTY',

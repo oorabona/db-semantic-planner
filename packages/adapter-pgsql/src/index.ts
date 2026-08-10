@@ -283,6 +283,7 @@ export {
 	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
 	type LogicalIdentityAdoptionMatch,
 	type LogicalIdentityAdoptionRuleOptions,
+	lockPgJournalRun,
 	MANUAL_SQL_OPERATION_KIND,
 	type ManualSqlPayload,
 	NO_NULLS_GUARD,

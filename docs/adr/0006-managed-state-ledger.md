@@ -462,14 +462,14 @@ ownership prevents takeover, the admitted-execution facade rejects fabricated
 in-process inputs at its boundary, and claim/resolution recovery records a
 crash or a lost COMMIT acknowledgement without treating it as a successful
 operation. External DDL is detected by catalogue identity and operation
-read-back before management is re-established. #TBD
+read-back before management is re-established.
 
 These are detection and coordination guarantees, not a privilege boundary. A
 superuser or table owner can race name resolution between the identity read and
 DDL; dbsp detects that conflict post-hoc through its identity/read-back checks
-but cannot prevent it. #TBD In-process code using the internal adapter subpath
-is trusted, as stated above. #TBD Advisory locks bind only cooperating dbsp
-processes; they do not constrain direct PostgreSQL clients. #TBD
+but cannot prevent it. In-process code using the internal adapter subpath
+is trusted, as stated above. Advisory locks bind only cooperating dbsp
+processes; they do not constrain direct PostgreSQL clients.
 
 Two of the three writers become one and one ceases to exist. The managed scope is narrower than
 the DDL path's reach, and the guarantee says so. A stored state drifting from its own history is

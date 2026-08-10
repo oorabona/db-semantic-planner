@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
 	executePgAdmittedOperation,
+	lockPgJournalRun,
 	type PgOutcomeTransactionalRequest,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -50,7 +51,10 @@ function runAdmitted(
 	]);
 	if (!manifest.ok) throw new Error(manifest.detail);
 	return executePgAdmittedOperation(executor, {
-		run: { runId: 'e2e-fixture', planDigest: 'e2e-fixture' },
+		run: lockPgJournalRun({
+			runId: 'e2e-fixture',
+			planDigest: 'e2e-fixture',
+		}),
 		approval: { approvals: [] },
 		manifest: manifest.manifest,
 		recomputedPlanDigest: 'e2e-fixture',

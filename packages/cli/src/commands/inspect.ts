@@ -278,6 +278,10 @@ export async function runInspect(
 							kind: 'catalogue-unavailable',
 							reason: error instanceof Error ? error.message : String(error),
 						},
+						failedSubsystem: {
+							subsystem: 'ledger',
+							reason: error instanceof Error ? error.message : String(error),
+						},
 					};
 				}
 			}

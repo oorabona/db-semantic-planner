@@ -21,6 +21,7 @@ const DDL_SINK_ALLOWLIST: Readonly<Record<string, string>> = {
 	'pgsql-adapter.ts': 'explicitly unmanaged API',
 	'transition/ledger.ts': 'ledger bootstrap and explicitly managed storage API',
 	'transition/observation-issuer.ts': 'token-gated managed DDL',
+	'transition/outcome-protocol.ts': 'token-gated managed DDL',
 	'transition/reinitialize-preflight.ts':
 		'separately privileged ledger cutover',
 };
@@ -53,6 +54,11 @@ function isDdlSqlExpression(node: ts.Expression): boolean {
 	if (ts.isParenthesizedExpression(node))
 		return isDdlSqlExpression(node.expression);
 	return false;
+}
+
+/** Dynamic planned SQL is just as much a DDL sink as a literal. */
+function isPlannedSqlExpression(node: ts.Expression): boolean {
+	return ts.isPropertyAccessExpression(node) && node.name.text === 'sql';
 }
 
 function hasDdlSink(source: string, file: string): boolean {
@@ -145,6 +151,7 @@ function hasDdlSink(source: string, file: string): boolean {
 			node.expression.name.text === 'query' &&
 			node.arguments[0] !== undefined &&
 			(isDdlSqlExpression(node.arguments[0]) ||
+				isPlannedSqlExpression(node.arguments[0]) ||
 				(ts.isIdentifier(node.arguments[0]) &&
 					ddlBindings.has(node.arguments[0].text)))
 		)
@@ -161,6 +168,15 @@ describe('SC-65 DDL execution sink inventory', () => {
 			hasDdlSink(
 				"const statement = 'DROP TABLE tenant.accounts'; await executor.query(statement);",
 				'indirection.ts',
+			),
+		).toBe(true);
+	});
+
+	it('rejects a new dynamic statement.sql sender', () => {
+		expect(
+			hasDdlSink(
+				'async function send(executor: { query(sql: string): unknown }, statement: { sql: string }) { await executor.query(statement.sql); }',
+				'dynamic-indirection.ts',
 			),
 		).toBe(true);
 	});
@@ -186,5 +202,5 @@ describe('SC-65 DDL execution sink inventory', () => {
 			expect(DDL_SINK_ALLOWLIST[sink]).toMatch(
 				/token-gated managed DDL|explicitly unmanaged(?: API| test fixture API)|ledger bootstrap and explicitly managed storage API|separately privileged ledger cutover/u,
 			);
-	});
+	}, 20_000);
 });

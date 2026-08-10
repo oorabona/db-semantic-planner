@@ -6,12 +6,14 @@ import type {
 } from '@dbsp/types';
 import { refusalFor } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import type { PgLockedRun } from './outcome-protocol.js';
 import {
 	appendPgOutcomeResolution,
 	checkApprovalScope,
 	checkDigestBinding,
 	checkLiveAdmission,
 	checkValidatedManifest,
+	lockPgJournalRun,
 	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
 	recoverPgAdmittedReaddressPair,
@@ -19,6 +21,13 @@ import {
 	runPgTransactionalOutcome,
 	withPgTransitionTransaction,
 } from './outcome-protocol.js';
+
+// @ts-expect-error PgLockedRun is minted only at the journal-load/run-lock bridge.
+const structurallyBuiltLockedRun: PgLockedRun = {
+	runId: 'caller-string-run',
+	planDigest: 'caller-string-digest',
+};
+void structurallyBuiltLockedRun;
 
 const address = {
 	scope: 'schema' as const,
@@ -237,7 +246,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 				reservations: [],
 			}),
 		};
-		const run = { runId: 'reviewed-run', planDigest };
+		const run = lockPgJournalRun({ runId: 'reviewed-run', planDigest });
 
 		expect(
 			checkApprovalScope({
@@ -269,6 +278,38 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		});
 	});
 
+	it('refuses a destructive grant whose trust root differs from the declared policy root', () => {
+		const planDigest = 'trust-root-bound-plan';
+		const operation = {
+			kind: 'destructive-outcome' as const,
+			request: { ...request('trust-root-claim'), members: [] } as never,
+			readBackAndResolve: async () => ({
+				rootClaimId: 'trust-root-claim',
+				members: [],
+				reservations: [],
+			}),
+		};
+		expect(
+			checkApprovalScope({
+				run: lockPgJournalRun({ runId: 'trust-root-run', planDigest }),
+				approval: {
+					declaredTrustRoot: { kind: 'policy', policyId: 'reviewed-policy' },
+					approvals: [
+						{
+							class: `destructive-plan-accepted:${planDigest}`,
+							fromTrustRoot: { kind: 'policy', policyId: 'attacker-policy' },
+						},
+					],
+				},
+				operation,
+			}),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason:
+				'admitted operation refuses destructive approval outside its scope or trust root',
+		});
+	});
+
 	it('does not let a table A approval-scope verdict mint a permit for table B', async () => {
 		const tableA = {
 			scope: 'schema' as const,
@@ -286,6 +327,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			plannedClaimKey: 'scope-bound-step-a/root',
 			address: tableA,
 			claimKind: 'intent',
+			requiresVacancy: true,
 			statementBundle: {
 				statements: [
 					{ ordinal: 0, sql: 'ALTER TABLE tenant.accounts ADD x integer' },
@@ -298,6 +340,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			plannedClaimKey: 'scope-bound-step-b/root',
 			address: tableB,
 			claimKind: 'intent',
+			requiresVacancy: true,
 			statementBundle: {
 				statements: [
 					{ ordinal: 0, sql: 'ALTER TABLE tenant.audit_log ADD x integer' },
@@ -320,7 +363,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			},
 		]);
 		if (!validation.ok) throw new Error(validation.detail);
-		const run = { runId: 'scope-bound-run', planDigest };
+		const run = lockPgJournalRun({ runId: 'scope-bound-run', planDigest });
 		const operationA = {
 			kind: 'single-outcome' as const,
 			request: {
@@ -548,6 +591,32 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(executor.sql[checkpoint - 1]).toBe('COMMIT');
 		expect(executor.sql.slice(checkpoint)).toContain(
 			'CREATE TABLE tenant.accounts (id integer)',
+		);
+	});
+
+	it('refuses a mid-window non-transactional live-admission attack before executing or DDL', async () => {
+		const executor = recorder();
+		const result = await runPgNonTransactionalOutcome(executor, {
+			...request('nontransactional-live-attack'),
+			executingEventId: 'nontransactional-live-attack-executing',
+			resolution: {
+				eventId: 'nontransactional-live-attack-refused',
+				eventKind: 'observed',
+			},
+			verifyLiveAdmission: async () => ({
+				kind: 'outcome-protocol-refused',
+				reason: 'live controller changed after claim admission',
+			}),
+		});
+		expect(result).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'live controller changed after claim admission',
+		});
+		expect(executor.sql).not.toContain(
+			'CREATE TABLE tenant.accounts (id integer)',
+		);
+		expect(executor.sql).not.toContain(
+			'nontransactional-live-attack-executing',
 		);
 	});
 

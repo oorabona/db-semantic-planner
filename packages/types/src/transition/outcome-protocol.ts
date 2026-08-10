@@ -72,6 +72,14 @@ export interface SqlBearingOutcomeClaimPlan extends OutcomeClaimPlanBase {
 	readonly statementBundle: ClaimStatementBundle;
 }
 
+/** Adoption records a present live object but deliberately sends no SQL. */
+export interface AdoptionOutcomeClaimPlan extends OutcomeClaimPlanBase {
+	readonly claimSpecies: 'adoption';
+	readonly rootClaimId?: string;
+	readonly claimKind: 'adopt-intent';
+	readonly statementBundle: EmptyClaimStatementBundle;
+}
+
 /** A closure member whose terminal fact is covered by its root claim's SQL. */
 export interface CascadeCoveredOutcomeClaimPlan extends OutcomeClaimPlanBase {
 	readonly claimSpecies: 'cascade-covered';
@@ -83,6 +91,7 @@ export interface CascadeCoveredOutcomeClaimPlan extends OutcomeClaimPlanBase {
 /** The fixed plan-time material that becomes one ledger claim. */
 export type OutcomeClaimPlan =
 	| SqlBearingOutcomeClaimPlan
+	| AdoptionOutcomeClaimPlan
 	| CascadeCoveredOutcomeClaimPlan;
 
 /** The only successful result of admission, including its single-use token. */
@@ -112,9 +121,6 @@ export type OutcomeVacancy =
 export interface OutcomeClaimAdmissionInput {
 	readonly plan: OutcomeClaimPlan;
 	readonly projection: LedgerChainProjection;
-	/** Read exactly once by the adapter in the claiming transaction. */
-	/** @deprecated Compatibility input for pre-controller-OID callers. */
-	readonly currentUser?: string;
 	/** Current role read by the adapter on the locked claiming session. */
 	readonly currentController?: ControllerIdentity;
 	/** Fresh locked catalogue identity for an existing managed address. */

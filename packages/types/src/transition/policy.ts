@@ -18,4 +18,6 @@ export interface ApplyPolicy {
  */
 export interface ScopedApprovalSet {
 	readonly approvals: readonly AssumptionAcceptance[];
+	/** The authority root declared for this admitted policy evaluation. */
+	readonly declaredTrustRoot?: TrustRoot;
 }

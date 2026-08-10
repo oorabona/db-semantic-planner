@@ -13,7 +13,10 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	};
 });
 
-import { executeGeneratorPlan } from './generator-execution.js';
+import {
+	executeGeneratorPlan,
+	readGeneratedPostcondition,
+} from './generator-execution.js';
 
 const dataDestructiveStep: NormalizedManagedStep = {
 	stepKey: 'generator:0',
@@ -44,6 +47,75 @@ const dataDestructiveStep: NormalizedManagedStep = {
 };
 
 describe('generator execution fixture shim', () => {
+	it.each([
+		[
+			{
+				...dataDestructiveStep,
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'column' as const,
+					name: 'id',
+					parent: dataDestructiveStep.address,
+				},
+			},
+			[{ column_type: 'integer', is_not_null: true, column_default: null }],
+		],
+		[
+			{
+				...dataDestructiveStep,
+				statementBundle: {
+					statements: [
+						{
+							ordinal: 0,
+							sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT accounts_check CHECK (id > 0)',
+						},
+					],
+				},
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'constraint' as const,
+					name: 'accounts_check',
+					parent: dataDestructiveStep.address,
+				},
+			},
+			[{ constraint_type: 'c', constraint_definition: 'CHECK (id < 0)' }],
+		],
+		[
+			{
+				...dataDestructiveStep,
+				statementBundle: {
+					statements: [
+						{
+							ordinal: 0,
+							sql: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+						},
+					],
+				},
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'index' as const,
+					name: 'accounts_id_idx',
+					parent: dataDestructiveStep.address,
+				},
+			},
+			[
+				{
+					is_unique: false,
+					index_definition:
+						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
+				},
+			],
+		],
+	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
+		await expect(
+			readGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows }) },
+				step as unknown as NormalizedManagedStep,
+				step.address! as never,
+			),
+		).rejects.toThrow('postcondition differs');
+	});
+
 	it('validates plan fixtures before destructive admission and passes the branded manifest', async () => {
 		executePgAdmittedOperation.mockResolvedValue({
 			kind: 'executed-destructive-outcome',

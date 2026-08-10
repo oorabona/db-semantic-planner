@@ -18,6 +18,7 @@ import {
 } from './constants.js';
 import { classifyPgWrite } from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
+import { readPgLedgerMarker } from './reinitialize-preflight.js';
 
 const LEDGER_EVENT_KINDS_SQL = [
 	'adopt-intent',
@@ -817,7 +818,24 @@ export async function readPgLedgerReservationsForPair(
 			? ({ scope: 'database' } as const)
 			: ({ scope: 'schema', schema: row.nspname } as const);
 	});
-	return readPgLedgerReservationsForPairInHomes(executor, pairId, targets);
+	const verifiedTargets: PgLedgerTarget[] = [];
+	for (const target of targets) {
+		// Relation-name discovery is untrusted: a tenant can create an unrelated
+		// table with this name. Validate the ledger marker and full physical shape
+		// before interpolating its schema into a reservation read.
+		try {
+			await validatePgLedgerPhysicalShape(executor, target);
+			const marker = await readPgLedgerMarker(executor, target);
+			if (marker.kind === 'current') verifiedTargets.push(target);
+		} catch {
+			// A counterfeit or unreadable same-named relation is not a ledger home.
+		}
+	}
+	return readPgLedgerReservationsForPairInHomes(
+		executor,
+		pairId,
+		verifiedTargets,
+	);
 }
 
 /** Read a re-address pair only from ledger homes already admitted by a caller. */

@@ -19,6 +19,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
+	lockPgJournalRun,
 	recoverPgAdmittedReaddressPair,
 } from './outcome-protocol.js';
 
@@ -501,14 +502,48 @@ export async function executePgTableReaddress(
 			targetObserved: observed(member.target),
 		};
 	});
-	// Re-addressing is a paired protocol rather than a managed-step claim. Its
-	// empty validated manifest is nevertheless the façade's explicit proof that
-	// this operation has no unpaired managed-step material to substitute.
-	const manifest = validateNormalizedManagedStepManifest([]);
+	const root = operationMembers[0];
+	if (!root)
+		return {
+			outcome: 'readdress-refused',
+			detail: 're-address has no closure members',
+		};
+	const statements = renderPgTableReaddressStatements(source, target).map(
+		(sql, ordinal) => ({ ordinal, sql }),
+	);
+	const manifestPlan = {
+		claimId: root.sourceClaimId,
+		claimSpecies: 'sql-bearing' as const,
+		executionId: request.executionId,
+		plannedClaimKey: `readdress:${pairId}:source`,
+		claimGroupId: pairId,
+		rootClaimId: root.sourceClaimId,
+		address: root.source,
+		claimKind: 'readdress-intent' as const,
+		statementBundle: { statements },
+		requiresVacancy: false,
+	};
+	// The pair's root is reviewed as a real manifest entry. Closure members are
+	// bound by the paired live admission and may not carry independent SQL.
+	const manifest = validateNormalizedManagedStepManifest([
+		{
+			stepKey: `readdress:${pairId}`,
+			order: 0,
+			segmentId: pairId,
+			dependencyOrder: [],
+			address: root.source as never,
+			claimKind: 'readdress-intent',
+			plannedClaimKeys: [manifestPlan.plannedClaimKey],
+			statementBundle: manifestPlan.statementBundle,
+			classification: 'non-destructive',
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+		},
+	]);
 	if (!manifest.ok)
 		throw new Error(`re-address manifest is invalid: ${manifest.detail}`);
 	const result = await executePgAdmittedOperation(executor, {
-		run: { runId: request.executionId, planDigest: pairId },
+		run: lockPgJournalRun({ runId: request.executionId, planDigest: pairId }),
 		approval: { approvals: [] },
 		manifest: manifest.manifest,
 		recomputedPlanDigest: pairId,
@@ -532,9 +567,8 @@ export async function executePgTableReaddress(
 						member.targetClaimId,
 					),
 				]),
-				statements: renderPgTableReaddressStatements(source, target).map(
-					(sql, ordinal) => ({ ordinal, sql }),
-				),
+				statements,
+				manifestPlan,
 				verifyLiveAdmission: async (session, currentController) => {
 					const lockedMembers = await readClosure(session, source, target);
 					if (

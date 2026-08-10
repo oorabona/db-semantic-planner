@@ -35,6 +35,7 @@ function event(
 		eventKind,
 		...(predecessor === undefined ? {} : { predecessor }),
 		controller: 'deployment',
+		controllerOid: '10',
 	};
 }
 
@@ -62,7 +63,7 @@ function admit(
 		projection: projectLedgerChain({ ledger, address, events }),
 		...(events.length > 0
 			? {
-					currentUser: 'deployment',
+					currentController: { name: 'deployment', oid: '10' },
 					liveAddress: {
 						...address,
 						catalogueIdentity: {

@@ -100,6 +100,31 @@ describe('no-argument apply pipeline', () => {
 		}
 	});
 
+	it('presents the persisted plan before it asks the interactive attacker to confirm it', async () => {
+		runPlan.mockResolvedValue(provenPlan);
+		const order: string[] = [];
+		const descriptor = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+		Object.defineProperty(process.stdin, 'isTTY', {
+			configurable: true,
+			value: true,
+		});
+		try {
+			await runNoArgumentApply(
+				{ db: 'postgres://test', schemaFile: 'schema.ts' },
+				async () => {
+					order.push('confirm');
+					return false;
+				},
+				undefined,
+				() => order.push('present'),
+			);
+			expect(order).toEqual(['present', 'confirm']);
+		} finally {
+			if (descriptor) Object.defineProperty(process.stdin, 'isTTY', descriptor);
+			else delete (process.stdin as { isTTY?: boolean }).isTTY;
+		}
+	});
+
 	it('--yes executes only after the planner returned its durable run', async () => {
 		runPlan.mockResolvedValue(provenPlan);
 		const execute = vi.fn(async () => ({

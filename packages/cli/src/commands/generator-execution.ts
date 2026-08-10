@@ -1,10 +1,12 @@
 /** Live-only executor for the no-argument schema-differ plan. */
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	compareSchemata,
 	createPgsqlAdapter,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
+	lockPgJournalRun,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
@@ -63,13 +65,6 @@ function matchesReviewedReplacementSelector(
 
 export type GeneratorExecutionResult =
 	| { readonly outcome: 'completed' }
-	| {
-			readonly outcome: 'partially-applied';
-			readonly detail: string;
-			readonly completedStepKeys: readonly string[];
-			readonly notStartedStepKeys: readonly string[];
-	  }
-	| { readonly outcome: 'selection-incomplete'; readonly detail: string }
 	| {
 			readonly outcome: 'partially-applied';
 			readonly detail: string;
@@ -209,6 +204,133 @@ function observed(address: LedgerAddress): LedgerPayload {
 		value: { kind: address.kind, name: address.name },
 		digest: `generator:${address.kind}:${address.name}`,
 	};
+}
+
+function normalizedDefinition(value: string): string {
+	return value
+		.replaceAll('"', '')
+		.replace(/\s+/gu, ' ')
+		.replace(/;$/u, '')
+		.trim()
+		.toLowerCase();
+}
+
+function generatedPayload(value: unknown): LedgerPayload {
+	return {
+		value: value as LedgerPayload['value'],
+		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+	};
+}
+
+/**
+ * Generated DDL has no operation runtime to supply an observation. Read the
+ * precise catalogue fields it changes; a same-named object is never enough to
+ * write an `observed` terminal.
+ */
+export async function readGeneratedPostcondition(
+	executor: LedgerQueryable,
+	step: NormalizedManagedStep,
+	address: LedgerAddress,
+): Promise<LedgerPayload> {
+	const statement = step.statementBundle.statements.at(-1)?.sql;
+	if (!statement) throw new Error(`generated step ${step.stepKey} has no SQL`);
+	const parent = address.parent?.name;
+	if (address.kind === 'column' && parent && address.schema) {
+		const row = (
+			await executor.query(
+				`SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
+				[address.schema, parent, address.name],
+			)
+		).rows[0];
+		if (!row) throw new Error(`generated column ${address.name} is absent`);
+		const type = String(row.column_type ?? '');
+		const nullable =
+			row.is_not_null === true
+				? false
+				: row.is_not_null === false
+					? true
+					: undefined;
+		const actualDefault =
+			row.column_default == null ? undefined : String(row.column_default);
+		const typeMatch = /\bTYPE\s+(.+?)(?:\s+USING\b|;|$)/iu.exec(statement);
+		if (
+			typeMatch &&
+			normalizedDefinition(type) !== normalizedDefinition(typeMatch[1] ?? '')
+		)
+			throw new Error(
+				`generated column ${address.name} type postcondition differs`,
+			);
+		if (/\bSET\s+NOT\s+NULL\b/iu.test(statement) && nullable !== false)
+			throw new Error(
+				`generated column ${address.name} nullability postcondition differs`,
+			);
+		if (/\bDROP\s+NOT\s+NULL\b/iu.test(statement) && nullable !== true)
+			throw new Error(
+				`generated column ${address.name} nullability postcondition differs`,
+			);
+		const defaultMatch = /\bSET\s+DEFAULT\s+(.+?);?$/iu.exec(statement);
+		if (
+			defaultMatch &&
+			normalizedDefinition(actualDefault ?? '') !==
+				normalizedDefinition(defaultMatch[1] ?? '')
+		)
+			throw new Error(
+				`generated column ${address.name} default postcondition differs`,
+			);
+		if (/\bDROP\s+DEFAULT\b/iu.test(statement) && actualDefault !== undefined)
+			throw new Error(
+				`generated column ${address.name} default postcondition differs`,
+			);
+		return generatedPayload({
+			kind: 'column',
+			type,
+			nullable,
+			default: actualDefault,
+		});
+	}
+	if (address.kind === 'constraint' && parent && address.schema) {
+		const row = (
+			await executor.query(
+				`SELECT constraint.conname AS constraint_name, constraint.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint.oid, true) AS constraint_definition FROM pg_catalog.pg_constraint constraint JOIN pg_catalog.pg_class relation ON relation.oid = constraint.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint.conname = $3`,
+				[address.schema, parent, address.name],
+			)
+		).rows[0];
+		if (!row) throw new Error(`generated constraint ${address.name} is absent`);
+		const definition = String(row.constraint_definition ?? '');
+		const expected = /\bADD\s+CONSTRAINT\s+(?:"[^"]+"|\S+)\s+(.+?);?$/iu.exec(
+			statement,
+		)?.[1];
+		if (
+			expected &&
+			normalizedDefinition(definition) !== normalizedDefinition(expected)
+		)
+			throw new Error(
+				`generated constraint ${address.name} postcondition differs`,
+			);
+		return generatedPayload({
+			kind: 'constraint',
+			type: String(row.constraint_type ?? ''),
+			definition,
+		});
+	}
+	if (address.kind === 'index' && parent && address.schema) {
+		const row = (
+			await executor.query(
+				`SELECT index_relation.relname AS index_name, index_meta.indisunique AS is_unique, pg_catalog.pg_get_indexdef(index_meta.indexrelid, 0, true) AS index_definition FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
+				[address.schema, parent, address.name],
+			)
+		).rows[0];
+		if (!row) throw new Error(`generated index ${address.name} is absent`);
+		const definition = String(row.index_definition ?? '');
+		if (normalizedDefinition(definition) !== normalizedDefinition(statement))
+			throw new Error(`generated index ${address.name} postcondition differs`);
+		return generatedPayload({
+			kind: 'index',
+			unique: row.is_unique === true,
+			definition,
+		});
+	}
+	return observed(address);
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
@@ -489,7 +611,10 @@ export async function executeGeneratorPlan(input: {
 				}
 				return result;
 			}
-			if (step.statementBundle.statements.length === 0) continue;
+			if (step.statementBundle.statements.length === 0) {
+				completedStepKeys.push(step.stepKey);
+				continue;
+			}
 			const address = step.address ?? step.closure?.root;
 			if (!address)
 				return {
@@ -506,8 +631,10 @@ export async function executeGeneratorPlan(input: {
 				step.classification === 'non-destructive' &&
 				step.requiresVacancy &&
 				(await alreadyAppliedCreation(input.pool, address))
-			)
+			) {
+				completedStepKeys.push(step.stepKey);
 				continue;
+			}
 			const claimKind: LedgerClaimKind = step.claimKind;
 			const rootClaimId = outcomeClaimId(executionId, plannedClaimKey, address);
 			const claim = {
@@ -531,7 +658,10 @@ export async function executeGeneratorPlan(input: {
 			};
 			if (step.classification === 'non-destructive') {
 				const result = await executePgAdmittedOperation(input.pool, {
-					run: { runId: input.runId, planDigest: input.planDigest },
+					run: lockPgJournalRun({
+						runId: input.runId,
+						planDigest: input.planDigest,
+					}),
 					approval,
 					manifest,
 					recomputedPlanDigest: input.planDigest,
@@ -544,7 +674,8 @@ export async function executeGeneratorPlan(input: {
 								eventId: outcomeClaimEventId(claim.claimId, 'observed'),
 								eventKind: 'observed',
 							},
-							readBack: async () => observed(address),
+							readBack: async () =>
+								readGeneratedPostcondition(input.pool, step, address),
 							recordCatalogueIdentity: true,
 							vacancy: async (executor: LedgerQueryable) =>
 								(await readPgCatalogueIdentity(executor, address))
@@ -672,7 +803,10 @@ export async function executeGeneratorPlan(input: {
 				},
 			};
 			const executed = (await executePgAdmittedOperation(input.pool, {
-				run: { runId: input.runId, planDigest: input.planDigest },
+				run: lockPgJournalRun({
+					runId: input.runId,
+					planDigest: input.planDigest,
+				}),
 				approval,
 				manifest,
 				recomputedPlanDigest: input.planDigest,

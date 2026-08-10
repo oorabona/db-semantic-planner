@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
 	readChain: vi.fn(),
 	readIdentity: vi.fn(),
 	executeAdmitted: vi.fn(),
+	lockPgJournalRun: vi.fn((run) => run),
 }));
 
 vi.mock('./chain-reader.js', () => ({
@@ -14,6 +15,7 @@ vi.mock('./catalogue-identity.js', () => ({
 }));
 vi.mock('./outcome-protocol.js', () => ({
 	executePgAdmittedOperation: mocks.executeAdmitted,
+	lockPgJournalRun: mocks.lockPgJournalRun,
 }));
 
 import { executePgDeclaredAdoption } from './adoption.js';

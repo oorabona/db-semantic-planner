@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
+	escapeDiagnosticText,
 	type PgReinitializePreflightPool,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -156,10 +157,10 @@ function formatScope(
 			? 'dbsp_meta'
 			: (scope.ledger.schema ?? 'unknown');
 	if (scope.outcome === 'failed')
-		return `${name}: failed (${scope.reason.step}: ${scope.reason.message})`;
+		return `${escapeDiagnosticText(name)}: failed (${escapeDiagnosticText(scope.reason.step)}: ${escapeDiagnosticText(scope.reason.message)})`;
 	return scope.refusal
-		? `${name}: ${scope.outcome} (${scope.refusal.code}: ${scope.refusal.detail})`
-		: `${name}: ${scope.outcome}`;
+		? `${escapeDiagnosticText(name)}: ${escapeDiagnosticText(scope.outcome)} (${escapeDiagnosticText(scope.refusal.code)}: ${escapeDiagnosticText(scope.refusal.detail)})`
+		: `${escapeDiagnosticText(name)}: ${escapeDiagnosticText(scope.outcome)}`;
 }
 
 export const preflightCommand = new Command('preflight')
@@ -193,7 +194,11 @@ export const preflightCommand = new Command('preflight')
 				`Wrote ${report.adoptionCandidates.length} adoption candidate(s) to ${options.out}.`,
 			);
 		} catch (error) {
-			console.error(error instanceof Error ? error.message : String(error));
+			console.error(
+				escapeDiagnosticText(
+					error instanceof Error ? error.message : String(error),
+				),
+			);
 			process.exitCode = 1;
 		}
 	});

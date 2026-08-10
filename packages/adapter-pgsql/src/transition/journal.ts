@@ -280,10 +280,7 @@ function assertRunTableShape(row: JournalTableShapeRow | undefined): void {
 		core_version: 'text',
 		started_at: 'timestamp with time zone',
 	};
-	if (
-		!columnsMatch(columns, legacyColumns) &&
-		!columnsMatch(columns, { ...legacyColumns, replayability: 'text' })
-	) {
+	if (!columnsMatch(columns, { ...legacyColumns, replayability: 'text' })) {
 		throw new Error('dbsp transition run journal table columns drifted');
 	}
 	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id"]') {
