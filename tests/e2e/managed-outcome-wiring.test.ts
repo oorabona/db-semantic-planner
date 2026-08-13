@@ -4,16 +4,26 @@ import {
 	createPgsqlAdapter,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
+	executePgAdmittedOperation,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
+	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
-// E2E deliberately exercises the non-transactional outcome internal.
 import {
+	lockPgJournalRun,
 	openPgOutcomeClaim,
-	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql/internal';
-import { type ModelIR, outcomeClaimEventId, outcomeClaimId } from '@dbsp/core';
+import {
+	acquireExclusiveTransitionLease,
+	type ModelIR,
+	outcomeClaimEventId,
+	outcomeClaimId,
+	planOperationSession,
+	transitionPlanDigest,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	LedgerReservationRow,
 	ManagedStepClaimMaterial,
@@ -180,6 +190,134 @@ function reservation(
 		rootClaimId: claim.claimId,
 		homeLedger: { scope: 'schema', schema: claim.address.schema },
 	};
+}
+
+/**
+ * Re-enter a reviewed, persisted run at the admitted facade's observable
+ * executing-to-send boundary.  This keeps the PID assertion on the actual
+ * durable execution session without calling the removed raw runner.
+ */
+async function runPersistedNonTransactionalAtGate(input: {
+	readonly pool: Awaited<ReturnType<typeof getTestPool>>;
+	readonly planned: PlannedRun;
+	readonly claim: OutcomeClaimPlan;
+	readonly reservations: readonly LedgerReservationRow[];
+	readonly onExecutingCommitted: (pid: number) => Promise<void>;
+}) {
+	// The checkpoint deliberately kills the run-lock connection. Mirror the old
+	// direct-driver harness's error listener even though this re-entry reaches
+	// that connection through the durable lock helper.
+	const runLockPool = Object.create(input.pool) as typeof input.pool;
+	runLockPool.connect = async () => {
+		const client = await input.pool.connect();
+		client.on('error', () => undefined);
+		return client;
+	};
+	let operationResult:
+		| Awaited<ReturnType<typeof executePgAdmittedOperation>>
+		| undefined;
+	try {
+		const locked = await withPgTransitionRunLock(
+			runLockPool,
+			input.planned.runId,
+			async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				try {
+					const executor = planOperationSession(lease.session);
+					const persisted = await readTransitionJournal(
+						executor,
+						input.planned.runId,
+						{ ensure: false },
+					);
+					const classification =
+						input.claim.claimKind === 'retire-intent'
+							? 'removal'
+							: 'non-destructive';
+					const manifest = validateNormalizedManagedStepManifest([
+						{
+							stepKey: input.claim.plannedClaimKey ?? input.claim.claimId,
+							order: 0,
+							segmentId: input.claim.claimId,
+							dependencyOrder: [],
+							address: input.claim.address as never,
+							claimKind: input.claim.claimKind,
+							plannedClaimKeys: [
+								input.claim.plannedClaimKey ?? input.claim.claimId,
+							],
+							statementBundle: input.claim.statementBundle,
+							classification,
+							requiresVacancy: input.claim.requiresVacancy ?? false,
+							replayPolicy:
+								classification === 'removal' ? 'fresh-live-only' : 'recorded',
+						},
+					]);
+					if (!manifest.ok)
+						throw new Error(
+							`persisted generator manifest is invalid: ${manifest.detail}`,
+						);
+					const planDigest = transitionPlanDigest(persisted.plan);
+					if (
+						planDigest !== persisted.run.planDigest ||
+						planDigest !== input.planned.planDigest
+					)
+						throw new Error(
+							'persisted generator plan digest does not match review',
+						);
+					operationResult = await executePgAdmittedOperation(executor, {
+						run: lockPgJournalRun(mintDurablyLoadedRun(persisted.run)),
+						approval: {
+							approvals: input.planned.plan.assumptions.map((assumption) => ({
+								class: assumption.class,
+							})),
+						},
+						manifest: manifest.manifest,
+						recomputedPlanDigest: planDigest,
+						operation: {
+							kind: 'single-outcome',
+							request: {
+								plan: input.claim,
+								reservations: input.reservations,
+								executingEventId: outcomeClaimEventId(
+									input.claim.claimId,
+									'executing',
+								),
+								resolution: {
+									eventId: outcomeClaimEventId(input.claim.claimId, 'observed'),
+									eventKind: 'observed',
+								},
+								vacancy: async () => ({ kind: 'vacant' }),
+								onExecutingCommitted: async () => {
+									const result = (await lease.session.query(
+										'SELECT pg_backend_pid() AS pid',
+									)) as { readonly rows: readonly { readonly pid?: number }[] };
+									const pid = result.rows[0]?.pid;
+									if (!pid)
+										throw new Error(
+											'executing gate session has no backend pid',
+										);
+									await input.onExecutingCommitted(pid);
+								},
+							},
+						},
+					});
+					return operationResult;
+				} finally {
+					await lease.release();
+				}
+			},
+		);
+		if (locked.kind === 'busy') throw new Error('persisted run lock is busy');
+		return locked.value;
+	} catch (error) {
+		if (
+			operationResult?.kind === 'outcome-protocol-refused' &&
+			errorDetail(error).startsWith(
+				'PostgreSQL transition run lock cleanup failed:',
+			)
+		)
+			return operationResult;
+		throw error;
+	}
 }
 
 async function provision(schema: string): Promise<void> {
@@ -475,54 +613,37 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 				untouched.runId,
 			);
 			const pool = await getTestPool();
-			const client = await pool.connect();
-			client.on('error', () => undefined);
 			let releaseSend!: () => void;
 			const send = new Promise<void>((resolve) => {
 				releaseSend = resolve;
 			});
-			let atExecutingGate!: () => void;
-			const executingGate = new Promise<void>((resolve) => {
+			let atExecutingGate!: (pid: number) => void;
+			const executingGate = new Promise<number>((resolve) => {
 				atExecutingGate = resolve;
 			});
-			try {
-				const pid = (
-					await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
-				).rows[0]?.pid;
-				if (!pid) throw new Error('executing gate client has no backend pid');
-				const running = runPgNonTransactionalOutcome(client, {
-					plan: interruptedExecutionClaim,
-					reservations: [
-						reservation(interruptedExecutionClaim, interrupted.runId),
-					],
-					executingEventId: outcomeClaimEventId(
-						interruptedExecutionClaim.claimId,
-						'executing',
-					),
-					resolution: {
-						eventId: outcomeClaimEventId(
-							interruptedExecutionClaim.claimId,
-							'observed',
-						),
-						eventKind: 'observed',
-					},
-					vacancy: async () => ({ kind: 'vacant' }),
-					onExecutingCommitted: async () => {
-						atExecutingGate();
-						await send;
-					},
-				});
-				await waitFor('the committed executing-to-send gate', executingGate);
-				await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
-					pid,
-				]);
-				releaseSend();
-				await expect(running).resolves.toMatchObject({
-					kind: 'outcome-protocol-refused',
-				});
-			} finally {
-				client.release(true);
-			}
+			const running = runPersistedNonTransactionalAtGate({
+				pool,
+				planned: interrupted,
+				claim: interruptedExecutionClaim,
+				reservations: [
+					reservation(interruptedExecutionClaim, interrupted.runId),
+				],
+				onExecutingCommitted: async (pid) => {
+					atExecutingGate(pid);
+					await send;
+				},
+			});
+			const pid = await waitFor(
+				'the committed executing-to-send gate',
+				executingGate,
+			);
+			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
+				pid,
+			]);
+			releaseSend();
+			await expect(running).resolves.toMatchObject({
+				kind: 'outcome-protocol-refused',
+			});
 			expect(
 				(
 					await pool.query(

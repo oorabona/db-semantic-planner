@@ -128,6 +128,7 @@ describe('generator execution fixture shim', () => {
 		await expect(
 			executeGeneratorPlan({
 				pool: pool as never,
+				run: {} as never,
 				plan,
 				planDigest: 'reviewed-plan',
 				schema: 'tenant',

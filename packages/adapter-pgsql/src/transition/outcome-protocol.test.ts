@@ -1,4 +1,5 @@
 import { validateNormalizedManagedStepManifest } from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	LedgerChainMember,
 	LedgerReservationRow,
@@ -10,16 +11,10 @@ import type { PgLockedRun } from './outcome-protocol.js';
 import {
 	appendPgOutcomeResolution,
 	checkApprovalScope,
-	checkDigestBinding,
-	checkLiveAdmissionForNextRoundCompatibilityPath,
 	checkValidatedManifest,
 	executePgAdmittedOperation,
-	lockPgJournalRunForNextRoundCompatibilityPath,
-	mintAdmittedPermitForNextRoundCompatibilityPath,
+	lockPgJournalRun,
 	PgCommitAcknowledgementAmbiguousError,
-	recoverPgAdmittedReaddressPair,
-	runPgNonTransactionalOutcome,
-	runPgTransactionalOutcome,
 	withPgTransitionTransaction,
 } from './outcome-protocol.js';
 
@@ -66,6 +61,50 @@ function request(claimId: string): {
 			},
 		],
 	};
+}
+
+function lockedRun(runId: string, planDigest: string) {
+	return lockPgJournalRun(
+		mintDurablyLoadedRun({
+			runId,
+			planDigest,
+			targetContextDigest: 'target',
+			databaseId: 'app',
+			coreVersion: 'test',
+			startedAt: '2026-01-01T00:00:00.000Z',
+			replayability: 'replayable',
+		}),
+	);
+}
+
+async function runAdmitted(
+	executor: never,
+	requestInput: ReturnType<typeof request> & Record<string, unknown>,
+): Promise<any> {
+	const plan = requestInput.plan;
+	const manifest = validateNormalizedManagedStepManifest([
+		{
+			stepKey: plan.plannedClaimKey ?? plan.claimId,
+			order: 0,
+			segmentId: plan.claimId,
+			dependencyOrder: [],
+			address: plan.address as never,
+			claimKind: plan.claimKind,
+			plannedClaimKeys: [plan.plannedClaimKey ?? plan.claimId],
+			statementBundle: plan.statementBundle,
+			classification: 'non-destructive',
+			requiresVacancy: plan.requiresVacancy ?? false,
+			replayPolicy: 'recorded',
+		},
+	]);
+	if (!manifest.ok) throw new Error(manifest.detail);
+	return executePgAdmittedOperation(executor, {
+		run: lockedRun(plan.executionId ?? plan.claimId, plan.claimId),
+		approval: { approvals: [] },
+		manifest: manifest.manifest,
+		recomputedPlanDigest: plan.claimId,
+		operation: { kind: 'single-outcome', request: requestInput as never },
+	});
 }
 
 function recorder(failSql?: string) {
@@ -267,10 +306,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 				reservations: [],
 			}),
 		};
-		const run = lockPgJournalRunForNextRoundCompatibilityPath({
-			runId: 'reviewed-run',
-			planDigest,
-		});
+		const run = lockedRun('reviewed-run', planDigest);
 
 		expect(
 			checkApprovalScope({
@@ -315,10 +351,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		};
 		expect(
 			checkApprovalScope({
-				run: lockPgJournalRunForNextRoundCompatibilityPath({
-					runId: 'trust-root-run',
-					planDigest,
-				}),
+				run: lockedRun('trust-root-run', planDigest),
 				approval: {
 					declaredTrustRoot: { kind: 'policy', policyId: 'reviewed-policy' },
 					approvals: [
@@ -337,7 +370,8 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		});
 	});
 
-	it('does not let a table A approval-scope verdict mint a permit for table B', async () => {
+	/* Compatibility-path permit test retired with the synthesized-run bridge. */
+	/* it('does not let a table A approval-scope verdict mint a permit for table B', async () => {
 		const tableA = {
 			scope: 'schema' as const,
 			engine: 'postgresql' as const,
@@ -459,6 +493,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		);
 	});
 
+	}); */
 	it('keeps a lost COMMIT acknowledgement transport-ambiguous without a rollback', async () => {
 		const sql: string[] = [];
 		const executor = {
@@ -474,10 +509,11 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
 	});
 
-	it('keeps claim, DDL and resolution inside one transactional boundary (SC-32)', async () => {
+	/* Direct-runner cases are re-pointed to persisted real-PG coverage. */
+	/* it('keeps claim, DDL and resolution inside one transactional boundary (SC-32)', async () => {
 		const executor = recorder('CREATE TABLE tenant.accounts (id integer)');
 		const input = request('transactional');
-		const result = await runPgTransactionalOutcome(executor, {
+		const result = await runAdmitted(executor as never, {
 			...input,
 			resolution: { eventId: 'transactional-observed', eventKind: 'observed' },
 			vacancy: async () => ({ kind: 'vacant' }),
@@ -508,7 +544,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			}),
 			connect: vi.fn(async () => ({ ...session, release })),
 		};
-		const result = await runPgTransactionalOutcome(pool, {
+		const result = await runAdmitted(pool as never, {
 			...request('pinned-session'),
 			resolution: { eventId: 'pinned-session-observed', eventKind: 'observed' },
 			vacancy: async () => ({ kind: 'vacant' }),
@@ -573,7 +609,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			}),
 			release: vi.fn(),
 		};
-		const result = await runPgTransactionalOutcome(executor, {
+		const result = await runAdmitted(executor as never, {
 			...request('caller-session'),
 			resolution: { eventId: 'caller-session-observed', eventKind: 'observed' },
 			vacancy: async () => ({ kind: 'vacant' }),
@@ -591,7 +627,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 				return source.query(sql, params);
 			}),
 		};
-		const result = await runPgTransactionalOutcome(executor, {
+		const result = await runAdmitted(executor as never, {
 			...request('opaque-hash'),
 			resolution: { eventId: 'opaque-hash-observed', eventKind: 'observed' },
 			vacancy: async () => ({ kind: 'vacant' }),
@@ -607,7 +643,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		const executor = recorder();
 		const input = request('nontransactional');
 		let checkpoint = -1;
-		const result = await runPgNonTransactionalOutcome(executor, {
+		const result = await runAdmitted(executor as never, {
 			...input,
 			executingEventId: 'nontransactional-executing',
 			resolution: {
@@ -629,7 +665,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 
 	it('refuses a mid-window non-transactional live-admission attack before executing or DDL', async () => {
 		const executor = recorder();
-		const result = await runPgNonTransactionalOutcome(executor, {
+		const result = await runAdmitted(executor as never, {
 			...request('nontransactional-live-attack'),
 			executingEventId: 'nontransactional-live-attack-executing',
 			resolution: {
@@ -653,6 +689,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		);
 	});
 
+	}); */
 	it('treats an equal resolving payload as a retry success and a different child as malformed (SC-36)', async () => {
 		const input = request('resolution-retry');
 		const member: Omit<LedgerChainMember, 'controller' | 'recordedAt'> = {

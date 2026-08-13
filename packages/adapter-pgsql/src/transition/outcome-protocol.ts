@@ -3,7 +3,6 @@ import {
 	projectLedgerChain,
 	selectorMatchesResource,
 	type ValidatedManagedStepManifest,
-	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import type { AdmittedDestructiveOutcomeClaim } from '@dbsp/core/internal';
 import {
@@ -26,7 +25,6 @@ import type {
 	LedgerEventKind,
 	LedgerPayload,
 	LedgerReservationRow,
-	NormalizedManagedStep,
 	OutcomeClaimAdmission,
 	OutcomeClaimPlan,
 	OutcomeIndeterminateRecoveryEvidence,
@@ -36,7 +34,6 @@ import type {
 	OutcomeRecoveryReadBack,
 	OutcomeVacancy,
 	ScopedApprovalSet,
-	TransitionRunMetadata,
 } from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -95,22 +92,6 @@ export function lockPgJournalRun(run: DurablyLoadedRun): PgLockedRun {
 	const locked = Object.freeze({
 		runId: run.metadata.runId,
 		planDigest: run.metadata.planDigest,
-	}) as PgLockedRun;
-	lockedRuns.add(locked);
-	return locked;
-}
-
-/**
- * NEXT ROUND target: direct compatibility paths have not yet been moved to
- * the core durable-run boundary. Keep their existing mint sites narrow and
- * private to this module until that migration is performed.
- */
-export function lockPgJournalRunForNextRoundCompatibilityPath(
-	run: Pick<TransitionRunMetadata, 'runId' | 'planDigest'>,
-): PgLockedRun {
-	const locked = Object.freeze({
-		runId: run.runId,
-		planDigest: run.planDigest,
 	}) as PgLockedRun;
 	lockedRuns.add(locked);
 	return locked;
@@ -365,7 +346,6 @@ const digestBindingVerdicts = new WeakSet<object>();
 const validatedManifestVerdicts = new WeakSet<object>();
 const approvalScopeVerdicts = new WeakMap<object, ApprovalScopeRecord>();
 const liveAdmissionVerdicts = new WeakMap<object, PostLockAdmissionEvidence>();
-const nextRoundCompatibilityLiveAdmissionVerdicts = new WeakSet<object>();
 
 function mintDigestBindingVerdict(): DigestBindingVerdict {
 	const verdict = Object.freeze({}) as DigestBindingVerdict;
@@ -401,12 +381,6 @@ function mintLiveAdmissionVerdict(
 }
 
 /** NEXT ROUND target for direct compatibility runners without durable evidence. */
-function mintLiveAdmissionVerdictForNextRoundCompatibilityPath(): LiveAdmissionVerdict {
-	const verdict = Object.freeze({}) as LiveAdmissionVerdict;
-	nextRoundCompatibilityLiveAdmissionVerdicts.add(verdict);
-	return verdict;
-}
-
 function requireAdmittedVerdicts(
 	digestBinding: DigestBindingVerdict,
 	validatedManifest: ValidatedManifestVerdict,
@@ -421,10 +395,7 @@ function requireAdmittedVerdicts(
 	if (!approvalScopeVerdicts.has(approvalScope))
 		throw new Error('admitted permit requires an approval-scope verdict');
 	const boundEvidence = liveAdmissionVerdicts.get(liveAdmission);
-	if (
-		!nextRoundCompatibilityLiveAdmissionVerdicts.has(liveAdmission) &&
-		(!boundEvidence || !isPostLockAdmissionEvidence(boundEvidence))
-	)
+	if (!boundEvidence || !isPostLockAdmissionEvidence(boundEvidence))
 		throw new Error(
 			'admitted permit requires a post-lock live-admission verdict',
 		);
@@ -451,33 +422,6 @@ export function mintAdmittedPermit(
 		approvalScope,
 		liveAdmission,
 		evidence,
-	);
-	const approval = approvalScopeVerdicts.get(approvalScope);
-	if (
-		approval?.classification !== 'single-outcome' ||
-		!sameLedgerAddress(approval.address, claim.plan.address)
-	)
-		throw new Error(
-			'admitted permit refuses an approval scope verdict for another operation',
-		);
-	const permit = Object.freeze({}) as AdmittedPermit;
-	admittedPermitRecords.set(permit, { claim });
-	return permit;
-}
-
-/** NEXT ROUND target for direct compatibility runners without durable evidence. */
-export function mintAdmittedPermitForNextRoundCompatibilityPath(
-	claim: AdmittedOutcomeClaim,
-	digestBinding: DigestBindingVerdict,
-	validatedManifest: ValidatedManifestVerdict,
-	approvalScope: ApprovalScopeVerdict,
-	liveAdmission: LiveAdmissionVerdict,
-): AdmittedPermit {
-	requireAdmittedVerdicts(
-		digestBinding,
-		validatedManifest,
-		approvalScope,
-		liveAdmission,
 	);
 	const approval = approvalScopeVerdicts.get(approvalScope);
 	if (
@@ -1734,14 +1678,11 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return refusal('ledger advisory lock is busy');
 		}
-		const postLockEvidence = verdicts.run
-			? await createPostLockAdmissionEvidence(executor, lock.proof)
-			: undefined;
-		const liveAdmission = postLockEvidence
-			? await checkLiveAdmission(postLockEvidence)
-			: verdicts.liveAdmission;
-		if (!liveAdmission)
-			return refusal('admitted operation has no live-admission verdict');
+		const postLockEvidence = await createPostLockAdmissionEvidence(
+			executor,
+			lock.proof,
+		);
+		const liveAdmission = await checkLiveAdmission(postLockEvidence);
 		if ('kind' in liveAdmission) {
 			if (ownsTransaction) await executor.query('ROLLBACK');
 			begun = false;
@@ -1796,22 +1737,14 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return vacancy;
 		}
-		const permit = postLockEvidence
-			? mintAdmittedPermit(
-					admission,
-					verdicts.digestBinding,
-					verdicts.validatedManifest,
-					verdicts.approvalScope,
-					liveAdmission,
-					postLockEvidence,
-				)
-			: mintAdmittedPermitForNextRoundCompatibilityPath(
-					admission,
-					verdicts.digestBinding,
-					verdicts.validatedManifest,
-					verdicts.approvalScope,
-					liveAdmission,
-				);
+		const permit = mintAdmittedPermit(
+			admission,
+			verdicts.digestBinding,
+			verdicts.validatedManifest,
+			verdicts.approvalScope,
+			liveAdmission,
+			postLockEvidence,
+		);
 		const sent =
 			'destructivePermit' in admission
 				? await executePgDestructiveBundle(executor, {
@@ -1847,82 +1780,6 @@ async function runPgTransactionalOutcomeOnSession(
 		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 		return refusal(detail(error));
 	}
-}
-
-/**
- * Runs the transactional outcome protocol on a connection pinned for its
- * whole claim/token/terminal lifecycle.
- */
-async function checkDirectOutcomeAdmission(
-	executor: TransitionJournalQueryable,
-	request: PgOutcomeTransactionalRequest,
-): Promise<AdmissionVerdicts | OutcomeProtocolRefusal> {
-	const classification =
-		request.plan.claimKind === 'retire-intent' ? 'removal' : 'non-destructive';
-	const manifestResult = validateNormalizedManagedStepManifest([
-		{
-			stepKey: request.plan.plannedClaimKey ?? request.plan.claimId,
-			order: 0,
-			segmentId: request.plan.claimId,
-			dependencyOrder: [],
-			address: request.plan.address as Exclude<
-				NormalizedManagedStep['address'],
-				undefined
-			>,
-			claimKind: request.plan.claimKind,
-			plannedClaimKeys: [request.plan.plannedClaimKey ?? request.plan.claimId],
-			statementBundle: request.plan.statementBundle,
-			classification,
-			requiresVacancy: request.plan.requiresVacancy ?? false,
-			replayPolicy:
-				classification === 'removal' ? 'fresh-live-only' : 'recorded',
-		},
-	]);
-	if (!manifestResult.ok)
-		return refusal(
-			`direct outcome refuses an invalid managed-step manifest: ${manifestResult.detail}`,
-		);
-	const run = lockPgJournalRunForNextRoundCompatibilityPath({
-		runId: request.plan.executionId ?? request.plan.claimId,
-		planDigest: request.plan.claimId,
-	});
-	const operation: PgSingleAdmittedOperation = {
-		kind: 'single-outcome',
-		request,
-	};
-	const digestBinding = checkDigestBinding({
-		run,
-		recomputedPlanDigest: request.plan.claimId,
-	});
-	if ('kind' in digestBinding) return digestBinding;
-	const validatedManifest = checkValidatedManifest({
-		manifest: manifestResult.manifest,
-		expectedPlans: [request.plan],
-	});
-	if ('kind' in validatedManifest) return validatedManifest;
-	const approvalScope = checkApprovalScope({
-		run,
-		approval: { approvals: [] },
-		operation,
-	});
-	if ('kind' in approvalScope) return approvalScope;
-	const liveAdmission = await checkLiveAdmissionForNextRoundCompatibilityPath(
-		executor,
-		request,
-	);
-	if ('kind' in liveAdmission) return liveAdmission;
-	return { digestBinding, validatedManifest, approvalScope, liveAdmission };
-}
-
-export async function runPgTransactionalOutcome(
-	executor: TransitionJournalQueryable,
-	request: PgOutcomeTransactionalRequest,
-): Promise<PgOutcomeResult> {
-	return withPgOutcomeSession(executor, async (session) => {
-		const verdicts = await checkDirectOutcomeAdmission(session, request);
-		if ('kind' in verdicts) return verdicts;
-		return runPgTransactionalOutcomeOnSession(session, request, verdicts);
-	});
 }
 
 function sameStatementBundle(
@@ -2176,10 +2033,15 @@ function operationApprovalSubject(operation: PgAdmittedOperation):
 			address: operation.request.plan.address,
 			classification: operation.kind,
 		};
-	const firstMember = operation.request.members[0];
-	if (!firstMember) return refusal('re-address has no closure members');
+	const root = operation.request.members.find((member) =>
+		sameLedgerAddress(member.source, operation.request.manifestPlan.address),
+	);
+	if (!root)
+		return refusal(
+			`re-address closure has no declared root ${operation.request.manifestPlan.address.name}`,
+		);
 	return {
-		address: firstMember.source,
+		address: root.source,
 		classification: operation.kind,
 	};
 }
@@ -2309,22 +2171,6 @@ export async function checkLiveAdmission(
 	}
 }
 
-/** NEXT ROUND target for direct compatibility paths outside durable admission. */
-export async function checkLiveAdmissionForNextRoundCompatibilityPath(
-	executor: TransitionJournalQueryable,
-	request: PgOutcomeClaimRequest,
-): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
-	const seen = new Set<string>();
-	for (const home of homesFor(request)) {
-		const key = `${home.scope}:${home.schema ?? ''}`;
-		if (seen.has(key)) continue;
-		seen.add(key);
-		const currency = await readPgLedgerScopeCurrency(executor, home);
-		if (currency.kind !== 'current') return currencyRefusal(currency);
-	}
-	return mintLiveAdmissionVerdictForNextRoundCompatibilityPath();
-}
-
 /**
  * The public PostgreSQL admitted-execution boundary. It is intentionally not
  * used by legacy paths yet: later dispatches bind their persisted runs and
@@ -2434,14 +2280,13 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return refusal('ledger advisory lock is busy');
 		}
-		const executingPostLockEvidence = verdicts.run
-			? await createPostLockAdmissionEvidence(executor, executingLock.proof)
-			: undefined;
-		const executingLiveAdmission = executingPostLockEvidence
-			? await checkLiveAdmission(executingPostLockEvidence)
-			: verdicts.liveAdmission;
-		if (!executingLiveAdmission)
-			return refusal('admitted operation has no live-admission verdict');
+		const executingPostLockEvidence = await createPostLockAdmissionEvidence(
+			executor,
+			executingLock.proof,
+		);
+		const executingLiveAdmission = await checkLiveAdmission(
+			executingPostLockEvidence,
+		);
 		if ('kind' in executingLiveAdmission) {
 			await rollback(executor);
 			return executingLiveAdmission;
@@ -2464,8 +2309,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 				await rollback(executor);
 				return refusal('ledger advisory lock is busy');
 			}
-			if (verdicts.run)
-				await createPostLockAdmissionEvidence(executor, terminalLock.proof);
+			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 			await refuseClaim(
 				executor,
 				admission,
@@ -2506,22 +2350,14 @@ async function runPgNonTransactionalOutcomeOnSession(
 		await commitPgOutcome(executor);
 		await request.onExecutingCommitted?.();
 		const sent = await sendPgAdmittedBundle(executor, {
-			permit: executingPostLockEvidence
-				? mintAdmittedPermit(
-						admission,
-						verdicts.digestBinding,
-						verdicts.validatedManifest,
-						verdicts.approvalScope,
-						executingLiveAdmission,
-						executingPostLockEvidence,
-					)
-				: mintAdmittedPermitForNextRoundCompatibilityPath(
-						admission,
-						verdicts.digestBinding,
-						verdicts.validatedManifest,
-						verdicts.approvalScope,
-						executingLiveAdmission,
-					),
+			permit: mintAdmittedPermit(
+				admission,
+				verdicts.digestBinding,
+				verdicts.validatedManifest,
+				verdicts.approvalScope,
+				executingLiveAdmission,
+				executingPostLockEvidence,
+			),
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) return sent;
@@ -2534,8 +2370,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return refusal('ledger advisory lock is busy');
 		}
-		if (verdicts.run)
-			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
+		await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 		const terminalPredecessor = await currentTerminalPredecessor(
 			executor,
 			target,
@@ -2565,18 +2400,6 @@ async function runPgNonTransactionalOutcomeOnSession(
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return refusal(detail(error));
 	}
-}
-
-/** Pins every non-transactional protocol checkpoint to one checked-out client. */
-export async function runPgNonTransactionalOutcome(
-	executor: TransitionJournalQueryable,
-	request: PgOutcomeNonTransactionalRequest,
-): Promise<PgOutcomeResult> {
-	return withPgOutcomeSession(executor, async (session) => {
-		const verdicts = await checkDirectOutcomeAdmission(session, request);
-		if ('kind' in verdicts) return verdicts;
-		return runPgNonTransactionalOutcomeOnSession(session, request, verdicts);
-	});
 }
 
 /**

@@ -1,15 +1,18 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
+	outcomeClaimId,
 	projectLedgerChain,
-	validateNormalizedManagedStepManifest,
+	type ValidatedManagedStepManifest,
 } from '@dbsp/core';
 import type {
 	LedgerAddress,
 	LedgerHome,
 	LedgerPayload,
 	LedgerReservationRow,
+	NormalizedManagedStep,
 	ResourceAddress,
+	ScopedApprovalSet,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
 import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
@@ -19,7 +22,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
-	lockPgJournalRunForNextRoundCompatibilityPath,
+	type PgLockedRun,
 	recoverPgAdmittedReaddressPair,
 } from './outcome-protocol.js';
 
@@ -65,11 +68,17 @@ export type PgReaddressResult =
 	| { readonly outcome: 'readdress-unsupported'; readonly detail: string }
 	| { readonly outcome: 'readdress-refused'; readonly detail: string };
 
-export interface PgReaddressRequest {
+export interface PgPersistedReaddressInput {
+	readonly executor: TransitionJournalQueryable;
+	/** The durable-run witness is locked by apply before this lifecycle starts. */
+	readonly run: PgLockedRun;
+	readonly manifest: ValidatedManagedStepManifest;
+	readonly recomputedPlanDigest: string;
+	readonly approval: ScopedApprovalSet;
+	/** Exact digest-covered normalized step; this is the only operation source. */
+	readonly step: NormalizedManagedStep;
 	readonly database: string;
 	readonly targetSchema: string;
-	readonly declaration: TableReaddressDeclaration;
-	readonly executionId: string;
 }
 
 interface ClosureMember {
@@ -77,6 +86,18 @@ interface ClosureMember {
 	readonly target: LedgerAddress;
 	readonly sourceChain: Awaited<ReturnType<typeof readPgLedgerAddressChain>>;
 	readonly targetChain: Awaited<ReturnType<typeof readPgLedgerAddressChain>>;
+}
+
+/**
+ * A re-address closure is catalogue-ordered for stable comparison, never for
+ * authority. The persisted lifecycle declaration names its root explicitly.
+ */
+export function selectPgReaddressClosureRoot<
+	Member extends { readonly source: LedgerAddress },
+>(members: readonly Member[], declaredRoot: LedgerAddress): Member | undefined {
+	return members.find((member) =>
+		sameLedgerAddress(member.source, declaredRoot),
+	);
 }
 
 function home(address: LedgerAddress): LedgerHome {
@@ -277,9 +298,12 @@ function reservation(
 	};
 }
 
-export function classifyPgReaddressSupport(
-	request: PgReaddressRequest,
-): PgReaddressResult | undefined {
+export function classifyPgReaddressSupport(request: {
+	readonly database: string;
+	readonly targetSchema?: string;
+	readonly executionId?: string;
+	readonly declaration: TableReaddressDeclaration;
+}): PgReaddressResult | undefined {
 	const { from, to } = request.declaration;
 	if ((from.database ?? request.database) !== (to.database ?? request.database))
 		return { outcome: 'readdress-unsupported', detail: 'cross-database' };
@@ -406,14 +430,44 @@ export async function recoverPgReaddressPair(
 				};
 }
 
-/** Execute the ADR 0006 three-step protocol for one declared table address change. */
-export async function executePgTableReaddress(
-	executor: TransitionJournalQueryable,
-	request: PgReaddressRequest,
+/**
+ * Execute the ADR 0006 pair from one exact, persisted normalized step.
+ *
+ * This deliberately has no direct-request form: the durable run, validated
+ * manifest, digest and reviewed lifecycle material all arrive together from
+ * the apply lock boundary.
+ */
+export async function executePgPersistedTableReaddress(
+	input: PgPersistedReaddressInput,
 ): Promise<PgReaddressResult> {
+	const lifecycle = input.step.lifecycle;
+	if (
+		lifecycle?.kind !== 'readdress' ||
+		input.step.classification !== 'non-destructive' ||
+		input.step.claimKind !== 'readdress-intent' ||
+		input.step.requiresVacancy
+	)
+		return {
+			outcome: 'readdress-refused',
+			detail: `persisted re-address step ${input.step.stepKey} has invalid lifecycle material`,
+		};
+	const plannedClaimKey = input.step.plannedClaimKeys[0];
+	const source = input.step.address;
+	if (!plannedClaimKey || !source || source.kind !== 'table')
+		return {
+			outcome: 'readdress-refused',
+			detail: `persisted re-address step ${input.step.stepKey} has incomplete normalized material`,
+		};
+	const executionId = `dbsp.generator.execution.${input.run.runId}`;
+	const request = {
+		database: input.database,
+		targetSchema: input.targetSchema,
+		declaration: lifecycle.declaration,
+		executionId,
+	};
 	const refused = classifyPgReaddressSupport(request);
 	if (refused) return refused;
-	const source = endpointAddress(
+	const declaredSource = endpointAddress(
 		request.database,
 		request.targetSchema,
 		request.declaration.from,
@@ -423,18 +477,23 @@ export async function executePgTableReaddress(
 		request.targetSchema,
 		request.declaration.to,
 	);
+	if (!sameLedgerAddress(source, declaredSource))
+		return {
+			outcome: 'readdress-refused',
+			detail: `persisted re-address step ${input.step.stepKey} does not bind its declared source`,
+		};
 	if (source.name === target.name && source.schema === target.schema)
 		return { outcome: 'no-op' };
-	const targetLive = await readPgCatalogueIdentity(executor, target);
-	const sourceLive = await readPgCatalogueIdentity(executor, source);
+	const targetLive = await readPgCatalogueIdentity(input.executor, target);
+	const sourceLive = await readPgCatalogueIdentity(input.executor, source);
 	if (!sourceLive && targetLive) {
 		const sourceChain = await readPgLedgerAddressChain(
-			executor,
+			input.executor,
 			home(source),
 			source,
 		);
 		const chain = await readPgLedgerAddressChain(
-			executor,
+			input.executor,
 			home(target),
 			target,
 		);
@@ -465,7 +524,7 @@ export async function executePgTableReaddress(
 
 	let members: readonly ClosureMember[];
 	try {
-		members = await readClosure(executor, source, target);
+		members = await readClosure(input.executor, source, target);
 	} catch (error) {
 		return {
 			outcome: 'readdress-refused',
@@ -477,11 +536,13 @@ export async function executePgTableReaddress(
 			outcome: 'readdress-refused',
 			detail: `source ${source.name} has no readable closure`,
 		};
-	const pairId = `dbsp.readdress.${randomUUID()}`;
+	const pairId = outcomeClaimId(executionId, plannedClaimKey, source);
 	const closureKey = (member: ClosureMember) =>
 		JSON.stringify([member.source, member.target]);
 	const operationMembers = members.map((member) => {
-		const sourceClaimId = claimId(pairId, 'source', member.source);
+		const sourceClaimId = sameLedgerAddress(member.source, source)
+			? pairId
+			: claimId(pairId, 'source', member.source);
 		const targetClaimId = claimId(pairId, 'target', member.target);
 		const sourceProjection = projectLedgerChain(member.sourceChain);
 		return {
@@ -502,54 +563,30 @@ export async function executePgTableReaddress(
 			targetObserved: observed(member.target),
 		};
 	});
-	const root = operationMembers[0];
+	const root = selectPgReaddressClosureRoot(operationMembers, source);
 	if (!root)
 		return {
 			outcome: 'readdress-refused',
-			detail: 're-address has no closure members',
+			detail: `re-address closure has no declared root ${source.name}`,
 		};
-	const statements = renderPgTableReaddressStatements(source, target).map(
-		(sql, ordinal) => ({ ordinal, sql }),
-	);
+	const statements = input.step.statementBundle.statements;
 	const manifestPlan = {
 		claimId: root.sourceClaimId,
 		claimSpecies: 'sql-bearing' as const,
 		executionId: request.executionId,
-		plannedClaimKey: `readdress:${pairId}:source`,
+		plannedClaimKey,
 		claimGroupId: pairId,
 		rootClaimId: root.sourceClaimId,
 		address: root.source,
 		claimKind: 'readdress-intent' as const,
-		statementBundle: { statements },
+		statementBundle: input.step.statementBundle,
 		requiresVacancy: false,
 	};
-	// The pair's root is reviewed as a real manifest entry. Closure members are
-	// bound by the paired live admission and may not carry independent SQL.
-	const manifest = validateNormalizedManagedStepManifest([
-		{
-			stepKey: `readdress:${pairId}`,
-			order: 0,
-			segmentId: pairId,
-			dependencyOrder: [],
-			address: root.source as never,
-			claimKind: 'readdress-intent',
-			plannedClaimKeys: [manifestPlan.plannedClaimKey],
-			statementBundle: manifestPlan.statementBundle,
-			classification: 'non-destructive',
-			requiresVacancy: false,
-			replayPolicy: 'recorded',
-		},
-	]);
-	if (!manifest.ok)
-		throw new Error(`re-address manifest is invalid: ${manifest.detail}`);
-	const result = await executePgAdmittedOperation(executor, {
-		run: lockPgJournalRunForNextRoundCompatibilityPath({
-			runId: request.executionId,
-			planDigest: pairId,
-		}),
-		approval: { approvals: [] },
-		manifest: manifest.manifest,
-		recomputedPlanDigest: pairId,
+	const result = await executePgAdmittedOperation(input.executor, {
+		run: input.run,
+		approval: input.approval,
+		manifest: input.manifest,
+		recomputedPlanDigest: input.recomputedPlanDigest,
 		operation: {
 			kind: 'paired-readdress',
 			request: {

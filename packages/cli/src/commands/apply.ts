@@ -12,6 +12,7 @@ import {
 	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
+import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
@@ -22,6 +23,7 @@ import {
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	ApplyPolicy,
 	ApplyResult,
@@ -983,6 +985,7 @@ export async function runApply(
 						throw new RecordedPlanDigestMismatchError();
 					return executeGeneratorPlan({
 						pool: owned,
+						run: lockPgJournalRun(mintDurablyLoadedRun(current.run)),
 						manifest: manifest.manifest,
 						planDigest: actualDigest,
 						schema: recordedSchema,

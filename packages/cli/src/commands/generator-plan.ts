@@ -17,6 +17,7 @@ import {
 	createPgTransitionRunPersister,
 	generateMigrationSQL,
 	readPgCatalogueIdentity,
+	renderPgTableReaddressStatements,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import type { InProcessProvenPlan } from '@dbsp/core';
@@ -27,6 +28,7 @@ import {
 } from '@dbsp/core';
 import type {
 	CatalogueIdentity,
+	LedgerAddress,
 	LedgerPayload,
 	NormalizedManagedStep,
 	PlanAssessment,
@@ -114,6 +116,28 @@ function replacementStatements(table: TableIR, schema: string) {
 			schemaName: schema,
 		}),
 	};
+}
+
+/** The paired executor sends only SQL that the persisted root step carries. */
+function readdressStatements(
+	database: string,
+	schema: string,
+	declaration: TableReaddressDeclaration,
+): readonly string[] {
+	const endpoint = (
+		value: TableReaddressDeclaration['from'],
+	): LedgerAddress => ({
+		scope: 'schema',
+		engine: 'postgresql',
+		database: value.database ?? database,
+		schema: value.schema ?? schema,
+		kind: value.kind ?? 'table',
+		name: value.name,
+	});
+	return renderPgTableReaddressStatements(
+		endpoint(declaration.from),
+		endpoint(declaration.to),
+	);
 }
 
 function lifecycleStep(input: {
@@ -396,10 +420,17 @@ export async function runGeneratorPlan(input: {
 			...(change.column ? { column: change.column } : {}),
 			classification: classifyGeneratedMutation(change.kind, change),
 			details: change.details,
-			statements: generateMigrationSQL(
-				{ ...executableDiff, changes: [change] },
-				{ includeDestructive: true, schemaName: schema },
-			),
+			statements:
+				change.kind === 'readdress_table' && change.meta?.readdress
+					? readdressStatements(
+							database,
+							schema,
+							change.meta.readdress as TableReaddressDeclaration,
+						)
+					: generateMigrationSQL(
+							{ ...executableDiff, changes: [change] },
+							{ includeDestructive: true, schemaName: schema },
+						),
 			...(change.kind === 'readdress_table' && change.meta?.readdress
 				? { readdress: change.meta.readdress as TableReaddressDeclaration }
 				: {}),
@@ -593,6 +624,7 @@ export async function runGeneratorPlan(input: {
 			if (change?.kind !== 'readdress_table' || !change.meta?.readdress)
 				continue;
 			Object.assign(step as object, {
+				claimKind: 'readdress-intent',
 				selection: {
 					kind: 'readdress',
 					selector: `table:${step.address.name}`,

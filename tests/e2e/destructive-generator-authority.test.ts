@@ -1,6 +1,7 @@
 /** Unit 11: one shared sequential PostgreSQL container, isolated schemas. */
 
 import { randomUUID } from 'node:crypto';
+import { unlink, writeFile } from 'node:fs/promises';
 import {
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
@@ -18,14 +19,17 @@ import type {
 	ProvenPlanStep,
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { runApply } from '../../packages/cli/src/commands/apply.js';
-import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
+import {
+	runApply,
+	runNoArgumentApply,
+} from '../../packages/cli/src/commands/apply.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
+const schemaFiles: string[] = [];
 
 function isNormalizedManagedStep(
 	step: ProvenPlanStep,
@@ -166,10 +170,48 @@ function generatorPlan(
 		postconditions: [],
 		generator: {
 			kind: 'schema-differ-generator',
+			...(schema === undefined ? {} : { planningSchema: schema }),
 			changes: [change],
 			statements: change.statements,
 		},
 	} as unknown as GeneratorDurablePlan;
+}
+
+async function applyPersistedGenerator(input: {
+	readonly plan: GeneratorDurablePlan;
+	readonly database: string;
+	readonly schema: string;
+	readonly accepts?: readonly string[];
+}) {
+	const pool = await getTestPool();
+	const runId = `generator:${randomUUID()}`;
+	const planDigest = transitionPlanDigest(input.plan);
+	await createPgTransitionRunPersister(pool).persist(
+		{
+			runId,
+			planDigest,
+			targetContextDigest: `fixture:${input.database}:${input.schema}`,
+			databaseId: input.database,
+			coreVersion: 'destructive-generator-e2e',
+			startedAt: new Date().toISOString(),
+			replayability: 'replayable',
+		},
+		input.plan,
+	);
+	const applied = await runApply(
+		runId,
+		{
+			db: process.env.DATABASE_URL!,
+			planDigest,
+			...(input.accepts === undefined ? {} : { accept: input.accepts }),
+		},
+		pool,
+	);
+	if (!('result' in applied))
+		throw new Error(
+			`apply did not execute persisted generator run: ${applied.outcome}`,
+		);
+	return applied.result;
 }
 
 async function executeDrop(input: {
@@ -178,28 +220,48 @@ async function executeDrop(input: {
 	name: string;
 	accepts?: readonly string[];
 }) {
-	const plan = generatorPlan(
-		{
-			kind: 'drop_table',
-			table: input.name,
-			classification: 'removal',
-			details: `drop ${input.name}`,
-			statements: [`DROP TABLE ${quote(input.schema)}.${quote(input.name)}`],
-		},
-		input.database,
-		input.schema,
+	const path = `${process.cwd()}/.unit11-${randomUUID()}.mjs`;
+	await writeFile(
+		path,
+		"import { schema } from '@dbsp/core';\nexport default schema({});\n",
 	);
-	const digest = transitionPlanDigest(plan);
-	return executeGeneratorPlan({
-		pool: await getTestPool(),
-		plan,
-		planDigest: digest,
-		schema: input.schema,
-		...(input.accepts ? { accepts: input.accepts } : {}),
-		runId: `generator:${randomUUID()}`,
-	});
+	schemaFiles.push(path);
+	const pool = await getTestPool();
+	const applied = await runNoArgumentApply(
+		{
+			db: process.env.DATABASE_URL!,
+			schemaFile: path,
+			schema: input.schema,
+			yes: true,
+		},
+		async () => true,
+		(runId, options) =>
+			runApply(
+				runId,
+				{
+					...options,
+					...(input.accepts?.length
+						? {
+								accept: [
+									...(options.accept ?? []),
+									`destructive-plan-accepted:${options.planDigest}`,
+								],
+							}
+						: {}),
+				},
+				pool,
+			),
+	);
+	if (!('result' in applied))
+		throw new Error(
+			`no-argument apply did not execute removal: ${applied.outcome}`,
+		);
+	return applied.result &&
+		typeof applied.result === 'object' &&
+		'result' in applied.result
+		? applied.result.result
+		: applied.result;
 }
-
 /** Assert topology, not timestamp order: every address is one closed line. */
 async function expectSingleChildChain(
 	pool: Awaited<ReturnType<typeof getTestPool>>,
@@ -243,9 +305,11 @@ async function expectSingleChildChain(
 afterEach(async () => {
 	const schema = schemas.pop();
 	if (schema) await dropSchema(schema);
+	while (schemaFiles.length) await unlink(schemaFiles.pop()!).catch(() => {});
 });
 afterAll(async () => {
 	while (schemas.length) await dropSchema(schemas.pop()!);
+	while (schemaFiles.length) await unlink(schemaFiles.pop()!).catch(() => {});
 });
 
 describe.sequential('unit 11 destructive generator authority (SC-46…52)', () => {
@@ -320,12 +384,10 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			databaseId,
 			schema,
 		);
-		const result = await executeGeneratorPlan({
-			pool,
+		const result = await applyPersistedGenerator({
 			plan,
-			planDigest: transitionPlanDigest(plan),
+			database: databaseId,
 			schema,
-			runId: `generator:${randomUUID()}`,
 		});
 		expect(result).toEqual({
 			outcome: 'destructive-authority-refused',
@@ -356,25 +418,11 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		await adopt(parent);
 		await adopt(identifier);
 		await adopt(child);
-		const probe = generatorPlan(
-			{
-				kind: 'drop_table',
-				table: 'managed_parent',
-				classification: 'removal',
-				details: 'drop managed_parent',
-				statements: [`DROP TABLE ${quote(schema)}.managed_parent`],
-			},
-			databaseId,
+		const result = await executeDrop({
 			schema,
-		);
-		const digest = transitionPlanDigest(probe);
-		const result = await executeGeneratorPlan({
-			pool,
-			plan: probe,
-			planDigest: digest,
-			schema,
-			accepts: [`destructive-plan-accepted:${digest}`],
-			runId: `generator:${randomUUID()}`,
+			database: databaseId,
+			name: 'managed_parent',
+			accepts: ['accept'],
 		});
 		expect(result).toEqual({ outcome: 'completed' });
 		await expect(

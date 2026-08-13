@@ -4,6 +4,7 @@ import {
 	classifyPgReaddressSupport,
 	isPgReaddressSelfOccupancy,
 	renderPgTableReaddressStatements,
+	selectPgReaddressClosureRoot,
 } from './readdress.js';
 
 const source = {
@@ -136,5 +137,30 @@ describe('re-address closure occupancy', () => {
 				},
 			),
 		).toBe(false);
+	});
+});
+
+describe('OBL-REC6 re-address closure root', () => {
+	it('selects the declared table root when a child sorts before it', () => {
+		const column = {
+			...source,
+			kind: 'column' as const,
+			name: 'id',
+			parent: source,
+		};
+		const members = [{ source: column }, { source }];
+		expect(selectPgReaddressClosureRoot(members, source)).toEqual({ source });
+	});
+
+	it('refuses selection when the declared root is absent', () => {
+		const column = {
+			...source,
+			kind: 'column' as const,
+			name: 'id',
+			parent: source,
+		};
+		expect(
+			selectPgReaddressClosureRoot([{ source: column }], source),
+		).toBeUndefined();
 	});
 });

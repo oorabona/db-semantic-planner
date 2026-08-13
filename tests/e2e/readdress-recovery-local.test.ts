@@ -2,6 +2,8 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+	createPgsqlGeneratedManagedStep,
+	createPgTransitionRunPersister,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
@@ -9,18 +11,17 @@ import {
 	renderPgTableReaddressStatements,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-// E2E deliberately exercises the readdress executor internal.
-import {
-	appendPgLedgerResolution,
-	executePgTableReaddress,
-} from '@dbsp/adapter-pgsql/internal';
-import { projectLedgerChain } from '@dbsp/core';
+import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+import { projectLedgerChain, transitionPlanDigest } from '@dbsp/core';
 import type {
 	LedgerAddress,
 	LedgerClaimKind,
 	LedgerReservationRow,
+	TableReaddressDeclaration,
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { runApply } from '../../packages/cli/src/commands/apply.js';
+import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';
 import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
@@ -194,33 +195,137 @@ async function createManagedTable(
 	return members;
 }
 
+/**
+ * Persist the exact paired lifecycle step, then execute it through apply.
+ * No E2E driver mints a lifecycle witness or calls the readdress executor.
+ */
+async function applyPersistedReaddress(input: {
+	readonly database: string;
+	readonly targetSchema: string;
+	readonly declaration: TableReaddressDeclaration;
+}) {
+	const pool = await getTestPool();
+	const sourceName = input.declaration.from.name;
+	const step = createPgsqlGeneratedManagedStep({
+		change: {
+			kind: 'readdress_table',
+			table: sourceName,
+			details: `readdress ${sourceName}`,
+			meta: { readdress: input.declaration },
+		} as never,
+		database: input.database,
+		schema: input.targetSchema,
+		stepKey: 'generator:0',
+		order: 0,
+		statements: renderPgTableReaddressStatements(
+			address(
+				input.declaration.from.schema ?? input.targetSchema,
+				input.declaration.from.database ?? input.database,
+				input.declaration.from.name,
+			),
+			address(
+				input.declaration.to.schema ?? input.targetSchema,
+				input.declaration.to.database ?? input.database,
+				input.declaration.to.name,
+			),
+		),
+	});
+	Object.assign(step, {
+		classification: 'non-destructive',
+		claimKind: 'readdress-intent',
+		selection: { kind: 'readdress', selector: `table:${sourceName}` },
+		lifecycle: { kind: 'readdress', declaration: input.declaration },
+	});
+	const plan = {
+		observations: [],
+		claims: [],
+		assumptions: [],
+		preconditions: [],
+		segments: [],
+		steps: [step],
+		postconditions: [],
+		generator: {
+			kind: 'schema-differ-generator',
+			planningSchema: input.targetSchema,
+			changes: [
+				{
+					kind: 'readdress_table',
+					table: sourceName,
+					classification: 'non-destructive',
+					details: `readdress ${sourceName}`,
+					statements: [],
+					readdress: input.declaration,
+				},
+			],
+		},
+	} as unknown as GeneratorDurablePlan;
+	const runId = unique('persisted-readdress');
+	const planDigest = transitionPlanDigest(plan);
+	await createPgTransitionRunPersister(pool).persist(
+		{
+			runId,
+			planDigest,
+			targetContextDigest: `fixture:${input.database}:${input.targetSchema}`,
+			databaseId: input.database,
+			coreVersion: 'readdress-e2e',
+			startedAt: new Date().toISOString(),
+			replayability: 'replayable',
+		},
+		plan as never,
+	);
+	const applied = await runApply(
+		runId,
+		{ db: process.env.DATABASE_URL!, planDigest },
+		pool,
+	);
+	if (!('result' in applied))
+		throw new Error(
+			`apply did not execute persisted readdress: ${applied.outcome}`,
+		);
+	return applied.result as unknown as {
+		readonly outcome: string;
+		readonly detail?: string;
+		readonly pairId?: string;
+	};
+}
+
 async function appendInterruptedPair(input: {
 	readonly source: LedgerAddress;
 	readonly target: LedgerAddress;
 	readonly executionId: string;
 	readonly pairId: string;
+	/** A real table closure may place children before the declared table root. */
+	readonly members?: readonly {
+		readonly source: LedgerAddress;
+		readonly target: LedgerAddress;
+	}[];
 }): Promise<readonly LedgerReservationRow[]> {
 	const rows: LedgerReservationRow[] = [];
-	for (const [side, value] of [
-		['source', input.source],
-		['target', input.target],
-	] as const) {
-		const rootClaimId = `dbsp.readdress.${input.pairId}.${side}.table.${randomUUID().replaceAll('-', '')}`;
-		const row = reservation(
-			value,
-			input.executionId,
-			input.pairId,
-			rootClaimId,
-		);
-		await admitFixtureOutcomeClaim({
-			claimId: rootClaimId,
-			address: value,
-			claimKind: 'readdress-intent',
-			pairId: input.pairId,
-			executionId: input.executionId,
-			statements: renderPgTableReaddressStatements(input.source, input.target),
-		});
-		rows.push(row);
+	for (const member of input.members ?? [input]) {
+		for (const [side, value] of [
+			['source', member.source],
+			['target', member.target],
+		] as const) {
+			const rootClaimId = `dbsp.readdress.${input.pairId}.${side}.${value.kind}.${randomUUID().replaceAll('-', '')}`;
+			const row = reservation(
+				value,
+				input.executionId,
+				input.pairId,
+				rootClaimId,
+			);
+			await admitFixtureOutcomeClaim({
+				claimId: rootClaimId,
+				address: value,
+				claimKind: 'readdress-intent',
+				pairId: input.pairId,
+				executionId: input.executionId,
+				statements: renderPgTableReaddressStatements(
+					input.source,
+					input.target,
+				),
+			});
+			rows.push(row);
+		}
 	}
 	return rows;
 }
@@ -245,10 +350,9 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		const before = await pool.query(
 			`SELECT id, encode(payload, 'hex') AS payload FROM ${quote(schema)}.source`,
 		);
-		const result = await executePgTableReaddress(pool, {
+		const result = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: { from: { name: 'source' }, to: { name: 'renamed' } },
 		});
 		requireCompleted(result);
@@ -284,10 +388,9 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 			writeAdoptionFile: async () => {},
 		});
 		await createManagedTable(schema, databaseId, 'moved');
-		const result = await executePgTableReaddress(pool, {
+		const result = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { schema, name: 'moved' },
 				to: { schema: targetSchema, name: 'moved' },
@@ -312,8 +415,7 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 			rows: [{ object: `${targetSchema}.moved_id_seq` }],
 		});
 		const pairs = await pool.query(
-			`SELECT DISTINCT pair_id FROM ${quote(targetSchema)}.dbsp_ledger_event WHERE pair_id = $1`,
-			[result.pairId],
+			`SELECT DISTINCT pair_id FROM ${quote(targetSchema)}.dbsp_ledger_event WHERE pair_id IS NOT NULL`,
 		);
 		expect(pairs.rows).toHaveLength(1);
 	});
@@ -325,10 +427,9 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		await pool.query(
 			`DROP TABLE ${quote(schema)}.identity_source; CREATE TABLE ${quote(schema)}.identity_source (id bigint PRIMARY KEY, payload bytea NOT NULL)`,
 		);
-		const mismatch = await executePgTableReaddress(pool, {
+		const mismatch = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { name: 'identity_source' },
 				to: { name: 'identity_target' },
@@ -349,10 +450,9 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		await pool.query(
 			`CREATE TABLE ${quote(schema)}.occupied_target (id integer)`,
 		);
-		const occupied = await executePgTableReaddress(pool, {
+		const occupied = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { name: 'occupied_source' },
 				to: { name: 'occupied_target' },
@@ -371,22 +471,34 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		const request = {
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { name: 'repeat_source' },
 				to: { name: 'repeat_target' },
 			},
 		} as const;
-		const initial = await executePgTableReaddress(pool, request);
+		const initial = await applyPersistedReaddress(request);
 		requireCompleted(initial);
-		expect(await executePgTableReaddress(pool, request)).toEqual({
-			outcome: 'no-op',
+		const beforeRepeat = await readPgLedgerAddressChain(
+			pool,
+			{ scope: 'schema', schema },
+			address(schema, databaseId, 'repeat_target'),
+		);
+		// The generator reports its aggregate outcome as completed; the paired
+		// lifecycle itself is a no-op, so it must append no second target claim.
+		expect(await applyPersistedReaddress(request)).toEqual({
+			outcome: 'completed',
 		});
+		const afterRepeat = await readPgLedgerAddressChain(
+			pool,
+			{ scope: 'schema', schema },
+			address(schema, databaseId, 'repeat_target'),
+		);
+		expect(afterRepeat.events).toHaveLength(beforeRepeat.events.length);
 		await pool.query(
 			`CREATE TABLE ${quote(schema)}.chainless_target (id integer)`,
 		);
 		expect(
-			await executePgTableReaddress(pool, {
+			await applyPersistedReaddress({
 				...request,
 				declaration: {
 					from: { name: 'chainless_source' },
@@ -434,7 +546,7 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 			await readPgLedgerAddressChain(pool, { scope: 'schema', schema }, retired)
 		).terminalMember?.eventId;
 		await createManagedTable(schema, databaseId, 'retired_source');
-		const readdressed = await executePgTableReaddress(pool, {
+		const readdressed = await applyPersistedReaddress({
 			...request,
 			declaration: {
 				from: { name: 'retired_source' },
@@ -456,9 +568,11 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		await createManagedTable(schema, databaseId, 'recovery_source');
+		const recoverySource = address(schema, databaseId, 'recovery_source');
+		const recoveryTarget = address(schema, databaseId, 'recovery_target');
 		const refusedRows = await appendInterruptedPair({
-			source: address(schema, databaseId, 'recovery_source'),
-			target: address(schema, databaseId, 'recovery_target'),
+			source: recoverySource,
+			target: recoveryTarget,
 			executionId: unique('run'),
 			pairId: unique('pair'),
 		});
@@ -469,6 +583,16 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 				reservations: refusedRows,
 			}),
 		).toMatchObject({ kind: 'readdress-recovery-refused-pair' });
+		const recoveredRoot = await readPgLedgerAddressChain(
+			pool,
+			{ scope: 'schema', schema },
+			recoverySource,
+		);
+		expect(recoveredRoot.terminalMember).toMatchObject({
+			address: recoverySource,
+			eventKind: 'refused',
+			pairId: refusedRows[0]!.pairId,
+		});
 		await createManagedTable(schema, databaseId, 'indeterminate_source');
 		await pool.query(
 			`CREATE TABLE ${quote(schema)}.indeterminate_target (id integer)`,
@@ -531,20 +655,18 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		await createManagedTable(schema, databaseId, 'json_source');
-		const crossDatabase = await executePgTableReaddress(pool, {
+		const crossDatabase = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { database: databaseId, name: 'json_source' },
 				to: { database: 'other_database', name: 'json_target' },
 			},
 		});
 		await pool.query(`CREATE TABLE ${quote(schema)}.json_target (id integer)`);
-		const occupied = await executePgTableReaddress(pool, {
+		const occupied = await applyPersistedReaddress({
 			database: databaseId,
 			targetSchema: schema,
-			executionId: unique('run'),
 			declaration: {
 				from: { name: 'json_source' },
 				to: { name: 'json_target' },

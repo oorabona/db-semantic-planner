@@ -1,19 +1,24 @@
 /** Explicit, token-gated admission of a pre-existing object into management. */
-import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
-	validateNormalizedManagedStepManifest,
+	type ValidatedManagedStepManifest,
 } from '@dbsp/core';
-import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
+import type {
+	LedgerAddress,
+	LedgerHome,
+	LedgerPayload,
+	NormalizedManagedStep,
+	ScopedApprovalSet,
+} from '@dbsp/types';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
-	lockPgJournalRunForNextRoundCompatibilityPath,
+	type PgLockedRun,
 	type PgOutcomeTransactionalRequest,
 } from './outcome-protocol.js';
 
@@ -41,7 +46,17 @@ export interface PgDeclaredAdoptionInput {
 	readonly shapeMatches: (
 		executor: TransitionJournalQueryable,
 	) => Promise<boolean>;
-	readonly executionId?: string;
+}
+
+export interface PgPersistedDeclaredAdoptionInput
+	extends PgDeclaredAdoptionInput {
+	/** Locked durable identity and its full reviewed manifest from apply. */
+	readonly run: PgLockedRun;
+	readonly manifest: ValidatedManagedStepManifest;
+	readonly recomputedPlanDigest: string;
+	readonly approval: ScopedApprovalSet;
+	/** Exact digest-covered step; adoption never constructs a standalone plan. */
+	readonly step: NormalizedManagedStep;
 }
 
 /**
@@ -106,16 +121,39 @@ export async function preflightPgDeclaredAdoption(
  * can never be turned into an adoption without a live catalogue identity.
  */
 export async function executePgDeclaredAdoption(
-	input: PgDeclaredAdoptionInput,
+	input: PgPersistedDeclaredAdoptionInput,
 ): Promise<PgAdoptionResult> {
 	try {
 		// This explanatory preflight does not mint authority: the same facts are
 		// re-read by verifyLiveAdmission after the claim/reservation is open.
 		const preflight = await preflightPgDeclaredAdoption(input);
 		if (preflight.outcome !== 'ready') return preflight;
-		const executionId =
-			input.executionId ?? `dbsp.adoption.execution.${randomUUID()}`;
-		const plannedClaimKey = `adoption:${input.address.kind}:${input.address.name}`;
+		const lifecycle = input.step.lifecycle;
+		const plannedClaimKey = input.step.plannedClaimKeys[0];
+		if (
+			lifecycle?.kind !== 'adoption' ||
+			!plannedClaimKey ||
+			input.step.claimKind !== 'adopt-intent' ||
+			input.step.classification !== 'non-destructive' ||
+			input.step.requiresVacancy ||
+			!input.step.address ||
+			!isDeepStrictEqual(input.step.address, input.address) ||
+			!isDeepStrictEqual(input.step.expectedDeclaration, input.declaration) ||
+			!isDeepStrictEqual(
+				input.step.expectedCatalogueIdentity,
+				input.expectedCatalogueIdentity,
+			)
+		)
+			return {
+				outcome: 'execution-failed',
+				detail: `adoption step ${input.step.stepKey} has invalid persisted lifecycle material`,
+			};
+		if (input.step.statementBundle.statements.length !== 0)
+			return {
+				outcome: 'execution-failed',
+				detail: `adoption step ${input.step.stepKey} carries SQL outside adoption lifecycle material`,
+			};
+		const executionId = `dbsp.generator.execution.${input.run.runId}`;
 		const claimId = outcomeClaimId(executionId, plannedClaimKey, input.address);
 		const outcomeRequest: PgOutcomeTransactionalRequest = {
 			plan: {
@@ -127,7 +165,10 @@ export async function executePgDeclaredAdoption(
 				rootClaimId: claimId,
 				address: input.address as never,
 				claimKind: 'adopt-intent',
-				statementBundle: { statements: [] },
+				// The exact persisted adoption bundle is required to be empty above.
+				statementBundle: input.step.statementBundle as {
+					readonly statements: readonly [];
+				},
 				// An adoption deliberately claims a present object. It is not a
 				// creation, so the generic creation-vacancy gate must not run.
 				requiresVacancy: false,
@@ -173,32 +214,11 @@ export async function executePgDeclaredAdoption(
 			readBack: async () => input.declaration,
 			recordCatalogueIdentity: true,
 		};
-		const manifest = validateNormalizedManagedStepManifest([
-			{
-				stepKey: plannedClaimKey,
-				order: 0,
-				segmentId: claimId,
-				dependencyOrder: [],
-				address: input.address as never,
-				claimKind: 'adopt-intent',
-				plannedClaimKeys: [plannedClaimKey],
-				statementBundle: outcomeRequest.plan.statementBundle,
-				classification: 'non-destructive',
-				requiresVacancy: false,
-				lifecycle: { kind: 'adoption', shape: {} as never },
-				replayPolicy: 'recorded',
-			},
-		]);
-		if (!manifest.ok)
-			return { outcome: 'execution-failed', detail: manifest.detail };
 		const result = await executePgAdmittedOperation(input.executor, {
-			run: lockPgJournalRunForNextRoundCompatibilityPath({
-				runId: executionId,
-				planDigest: claimId,
-			}),
-			approval: { approvals: [] },
-			manifest: manifest.manifest,
-			recomputedPlanDigest: claimId,
+			run: input.run,
+			approval: input.approval,
+			manifest: input.manifest,
+			recomputedPlanDigest: input.recomputedPlanDigest,
 			operation: { kind: 'single-outcome', request: outcomeRequest },
 		});
 		// The initial preflight is intentionally outside the claim transaction so

@@ -1,14 +1,25 @@
 import { randomUUID } from 'node:crypto';
-import { runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+import {
+	createPgTransitionRunPersister,
+	executePgAdmittedOperation,
+	type PgOutcomeNonTransactionalRequest,
+	readTransitionJournal,
+	runPgReinitializePreflight,
+} from '@dbsp/adapter-pgsql';
 // E2E deliberately exercises the outcome-protocol internals.
 import {
 	appendPgLedgerProgress,
 	appendPgOutcomeResolution,
+	lockPgJournalRun,
 	openPgOutcomeClaim,
 	recoverPgOutcomeClaim,
-	runPgNonTransactionalOutcome,
 } from '@dbsp/adapter-pgsql/internal';
-import type { LedgerAddress } from '@dbsp/types';
+import {
+	transitionPlanDigest,
+	validateNormalizedManagedStepManifest,
+} from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
+import type { LedgerAddress, ProvenPlanShape } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
 import { armOneShotInsertFailpoint } from './harness/index.js';
@@ -76,6 +87,71 @@ function resolutionEvidence(input: ReturnType<typeof makeClaim>) {
 			trustRoot: 'fixture-external-ddl-window',
 		},
 	};
+}
+
+/**
+ * Persist the exact normalized outcome step before passing it through the
+ * admitted facade.  The acknowledgement seam remains observable, but this
+ * E2E never invokes the removed raw non-transactional runner.
+ */
+async function runPersistedOutcome(
+	executor: pg.Pool | pg.PoolClient,
+	request: PgOutcomeNonTransactionalRequest,
+) {
+	const classification =
+		request.plan.claimKind === 'retire-intent' ? 'removal' : 'non-destructive';
+	const manifest = validateNormalizedManagedStepManifest([
+		{
+			stepKey: request.plan.plannedClaimKey ?? request.plan.claimId,
+			order: 0,
+			segmentId: request.plan.claimId,
+			dependencyOrder: [],
+			address: request.plan.address as never,
+			claimKind: request.plan.claimKind,
+			plannedClaimKeys: [request.plan.plannedClaimKey ?? request.plan.claimId],
+			statementBundle: request.plan.statementBundle,
+			classification,
+			requiresVacancy: request.plan.requiresVacancy ?? false,
+			replayPolicy:
+				classification === 'removal' ? 'fresh-live-only' : 'recorded',
+		},
+	]);
+	if (!manifest.ok) throw new Error(manifest.detail);
+	const plan = {
+		observations: [],
+		claims: [],
+		assumptions: [],
+		preconditions: [],
+		segments: [],
+		steps: manifest.manifest.steps,
+		postconditions: [],
+	} as unknown as ProvenPlanShape;
+	const planDigest = transitionPlanDigest(plan);
+	const runId = `managed-ledger-outcome:${
+		request.plan.executionId ?? request.plan.claimId
+	}`;
+	await createPgTransitionRunPersister(executor).persist(
+		{
+			runId,
+			planDigest,
+			targetContextDigest: `fixture:${request.plan.address.database}`,
+			databaseId: request.plan.address.database,
+			coreVersion: 'managed-ledger-outcome-recovery-e2e',
+			startedAt: '2000-01-01T00:00:00.000Z',
+			replayability: 'replayable',
+		},
+		plan,
+	);
+	const persisted = await readTransitionJournal(executor, runId, {
+		ensure: false,
+	});
+	return executePgAdmittedOperation(executor, {
+		run: lockPgJournalRun(mintDurablyLoadedRun(persisted.run)),
+		approval: { approvals: [] },
+		manifest: manifest.manifest,
+		recomputedPlanDigest: planDigest,
+		operation: { kind: 'single-outcome', request },
+	});
 }
 
 async function fixture() {
@@ -168,7 +244,7 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 				)
 			).rows[0]?.pg_backend_pid;
 			if (!pid) throw new Error('acknowledgement client has no backend pid');
-			const running = runPgNonTransactionalOutcome(client, {
+			const running = runPersistedOutcome(client, {
 				...input,
 				executingEventId: 'acknowledged-executing',
 				resolution: { eventId: 'acknowledged-observed', eventKind: 'observed' },

@@ -4,7 +4,6 @@ const mocks = vi.hoisted(() => ({
 	readChain: vi.fn(),
 	readIdentity: vi.fn(),
 	executeAdmitted: vi.fn(),
-	lockPgJournalRunForNextRoundCompatibilityPath: vi.fn((run) => run),
 }));
 
 vi.mock('./chain-reader.js', () => ({
@@ -15,8 +14,6 @@ vi.mock('./catalogue-identity.js', () => ({
 }));
 vi.mock('./outcome-protocol.js', () => ({
 	executePgAdmittedOperation: mocks.executeAdmitted,
-	lockPgJournalRunForNextRoundCompatibilityPath:
-		mocks.lockPgJournalRunForNextRoundCompatibilityPath,
 }));
 
 import { executePgDeclaredAdoption } from './adoption.js';
@@ -35,6 +32,27 @@ const declaration = {
 	digest: 'declared-shape',
 };
 const executor = { query: vi.fn() };
+
+function persisted() {
+	return {
+		run: { runId: 'run-1', planDigest: 'digest' } as never,
+		manifest: {} as never,
+		recomputedPlanDigest: 'digest',
+		approval: { approvals: [] },
+		step: {
+			stepKey: 'adoption:accounts',
+			address,
+			claimKind: 'adopt-intent',
+			plannedClaimKeys: ['adoption:accounts/root'],
+			statementBundle: { statements: [] },
+			classification: 'non-destructive',
+			requiresVacancy: false,
+			expectedDeclaration: declaration,
+			expectedCatalogueIdentity: identity,
+			lifecycle: { kind: 'adoption', shape: {} },
+		} as never,
+	};
+}
 
 function unmanaged() {
 	mocks.readChain.mockResolvedValue({ events: [] });
@@ -55,12 +73,13 @@ describe('declared PostgreSQL adoption admission', () => {
 		await expect(
 			executePgDeclaredAdoption({
 				executor,
+				...persisted(),
+				...persisted(),
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 				declaration,
 				expectedCatalogueIdentity: identity,
 				shapeMatches,
-				executionId: 'run-1',
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
 		expect(shapeMatches).toHaveBeenCalledOnce();
@@ -84,6 +103,7 @@ describe('declared PostgreSQL adoption admission', () => {
 		unmanaged();
 		const result = await executePgDeclaredAdoption({
 			executor,
+			...persisted(),
 			home: { scope: 'schema', schema: 'tenant' },
 			address,
 			declaration,
@@ -106,6 +126,7 @@ describe('declared PostgreSQL adoption admission', () => {
 		});
 		const result = await executePgDeclaredAdoption({
 			executor,
+			...persisted(),
 			home: { scope: 'schema', schema: 'tenant' },
 			address,
 			declaration,
@@ -154,6 +175,8 @@ describe('declared PostgreSQL adoption admission', () => {
 		await expect(
 			executePgDeclaredAdoption({
 				executor,
+				...persisted(),
+				...persisted(),
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 				declaration,
@@ -199,6 +222,7 @@ describe('declared PostgreSQL adoption admission', () => {
 		await expect(
 			executePgDeclaredAdoption({
 				executor,
+				...persisted(),
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 				declaration,
@@ -223,6 +247,7 @@ describe('declared PostgreSQL adoption admission', () => {
 		await expect(
 			executePgDeclaredAdoption({
 				executor,
+				...persisted(),
 				home: { scope: 'schema', schema: 'tenant' },
 				address,
 				declaration,

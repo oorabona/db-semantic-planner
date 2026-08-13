@@ -6,19 +6,14 @@ import {
 	createPgsqlAdapter,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
+	executePgPersistedTableReaddress,
+	type PgLockedRun,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
 } from '@dbsp/adapter-pgsql';
-// These legacy operation bridges have no public façade shape yet. The CLI is
-// their trusted in-process caller until their operation-specific admission is
-// expressed by executePgAdmittedOperation.
-import {
-	executePgTableReaddress,
-	lockPgJournalRunForNextRoundCompatibilityPath,
-} from '@dbsp/adapter-pgsql/internal';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
@@ -468,6 +463,8 @@ export async function executeGeneratorPlan(input: {
 	readonly schema: string;
 	/** Preserve scopes and trust roots until admission; never reduce to classes. */
 	readonly approval?: ScopedApprovalSet;
+	/** Durable witness minted while apply holds this run's journal lock. */
+	readonly run: PgLockedRun;
 	/** @deprecated Compatibility shim for old direct fixtures. */
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
@@ -528,7 +525,6 @@ export async function executeGeneratorPlan(input: {
 				expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 				shapeMatches: () =>
 					adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
-				executionId,
 			});
 			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
 				return preflight.outcome === 'adoption-refused'
@@ -584,13 +580,17 @@ export async function executeGeneratorPlan(input: {
 					};
 				const adopted = await executePgDeclaredAdoption({
 					executor: input.pool,
+					run: input.run,
+					manifest,
+					recomputedPlanDigest: input.planDigest,
+					approval,
+					step,
 					home: home(address),
 					address,
 					declaration: step.expectedDeclaration,
 					expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 					shapeMatches: () =>
 						adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
-					executionId,
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {
 					completedStepKeys.push(step.stepKey);
@@ -601,11 +601,15 @@ export async function executeGeneratorPlan(input: {
 					: { outcome: 'execution-failed', detail: adopted.detail };
 			}
 			if (step.lifecycle?.kind === 'readdress') {
-				const result = await executePgTableReaddress(input.pool, {
+				const result = await executePgPersistedTableReaddress({
+					executor: input.pool,
+					run: input.run,
+					manifest,
+					recomputedPlanDigest: input.planDigest,
+					approval,
+					step,
 					database,
 					targetSchema: input.schema,
-					declaration: step.lifecycle.declaration,
-					executionId,
 				});
 				if (result.outcome === 'completed' || result.outcome === 'no-op') {
 					completedStepKeys.push(step.stepKey);
@@ -660,10 +664,7 @@ export async function executeGeneratorPlan(input: {
 			};
 			if (step.classification === 'non-destructive') {
 				const result = await executePgAdmittedOperation(input.pool, {
-					run: lockPgJournalRunForNextRoundCompatibilityPath({
-						runId: input.runId,
-						planDigest: input.planDigest,
-					}),
+					run: input.run,
 					approval,
 					manifest,
 					recomputedPlanDigest: input.planDigest,
@@ -805,10 +806,7 @@ export async function executeGeneratorPlan(input: {
 				},
 			};
 			const executed = (await executePgAdmittedOperation(input.pool, {
-				run: lockPgJournalRunForNextRoundCompatibilityPath({
-					runId: input.runId,
-					planDigest: input.planDigest,
-				}),
+				run: input.run,
 				approval,
 				manifest,
 				recomputedPlanDigest: input.planDigest,

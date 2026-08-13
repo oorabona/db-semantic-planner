@@ -3,7 +3,6 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
-	executePgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -14,7 +13,10 @@ import {
 	REFUSAL_VOCABULARY,
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
+import {
+	runApply,
+	runNoArgumentApply,
+} from '../../packages/cli/src/commands/apply.js';
 import {
 	type GeneratorDurablePlan,
 	runGeneratorPlan,
@@ -27,6 +29,7 @@ import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
 const schemaFiles: string[] = [];
+const generatorSchemaFiles = new WeakMap<object, string>();
 
 function quote(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
@@ -92,26 +95,41 @@ async function fixture(...requested: string[]) {
 	return { pool, database: await database(), schemas: names };
 }
 
-/** The only fixture adoption path uses the production token-gated executor. */
+/** Setup adopts through an admitted fixture claim; lifecycle assertions use apply below. */
 async function adopt(value: LedgerAddress): Promise<void> {
 	const pool = await getTestPool();
+	const claimId = unique('fixture-adopt');
 	const live = await readPgCatalogueIdentity(pool, value);
 	if (!live?.catalogueIdentity) throw new Error(`cannot adopt ${value.name}`);
-	const result = await executePgDeclaredAdoption({
-		executor: pool,
-		home: { scope: 'schema', schema: value.schema! },
+	const reservation = {
 		address: value,
-		declaration: declaration(value.name),
-		expectedCatalogueIdentity: live.catalogueIdentity,
-		shapeMatches: async () => true,
-		executionId: unique('adopt'),
-	} as never);
-	if (result.outcome !== 'completed')
-		throw new Error(
-			`fixture adoption refused: ${
-				result.outcome === 'adoption-refused' ? result.detail : result.outcome
-			}`,
-		);
+		claimKind: 'adopt-intent' as const,
+		executionId: claimId,
+		rootClaimId: claimId,
+		homeLedger: { scope: 'schema' as const, schema: value.schema! },
+	};
+	const opened = await openFixtureOutcomeClaim(pool, {
+		claimId,
+		address: value,
+		claimKind: 'adopt-intent',
+		statements: ['SELECT 1'],
+		reservations: [reservation],
+	});
+	if (opened.kind !== 'admitted-outcome-claim') throw new Error(opened.reason);
+	await appendPgLedgerResolution(
+		pool,
+		{ scope: 'schema', schema: value.schema! },
+		{
+			eventId: `${claimId}:adopted`,
+			address: value,
+			eventKind: 'adopt',
+			predecessor: claimId,
+			catalogueIdentity: live.catalogueIdentity,
+			observed: declaration(value.name),
+		},
+		claimId,
+		[reservation],
+	);
 }
 
 async function schemaFile(
@@ -132,25 +150,108 @@ async function planFor(input: {
 	readonly table: string;
 	readonly state: 'adopt' | 'replace';
 }) {
-	return runGeneratorPlan({
+	const file = await schemaFile(input.table, input.state);
+	const plan = await runGeneratorPlan({
 		db: process.env.DATABASE_URL!,
 		schema: input.schema,
-		schemaFile: await schemaFile(input.table, input.state),
+		schemaFile: file,
 	});
+	generatorSchemaFiles.set(plan, file);
+	return plan;
 }
 
 function generatorPlan(plan: PlanResult): {
 	readonly plan: GeneratorDurablePlan;
 	readonly planDigest: string;
 	readonly runId: string;
+	readonly schemaFile: string;
 } {
 	if (!plan.plan || !plan.planDigest || !plan.runId)
 		throw new Error('generator plan was not persisted');
+	const file = generatorSchemaFiles.get(plan);
+	if (!file) throw new Error('generator plan has no persisted schema fixture');
 	return {
 		plan: plan.plan as GeneratorDurablePlan,
 		planDigest: plan.planDigest,
 		runId: plan.runId,
+		schemaFile: file,
 	};
+}
+
+/** Execute only the reviewed, persisted generator run through the public apply path. */
+async function applyReviewedGenerator(
+	reviewed: ReturnType<typeof generatorPlan>,
+	input: {
+		readonly accepts?: readonly string[];
+		readonly replaces?: readonly string[];
+	} = {},
+) {
+	const applied = await runApply(
+		reviewed.runId,
+		{
+			db: process.env.DATABASE_URL!,
+			planDigest: reviewed.planDigest,
+			...(input.accepts === undefined ? {} : { accept: input.accepts }),
+			...(input.replaces === undefined ? {} : { replace: input.replaces }),
+		},
+		await getTestPool(),
+	);
+	if (!('result' in applied))
+		throw new Error(
+			`apply did not execute reviewed generator run: ${applied.outcome}`,
+		);
+	return applied.result;
+}
+
+/**
+ * Generator removals are only executable by no-argument apply's just-persisted
+ * review flow.  The callback receives the actual digest before it supplies the
+ * explicit acceptance; the fixture never supplies the private removal bridge.
+ */
+async function applyReviewedReplacement(
+	reviewed: ReturnType<typeof generatorPlan>,
+	schema: string,
+	input: {
+		readonly accepts?: boolean;
+		readonly replaces?: readonly string[];
+	} = {},
+) {
+	const pool = await getTestPool();
+	const applied = await runNoArgumentApply(
+		{
+			db: process.env.DATABASE_URL!,
+			schemaFile: reviewed.schemaFile,
+			schema,
+			yes: true,
+			...(input.replaces === undefined ? {} : { replace: input.replaces }),
+		},
+		async () => true,
+		(runId, options) =>
+			runApply(
+				runId,
+				{
+					...options,
+					...(input.accepts
+						? {
+								accept: [
+									...(options.accept ?? []),
+									`destructive-plan-accepted:${options.planDigest}`,
+								],
+							}
+						: {}),
+				},
+				pool,
+			),
+	);
+	if (!('result' in applied))
+		throw new Error(
+			`no-argument apply did not execute replacement: ${applied.outcome}`,
+		);
+	return applied.result &&
+		typeof applied.result === 'object' &&
+		'result' in applied.result
+		? applied.result.result
+		: applied.result;
 }
 
 async function leaveOpenClaim(
@@ -212,24 +313,15 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		expect(reviewed.plan.generator.changes).toContainEqual(
 			expect.objectContaining({ kind: 'adopt_table', table: 'accounts' }),
 		);
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
-				runId: reviewed.runId,
-			}),
-		).resolves.toEqual({ outcome: 'completed' });
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
-				runId: unique('repeat'),
-			}),
-		).resolves.toEqual({ outcome: 'completed' });
+		await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+			outcome: 'completed',
+		});
+		const replay = generatorPlan(
+			await planFor({ schema, table: 'accounts', state: 'adopt' }),
+		);
+		await expect(applyReviewedGenerator(replay)).resolves.toEqual({
+			outcome: 'completed',
+		});
 		await expect(
 			pool.query(
 				`SELECT event_kind, declared, catalogue_identity FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'accounts' ORDER BY recorded_at`,
@@ -247,6 +339,9 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			]),
 		});
 
+		// Each persisted generator fixture declares one table. Remove the prior
+		// adopted fixture so this mismatch run cannot also plan its retirement.
+		await pool.query(`DROP TABLE ${quote(schema)}.accounts`);
 		await pool.query(`CREATE TABLE ${quote(schema)}.shape_mismatch (id text)`);
 		const shape = await planFor({
 			schema,
@@ -260,19 +355,12 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				table: 'shape_mismatch',
 			}),
 		);
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewedShape.plan,
-				planDigest: reviewedShape.planDigest,
-				schema,
-				runId: reviewedShape.runId,
-			}),
-		).resolves.toEqual({
+		await expect(applyReviewedGenerator(reviewedShape)).resolves.toEqual({
 			outcome: 'adoption-refused',
 			detail:
 				'declared adoption for shape_mismatch refuses live shape mismatch',
 		});
+		await pool.query(`DROP TABLE ${quote(schema)}.shape_mismatch`);
 		await pool.query(
 			`CREATE TABLE ${quote(schema)}.identity_mismatch (id integer PRIMARY KEY)`,
 		);
@@ -285,15 +373,7 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		await pool.query(
 			`DROP TABLE ${quote(schema)}.identity_mismatch; CREATE TABLE ${quote(schema)}.identity_mismatch (id integer PRIMARY KEY)`,
 		);
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewedIdentity.plan,
-				planDigest: reviewedIdentity.planDigest,
-				schema,
-				runId: reviewedIdentity.runId,
-			}),
-		).resolves.toEqual({
+		await expect(applyReviewedGenerator(reviewedIdentity)).resolves.toEqual({
 			outcome: 'adoption-refused',
 			detail:
 				'declared adoption for identity_mismatch refuses live identity mismatch',
@@ -421,55 +501,32 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			state: 'replace',
 		});
 		const reviewed = generatorPlan(plan);
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
-				runId: reviewed.runId,
-			}),
-		).resolves.toEqual({
+		await expect(applyReviewedReplacement(reviewed, schema)).resolves.toEqual({
 			outcome: 'destructive-authority-refused',
 			detail:
 				'replacement requires a named --replace selector from the reviewed plan',
 		});
 		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
+			applyReviewedReplacement(reviewed, schema, {
 				replaces: ['other_table'],
-				accepts: [`destructive-plan-accepted:${reviewed.planDigest}`],
-				runId: reviewed.runId,
+				accepts: true,
 			}),
 		).resolves.toEqual({
 			outcome: 'destructive-authority-refused',
 			detail: 'replacement other_table was not requested by the reviewed plan',
 		});
 		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
+			applyReviewedReplacement(reviewed, schema, {
 				replaces: ['replace_me'],
-				runId: unique('replace-unaccepted'),
 			}),
 		).resolves.toEqual({
 			outcome: 'destructive-authority-refused',
 			detail: 'operator acceptance is absent',
 		});
 		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewed.plan,
-				planDigest: reviewed.planDigest,
-				schema,
+			applyReviewedReplacement(reviewed, schema, {
 				replaces: ['replace_me'],
-				accepts: [`destructive-plan-accepted:${reviewed.planDigest}`],
-				runId: unique('replace'),
+				accepts: true,
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
 		await expect(
@@ -553,30 +610,18 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		expect(reviewedTarget.plan.generator.changes).toContainEqual(
 			expect.objectContaining({ kind: 'adoption_refused', table: 'moved' }),
 		);
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewedSource.plan,
-				planDigest: reviewedSource.planDigest,
-				schema: source,
-				runId: reviewedSource.runId,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'adoption-refused',
-			detail: expect.stringContaining('shape mismatch'),
-		});
-		await expect(
-			executeGeneratorPlan({
-				pool,
-				plan: reviewedTarget.plan,
-				planDigest: reviewedTarget.planDigest,
-				schema: target,
-				runId: reviewedTarget.runId,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'adoption-refused',
-			detail: expect.stringContaining('shape mismatch'),
-		});
+		await expect(applyReviewedGenerator(reviewedSource)).resolves.toMatchObject(
+			{
+				outcome: 'adoption-refused',
+				detail: expect.stringContaining('shape mismatch'),
+			},
+		);
+		await expect(applyReviewedGenerator(reviewedTarget)).resolves.toMatchObject(
+			{
+				outcome: 'adoption-refused',
+				detail: expect.stringContaining('shape mismatch'),
+			},
+		);
 		// Both reviewed scopes retain their pre-move refusal; the source claim is
 		// still open, and neither scope may append an adoption while the drift is
 		// unresolved.

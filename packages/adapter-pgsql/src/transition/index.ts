@@ -3,6 +3,7 @@ export {
 	type PgAdoptionPreflightResult,
 	type PgAdoptionResult,
 	type PgDeclaredAdoptionInput,
+	type PgPersistedDeclaredAdoptionInput,
 	preflightPgDeclaredAdoption,
 } from './adoption.js';
 export {
@@ -201,7 +202,6 @@ export {
 	readPgOutcomeRecoveryReadBack,
 	recoverPgOutcomeClaim,
 	resolvePgDestructiveOutcome,
-	runPgNonTransactionalOutcome,
 	validatePgLedgerRuntimeIntegrity,
 } from './outcome-protocol.js';
 export {
@@ -211,11 +211,10 @@ export {
 export {
 	classifyPgReaddressRecovery,
 	classifyPgReaddressSupport,
-	executePgTableReaddress,
+	executePgPersistedTableReaddress,
+	type PgPersistedReaddressInput,
 	type PgReaddressPairRecoveryResult,
-	type PgReaddressRequest,
 	type PgReaddressResult,
-	type ReaddressRecoveryAnswer,
 	recoverPgReaddressPair,
 	renderPgTableReaddressStatements,
 } from './readdress.js';
