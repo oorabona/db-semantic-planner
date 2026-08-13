@@ -5,7 +5,7 @@ import type {
 	LedgerReservationRow,
 	OutcomeClaimPlan,
 } from '@dbsp/types';
-import { refusalFor } from '@dbsp/types';
+import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgLockedRun } from './outcome-protocol.js';
 import {
@@ -187,6 +187,33 @@ function recorder(failSql?: string) {
 }
 
 describe('PostgreSQL outcome protocol compositions', () => {
+	it('OBL-REC5 recognizes independently read equal ledger addresses', () => {
+		expect(
+			sameLedgerAddress(address, {
+				...address,
+				parent: {
+					engine: 'postgresql',
+					database: 'app',
+					schema: 'tenant',
+					kind: 'table',
+					name: 'parent',
+				},
+			}),
+		).toBe(false);
+		const withParent = {
+			...address,
+			parent: {
+				engine: 'postgresql',
+				database: 'app',
+				schema: 'tenant',
+				kind: 'table' as const,
+				name: 'parent',
+			},
+		};
+		expect(sameLedgerAddress(withParent, structuredClone(withParent))).toBe(
+			true,
+		);
+	});
 	it('OBL-AUTH1 refuses a JavaScript-fabricated locked run at the admitted facade', async () => {
 		const result = await executePgAdmittedOperation(
 			{ query: vi.fn() },

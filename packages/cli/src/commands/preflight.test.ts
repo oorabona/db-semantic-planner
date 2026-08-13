@@ -1,8 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { writeAdoptionFileAtomically } from './preflight.js';
+import {
+	formatReinitializeSplit,
+	writeAdoptionFileAtomically,
+} from './preflight.js';
 
 const directories: string[] = [];
 
@@ -25,5 +28,69 @@ describe('preflight adoption output', () => {
 			version: 1,
 			adoptions: [],
 		});
+		expect((await stat(out)).mode & 0o777).toBe(0o600);
+	});
+
+	it('OBL-CLI3 fsyncs file then parent around the atomic replacement', async () => {
+		const calls: string[] = [];
+		const fileSystem = {
+			mkdtemp: async () => '/tmp/adoption-temp',
+			open: async (path: string, _flags: string, mode?: number) => ({
+				writeFile: async () => {
+					calls.push(`write:${path}:${mode ?? ''}`);
+				},
+				sync: async () => {
+					calls.push(`sync:${path}`);
+				},
+				close: async () => {
+					calls.push(`close:${path}`);
+				},
+			}),
+			rename: async (from: string, to: string) => {
+				calls.push(`rename:${from}:${to}`);
+			},
+			rm: async (path: string) => {
+				calls.push(`rm:${path}`);
+			},
+		};
+		await writeAdoptionFileAtomically(
+			'/tmp/adoption.json',
+			{ scopes: [], adoptionCandidates: [] },
+			fileSystem,
+		);
+		expect(calls).toEqual([
+			'write:/tmp/adoption-temp/adoption.json:384',
+			'sync:/tmp/adoption-temp/adoption.json',
+			'close:/tmp/adoption-temp/adoption.json',
+			'rename:/tmp/adoption-temp/adoption.json:/tmp/adoption.json',
+			'sync:/tmp',
+			'close:/tmp',
+			'rm:/tmp/adoption-temp',
+		]);
+	});
+
+	it('OBL-REC7 reports changed, failed, and not-attempted scopes together', () => {
+		expect(
+			formatReinitializeSplit([
+				{
+					ledger: { scope: 'schema', schema: 'changed' },
+					outcome: 'current',
+					marker: { kind: 'absent' },
+				},
+				{
+					ledger: { scope: 'schema', schema: 'failed' },
+					outcome: 'failed',
+					marker: { kind: 'absent' },
+					reason: { step: 'create', message: 'injected' },
+				},
+				{
+					ledger: { scope: 'schema', schema: 'later' },
+					outcome: 'not-attempted',
+					marker: { kind: 'absent' },
+				},
+			]),
+		).toBe(
+			'reinitialize-split: changed=changed; failed=failed; not-attempted=later',
+		);
 	});
 });

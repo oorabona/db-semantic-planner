@@ -55,16 +55,46 @@ export interface ReconcileResult {
 	readonly runId: string;
 	readonly addresses: readonly unknown[];
 	readonly detail?: string;
+	/** A closed, machine-readable cause for a command-level recovery failure. */
+	readonly failureCause?: ReconcileFailureCause;
 	/** One entry per selected root claim; non-appends retain their reason. */
 	readonly recovery?: readonly ReconcileRecoveryReport[];
 	/** Present when recovery refused before it could append a ledger outcome. */
 	readonly refusal?: PreAppendRefusal;
 }
 
+/** Distinguishes retryable connection failures from unsafe recovery evidence. */
+export type ReconcileFailureCause =
+	| 'authentication'
+	| 'transport'
+	| 'malformed-journal'
+	| 'catalogue';
+
+function pgSqlState(error: unknown): string | undefined {
+	if (typeof error !== 'object' || error === null || !('code' in error))
+		return undefined;
+	const code = error.code;
+	return typeof code === 'string' ? code : undefined;
+}
+
+/** Classify PostgreSQL failures by SQLSTATE; no server message is parsed. */
+export function classifyReconcileFailure(
+	error: unknown,
+	stage: 'journal' | 'catalogue' | 'reconcile',
+): ReconcileFailureCause {
+	const state = pgSqlState(error);
+	if (state === '28000' || state === '28P01') return 'authentication';
+	if (state?.startsWith('08')) return 'transport';
+	if (stage === 'journal') return 'malformed-journal';
+	return 'catalogue';
+}
+
 export interface ReconcileRecoveryReport {
 	readonly address: LedgerReservationRow['address'];
 	readonly outcome: PgRecoveryReportKind;
 	readonly reason?: string;
+	/** Present when the recovery row stopped on a classified evidence failure. */
+	readonly failureCause?: ReconcileFailureCause;
 	readonly refusal?: PreAppendRefusal;
 	/** Re-address recovery is reported and resolved as one reserved closure. */
 	readonly pairId?: string;
@@ -126,6 +156,9 @@ function recoveryReport(
 			outcome: 'pending',
 			reason: result.reason,
 			...(result.reasonCode === 'catalogue-unavailable'
+				? { failureCause: 'catalogue' as const }
+				: {}),
+			...(result.reasonCode === 'catalogue-unavailable'
 				? {
 						refusal: preAppendRefusalFor('ERR-09', {
 							address,
@@ -141,6 +174,7 @@ function recoveryReport(
 			address,
 			outcome: 'malformed-chain',
 			reason: result.reason,
+			failureCause: 'malformed-journal',
 			refusal: preAppendRefusalFor('ERR-08', { address, state: 'unknown' }),
 		};
 	return { address, outcome: 'protocol-refused', reason: result.reason };
@@ -329,7 +363,18 @@ export async function runReconcile(
 	options: ReconcileOptions,
 	pool?: import('pg').Pool,
 ): Promise<ReconcileResult> {
-	const owned = pool ?? (await createDbConnection(options.db)).pool;
+	let owned: import('pg').Pool;
+	try {
+		owned = pool ?? (await createDbConnection(options.db)).pool;
+	} catch (error) {
+		return {
+			outcome: 'reconcile-run-unavailable',
+			runId,
+			addresses: [],
+			failureCause: classifyReconcileFailure(error, 'reconcile'),
+		};
+	}
+	let stage: 'journal' | 'catalogue' | 'reconcile' = 'reconcile';
 	try {
 		const locked = await withPgTransitionRunLock(
 			owned,
@@ -337,9 +382,11 @@ export async function runReconcile(
 			async (target) => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
+					stage = 'journal';
 					const journal = await readTransitionJournal(lease.session, runId, {
 						ensure: false,
 					});
+					stage = 'reconcile';
 					const material: Array<{
 						readonly address: LedgerReservationRow['address'];
 						readonly plannedClaimKey?: string;
@@ -513,11 +560,13 @@ export async function runReconcile(
 							readonly stableStateBeforeClaim: 'unknown' | 'managed' | 'absent';
 						}> = [];
 						for (const row of rows) {
+							stage = 'catalogue';
 							const chain = await readPgLedgerAddressChain(
 								lease.session,
 								ledgerHome(row.address),
 								row.address,
 							);
+							stage = 'reconcile';
 							const projection = projectLedgerChain(chain);
 							if (
 								projection.kind !== 'projected-ledger-chain' ||
@@ -701,8 +750,13 @@ export async function runReconcile(
 			addresses: locked.value.addresses,
 			...(locked.value.recovery ? { recovery: locked.value.recovery } : {}),
 		};
-	} catch {
-		return { outcome: 'reconcile-run-unavailable', runId, addresses: [] };
+	} catch (error) {
+		return {
+			outcome: 'reconcile-run-unavailable',
+			runId,
+			addresses: [],
+			failureCause: classifyReconcileFailure(error, stage),
+		};
 	} finally {
 		if (pool === undefined) await owned.end();
 	}

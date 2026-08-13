@@ -21,8 +21,9 @@ execution command or file-based execution command.
 | `dbsp preflight --reinitialize` | Check and explicitly reinitialize a managed ledger when allowed. |
 
 ```bash
-dbsp plan --db "$DATABASE_URL" --schema public
-dbsp apply <run-id> --yes
+dbsp plan ./schema.ts --db "$DATABASE_URL" --schema public
+# Run the recorded id and digest printed by the preceding command.
+dbsp apply "$RUN_ID" --db "$DATABASE_URL" --plan-digest "$PLAN_DIGEST"
 dbsp inspect table:users --db "$DATABASE_URL" --schema public --format json
 ```
 
@@ -42,3 +43,10 @@ exploration and validation tools.
 Commands that support JSON emit one JSON document to stdout. Human diagnostics
 escape control and terminal-control sequences in database-controlled names;
 SQL text, credentials, and declarations are not logged by default.
+
+## Published internal adapter export
+
+`@dbsp/adapter-pgsql/internal` is a published subpath used by DBSP's managed
+facade. It is unsupported for external integrations; in-process use is trusted
+by declaration and the subpath is not a security boundary. Use the public
+adapter APIs for supported integrations.

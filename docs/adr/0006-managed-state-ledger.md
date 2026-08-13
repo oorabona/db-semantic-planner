@@ -467,8 +467,9 @@ read-back before management is re-established.
 These are detection and coordination guarantees, not a privilege boundary. A
 superuser or table owner can race name resolution between the identity read and
 DDL; dbsp detects that conflict post-hoc through its identity/read-back checks
-but cannot prevent it. In-process code using the internal adapter subpath
-is trusted, as stated above. Advisory locks bind only cooperating dbsp
+but cannot prevent it. The published `@dbsp/adapter-pgsql/internal` subpath is
+unsupported for external integrations; in-process code using it is trusted by
+declaration, as stated above, and it is not a security boundary. Advisory locks bind only cooperating dbsp
 processes; they do not constrain direct PostgreSQL clients.
 
 Two of the three writers become one and one ceases to exist. The managed scope is narrower than

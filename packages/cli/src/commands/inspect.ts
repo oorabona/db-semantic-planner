@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
 	createPgTransitionLessor,
 	DBSP_LEDGER_EVENT_TABLE,
+	escapeDiagnosticText,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerMarker,
@@ -396,7 +397,7 @@ export const inspectCommand = new Command('inspect')
 			const message = error instanceof Error ? error.message : String(error);
 			if (options.format === 'json')
 				printCliJson({ outcome: 'inspect-failed', error: message });
-			else console.error(`inspect-failed: ${message}`);
+			else console.error(`inspect-failed: ${escapeDiagnosticText(message)}`);
 			process.exitCode = 1;
 		}
 	});

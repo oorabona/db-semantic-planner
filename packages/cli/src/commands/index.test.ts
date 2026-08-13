@@ -170,6 +170,38 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toBe('');
 	});
 
+	it('OBL-CLI1 emits one JSON document for no-argument apply failures', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				'apply',
+				'--db',
+				'postgres://fixture',
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(29);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			outcome: 'apply-failed',
+			error: 'no-argument apply requires --schema-file <path>',
+		});
+		expect(completed.stderr).toBe('');
+	});
+
 	it('emits one JSON document without root stderr for plan JSON selected after an unknown root option [mutation: let root Commander write stderr]', () => {
 		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
 		const repositoryRoot = fileURLToPath(

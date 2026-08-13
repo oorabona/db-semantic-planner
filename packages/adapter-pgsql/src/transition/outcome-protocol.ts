@@ -1911,7 +1911,8 @@ async function runPgPairedReaddressOperation(
 				);
 				const reservation = request.reservations.find(
 					(candidate) =>
-						candidate.address === address && candidate.rootClaimId === eventId,
+						sameLedgerAddress(candidate.address, address) &&
+						candidate.rootClaimId === eventId,
 				);
 				if (!reservation) {
 					await executor.query('ROLLBACK');
@@ -1957,12 +1958,12 @@ async function runPgPairedReaddressOperation(
 				);
 			const sourceReservation = request.reservations.find(
 				(candidate) =>
-					candidate.address === member.source &&
+					sameLedgerAddress(candidate.address, member.source) &&
 					candidate.rootClaimId === member.sourceClaimId,
 			);
 			const targetReservation = request.reservations.find(
 				(candidate) =>
-					candidate.address === member.target &&
+					sameLedgerAddress(candidate.address, member.target) &&
 					candidate.rootClaimId === member.targetClaimId,
 			);
 			if (!sourceReservation || !targetReservation) {
@@ -2512,7 +2513,9 @@ async function recoverPgOutcomeClaimOnSession(
 			projection.kind !== 'projected-ledger-chain' ||
 			projection.openClaim?.event.eventId !== rootClaimId ||
 			request.reservations.length === 0 ||
-			!request.reservations.some((row) => row.address === request.address)
+			!request.reservations.some((row) =>
+				sameLedgerAddress(row.address, request.address),
+			)
 		) {
 			await executor.query('ROLLBACK');
 			begun = false;

@@ -64,6 +64,16 @@ function refusalProjection(claimKind: 'intent' | 'retire-intent' = 'intent') {
 }
 
 describe('inspect address selection', () => {
+	it('OBL-CLI2 renders control bytes as escaped diagnostic text', () => {
+		const rendered = renderInspectHuman({
+			ledger: { scope: 'schema', schema: 'public' },
+			marker: { kind: 'unreadable', reason: 'server\u0007text' },
+			live: { kind: 'not-requested' },
+		});
+		expect(rendered).not.toContain('\u0007');
+		expect(rendered).toContain('\\u0007');
+	});
+
 	it('uses the supplied kind prefix without appending a ledger event', () => {
 		expect(inspectAddress('app', 'tenant', 'enum:status')).toEqual({
 			scope: 'schema',

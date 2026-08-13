@@ -1,6 +1,6 @@
 /** Separately privileged ledger cutover; it never routes through apply. */
 import { createHash } from 'node:crypto';
-import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
 	escapeDiagnosticText,
@@ -32,30 +32,71 @@ export interface PreflightDeps {
 
 const defaultDeps: PreflightDeps = { createDbConnection, loadSchema };
 
-/** The only observable destination is `out`; the temporary name is never published. */
+export interface AdoptionFileSystem {
+	readonly mkdtemp: (prefix: string) => Promise<string>;
+	readonly open: (
+		path: string,
+		flags: string,
+		mode?: number,
+	) => Promise<{
+		writeFile(value: string, encoding: BufferEncoding): Promise<void>;
+		sync(): Promise<void>;
+		close(): Promise<void>;
+	}>;
+	readonly rename: (from: string, to: string) => Promise<void>;
+	readonly rm: (
+		path: string,
+		options: { recursive: boolean; force: boolean },
+	) => Promise<void>;
+}
+
+const nodeAdoptionFileSystem: AdoptionFileSystem = {
+	mkdtemp,
+	open,
+	rename,
+	rm,
+};
+
+/**
+ * The only observable destination is `out`; the temporary name is never
+ * published. An existing destination is deliberately replaced atomically only
+ * after the complete new document is durable.
+ */
 export async function writeAdoptionFileAtomically(
 	out: string,
 	report: ReinitializePreflightReport,
+	fileSystem: AdoptionFileSystem = nodeAdoptionFileSystem,
 ): Promise<void> {
-	const tempDirectory = await mkdtemp(
+	const tempDirectory = await fileSystem.mkdtemp(
 		join(dirname(out), '.dbsp-reinitialize-'),
 	);
 	const tempPath = join(tempDirectory, 'adoption.json');
 	try {
-		await writeFile(
-			tempPath,
-			JSON.stringify(
-				{
-					version: 1,
-					adoptions: report.adoptionCandidates,
-				},
-				null,
-			),
-			'utf8',
-		);
-		await rename(tempPath, out);
+		const file = await fileSystem.open(tempPath, 'wx', 0o600);
+		try {
+			await file.writeFile(
+				JSON.stringify(
+					{
+						version: 1,
+						adoptions: report.adoptionCandidates,
+					},
+					null,
+				),
+				'utf8',
+			);
+			await file.sync();
+		} finally {
+			await file.close();
+		}
+		await fileSystem.rename(tempPath, out);
+		const parent = await fileSystem.open(dirname(out), 'r');
+		try {
+			await parent.sync();
+		} finally {
+			await parent.close();
+		}
 	} finally {
-		await rm(tempDirectory, { recursive: true, force: true });
+		await fileSystem.rm(tempDirectory, { recursive: true, force: true });
 	}
 }
 
@@ -163,6 +204,28 @@ function formatScope(
 		: `${escapeDiagnosticText(name)}: ${escapeDiagnosticText(scope.outcome)}`;
 }
 
+/**
+ * A cutover spans independently committed scopes. Keep the durable split
+ * visible in one line so a failed middle scope cannot be mistaken for an
+ * all-or-nothing result; an empty class is explicitly reported.
+ */
+export function formatReinitializeSplit(
+	scopes: ReinitializePreflightReport['scopes'],
+): string {
+	const names = (predicate: (scope: (typeof scopes)[number]) => boolean) =>
+		scopes
+			.filter(predicate)
+			.map((scope) =>
+				escapeDiagnosticText(
+					scope.ledger.scope === 'database'
+						? 'dbsp_meta'
+						: (scope.ledger.schema ?? 'unknown'),
+				),
+			)
+			.join(',') || 'none';
+	return `reinitialize-split: changed=${names((scope) => scope.outcome === 'current')}; failed=${names((scope) => scope.outcome === 'failed')}; not-attempted=${names((scope) => scope.outcome === 'not-attempted')}`;
+}
+
 export const preflightCommand = new Command('preflight')
 	.description(
 		'Run the separately privileged managed-ledger reinitialize cutover',
@@ -186,6 +249,7 @@ export const preflightCommand = new Command('preflight')
 		try {
 			const report = await runPreflight({ ...options, scopes: options.scope });
 			for (const scope of report.scopes) console.log(formatScope(scope));
+			console.log(formatReinitializeSplit(report.scopes));
 			if (report.scopes.some((scope) => scope.outcome === 'failed')) {
 				process.exitCode = 1;
 				return;

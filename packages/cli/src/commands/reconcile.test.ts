@@ -94,9 +94,17 @@ vi.mock('@dbsp/core', () => ({
 	transitionPlanDigest: vi.fn(() => 'digest:generator'),
 }));
 
-import { runReconcile } from './reconcile.js';
+import { classifyReconcileFailure, runReconcile } from './reconcile.js';
 
 describe('reconcile durable outcome ordering', () => {
+	it.each([
+		['authentication', { code: '28P01' }, 'reconcile'],
+		['transport', { code: '08006' }, 'reconcile'],
+		['malformed-journal', new Error('opaque'), 'journal'],
+		['catalogue', new Error('opaque'), 'catalogue'],
+	] as const)('OBL-REC3 keeps the %s cause distinct', (cause, error, stage) => {
+		expect(classifyReconcileFailure(error, stage)).toBe(cause);
+	});
 	it('commits an interrupted generator refusal through the pool-owned outcome session', async () => {
 		fixture.recovery.mockResolvedValue({
 			kind: 'outcome-recovery-appended',

@@ -1233,7 +1233,10 @@ export const applyCommand = new Command('apply')
 					options,
 					confirmNoArgumentApply,
 					runApply,
-					(plan) => console.log(formatPlanHuman(plan, options.dryRun === true)),
+					options.format === 'json'
+						? () => undefined
+						: (plan) =>
+								console.log(formatPlanHuman(plan, options.dryRun === true)),
 				);
 			} catch (error) {
 				result = {

@@ -1,7 +1,9 @@
 /**
- * Package-internal ledger primitives used by adapter tests and the managed
- * facade. They are intentionally absent from the documented adapter entry
- * point; supported integrations use managed execution/recovery facades.
+ * Published `@dbsp/adapter-pgsql/internal` export for the DBSP-managed facade
+ * and adapter tests. It is unsupported for external integrations: in-process
+ * callers are trusted by declaration, and this export is not a security
+ * boundary. Supported integrations use the public managed execution/recovery
+ * facades.
  */
 export {
 	appendPgLedgerClaim,
