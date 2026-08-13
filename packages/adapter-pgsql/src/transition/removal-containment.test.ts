@@ -183,7 +183,7 @@ describe('removal effects closure', () => {
 		});
 	});
 
-	it('marks every system-schema resident before consultation', () => {
+	it('OBL-CTRL4: never infers ownership from a system-schema location', () => {
 		const closure = classifyRemovalEffectsClosure({
 			root,
 			effects: (['pg_toast', 'pg_catalog', 'information_schema'] as const).map(
@@ -196,18 +196,9 @@ describe('removal effects closure', () => {
 					} as LedgerAddress,
 				}),
 			),
-			isManaged: () => {
-				throw new Error('system residents must not reach isManaged');
-			},
+			isManaged: () => false,
 		});
-		expect(closure).toMatchObject({
-			kind: 'all-contained-or-managed',
-			effects: [
-				{ internalOwned: true },
-				{ internalOwned: true },
-				{ internalOwned: true },
-			],
-		});
+		expect(closure.kind).toBe('reaches-unmanaged');
 	});
 
 	it('still refuses an independent dependent reached through a root-owned row type', () => {
@@ -270,7 +261,7 @@ describe('removal effects closure', () => {
 		);
 	});
 
-	it('does not derive a pg_toast ledger lookup for a system-resident toast or its index', async () => {
+	it('returns undecidable when a system-resident dependent lacks positive ownership evidence', async () => {
 		const rootWithLedger = {
 			...root,
 			schema: 'unit_with_ledger',
@@ -317,10 +308,77 @@ describe('removal effects closure', () => {
 				return address.name === 'managed_child';
 			},
 		});
-		expect(closure.kind).toBe('all-contained-or-managed');
+		expect(closure.kind).toBe('reaches-unmanaged');
 		expect(ownershipLookups).toEqual([
+			{
+				...rootWithLedger,
+				schema: 'pg_toast',
+				kind: 'table',
+				name: 'pg_toast_42',
+			},
 			{ ...rootWithLedger, kind: 'table', name: 'managed_child' },
 		]);
+	});
+
+	it('normalizes PG 18 TOAST relation and index parent chains from raw catalogue rows', async () => {
+		const rootWithLedger = {
+			...root,
+			schema: 'unit_with_ledger',
+			name: 'managed_parent',
+		};
+		const ownershipLookups: LedgerAddress[] = [];
+		let calls = 0;
+		const closure = await readPgRemovalEffectsClosure({
+			executor: {
+				query: async () => {
+					calls += 1;
+					return calls === 1
+						? { rows: [{ oid: '42' }] }
+						: {
+								rows: [
+									// PG 18 gives the TOAST relation its direct internal edge
+									// to the table, but gives its index only the TOAST parent.
+									{
+										kind: 'table',
+										name: 'pg_toast_42',
+										schema: 'pg_toast',
+										parent_oid: '42',
+										parent_name: 'managed_parent',
+										parent_schema: 'unit_with_ledger',
+										internal_owned: true,
+									},
+									{
+										kind: 'index',
+										name: 'pg_toast_42_index',
+										schema: 'pg_toast',
+										parent_oid: '43',
+										parent_name: 'pg_toast_42',
+										parent_schema: 'pg_toast',
+									},
+								],
+							};
+				},
+			},
+			root: rootWithLedger,
+			isManaged: async (address) => {
+				ownershipLookups.push(address);
+				return false;
+			},
+		});
+		expect(closure.kind).toBe('all-contained-or-managed');
+		expect(ownershipLookups).toEqual([]);
+		expect(closure).toMatchObject({
+			effects: [
+				{
+					address: { kind: 'table', name: 'pg_toast_42' },
+					internalOwned: true,
+				},
+				{
+					address: { kind: 'index', name: 'pg_toast_42_index' },
+					internalOwned: true,
+				},
+			],
+		});
 	});
 
 	it('accounts a reviewed replacement array sibling through its type element OID', async () => {
@@ -556,96 +614,12 @@ describe('removal effects closure', () => {
 				return address.name === 'managed_child';
 			},
 		});
-		expect(closure.kind).toBe('all-contained-or-managed');
-		if (closure.kind !== 'all-contained-or-managed') return;
-		expect(
-			closure.effects.map((effect) => ({
-				kind: effect.address.kind,
-				name: effect.address.name,
-				parent: effect.address.parent?.name,
-				internalOwned: effect.internalOwned ?? false,
-			})),
-		).toEqual([
-			{ kind: 'column', name: 'id', parent: 'orders', internalOwned: false },
-			{
-				kind: 'column',
-				name: 'payload',
-				parent: 'orders',
-				internalOwned: false,
-			},
-			{
-				kind: 'constraint',
-				name: 'orders_pkey',
-				parent: 'orders',
-				internalOwned: false,
-			},
-			{
-				kind: 'index',
-				name: 'orders_pkey',
-				parent: 'orders',
-				internalOwned: false,
-			},
-			{
-				kind: 'sequence',
-				name: 'orders_id_seq',
-				parent: 'orders',
-				internalOwned: false,
-			},
-			{
-				kind: 'undeclarable',
-				name: 'pg_attrdef:77',
-				parent: 'id',
-				internalOwned: true,
-			},
-			{
-				kind: 'undeclarable',
-				name: 'pg_attrdef:77',
-				parent: 'id',
-				internalOwned: true,
-			},
-			{
-				kind: 'undeclarable',
-				name: 'orders',
-				parent: undefined,
-				internalOwned: true,
-			},
-			{
-				kind: 'undeclarable',
-				name: '_orders',
-				parent: undefined,
-				internalOwned: true,
-			},
-			{
-				kind: 'table',
-				name: 'pg_toast_42',
-				parent: undefined,
-				internalOwned: true,
-			},
-			{
-				kind: 'index',
-				name: 'pg_toast_42_index',
-				parent: 'pg_toast_42',
-				internalOwned: true,
-			},
-			{
-				kind: 'table',
-				name: 'managed_child',
-				parent: undefined,
-				internalOwned: false,
-			},
-			{
-				kind: 'sequence',
-				name: 'managed_child_id_seq',
-				parent: 'managed_child',
-				internalOwned: false,
-			},
-		]);
-		expect(closure.managedDependents).toEqual([
-			{ ...root, kind: 'table', name: 'managed_child' },
-		]);
-		expect(ownershipLookups).toEqual([
-			{ ...root, kind: 'table', name: 'managed_child' },
-		]);
+		expect(closure.kind).toBe('reaches-unmanaged');
+		if (closure.kind !== 'reaches-unmanaged') return;
+		expect(closure.unmanaged).toMatchObject({
+			schema: 'pg_toast',
+			name: 'pg_toast_42',
+		});
 	});
 
 	for (const [kind, catalogueClass] of [

@@ -4,7 +4,9 @@ import type { ChangeKind } from './schema-diff.js';
 export type GeneratedMutationClassification =
 	| 'non-destructive'
 	| 'removal'
-	| 'data-destructive';
+	| 'data-destructive'
+	/** A table rename is executed only by the paired re-address protocol. */
+	| 'paired-readdress';
 
 const NON_DESTRUCTIVE_KINDS: ReadonlySet<ChangeKind> = new Set([
 	'create_table',
@@ -47,6 +49,9 @@ export function classifyGeneratedMutation(
 	kind: ChangeKind | string,
 	change?: { readonly destructive?: boolean },
 ): GeneratedMutationClassification {
+	// A re-address has two ledger chains, two identities and a paired terminal.
+	// It is neither a generic safe mutation nor a destructive fallback.
+	if (kind === 'readdress_table') return 'paired-readdress';
 	if (
 		kind === 'enable_rls' ||
 		kind === 'disable_rls' ||
@@ -74,7 +79,11 @@ export function isGeneratedMutationDestructive(
 	kind: ChangeKind | string,
 	change?: { readonly destructive?: boolean },
 ): boolean {
-	return classifyGeneratedMutation(kind, change) !== 'non-destructive';
+	const classification = classifyGeneratedMutation(kind, change);
+	return (
+		classification !== 'non-destructive' &&
+		classification !== 'paired-readdress'
+	);
 }
 
 /** All removal statements remain generator-only; no transition operation maps one. */

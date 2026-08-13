@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticArtifactId } from '@dbsp/core';
-import type { ApplyResult } from '@dbsp/types';
+import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	APPLY_OUTCOME_CONTRACT,
@@ -10,6 +10,7 @@ import {
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
 	exitCodeForApplyOutcome,
+	generatorRunHasPriorStepEvents,
 	hasReusableAuthorization,
 	outcomeForApplyResult,
 	policyDigest,
@@ -251,6 +252,33 @@ describe('dbsp apply contract and policy', () => {
 			outcome: 'plan-digest-required',
 			runId: 'run-reviewed',
 		});
+	});
+
+	it('keys the generator replay gate to the loaded run, not a shared plan or address', () => {
+		const sharedPlanDigest = 'same-reviewed-plan';
+		const sharedAddress = {
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant',
+			kind: 'table',
+			name: 'accounts',
+		};
+		const attempted = {
+			run: { runId: 'run-attempted', planDigest: sharedPlanDigest },
+			events: [
+				{
+					runId: 'run-attempted',
+					address: sharedAddress,
+				} as unknown as TransitionRunJournal['events'][number],
+			],
+		};
+		const fresh = {
+			run: { runId: 'run-fresh', planDigest: sharedPlanDigest },
+			events: [],
+		};
+
+		expect(generatorRunHasPriorStepEvents(attempted)).toBe(true);
+		expect(generatorRunHasPriorStepEvents(fresh)).toBe(false);
 	});
 
 	it('reports a rejecting pool cleanup beside a successful apply outcome', async () => {

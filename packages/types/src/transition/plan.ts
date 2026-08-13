@@ -48,7 +48,8 @@ import type { DeclarableResourceAddress, ResourceAddress } from './resource.js';
 export type ManagedStepClassification =
 	| 'non-destructive'
 	| 'removal'
-	| 'data-destructive';
+	| 'data-destructive'
+	| 'paired-readdress';
 
 export type ManagedStepReplayPolicy = 'recorded' | 'fresh-live-only';
 

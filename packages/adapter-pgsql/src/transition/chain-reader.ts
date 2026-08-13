@@ -269,11 +269,12 @@ export async function readPgLedgerAddressChain(
 export async function readPgLedgerControllerOid(
 	executor: TransitionJournalQueryable,
 	ledger: LedgerHome,
+	address: LedgerAddress,
 	eventId: string,
 ): Promise<string> {
 	const result = await executor.query(
-		`SELECT controller_oid::text AS controller_oid FROM ${eventTable(ledger)} WHERE event_id = $1`,
-		[eventId],
+		`SELECT controller_oid::text AS controller_oid FROM ${eventTable(ledger)} WHERE event_id = $1 AND address_engine = $2 AND address_database = $3 AND address_schema = $4 AND address_parent = $5::jsonb AND address_kind = $6 AND address_name = $7`,
+		[eventId, ...addressParameters(address)],
 	);
 	const value = result.rows[0]?.controller_oid;
 	if (typeof value !== 'string')

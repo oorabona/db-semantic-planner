@@ -39,51 +39,52 @@ export interface PgRemovalEffectAddress {
 	readonly internalOwned?: boolean;
 }
 
-const SYSTEM_SCHEMA_NAMES = new Set([
-	'pg_toast',
-	'pg_catalog',
-	'information_schema',
-]);
-
-function isSystemSchemaResident(address: LedgerAddress): boolean {
-	return (
-		address.schema !== undefined && SYSTEM_SCHEMA_NAMES.has(address.schema)
-	);
-}
-
 /**
- * System-schema residents are implementation artifacts without requiring
- * catalogue identity proof. That ownership also flows over the parent edge,
- * so a child of an internal relation cannot become a ledger candidate.
+ * Only a positive catalogue-parent ownership proof makes an effect internal.
+ * A system schema is a location, not dbsp ownership evidence: a user object
+ * planted there remains a management candidate and therefore fails closed.
  */
 function markInternalOwnership(
 	effects: readonly PgRemovalEffectAddress[],
 ): readonly PgRemovalEffectAddress[] {
-	const internalAddresses = new Set(
-		effects
-			.filter(
-				(effect) =>
-					effect.internalOwned === true ||
-					isSystemSchemaResident(effect.address),
-			)
-			.map((effect) => ledgerAddressKey(effect.address)),
-	);
+	const internalAddresses = effects
+		.filter((effect) => effect.internalOwned === true)
+		.map((effect) => effect.address);
+	const isInternalAddress = (address: LedgerAddress): boolean =>
+		internalAddresses.some(
+			(candidate) => ledgerAddressKey(candidate) === ledgerAddressKey(address),
+		);
+	// pg_depend gives the TOAST relation's direct dependency a parent chain back
+	// to the user table, while pg_index gives the TOAST index only that relation
+	// as its parent. They denote the same physical pg_class row but not the same
+	// recursive ledger address. Preserve the positive TOAST ownership proof when
+	// joining those two catalogue representations; schema location alone remains
+	// insufficient evidence.
+	const isInternalRelation = (address: LedgerAddress): boolean =>
+		internalAddresses.some(
+			(candidate) =>
+				candidate.scope === address.scope &&
+				candidate.engine === address.engine &&
+				candidate.database === address.database &&
+				candidate.schema === address.schema &&
+				candidate.kind === address.kind &&
+				candidate.name === address.name,
+		);
 	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const effect of effects) {
-			const addressKey = ledgerAddressKey(effect.address);
-			if (internalAddresses.has(addressKey)) continue;
+			if (isInternalAddress(effect.address)) continue;
 			for (let parent = effect.address.parent; parent; parent = parent.parent) {
 				const parentAddress = {
 					...parent,
 					scope: effect.address.scope,
 				} as LedgerAddress;
 				if (
-					isSystemSchemaResident(parentAddress) ||
-					internalAddresses.has(ledgerAddressKey(parentAddress))
+					isInternalAddress(parentAddress) ||
+					isInternalRelation(parentAddress)
 				) {
-					internalAddresses.add(addressKey);
+					internalAddresses.push(effect.address);
 					changed = true;
 					break;
 				}
@@ -91,7 +92,7 @@ function markInternalOwnership(
 		}
 	}
 	return effects.map((effect) =>
-		internalAddresses.has(ledgerAddressKey(effect.address))
+		isInternalAddress(effect.address)
 			? { ...effect, internalOwned: true }
 			: effect,
 	);
@@ -445,9 +446,8 @@ export async function readPgRemovalEffectsClosure(input: {
 		}
 		const markedEffects = markInternalOwnership(effects);
 		const ownership = new Map<string, boolean>();
-		// Partition the fully marked cascade before consulting the caller: a
-		// callback cannot receive a system resident or an internal child and
-		// therefore cannot derive a fictional ledger home for either.
+		// Partition only positive internal ownership before consulting the caller.
+		// Schema location alone is never enough to skip a management decision.
 		for (const effect of managementRoots(input.root, markedEffects)) {
 			ownership.set(
 				ledgerAddressKey(effect.address),

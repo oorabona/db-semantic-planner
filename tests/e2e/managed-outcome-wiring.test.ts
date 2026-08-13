@@ -523,13 +523,14 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			expect(applied.outcome).toBe('completed');
 
 			const members = await ledgerChain(schema, claim.address.name);
-			const executed = executionClaim(claim, planned.runId);
+			const executed = members[0];
+			if (!executed) throw new Error('expected admitted enum claim');
 			expect(members.map((member) => member.eventKind)).toEqual([
 				'intent',
 				'observed',
 			]);
 			expect(members[1]).toMatchObject({
-				predecessor: executed.claimId,
+				predecessor: executed.eventId,
 				observedDigest: expect.any(String),
 			});
 			expect(
@@ -578,15 +579,17 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			expect(applied.outcome).toBe('completed');
 			expect(claim.statementBundle.statements).toHaveLength(1);
 			const members = await ledgerChain(schema, claim.address.name);
-			const executed = executionClaim(claim, planned.runId);
+			const executed = members[0];
+			if (!executed)
+				throw new Error('expected admitted concurrent-index claim');
 			expect(members.map((member) => member.eventKind)).toEqual([
 				'intent',
 				'executing',
 				'observed',
 			]);
-			expect(members[1]).toMatchObject({ predecessor: executed.claimId });
+			expect(members[1]).toMatchObject({ predecessor: executed.eventId });
 			expect(members[2]).toMatchObject({
-				predecessor: outcomeClaimEventId(executed.claimId, 'executing'),
+				predecessor: outcomeClaimEventId(executed.eventId, 'executing'),
 				observedDigest: expect.any(String),
 			});
 		});

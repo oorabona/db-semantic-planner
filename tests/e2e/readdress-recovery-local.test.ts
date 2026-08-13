@@ -231,7 +231,7 @@ async function applyPersistedReaddress(input: {
 		),
 	});
 	Object.assign(step, {
-		classification: 'non-destructive',
+		classification: 'paired-readdress',
 		claimKind: 'readdress-intent',
 		selection: { kind: 'readdress', selector: `table:${sourceName}` },
 		lifecycle: { kind: 'readdress', declaration: input.declaration },
@@ -251,7 +251,7 @@ async function applyPersistedReaddress(input: {
 				{
 					kind: 'readdress_table',
 					table: sourceName,
-					classification: 'non-destructive',
+					classification: 'paired-readdress',
 					details: `readdress ${sourceName}`,
 					statements: [],
 					readdress: input.declaration,

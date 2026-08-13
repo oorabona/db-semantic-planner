@@ -177,7 +177,11 @@ function lifecycleStep(input: {
 		address,
 		claimKind:
 			input.claimKind ??
-			(input.classification === 'removal' ? 'retire-intent' : 'intent'),
+			(input.classification === 'removal'
+				? 'retire-intent'
+				: input.classification === 'paired-readdress'
+					? 'readdress-intent'
+					: 'intent'),
 		plannedClaimKeys: [`${input.stepKey}:root`],
 		statementBundle: {
 			statements: (input.statements ?? []).map((sql, ordinal) => ({

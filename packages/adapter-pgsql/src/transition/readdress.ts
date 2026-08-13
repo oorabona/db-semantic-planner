@@ -443,7 +443,7 @@ export async function executePgPersistedTableReaddress(
 	const lifecycle = input.step.lifecycle;
 	if (
 		lifecycle?.kind !== 'readdress' ||
-		input.step.classification !== 'non-destructive' ||
+		input.step.classification !== 'paired-readdress' ||
 		input.step.claimKind !== 'readdress-intent' ||
 		input.step.requiresVacancy
 	)

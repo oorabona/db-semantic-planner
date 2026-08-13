@@ -808,13 +808,11 @@ export function createApplier(
 			// process.  Durable apply supplies the stricter load-path witness below.
 			const durablyLoadedRun =
 				carrier.__durablyLoadedRun ?? mintDurablyLoadedRun(run);
-			// A durable run is the reviewed plan, not one of its replay attempts.
-			// The first attempt keeps the historical run-scoped identity; a durable
-			// replay supplies a fresh identity so it cannot reuse a closed claim.
+			// A durable run is the reviewed plan, not one of its execution attempts.
+			// Every admitted attempt gets an opaque fresh identity; a prior committed
+			// step fact is refused by applyDurable before this path is reached.
 			const executionId =
-				carrier.__executionId ??
-				carrier.__durableRun?.runId ??
-				`dbsp.transition.execution.${randomUUID()}`;
+				carrier.__executionId ?? `dbsp.transition.execution.${randomUUID()}`;
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
@@ -2488,6 +2486,7 @@ export function createApplier(
 							assessment: derivedApplicableAssessment(plan),
 							__durableRun: loaded.run,
 							__durablyLoadedRun: durablyLoadedRun,
+							__executionId: `dbsp.transition.execution.${randomUUID()}`,
 							__executionBoundary: {
 								kind: 'durable-contract',
 								context: prepared.context,

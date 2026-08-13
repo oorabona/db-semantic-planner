@@ -298,7 +298,11 @@ export function createPgsqlGeneratedManagedStep(input: {
 	const classification: GeneratedMutationClassification =
 		classifyGeneratedMutation(input.change.kind, input.change);
 	const claimKind: LedgerClaimKind =
-		classification === 'removal' ? 'retire-intent' : 'intent';
+		classification === 'removal'
+			? 'retire-intent'
+			: classification === 'paired-readdress'
+				? 'readdress-intent'
+				: 'intent';
 	return {
 		stepKey: input.stepKey,
 		order: input.order,

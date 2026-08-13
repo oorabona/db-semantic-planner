@@ -116,6 +116,79 @@ describe('generator execution fixture shim', () => {
 		).rejects.toThrow('postcondition differs');
 	});
 
+	it('normalizes PostgreSQL primary-key attnotnull on CREATE TABLE read-back', async () => {
+		const step: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			statementBundle: {
+				statements: [
+					{
+						ordinal: 0,
+						sql: 'CREATE TABLE tenant.accounts ("id" INTEGER, CONSTRAINT "pk_accounts" PRIMARY KEY ("id"))',
+					},
+				],
+			},
+		};
+		await expect(
+			readGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								column_name: 'id',
+								column_type: 'integer',
+								is_not_null: true,
+								column_default: null,
+							},
+						],
+					}),
+				},
+				step,
+				step.address!,
+			),
+		).resolves.toMatchObject({
+			value: {
+				kind: 'table',
+				columns: [expect.objectContaining({ name: 'id', nullable: false })],
+			},
+		});
+	});
+
+	it('reads CREATE TABLE columns when a separately-rendered constraint follows it', async () => {
+		const step: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			statementBundle: {
+				statements: [
+					{
+						ordinal: 0,
+						sql: 'CREATE TABLE tenant.accounts ("id" INTEGER NOT NULL)',
+					},
+					{
+						ordinal: 1,
+						sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT "pk_accounts" PRIMARY KEY ("id")',
+					},
+				],
+			},
+		};
+		await expect(
+			readGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								column_name: 'id',
+								column_type: 'integer',
+								is_not_null: true,
+								column_default: null,
+							},
+						],
+					}),
+				},
+				step,
+				step.address!,
+			),
+		).resolves.toMatchObject({ value: { kind: 'table' } });
+	});
+
 	it('validates plan fixtures before destructive admission and passes the branded manifest', async () => {
 		executePgAdmittedOperation.mockResolvedValue({
 			kind: 'executed-destructive-outcome',

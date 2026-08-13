@@ -1,5 +1,5 @@
 /** Live-only executor for the no-argument schema-differ plan. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	compareSchemata,
@@ -78,6 +78,7 @@ export type GeneratorExecutionResult =
 			readonly outcome: 'destructive-authority-refused';
 			readonly detail: string;
 	  }
+	| { readonly outcome: 'prior-step-events-refusal'; readonly detail: string }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 function modelForAdoption(table: TableIR): ModelIR {
@@ -193,7 +194,20 @@ async function alreadyAppliedCreation(
 	address: LedgerAddress,
 ): Promise<boolean> {
 	const live = await readPgCatalogueIdentity(executor, address);
-	return live?.catalogueIdentity !== undefined && managed(executor, address);
+	if (!live?.catalogueIdentity) return false;
+	const chain = await readPgLedgerAddressChain(
+		executor,
+		home(address),
+		address,
+	);
+	const projection = projectLedgerChain(chain);
+	const recorded = chain.terminalMember?.catalogueIdentity;
+	return (
+		projection.kind === 'projected-ledger-chain' &&
+		projection.stableState === 'managed' &&
+		recorded !== undefined &&
+		isDeepStrictEqual(recorded, live.catalogueIdentity)
+	);
 }
 
 function observed(address: LedgerAddress): LedgerPayload {
@@ -219,6 +233,94 @@ function generatedPayload(value: unknown): LedgerPayload {
 	};
 }
 
+function sqlStringList(source: string): readonly string[] {
+	return [...source.matchAll(/'(?:''|[^'])+'/gu)].map((match) =>
+		match[0].slice(1, -1).replaceAll("''", "'"),
+	);
+}
+
+function sqlIdentifierList(source: string): readonly string[] {
+	return source
+		.split(',')
+		.map((identifier) => identifier.trim())
+		.map((identifier) =>
+			/^"((?:""|[^"])*)"$/u.test(identifier)
+				? identifier.slice(1, -1).replaceAll('""', '"')
+				: identifier,
+		)
+		.filter((identifier) => identifier.length > 0);
+}
+
+/**
+ * PostgreSQL makes every PRIMARY KEY member `attnotnull`, including a column
+ * whose CREATE TABLE clause omits an explicit NOT NULL.  Read the structural
+ * table constraint so the expected shape uses the same catalogue fact.
+ */
+function primaryKeyColumnNames(statement: string): ReadonlySet<string> {
+	const columns = new Set<string>();
+	for (const match of statement.matchAll(
+		/(?:\bCONSTRAINT\s+(?:"(?:""|[^"])+"|[^\s(]+)\s+)?\bPRIMARY\s+KEY\s*\(([^)]*)\)/giu,
+	))
+		for (const column of sqlIdentifierList(match[1] ?? '')) columns.add(column);
+	return columns;
+}
+
+function createTableColumnSpecifications(statement: string): readonly {
+	readonly name: string;
+	readonly type: string;
+	readonly nullable: boolean;
+	readonly default?: string;
+}[] {
+	const body = /\bCREATE\s+TABLE\b[\s\S]*?\(([\s\S]*)\)\s*;?$/iu.exec(
+		statement,
+	)?.[1];
+	if (!body) return [];
+	const primaryKeyColumns = primaryKeyColumnNames(statement);
+	return body
+		.split(',')
+		.map((part) => part.trim())
+		.filter(
+			(part) =>
+				part.length > 0 &&
+				!/^(?:CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\b/iu.test(
+					part,
+				),
+		)
+		.map((part) => {
+			const match = /^(?:"([^"]+)"|([^\s]+))\s+(.+)$/u.exec(part);
+			if (!match)
+				throw new Error(
+					`generated table column definition is unreadable: ${part}`,
+				);
+			const definition = match[3];
+			const name = match[1] ?? match[2];
+			if (definition === undefined || name === undefined)
+				throw new Error(
+					`generated table column definition is unreadable: ${part}`,
+				);
+			const type = definition
+				.split(
+					/\s+(?:NOT\s+NULL|NULL|DEFAULT|PRIMARY\s+KEY|UNIQUE|REFERENCES|CHECK)\b/iu,
+				)[0]
+				?.trim();
+			if (!type)
+				throw new Error(`generated table column type is unreadable: ${part}`);
+			const defaultMatch =
+				/\bDEFAULT\s+(.+?)(?=\s+(?:NOT\s+NULL|NULL|PRIMARY\s+KEY|UNIQUE|REFERENCES|CHECK)\b|$)/iu.exec(
+					definition,
+				);
+			return {
+				name,
+				type,
+				nullable:
+					!/\bNOT\s+NULL\b/iu.test(definition) && !primaryKeyColumns.has(name),
+				...(defaultMatch?.[1] === undefined
+					? {}
+					: { default: defaultMatch[1].trim() }),
+			};
+		});
+}
+
 /**
  * Generated DDL has no operation runtime to supply an observation. Read the
  * precise catalogue fields it changes; a same-named object is never enough to
@@ -229,7 +331,16 @@ export async function readGeneratedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
-	const statement = step.statementBundle.statements.at(-1)?.sql;
+	// CREATE TABLE can be followed by its separately-rendered primary-key or
+	// foreign-key statements. The table projection is defined by the CREATE
+	// statement, not the trailing constraint statement.
+	const statement =
+		(address.kind === 'table'
+			? step.statementBundle.statements.find((candidate) =>
+					/\bCREATE\s+TABLE\b/iu.test(candidate.sql),
+				)
+			: undefined
+		)?.sql ?? step.statementBundle.statements.at(-1)?.sql;
 	if (!statement) throw new Error(`generated step ${step.stepKey} has no SQL`);
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
@@ -327,7 +438,119 @@ export async function readGeneratedPostcondition(
 			definition,
 		});
 	}
-	return observed(address);
+	if (address.kind === 'table' && address.schema) {
+		const rows = (
+			await executor.query(
+				`SELECT attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attnum > 0 AND NOT attribute.attisdropped ORDER BY attribute.attnum`,
+				[address.schema, address.name],
+			)
+		).rows;
+		const expected = createTableColumnSpecifications(statement);
+		if (expected.length === 0 || rows.length !== expected.length)
+			throw new Error(
+				`generated table ${address.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(rows)}`,
+			);
+		for (const specification of expected) {
+			const actual = rows.find((row) => row.column_name === specification.name);
+			if (
+				!actual ||
+				normalizedDefinition(String(actual.column_type ?? '')) !==
+					normalizedDefinition(specification.type) ||
+				(actual.is_not_null !== true) !== specification.nullable ||
+				(specification.default !== undefined &&
+					normalizedDefinition(String(actual.column_default ?? '')) !==
+						normalizedDefinition(specification.default))
+			)
+				throw new Error(
+					`generated table ${address.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+				);
+		}
+		return generatedPayload({
+			kind: 'table',
+			columns: rows.map((row) => ({
+				name: String(row.column_name),
+				type: String(row.column_type),
+				nullable: row.is_not_null !== true,
+				default:
+					row.column_default == null ? undefined : String(row.column_default),
+			})),
+		});
+	}
+	if (address.kind === 'enum' && address.schema) {
+		const rows = (
+			await executor.query(
+				`SELECT enum_label.enumlabel AS label FROM pg_catalog.pg_type type JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace JOIN pg_catalog.pg_enum enum_label ON enum_label.enumtypid = type.oid WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum_label.enumsortorder`,
+				[address.schema, address.name],
+			)
+		).rows;
+		const labels = rows.map((row) => String(row.label));
+		const createLabels = /\bAS\s+ENUM\s*\(([\s\S]*)\)/iu.exec(statement)?.[1];
+		const expected = createLabels
+			? sqlStringList(createLabels)
+			: sqlStringList(statement);
+		const expectedFirst = expected[0];
+		if (
+			expectedFirst === undefined ||
+			(createLabels
+				? !isDeepStrictEqual(labels, expected)
+				: !labels.includes(expectedFirst))
+		)
+			throw new Error(
+				`generated enum ${address.name} labels postcondition differs`,
+			);
+		return generatedPayload({ kind: 'enum', labels });
+	}
+	if (address.kind === 'sequence' && address.schema) {
+		const row = (
+			await executor.query(
+				`SELECT sequence.start_value::text AS start_value, sequence.increment_by::text AS increment_by, sequence.min_value::text AS min_value, sequence.max_value::text AS max_value, sequence.cache_size::text AS cache_size, sequence.cycle AS cycle FROM pg_catalog.pg_sequences sequence WHERE sequence.schemaname = $1 AND sequence.sequencename = $2`,
+				[address.schema, address.name],
+			)
+		).rows[0];
+		if (!row) throw new Error(`generated sequence ${address.name} is absent`);
+		const expectedNumber = (keyword: string) =>
+			new RegExp(`\\b${keyword}\\s+(?:BY\\s+)?(-?\\d+)`, 'iu').exec(
+				statement,
+			)?.[1];
+		const checks: readonly [string, string | undefined][] = [
+			['start_value', expectedNumber('START')],
+			['increment_by', expectedNumber('INCREMENT')],
+			['min_value', expectedNumber('MINVALUE')],
+			['max_value', expectedNumber('MAXVALUE')],
+			['cache_size', expectedNumber('CACHE')],
+		];
+		if (
+			checks.some(
+				([field, expected]) =>
+					expected !== undefined && String(row[field] ?? '') !== expected,
+			) ||
+			(/\bCYCLE\b/iu.test(statement) &&
+				!/\bNO\s+CYCLE\b/iu.test(statement) &&
+				row.cycle !== true)
+		)
+			throw new Error(
+				`generated sequence ${address.name} properties postcondition differs`,
+			);
+		return generatedPayload({ kind: 'sequence', ...row });
+	}
+	if (address.kind === 'extension') {
+		const row = (
+			await executor.query(
+				`SELECT extension.extversion AS version FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
+				[address.name],
+			)
+		).rows[0];
+		const expected = /\bVERSION\s+'([^']+)'/iu.exec(statement)?.[1];
+		if (!row || (expected !== undefined && row.version !== expected))
+			throw new Error(
+				`generated extension ${address.name} version postcondition differs`,
+			);
+		return generatedPayload({
+			kind: 'extension',
+			version: String(row.version),
+		});
+	}
+	throw new Error(`generated ${address.kind} has no declarable read-back`);
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
@@ -497,7 +720,10 @@ export async function executeGeneratorPlan(input: {
 		const database = await databaseId(input.pool);
 		// Reconciliation selects reservations by the persisted run identity.  The
 		// execution scope is deterministic for that run, never a disconnected UUID.
-		const executionId = `dbsp.generator.execution.${input.runId}`;
+		// A persisted generator run identifies reviewed material, never a reusable
+		// claim namespace. The caller has already refused any prior step-scoped
+		// durable fact; a zero-event retry therefore gets a fresh attempt identity.
+		const executionId = `dbsp.generator.execution.${randomUUID()}`;
 		const steps = managedSteps(manifest);
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
@@ -677,8 +903,10 @@ export async function executeGeneratorPlan(input: {
 								eventId: outcomeClaimEventId(claim.claimId, 'observed'),
 								eventKind: 'observed',
 							},
-							readBack: async () =>
-								readGeneratedPostcondition(input.pool, step, address),
+							// Transactional DDL is visible only on the admitted session until
+							// its terminal ledger fact commits with it.
+							readBack: async (session) =>
+								readGeneratedPostcondition(session, step, address),
 							recordCatalogueIdentity: true,
 							vacancy: async (executor: LedgerQueryable) =>
 								(await readPgCatalogueIdentity(executor, address))

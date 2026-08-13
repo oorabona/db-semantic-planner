@@ -114,6 +114,7 @@ async function preflightReleaseRefusal(input: {
 		(await readPgLedgerControllerOid(
 			input.executor,
 			input.home,
+			input.address,
 			chain.terminalMember.eventId,
 		));
 	if (
@@ -192,6 +193,7 @@ export async function releasePgManagedAddress(input: {
 					(await readPgLedgerControllerOid(
 						executor,
 						input.home,
+						input.address,
 						chain.terminalMember.eventId,
 					));
 				if (

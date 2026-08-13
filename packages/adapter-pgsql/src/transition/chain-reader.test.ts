@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	findPgLedgerTerminalMember,
 	readPgLedgerAddressChain,
+	readPgLedgerControllerOid,
 } from './chain-reader.js';
 
 const ledger = { scope: 'schema', schema: 'tenant' } as const;
@@ -88,5 +89,26 @@ describe('PostgreSQL address-chain reader', () => {
 		const sql = String(query.mock.calls[0]?.[0]);
 		expect(sql).not.toMatch(/order\s+by|max\s*\(/i);
 		expect(sql).toContain('WHERE address_engine = $1');
+	});
+
+	it('OBL-CTRL3: keys a controller lookup by both address and event id', async () => {
+		const query = vi.fn(async () => ({ rows: [{ controller_oid: '42' }] }));
+		await expect(
+			readPgLedgerControllerOid({ query }, ledger, address, 'shared-event'),
+		).resolves.toBe('42');
+		const [sql, parameters] = query.mock.calls[0] as unknown as readonly [
+			string,
+			readonly unknown[],
+		];
+		expect(String(sql)).toContain('event_id = $1 AND address_engine = $2');
+		expect(parameters).toEqual([
+			'shared-event',
+			'postgresql',
+			'app',
+			'tenant',
+			'null',
+			'table',
+			'accounts',
+		]);
 	});
 });

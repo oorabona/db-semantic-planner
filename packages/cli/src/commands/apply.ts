@@ -1,4 +1,5 @@
 /** Execute exactly one reviewed durable transition run; never re-plan. */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
@@ -33,6 +34,7 @@ import type {
 	ResourceAddress,
 	ResourceSelector,
 	TransitionRunAuthorization,
+	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
 import { REFUSAL_VOCABULARY } from '@dbsp/types';
@@ -73,8 +75,46 @@ export interface ApplyOptions {
 	readonly dryRun?: boolean;
 	/** Reviewed replacement selector(s) for the no-argument generator path. */
 	readonly replace?: readonly string[];
-	/** Private no-argument bridge: only the command that just persisted the run sets it. */
-	readonly freshGeneratorRemovalRunId?: string;
+}
+
+/**
+ * Recovery is keyed to the loaded durable run. Ledger address history belongs
+ * to every run that touched the address and must not make a fresh run stale.
+ */
+export function generatorRunHasPriorStepEvents(
+	loaded: Pick<TransitionRunJournal, 'events'>,
+): boolean {
+	return loaded.events.length > 0;
+}
+
+/**
+ * The just-persisted generator-removal exception is an in-module capability,
+ * not an ApplyOptions field.  A public caller can neither name its type nor
+ * manufacture a value accepted by the WeakSet check below.
+ */
+interface JustPersistedGeneratorRemovalCapability {
+	readonly runId: string;
+}
+
+const justPersistedGeneratorRemovalCapabilities = new WeakSet<object>();
+const justPersistedGeneratorRemovalContext =
+	new AsyncLocalStorage<JustPersistedGeneratorRemovalCapability>();
+
+function mintJustPersistedGeneratorRemovalCapability(
+	runId: string,
+): JustPersistedGeneratorRemovalCapability {
+	const capability = Object.freeze({ runId });
+	justPersistedGeneratorRemovalCapabilities.add(capability);
+	return capability;
+}
+
+function permitsJustPersistedGeneratorRemoval(runId: string): boolean {
+	const capability = justPersistedGeneratorRemovalContext.getStore();
+	return (
+		capability !== undefined &&
+		capability.runId === runId &&
+		justPersistedGeneratorRemovalCapabilities.has(capability)
+	);
 }
 
 function errorDetail(error: unknown): string {
@@ -847,6 +887,8 @@ export async function runNoArgumentApply(
 			planDigest: effectivePlan.planDigest,
 		};
 	}
+	const runId = effectivePlan.runId;
+	const planDigest = effectivePlan.planDigest;
 	// Persisted material is shown before any confirmation requirement or prompt.
 	present(effectivePlan);
 	if (options.yes !== true && process.stdin.isTTY !== true) {
@@ -857,10 +899,7 @@ export async function runNoArgumentApply(
 			planDigest: effectivePlan.planDigest,
 		};
 	}
-	if (
-		options.yes !== true &&
-		!(await confirm(effectivePlan.runId, effectivePlan.planDigest))
-	) {
+	if (options.yes !== true && !(await confirm(runId, planDigest))) {
 		return {
 			outcome: 'confirmation-declined',
 			plan: effectivePlan,
@@ -871,13 +910,16 @@ export async function runNoArgumentApply(
 	const recordedRunOptions = Object.fromEntries(
 		Object.entries(options).filter(([key]) => key !== 'schema'),
 	) as ApplyOptions;
-	const result = await execute(effectivePlan.runId, {
+	const executeOptions = {
 		...recordedRunOptions,
 		planDigest: effectivePlan.planDigest,
-		...(isUnsupportedRemoval
-			? { freshGeneratorRemovalRunId: effectivePlan.runId }
-			: {}),
-	});
+	};
+	const result = isUnsupportedRemoval
+		? await justPersistedGeneratorRemovalContext.run(
+				mintJustPersistedGeneratorRemovalCapability(runId),
+				() => execute(runId, executeOptions),
+			)
+		: await execute(runId, executeOptions);
 	return {
 		outcome: result.outcome,
 		plan: effectivePlan,
@@ -911,7 +953,7 @@ async function loadOnTarget(
 	}
 }
 
-export async function runApply(
+async function runApplyInternal(
 	runId: string,
 	options: ApplyOptions,
 	pool?: Pool,
@@ -942,7 +984,7 @@ export async function runApply(
 	}
 	if (
 		persisted.run.replayability === 'non-replayable-generator-removal' &&
-		options.freshGeneratorRemovalRunId !== runId
+		!permitsJustPersistedGeneratorRemoval(runId)
 	) {
 		const refusal: ApplyCommandResult = {
 			outcome: 'non-replayable-generator-run',
@@ -983,6 +1025,12 @@ export async function runApply(
 						actualDigest !== expectedPlanDigest
 					)
 						throw new RecordedPlanDigestMismatchError();
+					if (generatorRunHasPriorStepEvents(current))
+						return {
+							outcome: 'prior-step-events-refusal' as const,
+							detail:
+								'run has prior generator step-attempt events; run dbsp recover instead',
+						};
 					return executeGeneratorPlan({
 						pool: owned,
 						run: lockPgJournalRun(mintDurablyLoadedRun(current.run)),
@@ -1134,6 +1182,15 @@ export async function runApply(
 		return withPoolCleanupReported(result, () => owned.end());
 	}
 	return result;
+}
+
+/** Public durable apply surface: it never accepts the private replay bridge. */
+export async function runApply(
+	runId: string,
+	options: ApplyOptions,
+	pool?: Pool,
+): Promise<ApplyCommandResult> {
+	return runApplyInternal(runId, options, pool);
 }
 
 export const applyCommand = new Command('apply')

@@ -649,8 +649,14 @@ export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
 	readonly resolution: PgOutcomeResolution;
 	/** Core has already opened the segment transaction; never nest BEGIN. */
 	readonly transactionOpen?: boolean;
-	/** Operation-owned terminal read-back; generic catalogue identity is not evidence. */
-	readonly readBack?: () => Promise<LedgerPayload>;
+	/**
+	 * Operation-owned terminal read-back; generic catalogue identity is not
+	 * evidence. It receives the admitted session so transactional DDL is read
+	 * before its terminal ledger fact commits.
+	 */
+	readonly readBack?: (
+		executor: TransitionJournalQueryable,
+	) => Promise<LedgerPayload>;
 	/** Required for creations; the reader runs after the claim and before SQL. */
 	readonly vacancy?: (
 		executor: TransitionJournalQueryable,
@@ -1186,7 +1192,7 @@ async function observedResolutionMember(
 	claim: AdmittedOutcomeClaim,
 	resolution: PgOutcomeResolution,
 	predecessor: string,
-	readBack: () => Promise<LedgerPayload>,
+	readBack: (executor: TransitionJournalQueryable) => Promise<LedgerPayload>,
 	recordCatalogueIdentity: boolean | undefined,
 ): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
 	const live = recordCatalogueIdentity
@@ -1197,7 +1203,7 @@ async function observedResolutionMember(
 		...(live?.catalogueIdentity
 			? { catalogueIdentity: live.catalogueIdentity }
 			: {}),
-		observed: await readBack(),
+		observed: await readBack(executor),
 	};
 }
 
