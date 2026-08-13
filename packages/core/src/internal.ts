@@ -11,6 +11,10 @@ export {
 	isDestructiveAuthorityPermit,
 } from './transition/destructive-authority.js';
 export {
+	type DurablyLoadedRun,
+	isDurablyLoadedRun,
+} from './transition/durably-loaded-run.js';
+export {
 	admitOutcomeClaim,
 	claimIdForToken,
 	consumeClaimToken,

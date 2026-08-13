@@ -25,4 +25,9 @@ export {
 	runPgNonTransactionalOutcome,
 	runPgTransactionalOutcome,
 } from './transition/outcome-protocol.js';
+export {
+	createPostLockAdmissionEvidence,
+	isPostLockAdmissionEvidence,
+	type PostLockAdmissionEvidence,
+} from './transition/post-lock-admission-evidence.js';
 export { executePgTableReaddress } from './transition/readdress.js';

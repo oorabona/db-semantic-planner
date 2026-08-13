@@ -561,8 +561,40 @@ export class PgLedgerStorageUnsupportedError extends Error {
 	}
 }
 
+declare const pgOrderedLedgerLocksBrand: unique symbol;
+
+/** Proof returned only after this transaction acquired every home in order. */
+export interface PgOrderedLedgerLocks {
+	readonly homes: readonly PgLedgerTarget[];
+	readonly [pgOrderedLedgerLocksBrand]: 'dbsp-pg-ordered-ledger-locks';
+}
+
+const orderedLedgerLocks = new WeakSet<object>();
+
+function mintPgOrderedLedgerLocks(
+	homes: readonly LedgerHome[],
+): PgOrderedLedgerLocks {
+	const proof = Object.freeze({
+		homes: Object.freeze(
+			orderedLedgerHomes(homes).map((home) => Object.freeze({ ...home })),
+		),
+	}) as PgOrderedLedgerLocks;
+	orderedLedgerLocks.add(proof);
+	return proof;
+}
+
+export function isPgOrderedLedgerLocks(
+	value: unknown,
+): value is PgOrderedLedgerLocks {
+	return (
+		value != null &&
+		(typeof value === 'object' || typeof value === 'function') &&
+		orderedLedgerLocks.has(value as object)
+	);
+}
+
 export type PgLedgerLockResult =
-	| { readonly kind: 'acquired' }
+	| { readonly kind: 'acquired'; readonly proof: PgOrderedLedgerLocks }
 	| { readonly kind: 'busy'; readonly ledger: LedgerHome }
 	| {
 			readonly kind: 'refused';
@@ -1436,5 +1468,12 @@ export async function acquirePgLedgerLocks(
 			return { kind: 'refused', ledger: home, error };
 		}
 	}
-	return { kind: 'acquired' };
+	const result = { kind: 'acquired' as const } as PgLedgerLockResult;
+	// Keep the historical result's enumerable shape: callers branch on `kind`,
+	// while only the new evidence constructor needs the opaque proof.
+	Object.defineProperty(result, 'proof', {
+		value: mintPgOrderedLedgerLocks(homes),
+		enumerable: false,
+	});
+	return result;
 }

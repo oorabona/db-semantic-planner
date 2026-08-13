@@ -30,6 +30,7 @@ import {
 	mergeCompatibleObservationContexts,
 	type ObservationContextMergeResult,
 } from './context-compat.js';
+import type { DurablyLoadedRun } from './durably-loaded-run.js';
 
 export interface OperationFingerprints {
 	readonly expectedBefore: FingerprintManifest;
@@ -108,6 +109,8 @@ export interface GuardExecutionResult {
 
 export interface TransitionExecutionClient {
 	readonly opaqueClient: TransitionSessionClient;
+	/** Mark the checked-out client unsafe to return to its pool. */
+	markClientCompromised(): void;
 }
 
 export interface NonRollbackableExecutionTracker {
@@ -122,6 +125,8 @@ export interface NonRollbackableExecutionTracker {
 export interface ManagedOutcomeExecutionRequest {
 	readonly claim: ManagedStepClaimMaterial;
 	readonly run: TransitionRunMetadata;
+	/** Core-minted proof that this run crossed a verified execution boundary. */
+	readonly durablyLoadedRun: DurablyLoadedRun;
 	/** Minted once by apply(), never reused when a recorded run is applied again. */
 	readonly executionId: string;
 	readonly transactional: boolean;

@@ -940,6 +940,16 @@ function currencyRefusal(
 	);
 }
 
+type RuntimeIntegritySeams = {
+	readonly validateShape: typeof validatePgLedgerPhysicalShape;
+	readonly readCurrency: typeof readPgLedgerScopeCurrency;
+};
+
+const runtimeIntegritySeams: RuntimeIntegritySeams = {
+	validateShape: validatePgLedgerPhysicalShape,
+	readCurrency: readPgLedgerScopeCurrency,
+};
+
 /**
  * The façade's runtime gate: validate the physical ledger and its marker /
  * lineage currency on the same pinned execution session before it admits DDL.
@@ -950,50 +960,22 @@ export async function validatePgLedgerRuntimeIntegrity(
 	executor: TransitionJournalQueryable,
 	homes: readonly PgLedgerTarget[],
 	run?: PgLockedRun,
+	seams: RuntimeIntegritySeams = runtimeIntegritySeams,
 ): Promise<OutcomeProtocolRefusal | undefined> {
-	const session = executor as object;
-	const cacheKey =
-		run === undefined ? undefined : `${run.runId}\u0000${run.planDigest}`;
-	const cachedByRun =
-		cacheKey === undefined
-			? undefined
-			: lockedLedgerIntegrity.get(session)?.get(cacheKey);
 	const seen = new Set<string>();
 	for (const home of homes) {
 		const key = `${home.scope}:${home.schema ?? ''}`;
 		if (seen.has(key)) continue;
 		seen.add(key);
-		if (cachedByRun?.has(key)) continue;
-		// Compatibility-only direct runners have no durable run-lock witness.
-		// They still re-read currency in their own locked transaction, but the
-		// admitted facade is the sole route that can cache and trust shape proof.
-		if (run === undefined) {
-			const currency = await readPgLedgerScopeCurrency(executor, home);
-			if (currency.kind !== 'current') return currencyRefusal(currency);
-			continue;
-		}
-		await validatePgLedgerPhysicalShape(executor, home);
-		const currency = await readPgLedgerScopeCurrency(executor, home);
+		// Direct compatibility runners do not carry a durable run witness. They
+		// keep their existing currency-only check; every witness-bearing admission
+		// independently re-checks shape with no retained cache.
+		if (run !== undefined) await seams.validateShape(executor, home);
+		const currency = await seams.readCurrency(executor, home);
 		if (currency.kind !== 'current') return currencyRefusal(currency);
-		if (cacheKey !== undefined) {
-			let byRun = lockedLedgerIntegrity.get(session);
-			if (!byRun) {
-				byRun = new Map();
-				lockedLedgerIntegrity.set(session, byRun);
-			}
-			let homesForRun = byRun.get(cacheKey);
-			if (!homesForRun) {
-				homesForRun = new Set();
-				byRun.set(cacheKey, homesForRun);
-			}
-			homesForRun.add(key);
-		}
 	}
 	return undefined;
 }
-
-/** Cleared by object lifetime; a pooled client is additionally keyed by run id. */
-const lockedLedgerIntegrity = new WeakMap<object, Map<string, Set<string>>>();
 
 /**
  * The sole claim-admission route: after the caller has begun and serialized

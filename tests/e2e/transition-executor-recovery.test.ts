@@ -462,7 +462,10 @@ async function writeIntentOnly(params: {
 	let releaseFailure: TransitionLeaseFailure | undefined;
 	try {
 		await runtime.writeIntentJournal(
-			{ opaqueClient: lease.session },
+			{
+				opaqueClient: lease.session,
+				markClientCompromised: () => undefined,
+			},
 			{
 				runId: params.run.runId,
 				run: params.run,

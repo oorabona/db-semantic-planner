@@ -28,6 +28,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { matchLiveObservationContext } from './context-match.js';
+import { mintDurablyLoadedRun } from './durably-loaded-run.js';
 import { validateExecutionContract } from './execution-contract.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type {
@@ -54,6 +55,7 @@ import {
 	acquireTransitionLease,
 	createTransitionLessor,
 	isTransitionLessor,
+	markTransitionClientCompromised,
 	planOperationSession,
 	type TransitionLease,
 	type TransitionLeaseFailure,
@@ -89,6 +91,7 @@ type DurableExecutionCarrier = {
 	readonly plan: InProcessProvenPlan;
 	readonly assessment: ApplicableAssessment;
 	readonly __durableRun?: TransitionRunMetadata;
+	readonly __durablyLoadedRun?: import('./durably-loaded-run.js').DurablyLoadedRun;
 	/**
 	 * The first delivery attempt remains run-scoped for durable journal and
 	 * recovery compatibility. A replay receives a fresh attempt identity.
@@ -801,6 +804,10 @@ export function createApplier(
 				}
 			}
 			const run = carrier.__durableRun ?? createTransitionRunMetadata(plan);
+			// A regular apply can only receive a plan minted by prove() in this
+			// process.  Durable apply supplies the stricter load-path witness below.
+			const durablyLoadedRun =
+				carrier.__durablyLoadedRun ?? mintDurablyLoadedRun(run);
 			// A durable run is the reviewed plan, not one of its replay attempts.
 			// The first attempt keeps the historical run-scoped identity; a durable
 			// replay supplies a fresh identity so it cannot reuse a closed claim.
@@ -1154,7 +1161,13 @@ export function createApplier(
 				}[] = [];
 				try {
 					lease = await acquireTransitionLease(target);
-					client = { opaqueClient: lease.session };
+					const leasedSession = lease.session;
+					client = {
+						opaqueClient: leasedSession,
+						markClientCompromised: () => {
+							markTransitionClientCompromised(leasedSession);
+						},
+					};
 					const executionClient = client;
 					if (executionBoundary.kind === 'durable-contract')
 						activeContext = executionBoundary.context;
@@ -1486,6 +1499,7 @@ export function createApplier(
 									return executeManagedOutcome(executionClient, {
 										claim: managedClaim,
 										run,
+										durablyLoadedRun,
 										executionId,
 										transactional,
 										lockTimeoutMs: lockTimeoutMs(
@@ -1510,6 +1524,8 @@ export function createApplier(
 										opaqueClient: planOperationSession(
 											executionClient.opaqueClient,
 										),
+										markClientCompromised:
+											executionClient.markClientCompromised,
 									},
 									entry.step.operation,
 									stepContext,
@@ -2409,6 +2425,7 @@ export function createApplier(
 			}
 			if (!semantic.ok)
 				return durableRefusal('plan-validation-failed', semantic.detail);
+			const durablyLoadedRun = mintDurablyLoadedRun(loaded.run);
 			for (const assumption of plan.assumptions) {
 				if (!assumptionAccepted(assumption, input.policy)) {
 					return durableRefusal(
@@ -2479,6 +2496,7 @@ export function createApplier(
 							plan,
 							assessment: derivedApplicableAssessment(plan),
 							__durableRun: loaded.run,
+							__durablyLoadedRun: durablyLoadedRun,
 							__executionBoundary: {
 								kind: 'durable-contract',
 								context: prepared.context,

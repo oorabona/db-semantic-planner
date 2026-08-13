@@ -745,7 +745,10 @@ async function withObservedStep<T>(
 		let observation: StepObservation;
 		try {
 			lease = await acquireTransitionTargetLease(target);
-			const client: TransitionExecutionClient = { opaqueClient: lease.session };
+			const client: TransitionExecutionClient = {
+				opaqueClient: lease.session,
+				markClientCompromised: () => undefined,
+			};
 			let context = await runtime.observeContext(
 				client,
 				step.operation,
