@@ -10,6 +10,8 @@ export {
 	appendPgLedgerRelease,
 	appendPgLedgerResolution,
 	appendPgLedgerResolutionGroup,
+	classifyPgLedgerPhysicalShape,
+	type PgLedgerPhysicalShapeOutcome,
 	readPgLedgerReservationsForPair,
 } from './transition/ledger.js';
 export {
