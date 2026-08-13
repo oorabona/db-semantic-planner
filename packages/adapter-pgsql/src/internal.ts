@@ -17,6 +17,8 @@ export {
 export {
 	appendPgOutcomeResolution,
 	executePgDestructiveOutcome,
+	lockPgJournalRun,
+	lockPgJournalRunForNextRoundCompatibilityPath,
 	openPgOutcomeClaim,
 	openPgOutcomeClaimGroup,
 	recoverPgOutcomeClaim,

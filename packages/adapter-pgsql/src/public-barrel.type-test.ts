@@ -5,6 +5,11 @@ import { executePgDestructiveOutcome } from '@dbsp/adapter-pgsql';
 
 void executePgDestructiveOutcome;
 
+// @ts-expect-error ordinary callers cannot mint a locked run from the package root
+import { lockPgJournalRun } from '@dbsp/adapter-pgsql';
+
+void lockPgJournalRun;
+
 // @ts-expect-error recovery primitive is not public
 import { recoverPgOutcomeClaim } from '@dbsp/adapter-pgsql';
 

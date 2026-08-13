@@ -14,6 +14,9 @@ vi.mock('@dbsp/core', () => ({ projectLedgerChain: mocks.project }));
 vi.mock('./ledger.js', () => ({
 	acquirePgLedgerLocks: mocks.locks,
 	appendPgLedgerRelease: mocks.appendRelease,
+	assertPgLedgerPhysicalShapeVerified: vi.fn(),
+	classifyPgLedgerPhysicalShape: vi.fn(),
+	isPgOrderedLedgerLocks: vi.fn(),
 	validatePgLedgerPhysicalShape: mocks.physicalIntegrity,
 }));
 vi.mock('./reinitialize-preflight.js', () => ({

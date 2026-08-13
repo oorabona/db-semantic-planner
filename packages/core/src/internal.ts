@@ -13,6 +13,7 @@ export {
 export {
 	type DurablyLoadedRun,
 	isDurablyLoadedRun,
+	mintDurablyLoadedRun,
 } from './transition/durably-loaded-run.js';
 export {
 	admitOutcomeClaim,

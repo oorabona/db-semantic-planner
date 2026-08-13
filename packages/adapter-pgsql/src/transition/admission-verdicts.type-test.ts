@@ -6,12 +6,32 @@ import {
 	mintAdmittedPermit,
 	type ValidatedManifestVerdict,
 } from './outcome-protocol.js';
+import type { PostLockAdmissionEvidence } from './post-lock-admission-evidence.js';
 
 declare const claim: AdmittedOutcomeClaim;
 declare const digestBinding: DigestBindingVerdict;
 declare const validatedManifest: ValidatedManifestVerdict;
 declare const approvalScope: ApprovalScopeVerdict;
 declare const liveAdmission: LiveAdmissionVerdict;
+declare const postLockEvidence: PostLockAdmissionEvidence;
+
+// @ts-expect-error OBL-AUTH6: permit minting requires post-lock evidence.
+mintAdmittedPermit(
+	claim,
+	digestBinding,
+	validatedManifest,
+	approvalScope,
+	liveAdmission,
+);
+
+mintAdmittedPermit(
+	claim,
+	digestBinding,
+	validatedManifest,
+	approvalScope,
+	liveAdmission,
+	postLockEvidence,
+);
 
 // @ts-expect-error A permit cannot omit the digest-binding verdict.
 mintAdmittedPermit(claim, validatedManifest, approvalScope, liveAdmission);

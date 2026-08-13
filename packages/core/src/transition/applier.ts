@@ -1946,13 +1946,10 @@ export function createApplier(
 				} catch (error) {
 					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
-						if (client && transactionStarted) {
-							await rollbackAndPrepareObservedJournalWrite(
-								segmentCoordinator,
-								client,
-								lockTimeoutMs(active.semantics, active.step, activeContext),
-							).catch(() => undefined);
-						}
+						// COMMIT may have reached PostgreSQL even though its acknowledgement
+						// was lost. This lease must never return to the pool, and no observed
+						// journal append may turn transport ambiguity into a claimed fact.
+						client?.markClientCompromised();
 						const journal = unknownJournal(active.intent);
 						const result = {
 							assessment: assessment(
@@ -1970,13 +1967,7 @@ export function createApplier(
 							journals: [...journals, journal],
 							observations,
 						};
-						return resultWithObservedJournal({
-							semantics: active.semantics,
-							client,
-							journal,
-							result,
-							outcomeDurable: true,
-						});
+						return result;
 					}
 					let rollbackAttempted = false;
 					let rollbackSucceeded = false;

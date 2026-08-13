@@ -6,7 +6,6 @@ import {
 	createPgsqlAdapter,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
-	lockPgJournalRun,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
@@ -16,7 +15,10 @@ import {
 // These legacy operation bridges have no public façade shape yet. The CLI is
 // their trusted in-process caller until their operation-specific admission is
 // expressed by executePgAdmittedOperation.
-import { executePgTableReaddress } from '@dbsp/adapter-pgsql/internal';
+import {
+	executePgTableReaddress,
+	lockPgJournalRunForNextRoundCompatibilityPath,
+} from '@dbsp/adapter-pgsql/internal';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
@@ -658,7 +660,7 @@ export async function executeGeneratorPlan(input: {
 			};
 			if (step.classification === 'non-destructive') {
 				const result = await executePgAdmittedOperation(input.pool, {
-					run: lockPgJournalRun({
+					run: lockPgJournalRunForNextRoundCompatibilityPath({
 						runId: input.runId,
 						planDigest: input.planDigest,
 					}),
@@ -803,7 +805,7 @@ export async function executeGeneratorPlan(input: {
 				},
 			};
 			const executed = (await executePgAdmittedOperation(input.pool, {
-				run: lockPgJournalRun({
+				run: lockPgJournalRunForNextRoundCompatibilityPath({
 					runId: input.runId,
 					planDigest: input.planDigest,
 				}),

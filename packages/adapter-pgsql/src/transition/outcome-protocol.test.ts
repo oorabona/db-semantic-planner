@@ -11,10 +11,11 @@ import {
 	appendPgOutcomeResolution,
 	checkApprovalScope,
 	checkDigestBinding,
-	checkLiveAdmission,
+	checkLiveAdmissionForNextRoundCompatibilityPath,
 	checkValidatedManifest,
-	lockPgJournalRun,
-	mintAdmittedPermit,
+	executePgAdmittedOperation,
+	lockPgJournalRunForNextRoundCompatibilityPath,
+	mintAdmittedPermitForNextRoundCompatibilityPath,
 	PgCommitAcknowledgementAmbiguousError,
 	recoverPgAdmittedReaddressPair,
 	runPgNonTransactionalOutcome,
@@ -107,6 +108,8 @@ function recorder(failSql?: string) {
 				};
 			if (statement.includes('pg_try_advisory_xact_lock'))
 				return { rows: [{ locked: true }] };
+			if (statement.includes('pg_backend_pid()::text AS backend_id'))
+				return { rows: [{ backend_id: '42', transaction_id: '7' }] };
 			if (statement.startsWith('SELECT event_id')) {
 				return {
 					rows:
@@ -145,6 +148,24 @@ function recorder(failSql?: string) {
 }
 
 describe('PostgreSQL outcome protocol compositions', () => {
+	it('OBL-AUTH1 refuses a JavaScript-fabricated locked run at the admitted facade', async () => {
+		const result = await executePgAdmittedOperation(
+			{ query: vi.fn() },
+			{
+				run: {
+					runId: 'fabricated-run',
+					planDigest: 'fabricated-digest',
+				} as PgLockedRun,
+				approval: { approvals: [] },
+				operation: { kind: 'single-outcome', request: {} } as never,
+			},
+		);
+		expect(result).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'admitted operation refuses an unbound locked journal run',
+		});
+	});
+
 	it('admits an empty live supplemental closure member beside its manifest-declared destructive root', () => {
 		const root = request('destructive-root').plan;
 		const validation = validateNormalizedManagedStepManifest([
@@ -246,7 +267,10 @@ describe('PostgreSQL outcome protocol compositions', () => {
 				reservations: [],
 			}),
 		};
-		const run = lockPgJournalRun({ runId: 'reviewed-run', planDigest });
+		const run = lockPgJournalRunForNextRoundCompatibilityPath({
+			runId: 'reviewed-run',
+			planDigest,
+		});
 
 		expect(
 			checkApprovalScope({
@@ -291,7 +315,10 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		};
 		expect(
 			checkApprovalScope({
-				run: lockPgJournalRun({ runId: 'trust-root-run', planDigest }),
+				run: lockPgJournalRunForNextRoundCompatibilityPath({
+					runId: 'trust-root-run',
+					planDigest,
+				}),
 				approval: {
 					declaredTrustRoot: { kind: 'policy', policyId: 'reviewed-policy' },
 					approvals: [
@@ -363,7 +390,10 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			},
 		]);
 		if (!validation.ok) throw new Error(validation.detail);
-		const run = lockPgJournalRun({ runId: 'scope-bound-run', planDigest });
+		const run = lockPgJournalRunForNextRoundCompatibilityPath({
+			runId: 'scope-bound-run',
+			planDigest,
+		});
 		const operationA = {
 			kind: 'single-outcome' as const,
 			request: {
@@ -399,7 +429,10 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			approval: { approvals: [] },
 			operation: operationA,
 		});
-		const liveAdmission = await checkLiveAdmission({ query: vi.fn() }, []);
+		const liveAdmission = await checkLiveAdmissionForNextRoundCompatibilityPath(
+			recorder(),
+			operationA.request,
+		);
 		if (
 			'kind' in digestBinding ||
 			'kind' in validatedManifest ||
@@ -409,7 +442,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			throw new Error('scope-binding setup unexpectedly refused');
 
 		expect(() =>
-			mintAdmittedPermit(
+			mintAdmittedPermitForNextRoundCompatibilityPath(
 				{
 					...operationB.request,
 					token: {} as never,

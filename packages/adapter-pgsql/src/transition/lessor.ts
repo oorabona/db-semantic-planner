@@ -212,26 +212,6 @@ export async function withPgTransitionRunLock<T>(
 							readonly rows: readonly Record<string, unknown>[];
 						};
 					},
-					// Managed outcomes may need a durable terminal even when the
-					// coordinator later rolls its segment back. This opens a distinct
-					// PostgreSQL session; it never borrows the run-lock connection.
-					openManagedOutcomeSession: async () => {
-						const outcomeClient = await pool.connect();
-						return {
-							query: (sql: string, params?: unknown) =>
-								outcomeClient.query(sql, params as never) as Promise<{
-									readonly rows: readonly Record<string, unknown>[];
-								}>,
-							release: (error?: unknown) =>
-								outcomeClient.release(
-									error === undefined
-										? undefined
-										: error instanceof Error
-											? error
-											: new Error(String(error)),
-								),
-						};
-					},
 					// Segment cleanup must not give back the session that owns the run lock.
 					release: () => undefined,
 				}) as TransitionQueryClient,

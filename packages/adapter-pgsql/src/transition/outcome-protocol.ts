@@ -11,7 +11,9 @@ import {
 	admitOutcomeClaim,
 	claimIdForToken,
 	consumeClaimToken,
+	type DurablyLoadedRun,
 	isDestructiveAuthorityPermit,
+	isDurablyLoadedRun,
 } from '@dbsp/core/internal';
 import type {
 	AdmittedOutcomeClaim,
@@ -52,6 +54,11 @@ import {
 	readPgLedgerReservationsForPair,
 	validatePgLedgerPhysicalShape,
 } from './ledger.js';
+import {
+	createPostLockAdmissionEvidence,
+	isPostLockAdmissionEvidence,
+	type PostLockAdmissionEvidence,
+} from './post-lock-admission-evidence.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 const DEFAULT_LOCK_TIMEOUT_MS = 5000;
@@ -80,7 +87,25 @@ export interface PgLockedRun {
  * beside the admitted facade; ordinary callers receive a `PgLockedRun`, never
  * manufacture one from string fields.
  */
-export function lockPgJournalRun(
+export function lockPgJournalRun(run: DurablyLoadedRun): PgLockedRun {
+	if (!isDurablyLoadedRun(run))
+		throw new Error(
+			'locked journal run refuses an unverified durable-run witness',
+		);
+	const locked = Object.freeze({
+		runId: run.metadata.runId,
+		planDigest: run.metadata.planDigest,
+	}) as PgLockedRun;
+	lockedRuns.add(locked);
+	return locked;
+}
+
+/**
+ * NEXT ROUND target: direct compatibility paths have not yet been moved to
+ * the core durable-run boundary. Keep their existing mint sites narrow and
+ * private to this module until that migration is performed.
+ */
+export function lockPgJournalRunForNextRoundCompatibilityPath(
 	run: Pick<TransitionRunMetadata, 'runId' | 'planDigest'>,
 ): PgLockedRun {
 	const locked = Object.freeze({
@@ -190,6 +215,16 @@ export class PgCommitAcknowledgementAmbiguousError extends Error {
 			},
 		);
 		this.name = 'PgCommitAcknowledgementAmbiguousError';
+	}
+}
+
+async function commitPgOutcome(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	try {
+		await executor.query('COMMIT');
+	} catch (error) {
+		throw new PgCommitAcknowledgementAmbiguousError(error);
 	}
 }
 
@@ -329,7 +364,8 @@ interface ApprovalScopeRecord {
 const digestBindingVerdicts = new WeakSet<object>();
 const validatedManifestVerdicts = new WeakSet<object>();
 const approvalScopeVerdicts = new WeakMap<object, ApprovalScopeRecord>();
-const liveAdmissionVerdicts = new WeakSet<object>();
+const liveAdmissionVerdicts = new WeakMap<object, PostLockAdmissionEvidence>();
+const nextRoundCompatibilityLiveAdmissionVerdicts = new WeakSet<object>();
 
 function mintDigestBindingVerdict(): DigestBindingVerdict {
 	const verdict = Object.freeze({}) as DigestBindingVerdict;
@@ -352,9 +388,22 @@ function mintApprovalScopeVerdict(
 	return verdict;
 }
 
-function mintLiveAdmissionVerdict(): LiveAdmissionVerdict {
+function mintLiveAdmissionVerdict(
+	evidence: PostLockAdmissionEvidence,
+): LiveAdmissionVerdict {
+	if (!isPostLockAdmissionEvidence(evidence))
+		throw new Error(
+			'admitted permit requires authentic post-lock admission evidence',
+		);
 	const verdict = Object.freeze({}) as LiveAdmissionVerdict;
-	liveAdmissionVerdicts.add(verdict);
+	liveAdmissionVerdicts.set(verdict, evidence);
+	return verdict;
+}
+
+/** NEXT ROUND target for direct compatibility runners without durable evidence. */
+function mintLiveAdmissionVerdictForNextRoundCompatibilityPath(): LiveAdmissionVerdict {
+	const verdict = Object.freeze({}) as LiveAdmissionVerdict;
+	nextRoundCompatibilityLiveAdmissionVerdicts.add(verdict);
 	return verdict;
 }
 
@@ -363,6 +412,7 @@ function requireAdmittedVerdicts(
 	validatedManifest: ValidatedManifestVerdict,
 	approvalScope: ApprovalScopeVerdict,
 	liveAdmission: LiveAdmissionVerdict,
+	evidence?: PostLockAdmissionEvidence,
 ): void {
 	if (!digestBindingVerdicts.has(digestBinding))
 		throw new Error('admitted permit requires a digest-binding verdict');
@@ -370,11 +420,53 @@ function requireAdmittedVerdicts(
 		throw new Error('admitted permit requires a validated-manifest verdict');
 	if (!approvalScopeVerdicts.has(approvalScope))
 		throw new Error('admitted permit requires an approval-scope verdict');
-	if (!liveAdmissionVerdicts.has(liveAdmission))
-		throw new Error('admitted permit requires a live-admission verdict');
+	const boundEvidence = liveAdmissionVerdicts.get(liveAdmission);
+	if (
+		!nextRoundCompatibilityLiveAdmissionVerdicts.has(liveAdmission) &&
+		(!boundEvidence || !isPostLockAdmissionEvidence(boundEvidence))
+	)
+		throw new Error(
+			'admitted permit requires a post-lock live-admission verdict',
+		);
+	if (
+		evidence &&
+		(!isPostLockAdmissionEvidence(evidence) || boundEvidence !== evidence)
+	)
+		throw new Error(
+			'admitted permit requires the post-lock evidence that minted its live-admission verdict',
+		);
 }
 
 export function mintAdmittedPermit(
+	claim: AdmittedOutcomeClaim,
+	digestBinding: DigestBindingVerdict,
+	validatedManifest: ValidatedManifestVerdict,
+	approvalScope: ApprovalScopeVerdict,
+	liveAdmission: LiveAdmissionVerdict,
+	evidence: PostLockAdmissionEvidence,
+): AdmittedPermit {
+	requireAdmittedVerdicts(
+		digestBinding,
+		validatedManifest,
+		approvalScope,
+		liveAdmission,
+		evidence,
+	);
+	const approval = approvalScopeVerdicts.get(approvalScope);
+	if (
+		approval?.classification !== 'single-outcome' ||
+		!sameLedgerAddress(approval.address, claim.plan.address)
+	)
+		throw new Error(
+			'admitted permit refuses an approval scope verdict for another operation',
+		);
+	const permit = Object.freeze({}) as AdmittedPermit;
+	admittedPermitRecords.set(permit, { claim });
+	return permit;
+}
+
+/** NEXT ROUND target for direct compatibility runners without durable evidence. */
+export function mintAdmittedPermitForNextRoundCompatibilityPath(
 	claim: AdmittedOutcomeClaim,
 	digestBinding: DigestBindingVerdict,
 	validatedManifest: ValidatedManifestVerdict,
@@ -707,7 +799,8 @@ export type PgOutcomeResult =
 			readonly kind: 'executed-outcome-claim';
 			readonly claim: AdmittedOutcomeClaim;
 	  }
-	| OutcomeProtocolRefusal;
+	| OutcomeProtocolRefusal
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
 
 export type PgPairedReaddressRecoveryDecision =
 	| { readonly kind: 'refused'; readonly reason: string }
@@ -1311,6 +1404,7 @@ async function openPgOutcomeClaimOnSession(
 					: detail(lock.error),
 			);
 		}
+		if (run) await createPostLockAdmissionEvidence(executor, lock.proof);
 		const integrity = await validatePgLedgerRuntimeIntegrity(
 			executor,
 			homesFor(request),
@@ -1327,11 +1421,12 @@ async function openPgOutcomeClaimOnSession(
 			begun = false;
 			return admission;
 		}
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor);
 		begun = false;
 		return admission;
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 		return refusal(detail(error));
 	}
 }
@@ -1639,6 +1734,19 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return refusal('ledger advisory lock is busy');
 		}
+		const postLockEvidence = verdicts.run
+			? await createPostLockAdmissionEvidence(executor, lock.proof)
+			: undefined;
+		const liveAdmission = postLockEvidence
+			? await checkLiveAdmission(postLockEvidence)
+			: verdicts.liveAdmission;
+		if (!liveAdmission)
+			return refusal('admitted operation has no live-admission verdict');
+		if ('kind' in liveAdmission) {
+			if (ownsTransaction) await executor.query('ROLLBACK');
+			begun = false;
+			return liveAdmission;
+		}
 		const integrity = await validatePgLedgerRuntimeIntegrity(
 			executor,
 			homesFor(request),
@@ -1667,7 +1775,7 @@ async function runPgTransactionalOutcomeOnSession(
 				request.resolution.eventId,
 				'ERR-05',
 			);
-			if (ownsTransaction) await executor.query('COMMIT');
+			if (ownsTransaction) await commitPgOutcome(executor);
 			begun = false;
 			return liveAdmissionRefusal;
 		}
@@ -1684,17 +1792,26 @@ async function runPgTransactionalOutcomeOnSession(
 				request.resolution.eventId,
 				'ERR-02',
 			);
-			if (ownsTransaction) await executor.query('COMMIT');
+			if (ownsTransaction) await commitPgOutcome(executor);
 			begun = false;
 			return vacancy;
 		}
-		const permit = mintAdmittedPermit(
-			admission,
-			verdicts.digestBinding,
-			verdicts.validatedManifest,
-			verdicts.approvalScope,
-			verdicts.liveAdmission,
-		);
+		const permit = postLockEvidence
+			? mintAdmittedPermit(
+					admission,
+					verdicts.digestBinding,
+					verdicts.validatedManifest,
+					verdicts.approvalScope,
+					liveAdmission,
+					postLockEvidence,
+				)
+			: mintAdmittedPermitForNextRoundCompatibilityPath(
+					admission,
+					verdicts.digestBinding,
+					verdicts.validatedManifest,
+					verdicts.approvalScope,
+					liveAdmission,
+				);
 		const sent =
 			'destructivePermit' in admission
 				? await executePgDestructiveBundle(executor, {
@@ -1722,11 +1839,12 @@ async function runPgTransactionalOutcomeOnSession(
 			request.plan.claimId,
 			request.reservations,
 		);
-		if (ownsTransaction) await executor.query('COMMIT');
+		if (ownsTransaction) await commitPgOutcome(executor);
 		begun = false;
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 		return refusal(detail(error));
 	}
 }
@@ -1764,7 +1882,7 @@ async function checkDirectOutcomeAdmission(
 		return refusal(
 			`direct outcome refuses an invalid managed-step manifest: ${manifestResult.detail}`,
 		);
-	const run = lockPgJournalRun({
+	const run = lockPgJournalRunForNextRoundCompatibilityPath({
 		runId: request.plan.executionId ?? request.plan.claimId,
 		planDigest: request.plan.claimId,
 	});
@@ -1788,7 +1906,10 @@ async function checkDirectOutcomeAdmission(
 		operation,
 	});
 	if ('kind' in approvalScope) return approvalScope;
-	const liveAdmission = await checkDirectLiveAdmission(executor, request);
+	const liveAdmission = await checkLiveAdmissionForNextRoundCompatibilityPath(
+		executor,
+		request,
+	);
 	if ('kind' in liveAdmission) return liveAdmission;
 	return { digestBinding, validatedManifest, approvalScope, liveAdmission };
 }
@@ -1867,6 +1988,14 @@ async function runPgPairedReaddressOperation(
 			await executor.query('ROLLBACK');
 			begun = false;
 			return refusal('ledger advisory lock is busy');
+		}
+		const liveAdmission = await checkLiveAdmission(
+			await createPostLockAdmissionEvidence(executor, lock.proof),
+		);
+		if ('kind' in liveAdmission) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return liveAdmission;
 		}
 		const integrity = await validatePgLedgerRuntimeIntegrity(
 			executor,
@@ -1952,7 +2081,7 @@ async function runPgPairedReaddressOperation(
 				verdicts.digestBinding,
 				verdicts.validatedManifest,
 				verdicts.approvalScope,
-				verdicts.liveAdmission,
+				liveAdmission,
 			),
 			request.statements,
 		);
@@ -2025,7 +2154,8 @@ interface AdmissionVerdicts {
 	readonly digestBinding: DigestBindingVerdict;
 	readonly validatedManifest: ValidatedManifestVerdict;
 	readonly approvalScope: ApprovalScopeVerdict;
-	readonly liveAdmission: LiveAdmissionVerdict;
+	/** Compatibility-only until direct runners receive durable run witnesses. */
+	readonly liveAdmission?: LiveAdmissionVerdict;
 	/** Enables one physical validation per locked run/home on this session. */
 	readonly run?: PgLockedRun;
 }
@@ -2170,19 +2300,17 @@ export function checkApprovalScope(input: {
 }
 
 export async function checkLiveAdmission(
-	executor: TransitionJournalQueryable,
-	homes: readonly PgLedgerTarget[],
+	evidence: PostLockAdmissionEvidence,
 ): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
-	// Physical shape is intentionally *not* checked here. The caller has not
-	// acquired the transaction-scoped ledger-home locks yet, so a pre-lock read
-	// is not admission evidence. Each runner revalidates immediately after lock.
-	void executor;
-	void homes;
-	return mintLiveAdmissionVerdict();
+	try {
+		return mintLiveAdmissionVerdict(evidence);
+	} catch (error) {
+		return refusal(detail(error));
+	}
 }
 
-/** Legacy direct calls bind their own actual ledger-home currency check. */
-async function checkDirectLiveAdmission(
+/** NEXT ROUND target for direct compatibility paths outside durable admission. */
+export async function checkLiveAdmissionForNextRoundCompatibilityPath(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimRequest,
 ): Promise<LiveAdmissionVerdict | OutcomeProtocolRefusal> {
@@ -2194,7 +2322,7 @@ async function checkDirectLiveAdmission(
 		const currency = await readPgLedgerScopeCurrency(executor, home);
 		if (currency.kind !== 'current') return currencyRefusal(currency);
 	}
-	return mintLiveAdmissionVerdict();
+	return mintLiveAdmissionVerdictForNextRoundCompatibilityPath();
 }
 
 /**
@@ -2243,22 +2371,10 @@ export async function executePgAdmittedOperation(
 		const approvalScope = checkApprovalScope(input);
 		if ('kind' in approvalScope) return approvalScope;
 		return await withPgOutcomeSession(session, async (pinnedSession) => {
-			// Runtime integrity is checked on the pinned, locked execution session.
-			// Scope/currency and operation admission are then re-read by the shared
-			// transactional evaluator under its ledger-home advisory locks.
-			const homes =
-				input.operation.kind === 'paired-readdress'
-					? homesForPairedReaddress(input.operation.request)
-					: input.operation.kind === 'destructive-outcome'
-						? homesForGroup(input.operation.request)
-						: homesFor(input.operation.request);
-			const liveAdmission = await checkLiveAdmission(pinnedSession, homes);
-			if ('kind' in liveAdmission) return liveAdmission;
 			const verdicts: AdmissionVerdicts = {
 				digestBinding,
 				validatedManifest,
 				approvalScope,
-				liveAdmission,
 				run: input.run,
 			};
 			if (input.operation.kind === 'paired-readdress')
@@ -2302,43 +2418,64 @@ async function runPgNonTransactionalOutcomeOnSession(
 	request: PgOutcomeNonTransactionalRequest,
 	verdicts: AdmissionVerdicts,
 ): Promise<PgOutcomeResult> {
-	const admission = await openPgOutcomeClaimOnSession(executor, request);
+	const admission = await openPgOutcomeClaimOnSession(
+		executor,
+		request,
+		verdicts.run,
+	);
 	if (admission.kind !== 'admitted-outcome-claim') return admission;
 	try {
+		await begin(executor, request.lockTimeoutMs);
+		const executingLock = await acquirePgLedgerLocks(
+			executor,
+			homesFor(request),
+		);
+		if (executingLock.kind !== 'acquired') {
+			await rollback(executor);
+			return refusal('ledger advisory lock is busy');
+		}
+		const executingPostLockEvidence = verdicts.run
+			? await createPostLockAdmissionEvidence(executor, executingLock.proof)
+			: undefined;
+		const executingLiveAdmission = executingPostLockEvidence
+			? await checkLiveAdmission(executingPostLockEvidence)
+			: verdicts.liveAdmission;
+		if (!executingLiveAdmission)
+			return refusal('admitted operation has no live-admission verdict');
+		if ('kind' in executingLiveAdmission) {
+			await rollback(executor);
+			return executingLiveAdmission;
+		}
+		const target = targetForPlan(request.plan);
 		const liveAdmissionRefusal = request.verifyLiveAdmission
 			? await request.verifyLiveAdmission(executor, admission.plan)
 			: undefined;
-		if (liveAdmissionRefusal) {
+		const vacancy = liveAdmissionRefusal
+			? undefined
+			: await verifyCreationVacancy(executor, admission, request.vacancy);
+		if (liveAdmissionRefusal || vacancy) {
+			await rollback(executor);
 			await begin(executor, request.lockTimeoutMs);
+			const terminalLock = await acquirePgLedgerLocks(
+				executor,
+				homesFor(request),
+			);
+			if (terminalLock.kind !== 'acquired') {
+				await rollback(executor);
+				return refusal('ledger advisory lock is busy');
+			}
+			if (verdicts.run)
+				await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 			await refuseClaim(
 				executor,
 				admission,
 				request,
 				request.resolution.eventId,
-				'ERR-05',
+				liveAdmissionRefusal ? 'ERR-05' : 'ERR-02',
 			);
-			await executor.query('COMMIT');
-			return liveAdmissionRefusal;
+			await commitPgOutcome(executor);
+			return liveAdmissionRefusal ?? vacancy!;
 		}
-		const vacancy = await verifyCreationVacancy(
-			executor,
-			admission,
-			request.vacancy,
-		);
-		if (vacancy) {
-			await begin(executor, request.lockTimeoutMs);
-			await refuseClaim(
-				executor,
-				admission,
-				request,
-				request.resolution.eventId,
-				'ERR-02',
-			);
-			await executor.query('COMMIT');
-			return vacancy;
-		}
-		await begin(executor, request.lockTimeoutMs);
-		const target = targetForPlan(request.plan);
 		const executingPredecessor = await currentTerminalPredecessor(
 			executor,
 			target,
@@ -2366,20 +2503,39 @@ async function runPgNonTransactionalOutcomeOnSession(
 			eventKind: 'executing',
 			predecessor: executingPredecessor,
 		});
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor);
 		await request.onExecutingCommitted?.();
 		const sent = await sendPgAdmittedBundle(executor, {
-			permit: mintAdmittedPermit(
-				admission,
-				verdicts.digestBinding,
-				verdicts.validatedManifest,
-				verdicts.approvalScope,
-				verdicts.liveAdmission,
-			),
+			permit: executingPostLockEvidence
+				? mintAdmittedPermit(
+						admission,
+						verdicts.digestBinding,
+						verdicts.validatedManifest,
+						verdicts.approvalScope,
+						executingLiveAdmission,
+						executingPostLockEvidence,
+					)
+				: mintAdmittedPermitForNextRoundCompatibilityPath(
+						admission,
+						verdicts.digestBinding,
+						verdicts.validatedManifest,
+						verdicts.approvalScope,
+						executingLiveAdmission,
+					),
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) return sent;
 		await begin(executor, request.lockTimeoutMs);
+		const terminalLock = await acquirePgLedgerLocks(
+			executor,
+			homesFor(request),
+		);
+		if (terminalLock.kind !== 'acquired') {
+			await rollback(executor);
+			return refusal('ledger advisory lock is busy');
+		}
+		if (verdicts.run)
+			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 		const terminalPredecessor = await currentTerminalPredecessor(
 			executor,
 			target,
@@ -2401,10 +2557,12 @@ async function runPgNonTransactionalOutcomeOnSession(
 			request.plan.claimId,
 			request.reservations,
 		);
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor);
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return refusal(detail(error));
 	}
 }

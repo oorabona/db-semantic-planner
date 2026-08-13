@@ -29,29 +29,11 @@ type Queryable = {
 	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
 };
 
-type IndependentOutcomeSession = Queryable & {
-	release(error?: unknown): void;
-};
-
-type OutcomeSessionProvider = {
-	openManagedOutcomeSession(): Promise<IndependentOutcomeSession>;
-};
-
 function queryable(client: TransitionExecutionClient): Queryable {
 	const candidate = client.opaqueClient as unknown as Partial<Queryable>;
 	if (typeof candidate.query !== 'function')
 		throw new Error('PostgreSQL managed-outcome client is not queryable');
 	return candidate as Queryable;
-}
-
-function outcomeSessionProvider(
-	client: TransitionExecutionClient,
-): OutcomeSessionProvider | undefined {
-	const candidate =
-		client.opaqueClient as unknown as Partial<OutcomeSessionProvider>;
-	return typeof candidate.openManagedOutcomeSession === 'function'
-		? (candidate as OutcomeSessionProvider)
-		: undefined;
 }
 
 function reservation(
@@ -204,19 +186,12 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 			]);
 			if (!manifest.ok) return refused(manifest.detail);
 			// The managed runtime cannot send through a raw runner: it supplies the
-			// loaded run and normalized manifest to the same admitted-operation
-			// facade used by generator execution.
-			const provider = outcomeSessionProvider(client);
+			// core-loaded run witness and normalized manifest to the same admitted-
+			// operation facade used by generator execution.
 			const operation: PgSingleAdmittedOperation = {
 				kind: 'single-outcome',
 				request: request.transactional
-					? {
-							...base,
-							// A provider means this protocol owns a separate session: a
-							// refusal commits here before the coordinator can roll back
-							// its outer segment on the run-lock session.
-							...(provider ? {} : { transactionOpen: true }),
-						}
+					? { ...base, transactionOpen: true }
 					: {
 							...base,
 							executingEventId: outcomeClaimEventId(claimId, 'executing'),
@@ -224,21 +199,13 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 			};
 			const admitted = async (session: Queryable) =>
 				executePgAdmittedOperation(session, {
-					run: lockPgJournalRun(request.run),
+					run: lockPgJournalRun(request.durablyLoadedRun),
 					approval: { approvals: [] },
 					manifest: manifest.manifest,
 					recomputedPlanDigest: request.run.planDigest,
 					operation,
 				});
-			const outcomeSession = provider
-				? await provider.openManagedOutcomeSession()
-				: undefined;
-			let result: Awaited<ReturnType<typeof admitted>>;
-			try {
-				result = await admitted(outcomeSession ?? executor);
-			} finally {
-				outcomeSession?.release();
-			}
+			const result = await admitted(executor);
 			return result.kind === 'executed-outcome-claim'
 				? { kind: 'completed' }
 				: refused('reason' in result ? result.reason : result.kind);

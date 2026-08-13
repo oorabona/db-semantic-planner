@@ -19,7 +19,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
-	lockPgJournalRun,
+	lockPgJournalRunForNextRoundCompatibilityPath,
 	recoverPgAdmittedReaddressPair,
 } from './outcome-protocol.js';
 
@@ -543,7 +543,10 @@ export async function executePgTableReaddress(
 	if (!manifest.ok)
 		throw new Error(`re-address manifest is invalid: ${manifest.detail}`);
 	const result = await executePgAdmittedOperation(executor, {
-		run: lockPgJournalRun({ runId: request.executionId, planDigest: pairId }),
+		run: lockPgJournalRunForNextRoundCompatibilityPath({
+			runId: request.executionId,
+			planDigest: pairId,
+		}),
 		approval: { approvals: [] },
 		manifest: manifest.manifest,
 		recomputedPlanDigest: pairId,

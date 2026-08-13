@@ -1,23 +1,28 @@
 import { randomUUID } from 'node:crypto';
 import {
+	createPgTransitionRunPersister,
 	executePgAdmittedOperation,
-	lockPgJournalRun,
 	type PgOutcomeTransactionalRequest,
+	readTransitionJournal,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerResolution,
+	lockPgJournalRun,
 	openPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
 import {
 	outcomeClaimEventId,
 	outcomeClaimId,
+	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerReservationRow,
 	OutcomeClaimPlan,
+	ProvenPlanShape,
 } from '@dbsp/types';
 import pg from 'pg';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -26,8 +31,15 @@ import { fixtureOutcomeClaim } from './outcome-claim-fixture.js';
 const pools: pg.Pool[] = [];
 const schemas: string[] = [];
 
-/** Fixture-only equivalent of the CLI's locked, permit-holding façade call. */
-function runAdmitted(
+/**
+ * Fixture-only equivalent of the CLI's locked, permit-holding façade call.
+ *
+ * The protocol cases deliberately retain their precise claim-window seams
+ * (notably SC-32's backend kill), but no longer fabricate the run offered to
+ * the façade.  The exact normalized manifest is persisted, reloaded, then
+ * passed through the same durable-run lock bridge as an ordinary operation.
+ */
+async function runAdmitted(
 	executor: pg.Pool | pg.PoolClient,
 	request: PgOutcomeTransactionalRequest,
 ) {
@@ -50,14 +62,39 @@ function runAdmitted(
 		},
 	]);
 	if (!manifest.ok) throw new Error(manifest.detail);
+	const plan = {
+		observations: [],
+		claims: [],
+		assumptions: [],
+		preconditions: [],
+		segments: [],
+		steps: manifest.manifest.steps,
+		postconditions: [],
+	} as unknown as ProvenPlanShape;
+	const planDigest = transitionPlanDigest(plan);
+	const runId = `managed-ledger-outcome:${
+		request.plan.executionId ?? request.plan.claimId
+	}`;
+	await createPgTransitionRunPersister(executor).persist(
+		{
+			runId,
+			planDigest,
+			targetContextDigest: `fixture:${request.plan.address.database}`,
+			databaseId: request.plan.address.database,
+			coreVersion: 'managed-ledger-outcome-e2e',
+			startedAt: '2000-01-01T00:00:00.000Z',
+			replayability: 'replayable',
+		},
+		plan,
+	);
+	const persisted = await readTransitionJournal(executor, runId, {
+		ensure: false,
+	});
 	return executePgAdmittedOperation(executor, {
-		run: lockPgJournalRun({
-			runId: 'e2e-fixture',
-			planDigest: 'e2e-fixture',
-		}),
+		run: lockPgJournalRun(mintDurablyLoadedRun(persisted.run)),
 		approval: { approvals: [] },
 		manifest: manifest.manifest,
-		recomputedPlanDigest: 'e2e-fixture',
+		recomputedPlanDigest: planDigest,
 		operation: { kind: 'single-outcome', request },
 	});
 }
