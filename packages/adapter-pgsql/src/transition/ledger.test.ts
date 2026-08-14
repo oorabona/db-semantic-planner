@@ -194,7 +194,7 @@ function createdLedgerImmutabilityTriggerRows() {
 			trigger_name: spec.name,
 			trigger_enabled: spec.enabled,
 			// PG 18's tgtype includes the row-trigger bit for FOR EACH ROW.
-			trigger_type: '27',
+			trigger_type: '31',
 			trigger_arguments: spec.arguments,
 			trigger_deferrable: spec.deferrable,
 			trigger_initially_deferred: spec.initiallyDeferred,
@@ -480,7 +480,7 @@ describe('managed ledger storage', () => {
 		const manifest = generatePgLedgerExpectedManifest();
 		const sql = renderCreateLedgerImmutabilityTriggerFromSpec(target);
 		const match = sql.match(
-			/CREATE TRIGGER ([a-z_]+) BEFORE UPDATE OR DELETE ON "[^"]+"\."([^"]+)" /,
+			/CREATE TRIGGER ([a-z_]+) BEFORE INSERT OR UPDATE OR DELETE ON "[^"]+"\."([^"]+)" /,
 		);
 		if (!match) throw new Error(`missing trigger declaration: ${sql}`);
 		expect([`${match[2]}.${match[1]}`]).toEqual([

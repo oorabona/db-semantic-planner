@@ -203,6 +203,7 @@ async function applyPersistedReaddress(input: {
 	readonly database: string;
 	readonly targetSchema: string;
 	readonly declaration: TableReaddressDeclaration;
+	readonly corruptPersistedMaterial?: 'substitute-step' | 'remove-steps';
 }) {
 	const pool = await getTestPool();
 	const sourceName = input.declaration.from.name;
@@ -273,6 +274,16 @@ async function applyPersistedReaddress(input: {
 		},
 		plan as never,
 	);
+	if (input.corruptPersistedMaterial === 'substitute-step')
+		await pool.query(
+			`UPDATE dbsp_meta.dbsp_transition_run_plan SET plan = jsonb_set(plan, '{steps,0,statementBundle}', '{"statements":["SELECT 0"]}'::jsonb) WHERE run_id = $1`,
+			[runId],
+		);
+	if (input.corruptPersistedMaterial === 'remove-steps')
+		await pool.query(
+			`UPDATE dbsp_meta.dbsp_transition_run_plan SET plan = plan - 'steps' WHERE run_id = $1`,
+			[runId],
+		);
 	const applied = await runApply(
 		runId,
 		{ db: process.env.DATABASE_URL!, planDigest },
@@ -461,6 +472,84 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		expect(occupied).toEqual({
 			outcome: 'readdress-refused',
 			detail: 'target occupied_target is occupied',
+		});
+	});
+
+	it('OBL-LIFE1: apply refuses substituted and absent persisted readdress material before DDL', async () => {
+		for (const [name, corruptPersistedMaterial, error] of [
+			[
+				'substituted_step',
+				'substitute-step',
+				'persisted generator manifest is invalid',
+			],
+			[
+				'absent_step',
+				'remove-steps',
+				'dbsp transition run plan row is invalid and non-resumable',
+			],
+		] as const) {
+			const { schema, database: databaseId } = await fixture();
+			const pool = await getTestPool();
+			await createManagedTable(schema, databaseId, name);
+			await expect(
+				applyPersistedReaddress({
+					database: databaseId,
+					targetSchema: schema,
+					declaration: { from: { name }, to: { name: `${name}_target` } },
+					corruptPersistedMaterial,
+				}),
+			).rejects.toThrow(error);
+			await expect(
+				pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
+			).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
+		}
+	});
+
+	it('OBL-LIFE4: apply refuses cross-database, non-table, and escaping-dependent readdresses', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		await createManagedTable(schema, databaseId, 'bounded_source');
+		await expect(
+			applyPersistedReaddress({
+				database: databaseId,
+				targetSchema: schema,
+				declaration: {
+					from: { database: databaseId, name: 'bounded_source' },
+					to: { database: 'other_database', name: 'bounded_target' },
+				},
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-unsupported',
+			detail: 'cross-database',
+		});
+		await expect(
+			applyPersistedReaddress({
+				database: databaseId,
+				targetSchema: schema,
+				declaration: {
+					from: { kind: 'index', name: 'bounded_source' },
+					to: { kind: 'index', name: 'bounded_target' },
+				},
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-unsupported',
+			detail: 'unsupported-kind index',
+		});
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.bounded_escape (source_id bigint REFERENCES ${quote(schema)}.bounded_source(id))`,
+		);
+		await expect(
+			applyPersistedReaddress({
+				database: databaseId,
+				targetSchema: schema,
+				declaration: {
+					from: { name: 'bounded_source' },
+					to: { name: 'bounded_target' },
+				},
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-refused',
+			detail: expect.stringContaining('escaping dependent'),
 		});
 	});
 

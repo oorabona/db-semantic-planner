@@ -49,6 +49,31 @@ afterEach(async () => {
 });
 
 describe('managed ledger database constraints (SC-07, SC-08, SC-09, SC-10, SC-12)', () => {
+	it('OBL-CTRL1: direct SQL cannot select a ledger-event controller', async () => {
+		const { pool, schema } = await fixture();
+		const address = testAddress(schema, 'controller_backstop');
+		const session = await pool.query<{ current_user: string }>(
+			'SELECT current_user',
+		);
+		await pool.query(
+			`INSERT INTO "${schema}"."dbsp_ledger_event" (event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, event_kind, controller) VALUES ($1, $2, $3, $4, 'null'::jsonb, $5, $6, 'intent', 'forged_controller')`,
+			[
+				'controller-backstop-root',
+				address.engine,
+				address.database,
+				address.schema,
+				address.kind,
+				address.name,
+			],
+		);
+		const recorded = await pool.query(
+			`SELECT controller::text AS controller FROM "${schema}"."dbsp_ledger_event" WHERE event_id = 'controller-backstop-root'`,
+		);
+		expect(recorded.rows).toEqual([
+			{ controller: session.rows[0]!.current_user },
+		]);
+	});
+
 	it('SC-07: rejects update and delete at the database', async () => {
 		const { pool, schema } = await fixture();
 		const address = testAddress(schema, 'immutable');

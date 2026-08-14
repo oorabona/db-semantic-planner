@@ -309,12 +309,12 @@ export function renderCreateLedgerIndexFromSpec(
 export const LEDGER_IMMUTABILITY_FUNCTION_NAME =
 	'dbsp_ledger_reject_event_mutation';
 export const LEDGER_IMMUTABILITY_FUNCTION_BODY =
-	" BEGIN RAISE EXCEPTION 'dbsp ledger events are append-only for address %', OLD.address_name USING ERRCODE = '55000'; END; ";
+	" BEGIN IF TG_OP = 'INSERT' THEN NEW.controller := current_user; NEW.controller_oid := current_user::regrole::oid; RETURN NEW; END IF; RAISE EXCEPTION 'dbsp ledger events are append-only for address %', OLD.address_name USING ERRCODE = '55000'; END; ";
 export const PG_LEDGER_IMMUTABILITY_TRIGGER_SPEC = {
 	name: 'dbsp_ledger_event_immutable',
 	tableName: DBSP_LEDGER_EVENT_TABLE,
 	enabled: 'O',
-	type: '27',
+	type: '31',
 	arguments: '',
 	deferrable: false,
 	initiallyDeferred: false,
@@ -341,7 +341,7 @@ export function renderCreateLedgerImmutabilityTriggerFromSpec(
 ): string {
 	const spec = PG_LEDGER_IMMUTABILITY_TRIGGER_SPEC;
 	const schema = ledgerSpecSchema(target).replaceAll("'", "''");
-	return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t.tgname = '${spec.name}' AND n.nspname = '${schema}' AND c.relname = '${spec.tableName}') THEN CREATE TRIGGER ${spec.name} BEFORE UPDATE OR DELETE ON ${table(target, spec.tableName)} FOR EACH ROW EXECUTE FUNCTION ${table(target, spec.functionName)}(); END IF; END $$`;
+	return `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE t.tgname = '${spec.name}' AND n.nspname = '${schema}' AND c.relname = '${spec.tableName}') THEN CREATE TRIGGER ${spec.name} BEFORE INSERT OR UPDATE OR DELETE ON ${table(target, spec.tableName)} FOR EACH ROW EXECUTE FUNCTION ${table(target, spec.functionName)}(); END IF; END $$`;
 }
 
 export type LedgerExpectedManifest = Readonly<{

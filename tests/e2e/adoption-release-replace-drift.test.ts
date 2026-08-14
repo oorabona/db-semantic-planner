@@ -302,6 +302,39 @@ afterAll(async () => {
 });
 
 describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…62)', () => {
+	it('OBL-LIFE2: apply refuses substituted and absent persisted adoption material', async () => {
+		for (const [table, mutation] of [
+			[
+				'adoption_substituted',
+				"jsonb_set(plan, '{steps,0,expectedDeclaration}', 'null'::jsonb)",
+			],
+			['adoption_absent', "plan #- '{steps,0,expectedDeclaration}'"],
+		] as const) {
+			const { pool, schemas: names } = await fixture();
+			const schema = names[0]!;
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(table)} (id integer PRIMARY KEY)`,
+			);
+			const reviewed = generatorPlan(
+				await planFor({ schema, table, state: 'adopt' }),
+			);
+			await pool.query(
+				`UPDATE dbsp_meta.dbsp_transition_run_plan SET plan = ${mutation} WHERE run_id = $1`,
+				[reviewed.runId],
+			);
+			await expect(
+				runApply(
+					reviewed.runId,
+					{ db: process.env.DATABASE_URL!, planDigest: reviewed.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'plan-digest-mismatch' });
+			await expect(
+				pool.query('SELECT to_regclass($1) AS object', [`${schema}.${table}`]),
+			).resolves.toMatchObject({ rows: [{ object: `${schema}.${table}` }] });
+		}
+	});
+
 	it('SC-59: a DSL-declared matching table records declaration, shape and identity; it is idempotent and mismatches refuse', async () => {
 		const { pool, database: databaseId, schemas: names } = await fixture();
 		const schema = names[0]!;
@@ -384,6 +417,34 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			),
 		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		void databaseId;
+	});
+
+	it('OBL-LIFE6: recorded adoption re-run adds neither a second claim nor a second adopt terminal', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schema = names[0]!;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.adoption_repeat (id integer PRIMARY KEY)`,
+		);
+		const initial = generatorPlan(
+			await planFor({ schema, table: 'adoption_repeat', state: 'adopt' }),
+		);
+		await expect(applyReviewedGenerator(initial)).resolves.toEqual({
+			outcome: 'completed',
+		});
+		const before = await pool.query<{ claims: number; terminals: number }>(
+			`SELECT count(*) FILTER (WHERE event_kind = 'adopt-intent')::int AS claims, count(*) FILTER (WHERE event_kind = 'adopt')::int AS terminals FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'adoption_repeat'`,
+		);
+		const replay = generatorPlan(
+			await planFor({ schema, table: 'adoption_repeat', state: 'adopt' }),
+		);
+		await expect(applyReviewedGenerator(replay)).resolves.toEqual({
+			outcome: 'completed',
+		});
+		const after = await pool.query<{ claims: number; terminals: number }>(
+			`SELECT count(*) FILTER (WHERE event_kind = 'adopt-intent')::int AS claims, count(*) FILTER (WHERE event_kind = 'adopt')::int AS terminals FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'adoption_repeat'`,
+		);
+		expect(before.rows).toEqual([{ claims: 1, terminals: 1 }]);
+		expect(after.rows).toEqual(before.rows);
 	});
 
 	it('SC-60 / OBL-CLI9: release refusals preserve each object; success makes the address unknown', async () => {
