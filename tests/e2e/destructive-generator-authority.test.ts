@@ -729,6 +729,68 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
 	});
 
+	it('OBL-READ4: a readable survivor recreated after destructive DDL remains indeterminate, never absent or refused', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_read4_survivor_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(root);
+		const plan = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: rootName,
+				classification: 'removal',
+				details: 'read-back survivor probe',
+				statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+			},
+			databaseId,
+			schema,
+		);
+		const planDigest = transitionPlanDigest(plan);
+		const runId = `obl-read4-survivor:${randomUUID()}`;
+		const run = lockPgJournalRun(
+			mintDurablyLoadedRun({
+				runId,
+				planDigest,
+				targetContextDigest: `read4:${schema}`,
+				databaseId,
+				coreVersion: 'checkpoint-e2e',
+				startedAt: new Date().toISOString(),
+				replayability: 'replayable',
+			}),
+		);
+		let recreated = false;
+		const result = await executeGeneratorPlan({
+			pool,
+			plan,
+			planDigest,
+			schema,
+			run,
+			runId,
+			accepts: [`destructive-plan-accepted:${planDigest}`],
+			observer: async (point) => {
+				if (point !== 'ddl-completed-before-read-back' || recreated) return;
+				recreated = true;
+				await pool.query(
+					`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+				);
+			},
+		});
+		expect(recreated).toBe(true);
+		expect(result).toMatchObject({
+			outcome: 'execution-failed',
+			detail: expect.stringMatching(/pending|surviv/i),
+		});
+		const terminals = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name = $1 AND event_kind IN ('absent', 'refused', 'indeterminate') ORDER BY recorded_at`,
+			[rootName],
+		);
+		expect(terminals.rows).toEqual([{ event_kind: 'indeterminate' }]);
+	});
+
 	it('OBL-AUTH5: destructive executing and group-terminal appends each reach the post-lock integrity checkpoint', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();

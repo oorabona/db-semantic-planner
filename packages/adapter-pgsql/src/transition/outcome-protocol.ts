@@ -875,6 +875,7 @@ export type PgOutcomeRecoveryResult =
 				{ readonly kind: 'malformed-outcome-resolution' }
 			>;
 	  }
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string }
 	| OutcomeProtocolRefusal;
 
 export type PgOutcomeResult =
@@ -888,7 +889,8 @@ export type PgOutcomeResult =
 export type PgPairedReaddressRecoveryDecision =
 	| { readonly kind: 'refused'; readonly reason: string }
 	| { readonly kind: 'pending'; readonly reason: string }
-	| { readonly kind: 'indeterminate'; readonly reason: string };
+	| { readonly kind: 'indeterminate'; readonly reason: string }
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
 
 /**
  * Recovery owns its reservation set: it re-reads every durable pair row,
@@ -1015,6 +1017,8 @@ async function recoverPgAdmittedReaddressPairOnSession(
 		return decision;
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return { kind: 'pending', reason: detail(error) };
 	}
 }
@@ -2197,6 +2201,8 @@ async function runPgPairedReaddressOperation(
 		return { kind: 'executed-paired-readdress', pairId: request.pairId };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return refusal(detail(error));
 	}
 }
@@ -2736,6 +2742,8 @@ async function recoverPgOutcomeClaimOnSession(
 		return { kind: 'outcome-recovery-appended', classification, append };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return refusal(detail(error));
 	}
 }

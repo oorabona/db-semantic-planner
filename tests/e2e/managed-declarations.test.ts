@@ -281,7 +281,7 @@ describeWithE2eCapabilities(
 		it('OBL-RUN9: the real PostgreSQL CLI-plan path leaves no durable run material for a non-canonical declaration', async () => {
 			const pool = await getTestPool();
 			const before = await pool.query<{ count: string }>(
-				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run',
+				"SELECT CASE WHEN pg_catalog.to_regclass('dbsp_meta.dbsp_transition_run') IS NULL THEN '0' ELSE (pg_catalog.xpath('/table/row/count/text()', pg_catalog.query_to_xml('SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run', false, false, '')))[1]::text END AS count",
 			);
 			const badModel: ModelIR = {
 				...emptyModel(),
@@ -325,7 +325,7 @@ describeWithE2eCapabilities(
 			).rejects.toThrow(/schema\.tables\["users"\]\.columns\[0\]\.default/);
 			expect(opened).toBe(false);
 			const after = await pool.query<{ count: string }>(
-				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run',
+				"SELECT CASE WHEN pg_catalog.to_regclass('dbsp_meta.dbsp_transition_run') IS NULL THEN '0' ELSE (pg_catalog.xpath('/table/row/count/text()', pg_catalog.query_to_xml('SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run', false, false, '')))[1]::text END AS count",
 			);
 			expect(after.rows).toEqual(before.rows);
 		});

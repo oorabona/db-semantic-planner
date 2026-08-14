@@ -46,6 +46,11 @@ export type PgReaddressPairRecoveryResult =
 			readonly kind: 'readdress-recovery-indeterminate-pair';
 			readonly pairId: string;
 			readonly reason: string;
+	  }
+	| {
+			readonly kind: 'readdress-recovery-transport-ambiguous-pair';
+			readonly pairId: string;
+			readonly reason: string;
 	  };
 
 /**
@@ -426,11 +431,17 @@ export async function recoverPgReaddressPair(
 					pairId: input.pairId,
 					reason: decision.reason,
 				}
-			: {
-					kind: 'readdress-recovery-pending-pair',
-					pairId: input.pairId,
-					reason: decision.reason,
-				};
+			: decision.kind === 'outcome-transport-ambiguous'
+				? {
+						kind: 'readdress-recovery-transport-ambiguous-pair',
+						pairId: input.pairId,
+						reason: decision.reason,
+					}
+				: {
+						kind: 'readdress-recovery-pending-pair',
+						pairId: input.pairId,
+						reason: decision.reason,
+					};
 }
 
 /**

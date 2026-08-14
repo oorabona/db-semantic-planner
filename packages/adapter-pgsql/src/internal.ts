@@ -22,6 +22,8 @@ export {
 	lockPgJournalRun,
 	openPgOutcomeClaim,
 	openPgOutcomeClaimGroup,
+	PgCommitAcknowledgementAmbiguousError,
+	recoverPgAdmittedReaddressPair,
 	recoverPgOutcomeClaim,
 	resolvePgDestructiveOutcome,
 	resolvePgOutcomeClaimGroup,

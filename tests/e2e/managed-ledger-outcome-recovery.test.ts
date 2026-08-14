@@ -3,6 +3,7 @@ import {
 	createPgTransitionRunPersister,
 	executePgAdmittedOperation,
 	type PgOutcomeNonTransactionalRequest,
+	type PgOutcomeTransactionalRequest,
 	readTransitionJournal,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -12,6 +13,7 @@ import {
 	appendPgOutcomeResolution,
 	lockPgJournalRun,
 	openPgOutcomeClaim,
+	PgCommitAcknowledgementAmbiguousError,
 	recoverPgOutcomeClaim,
 } from '@dbsp/adapter-pgsql/internal';
 import {
@@ -96,7 +98,7 @@ function resolutionEvidence(input: ReturnType<typeof makeClaim>) {
  */
 async function runPersistedOutcome(
 	executor: pg.Pool | pg.PoolClient,
-	request: PgOutcomeNonTransactionalRequest,
+	request: PgOutcomeTransactionalRequest | PgOutcomeNonTransactionalRequest,
 ) {
 	const classification =
 		request.plan.claimKind === 'retire-intent' ? 'removal' : 'non-destructive';
@@ -224,6 +226,149 @@ afterEach(async () => {
 });
 
 describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
+	it.each([
+		[
+			'transactional completion',
+			'transactional',
+			1,
+			['intent', 'observed'],
+		] as const,
+		['claim opening', 'claim', 1, ['intent']] as const,
+		[
+			'non-transactional executing',
+			'non-transactional',
+			2,
+			['intent', 'executing'],
+		] as const,
+		[
+			'non-transactional terminal',
+			'non-transactional',
+			3,
+			['intent', 'executing', 'observed'],
+		] as const,
+	] as const)('OBL-LOCK3: severing the %s COMMIT acknowledgement never reports success and leaves durable truth inspectable', async (_path, mode, severAt, durableKinds) => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(
+			schema,
+			`ambiguous_${mode}_${severAt}`,
+			`ambiguous-${mode}-${severAt}-claim`,
+		);
+		let acknowledgements = 0;
+		const observer = (point: string) => {
+			if (point !== 'commit-acknowledged') return;
+			acknowledgements += 1;
+			if (acknowledgements === severAt)
+				throw new Error('simulated lost COMMIT acknowledgement');
+		};
+		if (mode === 'claim') {
+			await expect(
+				openPgOutcomeClaim(pool, { ...input, observer }),
+			).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+		} else {
+			const request = {
+				...input,
+				resolution: {
+					eventId: `ambiguous-${mode}-observed`,
+					eventKind: 'observed' as const,
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+				observer,
+				...(mode === 'non-transactional'
+					? { executingEventId: `ambiguous-${mode}-executing` }
+					: {}),
+			};
+			await expect(runPersistedOutcome(pool, request)).resolves.toMatchObject({
+				kind: 'outcome-transport-ambiguous',
+			});
+		}
+		const events = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 ORDER BY recorded_at, event_id`,
+			[input.plan.address.name],
+		);
+		expect(events.rows.map((event) => event.event_kind)).toEqual(durableKinds);
+	});
+
+	it('OBL-LOCK3: severing a single recovery append acknowledgement reports ambiguity, then inspection sees the durable refusal', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(
+			schema,
+			'ambiguous_recovery',
+			'ambiguous-recovery-claim',
+		);
+		await openExecuting(pool, input);
+		await expect(
+			recoverPgOutcomeClaim(pool, {
+				...recovery(input, 'ambiguous-recovery-refused'),
+				observer: (point) => {
+					if (point === 'commit-acknowledged')
+						throw new Error('simulated lost COMMIT acknowledgement');
+				},
+			}),
+		).resolves.toMatchObject({ kind: 'outcome-transport-ambiguous' });
+		const terminal = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 ORDER BY recorded_at DESC LIMIT 1`,
+			[input.plan.address.name],
+		);
+		expect(terminal.rows).toEqual([{ event_kind: 'refused' }]);
+		await expect(
+			recoverPgOutcomeClaim(pool, recovery(input, 'ambiguous-recovery-retry')),
+		).resolves.toMatchObject({ kind: 'outcome-recovery-no-open-claim' });
+	});
+
+	it('OBL-READ3: an untouched post-executing recovery appends refused only after its operation read-back', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(
+			schema,
+			'untouched_readback',
+			'untouched-readback-claim',
+		);
+		await openExecuting(pool, input);
+		let readBacks = 0;
+		await expect(
+			recoverPgOutcomeClaim(pool, {
+				...recovery(input, 'untouched-readback-refused'),
+				operationReadBack: async () => {
+					readBacks += 1;
+					return {
+						observed: { value: { untouched: true }, digest: 'untouched' },
+						effect: 'no-effect',
+					};
+				},
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-appended',
+			classification: { resolution: { eventKind: 'refused' } },
+		});
+		expect(readBacks).toBe(1);
+	});
+
+	it('OBL-READ3: a touched post-executing object is indeterminate, never refused', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(
+			schema,
+			'touched_readback',
+			'touched-readback-claim',
+		);
+		await openExecuting(pool, input);
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(input.plan.address.name)} (id integer NOT NULL)`,
+		);
+		await expect(
+			recoverPgOutcomeClaim(
+				pool,
+				recovery(input, 'touched-readback-indeterminate'),
+			),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-appended',
+			classification: { resolution: { eventKind: 'indeterminate' } },
+		});
+		const terminals = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 AND event_kind = 'refused'`,
+			[input.plan.address.name],
+		);
+		expect(terminals.rows).toEqual([]);
+	});
+
 	it('SC-33: a kill at executing acknowledgement recovers as refused with no catalogue effect', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();

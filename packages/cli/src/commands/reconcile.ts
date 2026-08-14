@@ -124,6 +124,7 @@ type PgRecoveryReportKind =
 	| 'blocked'
 	| 'malformed-chain'
 	| 'protocol-refused'
+	| 'transport-ambiguous'
 	| 'refused-pair'
 	| 'indeterminate-pair';
 
@@ -193,6 +194,13 @@ function recoveryReport(
 			failureCause: 'malformed-journal',
 			refusal: preAppendRefusalFor('ERR-08', { address, state: 'unknown' }),
 		};
+	if (result.kind === 'outcome-transport-ambiguous')
+		return {
+			address,
+			outcome: 'transport-ambiguous',
+			reason: result.reason,
+			failureCause: 'transport',
+		};
 	return { address, outcome: 'protocol-refused', reason: result.reason };
 }
 
@@ -213,6 +221,14 @@ function readdressRecoveryReport(
 			address: first.address,
 			outcome: 'indeterminate-pair',
 			reason: result.reason,
+			pairId: result.pairId,
+		};
+	if (result.kind === 'readdress-recovery-transport-ambiguous-pair')
+		return {
+			address: first.address,
+			outcome: 'transport-ambiguous',
+			reason: result.reason,
+			failureCause: 'transport',
 			pairId: result.pairId,
 		};
 	return {

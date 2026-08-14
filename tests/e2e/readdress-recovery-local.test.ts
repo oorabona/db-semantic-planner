@@ -11,7 +11,10 @@ import {
 	renderPgTableReaddressStatements,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+import {
+	appendPgLedgerResolution,
+	recoverPgAdmittedReaddressPair,
+} from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain, transitionPlanDigest } from '@dbsp/core';
 import type {
 	LedgerAddress,
@@ -351,6 +354,44 @@ afterAll(async () => {
 });
 
 describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
+	it('OBL-LOCK3: severing a paired recovery append acknowledgement reports ambiguity and leaves the durable refusals inspectable', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		await createManagedTable(schema, databaseId, 'ambiguous_pair_source');
+		const rows = await appendInterruptedPair({
+			source: address(schema, databaseId, 'ambiguous_pair_source'),
+			target: address(schema, databaseId, 'ambiguous_pair_target'),
+			executionId: unique('run'),
+			pairId: unique('pair'),
+		});
+		const pairId = rows[0]?.pairId;
+		const executionId = rows[0]?.executionId;
+		if (!pairId || !executionId) throw new Error('fixture pair is incomplete');
+		await expect(
+			recoverPgAdmittedReaddressPair(pool, {
+				pairId,
+				executionId,
+				reservations: rows,
+				assess: async () => ({
+					kind: 'refused',
+					reason: 'verified untouched pair',
+				}),
+				observer: (point) => {
+					if (point === 'commit-acknowledged')
+						throw new Error('simulated lost COMMIT acknowledgement');
+				},
+			}),
+		).resolves.toMatchObject({ kind: 'outcome-transport-ambiguous' });
+		for (const row of rows) {
+			const chain = await readPgLedgerAddressChain(
+				pool,
+				row.homeLedger,
+				row.address,
+			);
+			expect(chain.terminalMember).toMatchObject({ eventKind: 'refused' });
+		}
+	});
+
 	it('SC-53: rename retains rows, closes the source chain, roots the target, and preserves existing bytes', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();

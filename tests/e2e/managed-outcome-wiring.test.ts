@@ -1468,10 +1468,24 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		it.each([
 			[
 				'authentication',
-				async () =>
-					runReconcile('rec3-authentication', {
-						db: 'postgres://dbsp:not-the-password@127.0.0.1:54330/dbsp',
-					}),
+				async () => {
+					const pool = await getTestPool();
+					const role = `dbsp_rec3_auth_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+					const password = randomUUID();
+					cliRoles.push(role);
+					await pool.query(
+						`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD '${password.replaceAll("'", "''")}'`,
+					);
+					const db = process.env.DATABASE_URL;
+					if (!db)
+						throw new Error('DATABASE_URL is required for managed-outcome E2E');
+					const badCredentials = new URL(db);
+					badCredentials.username = role;
+					badCredentials.password = `${password}-wrong`;
+					return runReconcile('rec3-authentication', {
+						db: badCredentials.toString(),
+					});
+				},
 			],
 			[
 				'transport',
