@@ -3,6 +3,7 @@ doc-meta:
   status: in_progress
   scope: core
   type: specification
+  coverage: none
   target_project: /mnt/disk/dev/db-semantic-planner
   created: 2026-08-06
   updated: 2026-08-07

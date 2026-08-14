@@ -1,3 +1,5 @@
+<!-- doc-meta: status=canonical coverage=none -->
+
 # Admission-layer obligation table — managed-state ledger delivery 2
 
 Status: ACTIVE. 53 of 67 rows are held with resolving citations; the fourteen rows

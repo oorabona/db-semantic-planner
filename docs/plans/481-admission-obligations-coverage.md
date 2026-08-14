@@ -1,3 +1,5 @@
+<!-- doc-meta: status=canonical coverage=none -->
+
 # Admission-obligation coverage audit
 
 Working audit only; do not commit.  Status is based on the construction in the
