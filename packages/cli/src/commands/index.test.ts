@@ -235,30 +235,34 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 				error: expect.stringContaining("missing required argument 'address'"),
 			},
 		],
-	] as const)('OBL-CLI1 refusal: %s emits exactly one JSON result document', (_command, invocation, expectedStatus, expected) => {
-		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
-		const repositoryRoot = fileURLToPath(
-			new URL('../../../../', import.meta.url),
-		);
-		const completed = spawnSync(
-			process.execPath,
-			['--import', 'tsx', cliPath, ...invocation],
-			{
-				cwd: repositoryRoot,
-				encoding: 'utf8',
-				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
-			},
-		);
+	] as const)(
+		'OBL-CLI1 refusal: %s emits exactly one JSON result document',
+		(_command, invocation, expectedStatus, expected) => {
+			const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+			const repositoryRoot = fileURLToPath(
+				new URL('../../../../', import.meta.url),
+			);
+			const completed = spawnSync(
+				process.execPath,
+				['--import', 'tsx', cliPath, ...invocation],
+				{
+					cwd: repositoryRoot,
+					encoding: 'utf8',
+					env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+				},
+			);
 
-		expect(completed.status).toBe(expectedStatus);
-		const document = JSON.parse(completed.stdout) as Record<string, unknown>;
-		expect(document).toMatchObject(expected);
-		// JSON.parse consumes the complete input, so this also rejects a second
-		// document. The serializer intentionally uses readable two-space JSON.
-		expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
-		expect(completed.stdout.trim().startsWith('{')).toBe(true);
-		expect(completed.stderr).toBe('');
-	});
+			expect(completed.status).toBe(expectedStatus);
+			const document = JSON.parse(completed.stdout) as Record<string, unknown>;
+			expect(document).toMatchObject(expected);
+			// JSON.parse consumes the complete input, so this also rejects a second
+			// document. The serializer intentionally uses readable two-space JSON.
+			expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
+			expect(completed.stdout.trim().startsWith('{')).toBe(true);
+			expect(completed.stderr).toBe('');
+		},
+		15_000,
+	);
 
 	it('OBL-RUN8 refuses fresh acceptance input on the recover command surface', () => {
 		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));

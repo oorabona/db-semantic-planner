@@ -8,6 +8,10 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerControllerOid,
 } from './chain-reader.js';
+import {
+	assertPgDatabaseWritable,
+	isPgDatabaseReadOnlyError,
+} from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
 	acquirePgLedgerLocks,
@@ -37,6 +41,12 @@ const sameControllerIdentity =
 
 export type PgReleaseResult =
 	| { readonly outcome: 'released' }
+	| {
+			/** A managed mutation must name a non-writable target before any release read. */
+			readonly outcome: 'database-read-only';
+			readonly detail: string;
+			readonly address: LedgerAddress;
+	  }
 	| {
 			/** Transport/query/read-only failure; never mislabel it malformed chain. */
 			readonly outcome: 'release-unavailable';
@@ -133,6 +143,17 @@ export async function releasePgManagedAddress(input: {
 	readonly address: LedgerAddress;
 }): Promise<PgReleaseResult> {
 	try {
+		try {
+			await assertPgDatabaseWritable(input.executor);
+		} catch (error) {
+			if (isPgDatabaseReadOnlyError(error))
+				return {
+					outcome: 'database-read-only',
+					address: input.address,
+					detail: error.message,
+				};
+			throw error;
+		}
 		const earlyRefusal = await preflightReleaseRefusal(input);
 		if (earlyRefusal) return earlyRefusal;
 		return await withPgTransitionTransaction(

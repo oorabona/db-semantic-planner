@@ -22,6 +22,11 @@ export interface ReleaseOptions {
 
 export type ReleaseCommandResult =
 	| { readonly outcome: 'released' }
+	| {
+			readonly outcome: 'database-read-only';
+			readonly detail: string;
+			readonly address: LedgerAddress;
+	  }
 	| { readonly outcome: 'release-unavailable'; readonly detail: string }
 	| {
 			readonly outcome: 'release-refused';
@@ -72,6 +77,8 @@ export async function runRelease(
 
 export function formatReleaseHuman(result: ReleaseCommandResult): string {
 	if (result.outcome === 'released') return 'released';
+	if (result.outcome === 'database-read-only')
+		return `database-read-only: ${escapeDiagnosticText(result.detail)}`;
 	if (result.outcome === 'release-unavailable')
 		return `release-unavailable: ${escapeDiagnosticText(result.detail)}`;
 	return [

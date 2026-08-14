@@ -16,6 +16,9 @@ import { expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runInspect } from '../../packages/cli/src/commands/inspect.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
+import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
+import { runRecover } from '../../packages/cli/src/commands/recover.js';
+import { runRelease } from '../../packages/cli/src/commands/release.js';
 import {
 	describeWithE2eCapabilities,
 	dumpAndRestoreInLocalPostgresContainer,
@@ -195,6 +198,35 @@ describeWithE2eCapabilities(
 					JSON.stringify(refused),
 					'the refusal must name its actionable fresh-ledger command',
 				).toContain('dbsp preflight --reinitialize');
+				const recovered = await runRecover(
+					planned.runId,
+					{
+						db: databaseUrl(targetDatabase),
+						planDigest: planned.planDigest,
+					},
+					target,
+				);
+				const reconciled = await runReconcile(
+					planned.runId,
+					{ db: databaseUrl(targetDatabase) },
+					target,
+				);
+				const released = await runRelease('application_table', {
+					db: databaseUrl(targetDatabase),
+					schema,
+				});
+				expect(recovered).toMatchObject({
+					outcome: 'recovery-context-mismatch',
+					detail: expect.stringContaining('ledger lineage mismatch'),
+				});
+				expect(reconciled).toMatchObject({
+					outcome: 'reconcile-unresolved',
+					detail: expect.stringContaining('ledger lineage mismatch'),
+				});
+				expect(released).toMatchObject({
+					outcome: 'release-refused',
+					detail: expect.stringContaining('ledger lineage'),
+				});
 
 				const inspected = await runInspect(undefined, {
 					db: databaseUrl(targetDatabase),

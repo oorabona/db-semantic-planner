@@ -1,6 +1,8 @@
 /** Classify a previously attempted run. Recovery never executes planned DDL. */
 import {
+	assertPgDatabaseWritable,
 	createPgTransitionPack,
+	isPgDatabaseReadOnlyError,
 	preparePgRecoveryAdmission,
 	readPgLedgerScopeCurrency,
 	readPgObservationContextFromLessor,
@@ -69,6 +71,7 @@ export const RECOVER_OUTCOME_CONTRACT = [
 		'attempted run authorization is invalid',
 	],
 	['plan-digest-required', 54, 'a reviewed plan digest is required'],
+	['database-read-only', 34, 'target cannot accept managed recovery writes'],
 	[
 		'recovery-plan-digest-mismatch',
 		55,
@@ -367,6 +370,19 @@ export async function runRecover(
 						default:
 							return { outcome: 'recovery-plan-invalid' as const };
 					}
+				}
+				const writabilityLease = await acquireTransitionTargetLease(target);
+				try {
+					await assertPgDatabaseWritable(writabilityLease.session);
+				} catch (error) {
+					if (isPgDatabaseReadOnlyError(error))
+						return {
+							outcome: 'database-read-only' as const,
+							detail: error.message,
+						};
+					throw error;
+				} finally {
+					await writabilityLease.release();
 				}
 				const markerRefusal = await recoverMarkerRefusal(
 					target,

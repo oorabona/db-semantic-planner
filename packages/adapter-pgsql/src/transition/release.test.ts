@@ -40,16 +40,26 @@ const address = {
 
 function executor(currentUser = 'owner', currentUserOid = '10') {
 	return {
-		query: vi.fn(async (sql: string) =>
-			sql ===
-			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid'
+		query: vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT pg_catalog.pg_is_in_recovery()'))
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'off',
+							transaction_read_only: 'off',
+						},
+					],
+				};
+			return sql ===
+				'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid'
 				? {
 						rows: [
 							{ current_user: currentUser, current_user_oid: currentUserOid },
 						],
 					}
-				: { rows: [] },
-		),
+				: { rows: [] };
+		}),
 	};
 }
 
@@ -153,6 +163,37 @@ describe('PostgreSQL release admission', () => {
 		expect(mocks.locks).not.toHaveBeenCalled();
 	});
 
+	it('OBL-CLI10: names a read-only database before release reads or appends', async () => {
+		const client = executor();
+		client.query.mockImplementation(async (sql: string) => {
+			if (sql.startsWith('SELECT pg_catalog.pg_is_in_recovery()'))
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'on',
+							transaction_read_only: 'on',
+						},
+					],
+				};
+			return { rows: [] };
+		});
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toEqual({
+			outcome: 'database-read-only',
+			address,
+			detail: 'database-read-only: target session is read-only',
+		});
+		expect(mocks.currency).not.toHaveBeenCalled();
+		expect(mocks.readChain).not.toHaveBeenCalled();
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+	});
+
 	it('appends exactly the released terminal shape atomically on success', async () => {
 		currentManaged();
 		const client = executor();
@@ -173,6 +214,7 @@ describe('PostgreSQL release admission', () => {
 			}),
 		);
 		expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
+			"SELECT pg_catalog.pg_is_in_recovery() AS in_recovery, current_setting('default_transaction_read_only') AS default_transaction_read_only, current_setting('transaction_read_only') AS transaction_read_only",
 			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
 			'BEGIN',
 			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',

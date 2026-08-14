@@ -6,6 +6,8 @@ import { expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
+import { runRecover } from '../../packages/cli/src/commands/recover.js';
+import { runRelease } from '../../packages/cli/src/commands/release.js';
 import {
 	createStreamingStandbyTopology,
 	describeWithE2eCapabilities,
@@ -20,6 +22,14 @@ function quoteIdent(value: string): string {
 
 function unique(prefix: string): string {
 	return `${prefix}_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+function readOnlyDatabaseUrl(): string {
+	const value = process.env.DATABASE_URL;
+	if (!value) throw new Error('DATABASE_URL is required for read-only E2E');
+	const url = new URL(value);
+	url.searchParams.set('options', '-c default_transaction_read_only=on');
+	return url.toString();
 }
 
 function enumModel(schema: string): ModelIR {
@@ -132,6 +142,15 @@ async function expectReadOnlyCommandOutcomes(
 		reconciled.outcome,
 		'reconcile must expose the same non-writable target outcome before recovery writes',
 	).toBe('database-read-only');
+	const recovered = await runRecover(
+		run.runId,
+		{ db: 'postgresql://e2e-local', planDigest: run.planDigest },
+		pool,
+	);
+	expect(
+		recovered.outcome,
+		'recover must classify a non-writable target before marker selection or append',
+	).toBe('database-read-only');
 }
 
 describeWithE2eCapabilities(
@@ -205,6 +224,15 @@ describeWithE2eCapabilities(
 					client.release();
 				}
 				await expectReadOnlyCommandOutcomes(pool, sessionRun, sessionSchema);
+				await expect(
+					runRelease('never_seen', {
+						db: readOnlyDatabaseUrl(),
+						schema: sessionSchema,
+					}),
+				).resolves.toMatchObject({
+					outcome: 'database-read-only',
+					detail: expect.stringContaining('target session is read-only'),
+				});
 			} finally {
 				await pool
 					.query(`DROP SCHEMA IF EXISTS ${quoteIdent(sessionSchema)} CASCADE`)
