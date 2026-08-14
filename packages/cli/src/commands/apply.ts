@@ -1063,10 +1063,29 @@ async function runApplyInternal(
 			if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
 			else {
 				const execution = locked.value;
-				const preAppendRefusal = applyPreAppendRefusal(
+				const defaultRefusal = applyPreAppendRefusal(
 					execution.outcome as ApplyOutcome,
 					persisted.plan,
 				);
+				const withheldAuthority =
+					execution.outcome === 'destructive-authority-refused'
+						? (execution.refusal?.withheldAuthority ??
+							(execution.detail.includes('operator acceptance')
+								? 'destructive operator acceptance authority'
+								: execution.detail.includes('ledger lineage')
+									? 'destructive ledger lineage authority'
+									: undefined))
+						: undefined;
+				const preAppendRefusal =
+					defaultRefusal === undefined || withheldAuthority === undefined
+						? defaultRefusal
+						: {
+								...defaultRefusal,
+								refusal: {
+									...defaultRefusal.refusal,
+									withheldAuthority,
+								},
+							};
 				result = {
 					outcome: execution.outcome as ApplyOutcome,
 					runId,

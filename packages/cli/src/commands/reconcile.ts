@@ -77,6 +77,22 @@ function pgSqlState(error: unknown): string | undefined {
 	return typeof code === 'string' ? code : undefined;
 }
 
+function isTransportError(error: unknown): boolean {
+	if (typeof error !== 'object' || error === null || !('code' in error))
+		return false;
+	const code = error.code;
+	return (
+		typeof code === 'string' &&
+		[
+			'ECONNREFUSED',
+			'ECONNRESET',
+			'EHOSTUNREACH',
+			'ENETUNREACH',
+			'ETIMEDOUT',
+		].includes(code)
+	);
+}
+
 /** Classify PostgreSQL failures by SQLSTATE; no server message is parsed. */
 export function classifyReconcileFailure(
 	error: unknown,
@@ -84,7 +100,7 @@ export function classifyReconcileFailure(
 ): ReconcileFailureCause {
 	const state = pgSqlState(error);
 	if (state === '28000' || state === '28P01') return 'authentication';
-	if (state?.startsWith('08')) return 'transport';
+	if (state?.startsWith('08') || isTransportError(error)) return 'transport';
 	if (stage === 'journal') return 'malformed-journal';
 	return 'catalogue';
 }

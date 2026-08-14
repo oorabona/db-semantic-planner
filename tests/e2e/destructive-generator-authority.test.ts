@@ -329,7 +329,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		expect(closure.kind).toBe('all-contained-or-managed');
 	});
 
-	it('SC-47: absent digest-bound acceptance refuses before DROP and leaves the object present', async () => {
+	it('OBL-AUTH8 operator acceptance: absent digest-bound acceptance names its withheld authority before DROP', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		await pool.query(`CREATE TABLE ${quote(schema)}.victim (id integer)`);
@@ -342,10 +342,77 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		expect(result).toEqual({
 			outcome: 'destructive-authority-refused',
 			detail: 'operator acceptance is absent',
+			refusal: {
+				withheldAuthority: 'destructive operator acceptance authority',
+			},
 		});
 		await expect(
 			pool.query('SELECT to_regclass($1) AS object', [`${schema}.victim`]),
 		).resolves.toMatchObject({ rows: [{ object: `${schema}.victim` }] });
+	});
+
+	it.each([
+		[
+			'ownership',
+			async (
+				pool: Awaited<ReturnType<typeof getTestPool>>,
+				address: LedgerAddress,
+			) => {
+				// Deliberately leave the live table outside the ledger.
+				void pool;
+				void address;
+			},
+			'destructive ownership authority',
+		],
+		[
+			'catalogue identity',
+			async (
+				pool: Awaited<ReturnType<typeof getTestPool>>,
+				address: LedgerAddress,
+			) => {
+				await adopt(address);
+				await pool.query(
+					`DROP TABLE ${quote(address.schema!)}.${quote(address.name)}; CREATE TABLE ${quote(address.schema!)}.${quote(address.name)} (id integer)`,
+				);
+			},
+			'destructive catalogue identity authority',
+		],
+		[
+			'ledger lineage',
+			async (
+				pool: Awaited<ReturnType<typeof getTestPool>>,
+				address: LedgerAddress,
+			) => {
+				await adopt(address);
+				await pool.query(
+					`UPDATE ${quote(address.schema!)}.dbsp_ledger_identity SET database_oid = '0' WHERE id = true`,
+				);
+			},
+			'destructive ledger lineage authority',
+		],
+	] as const)('OBL-AUTH8 %s: public generated removal refuses with the withheld-authority tuple', async (_axis, arrange, withheldAuthority) => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const name = `auth8_${randomUUID().replaceAll('-', '')}`;
+		const address = tableAddress(schema, databaseId, name);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer)`,
+		);
+		await arrange(pool, address);
+		await expect(
+			executeDrop({
+				schema,
+				database: databaseId,
+				name,
+				accepts: ['accept'],
+			}),
+		).resolves.toMatchObject({
+			outcome: 'destructive-authority-refused',
+			refusal: { withheldAuthority },
+		});
+		await expect(
+			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
+		).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
 	});
 
 	it('SC-48: an unmanaged escaping dependent refuses the whole removal before its statement', () => {
@@ -390,9 +457,12 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			database: databaseId,
 			schema,
 		});
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			outcome: 'destructive-authority-refused',
 			detail: 'operator acceptance is absent',
+			refusal: {
+				withheldAuthority: 'destructive operator acceptance authority',
+			},
 		});
 	});
 
@@ -514,7 +584,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		});
 	});
 
-	it('OBL-CTRL4: a superuser-planted pg_catalog dependent is positive unmanaged evidence and no removal DDL is issued', async () => {
+	it('OBL-CTRL4 / OBL-AUTH8 containment: a superuser-planted pg_catalog dependent is positive unmanaged evidence and no removal DDL is issued', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		const rootName = `obl_ctrl4_root_${randomUUID().replaceAll('-', '')}`;
@@ -524,6 +594,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			await pool.query(
 				`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
 			);
+			await adopt(root);
 			// The e2e role is a superuser.  This deliberately proves that a system
 			// schema location is not silently promoted to dbsp ownership.
 			await pool.query('SET allow_system_table_mods = on');
@@ -557,6 +628,9 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			expect(refused).toMatchObject({
 				outcome: 'destructive-authority-refused',
 				detail: expect.stringMatching(/containment|unmanaged|undecidable/i),
+				refusal: {
+					withheldAuthority: 'destructive containment authority',
+				},
 			});
 			await expect(
 				pool.query('SELECT to_regclass($1) AS root', [`${schema}.${rootName}`]),

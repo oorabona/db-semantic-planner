@@ -1255,6 +1255,72 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		});
 	});
 
+	describe.sequential('OBL-REC3 public reconcile diagnostic causes', () => {
+		it.each([
+			[
+				'authentication',
+				async () =>
+					runReconcile('rec3-authentication', {
+						db: 'postgres://dbsp:not-the-password@127.0.0.1:54330/dbsp',
+					}),
+			],
+			[
+				'transport',
+				async () =>
+					runReconcile('rec3-transport', {
+						db: 'postgres://dbsp:dbsp@127.0.0.1:1/dbsp',
+					}),
+			],
+			[
+				'malformed-journal',
+				async () => {
+					const schema = testSchema('rec3_malformed_journal');
+					await provision(schema);
+					const pool = await getTestPool();
+					await pool.query(
+						`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+					);
+					const planned = await planEnumAdd(schema);
+					await pool.query(
+						"UPDATE dbsp_meta.dbsp_transition_run_plan SET plan = 'null'::jsonb WHERE run_id = $1",
+						[planned.runId],
+					);
+					return runReconcile(planned.runId, { db: planned.db }, pool);
+				},
+			],
+			[
+				'catalogue',
+				async () => {
+					const schema = testSchema('rec3_catalogue');
+					await provision(schema);
+					const pool = await getTestPool();
+					await pool.query(
+						`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+					);
+					const planned = await planEnumAdd(schema);
+					const claim = executionClaim(
+						onlyManagedClaim(planned.plan),
+						planned.runId,
+					);
+					const opened = await openPgOutcomeClaim(pool, {
+						plan: claim,
+						reservations: [reservation(claim, planned.runId)],
+					});
+					expect(opened.kind).toBe('admitted-outcome-claim');
+					await pool.query(
+						`DROP TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+					);
+					return runReconcile(planned.runId, { db: planned.db }, pool);
+				},
+			],
+		] as const)('OBL-REC3: public reconcile preserves the %s cause from its real failing stage', async (cause, invoke) => {
+			await expect(invoke()).resolves.toMatchObject({
+				outcome: 'reconcile-run-unavailable',
+				failureCause: cause,
+			});
+		});
+	});
+
 	describe.sequential('non-current marker refusal', () => {
 		const markerAttacks = [
 			[

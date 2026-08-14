@@ -77,6 +77,8 @@ export type GeneratorExecutionResult =
 	| {
 			readonly outcome: 'destructive-authority-refused';
 			readonly detail: string;
+			/** The exact live authority that remained withheld at admission. */
+			readonly refusal?: { readonly withheldAuthority: string };
 	  }
 	| { readonly outcome: 'prior-step-events-refusal'; readonly detail: string }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
@@ -149,6 +151,47 @@ function acceptance(planDigest: string, approval: ScopedApprovalSet) {
 	) === true
 		? 'destructive-plan-accepted'
 		: 'absent';
+}
+
+/**
+ * Preserve the authority axis in the public generated-removal result.  The
+ * interpreter still makes the decision; this is presentation metadata for a
+ * refusal that has already been reached under the admission lock.
+ */
+function withheldDestructiveAuthority(
+	evidence: DestructiveAuthorityEvidence,
+): string | undefined {
+	if (
+		evidence.declaration !== 'requires-removal' &&
+		evidence.declaration !== 'requires-lossy-change' &&
+		evidence.declaration !== 'replacement-requested-by-plan'
+	)
+		return 'destructive declaration authority';
+	if (evidence.ownership !== 'managed-by-me')
+		return 'destructive ownership authority';
+	if (evidence.catalogueIdentity !== 'matches-recorded')
+		return 'destructive catalogue identity authority';
+	if (evidence.operatorAcceptance !== 'destructive-plan-accepted')
+		return 'destructive operator acceptance authority';
+	if (
+		evidence.containment !== undefined &&
+		evidence.containment !== 'all-contained-or-managed'
+	)
+		return 'destructive containment authority';
+	if (evidence.ledgerLineage !== 'matches-database')
+		return 'destructive ledger lineage authority';
+	return undefined;
+}
+
+/** Admission can reject policy/currency before invoking the live callback. */
+function withheldDestructiveAuthorityFromReason(
+	reason: string,
+): string | undefined {
+	if (reason.includes('operator acceptance'))
+		return 'destructive operator acceptance authority';
+	if (reason.includes('ledger lineage'))
+		return 'destructive ledger lineage authority';
+	return undefined;
 }
 
 async function databaseId(pool: Pool): Promise<string> {
@@ -705,6 +748,7 @@ export async function executeGeneratorPlan(input: {
 		approvals: (input.accepts ?? []).map((value) => ({ class: value })),
 	};
 	const completedStepKeys: string[] = [];
+	let destructiveRefusal: { readonly withheldAuthority: string } | undefined;
 	const partial = (detail: string): GeneratorExecutionResult =>
 		completedStepKeys.length === 0
 			? { outcome: 'execution-failed', detail }
@@ -766,6 +810,7 @@ export async function executeGeneratorPlan(input: {
 				outcome: 'destructive-authority-refused',
 				detail:
 					'replacement requires a named --replace selector from the reviewed plan',
+				refusal: { withheldAuthority: 'destructive declaration authority' },
 			};
 		for (const selector of input.replaces ?? [])
 			if (
@@ -776,6 +821,7 @@ export async function executeGeneratorPlan(input: {
 				return {
 					outcome: 'destructive-authority-refused',
 					detail: `replacement ${selector} was not requested by the reviewed plan`,
+					refusal: { withheldAuthority: 'destructive declaration authority' },
 				};
 		if (
 			replacementSelectors.some(
@@ -1012,12 +1058,22 @@ export async function executeGeneratorPlan(input: {
 						lockedAuthority.containment?.kind === 'all-contained-or-managed' &&
 						containment.closureDigest !==
 							lockedAuthority.containment.closureDigest
-					)
-						return decideDestructiveDecision(
+					) {
+						const decision = decideDestructiveDecision(
 							{ kind: 'removal', address },
 							{ ...lockedAuthority.evidence, containment: 'undecidable' },
 						);
-					return decideDestructiveDecision(
+						if (decision.kind === 'destructive-decision-refused')
+							destructiveRefusal = {
+								withheldAuthority:
+									withheldDestructiveAuthority({
+										...lockedAuthority.evidence,
+										containment: 'undecidable',
+									}) ?? 'destructive containment authority',
+							};
+						return decision;
+					}
+					const decision = decideDestructiveDecision(
 						{
 							kind:
 								step.classification === 'removal'
@@ -1031,6 +1087,13 @@ export async function executeGeneratorPlan(input: {
 						},
 						lockedAuthority.evidence,
 					);
+					if (decision.kind === 'destructive-decision-refused')
+						destructiveRefusal = {
+							withheldAuthority:
+								withheldDestructiveAuthority(lockedAuthority.evidence) ??
+								'destructive authority',
+						};
+					return decision;
 				},
 			};
 			const executed = (await executePgAdmittedOperation(input.pool, {
@@ -1125,6 +1188,16 @@ export async function executeGeneratorPlan(input: {
 				return {
 					outcome: 'destructive-authority-refused',
 					detail: executed.reason,
+					...(destructiveRefusal === undefined &&
+					withheldDestructiveAuthorityFromReason(executed.reason) === undefined
+						? {}
+						: {
+								refusal: destructiveRefusal ?? {
+									withheldAuthority:
+										withheldDestructiveAuthorityFromReason(executed.reason) ??
+										'destructive authority',
+								},
+							}),
 				};
 			completedStepKeys.push(step.stepKey);
 		}

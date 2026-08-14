@@ -664,7 +664,7 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		expect(neverSeen.projection).toMatchObject({ stableState: 'unknown' });
 	});
 
-	it('SC-61: replacement requires a reviewed name, then retires and creates under two claims and tokens', async () => {
+	it('SC-61 / OBL-AUTH8 declaration: replacement requires a reviewed name, then retires and creates under two claims and tokens', async () => {
 		const { pool, database: databaseId, schemas: names } = await fixture();
 		const schema = names[0]!;
 		await pool.query(`CREATE TABLE ${quote(schema)}.replace_me (id integer)`);
@@ -679,6 +679,9 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			outcome: 'destructive-authority-refused',
 			detail:
 				'replacement requires a named --replace selector from the reviewed plan',
+			refusal: {
+				withheldAuthority: 'destructive declaration authority',
+			},
 		});
 		await expect(
 			applyReviewedReplacement(reviewed, schema, {
@@ -688,14 +691,20 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		).resolves.toEqual({
 			outcome: 'destructive-authority-refused',
 			detail: 'replacement other_table was not requested by the reviewed plan',
+			refusal: {
+				withheldAuthority: 'destructive declaration authority',
+			},
 		});
 		await expect(
 			applyReviewedReplacement(reviewed, schema, {
 				replaces: ['replace_me'],
 			}),
-		).resolves.toEqual({
+		).resolves.toMatchObject({
 			outcome: 'destructive-authority-refused',
 			detail: 'operator acceptance is absent',
+			refusal: {
+				withheldAuthority: 'destructive operator acceptance authority',
+			},
 		});
 		await expect(
 			applyReviewedReplacement(reviewed, schema, {
