@@ -740,6 +740,57 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		expect(JSON.stringify(inspected)).toContain('readdressPair');
 	});
 
+	it('OBL-REC2: paired recovery over a half-applied rename reissues no DDL', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		await createManagedTable(schema, databaseId, 'half_applied_source');
+		const rows = await appendInterruptedPair({
+			source: address(schema, databaseId, 'half_applied_source'),
+			target: address(schema, databaseId, 'half_applied_target'),
+			executionId: unique('run'),
+			pairId: unique('pair'),
+		});
+
+		// Simulate the sole physical rename having landed before the process died.
+		// Recovery must classify this from the durable pair and live catalogue; it
+		// must never attempt to send the rename bundle a second time.
+		await pool.query(
+			`ALTER TABLE ${quote(schema)}.half_applied_source RENAME TO half_applied_target`,
+		);
+		const statements: string[] = [];
+		const captured = {
+			query<Row extends Record<string, unknown> = Record<string, unknown>>(
+				text: string,
+				values?: readonly unknown[],
+			) {
+				statements.push(text);
+				return values === undefined
+					? pool.query<Row>(text)
+					: pool.query<Row>(text, [...values]);
+			},
+		};
+
+		await expect(
+			recoverPgReaddressPair(captured, {
+				pairId: rows[0]!.pairId!,
+				executionId: rows[0]!.executionId,
+				reservations: rows,
+			}),
+		).resolves.toMatchObject({ kind: 'readdress-recovery-indeterminate-pair' });
+		expect(statements.join('\n')).not.toMatch(/\b(?:ALTER|CREATE|DROP)\b/iu);
+		for (const row of rows) {
+			const chain = await readPgLedgerAddressChain(
+				pool,
+				row.homeLedger,
+				row.address,
+			);
+			expect(chain.terminalMember).toMatchObject({
+				eventKind: 'indeterminate',
+				predecessor: row.rootClaimId,
+			});
+		}
+	});
+
 	it('SC-58: both refusal details are retained in JSON-shaped output and inspect stays readable', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();

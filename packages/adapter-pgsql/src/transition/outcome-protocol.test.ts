@@ -907,6 +907,42 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		);
 	});
 
+	it('keeps unarmed checkpoints inert and reports each admitted non-transactional boundary in order', async () => {
+		const unarmed = recorder();
+		const armed = recorder();
+		const input = {
+			...request('checkpoint-inert'),
+			executingEventId: 'checkpoint-inert-executing',
+			resolution: {
+				eventId: 'checkpoint-inert-observed',
+				eventKind: 'observed' as const,
+			},
+			vacancy: async () => ({ kind: 'vacant' as const }),
+		};
+		await expect(runAdmitted(unarmed as never, input)).resolves.toMatchObject({
+			kind: 'executed-outcome-claim',
+		});
+		const checkpoints: string[] = [];
+		await expect(
+			runAdmitted(armed as never, {
+				...input,
+				observer: async (point: string) => {
+					checkpoints.push(point);
+				},
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+		expect(armed.sql).toEqual(unarmed.sql);
+		expect(checkpoints).toEqual([
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+			'ddl-completed-before-read-back',
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+		]);
+	});
+
 	it('refuses a mid-window non-transactional live-admission attack before executing or DDL', async () => {
 		const executor = recorder();
 		const result = await runAdmitted(executor as never, {

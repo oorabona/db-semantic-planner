@@ -199,11 +199,34 @@ export class PgCommitAcknowledgementAmbiguousError extends Error {
 	}
 }
 
+/**
+ * Test-only observation points on the admitted path.  Production callers do
+ * not supply an observer, so the helper is inert: it performs no IPC, I/O, or
+ * scheduling work in an ordinary run.
+ */
+export type PgOutcomeCheckpoint =
+	| 'post-lock-integrity-before-append'
+	| 'commit-acknowledged'
+	| 'ddl-completed-before-read-back';
+
+export type PgOutcomeCheckpointObserver = (
+	checkpoint: PgOutcomeCheckpoint,
+) => Promise<void> | void;
+
+async function checkpoint(
+	observer: PgOutcomeCheckpointObserver | undefined,
+	point: PgOutcomeCheckpoint,
+): Promise<void> {
+	if (observer) await observer(point);
+}
+
 async function commitPgOutcome(
 	executor: TransitionJournalQueryable,
+	observer?: PgOutcomeCheckpointObserver,
 ): Promise<void> {
 	try {
 		await executor.query('COMMIT');
+		await checkpoint(observer, 'commit-acknowledged');
 	} catch (error) {
 		throw new PgCommitAcknowledgementAmbiguousError(error);
 	}
@@ -218,6 +241,8 @@ export interface PgOutcomeClaimRequest {
 		executor: TransitionJournalQueryable,
 		plan: OutcomeClaimPlan,
 	) => Promise<DestructiveDecision>;
+	/** Optional E2E observer; absent in all production command paths. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 }
 
 /** One root claim plus its token-free destructive-closure members. */
@@ -241,6 +266,8 @@ export interface PgOutcomeClaimGroupResolution {
 	}[];
 	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
 	readonly lockTimeoutMs?: number;
+	/** Optional E2E observer for this terminal-appending transaction. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 }
 
 export interface PgOutcomeResolution {
@@ -303,6 +330,8 @@ export interface PgPairedReaddressOperation {
 			currentController: ControllerIdentity,
 		) => Promise<OutcomeProtocolRefusal | undefined>;
 		readonly lockTimeoutMs?: number;
+		/** Optional E2E observer; absent in normal execution. */
+		readonly observer?: PgOutcomeCheckpointObserver;
 	};
 }
 
@@ -562,7 +591,7 @@ async function runPgDestructiveOutcome(
 				predecessor,
 			});
 			try {
-				await session.query('COMMIT');
+				await commitPgOutcome(session, request.observer);
 			} catch (error) {
 				return {
 					kind: 'outcome-transport-ambiguous',
@@ -574,6 +603,7 @@ async function runPgDestructiveOutcome(
 				statements: request.plan.statementBundle.statements,
 			});
 			if (sent) return sent;
+			await checkpoint(request.observer, 'ddl-completed-before-read-back');
 			const resolution = await readBackAndResolve(
 				session,
 				admission as AdmittedDestructiveOutcomeClaim,
@@ -716,6 +746,8 @@ export interface PgOutcomeRecoveryRequest {
 	readonly readBack: PgOutcomeReadBackFactory;
 	readonly operationReadBack?: PgOutcomeOperationReadBackFactory;
 	readonly lockTimeoutMs?: number;
+	/** Optional E2E observer for recovery's committing transaction. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 }
 
 export type PgOutcomeResolutionAppendResult =
@@ -772,6 +804,7 @@ export async function recoverPgAdmittedReaddressPair(
 			executor: TransitionJournalQueryable,
 			reservations: readonly LedgerReservationRow[],
 		) => Promise<PgPairedReaddressRecoveryDecision>;
+		readonly observer?: PgOutcomeCheckpointObserver;
 	},
 ): Promise<PgPairedReaddressRecoveryDecision> {
 	return withPgOutcomeSession(executor, (session) =>
@@ -789,6 +822,7 @@ async function recoverPgAdmittedReaddressPairOnSession(
 			executor: TransitionJournalQueryable,
 			reservations: readonly LedgerReservationRow[],
 		) => Promise<PgPairedReaddressRecoveryDecision>;
+		readonly observer?: PgOutcomeCheckpointObserver;
 	},
 ): Promise<PgPairedReaddressRecoveryDecision> {
 	let begun = false;
@@ -875,7 +909,7 @@ async function recoverPgAdmittedReaddressPairOnSession(
 				);
 			}
 		}
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return decision;
 	} catch (error) {
@@ -1365,13 +1399,14 @@ async function openPgOutcomeClaimOnSession(
 			begun = false;
 			return integrity;
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
 			await executor.query('ROLLBACK');
 			begun = false;
 			return admission;
 		}
-		await commitPgOutcome(executor);
+		await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return admission;
 	} catch (error) {
@@ -1419,6 +1454,7 @@ export async function openPgOutcomeClaimGroup(
 				begun = false;
 				return { root: integrity, members: [] };
 			}
+			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const all = [request, ...request.members];
 			const currencyHomes = homesForGroup(request);
 			const seen = new Set<string>();
@@ -1468,7 +1504,7 @@ export async function openPgOutcomeClaimGroup(
 				...request.reservations,
 				...request.members.flatMap((member) => member.reservations),
 			]);
-			await session.query('COMMIT');
+			await commitPgOutcome(session, request.observer);
 			begun = false;
 			return { root: admissions[0]!, members: admissions.slice(1) };
 		} catch (error) {
@@ -1508,7 +1544,7 @@ export async function resolvePgOutcomeClaimGroup(
 				members,
 				request.reservations,
 			);
-			await session.query('COMMIT');
+			await commitPgOutcome(session, request.observer);
 			begun = false;
 			return undefined;
 		} catch (error) {
@@ -1704,6 +1740,7 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return integrity;
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const target = targetForPlan(request.plan);
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
@@ -1722,7 +1759,7 @@ async function runPgTransactionalOutcomeOnSession(
 				request.resolution.eventId,
 				'ERR-05',
 			);
-			if (ownsTransaction) await commitPgOutcome(executor);
+			if (ownsTransaction) await commitPgOutcome(executor, request.observer);
 			begun = false;
 			return liveAdmissionRefusal;
 		}
@@ -1739,7 +1776,7 @@ async function runPgTransactionalOutcomeOnSession(
 				request.resolution.eventId,
 				'ERR-02',
 			);
-			if (ownsTransaction) await commitPgOutcome(executor);
+			if (ownsTransaction) await commitPgOutcome(executor, request.observer);
 			begun = false;
 			return vacancy;
 		}
@@ -1762,6 +1799,7 @@ async function runPgTransactionalOutcomeOnSession(
 						statements: admission.plan.statementBundle.statements,
 					});
 		if (sent) throw new Error(sent.reason);
+		await checkpoint(request.observer, 'ddl-completed-before-read-back');
 		const predecessor = await currentTerminalPredecessor(
 			executor,
 			target,
@@ -1778,7 +1816,7 @@ async function runPgTransactionalOutcomeOnSession(
 			request.plan.claimId,
 			request.reservations,
 		);
-		if (ownsTransaction) await commitPgOutcome(executor);
+		if (ownsTransaction) await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
@@ -1870,6 +1908,7 @@ async function runPgPairedReaddressOperation(
 			begun = false;
 			return integrity;
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const seen = new Set<string>();
 		for (const home of homes) {
 			const key = `${home.scope}:${home.schema ?? ''}`;
@@ -1950,6 +1989,7 @@ async function runPgPairedReaddressOperation(
 			request.statements,
 		);
 		if (sent) throw new Error(sent.reason);
+		await checkpoint(request.observer, 'ddl-completed-before-read-back');
 		for (const member of request.members) {
 			const liveTarget = await readPgCatalogueIdentity(executor, member.target);
 			if (!liveTarget?.catalogueIdentity)
@@ -2005,7 +2045,7 @@ async function runPgPairedReaddressOperation(
 				[targetReservation],
 			);
 		}
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return { kind: 'executed-paired-readdress', pairId: request.pairId };
 	} catch (error) {
@@ -2298,6 +2338,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return executingLiveAdmission;
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const target = targetForPlan(request.plan);
 		const liveAdmissionRefusal = request.verifyLiveAdmission
 			? await request.verifyLiveAdmission(executor, admission.plan)
@@ -2317,6 +2358,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 				return refusal('ledger advisory lock is busy');
 			}
 			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
+			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			await refuseClaim(
 				executor,
 				admission,
@@ -2324,7 +2366,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 				request.resolution.eventId,
 				liveAdmissionRefusal ? 'ERR-05' : 'ERR-02',
 			);
-			await commitPgOutcome(executor);
+			await commitPgOutcome(executor, request.observer);
 			return liveAdmissionRefusal ?? vacancy!;
 		}
 		const executingPredecessor = await currentTerminalPredecessor(
@@ -2354,7 +2396,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			eventKind: 'executing',
 			predecessor: executingPredecessor,
 		});
-		await commitPgOutcome(executor);
+		await commitPgOutcome(executor, request.observer);
 		await request.onExecutingCommitted?.();
 		const sent = await sendPgAdmittedBundle(executor, {
 			permit: mintAdmittedPermit(
@@ -2368,6 +2410,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			statements: admission.plan.statementBundle.statements,
 		});
 		if (sent) return sent;
+		await checkpoint(request.observer, 'ddl-completed-before-read-back');
 		await begin(executor, request.lockTimeoutMs);
 		const terminalLock = await acquirePgLedgerLocks(
 			executor,
@@ -2378,6 +2421,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			return refusal('ledger advisory lock is busy');
 		}
 		await createPostLockAdmissionEvidence(executor, terminalLock.proof);
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const terminalPredecessor = await currentTerminalPredecessor(
 			executor,
 			target,
@@ -2399,7 +2443,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			request.plan.claimId,
 			request.reservations,
 		);
-		await commitPgOutcome(executor);
+		await commitPgOutcome(executor, request.observer);
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		await rollback(executor);
@@ -2493,7 +2537,7 @@ async function recoverPgOutcomeClaimOnSession(
 		});
 		if (classification.kind !== 'outcome-recovery-append') {
 			try {
-				await executor.query('COMMIT');
+				await commitPgOutcome(executor, request.observer);
 				begun = false;
 			} catch (error) {
 				// A lost catalogue session cannot append anyway. Preserve the
@@ -2539,7 +2583,7 @@ async function recoverPgOutcomeClaimOnSession(
 			begun = false;
 			return refusal(append.reason);
 		}
-		await executor.query('COMMIT');
+		await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return { kind: 'outcome-recovery-appended', classification, append };
 	} catch (error) {

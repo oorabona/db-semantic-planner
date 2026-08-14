@@ -307,6 +307,8 @@ export {
 	PgLedgerStorageUnsupportedError,
 	type PgLedgerTarget,
 	type PgLockedRun,
+	type PgOutcomeCheckpoint,
+	type PgOutcomeCheckpointObserver,
 	type PgOutcomeClaimRequest,
 	type PgOutcomeExecutionRequest,
 	type PgOutcomeNonTransactionalRequest,

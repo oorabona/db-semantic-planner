@@ -186,6 +186,8 @@ export {
 	type PgAdmittedOperation,
 	type PgAdmittedOperationResult,
 	type PgLockedRun,
+	type PgOutcomeCheckpoint,
+	type PgOutcomeCheckpointObserver,
 	type PgOutcomeClaimGroupAdmission,
 	type PgOutcomeClaimGroupRequest,
 	type PgOutcomeClaimGroupResolution,
