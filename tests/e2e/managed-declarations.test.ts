@@ -278,6 +278,58 @@ describeWithE2eCapabilities(
 			).rejects.toThrow(/schema\.tables\["users"\]\.columns\[0\]\.default/);
 		});
 
+		it('OBL-RUN9: the real PostgreSQL CLI-plan path leaves no durable run material for a non-canonical declaration', async () => {
+			const pool = await getTestPool();
+			const before = await pool.query<{ count: string }>(
+				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run',
+			);
+			const badModel: ModelIR = {
+				...emptyModel(),
+				tables: new Map([
+					[
+						'users',
+						{
+							...fixtureTable(),
+							columns: [
+								{
+									name: 'createdAt',
+									type: 'datetime' as const,
+									nullable: false,
+									default: () => 'now()',
+								},
+							],
+						},
+					],
+				]),
+			};
+			let opened = false;
+			await expect(
+				runPlan(
+					{
+						db: process.env.DATABASE_URL!,
+						schemaFile: 'run9-live.ts',
+						schema: schemaName,
+					},
+					{
+						createDbConnection: async () => {
+							opened = true;
+							return { pool, release: async () => {} };
+						},
+						loadSchema: async () => ({
+							model: badModel,
+							definition: {},
+							tableNames: ['users'],
+						}),
+					},
+				),
+			).rejects.toThrow(/schema\.tables\["users"\]\.columns\[0\]\.default/);
+			expect(opened).toBe(false);
+			const after = await pool.query<{ count: string }>(
+				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_run',
+			);
+			expect(after.rows).toEqual(before.rows);
+		});
+
 		it('SC-22 and SC-26: persists a digest-covered declaration set and recorded apply reads no schema file', async () => {
 			const pool = await getTestPool();
 			await pool.query(

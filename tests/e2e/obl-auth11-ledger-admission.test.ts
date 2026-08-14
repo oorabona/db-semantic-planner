@@ -48,16 +48,19 @@ describeWithE2eCapabilities(
 			}
 		});
 
-		it('admits schema and database ledger homes through a login role without CREATE, using only read-only catalogue statements', async () => {
+		it('OBL-AUTH11: pair discovery captures every same-shaped home through a login role without CREATE', async () => {
 			const pool = await getTestPool();
 			const schema = uniqueName('obl_auth11');
+			const peerSchema = uniqueName('obl_auth11_peer');
 			const role = uniqueName('obl_auth11_reader');
 			const password = randomUUID();
-			schemas.push(schema);
-			await pool.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
+			schemas.push(schema, peerSchema);
+			await pool.query(
+				`CREATE SCHEMA ${quoteIdent(schema)}; CREATE SCHEMA ${quoteIdent(peerSchema)}`,
+			);
 			await runPgReinitializePreflight({
 				pool,
-				schemas: [schema],
+				schemas: [schema, peerSchema],
 				declarations: {
 					version: 1,
 					digest: `obl-auth11-${schema}`,
@@ -71,7 +74,7 @@ describeWithE2eCapabilities(
 				`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
 			);
 			roles.push(role);
-			for (const ledgerSchema of [schema, DBSP_META_SCHEMA]) {
+			for (const ledgerSchema of [schema, peerSchema, DBSP_META_SCHEMA]) {
 				await pool.query(
 					`GRANT USAGE ON SCHEMA ${quoteIdent(ledgerSchema)} TO ${quoteIdent(role)}`,
 				);
@@ -114,9 +117,9 @@ describeWithE2eCapabilities(
 					}),
 				).resolves.toEqual({ kind: 'verified' });
 				// Pair discovery must make the same no-CREATE promise as ordinary
-				// admission.  There is intentionally no pair in this fixture: a
-				// complete, typed empty answer proves discovery inspected both admitted
-				// homes rather than treating one home as the whole closure.
+				// admission.  There is intentionally no pair in this fixture.  The two
+				// same-shaped schema homes plus the database home prove it did not stop
+				// at the first catalogue candidate.
 				const pair = await readPgLedgerReservationsForPair(
 					readOnlyExecutor,
 					`obl-auth11-empty-pair-${schema}`,
@@ -125,6 +128,10 @@ describeWithE2eCapabilities(
 				expect(pair.candidates).toEqual(
 					expect.arrayContaining([
 						{ target: { scope: 'schema', schema }, kind: 'verified' },
+						{
+							target: { scope: 'schema', schema: peerSchema },
+							kind: 'verified',
+						},
 						{ target: { scope: 'database' }, kind: 'verified' },
 					]),
 				);
