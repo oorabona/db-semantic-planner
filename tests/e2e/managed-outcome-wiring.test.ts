@@ -30,9 +30,11 @@ import type {
 } from '@dbsp/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
+import { runInspect } from '../../packages/cli/src/commands/inspect.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { runRecover } from '../../packages/cli/src/commands/recover.js';
+import { runRelease } from '../../packages/cli/src/commands/release.js';
 import { type CheckpointChild, spawnCheckpointChild } from './harness/index.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 import {
@@ -1046,6 +1048,210 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					}),
 				],
 			});
+		});
+	});
+
+	describe.sequential('OBL-REC12 corrupted ledger storage', () => {
+		/**
+		 * The normal ledger constraints make these three states impossible.  Each
+		 * construction deliberately relaxes only the constraint that prevents the
+		 * corruption, then drives the public surface.  The per-test schema is
+		 * discarded afterwards, so the test never leaves weakened infrastructure
+		 * behind for another cell.
+		 */
+		async function corruptedRun(
+			corruption:
+				| 'unknown-kind'
+				| 'broken-predecessor'
+				| 'divergent-resolution',
+		): Promise<{ readonly planned: PlannedRun; readonly schema: string }> {
+			const schema = testSchema(`rec12_${corruption.replaceAll('-', '_')}`);
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			const claim = executionClaim(
+				onlyManagedClaim(planned.plan),
+				planned.runId,
+			);
+			const opened = await openPgOutcomeClaim(pool, {
+				plan: claim,
+				reservations: [reservation(claim, planned.runId)],
+			});
+			expect(opened.kind).toBe('admitted-outcome-claim');
+			const event = `${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`;
+			const executingEventId = `${claim.claimId}:executing`;
+			await pool.query(
+				`INSERT INTO ${event} (event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, event_kind, predecessor) VALUES ($1, $2, $3, $4, 'null'::jsonb, $5, $6, $7, $8, $9, $10, 'executing', $10)`,
+				[
+					executingEventId,
+					claim.address.engine,
+					claim.address.database,
+					claim.address.schema ?? '',
+					claim.address.kind,
+					claim.address.name,
+					claim.executionId,
+					claim.plannedClaimKey,
+					claim.claimGroupId,
+					claim.claimId,
+				],
+			);
+			if (corruption === 'unknown-kind') {
+				await pool.query(
+					`ALTER TABLE ${event} DISABLE TRIGGER ${quoteIdent('dbsp_ledger_event_immutable')}`,
+				);
+				await pool.query(
+					`ALTER TABLE ${event} DROP CONSTRAINT ${quoteIdent('dbsp_ledger_event_kind_closed')}`,
+				);
+				await pool.query(
+					`UPDATE ${event} SET event_kind = 'unknown-e2e-kind' WHERE event_id = $1`,
+					[executingEventId],
+				);
+			} else if (corruption === 'broken-predecessor') {
+				await pool.query(
+					`ALTER TABLE ${event} DISABLE TRIGGER ${quoteIdent('dbsp_ledger_event_immutable')}`,
+				);
+				await pool.query(
+					`ALTER TABLE ${event} DROP CONSTRAINT ${quoteIdent('dbsp_ledger_event_same_address_predecessor')}`,
+				);
+				await pool.query(
+					`UPDATE ${event} SET predecessor = 'missing-e2e-predecessor' WHERE event_id = $1`,
+					[executingEventId],
+				);
+			} else {
+				await pool.query(
+					`ALTER TABLE ${event} DROP CONSTRAINT ${quoteIdent('dbsp_ledger_event_one_child')}`,
+				);
+				for (const [eventId, cause] of [
+					['rec12-first-resolution', 'first resolution'],
+					['rec12-divergent-resolution', 'different resolution payload'],
+				] as const)
+					await pool.query(
+						`INSERT INTO ${event} (event_id, address_engine, address_database, address_schema, address_parent, address_kind, address_name, execution_id, planned_claim_key, claim_group_id, root_claim_id, event_kind, predecessor, refusal_code, refusal_cause, refusal_state, refusal_withheld_authority, refusal_resolving_command) VALUES ($1, $2, $3, $4, 'null'::jsonb, $5, $6, $7, $8, $9, $10, 'refused', $10, 'ERR-08', $11, 'unknown', 'malformed journal evidence', 'dbsp reconcile')`,
+						[
+							eventId,
+							claim.address.engine,
+							claim.address.database,
+							claim.address.schema ?? '',
+							claim.address.kind,
+							claim.address.name,
+							claim.executionId,
+							claim.plannedClaimKey,
+							claim.claimGroupId,
+							executingEventId,
+							cause,
+						],
+					);
+			}
+			return { planned, schema };
+		}
+
+		it.each([
+			['unknown kind', 'unknown-kind'],
+			['broken predecessor', 'broken-predecessor'],
+			['divergent resolution payload', 'divergent-resolution'],
+		] as const)('OBL-REC12 reconcile: %s refuses selection and appends no recovery event', async (_name, corruption) => {
+			const { planned } = await corruptedRun(corruption);
+			const pool = await getTestPool();
+			const before = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			await expect(
+				runReconcile(planned.runId, { db: planned.db }, pool),
+			).resolves.toMatchObject({
+				outcome: 'reconcile-claim-selection-unavailable',
+			});
+			const after = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			expect(after.rows).toEqual(before.rows);
+		});
+
+		it.each([
+			['unknown kind', 'unknown-kind'],
+			['broken predecessor', 'broken-predecessor'],
+			['divergent resolution payload', 'divergent-resolution'],
+		] as const)('OBL-REC12 inspect: %s stays readable as a typed malformed projection', async (_name, corruption) => {
+			const { planned, schema } = await corruptedRun(corruption);
+			await expect(
+				runInspect('enum:status', { db: planned.db, schema }),
+			).resolves.toMatchObject({
+				projection: { kind: 'unprojectable-ledger-chain' },
+			});
+		});
+
+		it.each([
+			['unknown kind', 'unknown-kind'],
+			['broken predecessor', 'broken-predecessor'],
+			['divergent resolution payload', 'divergent-resolution'],
+		] as const)('OBL-REC12 release: %s refuses without a release append', async (_name, corruption) => {
+			const { planned, schema } = await corruptedRun(corruption);
+			const pool = await getTestPool();
+			const before = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			await expect(
+				runRelease('enum:status', { db: planned.db, schema }),
+			).resolves.toMatchObject({
+				outcome: 'release-refused',
+				refusal: { code: 'ERR-08' },
+			});
+			const after = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			expect(after.rows).toEqual(before.rows);
+		});
+
+		it.each([
+			['unknown kind', 'unknown-kind'],
+			['broken predecessor', 'broken-predecessor'],
+			['divergent resolution payload', 'divergent-resolution'],
+		] as const)('OBL-REC12 apply: %s refuses before a new lifecycle append', async (_name, corruption) => {
+			const { planned, schema } = await corruptedRun(corruption);
+			const pool = await getTestPool();
+			const before = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			const result = await runApply(
+				planned.runId,
+				{
+					db: planned.db,
+					planDigest: planned.planDigest,
+					accept: planned.plan.assumptions.map(
+						(assumption) => assumption.class,
+					),
+				},
+				pool,
+			);
+			expect(result.outcome).not.toBe('applied');
+			const after = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			expect(after.rows).toEqual(before.rows);
+		});
+
+		it.each([
+			['unknown kind', 'unknown-kind'],
+			['broken predecessor', 'broken-predecessor'],
+			['divergent resolution payload', 'divergent-resolution'],
+		] as const)('OBL-REC12 recover: %s refuses before recovery append', async (_name, corruption) => {
+			const { planned, schema } = await corruptedRun(corruption);
+			const pool = await getTestPool();
+			const before = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			const result = await runRecover(
+				planned.runId,
+				{ db: planned.db, planDigest: planned.planDigest },
+				pool,
+			);
+			expect(result.outcome).not.toBe('completed');
+			const after = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+			expect(after.rows).toEqual(before.rows);
 		});
 	});
 
