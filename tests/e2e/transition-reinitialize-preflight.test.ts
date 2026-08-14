@@ -42,7 +42,7 @@ function quoteLiteral(value: string): string {
 
 describeWithE2eCapabilities(
 	['role-administration'],
-	'SC-13 #481 reinitialize-preflight ownership and grants',
+	'SC-13 / OBL-REC8 #481 reinitialize-preflight ownership and grants',
 	() => {
 		const roles: string[] = [];
 		const schemas: string[] = [];
@@ -127,6 +127,27 @@ describeWithE2eCapabilities(
 				).toBe(true);
 				const tenant = await rolePool(tenantA, password);
 				try {
+					for (const ledgerSchema of [schemaA, schemaB, DBSP_META_SCHEMA]) {
+						for (const table of [
+							DBSP_LEDGER_EVENT_TABLE,
+							DBSP_LEDGER_RESERVATION_TABLE,
+							DBSP_LEDGER_IDENTITY_TABLE,
+							DBSP_LEDGER_MARKER_TABLE,
+						]) {
+							const access = await setup.query<{ allowed: boolean }>(
+								'SELECT has_table_privilege($1, $2, $3) AS allowed',
+								[
+									tenantA,
+									`${quoteIdent(ledgerSchema)}.${quoteIdent(table)}`,
+									'SELECT,INSERT,UPDATE,DELETE,TRUNCATE',
+								],
+							);
+							expect(
+								access.rows[0]?.allowed,
+								`${tenantA} must not have any ledger DML privilege on ${ledgerSchema}.${table}`,
+							).toBe(false);
+						}
+					}
 					await expect(
 						tenant.query(
 							`SELECT * FROM ${quoteIdent(schemaB)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
@@ -157,6 +178,15 @@ describeWithE2eCapabilities(
 					outcome: 'failed',
 					refusal: { code: 'reinitialize-preflight-grants' },
 				});
+				const stillGranted = await setup.query<{ allowed: boolean }>(
+					'SELECT has_table_privilege($1, $2, $3) AS allowed',
+					[
+						tenantA,
+						`${quoteIdent(schemaA)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+						'SELECT',
+					],
+				);
+				expect(stillGranted.rows[0]?.allowed).toBe(true);
 			} finally {
 				await deployed.end();
 			}
@@ -575,7 +605,7 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 		await resetDbspMeta();
 	});
 
-	it('writes only DSL declarations without a chain and appends no events', async () => {
+	it('OBL-REC10: excludes every covered and dbsp-infrastructure address from adoption candidates', async () => {
 		const schema = uniqueName('reinitialize_adoption');
 		schemas.push(schema);
 		await createPreflightSchema(schema);
@@ -587,7 +617,11 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 		const out = join(directory, 'adoption.json');
 
 		const report = await runPreflight([schema], {
-			declarations: tableDeclarations(schema, ['covered', 'candidate']),
+			declarations: tableDeclarations(schema, [
+				'covered',
+				'candidate',
+				DBSP_LEDGER_EVENT_TABLE,
+			]),
 			writeAdoptionFile: (value: ReinitializePreflightReport) =>
 				writeAdoptionFileAtomically(out, value),
 		});
@@ -600,5 +634,25 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 			adoptions: report.adoptionCandidates,
 		});
 		expect(await ledgerEventCount(schema)).toBe(before);
+	});
+
+	it('OBL-CLI3: emits an adoption artifact with owner-only mode under umask 022', async () => {
+		const schema = uniqueName('reinitialize_adoption_mode');
+		schemas.push(schema);
+		await createPreflightSchema(schema);
+		const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-mode-e2e-'));
+		directories.push(directory);
+		const out = join(directory, 'adoption.json');
+		const previousUmask = process.umask(0o022);
+		try {
+			await runPreflight([schema], {
+				declarations: tableDeclarations(schema, ['candidate']),
+				writeAdoptionFile: (value: ReinitializePreflightReport) =>
+					writeAdoptionFileAtomically(out, value),
+			});
+		} finally {
+			process.umask(previousUmask);
+		}
+		expect((await stat(out)).mode & 0o777).toBe(0o600);
 	});
 });

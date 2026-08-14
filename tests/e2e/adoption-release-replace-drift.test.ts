@@ -386,7 +386,7 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 		void databaseId;
 	});
 
-	it('SC-60: release refuses pending, blocked, another controller and lineage mismatch; success preserves the object and makes the address unknown', async () => {
+	it('SC-60 / OBL-CLI9: release refusals preserve each object; success makes the address unknown', async () => {
 		const { pool, database: databaseId, schemas: names } = await fixture();
 		const schema = names[0]!;
 		for (const name of [
@@ -401,6 +401,12 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			);
 		await adopt(address(schema, databaseId, 'pending'));
 		await leaveOpenClaim(address(schema, databaseId, 'pending'));
+		await pool.query(
+			`INSERT INTO ${quote(schema)}.pending VALUES (1, 'pending')`,
+		);
+		const pendingBefore = await pool.query(
+			`SELECT * FROM ${quote(schema)}.pending`,
+		);
 		await expect(
 			runRelease('pending', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
@@ -413,8 +419,17 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				...REFUSAL_VOCABULARY['ERR-08'],
 			},
 		});
+		await expect(
+			pool.query(`SELECT * FROM ${quote(schema)}.pending`),
+		).resolves.toEqual(pendingBefore);
 		await adopt(address(schema, databaseId, 'blocked'));
 		await leaveOpenClaim(address(schema, databaseId, 'blocked'), true);
+		await pool.query(
+			`INSERT INTO ${quote(schema)}.blocked VALUES (2, 'blocked')`,
+		);
+		const blockedBefore = await pool.query(
+			`SELECT * FROM ${quote(schema)}.blocked`,
+		);
 		await expect(
 			runRelease('blocked', { db: process.env.DATABASE_URL!, schema }),
 		).resolves.toMatchObject({
@@ -427,7 +442,16 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				...REFUSAL_VOCABULARY['ERR-08'],
 			},
 		});
+		await expect(
+			pool.query(`SELECT * FROM ${quote(schema)}.blocked`),
+		).resolves.toEqual(blockedBefore);
 		await adopt(address(schema, databaseId, 'other_controller'));
+		await pool.query(
+			`INSERT INTO ${quote(schema)}.other_controller VALUES (3, 'other')`,
+		);
+		const otherControllerBefore = await pool.query(
+			`SELECT * FROM ${quote(schema)}.other_controller`,
+		);
 		await pool.query(
 			`ALTER TABLE ${quote(schema)}.dbsp_ledger_event DISABLE TRIGGER ALL; UPDATE ${quote(schema)}.dbsp_ledger_event SET controller = 'dbsp_other_controller' WHERE address_name = 'other_controller'; ALTER TABLE ${quote(schema)}.dbsp_ledger_event ENABLE TRIGGER ALL`,
 		);
@@ -443,7 +467,16 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				...REFUSAL_VOCABULARY['ERR-05'],
 			},
 		});
+		await expect(
+			pool.query(`SELECT * FROM ${quote(schema)}.other_controller`),
+		).resolves.toEqual(otherControllerBefore);
 		await adopt(address(schema, databaseId, 'lineage'));
+		await pool.query(
+			`INSERT INTO ${quote(schema)}.lineage VALUES (4, 'lineage')`,
+		);
+		const lineageBefore = await pool.query(
+			`SELECT * FROM ${quote(schema)}.lineage`,
+		);
 		await pool.query(
 			`UPDATE ${quote(schema)}.dbsp_ledger_identity SET database_oid = 'lineage-mismatch'`,
 		);
@@ -459,6 +492,9 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				...REFUSAL_VOCABULARY['ERR-06'],
 			},
 		});
+		await expect(
+			pool.query(`SELECT * FROM ${quote(schema)}.lineage`),
+		).resolves.toEqual(lineageBefore);
 		await pool.query(
 			`UPDATE ${quote(schema)}.dbsp_ledger_identity SET database_oid = (SELECT oid::text FROM pg_catalog.pg_database WHERE datname = current_database())`,
 		);

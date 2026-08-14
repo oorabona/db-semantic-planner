@@ -29,6 +29,14 @@ export type TransitionJournalQueryable = {
 	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
 };
 
+/** A copied plan row is not authority for a differently named run. */
+export class TransitionRunIdentityMismatchError extends Error {
+	constructor() {
+		super('dbsp transition run plan bound id does not match its run row');
+		this.name = 'TransitionRunIdentityMismatchError';
+	}
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -121,6 +129,7 @@ export function renderCreateTransitionRunPlanTableSql(): string {
 	return (
 		`CREATE TABLE IF NOT EXISTS ${transitionRunPlanTable()} (` +
 		'run_id text PRIMARY KEY, ' +
+		'bound_run_id text NOT NULL, ' +
 		'plan jsonb NOT NULL, ' +
 		`FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id)` +
 		')'
@@ -339,7 +348,13 @@ function assertRunPlanTableShape(row: JournalTableShapeRow | undefined): void {
 		throw new Error('dbsp transition run plan table has invalid shape');
 	}
 	const columns = jsonRecord(row.columns);
-	if (!columnsMatch(columns, { run_id: 'text', plan: 'jsonb' })) {
+	if (
+		!columnsMatch(columns, {
+			run_id: 'text',
+			bound_run_id: 'text',
+			plan: 'jsonb',
+		})
+	) {
 		throw new Error('dbsp transition run plan table columns drifted');
 	}
 	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id"]') {
@@ -542,13 +557,19 @@ async function ensureRun(
 		);
 	}
 	const plan = await executor.query(
-		`SELECT run_id FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+		`SELECT run_id, bound_run_id FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
 		[run.runId],
 	);
 	if (!plan.rows[0]) {
 		throw new Error(
 			`dbsp transition run ${run.runId} has no persisted proven plan`,
 		);
+	}
+	if (
+		plan.rows[0].run_id !== run.runId ||
+		plan.rows[0].bound_run_id !== run.runId
+	) {
+		throw new TransitionRunIdentityMismatchError();
 	}
 }
 
@@ -710,8 +731,8 @@ export function createPgTransitionRunPersister(
 					`VALUES ($1, $2, $3, $4, $5, '${replayability}', $6::timestamptz) ` +
 					'ON CONFLICT (run_id) DO NOTHING ' +
 					'RETURNING run_id' +
-					`) INSERT INTO ${transitionRunPlanTable()} (run_id, plan) ` +
-					'SELECT run_id, $7::jsonb FROM ins_run ' +
+					`) INSERT INTO ${transitionRunPlanTable()} (run_id, bound_run_id, plan) ` +
+					'SELECT run_id, $7, $8::jsonb FROM ins_run ' +
 					'ON CONFLICT (run_id) DO NOTHING',
 				[
 					run.runId,
@@ -720,12 +741,13 @@ export function createPgTransitionRunPersister(
 					run.databaseId,
 					run.coreVersion,
 					run.startedAt,
+					run.runId,
 					serialized,
 				],
 			);
 			await ensureRun(executor, run);
 			const storedPlan = await executor.query(
-				`SELECT plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+				`SELECT run_id, bound_run_id, plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
 				[run.runId],
 			);
 			const row = storedPlan.rows[0];
@@ -733,6 +755,9 @@ export function createPgTransitionRunPersister(
 				throw new Error(
 					`dbsp transition run ${run.runId} proven plan was not persisted`,
 				);
+			}
+			if (row.run_id !== run.runId || row.bound_run_id !== run.runId) {
+				throw new TransitionRunIdentityMismatchError();
 			}
 			if (stableJson(planFromRow(row)) !== stableJson(plan)) {
 				throw new Error(
@@ -936,7 +961,7 @@ export async function readTransitionJournal(
 		throw new Error(`dbsp transition run ${runId} was not found`);
 	}
 	const plan = await executor.query(
-		`SELECT plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
+		`SELECT run_id, bound_run_id, plan FROM ${transitionRunPlanTable()} WHERE run_id = $1`,
 		[runId],
 	);
 	const planRow = plan.rows[0];
@@ -944,6 +969,9 @@ export async function readTransitionJournal(
 		throw new Error(
 			`dbsp transition run ${runId} has no persisted proven plan and is non-resumable`,
 		);
+	}
+	if (planRow.run_id !== runId || planRow.bound_run_id !== runId) {
+		throw new TransitionRunIdentityMismatchError();
 	}
 	const events = await executor.query(
 		`SELECT run_id, seq::text AS seq, event, step_id, operation_ref, operation_kind, recorded_at, record ` +

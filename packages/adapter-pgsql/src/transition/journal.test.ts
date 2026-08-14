@@ -141,6 +141,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 				relkind: 'r',
 				columns: {
 					run_id: { type: 'text', notNull: true },
+					bound_run_id: { type: 'text', notNull: true },
 					plan: { type: 'jsonb', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -243,16 +244,18 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 				});
 				this.plans.set(String(run_id), {
 					run_id,
-					plan: JSON.parse(String(params[6])) as unknown,
+					bound_run_id: params[6],
+					plan: JSON.parse(String(params[7])) as unknown,
 				});
 			}
 			return { rows: [] };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
-			const [runId, plan] = params;
+			const [runId, boundRunId, plan] = params;
 			if (!this.plans.has(String(runId))) {
 				this.plans.set(String(runId), {
 					run_id: runId,
+					bound_run_id: boundRunId,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
@@ -575,6 +578,7 @@ describe('transition journal primitive', () => {
 		await persister.persist(metadata, plan);
 		executor.plans.set(metadata.runId, {
 			run_id: metadata.runId,
+			bound_run_id: metadata.runId,
 			plan: { ...plan, persisted: false },
 		});
 		await expect(persister.persist(metadata, plan)).rejects.toThrow(
@@ -696,6 +700,22 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/no persisted proven plan and is non-resumable/);
 	});
 
+	it('OBL-RUN3 refuses a plan row whose durable bound run id differs from its key', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		const stored = executor.plans.get(metadata.runId);
+		if (!stored) throw new Error('expected persisted plan');
+		executor.plans.set(metadata.runId, {
+			...stored,
+			bound_run_id: 'run:copied-from',
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow('bound id does not match');
+	});
+
 	it('fails closed on a corrupt replayability value instead of defaulting it to replayable', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
@@ -728,6 +748,7 @@ describe('transition journal primitive', () => {
 		});
 		executor.plans.set(metadata.runId, {
 			run_id: metadata.runId,
+			bound_run_id: metadata.runId,
 			plan: corruptPlan,
 		});
 

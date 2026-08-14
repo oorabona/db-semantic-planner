@@ -121,6 +121,7 @@ function journalTableShape(table: string) {
 			relkind: 'r',
 			columns: {
 				run_id: { type: 'text', notNull: true },
+				bound_run_id: { type: 'text', notNull: true },
 				plan: { type: 'jsonb', notNull: true },
 			},
 			primary_key: ['run_id'],
@@ -526,7 +527,9 @@ describe('AlterTableAddCheck operation runtime', () => {
 						return { rows: [journalTableShape(String(params?.[1]))] };
 					}
 					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
-						return { rows: [{ run_id: run.runId }] };
+						return {
+							rows: [{ run_id: run.runId, bound_run_id: run.runId }],
+						};
 					}
 					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 						return { rows: [journalRunRow(run)] };

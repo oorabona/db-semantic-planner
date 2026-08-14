@@ -10,8 +10,9 @@ import {
 } from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress } from '@dbsp/types';
 import pg from 'pg';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fixtureRefusedResolutionMember } from './outcome-claim-fixture.js';
+import { resetDbspMeta } from './transition-reinitialize-preflight-testkit.js';
 
 const pools: pg.Pool[] = [];
 
@@ -39,8 +40,11 @@ function address(
 			};
 }
 
+beforeEach(resetDbspMeta);
+
 afterEach(async () => {
 	await Promise.all(pools.splice(0).map((pool) => pool.end()));
+	await resetDbspMeta();
 });
 
 describe('managed ledger effects closures (SC-11, SC-14)', () => {

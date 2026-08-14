@@ -96,6 +96,7 @@ export {
 	renderCreateTransitionRunPlanTableSql,
 	renderCreateTransitionRunTableSql,
 	type TransitionJournalQueryable,
+	TransitionRunIdentityMismatchError,
 } from './journal.js';
 export {
 	acquirePgLedgerLocks,

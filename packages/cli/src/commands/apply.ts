@@ -10,6 +10,7 @@ import {
 	escapeDiagnosticText,
 	preparePgExecutionSession,
 	readTransitionJournal,
+	TransitionRunIdentityMismatchError,
 	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
@@ -973,6 +974,20 @@ async function runApplyInternal(
 	try {
 		persisted = await loadOnLessor(createPgTransitionLessor(owned), runId);
 	} catch (error) {
+		if (error instanceof TransitionRunIdentityMismatchError) {
+			const refusal: ApplyCommandResult = {
+				outcome: 'run-id-mismatch',
+				runId,
+				result: {
+					assessment: {
+						reasons: [{ detail: error.message }],
+					},
+				} as unknown as ApplyResult,
+			};
+			return pool === undefined
+				? withPoolCleanupReported(refusal, () => owned.end())
+				: refusal;
+		}
 		if (pool === undefined) {
 			try {
 				await owned.end();

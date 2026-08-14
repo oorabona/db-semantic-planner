@@ -32,6 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runApply } from '../../packages/cli/src/commands/apply.js';
 import { runPlan } from '../../packages/cli/src/commands/plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
+import { runRecover } from '../../packages/cli/src/commands/recover.js';
 import { type CheckpointChild, spawnCheckpointChild } from './harness/index.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 import {
@@ -359,6 +360,34 @@ async function planEnumAdd(schema: string): Promise<PlannedRun> {
 	};
 }
 
+async function copyPersistedRun(
+	sourceRunId: string,
+	copyRunId: string,
+	removeSource = false,
+): Promise<void> {
+	const pool = await getTestPool();
+	await pool.query(
+		`INSERT INTO dbsp_meta.dbsp_transition_run (run_id, plan_digest, target_context_digest, database_id, core_version, replayability, started_at) ` +
+			`SELECT $1, plan_digest, target_context_digest, database_id, core_version, replayability, started_at FROM dbsp_meta.dbsp_transition_run WHERE run_id = $2`,
+		[copyRunId, sourceRunId],
+	);
+	await pool.query(
+		`INSERT INTO dbsp_meta.dbsp_transition_run_plan (run_id, bound_run_id, plan) ` +
+			`SELECT $1, bound_run_id, plan FROM dbsp_meta.dbsp_transition_run_plan WHERE run_id = $2`,
+		[copyRunId, sourceRunId],
+	);
+	if (removeSource) {
+		await pool.query(
+			'DELETE FROM dbsp_meta.dbsp_transition_run_plan WHERE run_id = $1',
+			[sourceRunId],
+		);
+		await pool.query(
+			'DELETE FROM dbsp_meta.dbsp_transition_run WHERE run_id = $1',
+			[sourceRunId],
+		);
+	}
+}
+
 async function planConcurrentIndex(
 	schema: string,
 	indexName: string,
@@ -504,6 +533,200 @@ afterEach(async () => {
 
 describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 	describe.sequential('transactional managed outcomes', () => {
+		it('OBL-RUN1: public apply refuses an intact durable plan when the reviewed digest is wrong before authorization or DDL', async () => {
+			const schema = testSchema('run_wrong_review_digest');
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+
+			await expect(
+				runApply(
+					planned.runId,
+					{ db: planned.db, planDigest: `${planned.planDigest}-substituted` },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'plan-digest-mismatch' });
+			await expect(
+				pool.query(
+					'SELECT count(*)::integer AS count FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
+					[planned.runId],
+				),
+			).resolves.toMatchObject({ rows: [{ count: 0 }] });
+			await expect(
+				pool.query(
+					`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
+					[schema],
+				),
+			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
+		});
+
+		it('OBL-RUN5: a durable pre-admission refusal leaves the run re-applicable and its real ledger chain readable', async () => {
+			const schema = testSchema('run_pre_admission_retry');
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			const claim = onlyManagedClaim(planned.plan);
+
+			await expect(
+				runApply(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'assumption-not-accepted' });
+			await expect(
+				pool.query(
+					'SELECT count(*)::integer AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
+					[planned.runId],
+				),
+			).resolves.toMatchObject({ rows: [{ count: 0 }] });
+
+			await expect(
+				runApply(
+					planned.runId,
+					{
+						db: planned.db,
+						planDigest: planned.planDigest,
+						accept: planned.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'completed' });
+			expect(
+				(await ledgerChain(schema, claim.address.name)).map(
+					(member) => member.eventKind,
+				),
+			).toEqual(['intent', 'observed']);
+		});
+
+		it('OBL-RUN1: a direct-SQL persisted-plan mutation is refused by public apply and recover before DDL', async () => {
+			const schema = testSchema('run_plan_tamper');
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			await pool.query(
+				"UPDATE dbsp_meta.dbsp_transition_run_plan SET plan = jsonb_set(plan, '{steps,0,order}', '99'::jsonb) WHERE run_id = $1",
+				[planned.runId],
+			);
+
+			await expect(
+				runApply(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'plan-digest-mismatch' });
+			await expect(
+				runRecover(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'recovery-plan-digest-mismatch' });
+			await expect(
+				pool.query(
+					`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
+					[schema],
+				),
+			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
+		});
+
+		it('OBL-RUN3: a persisted durable run with an unsupported execution epoch is refused by public apply before DDL', async () => {
+			const schema = testSchema('run_epoch_tamper');
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			await pool.query(
+				"UPDATE dbsp_meta.dbsp_transition_run SET core_version = '9.9.9' WHERE run_id = $1",
+				[planned.runId],
+			);
+			const refused = await runApply(
+				planned.runId,
+				{ db: planned.db, planDigest: planned.planDigest },
+				pool,
+			);
+			expect(refused).toMatchObject({
+				outcome: 'compatibility-refusal',
+				result: {
+					assessment: {
+						reasons: [
+							expect.objectContaining({
+								detail: expect.stringContaining(
+									'execution compatibility epoch',
+								),
+							}),
+						],
+					},
+				},
+			});
+			await expect(
+				pool.query(
+					`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
+					[schema],
+				),
+			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
+		});
+
+		it.each([
+			['copied', false],
+			['renamed', true],
+		] as const)('OBL-RUN3: public apply refuses a %s durable run row before authorization or DDL', async (variant, removeSource) => {
+			const schema = testSchema(`run_identity_${variant}`);
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			const copiedRunId = `${planned.runId}:${variant}`;
+			await copyPersistedRun(planned.runId, copiedRunId, removeSource);
+
+			await expect(
+				runApply(
+					copiedRunId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({
+				outcome: 'run-id-mismatch',
+				result: {
+					assessment: {
+						reasons: [
+							expect.objectContaining({
+								detail: expect.stringContaining('bound id'),
+							}),
+						],
+					},
+				},
+			});
+			await expect(
+				pool.query(
+					'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
+					[copiedRunId],
+				),
+			).resolves.toMatchObject({ rows: [{ count: '0' }] });
+			await expect(
+				pool.query(
+					`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
+					[schema],
+				),
+			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
+		});
+
 		it('keeps one applied enum run ledger-complete while its delivery-1 journal stays on that run', async () => {
 			const schema = testSchema('transactional');
 			await provision(schema);

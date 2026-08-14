@@ -125,7 +125,7 @@ describeWithE2eCapabilities(
 	['container-exec'],
 	'SC-43, SC-44 #481 restored ledgers refuse mutation and retain readable provenance',
 	() => {
-		it('SC-43: full pg_dump/pg_restore refuses mutation, permits inspect, then reinitializes a fresh ledger', async () => {
+		it('SC-43 / OBL-REC9: full pg_dump/pg_restore archives byte-stable, read-only lineage before a fresh ledger', async () => {
 			const admin = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 			const sourceDatabase = unique('dbsp_lineage_full_source');
 			const targetDatabase = unique('dbsp_lineage_full_target');
@@ -133,6 +133,10 @@ describeWithE2eCapabilities(
 			const temporary = await mkdtemp(join(tmpdir(), 'dbsp-lineage-'));
 			let source: pg.Pool | undefined;
 			let target: pg.Pool | undefined;
+			let sourceEventRows: readonly {
+				readonly event_id: string;
+				readonly row: string;
+			}[] = [];
 			try {
 				await createDatabase(admin, sourceDatabase);
 				await createDatabase(admin, targetDatabase);
@@ -159,6 +163,11 @@ describeWithE2eCapabilities(
 					databaseUrl(sourceDatabase),
 					schema,
 				);
+				sourceEventRows = (
+					await source.query<{ event_id: string; row: string }>(
+						`SELECT event_id, row_to_json(e)::text AS row FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} e ORDER BY event_id`,
+					)
+				).rows;
 				await source.end();
 				source = undefined;
 
@@ -251,12 +260,31 @@ describeWithE2eCapabilities(
 				const archivedEvent = archived.rows[0]?.relname;
 				if (!archivedEvent)
 					throw new Error('expected archived event ledger table');
+				const archivedRows = await target.query<{
+					event_id: string;
+					row: string;
+				}>(
+					`SELECT event_id, row_to_json(e)::text AS row FROM ${quoteIdent(schema)}.${quoteIdent(archivedEvent)} e ORDER BY event_id`,
+				);
+				expect(archivedRows.rows).toEqual(sourceEventRows);
+				const archiveAccess = await target.query<{ public_select: boolean }>(
+					"SELECT coalesce(bool_or(access.grantee = 0), false) AS public_select FROM pg_catalog.pg_class relation CROSS JOIN LATERAL pg_catalog.aclexplode(coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) access WHERE relation.oid = $1::regclass AND access.privilege_type = 'SELECT'",
+					[`${quoteIdent(schema)}.${quoteIdent(archivedEvent)}`],
+				);
+				expect(archiveAccess.rows[0]?.public_select).toBe(false);
 				await expect(
 					target.query(
 						`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(archivedEvent)} DEFAULT VALUES`,
 					),
 					'archived restored history must be trigger-enforced read-only',
 				).rejects.toThrow('dbsp archived ledger is read-only');
+				for (const mutation of [
+					`UPDATE ${quoteIdent(schema)}.${quoteIdent(archivedEvent)} SET event_id = event_id`,
+					`DELETE FROM ${quoteIdent(schema)}.${quoteIdent(archivedEvent)}`,
+				])
+					await expect(target.query(mutation)).rejects.toThrow(
+						'dbsp archived ledger is read-only',
+					);
 			} finally {
 				await source?.end();
 				await target?.end();

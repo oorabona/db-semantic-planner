@@ -164,6 +164,7 @@ class FakeEnumPool {
 				relkind: 'r',
 				columns: {
 					run_id: { type: 'text', notNull: true },
+					bound_run_id: { type: 'text', notNull: true },
 					plan: { type: 'jsonb', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -303,6 +304,7 @@ class FakeEnumPool {
 				database_id,
 				core_version,
 				started_at,
+				bound_run_id,
 				plan,
 			] = params ?? [];
 			if (!this.runs.has(String(run_id))) {
@@ -317,6 +319,7 @@ class FakeEnumPool {
 				});
 				this.plans.set(String(run_id), {
 					run_id,
+					bound_run_id,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
@@ -345,10 +348,11 @@ class FakeEnumPool {
 			return { rows: [] };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
-			const [run_id, plan] = params ?? [];
+			const [run_id, bound_run_id, plan] = params ?? [];
 			if (!this.plans.has(String(run_id))) {
 				this.plans.set(String(run_id), {
 					run_id,
+					bound_run_id,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
