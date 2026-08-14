@@ -8,6 +8,7 @@ import {
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	readPgCatalogueIdentity,
+	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
@@ -511,6 +512,49 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				resolvingCommand: 'dbsp apply',
 			},
 		});
+	});
+
+	it('OBL-CTRL4: a superuser-planted pg_catalog dependent is positive unmanaged evidence and no removal DDL is issued', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_ctrl4_root_${randomUUID().replaceAll('-', '')}`;
+		const plantedName = `dbsp_obl_ctrl4_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		try {
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+			);
+			// The e2e role is a superuser.  This deliberately proves that a system
+			// schema location is not silently promoted to dbsp ownership.
+			await pool.query('SET allow_system_table_mods = on');
+			await pool.query(
+				`CREATE TABLE pg_catalog.${quote(plantedName)} (root_id integer REFERENCES ${quote(schema)}.${quote(rootName)}(id))`,
+			);
+			const live = await readPgCatalogueIdentity(pool, root);
+			if (!live?.catalogueIdentity)
+				throw new Error('OBL-CTRL4 fixture root identity is unreadable');
+			const closure = await readPgRemovalEffectsClosure({
+				executor: pool,
+				root: { ...root, catalogueIdentity: live.catalogueIdentity },
+				isManaged: async () => false,
+			});
+			expect(['reaches-unmanaged', 'undecidable']).toContain(closure.kind);
+			if (closure.kind === 'reaches-unmanaged')
+				expect(closure.unmanaged).toMatchObject({
+					schema: 'pg_catalog',
+					name: plantedName,
+				});
+			await expect(
+				pool.query('SELECT to_regclass($1) AS root', [`${schema}.${rootName}`]),
+			).resolves.toMatchObject({ rows: [{ root: `${schema}.${rootName}` }] });
+		} finally {
+			await pool
+				.query('SET allow_system_table_mods = on')
+				.catch(() => undefined);
+			await pool
+				.query(`DROP TABLE IF EXISTS pg_catalog.${quote(plantedName)}`)
+				.catch(() => undefined);
+		}
 	});
 
 	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {

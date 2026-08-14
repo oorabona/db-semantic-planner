@@ -29,9 +29,9 @@ row requires CLI/package-root evidence.
 | OBL-AUTH10 | gap | — | No failpoint between destructive closure discovery and locked admission that adds a dependent and proves containment refusal/no DDL. |
 | OBL-AUTH11 | covered | `tests/e2e/ledger-catalogue-statement-capture.test.ts: uses the catalogue whitelist for the three-candidate set without CREATE`; `tests/e2e/ledger-manifest-catalogue-matrix.test.ts: matches every manifest table and ordered column fingerprint in PostgreSQL`; `tests/e2e/obl-auth11-ledger-admission.test.ts: OBL-AUTH11 discovers an empty pair across two same-shaped schema homes and the database home through a login role without CREATE, using only transaction control, admitted setup, and read-only catalogue statements` | — |
 | OBL-CTRL1 | covered | `tests/e2e/claim-controller-role.test.ts: records the second login role as controller when that role opens the claim`; `tests/e2e/managed-ledger-storage.test.ts: OBL-CTRL1 normalizes a direct-SQL explicit controller to the session identity; SC-07 rejects UPDATE and DELETE at the database` | — |
-| OBL-CTRL2 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: SC-60: release refuses pending, blocked, another controller and lineage mismatch; success preserves the object and makes the address unknown` | Uses a trigger-disabled fixture and `release`; it does not open a claim as a second role, nor make role lookup unreadable by dropping a role. |
+| OBL-CTRL2 | covered | `tests/e2e/adoption-release-replace-drift.test.ts: SC-60: release refuses pending, blocked, another controller and lineage mismatch; success preserves the object and makes the address unknown`; `tests/e2e/claim-controller-role.test.ts: OBL-CTRL2 opens the managed claim under a distinct login role, then drives the public CLI release path both before and after that role is dropped` | — |
 | OBL-CTRL3 | covered | `packages/adapter-pgsql/src/transition/chain-reader.test.ts: OBL-CTRL3: two address chains sharing an event id cannot cross-answer controller lookup` | — |
-| OBL-CTRL4 | partial | `packages/adapter-pgsql/src/transition/removal-containment.test.ts: OBL-CTRL4: never infers ownership from a system-schema location`; `packages/adapter-pgsql/src/transition/removal-containment.test.ts: returns undecidable when a system-resident dependent lacks positive ownership evidence` | No superuser-created user table in a system schema reached by the public removal path with an asserted refusal/no DDL. |
+| OBL-CTRL4 | partial | `packages/adapter-pgsql/src/transition/removal-containment.test.ts: OBL-CTRL4: never infers ownership from a system-schema location`; `packages/adapter-pgsql/src/transition/removal-containment.test.ts: returns undecidable when a system-resident dependent lacks positive ownership evidence`; `tests/e2e/destructive-generator-authority.test.ts: OBL-CTRL4 plants a pg_catalog dependent under allow_system_table_mods and gets reaches-unmanaged/undecidable without removal DDL` | The public generator-removal command has not yet been driven from that closure to its final refusal. |
 | OBL-LIFE1 | partial | `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE1 substitutes and removes persisted readdress step material, drives it through apply, and asserts the source remains` | The test is present but the pinned probe server is PostgreSQL 18, which this runtime refuses before lifecycle execution; re-run on the supported major. |
 | OBL-LIFE2 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: OBL-LIFE2 substitutes and removes persisted adoption material through apply and asserts no DDL`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59: a DSL-declared matching table records declaration, shape and identity; it is idempotent and mismatches refuse` | The new apply construction awaits a supported-major e2e run; its assertions reject the invalid durable manifest before DDL. |
 | OBL-LIFE3 | covered | `packages/adapter-pgsql/src/ddl/destructive-classification.test.ts: OBL-LIFE3: uses the frozen ChangeKind mapping and reserves the default for unknown kinds` | — |
@@ -87,8 +87,8 @@ No remaining unit-slice rows.
 
 ### E2E
 
-24 rows: OBL-RUN2, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10,
-OBL-CTRL2, OBL-CTRL4, OBL-LIFE1, OBL-LIFE2, OBL-LIFE4,
+23 rows: OBL-RUN2, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10,
+OBL-CTRL4, OBL-LIFE1, OBL-LIFE2, OBL-LIFE4,
 OBL-LIFE5, OBL-LIFE6, OBL-LIFE7, OBL-READ1, OBL-READ2, OBL-READ4,
 OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC7, OBL-REC12,
 OBL-REC14, OBL-CLI1, OBL-CLI2, OBL-CLI10.
@@ -104,6 +104,6 @@ OBL-LOCK7, OBL-REC7, OBL-REC13, OBL-REC14, OBL-REC2.
 1 gap: OBL-CLI6 needs the quoted four-surface final-review checklist.  OBL-CLI7
 has an evidence artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts`.
 
-The status totals are **33 covered, 29 partial, 3 gap, and 2 audit-evidence**.
+The status totals are **34 covered, 28 partial, 3 gap, and 2 audit-evidence**.
 Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
 artifact.  All 67 table rows are accounted for.

@@ -5,12 +5,16 @@ import {
 	DBSP_META_SCHEMA,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
 import type { LedgerAddress } from '@dbsp/types';
 import { afterEach, expect, it } from 'vitest';
 import { applyCommand } from '../../packages/cli/src/commands/apply.js';
 import { planCommand } from '../../packages/cli/src/commands/plan.js';
 import { preflightCommand } from '../../packages/cli/src/commands/preflight.js';
-import { releaseCommand } from '../../packages/cli/src/commands/release.js';
+import {
+	releaseCommand,
+	runRelease,
+} from '../../packages/cli/src/commands/release.js';
 import { describeWithE2eCapabilities } from './harness/index.js';
 import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
 import { getTestPool } from './testkit/index.js';
@@ -160,5 +164,120 @@ describeWithE2eCapabilities(
 				);
 			}
 		});
+
+		it('OBL-CTRL2: CLI release refuses a managed address claimed by a second role, including after that role is dropped', async () => {
+			const setup = await getTestPool();
+			const role = uniqueName('obl_ctrl2_controller');
+			const password = uniqueName('obl_ctrl2_password');
+			const schema = uniqueName('obl_ctrl2_schema');
+			roles.push(role);
+			schemas.push(schema);
+			await setup.query(
+				`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
+			);
+			const deployment = await setup.query<{
+				database: string;
+				role: string;
+			}>('SELECT current_database() AS database, current_user AS role');
+			await setup.query(
+				`GRANT CREATE ON DATABASE ${quoteIdent(deployment.rows[0]!.database)} TO ${quoteIdent(role)}`,
+			);
+			await setup.query(
+				`CREATE SCHEMA ${quoteIdent(schema)} AUTHORIZATION ${quoteIdent(role)}`,
+			);
+			const controller = await rolePool(role, password);
+			const address: LedgerAddress = {
+				scope: 'schema',
+				engine: 'postgresql',
+				database: deployment.rows[0]!.database,
+				schema,
+				kind: 'table',
+				name: 'foreign_controller',
+			};
+			const claimId = `dbsp.obl-ctrl2.${randomUUID()}`;
+			try {
+				const preflight = await runPgReinitializePreflight({
+					pool: setup,
+					schemas: [schema],
+					declarations: emptyDeclarations(),
+					writeAdoptionFile: async () => {},
+				});
+				expect(preflight.scopes.map((scope) => scope.outcome)).not.toContain(
+					'failed',
+				);
+				await setup.query(
+					`GRANT ${quoteIdent(deployment.rows[0]!.role)} TO ${quoteIdent(role)}`,
+				);
+				const opened = await openFixtureOutcomeClaim(controller, {
+					claimId,
+					address,
+					claimKind: 'adopt-intent',
+					statements: ['SELECT 1'],
+					reservations: [
+						{
+							address,
+							claimKind: 'adopt-intent',
+							executionId: claimId,
+							rootClaimId: claimId,
+							homeLedger: { scope: 'schema', schema },
+						},
+					],
+				});
+				expect(opened.kind).toBe('admitted-outcome-claim');
+				await appendPgLedgerResolution(
+					controller,
+					{ scope: 'schema', schema },
+					{
+						eventId: `${claimId}:adopted`,
+						address,
+						eventKind: 'adopt',
+						predecessor: claimId,
+						observed: { value: { table: address.name }, digest: 'obl-ctrl2' },
+					},
+					claimId,
+					[
+						{
+							address,
+						},
+					],
+				);
+				const first = await runRelease(`table:${address.name}`, {
+					db: process.env.DATABASE_URL!,
+					schema,
+					kind: 'table',
+				});
+				expect(first).toMatchObject({
+					outcome: 'release-refused',
+					refusal: { withheldAuthority: 'managed mutation authority' },
+				});
+
+				// The durable controller identity is an oid/name pair, not a grant
+				// lookup.  Dropping the original login cannot become an authority
+				// fallback: the public CLI still refuses its now-stale controller.
+				await controller.end();
+				await setup.query(
+					`ALTER SCHEMA ${quoteIdent(schema)} OWNER TO ${quoteIdent(deployment.rows[0]!.role)}`,
+				);
+				await setup.query(
+					`REVOKE ${quoteIdent(deployment.rows[0]!.role)} FROM ${quoteIdent(role)}`,
+				);
+				await setup.query(
+					`REVOKE CREATE ON DATABASE ${quoteIdent(deployment.rows[0]!.database)} FROM ${quoteIdent(role)}`,
+				);
+				await setup.query(`DROP ROLE ${quoteIdent(role)}`);
+				roles.splice(roles.indexOf(role), 1);
+				const dropped = await runRelease(`table:${address.name}`, {
+					db: process.env.DATABASE_URL!,
+					schema,
+					kind: 'table',
+				});
+				expect(dropped).toMatchObject({
+					outcome: 'release-refused',
+					refusal: { withheldAuthority: 'managed mutation authority' },
+				});
+			} finally {
+				await controller.end().catch(() => undefined);
+			}
+		}, 30_000);
 	},
 );
