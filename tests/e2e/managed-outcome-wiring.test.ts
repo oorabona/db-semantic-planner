@@ -1,9 +1,13 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
 	createPgsqlAdapter,
 	DBSP_LEDGER_EVENT_TABLE,
+	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
+	DBSP_LEDGER_RESERVATION_TABLE,
 	executePgAdmittedOperation,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgLedgerReservationsForExecution,
@@ -47,6 +51,9 @@ const WAIT_TIMEOUT_MS = 45_000;
 const POLL_INTERVAL_MS = 100;
 const CHILD_TERM_TIMEOUT_MS = 1_500;
 const schemas: string[] = [];
+const cliSchemaFiles: string[] = [];
+const cliRoles: string[] = [];
+const cliEventTriggers: string[] = [];
 
 interface PlannedRun {
 	readonly db: string;
@@ -73,6 +80,200 @@ function testSchema(label: string): string {
 
 function errorDetail(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+type CliDocument = Record<string, unknown>;
+
+function spawnCli(args: readonly string[]) {
+	const cliPath = fileURLToPath(
+		new URL('../../packages/cli/src/index.ts', import.meta.url),
+	);
+	const repositoryRoot = fileURLToPath(new URL('../../', import.meta.url));
+	return spawnSync(process.execPath, ['--import', 'tsx', cliPath, ...args], {
+		cwd: repositoryRoot,
+		encoding: 'utf8',
+		env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+	});
+}
+
+/** Parse the entire stdout stream and validate the command's declared envelope. */
+function cliDocument(
+	completed: ReturnType<typeof spawnCli>,
+	command: 'apply' | 'inspect' | 'plan' | 'recover' | 'reconcile' | 'release',
+): CliDocument {
+	expect(completed.stderr).toBe('');
+	const document = JSON.parse(completed.stdout) as CliDocument;
+	// JSON.parse accepts surrounding whitespace only; this canonical check rejects
+	// a second document and validates the serializer contract at the process edge.
+	expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
+	switch (command) {
+		case 'apply':
+		case 'recover':
+			expect(document).toMatchObject({
+				outcome: expect.any(String),
+				exitCode: expect.any(Number),
+			});
+			break;
+		case 'inspect':
+			expect(document).toMatchObject({
+				ledger: expect.any(Object),
+				marker: expect.any(Object),
+				live: expect.any(Object),
+			});
+			break;
+		case 'plan':
+			expect(document).toMatchObject({
+				compareKind: expect.any(String),
+				proveKind: expect.any(String),
+				assessment: expect.any(Object),
+				persisted: expect.any(Boolean),
+			});
+			break;
+		case 'reconcile':
+			expect(document).toMatchObject({
+				outcome: expect.any(String),
+				runId: expect.any(String),
+				addresses: expect.any(Array),
+			});
+			break;
+		case 'release':
+			expect(document).toMatchObject({ outcome: expect.any(String) });
+			break;
+	}
+	return document;
+}
+
+function cliFailureDocument(
+	completed: ReturnType<typeof spawnCli>,
+): CliDocument {
+	expect(completed.stderr).toBe('');
+	const document = JSON.parse(completed.stdout) as CliDocument;
+	expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
+	return document;
+}
+
+async function cliSchemaFile(source = 'schema({})'): Promise<string> {
+	const path = `${process.cwd()}/.dbsp-cli-obligation-${randomUUID()}.mjs`;
+	await writeFile(
+		path,
+		`import { schema } from '@dbsp/core';\nexport default ${source};\n`,
+	);
+	cliSchemaFiles.push(path);
+	return path;
+}
+
+function controlPayload(): string {
+	return `pg-control-${randomUUID().slice(0, 8)}\u001b\u0007`;
+}
+
+async function installPgControlInsertTrigger(input: {
+	readonly schema: string;
+	readonly tableSchema: string;
+	readonly table: string;
+	readonly payload: string;
+}): Promise<void> {
+	const pool = await getTestPool();
+	const functionName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const triggerName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	await pool.query(
+		`CREATE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}() RETURNS trigger LANGUAGE plpgsql AS $body$ BEGIN RAISE EXCEPTION '%', '${input.payload.replaceAll("'", "''")}'; END; $body$`,
+	);
+	await pool.query(
+		`CREATE TRIGGER ${quoteIdent(triggerName)} BEFORE INSERT ON ${quoteIdent(input.tableSchema)}.${quoteIdent(input.table)} FOR EACH ROW EXECUTE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}()`,
+	);
+}
+
+async function cliReadRole(input: {
+	readonly db: string;
+	readonly schema: string;
+}): Promise<string> {
+	const pool = await getTestPool();
+	const role = `dbsp_cli_reader_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+	const password = randomUUID();
+	cliRoles.push(role);
+	await pool.query(
+		`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD '${password.replaceAll("'", "''")}'`,
+	);
+	await pool.query(
+		`GRANT USAGE ON SCHEMA ${quoteIdent('dbsp_meta')}, ${quoteIdent(input.schema)} TO ${quoteIdent(role)}`,
+	);
+	await pool.query(
+		`GRANT SELECT ON TABLE ${[
+			'dbsp_transition_run',
+			'dbsp_transition_run_plan',
+			'dbsp_transition_journal',
+			'dbsp_transition_authorization',
+		]
+			.map((table) => `${quoteIdent('dbsp_meta')}.${quoteIdent(table)}`)
+			.join(', ')} TO ${quoteIdent(role)}`,
+	);
+	await pool.query(
+		`GRANT SELECT ON TABLE ${[
+			DBSP_LEDGER_EVENT_TABLE,
+			DBSP_LEDGER_IDENTITY_TABLE,
+			DBSP_LEDGER_MARKER_TABLE,
+			DBSP_LEDGER_RESERVATION_TABLE,
+		]
+			.map((table) => `${quoteIdent(input.schema)}.${quoteIdent(table)}`)
+			.join(', ')} TO ${quoteIdent(role)}`,
+	);
+	const url = new URL(input.db);
+	url.username = role;
+	url.password = password;
+	return url.toString();
+}
+
+async function installPgControlReadPolicy(input: {
+	readonly schema: string;
+	readonly table: string;
+	readonly payload: string;
+}): Promise<void> {
+	const pool = await getTestPool();
+	const functionName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const policyName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	await pool.query(
+		`CREATE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}() RETURNS boolean LANGUAGE plpgsql AS $body$ BEGIN RAISE EXCEPTION '%', '${input.payload.replaceAll("'", "''")}'; END; $body$`,
+	);
+	await pool.query(
+		`ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.table)} ENABLE ROW LEVEL SECURITY; ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(input.table)} FORCE ROW LEVEL SECURITY; CREATE POLICY ${quoteIdent(policyName)} ON ${quoteIdent(input.schema)}.${quoteIdent(input.table)} FOR SELECT USING (${quoteIdent(input.schema)}.${quoteIdent(functionName)}())`,
+	);
+}
+
+async function installPgControlDdlTrigger(input: {
+	readonly schema: string;
+	readonly payload: string;
+}): Promise<void> {
+	const pool = await getTestPool();
+	const functionName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const triggerName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	cliEventTriggers.push(triggerName);
+	await pool.query(
+		`CREATE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}() RETURNS event_trigger LANGUAGE plpgsql AS $body$ BEGIN RAISE EXCEPTION '%', '${input.payload.replaceAll("'", "''")}'; END; $body$`,
+	);
+	await pool.query(
+		`CREATE EVENT TRIGGER ${quoteIdent(triggerName)} ON ddl_command_start WHEN TAG IN ('CREATE SCHEMA') EXECUTE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}()`,
+	);
+}
+
+function expectEscapedPgControl(
+	completed: ReturnType<typeof spawnCli>,
+	document: CliDocument,
+	payload: string,
+): void {
+	expect(completed.stdout).not.toContain('\u001b');
+	expect(completed.stdout).not.toContain('\u0007');
+	expect(completed.stdout).toContain('\\u001b');
+	expect(completed.stdout).toContain('\\u0007');
+	const containsPayload = (value: unknown): boolean => {
+		if (typeof value === 'string') return value.includes(payload);
+		if (Array.isArray(value)) return value.some(containsPayload);
+		return (
+			typeof value === 'object' &&
+			value !== null &&
+			Object.values(value).some(containsPayload)
+		);
+	};
+	expect(containsPayload(document)).toBe(true);
 }
 
 function waitFor<T>(label: string, promise: Promise<T>): Promise<T> {
@@ -529,7 +730,15 @@ async function disposeChild(child: CheckpointChild): Promise<void> {
 beforeEach(resetDbspMeta);
 
 afterEach(async () => {
+	const pool = await getTestPool();
+	for (const trigger of cliEventTriggers.splice(0))
+		await pool.query(`DROP EVENT TRIGGER IF EXISTS ${quoteIdent(trigger)}`);
 	for (const schema of schemas.splice(0).reverse()) await dropSchema(schema);
+	for (const path of cliSchemaFiles.splice(0)) await rm(path, { force: true });
+	for (const role of cliRoles.splice(0)) {
+		await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);
+		await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
+	}
 	await resetDbspMeta();
 });
 
@@ -1483,6 +1692,455 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					(member) => member.eventKind,
 				),
 			).toEqual(['intent']);
+		});
+	});
+
+	describe.sequential('OBL-CLI1 spawned JSON success envelopes', () => {
+		async function plannedEnumRun(label: string) {
+			const schema = testSchema(`cli1_${label}`);
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			return { schema, planned: await planEnumAdd(schema) };
+		}
+
+		it('OBL-CLI1 apply: spawned success is one schema-valid completed document', async () => {
+			const { planned } = await plannedEnumRun('apply');
+			const completed = spawnCli([
+				'apply',
+				planned.runId,
+				'--db',
+				planned.db,
+				'--plan-digest',
+				planned.planDigest,
+				...planned.plan.assumptions.flatMap((assumption) => [
+					'--accept',
+					assumption.class,
+				]),
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'apply').outcome).toBe('completed');
+		});
+
+		it('OBL-CLI1 inspect: spawned success is one schema-valid readable document', async () => {
+			const schema = testSchema('cli1_inspect');
+			await provision(schema);
+			const db = process.env.DATABASE_URL;
+			if (!db) throw new Error('DATABASE_URL is required for CLI E2E');
+			const completed = spawnCli([
+				'inspect',
+				'--db',
+				db,
+				'--schema',
+				schema,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'inspect').live).toEqual({
+				kind: 'not-requested',
+			});
+		});
+
+		it('OBL-CLI1 plan: spawned success is one schema-valid no-drift document', async () => {
+			const schema = testSchema('cli1_plan');
+			await provision(schema);
+			const db = process.env.DATABASE_URL;
+			if (!db) throw new Error('DATABASE_URL is required for CLI E2E');
+			const completed = spawnCli([
+				'plan',
+				await cliSchemaFile(),
+				'--db',
+				db,
+				'--schema',
+				schema,
+				'--dry-run',
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'plan').proveKind).toBe('no-drift');
+		});
+
+		it('OBL-CLI1 recover: spawned success is one schema-valid completed document', async () => {
+			const { planned } = await plannedEnumRun('recover');
+			await expect(
+				runApply(
+					planned.runId,
+					{
+						db: planned.db,
+						planDigest: planned.planDigest,
+						accept: planned.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					await getTestPool(),
+				),
+			).resolves.toMatchObject({ outcome: 'completed' });
+			const completed = spawnCli([
+				'recover',
+				planned.runId,
+				'--db',
+				planned.db,
+				'--plan-digest',
+				planned.planDigest,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'recover').outcome).toBe('completed');
+		});
+
+		it('OBL-CLI1 reconcile: spawned success is one schema-valid completed document', async () => {
+			const { planned } = await plannedEnumRun('reconcile');
+			const claim = executionClaim(
+				onlyManagedClaim(planned.plan),
+				planned.runId,
+			);
+			await expect(
+				openPgOutcomeClaim(await getTestPool(), {
+					plan: claim,
+					reservations: [reservation(claim, planned.runId)],
+				}),
+			).resolves.toMatchObject({ kind: 'admitted-outcome-claim' });
+			const completed = spawnCli([
+				'reconcile',
+				planned.runId,
+				'--db',
+				planned.db,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'reconcile').outcome).toBe(
+				'reconcile-completed',
+			);
+		});
+
+		it('OBL-CLI1 release: spawned success is one schema-valid released document', async () => {
+			const { schema, planned } = await plannedEnumRun('release');
+			await expect(
+				runApply(
+					planned.runId,
+					{
+						db: planned.db,
+						planDigest: planned.planDigest,
+						accept: planned.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					await getTestPool(),
+				),
+			).resolves.toMatchObject({ outcome: 'completed' });
+			const completed = spawnCli([
+				'release',
+				'enum:status',
+				'--db',
+				planned.db,
+				'--schema',
+				schema,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			expect(cliDocument(completed, 'release').outcome).toBe('released');
+		});
+	});
+
+	describe.sequential('OBL-REC3/REC5 spawned reconcile evidence', () => {
+		async function openedCliReconcile(label: string) {
+			const schema = testSchema(`cli_reconcile_${label}`);
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			const claim = executionClaim(
+				onlyManagedClaim(planned.plan),
+				planned.runId,
+			);
+			await expect(
+				openPgOutcomeClaim(pool, {
+					plan: claim,
+					reservations: [reservation(claim, planned.runId)],
+				}),
+			).resolves.toMatchObject({ kind: 'admitted-outcome-claim' });
+			return { claim, planned, schema };
+		}
+
+		it('OBL-REC3: CLI reconcile classifies a revoked catalogue reservation read as catalogue', async () => {
+			const { planned, schema } = await openedCliReconcile('rec3');
+			const pool = await getTestPool();
+			const role = `dbsp_rec3_reader_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+			const password = randomUUID();
+			cliRoles.push(role);
+			await pool.query(
+				`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD '${password.replaceAll("'", "''")}'`,
+			);
+			const database = await pool.query<{ database: string }>(
+				'SELECT current_database() AS database',
+			);
+			await pool.query(
+				`GRANT CONNECT ON DATABASE ${quoteIdent(database.rows[0]!.database)} TO ${quoteIdent(role)}`,
+			);
+			await pool.query(
+				`GRANT USAGE ON SCHEMA ${quoteIdent('dbsp_meta')}, ${quoteIdent(schema)} TO ${quoteIdent(role)}`,
+			);
+			await pool.query(
+				`GRANT SELECT ON TABLE ${[
+					'dbsp_transition_run',
+					'dbsp_transition_run_plan',
+					'dbsp_transition_journal',
+					'dbsp_transition_authorization',
+				]
+					.map((table) => `${quoteIdent('dbsp_meta')}.${quoteIdent(table)}`)
+					.join(', ')} TO ${quoteIdent(role)}`,
+			);
+			await pool.query(
+				`GRANT SELECT ON TABLE ${[
+					DBSP_LEDGER_EVENT_TABLE,
+					DBSP_LEDGER_IDENTITY_TABLE,
+					DBSP_LEDGER_MARKER_TABLE,
+				]
+					.map((table) => `${quoteIdent(schema)}.${quoteIdent(table)}`)
+					.join(', ')} TO ${quoteIdent(role)}`,
+			);
+			// Deliberately omit SELECT on dbsp_ledger_reservation: it is the real
+			// catalogue-read target selected by reconcile after journal loading.
+			const roleDb = new URL(planned.db);
+			roleDb.username = role;
+			roleDb.password = password;
+			const completed = spawnCli([
+				'reconcile',
+				planned.runId,
+				'--db',
+				roleDb.toString(),
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(1);
+			const document = cliDocument(completed, 'reconcile');
+			expect(document).toMatchObject({
+				outcome: 'reconcile-run-unavailable',
+				failureCause: 'catalogue',
+			});
+		});
+
+		it('OBL-REC5 plan-address comparison: CLI reconcile accepts a re-parsed value-equal reservation address', async () => {
+			const { claim, planned } = await openedCliReconcile('rec5_plan');
+			const completed = spawnCli([
+				'reconcile',
+				planned.runId,
+				'--db',
+				planned.db,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			const document = cliDocument(completed, 'reconcile');
+			expect(document).toMatchObject({
+				outcome: 'reconcile-completed',
+				addresses: [structuredClone(claim.address)],
+			});
+		});
+
+		it('OBL-REC5 root-address comparison: CLI reconcile accepts re-parsed value-equal root/member addresses', async () => {
+			const { claim, planned } = await openedCliReconcile('rec5_root');
+			const completed = spawnCli([
+				'reconcile',
+				planned.runId,
+				'--db',
+				planned.db,
+				'--format',
+				'json',
+			]);
+			expect(completed.status).toBe(0);
+			const document = cliDocument(completed, 'reconcile');
+			expect(document).toMatchObject({
+				outcome: 'reconcile-completed',
+				recovery: [
+					expect.objectContaining({ address: structuredClone(claim.address) }),
+				],
+			});
+		});
+
+		describe.sequential('OBL-CLI2 PostgreSQL control-byte exception payloads', () => {
+			it('OBL-CLI2 apply: escapes a PostgreSQL trigger payload on its command exception path', async () => {
+				const { planned, schema } = await openedCliReconcile('cli2_apply');
+				const payload = controlPayload();
+				await installPgControlInsertTrigger({
+					schema,
+					tableSchema: 'dbsp_meta',
+					table: 'dbsp_transition_authorization',
+					payload,
+				});
+				const completed = spawnCli([
+					'apply',
+					planned.runId,
+					'--db',
+					planned.db,
+					'--plan-digest',
+					planned.planDigest,
+					...planned.plan.assumptions.flatMap((assumption) => [
+						'--accept',
+						assumption.class,
+					]),
+					'--format',
+					'json',
+				]);
+				expect(completed.status).not.toBe(0);
+				const document = cliFailureDocument(completed);
+				expect(document.outcome).toBe('authorization-write-failed');
+				expectEscapedPgControl(completed, document, payload);
+			});
+
+			it('OBL-CLI2 inspect: escapes a PostgreSQL RLS payload on its command exception path', async () => {
+				const { planned, schema } = await openedCliReconcile('cli2_inspect');
+				const payload = controlPayload();
+				await installPgControlReadPolicy({
+					schema,
+					table: DBSP_LEDGER_EVENT_TABLE,
+					payload,
+				});
+				const completed = spawnCli([
+					'inspect',
+					'enum:status',
+					'--db',
+					await cliReadRole({ db: planned.db, schema }),
+					'--schema',
+					schema,
+					'--format',
+					'json',
+				]);
+				expect(completed.status).toBe(0);
+				const document = cliFailureDocument(completed);
+				expect(document).toMatchObject({
+					failedSubsystem: { subsystem: 'ledger', reason: expect.any(String) },
+				});
+				expectEscapedPgControl(completed, document, payload);
+			});
+
+			it('OBL-CLI2 plan: escapes a PostgreSQL persistence trigger payload on its command exception path', async () => {
+				const schema = testSchema('cli2_plan');
+				await provision(schema);
+				const db = process.env.DATABASE_URL;
+				if (!db) throw new Error('DATABASE_URL is required for CLI E2E');
+				const payload = controlPayload();
+				await installPgControlDdlTrigger({ schema, payload });
+				const completed = spawnCli([
+					'plan',
+					await cliSchemaFile(),
+					'--db',
+					db,
+					'--schema',
+					schema,
+					'--format',
+					'json',
+				]);
+				expect(completed.status).toBe(1);
+				const document = cliFailureDocument(completed);
+				expect(document).toMatchObject({ error: expect.any(String) });
+				expectEscapedPgControl(completed, document, payload);
+			});
+
+			it('OBL-CLI2 recover: escapes a PostgreSQL marker-read RLS payload on its command exception path', async () => {
+				const { planned, schema } = await openedCliReconcile('cli2_recover');
+				const payload = controlPayload();
+				await installPgControlReadPolicy({
+					schema,
+					table: DBSP_LEDGER_MARKER_TABLE,
+					payload,
+				});
+				const completed = spawnCli([
+					'recover',
+					planned.runId,
+					'--db',
+					await cliReadRole({ db: planned.db, schema }),
+					'--plan-digest',
+					planned.planDigest,
+					'--format',
+					'json',
+				]);
+				expect(completed.status).not.toBe(0);
+				const document = cliFailureDocument(completed);
+				expect(document.outcome).toBe('recovery-failed');
+				expectEscapedPgControl(completed, document, payload);
+			});
+
+			it('OBL-CLI2 reconcile: escapes a PostgreSQL resolution trigger payload on its command exception path', async () => {
+				const { planned, schema } = await openedCliReconcile('cli2_rec');
+				const payload = controlPayload();
+				await installPgControlInsertTrigger({
+					schema,
+					tableSchema: schema,
+					table: DBSP_LEDGER_EVENT_TABLE,
+					payload,
+				});
+				const completed = spawnCli([
+					'reconcile',
+					planned.runId,
+					'--db',
+					planned.db,
+					'--format',
+					'json',
+				]);
+				expect(completed.status).toBe(1);
+				const document = cliFailureDocument(completed);
+				expect(document).toMatchObject({
+					outcome: 'reconcile-unresolved',
+					detail: expect.any(String),
+				});
+				expectEscapedPgControl(completed, document, payload);
+			});
+
+			it('OBL-CLI2 release: escapes a PostgreSQL release trigger payload on its command exception path', async () => {
+				const schema = testSchema('cli2_release');
+				await provision(schema);
+				const pool = await getTestPool();
+				await pool.query(
+					`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+				);
+				const planned = await planEnumAdd(schema);
+				await expect(
+					runApply(
+						planned.runId,
+						{
+							db: planned.db,
+							planDigest: planned.planDigest,
+							accept: planned.plan.assumptions.map(
+								(assumption) => assumption.class,
+							),
+						},
+						pool,
+					),
+				).resolves.toMatchObject({ outcome: 'completed' });
+				const payload = controlPayload();
+				await installPgControlInsertTrigger({
+					schema,
+					tableSchema: schema,
+					table: DBSP_LEDGER_EVENT_TABLE,
+					payload,
+				});
+				const completed = spawnCli([
+					'release',
+					'enum:status',
+					'--db',
+					planned.db,
+					'--schema',
+					schema,
+					'--format',
+					'json',
+				]);
+				expect(completed.status).toBe(1);
+				const document = cliFailureDocument(completed);
+				expect(document.outcome).toBe('release-unavailable');
+				expectEscapedPgControl(completed, document, payload);
+			});
 		});
 	});
 });

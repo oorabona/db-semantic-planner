@@ -771,6 +771,9 @@ export async function runReconcile(
 			outcome: 'reconcile-run-unavailable',
 			runId,
 			addresses: [],
+			detail: escapeDiagnosticText(
+				error instanceof Error ? error.message : String(error),
+			),
 			failureCause: classifyReconcileFailure(error, stage),
 		};
 	} finally {
