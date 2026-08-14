@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import type { ModelIR } from '@dbsp/core';
@@ -564,6 +567,79 @@ async function planConcurrentIndex(schema: string, scenario?: Scenario) {
 }
 
 describe('SC-03 #481 non-transactional durable admission', () => {
+	it.each([
+		['omitted', 'omitted'],
+		['policy narrowed after review', 'narrowed'],
+		['extra acceptance for an absent assumption', 'extra'],
+	] as const)('OBL-RUN4 refuses %s non-transactional acceptance without a durable append', async (_construction, policyKind) => {
+		await inScenario('obl_run4_refusal', async (scenario) => {
+			await createUsers(scenario.schema, 10);
+			const plan = await planConcurrentIndex(scenario.schema, scenario);
+			const pool = await getTestPool();
+			const accepts = plan.plan.assumptions
+				.map((assumption) => assumption.class)
+				.filter((entry) => entry !== 'non-transactional-segment');
+			const temporary = await mkdtemp(join(tmpdir(), 'dbsp-run4-policy-'));
+			try {
+				const policy = join(temporary, 'narrowed-policy.json');
+				if (policyKind === 'narrowed') {
+					await writeFile(
+						policy,
+						JSON.stringify([
+							{
+								class: 'non-transactional-segment',
+								withinScope: [{ schema: 'not-the-planned-schema' }],
+							},
+						]),
+					);
+				}
+				const result = await runApply(
+					plan.runId,
+					{
+						db: plan.db,
+						planDigest: plan.planDigest,
+						accept:
+							policyKind === 'extra'
+								? [...accepts, 'not-carried-by-this-plan']
+								: accepts,
+						...(policyKind === 'narrowed' ? { acceptPolicy: policy } : {}),
+					},
+					pool,
+				);
+				expect(result.outcome).toBe('transactional-only-refusal');
+				expect(exitCodeForApplyOutcome(result.outcome)).toBe(17);
+			} finally {
+				await rm(temporary, { recursive: true, force: true });
+			}
+			const journal = await pool.query<{ count: string }>(
+				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
+				[plan.runId],
+			);
+			expect(journal.rows[0]?.count).toBe('0');
+			const ledger = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(scenario.schema)}.${quoteIdent('dbsp_ledger_event')}`,
+			);
+			expect(ledger.rows[0]?.count).toBe('0');
+		});
+	});
+
+	it('OBL-RUN4 admits an accepted non-transactional assumption', async () => {
+		await inScenario('obl_run4_accepted', async (scenario) => {
+			await createUsers(scenario.schema, 10);
+			const plan = await planConcurrentIndex(scenario.schema, scenario);
+			const result = await runApply(
+				plan.runId,
+				{
+					db: plan.db,
+					planDigest: plan.planDigest,
+					accept: plan.plan.assumptions.map((assumption) => assumption.class),
+				},
+				await getTestPool(),
+			);
+			expect(result.outcome).toBe('completed');
+		});
+	});
+
 	it('refuses an unaccepted segment before any step-attempt event', async () => {
 		await inScenario('sc03', async (scenario) => {
 			await createUsers(scenario.schema, 10);

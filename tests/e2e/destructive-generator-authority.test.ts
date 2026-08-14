@@ -470,7 +470,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		).resolves.toMatchObject({ rows: [{ event_kind: 'absent' }] });
 	});
 
-	it('SC-52: a persisted generator-removal run refuses replay by id', async () => {
+	it('OBL-RUN6: a public caller cannot forge the private generator-removal bridge', async () => {
 		const pool = await getTestPool();
 		const plan = generatorPlan({
 			kind: 'drop_table',
@@ -493,8 +493,15 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			},
 			plan,
 		);
+		const forgedPublicOptions = {
+			db: 'postgres://fixture',
+			planDigest: digest,
+			// Hostile JavaScript can add the historic private field even though
+			// ApplyOptions does not expose it. The exported surface must ignore it.
+			freshGeneratorRemovalRunId: runId,
+		} as unknown as Parameters<typeof runApply>[1];
 		await expect(
-			runApply(runId, { db: 'postgres://fixture', planDigest: digest }, pool),
+			runApply(runId, forgedPublicOptions, pool),
 		).resolves.toMatchObject({
 			outcome: 'non-replayable-generator-run',
 			refusal: {

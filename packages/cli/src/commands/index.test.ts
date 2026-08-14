@@ -202,6 +202,123 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toBe('');
 	});
 
+	it('OBL-CLI1 emits one JSON document for recover parse failures', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				'recover',
+				'--db',
+				'postgres://must-not-connect',
+				'--plan-digest',
+				'digest',
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		const document = JSON.parse(completed.stdout) as Record<string, unknown>;
+		expect(document).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("missing required argument 'run-id'"),
+		});
+		expect(completed.stdout.trim().startsWith('{')).toBe(true);
+		expect(completed.stderr).toBe('');
+	});
+
+	it('OBL-RUN8 refuses fresh acceptance input on the recover command surface', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				'recover',
+				'run-reviewed',
+				'--db',
+				'postgres://must-not-connect',
+				'--plan-digest',
+				'digest',
+				'--accept',
+				'non-transactional-segment',
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("unknown option '--accept'"),
+		});
+		expect(completed.stderr).toBe('');
+	});
+
+	it.each([
+		['apply', ['apply']],
+		['plan', ['plan', 'schema.ts']],
+		['inspect', ['inspect', 'table:users']],
+		['recover', ['recover', 'run-reviewed']],
+		['reconcile', ['reconcile', 'run-reviewed']],
+		['release', ['release', 'table:users']],
+	] as const)('OBL-CLI2 escapes control bytes through the %s command error path', (_command, invocation) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const controlOption = '--attacker-\u001b[2J\u0007';
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				...invocation,
+				'--db',
+				'postgres://must-not-connect',
+				...(_command === 'recover' ? ['--plan-digest', 'digest'] : []),
+				controlOption,
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).not.toContain('\u001b');
+		expect(completed.stdout).not.toContain('\u0007');
+		const document = JSON.parse(completed.stdout) as Record<string, unknown>;
+		expect(document).toMatchObject({ status: 'error' });
+		expect(String(document.error)).toContain('unknown option');
+		expect(completed.stdout).toContain('\\u001b');
+		expect(completed.stderr).toBe('');
+	});
+
 	it('emits one JSON document without root stderr for plan JSON selected after an unknown root option [mutation: let root Commander write stderr]', () => {
 		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
 		const repositoryRoot = fileURLToPath(

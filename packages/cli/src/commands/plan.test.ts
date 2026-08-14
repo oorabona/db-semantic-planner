@@ -304,7 +304,7 @@ describe('dbsp plan outcomes', () => {
 		expect(runMetadata.planDigest).toBe(transitionPlanDigest(result.plan!));
 	});
 
-	it('SC-25: rejects a non-canonicalizable declaration before comparison or persistence', async () => {
+	it('OBL-RUN9 rejects a non-canonicalizable declaration before comparison or persistence', async () => {
 		const deps = dependencies(
 			{ kind: 'no-drift', claimedInvariant: { kind: 'test', scope: [] } },
 			{ kind: 'no-drift', claim: {}, assessment: applicable },

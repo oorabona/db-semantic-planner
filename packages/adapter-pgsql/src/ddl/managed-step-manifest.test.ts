@@ -61,7 +61,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		'drop_policy',
 		'add_comment',
 		'drop_comment',
-	] as const)('refuses non-declarable %s before any manifest address exists', (kind) => {
+	] as const)('OBL-RUN9 refuses non-declarable %s before any manifest address exists', (kind) => {
 		expect(() => assertDeclarableChangeKind(kind)).toThrow(
 			'diagnostic-only and non-declarable',
 		);

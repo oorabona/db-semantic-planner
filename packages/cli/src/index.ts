@@ -31,6 +31,7 @@ const jsonFormatCommands = new Set([
 	'apply',
 	'inspect',
 	'plan',
+	'recover',
 	'reconcile',
 	'release',
 ]);

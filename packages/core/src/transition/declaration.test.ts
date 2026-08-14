@@ -30,7 +30,7 @@ function table(overrides: Partial<TableIR> = {}): TableIR {
 }
 
 describe('managed declaration slicing', () => {
-	it('SC-20: has fragments only for the closed declarable-kind set', () => {
+	it('OBL-RUN9 excludes RLS, policies, and comments while retaining declarable fragments', () => {
 		const declarableModel = {
 			...model(
 				table({

@@ -642,6 +642,55 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
 		});
 
+		it.each([
+			[
+				'tampered',
+				"UPDATE dbsp_meta.dbsp_transition_authorization SET actor = 'attacker' WHERE run_id = $1",
+				'recovery-authorization-invalid',
+			],
+			[
+				'deleted',
+				'DELETE FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
+				'recovery-authorization-missing',
+			],
+		] as const)('OBL-RUN8: public recover refuses a %s persisted authorization without another ledger append', async (_variant, corruption, expectedOutcome) => {
+			const schema = testSchema('run_auth_corrupt');
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			await expect(
+				runApply(
+					planned.runId,
+					{
+						db: planned.db,
+						planDigest: planned.planDigest,
+						accept: planned.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: 'completed' });
+			const before = await ledgerChain(
+				schema,
+				onlyManagedClaim(planned.plan).address.name,
+			);
+			await pool.query(corruption, [planned.runId]);
+			await expect(
+				runRecover(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				),
+			).resolves.toMatchObject({ outcome: expectedOutcome });
+			expect(
+				await ledgerChain(schema, onlyManagedClaim(planned.plan).address.name),
+			).toEqual(before);
+		});
+
 		it('OBL-RUN3: a persisted durable run with an unsupported execution epoch is refused by public apply before DDL', async () => {
 			const schema = testSchema('run_epoch_tamper');
 			await provision(schema);

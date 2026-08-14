@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	formatReinitializeSplit,
@@ -15,6 +17,71 @@ afterEach(async () => {
 });
 
 describe('preflight adoption output', () => {
+	it.each([
+		[
+			'--reinitialize',
+			[
+				'--db',
+				'postgres://must-not-connect',
+				'--out',
+				'/tmp/adoption.json',
+				'--schema-file',
+				'schema.ts',
+				'--scope',
+				'public',
+			],
+		],
+		[
+			'--out',
+			[
+				'--db',
+				'postgres://must-not-connect',
+				'--reinitialize',
+				'--schema-file',
+				'schema.ts',
+				'--scope',
+				'public',
+			],
+		],
+		[
+			'--schema-file',
+			[
+				'--db',
+				'postgres://must-not-connect',
+				'--reinitialize',
+				'--out',
+				'/tmp/adoption.json',
+				'--scope',
+				'public',
+			],
+		],
+		[
+			'--scope',
+			[
+				'--db',
+				'postgres://must-not-connect',
+				'--reinitialize',
+				'--out',
+				'/tmp/adoption.json',
+				'--schema-file',
+				'schema.ts',
+			],
+		],
+	] as const)('OBL-CLI8 refuses usage when %s is omitted before it opens a database', (missing, args) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, 'preflight', ...args],
+			{ cwd: repositoryRoot, encoding: 'utf8' },
+		);
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).toBe('');
+		expect(completed.stderr).toContain(`required option '${missing}`);
+	});
+
 	it('OBL-CLI3 atomically replaces an existing adoption destination with a restrictive artifact', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-test-'));
 		directories.push(directory);

@@ -21,10 +21,10 @@ execution command or file-based execution command.
 | `dbsp preflight --reinitialize` | Check and explicitly reinitialize a managed ledger when allowed. |
 
 ```bash
-dbsp plan ./schema.ts --db "$DATABASE_URL" --schema public
+dbsp plan ./schema.ts --db "$DATABASE_URL" --schema "$DBSP_SCHEMA"
 # Run the recorded id and digest printed by the preceding command.
-dbsp apply "$RUN_ID" --db "$DATABASE_URL" --plan-digest "$PLAN_DIGEST"
-dbsp inspect table:users --db "$DATABASE_URL" --schema public --format json
+dbsp apply "$RUN_ID" --db "$DATABASE_URL" --plan-digest "$PLAN_DIGEST" --accept operation-pack-semantics --accept external-ddl-exclusion
+dbsp inspect table:users --db "$DATABASE_URL" --schema "$DBSP_SCHEMA" --format json
 ```
 
 `--dry-run` on no-argument `apply` does not persist a run. Declining a presented
