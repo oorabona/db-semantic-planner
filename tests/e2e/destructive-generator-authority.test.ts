@@ -721,6 +721,64 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
 	});
 
+	it('OBL-AUTH5: destructive executing and group-terminal appends each reach the post-lock integrity checkpoint', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_auth5_root_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(root);
+		const plan = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: rootName,
+				classification: 'removal',
+				details: 'checkpointed destructive removal',
+				statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+			},
+			databaseId,
+			schema,
+		);
+		const planDigest = transitionPlanDigest(plan);
+		const runId = `obl-auth5:${randomUUID()}`;
+		const run = lockPgJournalRun(
+			mintDurablyLoadedRun({
+				runId,
+				planDigest,
+				targetContextDigest: `checkpoint:${schema}`,
+				databaseId,
+				coreVersion: 'checkpoint-e2e',
+				startedAt: new Date().toISOString(),
+				replayability: 'replayable',
+			}),
+		);
+		const checkpoints: string[] = [];
+		const result = await executeGeneratorPlan({
+			pool,
+			plan,
+			planDigest,
+			schema,
+			run,
+			runId,
+			accepts: [`destructive-plan-accepted:${planDigest}`],
+			observer: async (point) => {
+				checkpoints.push(point);
+			},
+		});
+		expect(result).toEqual({ outcome: 'completed' });
+		expect(checkpoints).toEqual([
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+			'ddl-completed-before-read-back',
+			'post-lock-integrity-before-append',
+			'commit-acknowledged',
+		]);
+	});
+
 	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();

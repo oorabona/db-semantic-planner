@@ -569,6 +569,26 @@ async function runPgDestructiveOutcome(
 		try {
 			// Persist the send boundary before the first autocommitted statement.
 			await begin(session, request.lockTimeoutMs);
+			const executingLock = await acquirePgLedgerLocks(
+				session,
+				homesForGroup(request),
+			);
+			if (executingLock.kind !== 'acquired') {
+				await rollback(session);
+				return refusal('ledger advisory lock is busy');
+			}
+			const executingPostLockEvidence = await createPostLockAdmissionEvidence(
+				session,
+				executingLock.proof,
+			);
+			const executingLiveAdmission = await checkLiveAdmission(
+				executingPostLockEvidence,
+			);
+			if ('kind' in executingLiveAdmission) {
+				await rollback(session);
+				return executingLiveAdmission;
+			}
+			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const target = targetForPlan(request.plan);
 			const predecessor = await currentTerminalPredecessor(
 				session,
@@ -616,7 +636,16 @@ async function runPgDestructiveOutcome(
 				session,
 				admission as AdmittedDestructiveOutcomeClaim,
 			);
-			const resolved = await resolvePgDestructiveOutcome(session, resolution);
+			// The read-back factory owns the durable terminal material, while the
+			// admitted operation owns the test-only observer.  Preserve both so the
+			// terminal resolution COMMIT is observable by the same one-shot
+			// checkpoint protocol as the preceding executing COMMIT.
+			const resolved = await resolvePgDestructiveOutcome(
+				session,
+				request.observer === undefined
+					? resolution
+					: { ...resolution, observer: request.observer },
+			);
 			if (
 				resolution.members.some(
 					({ member }) => member.eventKind === 'indeterminate',
@@ -672,30 +701,56 @@ export async function resolvePgDestructiveOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupResolution,
 ): Promise<undefined | OutcomeProtocolRefusal> {
+	if (request.members.length === 0)
+		return refusal('destructive outcome has no terminal member');
 	if (request.members.length > 1)
 		return resolvePgOutcomeClaimGroup(executor, request);
-	const terminal = request.members[0];
-	if (!terminal) return refusal('destructive outcome has no terminal member');
-	try {
-		const member = await memberWithCurrentTerminalPredecessor(
-			executor,
-			terminal.target,
-			terminal.member,
-		);
-		if (member.eventKind === 'indeterminate')
-			await appendPgLedgerProgress(executor, terminal.target, member);
-		else
-			await appendPgLedgerResolution(
-				executor,
-				terminal.target,
-				member,
-				request.rootClaimId,
-				request.reservations,
+	const terminal = request.members[0]!;
+	return withPgOutcomeSession(executor, async (session) => {
+		let begun = false;
+		try {
+			await begin(session, request.lockTimeoutMs);
+			begun = true;
+			const lock = await acquirePgLedgerLocks(session, [terminal.target]);
+			if (lock.kind !== 'acquired') {
+				await rollback(session);
+				begun = false;
+				return refusal('ledger advisory lock is busy');
+			}
+			const postLockEvidence = await createPostLockAdmissionEvidence(
+				session,
+				lock.proof,
 			);
-		return undefined;
-	} catch (error) {
-		return refusal(detail(error));
-	}
+			const liveAdmission = await checkLiveAdmission(postLockEvidence);
+			if ('kind' in liveAdmission) {
+				await rollback(session);
+				begun = false;
+				return liveAdmission;
+			}
+			await checkpoint(request.observer, 'post-lock-integrity-before-append');
+			const member = await memberWithCurrentTerminalPredecessor(
+				session,
+				terminal.target,
+				terminal.member,
+			);
+			if (member.eventKind === 'indeterminate')
+				await appendPgLedgerProgress(session, terminal.target, member);
+			else
+				await appendPgLedgerResolution(
+					session,
+					terminal.target,
+					member,
+					request.rootClaimId,
+					request.reservations,
+				);
+			await commitPgOutcome(session, request.observer);
+			begun = false;
+			return undefined;
+		} catch (error) {
+			if (begun) await rollback(session);
+			return refusal(detail(error));
+		}
+	});
 }
 
 export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
@@ -1556,6 +1611,17 @@ export async function resolvePgOutcomeClaimGroup(
 				begun = false;
 				return refusal('ledger advisory lock is busy');
 			}
+			const postLockEvidence = await createPostLockAdmissionEvidence(
+				session,
+				lock.proof,
+			);
+			const liveAdmission = await checkLiveAdmission(postLockEvidence);
+			if ('kind' in liveAdmission) {
+				await session.query('ROLLBACK');
+				begun = false;
+				return liveAdmission;
+			}
+			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const members = await Promise.all(
 				request.members.map(async ({ target, member }) =>
 					memberWithCurrentTerminalPredecessor(session, target, member),
