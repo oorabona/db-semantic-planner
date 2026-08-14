@@ -27,7 +27,7 @@ row requires CLI/package-root evidence.
 | OBL-AUTH8 | partial | `packages/core/src/transition/destructive-authority.test.ts: refuses every non-permitting outcome in the closed removal matrix`; `packages/adapter-pgsql/src/transition/outcome-protocol.test.ts: attributes a missing destructive acceptance before a scoped rejection` | No CLI removal-path construction for each of six live authorities, including a severed connection mid-evidence-read and asserted `withheldAuthority`. |
 | OBL-AUTH9 | covered | `packages/adapter-pgsql/src/transition/outcome-protocol.test.ts: OBL-AUTH9 refuses a captured destructive grant replayed against a different plan digest/different address scope/unexpected trust root/missing trust root` | — |
 | OBL-AUTH10 | gap | — | No failpoint between destructive closure discovery and locked admission that adds a dependent and proves containment refusal/no DDL. |
-| OBL-AUTH11 | partial | `tests/e2e/ledger-catalogue-statement-capture.test.ts: uses the catalogue whitelist for the three-candidate set without CREATE`; `tests/e2e/ledger-manifest-catalogue-matrix.test.ts: matches every manifest table and ordered column fingerprint in PostgreSQL`; `tests/e2e/obl-auth11-ledger-admission.test.ts: OBL-AUTH11 admits schema and database ledger homes through a login role without CREATE, using only read-only catalogue statements` | Missing pair discovery plus admission on several homes. |
+| OBL-AUTH11 | covered | `tests/e2e/ledger-catalogue-statement-capture.test.ts: uses the catalogue whitelist for the three-candidate set without CREATE`; `tests/e2e/ledger-manifest-catalogue-matrix.test.ts: matches every manifest table and ordered column fingerprint in PostgreSQL`; `tests/e2e/obl-auth11-ledger-admission.test.ts: OBL-AUTH11 admits schema and database ledger homes and discovers an empty cross-home pair through a login role without CREATE, using only transaction control, admitted setup, and read-only catalogue statements` | — |
 | OBL-CTRL1 | covered | `tests/e2e/claim-controller-role.test.ts: records the second login role as controller when that role opens the claim`; `tests/e2e/managed-ledger-storage.test.ts: OBL-CTRL1 normalizes a direct-SQL explicit controller to the session identity; SC-07 rejects UPDATE and DELETE at the database` | — |
 | OBL-CTRL2 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: SC-60: release refuses pending, blocked, another controller and lineage mismatch; success preserves the object and makes the address unknown` | Uses a trigger-disabled fixture and `release`; it does not open a claim as a second role, nor make role lookup unreadable by dropping a role. |
 | OBL-CTRL3 | covered | `packages/adapter-pgsql/src/transition/chain-reader.test.ts: OBL-CTRL3: two address chains sharing an event id cannot cross-answer controller lookup` | — |
@@ -38,7 +38,7 @@ row requires CLI/package-root evidence.
 | OBL-LIFE4 | partial | `packages/adapter-pgsql/src/transition/readdress.test.ts: refuses a cross-database declaration before claims, names a non-table unsupported kind, and refuses an escaping dependent`; `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE4 drives all three forms through apply` | The public construction awaits a supported-major e2e run; the pinned PostgreSQL 18 probe is refused by runtime integrity first. |
 | OBL-LIFE5 | partial | `tests/e2e/readdress-recovery-local.test.ts: SC-55: identity mismatch and an occupied target refuse before DDL`; `packages/adapter-pgsql/src/transition/readdress.test.ts: keeps a different target identity occupied`; `packages/adapter-pgsql/src/transition/readdress.test.ts: allows a same-identity physical sequence at its re-keyed target address` | Missing failpoint closure mutation, unmanaged source, second-controller source, and public self-occupying rerun. |
 | OBL-LIFE6 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: OBL-LIFE6 asserts one adopt terminal and zero new claims after a public apply re-run`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59 mutates live shape/identity and refuses` | The under-lock mutation construction remains failpoint-only. The re-run assertion awaits a supported-major e2e run. |
-| OBL-LIFE7 | partial | `tests/e2e/managed-ledger-outcome-protocol.test.ts: SC-40: a post-claim occupied creation refuses and leaves no adoption`; `packages/core/src/transition/outcome-protocol.test.ts: scopes repeated lifecycles to execution and extends the address chain` | Missing occupied-from-unknown, occupied-from-absent, shape-matching foreign, and recorded-identity re-encounter constructions through creation. |
+| OBL-LIFE7 | partial | `tests/e2e/managed-ledger-outcome-protocol.test.ts: OBL-LIFE7 refuses a shape-matching foreign object from both unknown and absent, leaving no adoption`; `packages/core/src/transition/outcome-protocol.test.ts: scopes repeated lifecycles to execution and extends the address chain` | Missing the recorded-identity re-encounter construction through creation. |
 | OBL-READ1 | partial | `tests/e2e/managed-declarations.test.ts: SC-24: refuses a same-name table recreated outside the recorded run`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59: a DSL-declared matching table records declaration, shape and identity; it is idempotent and mismatches refuse` | Missing both identity-change and identity-preserving shape mutation for every declarable kind, with `indeterminate`/never-`managed` assertions. |
 | OBL-READ2 | partial | `tests/e2e/managed-ledger-outcome-recovery.test.ts: SC-34 and SC-35: post-DDL recovery uses accepted exclusion per address` | It directly creates the matching table after opening `executing`; it does not construct the required crash-after-DDL-commit failpoint before public recovery. |
 | OBL-READ3 | partial | `tests/e2e/managed-ledger-outcome-recovery.test.ts: SC-33: a kill at executing acknowledgement recovers as refused with no catalogue effect`; `packages/core/src/transition/outcome-recovery.test.ts: refuses a not-issued creation before an operation verifier can call it unverifiable` | Missing a failpoint sweep after every `executing` stage proving no unverified `refused` append. |
@@ -68,7 +68,7 @@ row requires CLI/package-root evidence.
 | OBL-CLI2 | partial | `packages/cli/src/commands/inspect.test.ts: OBL-CLI2 renders control bytes as escaped diagnostic text`; `packages/cli/src/commands/inspect.test.ts: escapes a catalogue-derived object name in human output and emits parseable JSON` | Missing PostgreSQL/error payload control-byte attacks on every command exception path. |
 | OBL-CLI3 | covered | `packages/cli/src/commands/preflight.test.ts: OBL-CLI3 fsyncs file then parent around the atomic replacement`; `packages/cli/src/commands/preflight.test.ts: OBL-CLI3 atomically replaces an existing adoption destination with a restrictive artifact`; `tests/e2e/transition-reinitialize-preflight.test.ts: OBL-CLI3: emits an adoption artifact with owner-only mode under umask 022` | — |
 | OBL-CLI4 | covered | `packages/cli/src/commands/apply.test.ts: OBL-CLI4 rejects unknown trust-root union members, empty classes, and extra acceptance keys in --accept and --accept-policy input`; `packages/cli/src/commands/apply.test.ts: OBL-CLI4 refuses a reused durable authorization with one changed plan digest/policy/grants/actor/authorization time binding`; `packages/cli/src/commands/apply.test.ts: mutation: reusing an authorization from another run replays approval across run ids` | — |
-| OBL-CLI5 | gap | — | `packages/docs/.vitepress/theme/cli-usage.test.ts` only checks strings in the guide; no executable-docs run executes every example as written. |
+| OBL-CLI5 | covered | `packages/docs/.vitepress/theme/cli-usage.test.ts: OBL-CLI5 executes every managed-workflow example as written, including the completed recorded apply` | — |
 | OBL-CLI6 | audit-evidence | gap | No enumerated, quoted four-surface consistency checklist was found. The export/header/guide/ADR prose exists, but it is not the required final-review artifact. |
 | OBL-CLI7 | audit-evidence | `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts: SC-65 DDL execution sink inventory` | Evidence artifact lives in that static test's `DDL_SINK_ALLOWLIST`, generated AST discovery, and label assertions; it is the machine-derived sink inventory requested by the row. |
 | OBL-CLI8 | covered | `packages/cli/src/commands/preflight.test.ts: OBL-CLI8 refuses usage when each required preflight flag is omitted before it opens a database` | — |
@@ -87,11 +87,11 @@ No remaining unit-slice rows.
 
 ### E2E
 
-28 rows: OBL-RUN2, OBL-RUN4, OBL-RUN9, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10, OBL-AUTH11,
+26 rows: OBL-RUN2, OBL-RUN4, OBL-RUN9, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10,
 OBL-CTRL2, OBL-CTRL4, OBL-LIFE1, OBL-LIFE2, OBL-LIFE4,
 OBL-LIFE5, OBL-LIFE6, OBL-LIFE7, OBL-READ1, OBL-READ2, OBL-READ4,
 OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC7, OBL-REC12,
-OBL-REC14, OBL-CLI1, OBL-CLI2, OBL-CLI5, OBL-CLI10.
+OBL-REC14, OBL-CLI1, OBL-CLI2, OBL-CLI10.
 
 ### Failpoint-e2e
 
@@ -104,6 +104,6 @@ OBL-LOCK7, OBL-REC7, OBL-REC13, OBL-REC14, OBL-REC2.
 1 gap: OBL-CLI6 needs the quoted four-surface final-review checklist.  OBL-CLI7
 has an evidence artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts`.
 
-The status totals are **29 covered, 32 partial, 4 gap, and 2 audit-evidence**.
+The status totals are **31 covered, 31 partial, 3 gap, and 2 audit-evidence**.
 Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
 artifact.  All 67 table rows are accounted for.

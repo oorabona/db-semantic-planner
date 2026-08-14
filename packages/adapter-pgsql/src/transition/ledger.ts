@@ -159,6 +159,9 @@ async function readLedgerDeparseFixture(
 ): Promise<LedgerDeparseFixture | undefined> {
 	const here = dirname(fileURLToPath(import.meta.url));
 	const candidates = [
+		// tsup copies the published fixtures to dist/.  Keep this first so a
+		// workspace consumer never depends on a repository-relative fallback.
+		resolve(here, `pg-${major}.json`),
 		resolve(here, 'ledger-deparse-fixtures', `pg-${major}.json`),
 		resolve(
 			process.cwd(),

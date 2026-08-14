@@ -13,6 +13,7 @@ import {
 import {
 	classifyPgLedgerPhysicalShape,
 	createPostLockAdmissionEvidence,
+	readPgLedgerReservationsForPair,
 } from '@dbsp/adapter-pgsql/internal';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { describeWithE2eCapabilities } from './harness/index.js';
@@ -112,6 +113,21 @@ describeWithE2eCapabilities(
 						scope: 'database',
 					}),
 				).resolves.toEqual({ kind: 'verified' });
+				// Pair discovery must make the same no-CREATE promise as ordinary
+				// admission.  There is intentionally no pair in this fixture: a
+				// complete, typed empty answer proves discovery inspected both admitted
+				// homes rather than treating one home as the whole closure.
+				const pair = await readPgLedgerReservationsForPair(
+					readOnlyExecutor,
+					`obl-auth11-empty-pair-${schema}`,
+				);
+				expect(pair).toEqual([]);
+				expect(pair.candidates).toEqual(
+					expect.arrayContaining([
+						{ target: { scope: 'schema', schema }, kind: 'verified' },
+						{ target: { scope: 'database' }, kind: 'verified' },
+					]),
+				);
 				const client = await reader.connect();
 				try {
 					await client.query('BEGIN');
@@ -143,7 +159,9 @@ describeWithE2eCapabilities(
 				const statementClasses = new Set(
 					statements.map((text) => text.trim().split(/\s+/u)[0]?.toUpperCase()),
 				);
-				expect(statementClasses).toEqual(new Set(['SELECT', 'SET']));
+				expect(statementClasses).toEqual(
+					new Set(['BEGIN', 'COMMIT', 'SELECT', 'SET']),
+				);
 				expect(
 					statements.some((text) =>
 						/\b(?:ALTER|CREATE|DELETE|DROP|INSERT|UPDATE)\b/iu.test(text),

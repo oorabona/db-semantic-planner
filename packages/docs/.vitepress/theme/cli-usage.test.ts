@@ -93,8 +93,8 @@ describe('CLI usage guide', () => {
 				'--accept',
 				'external-ddl-exclusion',
 			]);
-			expect(applied.status, `${applied.stdout}\n${applied.stderr}`).toBe(56);
-			expect(applied.stdout).toContain('execution-failed');
+			expect(applied.status, `${applied.stdout}\n${applied.stderr}`).toBe(0);
+			expect(applied.stdout).toContain('completed');
 			const inspected = execute([
 				'inspect',
 				'table:users',

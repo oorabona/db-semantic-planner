@@ -346,11 +346,46 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 		}
 	});
 
-	it('SC-40: a post-claim occupied creation refuses and leaves no adoption', async () => {
+	it('OBL-LIFE7: foreign occupants from unknown and absent refuse; a matching shape is never adopted', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();
 		const input = claim(schema, 'externally_created', 'vacancy-claim');
 		try {
+			// An untracked foreign relation at an unknown address is drift even when
+			// it has the exact tempting shape.  It must leave a refusal, never an
+			// adoption/managed terminal.
+			await pool.query(
+				`CREATE TABLE ${quoteIdent(schema)}."occupied_from_unknown" (id integer)`,
+			);
+			const unknown = claim(
+				schema,
+				'occupied_from_unknown',
+				'occupied-from-unknown-claim',
+			);
+			await expect(
+				runAdmitted(client, {
+					...unknown,
+					resolution: {
+						eventId: 'occupied-from-unknown-refused',
+						eventKind: 'refused',
+					},
+					vacancy: async () => vacancy(pool, schema, 'occupied_from_unknown'),
+				}),
+			).resolves.toMatchObject({
+				kind: 'outcome-protocol-refused',
+				reason: `creation vacancy found occupied ${schema}.occupied_from_unknown`,
+			});
+			await expect(
+				pool.query(
+					`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = 'occupied_from_unknown' ORDER BY event_id`,
+				),
+			).resolves.toMatchObject({
+				rows: [{ event_kind: 'intent' }, { event_kind: 'refused' }],
+			});
+
+			// Re-encounter the exact same shape after a durable absent terminal. The
+			// address is still not self-recorded; physical similarity is not creation
+			// idempotency and cannot mint management authority.
 			await pool.query(
 				`CREATE TABLE ${quoteIdent(schema)}."externally_created" (id integer)`,
 			);
