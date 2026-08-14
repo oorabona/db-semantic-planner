@@ -170,49 +170,39 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toBe('');
 	});
 
-	it('OBL-CLI1 emits one JSON document for no-argument apply failures', () => {
-		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
-		const repositoryRoot = fileURLToPath(
-			new URL('../../../../', import.meta.url),
-		);
-		const completed = spawnSync(
-			process.execPath,
-			[
-				'--import',
-				'tsx',
-				cliPath,
-				'apply',
-				'--db',
-				'postgres://fixture',
-				'--format',
-				'json',
-			],
+	it.each([
+		[
+			'apply',
+			['apply', '--db', 'postgres://fixture', '--format', 'json'],
+			29,
 			{
-				cwd: repositoryRoot,
-				encoding: 'utf8',
-				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+				outcome: 'apply-failed',
+				error: 'no-argument apply requires --schema-file <path>',
 			},
-		);
-
-		expect(completed.status).toBe(29);
-		expect(JSON.parse(completed.stdout)).toMatchObject({
-			outcome: 'apply-failed',
-			error: 'no-argument apply requires --schema-file <path>',
-		});
-		expect(completed.stderr).toBe('');
-	});
-
-	it('OBL-CLI1 emits one JSON document for recover parse failures', () => {
-		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
-		const repositoryRoot = fileURLToPath(
-			new URL('../../../../', import.meta.url),
-		);
-		const completed = spawnSync(
-			process.execPath,
+		],
+		[
+			'inspect',
+			['inspect', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				outcome: 'inspect-failed',
+				error: expect.stringContaining('EAI_AGAIN'),
+			},
+		],
+		[
+			'plan',
+			['plan', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining(
+					"missing required argument 'schema-file'",
+				),
+			},
+		],
+		[
+			'recover',
 			[
-				'--import',
-				'tsx',
-				cliPath,
 				'recover',
 				'--db',
 				'postgres://must-not-connect',
@@ -221,6 +211,38 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 				'--format',
 				'json',
 			],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'run-id'"),
+			},
+		],
+		[
+			'reconcile',
+			['reconcile', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'run-id'"),
+			},
+		],
+		[
+			'release',
+			['release', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'address'"),
+			},
+		],
+	] as const)('OBL-CLI1 refusal: %s emits exactly one JSON result document', (_command, invocation, expectedStatus, expected) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, ...invocation],
 			{
 				cwd: repositoryRoot,
 				encoding: 'utf8',
@@ -228,12 +250,12 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 			},
 		);
 
-		expect(completed.status).toBe(1);
+		expect(completed.status).toBe(expectedStatus);
 		const document = JSON.parse(completed.stdout) as Record<string, unknown>;
-		expect(document).toMatchObject({
-			status: 'error',
-			error: expect.stringContaining("missing required argument 'run-id'"),
-		});
+		expect(document).toMatchObject(expected);
+		// JSON.parse consumes the complete input, so this also rejects a second
+		// document. The serializer intentionally uses readable two-space JSON.
+		expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
 		expect(completed.stdout.trim().startsWith('{')).toBe(true);
 		expect(completed.stderr).toBe('');
 	});

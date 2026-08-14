@@ -1050,7 +1050,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 	});
 
 	describe.sequential('non-current marker refusal', () => {
-		it.each([
+		const markerAttacks = [
 			[
 				'older',
 				async (schema: string) => {
@@ -1104,7 +1104,11 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					);
 				},
 			],
-		] as const)('OBL-CLI10: recover refuses a %s marker before recovery selection or append', async (kind, corruptMarker) => {
+		] as const;
+
+		it.each(
+			markerAttacks,
+		)('OBL-CLI10: recover refuses a %s marker before recovery selection or append', async (kind, corruptMarker) => {
 			const schema = testSchema(`recover_marker_${kind}`);
 			await provision(schema);
 			const pool = await getTestPool();
@@ -1143,8 +1147,10 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			).resolves.toEqual(eventCount);
 		});
 
-		it('refuses apply and reconcile with the reinitialize preflight reason without ledger appends', async () => {
-			const schema = testSchema('marker');
+		it.each(
+			markerAttacks,
+		)('OBL-CLI10: apply and reconcile refuse a %s marker before ledger append', async (kind, corruptMarker) => {
+			const schema = testSchema(`ar_marker_${kind}`);
 			await provision(schema);
 			const pool = await getTestPool();
 			await pool.query(
@@ -1161,10 +1167,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			});
 			expect(admitted.kind).toBe('admitted-outcome-claim');
 			const applyRun = await planEnumAdd(schema);
-			await pool.query(
-				`UPDATE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
-				[PG_LEDGER_SHAPE_VERSION + 1],
-			);
+			await corruptMarker(schema);
 			const before = await pool.query<{ count: string }>(
 				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
 			);
@@ -1180,6 +1183,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 				pool,
 			);
 			expect(applied.outcome).not.toBe('completed');
+			expect(JSON.stringify(applied)).toContain(`ledger marker ${kind}`);
 			expect(JSON.stringify(applied)).toContain(
 				'run dbsp preflight --reinitialize',
 			);

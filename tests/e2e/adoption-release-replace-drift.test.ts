@@ -3,6 +3,8 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
+	DBSP_LEDGER_MARKER_TABLE,
+	PG_LEDGER_SHAPE_VERSION,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -302,6 +304,81 @@ afterAll(async () => {
 });
 
 describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…62)', () => {
+	it.each([
+		[
+			'older',
+			async (schema: string) => {
+				const pool = await getTestPool();
+				await pool.query(
+					`ALTER TABLE ${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+				);
+				await pool.query(
+					`UPDATE ${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
+					[PG_LEDGER_SHAPE_VERSION - 1],
+				);
+			},
+		],
+		[
+			'future',
+			async (schema: string) => {
+				const pool = await getTestPool();
+				await pool.query(
+					`UPDATE ${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
+					[PG_LEDGER_SHAPE_VERSION + 1],
+				);
+			},
+		],
+		[
+			'mixed',
+			async (schema: string) => {
+				const pool = await getTestPool();
+				const marker = `${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)}`;
+				await pool.query(
+					`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+				);
+				await pool.query(
+					`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_pkey, DROP CONSTRAINT dbsp_ledger_marker_id_check`,
+				);
+				await pool.query(
+					`INSERT INTO ${marker} (id, version) VALUES (false, $1)`,
+					[PG_LEDGER_SHAPE_VERSION + 1],
+				);
+			},
+		],
+		[
+			'unreadable',
+			async (schema: string) => {
+				const pool = await getTestPool();
+				const marker = `${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)}`;
+				await pool.query(
+					`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+				);
+				await pool.query(
+					`ALTER TABLE ${marker} ALTER COLUMN version TYPE text USING 'not-a-version'`,
+				);
+			},
+		],
+	] as const)('OBL-CLI10: release refuses a %s marker without touching the managed object', async (_kind, corruptMarker) => {
+		const { pool, database: databaseId, schemas: names } = await fixture();
+		const schema = names[0]!;
+		const name = unique('release_marker');
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(address(schema, databaseId, name));
+		await corruptMarker(schema);
+		await expect(
+			runRelease(name, { db: process.env.DATABASE_URL!, schema }),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			address: address(schema, databaseId, name),
+			refusal: { code: 'ERR-06' },
+		});
+		await expect(
+			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
+		).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
+	});
+
 	it('OBL-LIFE2: apply refuses substituted and absent persisted adoption material', async () => {
 		for (const [table, mutation] of [
 			[
