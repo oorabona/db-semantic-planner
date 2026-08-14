@@ -2,6 +2,7 @@
 import {
 	createPgTransitionPack,
 	preparePgRecoveryAdmission,
+	readPgLedgerScopeCurrency,
 	readPgObservationContextFromLessor,
 	readTransitionJournal,
 	withPgTransitionRunLock,
@@ -18,6 +19,8 @@ import {
 import type {
 	ApplyPolicy,
 	ApplyResult,
+	LedgerAddress,
+	LedgerHome,
 	TransitionRunJournal,
 } from '@dbsp/types';
 import { Command } from 'commander';
@@ -30,6 +33,10 @@ import {
 	validateAssumptionAcceptance,
 	withPoolCleanupReported,
 } from './apply.js';
+import {
+	type PreAppendRefusal,
+	preAppendRefusalFor,
+} from './refusal-output.js';
 
 export const RECOVER_OUTCOME_CONTRACT = [
 	['completed', 0, 'all attempted steps were durably reconciled'],
@@ -226,11 +233,93 @@ async function load(
 	}
 }
 
+function ledgerHome(address: LedgerAddress): LedgerHome {
+	if (address.scope === 'database') return { scope: 'database' };
+	if (!address.schema)
+		throw new Error(
+			`schema-scoped managed claim ${address.name} has no schema`,
+		);
+	return { scope: 'schema', schema: address.schema };
+}
+
+function sameLedgerHome(left: LedgerHome, right: LedgerHome): boolean {
+	return left.scope === right.scope && left.schema === right.schema;
+}
+
+function recoveryAddresses(
+	journal: TransitionRunJournal & {
+		readonly plan: import('@dbsp/types').ProvenPlanShape;
+	},
+): readonly LedgerAddress[] {
+	return journal.plan.steps.flatMap((step) => {
+		const generated = step as { readonly address?: LedgerAddress };
+		const address = step.managedClaim?.address ?? generated.address;
+		return address === undefined ? [] : [address];
+	});
+}
+
+function formatLedgerHome(home: LedgerHome): string {
+	return home.scope === 'database' ? 'database' : `schema ${home.schema}`;
+}
+
+/**
+ * Recovery must not turn an ordinary command into a marker upgrade path. The
+ * persisted run supplies the finite homes to inspect, but no recovery
+ * selection, authorization replay, or ledger append may follow a stale marker.
+ */
+async function recoverMarkerRefusal(
+	target: Parameters<typeof acquireTransitionTargetLease>[0],
+	journal: TransitionRunJournal & {
+		readonly plan: import('@dbsp/types').ProvenPlanShape;
+	},
+): Promise<
+	| {
+			readonly detail: string;
+			readonly refusal: PreAppendRefusal;
+	  }
+	| undefined
+> {
+	const addresses = recoveryAddresses(journal);
+	const homes: Array<{
+		readonly address: LedgerAddress;
+		readonly home: LedgerHome;
+	}> = [];
+	for (const address of addresses) {
+		const home = ledgerHome(address);
+		if (homes.some((candidate) => sameLedgerHome(candidate.home, home)))
+			continue;
+		homes.push({ address, home });
+	}
+	const lease = await acquireTransitionTargetLease(target);
+	try {
+		for (const { address, home } of homes) {
+			const currency = await readPgLedgerScopeCurrency(lease.session, home);
+			if (currency.kind === 'current') continue;
+			const detail =
+				currency.kind === 'not-current' && currency.reason === 'lineage'
+					? `ledger lineage mismatch in ${formatLedgerHome(home)}; run dbsp preflight --reinitialize`
+					: `ledger marker ${currency.marker.kind} in ${formatLedgerHome(home)}; run dbsp preflight --reinitialize`;
+			return {
+				detail,
+				refusal: preAppendRefusalFor('ERR-03', {
+					address,
+					state: 'unknown',
+				}),
+			};
+		}
+	} finally {
+		await lease.release();
+	}
+	return undefined;
+}
+
 export type RecoverCommandResult = (
 	| {
 			readonly outcome: Exclude<RecoverOutcome, 'run-busy' | 'recovery-failed'>;
 			readonly runId: string;
 			readonly result?: ApplyResult;
+			readonly detail?: string;
+			readonly refusal?: PreAppendRefusal;
 	  }
 	| { readonly outcome: 'run-busy'; readonly runId: string }
 ) & {
@@ -279,6 +368,15 @@ export async function runRecover(
 							return { outcome: 'recovery-plan-invalid' as const };
 					}
 				}
+				const markerRefusal = await recoverMarkerRefusal(
+					target,
+					loaded.journal,
+				);
+				if (markerRefusal)
+					return {
+						outcome: 'recovery-context-mismatch' as const,
+						...markerRefusal,
+					};
 				const authorization =
 					loaded.journal.events.length === 0
 						? undefined

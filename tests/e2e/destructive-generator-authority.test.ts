@@ -544,6 +544,20 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 					schema: 'pg_catalog',
 					name: plantedName,
 				});
+			// Drive the public generator-removal surface all the way to the
+			// authority decision.  Reading the closure alone is not sufficient:
+			// the command must retain the containment refusal and must not turn the
+			// planned DROP into DDL.
+			const refused = await executeDrop({
+				schema,
+				database: databaseId,
+				name: rootName,
+				accepts: ['accept'],
+			});
+			expect(refused).toMatchObject({
+				outcome: 'destructive-authority-refused',
+				detail: expect.stringMatching(/containment|unmanaged|undecidable/i),
+			});
 			await expect(
 				pool.query('SELECT to_regclass($1) AS root', [`${schema}.${rootName}`]),
 			).resolves.toMatchObject({ rows: [{ root: `${schema}.${rootName}` }] });

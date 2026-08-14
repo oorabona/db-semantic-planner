@@ -1050,6 +1050,99 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 	});
 
 	describe.sequential('non-current marker refusal', () => {
+		it.each([
+			[
+				'older',
+				async (schema: string) => {
+					const pool = await getTestPool();
+					await pool.query(
+						`ALTER TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+					);
+					await pool.query(
+						`UPDATE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
+						[PG_LEDGER_SHAPE_VERSION - 1],
+					);
+				},
+			],
+			[
+				'future',
+				async (schema: string) => {
+					const pool = await getTestPool();
+					await pool.query(
+						`UPDATE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
+						[PG_LEDGER_SHAPE_VERSION + 1],
+					);
+				},
+			],
+			[
+				'mixed',
+				async (schema: string) => {
+					const pool = await getTestPool();
+					const marker = `${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)}`;
+					await pool.query(
+						`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+					);
+					await pool.query(
+						`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_pkey, DROP CONSTRAINT dbsp_ledger_marker_id_check`,
+					);
+					await pool.query(
+						`INSERT INTO ${marker} (id, version) VALUES (false, $1)`,
+						[PG_LEDGER_SHAPE_VERSION + 1],
+					);
+				},
+			],
+			[
+				'unreadable',
+				async (schema: string) => {
+					const pool = await getTestPool();
+					const marker = `${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)}`;
+					await pool.query(
+						`ALTER TABLE ${marker} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+					);
+					await pool.query(
+						`ALTER TABLE ${marker} ALTER COLUMN version TYPE text USING 'not-a-version'`,
+					);
+				},
+			],
+		] as const)('OBL-CLI10: recover refuses a %s marker before recovery selection or append', async (kind, corruptMarker) => {
+			const schema = testSchema(`recover_marker_${kind}`);
+			await provision(schema);
+			const pool = await getTestPool();
+			await pool.query(
+				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+			);
+			const planned = await planEnumAdd(schema);
+			await corruptMarker(schema);
+			const eventCount = await pool.query<{ count: string }>(
+				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			);
+
+			const recovered = await runRecover(
+				planned.runId,
+				{ db: planned.db, planDigest: planned.planDigest },
+				pool,
+			);
+			expect(recovered).toMatchObject({
+				outcome: 'recovery-context-mismatch',
+				detail: expect.stringContaining(`ledger marker ${kind}`),
+				refusal: {
+					address: onlyManagedClaim(planned.plan).address,
+					refusal: {
+						code: 'ERR-03',
+						resolvingCommand: 'dbsp preflight --reinitialize',
+					},
+				},
+			});
+			expect(JSON.parse(JSON.stringify(recovered))).toMatchObject({
+				refusal: { refusal: { code: 'ERR-03' } },
+			});
+			await expect(
+				pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				),
+			).resolves.toEqual(eventCount);
+		});
+
 		it('refuses apply and reconcile with the reinitialize preflight reason without ledger appends', async () => {
 			const schema = testSchema('marker');
 			await provision(schema);

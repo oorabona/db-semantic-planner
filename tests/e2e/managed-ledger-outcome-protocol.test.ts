@@ -472,6 +472,89 @@ describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () =>
 		}
 	});
 
+	it('OBL-LIFE7: a recorded catalogue identity permits the same managed object to be re-encountered', async () => {
+		const { pool, schema } = await fixture();
+		const execution = randomUUID();
+		const first = fixtureOutcomeClaim({
+			claimId: `recorded-identity-first:${execution}`,
+			executionId: `recorded-identity-first-execution:${execution}`,
+			plannedClaimKey: 'recorded-identity/root',
+			address: address(schema, 'recorded_identity'),
+			claimKind: 'intent',
+			requiresVacancy: true,
+			statements: [
+				`CREATE TABLE ${quoteIdent(schema)}."recorded_identity" (id integer)`,
+			],
+			reservations: [
+				{
+					address: address(schema, 'recorded_identity'),
+					claimKind: 'intent',
+					executionId: `recorded-identity-first-execution:${execution}`,
+					rootClaimId: `recorded-identity-first:${execution}`,
+					homeLedger: { scope: 'schema', schema },
+				},
+			],
+		});
+		await expect(
+			runAdmitted(pool, {
+				...first,
+				resolution: {
+					eventId: `recorded-identity-first-observed:${execution}`,
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' }),
+				readBack: async () => ({
+					value: { table: 'recorded_identity', cycle: 1 },
+					digest: 'recorded-identity-first',
+				}),
+				recordCatalogueIdentity: true,
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+
+		const again = fixtureOutcomeClaim({
+			...first.plan,
+			claimId: `recorded-identity-again:${execution}`,
+			executionId: `recorded-identity-again-execution:${execution}`,
+			plannedClaimKey: 'recorded-identity/re-encounter',
+			claimGroupId: `recorded-identity-again:${execution}`,
+			rootClaimId: `recorded-identity-again:${execution}`,
+			requiresVacancy: false,
+			statements: [
+				`ALTER TABLE ${quoteIdent(schema)}."recorded_identity" ADD COLUMN note text`,
+			],
+			reservations: [
+				{
+					address: first.plan.address,
+					claimKind: 'intent',
+					executionId: `recorded-identity-again-execution:${execution}`,
+					rootClaimId: `recorded-identity-again:${execution}`,
+					homeLedger: { scope: 'schema', schema },
+				},
+			],
+		});
+		const reencounter = await runAdmitted(pool, {
+			...again,
+			resolution: {
+				eventId: `recorded-identity-again-observed:${execution}`,
+				eventKind: 'observed',
+			},
+			readBack: async () => ({
+				value: { table: 'recorded_identity', cycle: 2 },
+				digest: 'recorded-identity-again',
+			}),
+			recordCatalogueIdentity: true,
+		});
+		if (reencounter.kind === 'outcome-protocol-refused')
+			throw new Error(reencounter.reason);
+		expect(reencounter).toMatchObject({ kind: 'executed-outcome-claim' });
+		await expect(
+			pool.query(
+				`SELECT column_name FROM information_schema.columns WHERE table_schema = $1 AND table_name = 'recorded_identity' AND column_name = 'note'`,
+				[schema],
+			),
+		).resolves.toMatchObject({ rows: [{ column_name: 'note' }] });
+	});
+
 	it('SC-41: two sessions race a creation and exactly one open claim wins', async () => {
 		const { pool, schema } = await fixture();
 		const input = claim(schema, 'one_winner', 'winner-claim');
