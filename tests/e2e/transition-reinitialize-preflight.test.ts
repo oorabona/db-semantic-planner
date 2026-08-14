@@ -656,3 +656,51 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 		expect((await stat(out)).mode & 0o777).toBe(0o600);
 	});
 });
+
+describe('OBL-REC11 reinitialize preflight statement capture', () => {
+	const schemas: string[] = [];
+
+	beforeEach(resetDbspMeta);
+
+	afterEach(async () => {
+		for (const schema of schemas.splice(0)) await dropSchema(schema);
+		await resetDbspMeta();
+	}, 30_000);
+
+	it('captures a full preflight with zero event or reservation-table writes', async () => {
+		const schema = uniqueName('reinitialize_statement_capture');
+		schemas.push(schema);
+		await createPreflightSchema(schema);
+		const pool = await getTestPool();
+		const statements: string[] = [];
+		const capturedPool = Object.create(pool) as typeof pool;
+		capturedPool.connect = async () => {
+			const client = await pool.connect();
+			const query = client.query.bind(client);
+			const capturedClient = Object.create(client) as typeof client;
+			capturedClient.query = (async (sql: string, values?: unknown[]) => {
+				statements.push(sql);
+				return await query(sql, values);
+			}) as typeof capturedClient.query;
+			capturedClient.release = client.release.bind(client);
+			return capturedClient;
+		};
+		const report = await runPreflight([schema], {
+			pool: capturedPool,
+			writeAdoptionFile: async () => {},
+		});
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'schema', schema },
+				outcome: 'current',
+			}),
+		);
+		const writes = statements.filter(
+			(sql) =>
+				/^\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(sql) &&
+				(sql.includes(DBSP_LEDGER_EVENT_TABLE) ||
+					sql.includes(DBSP_LEDGER_RESERVATION_TABLE)),
+		);
+		expect(writes).toEqual([]);
+	});
+});

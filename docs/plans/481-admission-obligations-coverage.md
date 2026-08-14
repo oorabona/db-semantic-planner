@@ -53,14 +53,14 @@ row requires CLI/package-root evidence.
 | OBL-REC1 | partial | `packages/adapter-pgsql/src/transition/outcome-protocol.test.ts: OBL-REC1 refuses a recovery append whose forged reservation subset omits the live claim address` | Missing foreign executionId group, two-root group, and stale-home recovery/reconcile constructions. |
 | OBL-REC2 | partial | `packages/core/src/transition/outcome-recovery.test.ts: OBL-REC2 refuses indeterminate recovery evidence with one mismatched claimId/executionId/plannedClaimKey/statement-bundle digest/planDigest/address before catalogue read`; `tests/e2e/readdress-recovery-local.test.ts: SC-57: fabricated interrupted pairs classify whole closures as refused, pending, or indeterminate` | The six unit evidence variants are complete. Missing paired-readdress no-DDL statement-capture proof. |
 | OBL-REC3 | partial | `packages/cli/src/commands/reconcile.test.ts: OBL-REC3 keeps the authentication cause distinct`; `packages/cli/src/commands/reconcile.test.ts: OBL-REC3 keeps the transport cause distinct`; `packages/cli/src/commands/reconcile.test.ts: OBL-REC3 keeps the malformed-journal cause distinct`; `packages/cli/src/commands/reconcile.test.ts: OBL-REC3 keeps the catalogue cause distinct` | These are command-unit seams; no CLI/real-PostgreSQL bad credentials, severed connection, corrupt journal, and revoked catalogue-read constructions. |
-| OBL-REC4 | gap | — | No same-named reservation table with revoked `SELECT` during discovery, nor output asserting an unverifiable candidate. |
+| OBL-REC4 | covered | `tests/e2e/ledger-catalogue-statement-capture.test.ts: OBL-REC4 names a same-named ledger candidate as unverifiable when reservation SELECT is revoked` | — |
 | OBL-REC5 | partial | `packages/adapter-pgsql/src/transition/outcome-protocol.test.ts: OBL-REC5 recognizes independently read equal ledger addresses` | Missing CLI recovery/reconcile over re-parsed stored addresses and the complete comparison-site inventory with per-site value-equality evidence/justification. |
 | OBL-REC6 | covered | `packages/adapter-pgsql/src/transition/readdress.test.ts: OBL-REC6 re-address closure root selects the declared table root when a child sorts before it`; `packages/adapter-pgsql/src/transition/readdress.test.ts: OBL-REC6 re-address closure root refuses selection when the declared root is absent` | — |
 | OBL-REC7 | partial | `tests/e2e/transition-reinitialize-preflight.test.ts: keeps a current marker and recovers after kill at archive`; `tests/e2e/transition-reinitialize-preflight.test.ts: reports current, unchanged, failed, and not-attempted around a denied scope`; `packages/cli/src/commands/preflight.test.ts: OBL-REC7 reports changed, failed, and not-attempted scopes together` | Missing a marker flip between pre-lock inspection and processing, plus the requested after-first-of-several-scopes failpoint with explicit per-scope untouched-or-complete proof. |
 | OBL-REC8 | covered | `tests/e2e/transition-reinitialize-preflight.test.ts: SC-13 / OBL-REC8 #481 reinitialize-preflight ownership and grants` | — |
-| OBL-REC9 | partial | `tests/e2e/lineage-restore-local.test.ts: SC-43 / OBL-REC9: full pg_dump/pg_restore archives byte-stable, read-only lineage before a fresh ledger` | Missing archival-index assertions, the all-archived-table non-owner grant sweep, and `TRUNCATE` refusal. |
+| OBL-REC9 | covered | `tests/e2e/lineage-restore-local.test.ts: SC-43 / OBL-REC9: full pg_dump/pg_restore archives byte-stable, read-only lineage before a fresh ledger` | — |
 | OBL-REC10 | covered | `tests/e2e/transition-reinitialize-preflight.test.ts: OBL-REC10: excludes every covered and dbsp-infrastructure address from adoption candidates` | — |
-| OBL-REC11 | partial | `tests/e2e/transition-reinitialize-preflight.test.ts: writes only DSL declarations without a chain and appends no events` | Counts event rows before/after, but does not use statement capture to rule out event/reservation writes that net to zero. |
+| OBL-REC11 | covered | `tests/e2e/transition-reinitialize-preflight.test.ts: OBL-REC11 reinitialize preflight statement capture` | — |
 | OBL-REC12 | partial | `packages/core/src/transition/lifecycle-interpreter.test.ts: returns structured malformed-chain values for every degraded chain shape`; `tests/e2e/managed-ledger-outcome-recovery.test.ts: SC-36: PostgreSQL accepts an equal resolution retry and fails closed on a differing child` | Missing direct corrupted-storage construction for unknown kind, broken predecessor, and divergent payload across all five `inspect`/`apply`/`reconcile`/`recover`/`release` surfaces with zero recovery appends. |
 | OBL-REC13 | partial | `tests/e2e/readdress-recovery-local.test.ts: SC-57: fabricated interrupted pairs classify whole closures as refused, pending, or indeterminate` | Missing a crash-produced full source closure and statement capture proving no DDL is resent for all three outcomes. |
 | OBL-REC14 | partial | `tests/e2e/transition-non-transactional-apply.test.ts: SC-05: classifies a server-aborted invalid index as recovery-unknown-step-result`; `tests/e2e/managed-outcome-wiring.test.ts: reports reconcile-unresolved when the child is killed after send and PostgreSQL retains an invalid index` | Neither drives `dbsp reconcile` to a dedicated invalid-index refusal/pending result naming the index and excluding success. |
@@ -87,10 +87,10 @@ No remaining unit-slice rows.
 
 ### E2E
 
-30 rows: OBL-RUN2, OBL-RUN4, OBL-RUN9, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10, OBL-AUTH11,
+28 rows: OBL-RUN2, OBL-RUN4, OBL-RUN9, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10, OBL-AUTH11,
 OBL-CTRL2, OBL-CTRL4, OBL-LIFE1, OBL-LIFE2, OBL-LIFE4,
 OBL-LIFE5, OBL-LIFE6, OBL-LIFE7, OBL-READ1, OBL-READ2, OBL-READ4,
-OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC4, OBL-REC7, OBL-REC9, OBL-REC12,
+OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC7, OBL-REC12,
 OBL-REC14, OBL-CLI1, OBL-CLI2, OBL-CLI5, OBL-CLI10.
 
 ### Failpoint-e2e
@@ -104,6 +104,6 @@ OBL-LOCK7, OBL-REC7, OBL-REC13, OBL-REC14, OBL-REC2.
 1 gap: OBL-CLI6 needs the quoted four-surface final-review checklist.  OBL-CLI7
 has an evidence artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts`.
 
-The status totals are **26 covered, 34 partial, 5 gap, and 2 audit-evidence**.
+The status totals are **29 covered, 32 partial, 4 gap, and 2 audit-evidence**.
 Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
 artifact.  All 67 table rows are accounted for.

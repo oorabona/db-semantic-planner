@@ -272,6 +272,29 @@ describeWithE2eCapabilities(
 					[`${quoteIdent(schema)}.${quoteIdent(archivedEvent)}`],
 				);
 				expect(archiveAccess.rows[0]?.public_select).toBe(false);
+				const archivedTables = await target.query<{ relname: string }>(
+					"SELECT relname FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_class.relnamespace WHERE nspname = $1 AND relkind = 'r' AND relname LIKE 'dbsp_ledger_%_archive_%' ORDER BY relname",
+					[schema],
+				);
+				expect(
+					archivedTables.rows.map((row) => row.relname),
+					'every restored ledger relation, including reservations, is archived',
+				).toHaveLength(4);
+				const archivedIndexes = await target.query<{ relname: string }>(
+					"SELECT index_class.relname FROM pg_catalog.pg_index index_definition JOIN pg_catalog.pg_class table_class ON table_class.oid = index_definition.indrelid JOIN pg_catalog.pg_class index_class ON index_class.oid = index_definition.indexrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = table_class.relnamespace WHERE namespace.nspname = $1 AND table_class.relname LIKE 'dbsp_ledger_%_archive_%' ORDER BY index_class.relname",
+					[schema],
+				);
+				expect(archivedIndexes.rows).toHaveLength(7);
+				expect(
+					archivedIndexes.rows.every((row) =>
+						row.relname.includes('_archive_'),
+					),
+				).toBe(true);
+				const nonOwnerGrants = await target.query<{ count: string }>(
+					"SELECT count(*)::text AS count FROM pg_catalog.pg_class relation CROSS JOIN LATERAL pg_catalog.aclexplode(coalesce(relation.relacl, pg_catalog.acldefault('r', relation.relowner))) access WHERE relation.relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = $1) AND relation.relname LIKE 'dbsp_ledger_%_archive_%' AND access.grantee <> relation.relowner",
+					[schema],
+				);
+				expect(nonOwnerGrants.rows[0]?.count).toBe('0');
 				await expect(
 					target.query(
 						`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(archivedEvent)} DEFAULT VALUES`,
@@ -285,6 +308,11 @@ describeWithE2eCapabilities(
 					await expect(target.query(mutation)).rejects.toThrow(
 						'dbsp archived ledger is read-only',
 					);
+				await expect(
+					target.query(
+						`TRUNCATE ${quoteIdent(schema)}.${quoteIdent(archivedEvent)}`,
+					),
+				).rejects.toThrow('dbsp archived ledger is read-only');
 			} finally {
 				await source?.end();
 				await target?.end();
