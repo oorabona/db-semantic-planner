@@ -7,6 +7,8 @@ import {
 	classifyRemovalEffectsClosure,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
+	DBSP_LEDGER_EVENT_TABLE,
+	DBSP_LEDGER_MARKER_TABLE,
 	readPgCatalogueIdentity,
 	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
@@ -14,10 +16,13 @@ import {
 import {
 	appendPgLedgerResolution,
 	lockPgJournalRun,
+	openPgOutcomeClaimGroup,
+	resolvePgOutcomeClaimGroup,
 } from '@dbsp/adapter-pgsql/internal';
 import { outcomeClaimId, transitionPlanDigest } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
+	CascadeCoveredOutcomeClaimPlan,
 	LedgerAddress,
 	LedgerReservationRow,
 	NormalizedManagedStep,
@@ -31,7 +36,10 @@ import {
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
-import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
+import {
+	fixtureOutcomeClaim,
+	openFixtureOutcomeClaim,
+} from './outcome-claim-fixture.js';
 import { dropSchema, getTestPool } from './testkit/index.js';
 
 const schemas: string[] = [];
@@ -777,6 +785,177 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			'post-lock-integrity-before-append',
 			'commit-acknowledged',
 		]);
+	});
+
+	it('OBL-AUTH5: destructive executing append refuses physical-ledger drift before DDL', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_auth5_executing_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(root);
+		const plan = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: rootName,
+				classification: 'removal',
+				details: 'executing runtime-integrity refusal',
+				statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+			},
+			databaseId,
+			schema,
+		);
+		const planDigest = transitionPlanDigest(plan);
+		const runId = `obl-auth5-executing:${randomUUID()}`;
+		const run = lockPgJournalRun(
+			mintDurablyLoadedRun({
+				runId,
+				planDigest,
+				targetContextDigest: `runtime-integrity:${schema}`,
+				databaseId,
+				coreVersion: 'checkpoint-e2e',
+				startedAt: new Date().toISOString(),
+				replayability: 'replayable',
+			}),
+		);
+		let claimCommitted = false;
+		const result = await executeGeneratorPlan({
+			pool,
+			plan,
+			planDigest,
+			schema,
+			run,
+			runId,
+			accepts: [`destructive-plan-accepted:${planDigest}`],
+			observer: async (point) => {
+				if (point !== 'commit-acknowledged' || claimCommitted) return;
+				// The claim's COMMIT releases the shape reader's catalogue locks.  The
+				// next append is the destructive executing transaction under test.
+				claimCommitted = true;
+				await pool.query(
+					`ALTER TABLE ${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+				);
+			},
+		});
+		expect(claimCommitted).toBe(true);
+		expect(result).toMatchObject({
+			outcome: 'destructive-authority-refused',
+			detail: expect.stringMatching(/ledger physical shape/i),
+		});
+		await expect(
+			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${rootName}`]),
+		).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
+		const events = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name = $1`,
+			[rootName],
+		);
+		expect(events.rows.map(({ event_kind }) => event_kind)).not.toContain(
+			'executing',
+		);
+	});
+
+	it('OBL-AUTH5: group-terminal append refuses physical-ledger drift without a terminal fact', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_auth5_root_${randomUUID().replaceAll('-', '')}`;
+		const childName = `obl_auth5_child_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		const child = tableAddress(schema, databaseId, childName);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY); CREATE TABLE ${quote(schema)}.${quote(childName)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(root);
+		await adopt(child);
+		const runId = `obl-auth5-group-terminal:${randomUUID()}`;
+		const run = lockPgJournalRun(
+			mintDurablyLoadedRun({
+				runId,
+				planDigest: `group-terminal:${rootName}`,
+				targetContextDigest: `runtime-integrity:${schema}`,
+				databaseId,
+				coreVersion: 'checkpoint-e2e',
+				startedAt: new Date().toISOString(),
+				replayability: 'replayable',
+			}),
+		);
+		const rootClaimId = `obl-auth5-group-root:${randomUUID()}`;
+		const rootClaim = fixtureOutcomeClaim({
+			claimId: rootClaimId,
+			executionId: runId,
+			claimGroupId: rootClaimId,
+			rootClaimId,
+			address: root,
+			claimKind: 'retire-intent',
+			statements: ['SELECT 1'],
+			reservations: [reservation(root, rootClaimId, 'retire-intent')],
+		});
+		const childClaimId = `obl-auth5-group-child:${randomUUID()}`;
+		const childFixture = fixtureOutcomeClaim({
+			claimId: childClaimId,
+			executionId: runId,
+			claimGroupId: rootClaimId,
+			rootClaimId,
+			address: child,
+			claimKind: 'retire-intent',
+			statements: [],
+			reservations: [reservation(child, childClaimId, 'retire-intent')],
+		});
+		const childClaim = {
+			...childFixture,
+			plan: {
+				...childFixture.plan,
+				claimSpecies: 'cascade-covered' as const,
+			} as CascadeCoveredOutcomeClaimPlan,
+		};
+		const opened = await openPgOutcomeClaimGroup(
+			pool,
+			{ ...rootClaim, members: [childClaim] },
+			run,
+		);
+		expect(opened, JSON.stringify(opened)).toMatchObject({
+			root: { kind: 'admitted-outcome-claim' },
+			members: [{ kind: 'admitted-outcome-claim' }],
+		});
+		await pool.query(
+			`ALTER TABLE ${quote(schema)}.${quote(DBSP_LEDGER_MARKER_TABLE)} DROP CONSTRAINT dbsp_ledger_marker_version_check`,
+		);
+		await expect(
+			resolvePgOutcomeClaimGroup(pool, {
+				rootClaimId,
+				members: [
+					{
+						target: { scope: 'schema', schema },
+						member: {
+							eventId: `${rootClaimId}:absent`,
+							address: root,
+							eventKind: 'absent',
+							predecessor: rootClaimId,
+						},
+					},
+					{
+						target: { scope: 'schema', schema },
+						member: {
+							eventId: `${childClaimId}:absent`,
+							address: child,
+							eventKind: 'absent',
+							predecessor: childClaimId,
+						},
+					},
+				],
+				reservations: [...rootClaim.reservations, ...childClaim.reservations],
+				runtimeIntegrityRun: run,
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: expect.stringMatching(/ledger physical shape/i),
+		});
+		const terminals = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name IN ($1, $2) AND event_kind IN ('absent', 'refused', 'indeterminate')`,
+			[rootName, childName],
+		);
+		expect(terminals.rows).toEqual([]);
 	});
 
 	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {

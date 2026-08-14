@@ -266,6 +266,8 @@ export interface PgOutcomeClaimGroupResolution {
 	}[];
 	readonly reservations: readonly Pick<LedgerReservationRow, 'address'>[];
 	readonly lockTimeoutMs?: number;
+	/** Durable run witness carried from destructive admission to its terminal. */
+	readonly runtimeIntegrityRun?: PgLockedRun;
 	/** Optional E2E observer for this terminal-appending transaction. */
 	readonly observer?: PgOutcomeCheckpointObserver;
 }
@@ -552,6 +554,7 @@ export type PgDestructiveOutcomeResult =
 async function runPgDestructiveOutcome(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupRequest,
+	run: PgLockedRun,
 	readBackAndResolve: (
 		executor: TransitionJournalQueryable,
 		claim: AdmittedDestructiveOutcomeClaim,
@@ -560,8 +563,8 @@ async function runPgDestructiveOutcome(
 	return withPgOutcomeSession(executor, async (session) => {
 		const admission =
 			request.members.length > 0
-				? (await openPgOutcomeClaimGroup(session, request)).root
-				: await openPgOutcomeClaim(session, request);
+				? (await openPgOutcomeClaimGroup(session, request, run)).root
+				: await openPgOutcomeClaim(session, request, run);
 		if (admission.kind !== 'admitted-outcome-claim') return admission;
 		if (!('destructivePermit' in admission))
 			return refusal('destructive admission did not mint an authority permit');
@@ -587,6 +590,15 @@ async function runPgDestructiveOutcome(
 			if ('kind' in executingLiveAdmission) {
 				await rollback(session);
 				return executingLiveAdmission;
+			}
+			const integrity = await validatePgLedgerRuntimeIntegrity(
+				session,
+				homesForGroup(request),
+				run,
+			);
+			if (integrity) {
+				await rollback(session);
+				return integrity;
 			}
 			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const target = targetForPlan(request.plan);
@@ -640,12 +652,13 @@ async function runPgDestructiveOutcome(
 			// admitted operation owns the test-only observer.  Preserve both so the
 			// terminal resolution COMMIT is observable by the same one-shot
 			// checkpoint protocol as the preceding executing COMMIT.
-			const resolved = await resolvePgDestructiveOutcome(
-				session,
-				request.observer === undefined
-					? resolution
-					: { ...resolution, observer: request.observer },
-			);
+			const resolved = await resolvePgDestructiveOutcome(session, {
+				...resolution,
+				runtimeIntegrityRun: run,
+				...(request.observer === undefined
+					? {}
+					: { observer: request.observer }),
+			});
 			if (
 				resolution.members.some(
 					({ member }) => member.eventKind === 'indeterminate',
@@ -726,6 +739,16 @@ export async function resolvePgDestructiveOutcome(
 				await rollback(session);
 				begun = false;
 				return liveAdmission;
+			}
+			const integrity = await validatePgLedgerRuntimeIntegrity(
+				session,
+				[terminal.target],
+				request.runtimeIntegrityRun,
+			);
+			if (integrity) {
+				await rollback(session);
+				begun = false;
+				return integrity;
 			}
 			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const member = await memberWithCurrentTerminalPredecessor(
@@ -1498,9 +1521,10 @@ async function openPgOutcomeClaimOnSession(
 export async function openPgOutcomeClaim(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimRequest,
+	run?: PgLockedRun,
 ): Promise<OutcomeClaimAdmission> {
 	return withPgOutcomeSession(executor, (session) =>
-		openPgOutcomeClaimOnSession(session, request),
+		openPgOutcomeClaimOnSession(session, request, run),
 	);
 }
 
@@ -1511,6 +1535,7 @@ export async function openPgOutcomeClaim(
 export async function openPgOutcomeClaimGroup(
 	executor: TransitionJournalQueryable,
 	request: PgOutcomeClaimGroupRequest,
+	run?: PgLockedRun,
 ): Promise<PgOutcomeClaimGroupAdmission> {
 	return withPgOutcomeSession(executor, async (session) => {
 		let begun = false;
@@ -1523,9 +1548,20 @@ export async function openPgOutcomeClaimGroup(
 				begun = false;
 				return { root: refusal('ledger advisory lock is busy'), members: [] };
 			}
+			const postLockEvidence = await createPostLockAdmissionEvidence(
+				session,
+				lock.proof,
+			);
+			const postLockLiveAdmission = await checkLiveAdmission(postLockEvidence);
+			if ('kind' in postLockLiveAdmission) {
+				await session.query('ROLLBACK');
+				begun = false;
+				return { root: postLockLiveAdmission, members: [] };
+			}
 			const integrity = await validatePgLedgerRuntimeIntegrity(
 				session,
 				homesForGroup(request),
+				run,
 			);
 			if (integrity) {
 				await session.query('ROLLBACK');
@@ -1620,6 +1656,16 @@ export async function resolvePgOutcomeClaimGroup(
 				await session.query('ROLLBACK');
 				begun = false;
 				return liveAdmission;
+			}
+			const integrity = await validatePgLedgerRuntimeIntegrity(
+				session,
+				request.members.map(({ member }) => targetForAddress(member.address)),
+				request.runtimeIntegrityRun,
+			);
+			if (integrity) {
+				await session.query('ROLLBACK');
+				begun = false;
+				return integrity;
 			}
 			await checkpoint(request.observer, 'post-lock-integrity-before-append');
 			const members = await Promise.all(
@@ -2381,6 +2427,7 @@ export async function executePgAdmittedOperation(
 				return runPgDestructiveOutcome(
 					pinnedSession,
 					input.operation.request,
+					input.run,
 					input.operation.readBackAndResolve,
 				);
 			return 'executingEventId' in input.operation.request
