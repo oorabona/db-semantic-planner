@@ -1,4 +1,5 @@
 import type {
+	ClaimToken,
 	LedgerAddress,
 	LedgerChainMember,
 	OutcomeClaimPlan,
@@ -199,6 +200,60 @@ describe('outcome claim admission (SC-30, SC-42)', () => {
 		).toMatchObject({
 			kind: 'outcome-protocol-refused',
 			reason: 'claim token for claim first has already been consumed',
+		});
+	});
+
+	it('OBL-AUTH2 refuses a JavaScript-forged token at the public consumption facade', () => {
+		const admitted = admit(plan('forged-token'));
+		if (admitted.kind !== 'admitted-outcome-claim')
+			throw new Error(admitted.reason);
+		expect(
+			consumeClaimToken(
+				{} as unknown as ClaimToken,
+				admitted.plan.claimId,
+				admitted.plan.statementBundle.statements,
+			),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'claim token was not minted by claim admission',
+		});
+	});
+
+	it('OBL-AUTH2 refuses a reordered admitted statement bundle', () => {
+		const admitted = admit({
+			...plan('reordered-bundle'),
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'CREATE TABLE accounts (id integer)' },
+					{ ordinal: 1, sql: "COMMENT ON TABLE accounts IS 'managed'" },
+				],
+			},
+		});
+		if (admitted.kind !== 'admitted-outcome-claim')
+			throw new Error(admitted.reason);
+		expect(
+			consumeClaimToken(admitted.token, admitted.plan.claimId, [
+				admitted.plan.statementBundle.statements[1]!,
+				admitted.plan.statementBundle.statements[0]!,
+			]),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: "statements are outside claim reordered-bundle's recorded bundle",
+		});
+	});
+
+	it('OBL-AUTH2 refuses an appended statement after admission', () => {
+		const admitted = admit(plan('appended-bundle'));
+		if (admitted.kind !== 'admitted-outcome-claim')
+			throw new Error(admitted.reason);
+		expect(
+			consumeClaimToken(admitted.token, admitted.plan.claimId, [
+				...admitted.plan.statementBundle.statements,
+				{ ordinal: 1, sql: "COMMENT ON TABLE accounts IS 'attacker'" },
+			]),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: "statements are outside claim appended-bundle's recorded bundle",
 		});
 	});
 

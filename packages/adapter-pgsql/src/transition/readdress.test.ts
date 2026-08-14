@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	classifyPgReaddressRecovery,
 	classifyPgReaddressSupport,
+	executePgPersistedTableReaddress,
 	isPgReaddressSelfOccupancy,
 	renderPgTableReaddressStatements,
 	selectPgReaddressClosureRoot,
@@ -93,6 +94,47 @@ describe('re-address declaration bounds', () => {
 		).toEqual({
 			outcome: 'readdress-unsupported',
 			detail: 'unsupported-kind index',
+		});
+	});
+
+	it('OBL-LIFE4 refuses an escaping dependent through the persisted readdress facade before admission', async () => {
+		const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.includes('pg_catalog.pg_class') && !sql.includes('WITH root'))
+				return { rows: params?.[1] === 'source_table' ? [{ oid: '42' }] : [] };
+			if (sql.includes('dependent.contype'))
+				return { rows: [{ exists: true }] };
+			throw new Error(`unexpected SQL: ${sql}`);
+		});
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: { query },
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				step: {
+					stepKey: 'move-orders',
+					address: source,
+					claimKind: 'readdress-intent',
+					classification: 'paired-readdress',
+					requiresVacancy: false,
+					plannedClaimKeys: ['move-orders/root'],
+					statementBundle: { statements: [] },
+					lifecycle: {
+						kind: 'readdress',
+						declaration: {
+							from: { schema: source.schema, name: source.name },
+							to: { schema: source.schema, name: 'target_table' },
+						},
+					},
+				} as never,
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toEqual({
+			outcome: 'readdress-refused',
+			detail:
+				'source source_table has an escaping dependent outside the paired closure',
 		});
 	});
 });

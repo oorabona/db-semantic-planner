@@ -91,11 +91,24 @@ describe('PostgreSQL address-chain reader', () => {
 		expect(sql).toContain('WHERE address_engine = $1');
 	});
 
-	it('OBL-CTRL3: keys a controller lookup by both address and event id', async () => {
-		const query = vi.fn(async () => ({ rows: [{ controller_oid: '42' }] }));
+	it('OBL-CTRL3: two address chains sharing an event id cannot cross-answer controller lookup', async () => {
+		const auditAddress = { ...address, name: 'audit_log' };
+		const query = vi.fn(
+			async (_sql: string, parameters: readonly unknown[]) => ({
+				rows: [{ controller_oid: parameters[6] === 'accounts' ? '42' : '43' }],
+			}),
+		);
 		await expect(
 			readPgLedgerControllerOid({ query }, ledger, address, 'shared-event'),
 		).resolves.toBe('42');
+		await expect(
+			readPgLedgerControllerOid(
+				{ query },
+				ledger,
+				auditAddress,
+				'shared-event',
+			),
+		).resolves.toBe('43');
 		const [sql, parameters] = query.mock.calls[0] as unknown as readonly [
 			string,
 			readonly unknown[],
@@ -109,6 +122,15 @@ describe('PostgreSQL address-chain reader', () => {
 			'null',
 			'table',
 			'accounts',
+		]);
+		expect(query.mock.calls[1]?.[1]).toEqual([
+			'shared-event',
+			'postgresql',
+			'app',
+			'tenant',
+			'null',
+			'table',
+			'audit_log',
 		]);
 	});
 });

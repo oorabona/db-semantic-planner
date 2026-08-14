@@ -27,6 +27,35 @@ export type PgTransitionClientLease = {
 };
 
 /**
+ * The whole state set which a plan operation is never allowed to change.
+ *
+ * Keep this closed and named here. These settings are the complete PostgreSQL
+ * execution-contract vocabulary, including the provenance-only clauses: plan
+ * SQL must not be able to turn either its rendering prerequisites or its
+ * reviewed session provenance into a different execution environment.
+ */
+const DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS = [
+	{
+		setting: 'standard_conforming_strings',
+		column: 'standard_conforming_strings',
+	},
+	{ setting: 'search_path', column: 'search_path' },
+	{ setting: 'client_encoding', column: 'client_encoding' },
+	{ setting: 'TimeZone', column: 'time_zone' },
+] as const;
+
+type DurablePlanOperationInvariantSnapshot = {
+	readonly sessionUser: string;
+	readonly currentUser: string;
+	readonly settings: Readonly<
+		Record<
+			(typeof DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS)[number]['column'],
+			string
+		>
+	>;
+};
+
+/**
  * Declare a pg Pool as a source of transition leases.
  *
  * The typed Pool argument and this explicit factory call are the declaration.
@@ -172,6 +201,7 @@ export async function withPgTransitionRunLock<T>(
 		);
 		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
 		locked = true;
+		const invariants = await captureDurablePlanOperationInvariants(client, key);
 		const lessor = createTransitionLessor(
 			async () =>
 				({
@@ -183,7 +213,11 @@ export async function withPgTransitionRunLock<T>(
 					// same invariant check, while our own SET/SHOW contract clauses do not.
 					queryPlanOperation: async (sql: string, params?: unknown) => {
 						try {
-							await assertDurablePlanOperationInvariants(client, key);
+							await assertDurablePlanOperationInvariants(
+								client,
+								key,
+								invariants,
+							);
 						} catch (error) {
 							// A failed check at either boundary makes this session unsafe to
 							// pool, even if the final unlock happens to succeed.
@@ -202,7 +236,11 @@ export async function withPgTransitionRunLock<T>(
 							queryFailure = error;
 						}
 						try {
-							await assertDurablePlanOperationInvariants(client, key);
+							await assertDurablePlanOperationInvariants(
+								client,
+								key,
+								invariants,
+							);
 						} catch (error) {
 							planOperationViolatedInvariant = true;
 							throw error;
@@ -314,11 +352,56 @@ async function configurePgUtf8(client: {
  * state check, not a SQL recognizer: alternative spelling, comments, compound
  * statements, and future PostgreSQL syntax all get the same answer.
  */
+async function captureDurablePlanOperationInvariants(
+	client: PoolClient,
+	key: bigint,
+): Promise<DurablePlanOperationInvariantSnapshot> {
+	const row = await readDurablePlanOperationInvariants(client, key);
+	if (row.runLockHeld !== true) {
+		throw new Error(
+			'PostgreSQL transition run lock was not held while capturing durable plan operation invariants',
+		);
+	}
+	return {
+		sessionUser: row.sessionUser,
+		currentUser: row.currentUser,
+		settings: row.settings,
+	};
+}
+
 async function assertDurablePlanOperationInvariants(
 	client: PoolClient,
 	key: bigint,
+	expected: DurablePlanOperationInvariantSnapshot,
 ): Promise<void> {
+	const row = await readDurablePlanOperationInvariants(client, key);
+	if (
+		row.runLockHeld !== true ||
+		row.sessionUser !== expected.sessionUser ||
+		row.currentUser !== expected.currentUser ||
+		DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.some(
+			({ column }) => row.settings[column] !== expected.settings[column],
+		)
+	) {
+		throw new Error(
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+		);
+	}
+}
+
+async function readDurablePlanOperationInvariants(
+	client: PoolClient,
+	key: bigint,
+): Promise<{
+	readonly runLockHeld: boolean;
+	readonly sessionUser: string;
+	readonly currentUser: string;
+	readonly settings: DurablePlanOperationInvariantSnapshot['settings'];
+}> {
 	const { classId, objectId } = advisoryLockIds(key);
+	const settingColumns = DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.map(
+		({ setting, column }) => `current_setting('${setting}') AS ${column}`,
+	).join(',\n\t\t\t\t');
 	const row = (
 		await client.query(
 			`SELECT
@@ -332,15 +415,36 @@ async function assertDurablePlanOperationInvariants(
 						AND objsubid = 1
 						AND granted
 				) AS run_lock_held,
-				current_setting('client_encoding') AS client_encoding`,
+				session_user::text AS session_user,
+				current_user::text AS current_user,
+				${settingColumns}`,
 			[classId, objectId],
 		)
 	).rows[0];
-	if (row?.run_lock_held !== true || row.client_encoding !== 'UTF8') {
+	const settings = Object.fromEntries(
+		DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.map(({ column }) => [
+			column,
+			readDurablePlanOperationInvariantString(row, column),
+		]),
+	) as DurablePlanOperationInvariantSnapshot['settings'];
+	return {
+		runLockHeld: row?.run_lock_held === true,
+		sessionUser: readDurablePlanOperationInvariantString(row, 'session_user'),
+		currentUser: readDurablePlanOperationInvariantString(row, 'current_user'),
+		settings,
+	};
+}
+
+function readDurablePlanOperationInvariantString(
+	row: Record<string, unknown> | undefined,
+	column: string,
+): string {
+	const value = row?.[column];
+	if (typeof value !== 'string')
 		throw new Error(
-			'durable plan operation may not release the run lock or change client_encoding',
+			`PostgreSQL transition run invariant probe returned no string ${column}`,
 		);
-	}
+	return value;
 }
 
 function advisoryLockIds(key: bigint): {

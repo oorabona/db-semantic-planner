@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 describe('preflight adoption output', () => {
-	it('publishes only the complete adoption document at the requested path', async () => {
+	it('OBL-CLI3 atomically replaces an existing adoption destination with a restrictive artifact', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-test-'));
 		directories.push(directory);
 		const out = join(directory, 'adoption.json');

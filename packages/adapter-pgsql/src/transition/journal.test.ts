@@ -461,7 +461,7 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/authorization table foreign key drifted/);
 	});
 
-	it('mutation: allowing authorization after a step event creates approval after an attempt', async () => {
+	it('OBL-RUN2 refuses authorization after a durable step event makes the run recover-only', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		await persistRun(executor, metadata);
@@ -567,20 +567,38 @@ describe('transition journal primitive', () => {
 		).toBe(true);
 	});
 
-	it('persists an idempotent run/plan pair and rejects plan drift', async () => {
+	it('OBL-RUN7 refuses a stored-plan mutation between idempotent persists', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		const persister = createPgTransitionRunPersister(asPool(executor));
 
 		await persister.persist(metadata, plan);
-		await persister.persist(metadata, plan);
-		const driftedPlan = { ...plan };
-		Object.assign(driftedPlan, { persisted: false });
-		await expect(persister.persist(metadata, driftedPlan)).rejects.toThrow(
-			/digest does not match/,
+		executor.plans.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan: { ...plan, persisted: false },
+		});
+		await expect(persister.persist(metadata, plan)).rejects.toThrow(
+			/different proven plan/,
 		);
 		expect(executor.runs.get(metadata.runId)).toBeDefined();
-		expect(executor.plans.get(metadata.runId)?.plan).toEqual(plan);
+	});
+
+	it('OBL-RUN7 refuses journal-column type drift before it persists a run', async () => {
+		const executor = new FakeJournalExecutor();
+		executor.shapeOverrides.set('dbsp_transition_journal', {
+			...executor.tableShape('dbsp_transition_journal'),
+			columns: {
+				...(executor.tableShape('dbsp_transition_journal').columns as Record<
+					string,
+					Record<string, unknown>
+				>),
+				recorded_at: { type: 'text', notNull: true },
+			},
+		});
+		await expect(persistRun(executor, run())).rejects.toThrow(
+			/event journal table columns drifted/,
+		);
+		expect(executor.runs.size).toBe(0);
 	});
 
 	it('writes the run and plan with one autocommit statement, never a transaction', async () => {

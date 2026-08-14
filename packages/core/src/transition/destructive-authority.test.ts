@@ -1,6 +1,14 @@
-import type { DestructiveAuthorityEvidence, LedgerAddress } from '@dbsp/types';
+import type {
+	DestructiveAuthorityEvidence,
+	DestructiveAuthorityPermit,
+	LedgerAddress,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { decideDestructiveDecision } from './destructive-authority.js';
+import {
+	admitDestructiveOutcomeClaim,
+	decideDestructiveDecision,
+	isDestructiveAuthorityPermit,
+} from './destructive-authority.js';
 
 const address: LedgerAddress = {
 	scope: 'schema',
@@ -12,6 +20,39 @@ const address: LedgerAddress = {
 };
 
 describe('destructive authority matrix', () => {
+	it('OBL-AUTH7 refuses a JavaScript-forged destructive permit before the destructive sink', () => {
+		expect(
+			isDestructiveAuthorityPermit({} as unknown as DestructiveAuthorityPermit),
+		).toBe(false);
+	});
+
+	it('OBL-AUTH7 refuses an authentic destructive permit for another address', () => {
+		const decision = decideDestructiveDecision(
+			{ kind: 'removal', address },
+			{
+				declaration: 'requires-removal',
+				ownership: 'managed-by-me',
+				catalogueIdentity: 'matches-recorded',
+				operatorAcceptance: 'destructive-plan-accepted',
+				containment: 'all-contained-or-managed',
+				ledgerLineage: 'matches-database',
+			},
+		);
+		if (decision.kind !== 'destructive-decision-permitted')
+			throw new Error('expected destructive decision');
+		expect(
+			admitDestructiveOutcomeClaim({
+				decision,
+				admission: {
+					plan: { address: { ...address, name: 'other_orders' } } as never,
+					projection: {} as never,
+				},
+			}),
+		).toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'destructive authority address does not match the claim address',
+		});
+	});
 	it('permits only the six positive authority cells for a removal', () => {
 		const decision = decideDestructiveDecision(
 			{ kind: 'removal', address },

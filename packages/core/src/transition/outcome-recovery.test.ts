@@ -80,6 +80,14 @@ async function recover(
 		readonly resolve?: boolean;
 		readonly evidence?: boolean;
 		readonly effect?: 'applied' | 'no-effect' | 'unverifiable';
+		readonly evidenceMutation?: Partial<{
+			claimId: string;
+			executionId: string;
+			plannedClaimKey: string;
+			persistedBundleDigest: string;
+			planDigest: string;
+			address: typeof address;
+		}>;
 	} = {},
 ) {
 	return classifyOutcomeRecovery({
@@ -106,6 +114,16 @@ async function recover(
 							address,
 							trustRoot: 'external-ddl-window',
 						},
+						...options.evidenceMutation,
+						...(options.evidenceMutation?.address === undefined
+							? {}
+							: {
+									externalDdlExclusion: {
+										planDigest: 'plan-digest',
+										address: options.evidenceMutation.address,
+										trustRoot: 'external-ddl-window',
+									},
+								}),
 					},
 				}
 			: {}),
@@ -275,6 +293,31 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		});
 		expect(result).toMatchObject({ kind: 'outcome-recovery-blocked' });
 		expect(catalogueCalls).toBe(0);
+	});
+
+	it.each([
+		['claimId', { claimId: 'other-claim' }],
+		['executionId', { executionId: 'other-execution' }],
+		['plannedClaimKey', { plannedClaimKey: 'other-key' }],
+		['statement-bundle digest', { persistedBundleDigest: 'other-bundle' }],
+		['planDigest', { planDigest: 'other-plan' }],
+		['address', { address: { ...address, name: 'other_accounts' } }],
+	] as const)('OBL-REC2 refuses indeterminate recovery evidence with one mismatched %s before catalogue read', async (_field, evidenceMutation) => {
+		const result = await recover(
+			openClaim('intent', 'indeterminate'),
+			present,
+			{
+				resolve: true,
+				evidence: true,
+				effect: 'applied',
+				evidenceMutation,
+			},
+		);
+		expect(result).toMatchObject({
+			kind: 'outcome-recovery-blocked',
+			reason:
+				'indeterminate claim refuses a missing or mismatched admission envelope',
+		});
 	});
 
 	it('returns pending and no append when the catalogue is unavailable', async () => {

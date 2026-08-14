@@ -19,7 +19,6 @@ import {
 	type ModelIR,
 	outcomeClaimEventId,
 	outcomeClaimId,
-	planOperationSession,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
@@ -223,7 +222,12 @@ async function runPersistedNonTransactionalAtGate(input: {
 			async (target) => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
-					const executor = planOperationSession(lease.session);
+					// The admitted facade owns journal and ledger infrastructure on the
+					// ordinary leased-session channel.  Its physical-shape reader uses
+					// SET LOCAL search_path inside its transaction; routing that setup
+					// through the plan-operation channel would make the lease invariant
+					// mistake adapter infrastructure for reviewed plan SQL.
+					const executor = lease.session;
 					const persisted = await readTransitionJournal(
 						executor,
 						input.planned.runId,

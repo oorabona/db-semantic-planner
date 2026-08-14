@@ -51,9 +51,13 @@ const forgedApprovalScope: ApprovalScopeVerdict = {};
 // @ts-expect-error Live admission verdicts are module-private brands.
 const forgedLiveAdmission: LiveAdmissionVerdict = {};
 
+// @ts-expect-error OBL-AUTH3: a cross-wired permit cannot be assembled from a caller-shaped verdict.
+const crossWiredApprovalVerdict: ApprovalScopeVerdict = {};
+
 void [
 	forgedDigestBinding,
 	forgedValidatedManifest,
 	forgedApprovalScope,
 	forgedLiveAdmission,
+	crossWiredApprovalVerdict,
 ];

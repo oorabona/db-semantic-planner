@@ -137,6 +137,23 @@ describe('dbsp apply contract and policy', () => {
 		).toThrow('acceptance[1].withinScope[0].within.kind');
 	});
 
+	it.each([
+		[
+			'an unknown trust-root union member',
+			{
+				class: 'manual-proof',
+				fromTrustRoot: { kind: 'machine', identity: 'operator' },
+			},
+		],
+		['an empty acceptance class', { class: '' }],
+		[
+			'an extra top-level acceptance key',
+			{ class: 'manual-proof', attacker: true },
+		],
+	] as const)('OBL-CLI4 rejects %s in --accept and --accept-policy input', (_attack, value) => {
+		expect(() => validateAssumptionAcceptance(value)).toThrow();
+	});
+
 	it('accepts an opaque versioned catalogue identity envelope without interpreting its payload', () => {
 		expect(() =>
 			validateAssumptionAcceptance({
@@ -322,6 +339,58 @@ describe('dbsp apply contract and policy', () => {
 				'plan-digest',
 				policy,
 				grants,
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		['plan digest', { runId: 'run-reviewed', planDigest: 'other-plan' }],
+		['policy', { runId: 'run-reviewed', policy: [{ class: 'other-proof' }] }],
+		[
+			'grants',
+			{
+				runId: 'run-reviewed',
+				grants: [{ assumptionId: 'assumption:2', grant: 0 }],
+			},
+		],
+		['actor', { runId: 'run-reviewed', actor: 'other-operator' }],
+		[
+			'authorization time',
+			{ runId: 'run-reviewed', authorizedAt: '2026-07-30T00:00:00.000Z' },
+		],
+	] as const)('OBL-CLI4 refuses a reused durable authorization with one changed %s binding', (_field, changed) => {
+		const policy = [{ class: 'manual-proof' }] as const;
+		const grants = [{ assumptionId: 'assumption:1', grant: 0 }] as const;
+		const variant = changed as Partial<{
+			runId: string;
+			planDigest: string;
+			policy: typeof policy;
+			grants: typeof grants;
+			actor: string;
+			authorizedAt: string;
+		}>;
+		const record = {
+			policy,
+			grants,
+			actor: 'operator',
+			authorizedAt: '2026-07-29T00:00:00.000Z',
+			digest: authorizationDigest(
+				'run-reviewed',
+				'plan-digest',
+				policy,
+				grants,
+				'operator',
+				'2026-07-29T00:00:00.000Z',
+			),
+		};
+		const candidate = { ...record, ...variant };
+		expect(
+			hasReusableAuthorization(
+				[candidate],
+				variant.runId ?? 'run-reviewed',
+				variant.planDigest ?? 'plan-digest',
+				variant.policy ?? policy,
+				variant.grants ?? grants,
 			),
 		).toBe(false);
 	});
