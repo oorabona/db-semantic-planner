@@ -32,10 +32,10 @@ row requires CLI/package-root evidence.
 | OBL-CTRL2 | covered | `tests/e2e/adoption-release-replace-drift.test.ts: SC-60: release refuses pending, blocked, another controller and lineage mismatch; success preserves the object and makes the address unknown`; `tests/e2e/claim-controller-role.test.ts: OBL-CTRL2 opens the managed claim under a distinct login role, then drives the public CLI release path both before and after that role is dropped` | — |
 | OBL-CTRL3 | covered | `packages/adapter-pgsql/src/transition/chain-reader.test.ts: OBL-CTRL3: two address chains sharing an event id cannot cross-answer controller lookup` | — |
 | OBL-CTRL4 | covered | `packages/adapter-pgsql/src/transition/removal-containment.test.ts: OBL-CTRL4: never infers ownership from a system-schema location`; `packages/adapter-pgsql/src/transition/removal-containment.test.ts: returns undecidable when a system-resident dependent lacks positive ownership evidence`; `tests/e2e/destructive-generator-authority.test.ts: OBL-CTRL4 plants a pg_catalog dependent under allow_system_table_mods, drives public generator removal to its containment refusal, and proves no DROP DDL runs` | — |
-| OBL-LIFE1 | partial | `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE1 substitutes and removes persisted readdress step material, drives it through apply, and asserts the source remains` | The test is present but the pinned probe server is PostgreSQL 18, which this runtime refuses before lifecycle execution; re-run on the supported major. |
-| OBL-LIFE2 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: OBL-LIFE2 substitutes and removes persisted adoption material through apply and asserts no DDL`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59: a DSL-declared matching table records declaration, shape and identity; it is idempotent and mismatches refuse` | The new apply construction awaits a supported-major e2e run; its assertions reject the invalid durable manifest before DDL. |
+| OBL-LIFE1 | covered | `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE1: apply refuses substituted and absent persisted readdress material before DDL` | — |
+| OBL-LIFE2 | covered | `tests/e2e/adoption-release-replace-drift.test.ts: OBL-LIFE2: apply refuses substituted and absent persisted adoption material`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59: a DSL-declared matching table records declaration, shape and identity; it is idempotent and mismatches refuse` | — |
 | OBL-LIFE3 | covered | `packages/adapter-pgsql/src/ddl/destructive-classification.test.ts: OBL-LIFE3: uses the frozen ChangeKind mapping and reserves the default for unknown kinds` | — |
-| OBL-LIFE4 | partial | `packages/adapter-pgsql/src/transition/readdress.test.ts: refuses a cross-database declaration before claims, names a non-table unsupported kind, and refuses an escaping dependent`; `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE4 drives all three forms through apply` | The public construction awaits a supported-major e2e run; the pinned PostgreSQL 18 probe is refused by runtime integrity first. |
+| OBL-LIFE4 | covered | `packages/adapter-pgsql/src/transition/readdress.test.ts: refuses a cross-database declaration before claims, names a non-table unsupported kind, and refuses an escaping dependent`; `tests/e2e/readdress-recovery-local.test.ts: OBL-LIFE4: apply refuses cross-database, non-table, and escaping-dependent readdresses` | — |
 | OBL-LIFE5 | partial | `tests/e2e/readdress-recovery-local.test.ts: SC-55: identity mismatch and an occupied target refuse before DDL`; `packages/adapter-pgsql/src/transition/readdress.test.ts: keeps a different target identity occupied`; `packages/adapter-pgsql/src/transition/readdress.test.ts: allows a same-identity physical sequence at its re-keyed target address` | Missing failpoint closure mutation, unmanaged source, second-controller source, and public self-occupying rerun. |
 | OBL-LIFE6 | partial | `tests/e2e/adoption-release-replace-drift.test.ts: OBL-LIFE6 asserts one adopt terminal and zero new claims after a public apply re-run`; `tests/e2e/adoption-release-replace-drift.test.ts: SC-59 mutates live shape/identity and refuses` | The under-lock mutation construction remains failpoint-only. The re-run assertion awaits a supported-major e2e run. |
 | OBL-LIFE7 | covered | `tests/e2e/managed-ledger-outcome-protocol.test.ts: OBL-LIFE7 refuses a shape-matching foreign object from both unknown and absent, leaving no adoption`; `tests/e2e/managed-ledger-outcome-protocol.test.ts: OBL-LIFE7 records a created PostgreSQL catalogue identity then admits a subsequent lifecycle only when that exact identity is re-encountered`; `packages/core/src/transition/outcome-protocol.test.ts: scopes repeated lifecycles to execution and extends the address chain` | — |
@@ -87,23 +87,23 @@ No remaining unit-slice rows.
 
 ### E2E
 
-20 rows: OBL-RUN2, OBL-AUTH5, OBL-AUTH8, OBL-AUTH10,
-OBL-CTRL4, OBL-LIFE1, OBL-LIFE2, OBL-LIFE4,
-OBL-LIFE5, OBL-LIFE6, OBL-LIFE7, OBL-READ1, OBL-READ2, OBL-READ4,
-OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC7, OBL-REC12,
-OBL-REC14, OBL-CLI10.
+13 rows: OBL-RUN2, OBL-AUTH8, OBL-LIFE5, OBL-LIFE6, OBL-READ1,
+OBL-READ2, OBL-LOCK1, OBL-LOCK2, OBL-LOCK4, OBL-LOCK7, OBL-REC7,
+OBL-REC13, OBL-REC14.
 
 ### Failpoint-e2e
 
-15 rows: OBL-RUN2, OBL-AUTH5, OBL-AUTH10, OBL-LIFE5, OBL-LIFE6,
-OBL-READ1, OBL-READ3, OBL-READ4, OBL-LOCK1, OBL-LOCK2, OBL-LOCK3,
-OBL-LOCK7, OBL-REC7, OBL-REC13, OBL-REC14.
+8 rows: OBL-RUN2, OBL-LIFE5, OBL-LIFE6, OBL-READ2, OBL-LOCK7,
+OBL-REC7, OBL-REC13, OBL-REC14.
 
 ### Audit evidence
 
 1 gap: OBL-CLI6 needs the quoted four-surface final-review checklist.  OBL-CLI7
 has an evidence artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts`.
 
+The status totals are **52 covered, 12 partial, 1 gap, and 2 audit-evidence**.
+Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
+artifact.  All 67 table rows are accounted for.
 The status totals are **39 covered, 23 partial, 3 gap, and 2 audit-evidence**.
 Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
 artifact.  All 67 table rows are accounted for.
