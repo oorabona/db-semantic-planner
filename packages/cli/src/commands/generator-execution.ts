@@ -8,6 +8,7 @@ import {
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
 	type PgLockedRun,
+	type PgOutcomeCheckpointObserver,
 	preflightPgDeclaredAdoption,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
@@ -731,6 +732,8 @@ export async function executeGeneratorPlan(input: {
 	readonly approval?: ScopedApprovalSet;
 	/** Durable witness minted while apply holds this run's journal lock. */
 	readonly run: PgLockedRun;
+	/** Test-only admitted-path observation; absent from every CLI invocation. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 	/** @deprecated Compatibility shim for old direct fixtures. */
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
@@ -863,6 +866,7 @@ export async function executeGeneratorPlan(input: {
 					expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 					shapeMatches: () =>
 						adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
+					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {
 					completedStepKeys.push(step.stepKey);
@@ -882,6 +886,7 @@ export async function executeGeneratorPlan(input: {
 					step,
 					database,
 					targetSchema: input.schema,
+					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (result.outcome === 'completed' || result.outcome === 'no-op') {
 					completedStepKeys.push(step.stepKey);
@@ -954,6 +959,9 @@ export async function executeGeneratorPlan(input: {
 							readBack: async (session) =>
 								readGeneratedPostcondition(session, step, address),
 							recordCatalogueIdentity: true,
+							...(input.observer === undefined
+								? {}
+								: { observer: input.observer }),
 							vacancy: async (executor: LedgerQueryable) =>
 								(await readPgCatalogueIdentity(executor, address))
 									? {
@@ -1095,6 +1103,7 @@ export async function executeGeneratorPlan(input: {
 						};
 					return decision;
 				},
+				...(input.observer === undefined ? {} : { observer: input.observer }),
 			};
 			const executed = (await executePgAdmittedOperation(input.pool, {
 				run: input.run,
@@ -1106,10 +1115,72 @@ export async function executeGeneratorPlan(input: {
 					request: admitRequest,
 					readBackAndResolve: async (session) => {
 						const live = await readPgCatalogueIdentity(session, address);
-						if (step.classification === 'removal' && live)
-							throw new Error(
-								`destructive claim ${claim.claimId} executed but ${address.name} remains present`,
+						const survivors: LedgerAddress[] =
+							step.classification === 'removal' && live ? [address] : [];
+						const childLives = await Promise.all(
+							containedClaims.map(async (child) => ({
+								child,
+								live: await readPgCatalogueIdentity(
+									session,
+									child.plan.address,
+								),
+							})),
+						);
+						for (const { child, live: childLive } of childLives)
+							if (childLive) survivors.push(child.plan.address);
+						if (survivors.length > 0) {
+							const survivorNames = survivors.map(
+								(survivor) =>
+									`${survivor.kind} ${survivor.schema ?? '<database>'}.${survivor.name}`,
 							);
+							const survivorObservation = {
+								value: { survivors: survivorNames },
+								digest: createHash('sha256')
+									.update(JSON.stringify(survivorNames))
+									.digest('hex'),
+							};
+							return {
+								rootClaimId: claim.claimId,
+								members: [
+									{
+										target: home(address),
+										member: {
+											eventId: outcomeClaimEventId(
+												claim.claimId,
+												'indeterminate',
+											),
+											executionId,
+											plannedClaimKey: claim.plannedClaimKey,
+											claimGroupId: claim.claimGroupId,
+											rootClaimId: claim.rootClaimId,
+											address,
+											eventKind: 'indeterminate' as const,
+											observed: survivorObservation,
+										},
+									},
+									...containedClaims.map((child) => ({
+										target: home(child.plan.address),
+										member: {
+											eventId: outcomeClaimEventId(
+												child.plan.claimId,
+												'indeterminate',
+											),
+											executionId,
+											plannedClaimKey: child.plan.plannedClaimKey,
+											claimGroupId: claim.claimId,
+											rootClaimId: claim.claimId,
+											address: child.plan.address,
+											eventKind: 'indeterminate' as const,
+											observed: survivorObservation,
+										},
+									})),
+								],
+								reservations: [
+									baseReservation,
+									...containedClaims.map(({ reservation }) => reservation),
+								],
+							};
+						}
 						const terminals: Array<{
 							readonly target: LedgerHome;
 							readonly member: Omit<
@@ -1143,10 +1214,6 @@ export async function executeGeneratorPlan(input: {
 							},
 						];
 						for (const child of containedClaims) {
-							if (await readPgCatalogueIdentity(session, child.plan.address))
-								throw new Error(
-									`destructive claim ${claim.claimId} executed but contained ${child.plan.address.name} remains present`,
-								);
 							terminals.push({
 								target: home(child.plan.address),
 								member: {
@@ -1174,6 +1241,7 @@ export async function executeGeneratorPlan(input: {
 			})) as
 				| { readonly kind: 'executed-destructive-outcome' }
 				| { readonly kind: 'outcome-protocol-refused'; readonly reason: string }
+				| { readonly kind: 'outcome-protocol-pending'; readonly reason: string }
 				| {
 						readonly kind: 'outcome-transport-ambiguous';
 						readonly reason: string;
@@ -1184,6 +1252,10 @@ export async function executeGeneratorPlan(input: {
 						outcome: 'execution-failed',
 						detail: executed.reason,
 					};
+			if (executed.kind === 'outcome-protocol-pending')
+				return partial(
+					`destructive claim ${claim.claimId} remains pending after executing: ${executed.reason}`,
+				);
 			if (executed.kind !== 'executed-destructive-outcome')
 				return {
 					outcome: 'destructive-authority-refused',

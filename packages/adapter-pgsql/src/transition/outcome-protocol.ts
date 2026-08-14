@@ -535,6 +535,12 @@ async function memberWithCurrentTerminalPredecessor(
 
 export type PgDestructiveOutcomeResult =
 	| { readonly kind: 'executed-destructive-outcome' }
+	/**
+	 * SQL was admitted and may have run, but its operation-owned read-back could
+	 * not establish a terminal fact.  Keep the durable claim open for reconcile;
+	 * in particular, never turn this post-executing state into `refused`.
+	 */
+	| { readonly kind: 'outcome-protocol-pending'; readonly reason: string }
 	| OutcomeProtocolRefusal
 	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
 
@@ -559,6 +565,7 @@ async function runPgDestructiveOutcome(
 		if (admission.kind !== 'admitted-outcome-claim') return admission;
 		if (!('destructivePermit' in admission))
 			return refusal('destructive admission did not mint an authority permit');
+		let executingCommitted = false;
 		try {
 			// Persist the send boundary before the first autocommitted statement.
 			await begin(session, request.lockTimeoutMs);
@@ -592,6 +599,7 @@ async function runPgDestructiveOutcome(
 			});
 			try {
 				await commitPgOutcome(session, request.observer);
+				executingCommitted = true;
 			} catch (error) {
 				return {
 					kind: 'outcome-transport-ambiguous',
@@ -609,11 +617,23 @@ async function runPgDestructiveOutcome(
 				admission as AdmittedDestructiveOutcomeClaim,
 			);
 			const resolved = await resolvePgDestructiveOutcome(session, resolution);
+			if (
+				resolution.members.some(
+					({ member }) => member.eventKind === 'indeterminate',
+				)
+			)
+				return {
+					kind: 'outcome-protocol-pending',
+					reason:
+						'destructive read-back found a surviving closure member; the claim remains indeterminate',
+				};
 			return resolved ?? { kind: 'executed-destructive-outcome' };
 		} catch (error) {
 			await rollback(session);
 			if (error instanceof PgCommitAcknowledgementAmbiguousError)
 				return { kind: 'outcome-transport-ambiguous', reason: error.message };
+			if (executingCommitted)
+				return { kind: 'outcome-protocol-pending', reason: detail(error) };
 			return refusal(detail(error));
 		}
 	});
@@ -662,13 +682,16 @@ export async function resolvePgDestructiveOutcome(
 			terminal.target,
 			terminal.member,
 		);
-		await appendPgLedgerResolution(
-			executor,
-			terminal.target,
-			member,
-			request.rootClaimId,
-			request.reservations,
-		);
+		if (member.eventKind === 'indeterminate')
+			await appendPgLedgerProgress(executor, terminal.target, member);
+		else
+			await appendPgLedgerResolution(
+				executor,
+				terminal.target,
+				member,
+				request.rootClaimId,
+				request.reservations,
+			);
 		return undefined;
 	} catch (error) {
 		return refusal(detail(error));
@@ -1538,12 +1561,24 @@ export async function resolvePgOutcomeClaimGroup(
 					memberWithCurrentTerminalPredecessor(session, target, member),
 				),
 			);
-			await appendPgLedgerResolutionGroup(
-				session,
-				request.rootClaimId,
-				members,
-				request.reservations,
-			);
+			if (members.every((member) => member.eventKind === 'indeterminate')) {
+				// A readable partial destructive effect keeps every member's claim
+				// open.  Reservations deliberately remain: another writer must not
+				// turn this uncertainty into a competing lifecycle.
+				for (const member of members)
+					await appendPgLedgerProgress(
+						session,
+						targetForAddress(member.address),
+						member,
+					);
+			} else {
+				await appendPgLedgerResolutionGroup(
+					session,
+					request.rootClaimId,
+					members,
+					request.reservations,
+				);
+			}
 			await commitPgOutcome(session, request.observer);
 			begun = false;
 			return undefined;

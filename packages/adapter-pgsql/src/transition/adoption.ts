@@ -19,6 +19,7 @@ import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
 	type PgLockedRun,
+	type PgOutcomeCheckpointObserver,
 	type PgOutcomeTransactionalRequest,
 } from './outcome-protocol.js';
 
@@ -57,6 +58,8 @@ export interface PgPersistedDeclaredAdoptionInput
 	readonly approval: ScopedApprovalSet;
 	/** Exact digest-covered step; adoption never constructs a standalone plan. */
 	readonly step: NormalizedManagedStep;
+	/** Test-only admitted-path observation; absent from normal callers. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 }
 
 /**
@@ -213,6 +216,7 @@ export async function executePgDeclaredAdoption(
 			},
 			readBack: async () => input.declaration,
 			recordCatalogueIdentity: true,
+			...(input.observer === undefined ? {} : { observer: input.observer }),
 		};
 		const result = await executePgAdmittedOperation(input.executor, {
 			run: input.run,

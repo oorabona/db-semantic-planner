@@ -23,6 +23,7 @@ import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
 	type PgLockedRun,
+	type PgOutcomeCheckpointObserver,
 	recoverPgAdmittedReaddressPair,
 } from './outcome-protocol.js';
 
@@ -79,6 +80,8 @@ export interface PgPersistedReaddressInput {
 	readonly step: NormalizedManagedStep;
 	readonly database: string;
 	readonly targetSchema: string;
+	/** Test-only admitted-path observation; absent from normal callers. */
+	readonly observer?: PgOutcomeCheckpointObserver;
 }
 
 interface ClosureMember {
@@ -696,6 +699,7 @@ export async function executePgPersistedTableReaddress(
 					}
 					return undefined;
 				},
+				...(input.observer === undefined ? {} : { observer: input.observer }),
 			},
 		},
 	});

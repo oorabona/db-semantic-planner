@@ -11,8 +11,12 @@ import {
 	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+import {
+	appendPgLedgerResolution,
+	lockPgJournalRun,
+} from '@dbsp/adapter-pgsql/internal';
 import { outcomeClaimId, transitionPlanDigest } from '@dbsp/core';
+import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	LedgerAddress,
 	LedgerReservationRow,
@@ -24,6 +28,7 @@ import {
 	runApply,
 	runNoArgumentApply,
 } from '../../packages/cli/src/commands/apply.js';
+import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { openFixtureOutcomeClaim } from './outcome-claim-fixture.js';
@@ -643,6 +648,77 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				.query(`DROP TABLE IF EXISTS pg_catalog.${quote(plantedName)}`)
 				.catch(() => undefined);
 		}
+	});
+
+	it('OBL-AUTH10: a dependent added at the post-lock admission checkpoint changes the containment closure and refuses before DROP', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		const rootName = `obl_auth10_root_${randomUUID().replaceAll('-', '')}`;
+		const dependentName = `obl_auth10_dependent_${randomUUID().replaceAll('-', '')}`;
+		const root = tableAddress(schema, databaseId, rootName);
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+		);
+		await adopt(root);
+		const plan = generatorPlan(
+			{
+				kind: 'drop_table',
+				table: rootName,
+				classification: 'removal',
+				details: 'checkpointed destructive removal',
+				statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+			},
+			databaseId,
+			schema,
+		);
+		const planDigest = transitionPlanDigest(plan);
+		const runId = `obl-auth10:${randomUUID()}`;
+		const run = lockPgJournalRun(
+			mintDurablyLoadedRun({
+				runId,
+				planDigest,
+				targetContextDigest: `checkpoint:${schema}`,
+				databaseId,
+				coreVersion: 'checkpoint-e2e',
+				startedAt: new Date().toISOString(),
+				replayability: 'replayable',
+			}),
+		);
+		let reached: (() => void) | undefined;
+		const atAdmission = new Promise<void>((resolve) => {
+			reached = resolve;
+		});
+		let release: (() => void) | undefined;
+		const continueAdmission = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const running = executeGeneratorPlan({
+			pool,
+			plan,
+			planDigest,
+			schema,
+			run,
+			runId,
+			accepts: [`destructive-plan-accepted:${planDigest}`],
+			observer: async (point) => {
+				if (point !== 'post-lock-integrity-before-append') return;
+				reached?.();
+				await continueAdmission;
+			},
+		});
+		await atAdmission;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.${quote(dependentName)} (root_id integer REFERENCES ${quote(schema)}.${quote(rootName)}(id))`,
+		);
+		release?.();
+		await expect(running).resolves.toMatchObject({
+			outcome: 'destructive-authority-refused',
+			detail: expect.stringMatching(/containment.*undecidable/i),
+			refusal: { withheldAuthority: 'destructive containment authority' },
+		});
+		await expect(
+			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${rootName}`]),
+		).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
 	});
 
 	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {
