@@ -360,6 +360,10 @@ describe('withPgTransitionRunLock statement origin', () => {
 					encoding = 'LATIN1';
 					return { rows: [] };
 				}
+				if (sql === "SET client_encoding TO 'LATIN1'") {
+					encoding = 'LATIN1';
+					return { rows: [] };
+				}
 				if (sql === 'SET ROLE dbsp_member') {
 					currentUser = 'dbsp_member';
 					return { rows: [] };
@@ -476,6 +480,36 @@ describe('withPgTransitionRunLock statement origin', () => {
 			}
 			return undefined;
 		});
+
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toBe(
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+		);
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it.each([
+		"SET NAMES 'LATIN1'",
+		"SET client_encoding TO 'LATIN1'",
+	])('mutation: a plan operation using %s violates the encoding invariant and closes the run', async (statement) => {
+		const { client, pool } = lockedPool();
+		let failure: unknown;
+
+		await withPgTransitionRunLock(
+			pool,
+			'run:plan-encoding-spelling',
+			async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				try {
+					await planOperationSession(lease.session).query(statement);
+				} catch (error) {
+					failure = error;
+				} finally {
+					await lease.release();
+				}
+				return undefined;
+			},
+		);
 
 		expect(failure).toBeInstanceOf(Error);
 		expect((failure as Error).message).toBe(

@@ -3,12 +3,15 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
+	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgCatalogueIdentity,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+import { schema } from '@dbsp/core';
 import {
 	type LedgerAddress,
 	type LedgerPayload,
@@ -142,6 +145,26 @@ async function schemaFile(
 	await writeFile(
 		path,
 		`import { schema } from '@dbsp/core';\nexport default schema({ ${table}: { id: 'integer' } }, { ${table}: { ${state}: true } });\n`,
+	);
+	schemaFiles.push(path);
+	return path;
+}
+
+async function bootstrapSchemaFile(): Promise<string> {
+	const path = `${process.cwd()}/.unit13-${unique('initial-bootstrap')}.mjs`;
+	await writeFile(
+		path,
+		[
+			"import { schema } from '@dbsp/core';",
+			'export default schema(',
+			'  {',
+			"    authors: { id: { type: 'integer', primaryKey: true }, email: { type: 'text', unique: true } },",
+			"    posts: { id: { type: 'integer', primaryKey: true }, authorId: 'integer', title: 'text' },",
+			'  },',
+			');',
+			'',
+		].join('\n'),
+		'utf8',
 	);
 	schemaFiles.push(path);
 	return path;
@@ -494,6 +517,70 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 			),
 		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		void databaseId;
+	});
+
+	it('restores the complete initial-schema bootstrap through the persisted generator path', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schemaName = names[0]!;
+		const desired = schema({
+			authors: {
+				id: { type: 'integer', primaryKey: true },
+				email: { type: 'text', unique: true },
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: 'integer',
+				title: 'text',
+			},
+		});
+		const planned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema: schemaName,
+			schemaFile: await bootstrapSchemaFile(),
+		});
+		expect(planned).toMatchObject({
+			compareKind: 'transitions',
+			proveKind: 'proven',
+			persisted: true,
+		});
+		if (!planned.plan || !planned.planDigest || !planned.runId)
+			throw new Error('initial bootstrap generator plan was not persisted');
+		const durablePlan = planned.plan as GeneratorDurablePlan;
+		const generatedStatements = durablePlan.generator.changes.flatMap(
+			(change) => change.statements,
+		);
+		const executableStatements = durablePlan.steps.flatMap((step) => {
+			const candidate = step as {
+				readonly statementBundle?: {
+					readonly statements: readonly { readonly sql: string }[];
+				};
+			};
+			return (
+				candidate.statementBundle?.statements.map(
+					(statement) => statement.sql,
+				) ?? []
+			);
+		});
+		expect(generatedStatements.length).toBeGreaterThan(0);
+		expect(executableStatements).toEqual(generatedStatements);
+
+		const applied = await runApply(
+			planned.runId,
+			{ db: process.env.DATABASE_URL!, planDigest: planned.planDigest },
+			pool,
+		);
+		if (!('result' in applied))
+			throw new Error(
+				`initial bootstrap generator plan did not apply: ${applied.outcome}`,
+			);
+		expect(applied.result).toEqual({ outcome: 'completed' });
+
+		const endState = await comparePgsqlDatabaseSchema(
+			createPgsqlAdapter(pool),
+			desired.model,
+			{ schema: schemaName, ignoreUnmanagedExtensions: true },
+		);
+		expect(endState.changes).toEqual([]);
 	});
 
 	it('OBL-LIFE6: recorded adoption re-run adds neither a second claim nor a second adopt terminal', async () => {

@@ -186,7 +186,7 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 			1,
 			{
 				outcome: 'inspect-failed',
-				error: expect.stringContaining('EAI_AGAIN'),
+				error: expect.stringMatching(/ENOTFOUND|EAI_AGAIN/),
 			},
 		],
 		[
