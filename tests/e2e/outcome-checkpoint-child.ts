@@ -6,7 +6,7 @@ import type { LedgerReservationRow, OutcomeClaimPlan } from '@dbsp/types';
 import pg from 'pg';
 import { checkpoint } from './harness/index.js';
 
-const [mode, schema] = process.argv.slice(2);
+const [mode, schema, expectation] = process.argv.slice(2);
 const db = process.env.DATABASE_URL;
 
 function quoteIdent(identifier: string): string {
@@ -111,6 +111,11 @@ void executePgAdmittedOperation(pool, {
 	},
 })
 	.then(async (result) => {
+		if (expectation === 'integrity-refusal') {
+			if (result.kind !== 'outcome-protocol-refused')
+				throw new Error(`checkpoint child result: ${result.kind}`);
+			return;
+		}
 		if (result.kind !== 'executed-outcome-claim')
 			throw new Error(`checkpoint child result: ${result.kind}`);
 	})

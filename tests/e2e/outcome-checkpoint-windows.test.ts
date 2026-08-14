@@ -44,15 +44,42 @@ async function provision(schema: string): Promise<void> {
 function spawn(
 	mode: 'transactional' | 'non-transactional',
 	schema: string,
+	expectation?: 'integrity-refusal',
 ): CheckpointChild {
 	const db = process.env.DATABASE_URL;
 	if (!db)
 		throw new Error('DATABASE_URL is required for outcome checkpoint E2E');
 	return spawnCheckpointChild(
 		fileURLToPath(new URL('./outcome-checkpoint-child.ts', import.meta.url)),
-		{ args: [mode, schema], env: { ...process.env, DATABASE_URL: db } },
+		{
+			args: [mode, schema, ...(expectation === undefined ? [] : [expectation])],
+			env: { ...process.env, DATABASE_URL: db },
+		},
 	);
 }
+
+const ledgerArtefactDrifts = [
+	[
+		'relation',
+		(schema: string) =>
+			`ALTER TABLE ${quoteIdent(schema)}.${quoteIdent('dbsp_ledger_marker')} RENAME TO ${quoteIdent('dbsp_ledger_marker_drift')}`,
+	],
+	[
+		'column',
+		(schema: string) =>
+			`ALTER TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} DROP COLUMN recorded_at`,
+	],
+	[
+		'constraint',
+		(schema: string) =>
+			`ALTER TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} DROP CONSTRAINT dbsp_ledger_event_one_child`,
+	],
+	[
+		'index',
+		(schema: string) =>
+			`DROP INDEX ${quoteIdent(schema)}.${quoteIdent('dbsp_ledger_event_terminal_member')}`,
+	],
+] as const;
 
 async function acknowledgeThrough(
 	child: CheckpointChild,
@@ -95,6 +122,54 @@ describe.sequential('OBL checkpoint windows', () => {
 			expect(await eventKinds(schema)).toEqual(['intent', 'observed']);
 		} finally {
 			await child.terminate('SIGKILL');
+		}
+	});
+
+	it.each([
+		['transactional completion append', 'transactional', [] as const] as const,
+		[
+			'non-transactional claim append',
+			'non-transactional',
+			[] as const,
+		] as const,
+		[
+			'non-transactional executing append',
+			'non-transactional',
+			['post-lock-integrity-before-append', 'commit-acknowledged'] as const,
+		] as const,
+		[
+			'non-transactional terminal append',
+			'non-transactional',
+			[
+				'post-lock-integrity-before-append',
+				'commit-acknowledged',
+				'post-lock-integrity-before-append',
+				'commit-acknowledged',
+				'ddl-completed-before-read-back',
+			] as const,
+		] as const,
+	] as const)('OBL-AUTH5: every uncovered %s refuses every mutated ledger artefact before its append', async (_path, mode, prefix) => {
+		for (const [artefact, mutate] of ledgerArtefactDrifts) {
+			const schema = schemaName(`auth5_${artefact}`);
+			await provision(schema);
+			const child = spawn(mode, schema, 'integrity-refusal');
+			try {
+				await acknowledgeThrough(child, prefix);
+				await waitFor(
+					'post-lock integrity checkpoint',
+					child.waitForCheckpoint('post-lock-integrity-before-append'),
+				);
+				const pool = await getTestPool();
+				await pool.query(mutate(schema));
+				await child.acknowledge('post-lock-integrity-before-append');
+				expect(
+					await waitFor('integrity-refusal child exit', child.exited),
+				).toMatchObject({
+					code: 0,
+				});
+			} finally {
+				await child.terminate('SIGKILL');
+			}
 		}
 	});
 

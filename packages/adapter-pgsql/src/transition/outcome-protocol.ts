@@ -1493,6 +1493,7 @@ async function openPgOutcomeClaimOnSession(
 					: detail(lock.error),
 			);
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		if (run) await createPostLockAdmissionEvidence(executor, lock.proof);
 		const integrity = await validatePgLedgerRuntimeIntegrity(
 			executor,
@@ -1504,7 +1505,6 @@ async function openPgOutcomeClaimOnSession(
 			begun = false;
 			return integrity;
 		}
-		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
 			await executor.query('ROLLBACK');
@@ -1871,6 +1871,7 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return refusal('ledger advisory lock is busy');
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const postLockEvidence = await createPostLockAdmissionEvidence(
 			executor,
 			lock.proof,
@@ -1891,7 +1892,6 @@ async function runPgTransactionalOutcomeOnSession(
 			begun = false;
 			return integrity;
 		}
-		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const target = targetForPlan(request.plan);
 		const { admission } = await admitPgOutcomeClaim(executor, request);
 		if (admission.kind !== 'admitted-outcome-claim') {
@@ -2481,6 +2481,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return refusal('ledger advisory lock is busy');
 		}
+		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		const executingPostLockEvidence = await createPostLockAdmissionEvidence(
 			executor,
 			executingLock.proof,
@@ -2492,7 +2493,15 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return executingLiveAdmission;
 		}
-		await checkpoint(request.observer, 'post-lock-integrity-before-append');
+		const executingIntegrity = await validatePgLedgerRuntimeIntegrity(
+			executor,
+			homesFor(request),
+			verdicts.run,
+		);
+		if (executingIntegrity) {
+			await rollback(executor);
+			return executingIntegrity;
+		}
 		const target = targetForPlan(request.plan);
 		const liveAdmissionRefusal = request.verifyLiveAdmission
 			? await request.verifyLiveAdmission(executor, admission.plan)
@@ -2511,8 +2520,8 @@ async function runPgNonTransactionalOutcomeOnSession(
 				await rollback(executor);
 				return refusal('ledger advisory lock is busy');
 			}
-			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 			await checkpoint(request.observer, 'post-lock-integrity-before-append');
+			await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 			await refuseClaim(
 				executor,
 				admission,
@@ -2574,8 +2583,17 @@ async function runPgNonTransactionalOutcomeOnSession(
 			await rollback(executor);
 			return refusal('ledger advisory lock is busy');
 		}
-		await createPostLockAdmissionEvidence(executor, terminalLock.proof);
 		await checkpoint(request.observer, 'post-lock-integrity-before-append');
+		await createPostLockAdmissionEvidence(executor, terminalLock.proof);
+		const terminalIntegrity = await validatePgLedgerRuntimeIntegrity(
+			executor,
+			homesFor(request),
+			verdicts.run,
+		);
+		if (terminalIntegrity) {
+			await rollback(executor);
+			return terminalIntegrity;
+		}
 		const terminalPredecessor = await currentTerminalPredecessor(
 			executor,
 			target,

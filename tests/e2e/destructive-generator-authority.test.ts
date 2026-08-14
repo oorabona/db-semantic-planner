@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import {
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
@@ -28,6 +29,7 @@ import type {
 	NormalizedManagedStep,
 	ProvenPlanStep,
 } from '@dbsp/types';
+import pg from 'pg';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import {
 	runApply,
@@ -36,6 +38,7 @@ import {
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
+import { spawnCheckpointChild } from './harness/index.js';
 import {
 	fixtureOutcomeClaim,
 	openFixtureOutcomeClaim,
@@ -118,10 +121,10 @@ function reservation(
 	};
 }
 
-async function adopt(address: LedgerAddress): Promise<void> {
-	const pool = await getTestPool();
+async function adopt(address: LedgerAddress, pool?: pg.Pool): Promise<void> {
+	const executor = pool ?? (await getTestPool());
 	const claimId = `adopt:${address.name}:${randomUUID()}`;
-	const admission = await openFixtureOutcomeClaim(pool, {
+	const admission = await openFixtureOutcomeClaim(executor, {
 		claimId,
 		address,
 		claimKind: 'adopt-intent',
@@ -130,11 +133,11 @@ async function adopt(address: LedgerAddress): Promise<void> {
 	});
 	if (admission.kind !== 'admitted-outcome-claim')
 		throw new Error(admission.reason);
-	const live = await readPgCatalogueIdentity(pool, address);
+	const live = await readPgCatalogueIdentity(executor, address);
 	if (!live?.catalogueIdentity)
 		throw new Error(`fixture could not read ${address.name}`);
 	await appendPgLedgerResolution(
-		pool,
+		executor,
 		{ scope: 'schema', schema: address.schema! },
 		{
 			eventId: `${claimId}:adopted`,
@@ -668,65 +671,32 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
 		);
 		await adopt(root);
-		const plan = generatorPlan(
+		const db = process.env.DATABASE_URL;
+		if (!db) throw new Error('DATABASE_URL is required for OBL-AUTH10');
+		const child = spawnCheckpointChild(
+			fileURLToPath(
+				new URL('./destructive-checkpoint-child.ts', import.meta.url),
+			),
 			{
-				kind: 'drop_table',
-				table: rootName,
-				classification: 'removal',
-				details: 'checkpointed destructive removal',
-				statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+				args: ['auth10', schema, rootName],
+				env: { ...process.env, DATABASE_URL: db },
 			},
-			databaseId,
-			schema,
 		);
-		const planDigest = transitionPlanDigest(plan);
-		const runId = `obl-auth10:${randomUUID()}`;
-		const run = lockPgJournalRun(
-			mintDurablyLoadedRun({
-				runId,
-				planDigest,
-				targetContextDigest: `checkpoint:${schema}`,
-				databaseId,
-				coreVersion: 'checkpoint-e2e',
-				startedAt: new Date().toISOString(),
-				replayability: 'replayable',
-			}),
-		);
-		let reached: (() => void) | undefined;
-		const atAdmission = new Promise<void>((resolve) => {
-			reached = resolve;
-		});
-		let release: (() => void) | undefined;
-		const continueAdmission = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const running = executeGeneratorPlan({
-			pool,
-			plan,
-			planDigest,
-			schema,
-			run,
-			runId,
-			accepts: [`destructive-plan-accepted:${planDigest}`],
-			observer: async (point) => {
-				if (point !== 'post-lock-integrity-before-append') return;
-				reached?.();
-				await continueAdmission;
-			},
-		});
-		await atAdmission;
-		await pool.query(
-			`CREATE TABLE ${quote(schema)}.${quote(dependentName)} (root_id integer REFERENCES ${quote(schema)}.${quote(rootName)}(id))`,
-		);
-		release?.();
-		await expect(running).resolves.toMatchObject({
-			outcome: 'destructive-authority-refused',
-			detail: expect.stringMatching(/containment.*undecidable/i),
-			refusal: { withheldAuthority: 'destructive containment authority' },
-		});
-		await expect(
-			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${rootName}`]),
-		).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
+		try {
+			await child.waitForCheckpoint('post-lock-integrity-before-append');
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(dependentName)} (root_id integer REFERENCES ${quote(schema)}.${quote(rootName)}(id))`,
+			);
+			await child.acknowledge('post-lock-integrity-before-append');
+			expect(await child.exited).toMatchObject({ code: 0 });
+			await expect(
+				pool.query('SELECT to_regclass($1) AS object', [
+					`${schema}.${rootName}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ object: `${schema}.${rootName}` }] });
+		} finally {
+			await child.terminate('SIGKILL');
+		}
 	});
 
 	it('OBL-READ4: a readable survivor recreated after destructive DDL remains indeterminate, never absent or refused', async () => {
@@ -789,6 +759,155 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			[rootName],
 		);
 		expect(terminals.rows).toEqual([{ event_kind: 'indeterminate' }]);
+	});
+
+	it('OBL-READ4: revoking the catalogue read after destructive DDL keeps the claim open and pending without a terminal', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const schema = `destructive_generator_${randomUUID().replaceAll('-', '')}`;
+		schemas.push(schema);
+		const rootName = `obl_read4_unreadable_${randomUUID().replaceAll('-', '')}`;
+		const role = `dbsp_read4_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const catalogueReader = `dbsp_read4_catalogue_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const password = randomUUID();
+		const root = tableAddress(schema, databaseId, rootName);
+		let restricted: pg.Pool | undefined;
+		let publicCatalogueRead = false;
+		try {
+			await pool.query(
+				`CREATE ROLE ${quote(role)} LOGIN PASSWORD '${password.replaceAll("'", "''")}'`,
+			);
+			await pool.query(`CREATE ROLE ${quote(catalogueReader)} NOLOGIN`);
+			await pool.query(
+				`GRANT CONNECT, CREATE ON DATABASE ${quote(databaseId)} TO ${quote(role)}`,
+			);
+			const roleDb = new URL(process.env.DATABASE_URL!);
+			roleDb.username = role;
+			roleDb.password = password;
+			restricted = new pg.Pool({ connectionString: roleDb.toString(), max: 1 });
+			await restricted.query(`CREATE SCHEMA ${quote(schema)}`);
+			const preflight = await runPgReinitializePreflight({
+				pool: restricted,
+				schemas: [schema],
+				declarations: {
+					version: 1,
+					digest: `destructive-generator-${schema}`,
+					declarations: [],
+				},
+				writeAdoptionFile: async () => {},
+			});
+			if (
+				preflight.scopes.some(
+					(scope) =>
+						scope.ledger.scope === 'schema' &&
+						scope.outcome !== 'current' &&
+						scope.outcome !== 'unchanged',
+				)
+			)
+				throw new Error(
+					'fixture could not initialize a current ledger lineage',
+				);
+			await restricted.query(
+				`CREATE TABLE ${quote(schema)}.${quote(rootName)} (id integer PRIMARY KEY)`,
+			);
+			await adopt(root, restricted);
+			const current = await pool.query<{ allowed: boolean }>(
+				"SELECT has_table_privilege('public', 'pg_catalog.pg_class', 'SELECT') AS allowed",
+			);
+			publicCatalogueRead = current.rows[0]?.allowed === true;
+			await pool.query(
+				'REVOKE SELECT ON TABLE pg_catalog.pg_class FROM PUBLIC',
+			);
+			await pool.query(
+				`GRANT SELECT ON TABLE pg_catalog.pg_class TO ${quote(catalogueReader)}; GRANT ${quote(catalogueReader)} TO ${quote(role)}`,
+			);
+			const plan = generatorPlan(
+				{
+					kind: 'drop_table',
+					table: rootName,
+					classification: 'removal',
+					details: 'unreadable destructive read-back probe',
+					statements: [`DROP TABLE ${quote(schema)}.${quote(rootName)}`],
+				},
+				databaseId,
+				schema,
+			);
+			const planDigest = transitionPlanDigest(plan);
+			const runId = `obl-read4-unreadable:${randomUUID()}`;
+			const run = lockPgJournalRun(
+				mintDurablyLoadedRun({
+					runId,
+					planDigest,
+					targetContextDigest: `read4:${schema}`,
+					databaseId,
+					coreVersion: 'checkpoint-e2e',
+					startedAt: new Date().toISOString(),
+					replayability: 'replayable',
+				}),
+			);
+			let reached: (() => void) | undefined;
+			const atReadBack = new Promise<void>((resolve) => {
+				reached = resolve;
+			});
+			let resume: (() => void) | undefined;
+			const continueReadBack = new Promise<void>((resolve) => {
+				resume = resolve;
+			});
+			const running = executeGeneratorPlan({
+				pool: restricted,
+				plan,
+				planDigest,
+				schema,
+				run,
+				runId,
+				accepts: [`destructive-plan-accepted:${planDigest}`],
+				observer: async (point) => {
+					if (point !== 'ddl-completed-before-read-back') return;
+					reached?.();
+					await continueReadBack;
+				},
+			});
+			await Promise.race([
+				atReadBack,
+				running.then((result) => {
+					throw new Error(
+						`READ4 execution ended before the post-DDL checkpoint: ${result.outcome}${'detail' in result ? ` (${result.detail})` : ''}`,
+					);
+				}),
+			]);
+			await pool.query(`REVOKE ${quote(catalogueReader)} FROM ${quote(role)}`);
+			resume?.();
+			await expect(running).resolves.toMatchObject({
+				outcome: 'execution-failed',
+				detail: expect.stringMatching(/pending|permission denied/i),
+			});
+			const terminals = await pool.query<{ event_kind: string }>(
+				`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name = $1 AND event_kind IN ('absent', 'refused', 'indeterminate') ORDER BY recorded_at`,
+				[rootName],
+			);
+			expect(terminals.rows).toEqual([]);
+			const open = await pool.query<{ event_kind: string }>(
+				`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name = $1 ORDER BY recorded_at DESC LIMIT 1`,
+				[rootName],
+			);
+			expect(open.rows).toEqual([{ event_kind: 'executing' }]);
+		} finally {
+			if (publicCatalogueRead)
+				await pool
+					.query('GRANT SELECT ON TABLE pg_catalog.pg_class TO PUBLIC')
+					.catch(() => undefined);
+			await restricted?.end();
+			await pool.query(`DROP OWNED BY ${quote(role)}`).catch(() => undefined);
+			await pool
+				.query(`DROP ROLE IF EXISTS ${quote(role)}`)
+				.catch(() => undefined);
+			await pool
+				.query(`DROP OWNED BY ${quote(catalogueReader)}`)
+				.catch(() => undefined);
+			await pool
+				.query(`DROP ROLE IF EXISTS ${quote(catalogueReader)}`)
+				.catch(() => undefined);
+		}
 	});
 
 	it('OBL-AUTH5: destructive executing and group-terminal appends each reach the post-lock integrity checkpoint', async () => {
