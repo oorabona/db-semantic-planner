@@ -14,16 +14,17 @@ This guide covers best practices for deploying db-semantic-planner in production
 ## Table of Contents
 
 1. [Connection Pooling](#connection-pooling)
-2. [Timeout Management](#timeout-management)
-3. [Multi-Tenant Isolation](#multi-tenant-isolation)
-4. [Error Handling](#error-handling)
-5. [Observability & Logging](#observability--logging)
-6. [Streaming Large Results](#streaming-large-results)
-7. [Query Analysis](#query-analysis)
-8. [Rate Limiting](#rate-limiting)
-9. [Security Hardening](#security-hardening)
-10. [Health Checks](#health-checks)
-11. [Performance Tuning](#performance-tuning)
+2. [Prepared Statements](#prepared-statements)
+3. [Timeout Management](#timeout-management)
+4. [Multi-Tenant Isolation](#multi-tenant-isolation)
+5. [Error Handling](#error-handling)
+6. [Observability & Logging](#observability--logging)
+7. [Streaming Large Results](#streaming-large-results)
+8. [Query Analysis](#query-analysis)
+9. [Rate Limiting](#rate-limiting)
+10. [Security Hardening](#security-hardening)
+11. [Health Checks](#health-checks)
+12. [Performance Tuning](#performance-tuning)
 
 ---
 
@@ -94,6 +95,43 @@ setInterval(() => {
   });
 }, 60000);
 ```
+
+---
+
+## Prepared Statements
+
+The PostgreSQL adapter leaves named server-side prepared statements **off by
+default**. Opt in only for workloads that repeatedly execute the same compiled,
+parameterized SQL on long-lived PostgreSQL connections:
+
+```typescript
+const adapter = createPgsqlAdapter(pool, {
+  preparedStatements: { maxStatements: 500 }, // `true` uses the same default
+});
+```
+
+Only compiled `execute()` / `executeWithMeta()` calls with at least one parameter
+are eligible. Raw SQL, DDL, cursor commands, and transaction plumbing always use
+the existing unnamed driver calls. A statement is admitted on its second sighting
+and then remains admitted; there is no eviction or `DEALLOCATE`.
+
+Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
+connection prepares an admitted statement independently, so `maxStatements`
+bounds the statements that this adapter can create on each connection. If you use
+PgBouncer in transaction-pooling mode, it must be configured with
+`max_prepared_statements`; otherwise leave this option off.
+
+PostgreSQL considers a generic plan only after five custom executions, and adopts
+it only when its estimated cost is competitive. Parameter-sensitive queries can
+therefore continue to use custom plans. To observe planning cost in
+`pg_stat_statements`, enable `pg_stat_statements.track_planning`; it is hidden by
+default.
+
+Do not issue external `DEALLOCATE` for adapter-managed statement names: node-postgres
+keeps its own per-connection statement map and cannot safely be resynchronized. A
+result-shape-changing DDL can cause PostgreSQL to return SQLSTATE `0A000` for a
+cached plan. That error propagates normally; recycle the affected long-lived pool
+connections after the DDL, or turn this option off.
 
 ---
 
@@ -719,4 +757,3 @@ CREATE INDEX idx_categories_parent_id ON categories(parent_id);
 ## See Also
 
 - [Getting Started](./getting-started) - Installation and first query
-

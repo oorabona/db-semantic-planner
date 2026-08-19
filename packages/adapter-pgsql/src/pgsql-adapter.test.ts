@@ -404,6 +404,40 @@ describe('PgsqlAdapter', () => {
 			expect(results).not.toHaveProperty('command');
 			expect(pool.query).toHaveBeenCalledWith(query.sql, query.parameters);
 		});
+
+		it('uses a named config object only after the second eligible compiled execution', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [{ id: 7 }],
+				rowCount: 1,
+				command: 'SELECT',
+			} as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery('SELECT id FROM users WHERE id = $1', [7]);
+
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, [7]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: query.sql,
+				values: [7],
+			});
+		});
+
+		it('does not name compiled executions without parameters', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery('SELECT 1');
+
+			await adapter.execute(query);
+			await adapter.execute(query);
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, []);
+			expect(pool.query).toHaveBeenNthCalledWith(2, query.sql, []);
+		});
 	});
 
 	describe('executeWithMeta', () => {
@@ -534,6 +568,38 @@ describe('PgsqlAdapter', () => {
 
 			expect(results).toEqual(mockRows);
 			expect(pool.query).toHaveBeenCalledWith(sql, params);
+		});
+
+		it('never names raw SQL even when prepared statements are enabled', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [{ id: 1 }] } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await adapter.executeRaw(sql, [1]);
+			await adapter.executeRaw(sql, [1]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, sql, [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, sql, [1]);
+		});
+	});
+
+	describe('preparedStatements disabled', () => {
+		it('preserves each existing driver argument shape', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: false });
+
+			await adapter.execute(testQuery('SELECT $1', [1]));
+			await adapter.executeRaw('SELECT $1', [1]);
+			await adapter.executeDDL('CREATE TABLE disabled_path_test (id integer)');
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, 'SELECT $1', [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, 'SELECT $1', [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(
+				3,
+				'CREATE TABLE disabled_path_test (id integer)',
+			);
 		});
 	});
 

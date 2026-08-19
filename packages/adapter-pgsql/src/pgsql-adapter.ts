@@ -135,6 +135,10 @@ import {
 } from './naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
+	normalizeMaxPreparedStatements,
+	PreparedStatementRegistry,
+} from './prepared-statements.js';
+import {
 	finalizeEnvelope,
 	fromCompiledQuery,
 	fromOutputDescriptors,
@@ -344,6 +348,10 @@ type QueryResultMetadata = {
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
+const preparedStatementRegistries = new WeakMap<
+	Pool | PoolClient,
+	PreparedStatementRegistry
+>();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -352,6 +360,8 @@ type StatementExecutionOptions = {
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
+	/** Set only by execute()/executeWithMeta() for compiled parameterized SQL. */
+	readonly prepareEligible?: boolean;
 	readonly rawSqlStatement?: boolean;
 };
 
@@ -2006,6 +2016,11 @@ function getNqlBindingProjection(
 /**
  * Options for PgsqlAdapter.
  */
+export interface PgsqlPreparedStatementsOptions {
+	/** Maximum distinct compiled statements admitted per pool (default: 500). */
+	readonly maxStatements?: number;
+}
+
 export interface PgsqlAdapterOptions {
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
@@ -2024,6 +2039,11 @@ export interface PgsqlAdapterOptions {
 	readonly defaultPkColumnName?: string;
 	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
 	readonly deriveFkColumnName?: FkColumnDerivation;
+	/**
+	 * Opt in to node-postgres named prepared statements for compiled queries with
+	 * parameters. `true` uses the default statement cap; an object overrides it.
+	 */
+	readonly preparedStatements?: boolean | PgsqlPreparedStatementsOptions;
 }
 
 export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
@@ -2070,6 +2090,7 @@ interface PgsqlAdapterInternalOptions
 	readonly rollbackOnlyScope?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
 	readonly dbspScopeState?: DbspScopeState;
+	readonly preparedStatementRegistry?: PreparedStatementRegistry;
 }
 
 type PgsqlPublicAdapterConstructionOptions =
@@ -2093,6 +2114,7 @@ type PgsqlAdapterInternalConstructionOverrides =
 		readonly rollbackOnlyScope?: true;
 		readonly dbspScopeToken?: DbspScopeToken;
 		readonly dbspScopeState?: DbspScopeState;
+		readonly preparedStatementRegistry?: PreparedStatementRegistry;
 	};
 
 function isPgsqlAdapterInternalOptions(
@@ -2170,6 +2192,26 @@ function getDbspScopeStateOption(
 		: undefined;
 }
 
+function getPreparedStatementRegistryOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): PreparedStatementRegistry | undefined {
+	return isPgsqlAdapterInternalOptions(options)
+		? options.preparedStatementRegistry
+		: undefined;
+}
+
+function getOrCreatePreparedStatementRegistry(
+	executor: Pool | PoolClient,
+	maxStatements: number,
+): PreparedStatementRegistry {
+	let registry = preparedStatementRegistries.get(executor);
+	if (registry === undefined) {
+		registry = new PreparedStatementRegistry(maxStatements);
+		preparedStatementRegistries.set(executor, registry);
+	}
+	return registry;
+}
+
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
 	connection: Pool | PoolClient | undefined,
 	options: PgsqlAdapterConstructionOptions,
@@ -2214,6 +2256,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
+	private readonly preparedStatements:
+		| true
+		| PgsqlPreparedStatementsOptions
+		| false;
+	private readonly preparedStatementRegistry:
+		| PreparedStatementRegistry
+		| undefined;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
@@ -2289,6 +2338,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
+		this.preparedStatements = options?.preparedStatements ?? false;
+		if (this.preparedStatements !== false) {
+			const maxStatements = normalizeMaxPreparedStatements(
+				typeof this.preparedStatements === 'object'
+					? this.preparedStatements.maxStatements
+					: undefined,
+			);
+			this.preparedStatementRegistry =
+				getPreparedStatementRegistryOption(options) ??
+				(this.pool !== undefined
+					? getOrCreatePreparedStatementRegistry(this.pool, maxStatements)
+					: this.client !== undefined
+						? getOrCreatePreparedStatementRegistry(this.client, maxStatements)
+						: undefined);
+		} else {
+			this.preparedStatementRegistry = undefined;
+		}
 		this.defaultPk = options?.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options?.deriveFkColumnName ?? defaultFkDerivation;
 
@@ -2339,12 +2405,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			(overrides.rollbackOnlyScope ?? this.rollbackOnlyScope)
 				? true
 				: undefined;
+		const preparedStatementRegistry = this.preparedStatementRegistry;
 		const hasInternalOptions =
 			adapterManagedTransaction === true ||
 			adapterManagedPinnedConnection === true ||
 			rollbackOnlyScope === true ||
 			scopeToken !== undefined ||
-			scopeState !== undefined;
+			scopeState !== undefined ||
+			preparedStatementRegistry !== undefined;
 		return {
 			...(hasInternalOptions && {
 				[pgsqlAdapterInternalOptionsKey]: true as const,
@@ -2353,6 +2421,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
 			...(this.model !== undefined && { model: this.model }),
 			...(this.logger !== undefined && { logger: this.logger }),
+			...(this.preparedStatements !== false && {
+				preparedStatements: this.preparedStatements,
+			}),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.borrowedClient && { borrowedClient: true as const }),
@@ -2364,6 +2435,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(rollbackOnlyScope === true && { rollbackOnlyScope }),
 			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
 			...(scopeState !== undefined && { dbspScopeState: scopeState }),
+			...(preparedStatementRegistry !== undefined && {
+				preparedStatementRegistry,
+			}),
 			...overrides,
 		};
 	}
@@ -3092,7 +3166,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const guardedQuery = guardCompiledQuery(query, 'execute');
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
-		>(guardedQuery.sql, guardedQuery.parameters);
+		>(guardedQuery.sql, guardedQuery.parameters, { prepareEligible: true });
 		const metadata = queryResultMetadata(result);
 		const rows = this.transformResultRows(result.rows, guardedQuery) as T[];
 		return {
@@ -5827,6 +5901,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				executor,
 				sql,
 				parameters,
+				options.prepareEligible ?? false,
 			);
 			if (options.inspectTransactionControl !== false) {
 				await this.assertNoTransactionControlCommand(
@@ -5989,7 +6064,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		executor: Pool | PoolClient,
 		sql: string,
 		parameters: readonly unknown[] | undefined,
+		prepareEligible: boolean,
 	): Promise<MaybeMultipleQueryResults<T>> {
+		if (
+			this.preparedStatementRegistry !== undefined &&
+			prepareEligible &&
+			parameters !== undefined &&
+			parameters.length > 0
+		) {
+			const name = this.preparedStatementRegistry.admit(sql);
+			if (name !== undefined) {
+				return executor.query<T>({
+					name,
+					text: sql,
+					values: [...parameters],
+				}) as Promise<MaybeMultipleQueryResults<T>>;
+			}
+		}
 		if (parameters === undefined) {
 			return executor.query<T>(sql) as Promise<MaybeMultipleQueryResults<T>>;
 		}
