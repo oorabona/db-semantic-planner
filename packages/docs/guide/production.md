@@ -123,11 +123,13 @@ Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
 connection prepares an admitted statement independently. `maxStatements` is an
 executor-scoped upper bound on the distinct names dbsp can admit through that
 registry; it is not an inventory of statements the server currently holds. The cap
-is configured executor-wide: every adapter sharing the same `Pool` (or the same
-borrowed `PoolClient`) must use the same `maxStatements`, and constructing one with
-a different cap fails. This bound is not combined across a pool adapter and a
-borrowed-client adapter that happen to use the same physical connection, so that
-connection can exceed either executor's cap. If you use PgBouncer in
+is configured executor-wide for adapters created by the same loaded dbsp module
+instance: every adapter sharing the same `Pool` (or the same borrowed `PoolClient`)
+must use the same `maxStatements`, and constructing one with a different cap fails.
+Duplicate installations maintain independent registries, so this same-cap enforcement
+and bound do not combine across module instances. This bound is not combined across a
+pool adapter and a borrowed-client adapter that happen to use the same physical
+connection, so that connection can exceed either executor's cap. If you use PgBouncer in
 transaction-pooling mode, it must be configured with `max_prepared_statements`;
 otherwise leave this option off.
 
@@ -149,8 +151,8 @@ default.
 Do not issue external `DEALLOCATE` for adapter-managed statement names:
 node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
-cached plan; `DEALLOCATE ALL`, `DISCARD ALL`, and connection/proxy resets can
-return `26000`; an externally created statement in the reserved namespace can
+cached plan; after `DEALLOCATE ALL`, `DISCARD ALL`, or a connection/proxy reset, the
+next named execution can return `26000`; an externally created statement in the reserved namespace can
 return `42P05`. On one of these errors from a named execution, dbsp tombstones the
 SQL before propagating the original error. Future calls use the unnamed path for
 the executor lifetime. For a `Pool`, this is pool-wide: one client reset disables

@@ -424,6 +424,7 @@ describe('adapter prepared statements', () => {
 			import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 			import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 			const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, application_name: process.env.DBSP_APPLICATION_NAME });
+			pool.on('error', () => {});
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
 			const compiled = (value) => projectionlessCompiledQuery({ sql: 'SELECT pg_sleep(30) WHERE $1::boolean', parameters: [value] }, 'prepared-statements-transport-child');
 			await adapter.execute(compiled(false));
@@ -449,7 +450,7 @@ describe('adapter prepared statements', () => {
 				stdio: ['ignore', 'pipe', 'pipe'],
 			},
 		);
-		const childExit = new Promise<
+		const childClose = new Promise<
 			| { readonly kind: 'error'; readonly error: Error }
 			| {
 					readonly kind: 'exit';
@@ -458,7 +459,7 @@ describe('adapter prepared statements', () => {
 			  }
 		>((resolve) => {
 			child.once('error', (error) => resolve({ kind: 'error', error }));
-			child.once('exit', (code, signal) =>
+			child.once('close', (code, signal) =>
 				resolve({ kind: 'exit', code, signal }),
 			);
 		});
@@ -488,14 +489,14 @@ describe('adapter prepared statements', () => {
 			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
 				pid,
 			]);
-			const exited = await childExit;
+			const exited = await childClose;
 			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
 			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
 		} finally {
 			if (child.exitCode === null) {
 				child.kill('SIGKILL');
-				await childExit;
+				await childClose;
 			}
 		}
 	});

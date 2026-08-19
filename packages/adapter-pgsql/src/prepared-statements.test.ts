@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
 	derivePreparedStatementName,
@@ -9,12 +10,36 @@ describe('prepared statement admission', () => {
 	it('derives a stable 128-bit SHA-256 name from the complete SQL text', () => {
 		const sql = 'SELECT * FROM inventory WHERE sku = $1';
 		const name = derivePreparedStatementName(sql);
+		const expectedName = `dbsp_ps_${createHash('sha256')
+			.update(sql)
+			.digest('hex')
+			.slice(0, 32)}`;
+		const sharedLongPrefix =
+			'SELECT * FROM inventory WHERE sku = $1 /* '.repeat(1_024);
+		const firstLongSql = `${sharedLongPrefix}first */`;
+		const secondLongSql = `${sharedLongPrefix}second */`;
 
 		expect(name).toMatch(/^dbsp_ps_[0-9a-f]{32}$/);
 		expect(name.length).toBeLessThanOrEqual(63);
+		expect(name).toBe(expectedName);
 		expect(derivePreparedStatementName(sql)).toBe(name);
 		expect(derivePreparedStatementName(`${sql} -- distinct text`)).not.toBe(
 			name,
+		);
+		expect(derivePreparedStatementName(firstLongSql)).toBe(
+			`dbsp_ps_${createHash('sha256')
+				.update(firstLongSql)
+				.digest('hex')
+				.slice(0, 32)}`,
+		);
+		expect(derivePreparedStatementName(secondLongSql)).toBe(
+			`dbsp_ps_${createHash('sha256')
+				.update(secondLongSql)
+				.digest('hex')
+				.slice(0, 32)}`,
+		);
+		expect(derivePreparedStatementName(firstLongSql)).not.toBe(
+			derivePreparedStatementName(secondLongSql),
 		);
 	});
 
@@ -121,13 +146,15 @@ describe('prepared statement admission', () => {
 		).toEqual(new Set());
 	});
 
-	it('defaults the cap and rejects each invalid cap class accurately', () => {
+	it('defaults the cap', () => {
 		expect(normalizeMaxPreparedStatements(undefined)).toBe(500);
-		expect(() => normalizeMaxPreparedStatements(0)).toThrow(
-			/must be greater than zero/,
-		);
-		expect(() =>
-			normalizeMaxPreparedStatements(Number.MAX_SAFE_INTEGER + 1),
-		).toThrow(/must be a safe integer/);
+	});
+
+	it.each([
+		[null, /must be a safe integer/],
+		[0, /must be greater than zero/],
+		[Number.MAX_SAFE_INTEGER + 1, /must be a safe integer/],
+	])('rejects invalid cap %s', (invalidCap, message) => {
+		expect(() => normalizeMaxPreparedStatements(invalidCap)).toThrow(message);
 	});
 });

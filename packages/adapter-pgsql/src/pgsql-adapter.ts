@@ -563,6 +563,21 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 	);
 }
 
+/**
+ * node-postgres throws this before sending a query when its client-local parsed
+ * statement map already associates our exact name with other SQL. It has no
+ * SQLSTATE, so recognize only its canonical message for the attempted name.
+ */
+function isDriverLocalPreparedStatementNameCollision(
+	error: unknown,
+	attemptedName: string,
+): boolean {
+	const message = `Prepared statements must be unique - '${attemptedName}' was used for a different statement`;
+	return (
+		error instanceof Error && !('code' in error) && error.message === message
+	);
+}
+
 function describeTransactionOptionValue(value: unknown): string {
 	if (value === null) return 'null';
 	if (typeof value === 'string') return `string ${JSON.stringify(value)}`;
@@ -6127,7 +6142,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				if (
 					isPgErrorWithCode(error, '0A000') ||
 					isPgErrorWithCode(error, '26000') ||
-					isPgErrorWithCode(error, '42P05')
+					isPgErrorWithCode(error, '42P05') ||
+					isDriverLocalPreparedStatementNameCollision(error, name)
 				) {
 					// Invalidated named statements are never retried in-call. Later calls
 					// use the unnamed path for this executor.

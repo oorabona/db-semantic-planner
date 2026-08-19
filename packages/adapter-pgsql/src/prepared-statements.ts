@@ -79,14 +79,18 @@ export class PreparedStatementRegistry {
 }
 
 export function normalizeMaxPreparedStatements(
-	maxStatements: number | undefined,
+	maxStatements: number | null | undefined,
 ): number {
-	const resolved = maxStatements ?? DEFAULT_MAX_PREPARED_STATEMENTS;
+	const resolved =
+		maxStatements === undefined
+			? DEFAULT_MAX_PREPARED_STATEMENTS
+			: maxStatements;
 	if (!Number.isSafeInteger(resolved))
 		throw new Error('preparedStatements.maxStatements must be a safe integer.');
-	if (resolved < 1)
+	const normalized = resolved as number;
+	if (normalized < 1)
 		throw new Error(
 			'preparedStatements.maxStatements must be greater than zero.',
 		);
-	return resolved;
+	return normalized;
 }

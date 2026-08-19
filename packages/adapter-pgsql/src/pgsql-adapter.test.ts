@@ -13,6 +13,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 } from './pgsql-adapter.js';
+import { derivePreparedStatementName } from './prepared-statements.js';
 
 // ============================================================================
 // Mock Pool
@@ -652,6 +653,64 @@ describe('PgsqlAdapter', () => {
 			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
 
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('tombstones an exact-name driver-local collision without retrying it', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = new Error(
+				`Prepared statements must be unique - '${derivePreparedStatementName(sql)}' was used for a different statement`,
+			);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('keeps naming after a driver-local collision names another statement', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = new Error(
+				"Prepared statements must be unique - 'dbsp_ps_unexpected' was used for a different statement",
+			);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+
+			expect(client.query).toHaveBeenNthCalledWith(3, {
+				name: derivePreparedStatementName(sql),
+				text: sql,
+				values: [7],
+			});
 		});
 
 		it.each([
