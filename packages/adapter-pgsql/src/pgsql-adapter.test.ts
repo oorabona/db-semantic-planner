@@ -90,6 +90,81 @@ describe('PgsqlAdapter', () => {
 				/createPgsqlAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
 			);
 		});
+
+		it.each([
+			'false',
+			0,
+			null,
+		])('rejects an invalid preparedStatements value: %s', (preparedStatements) => {
+			expect(
+				() =>
+					new PgsqlAdapter(undefined, {
+						preparedStatements,
+					} as any),
+			).toThrow(
+				/preparedStatements must be true, false, or a non-null options object/,
+			);
+		});
+
+		it('normalizes prepared statements independently of later caller mutation', () => {
+			const pool = createMockPool();
+			const preparedStatements = { maxStatements: 1 };
+			const adapter = createPgsqlAdapter(pool, { preparedStatements });
+			preparedStatements.maxStatements = 2;
+
+			const scoped = adapter.withSchema('tenant_1') as PgsqlAdapter;
+			const parentConfig = (adapter as any).preparedStatements;
+			const childConfig = (scoped as any).preparedStatements;
+			expect(parentConfig.maxStatements).toBe(1);
+			expect(childConfig).not.toBe(parentConfig);
+			expect(childConfig.maxStatements).toBe(1);
+		});
+
+		it('shares equal prepared-statement caps and rejects conflicting pool caps', () => {
+			const pool = createMockPool();
+			const first = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+			const equal = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			expect((equal as any).preparedStatementRegistry).toBe(
+				(first as any).preparedStatementRegistry,
+			);
+			expect(() =>
+				createPgsqlAdapter(pool, { preparedStatements: { maxStatements: 2 } }),
+			).toThrow(
+				/preparedStatements\.maxStatements is configured pool-wide.*expected 1, received 2/,
+			);
+		});
+
+		it('shares equal prepared-statement caps and rejects conflicting client caps', () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const first = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+			const equal = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			expect((equal as any).preparedStatementRegistry).toBe(
+				(first as any).preparedStatementRegistry,
+			);
+			expect(() =>
+				createPgsqlAdapter(client, {
+					borrowedClient: true,
+					preparedStatements: { maxStatements: 2 },
+				}),
+			).toThrow(
+				/preparedStatements\.maxStatements is configured pool-wide.*expected 1, received 2/,
+			);
+		});
 	});
 
 	describe('createPgsqlAdapter', () => {
@@ -437,6 +512,58 @@ describe('PgsqlAdapter', () => {
 
 			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, []);
 			expect(pool.query).toHaveBeenNthCalledWith(2, query.sql, []);
+		});
+
+		it('tombstones an invalidated named statement and retries it unnamed outside a transaction', async () => {
+			const pool = createMockPool();
+			const error = { code: '0A000' };
+			vi.mocked(pool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery('SELECT id FROM users WHERE id = $1', [7]);
+
+			await adapter.execute(query);
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(2, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: query.sql,
+				values: [7],
+			});
+			expect(pool.query).toHaveBeenNthCalledWith(3, query.sql, [7]);
+			expect(pool.query).toHaveBeenNthCalledWith(4, query.sql, [7]);
+		});
+
+		it('tombstones an invalidated named statement but preserves its error in a transaction', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'T',
+			}) as unknown as PoolClient & { _txStatus: string };
+			const error = { code: '26000' };
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockImplementationOnce(async () => {
+					client._txStatus = 'E';
+					throw error;
+				})
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			client._txStatus = 'I';
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
 		});
 	});
 

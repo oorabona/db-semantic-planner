@@ -113,13 +113,19 @@ const adapter = createPgsqlAdapter(pool, {
 Only compiled `execute()` / `executeWithMeta()` calls with at least one parameter
 are eligible. Raw SQL, DDL, cursor commands, and transaction plumbing always use
 the existing unnamed driver calls. A statement is admitted on its second sighting
-and then remains admitted; there is no eviction or `DEALLOCATE`.
+and normally remains admitted. First sightings occupy a bounded recency window; when
+that window is full, its oldest candidate is evicted, so a candidate evicted
+between sightings must be seen again before it can be admitted. Once named
+admission is full, new candidate text is not retained. There is no adapter-issued
+`DEALLOCATE`.
 
 Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
 connection prepares an admitted statement independently, so `maxStatements`
-bounds the statements that this adapter can create on each connection. If you use
-PgBouncer in transaction-pooling mode, it must be configured with
-`max_prepared_statements`; otherwise leave this option off.
+bounds the statements that this adapter can create on each connection. The cap is
+configured pool-wide: every adapter sharing the same `Pool` (or the same borrowed
+`PoolClient`) must use the same `maxStatements`, and constructing one with a
+different cap fails. If you use PgBouncer in transaction-pooling mode, it must be
+configured with `max_prepared_statements`; otherwise leave this option off.
 
 PostgreSQL considers a generic plan only after five custom executions, and adopts
 it only when its estimated cost is competitive. Parameter-sensitive queries can
@@ -127,11 +133,14 @@ therefore continue to use custom plans. To observe planning cost in
 `pg_stat_statements`, enable `pg_stat_statements.track_planning`; it is hidden by
 default.
 
-Do not issue external `DEALLOCATE` for adapter-managed statement names: node-postgres
-keeps its own per-connection statement map and cannot safely be resynchronized. A
-result-shape-changing DDL can cause PostgreSQL to return SQLSTATE `0A000` for a
-cached plan. That error propagates normally; recycle the affected long-lived pool
-connections after the DDL, or turn this option off.
+Do not issue external `DEALLOCATE` for adapter-managed statement names:
+node-postgres keeps its own per-connection statement map and cannot safely be
+resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
+cached plan; `DEALLOCATE ALL`, `DISCARD ALL`, and connection/proxy resets can
+return `26000`. On either error from a named execution, dbsp permanently falls
+back to unnamed execution for that SQL on the shared pool/client registry. Outside
+a transaction it retries the failed call once unnamed. Inside a transaction the
+original error still propagates, while later transactions use the unnamed path.
 
 ---
 

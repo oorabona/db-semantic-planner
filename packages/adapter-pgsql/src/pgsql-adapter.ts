@@ -350,7 +350,10 @@ type QueryResultMetadata = {
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
 const preparedStatementRegistries = new WeakMap<
 	Pool | PoolClient,
-	PreparedStatementRegistry
+	{
+		readonly maxStatements: number;
+		readonly registry: PreparedStatementRegistry;
+	}
 >();
 
 type StatementExecutionOptions = {
@@ -2017,7 +2020,7 @@ function getNqlBindingProjection(
  * Options for PgsqlAdapter.
  */
 export interface PgsqlPreparedStatementsOptions {
-	/** Maximum distinct compiled statements admitted per pool (default: 500). */
+	/** Maximum distinct compiled statements admitted per pool/client (default: 500). */
 	readonly maxStatements?: number;
 }
 
@@ -2204,12 +2207,54 @@ function getOrCreatePreparedStatementRegistry(
 	executor: Pool | PoolClient,
 	maxStatements: number,
 ): PreparedStatementRegistry {
-	let registry = preparedStatementRegistries.get(executor);
-	if (registry === undefined) {
-		registry = new PreparedStatementRegistry(maxStatements);
-		preparedStatementRegistries.set(executor, registry);
+	const configured = preparedStatementRegistries.get(executor);
+	if (configured === undefined) {
+		const registry = new PreparedStatementRegistry(maxStatements);
+		preparedStatementRegistries.set(executor, { maxStatements, registry });
+		return registry;
 	}
-	return registry;
+	if (configured.maxStatements !== maxStatements) {
+		throw new Error(
+			`preparedStatements.maxStatements is configured pool-wide for this executor: ` +
+				`expected ${configured.maxStatements}, received ${maxStatements}.`,
+		);
+	}
+	return configured.registry;
+}
+
+type NormalizedPreparedStatementsConfig =
+	| false
+	| Readonly<{ maxStatements: number }>;
+
+function normalizePreparedStatements(
+	value: unknown,
+): NormalizedPreparedStatementsConfig {
+	if (value === undefined || value === false) return false;
+	if (value === true) {
+		return Object.freeze({
+			maxStatements: normalizeMaxPreparedStatements(undefined),
+		});
+	}
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		throw new Error(
+			'preparedStatements must be true, false, or a non-null options object.',
+		);
+	}
+	return Object.freeze({
+		maxStatements: normalizeMaxPreparedStatements(
+			(value as PgsqlPreparedStatementsOptions).maxStatements,
+		),
+	});
+}
+
+function clonePreparedStatements(
+	config: NormalizedPreparedStatementsConfig,
+): false | PgsqlPreparedStatementsOptions {
+	return config === false ? false : { maxStatements: config.maxStatements };
+}
+
+function isInvalidatedPreparedStatementError(error: unknown): boolean {
+	return isPgErrorWithCode(error, '0A000') || isPgErrorWithCode(error, '26000');
 }
 
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
@@ -2256,10 +2301,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
-	private readonly preparedStatements:
-		| true
-		| PgsqlPreparedStatementsOptions
-		| false;
+	private readonly preparedStatements: NormalizedPreparedStatementsConfig;
 	private readonly preparedStatementRegistry:
 		| PreparedStatementRegistry
 		| undefined;
@@ -2338,13 +2380,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
-		this.preparedStatements = options?.preparedStatements ?? false;
+		this.preparedStatements = normalizePreparedStatements(
+			options?.preparedStatements,
+		);
 		if (this.preparedStatements !== false) {
-			const maxStatements = normalizeMaxPreparedStatements(
-				typeof this.preparedStatements === 'object'
-					? this.preparedStatements.maxStatements
-					: undefined,
-			);
+			const { maxStatements } = this.preparedStatements;
 			this.preparedStatementRegistry =
 				getPreparedStatementRegistryOption(options) ??
 				(this.pool !== undefined
@@ -2422,7 +2462,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this.model !== undefined && { model: this.model }),
 			...(this.logger !== undefined && { logger: this.logger }),
 			...(this.preparedStatements !== false && {
-				preparedStatements: this.preparedStatements,
+				preparedStatements: clonePreparedStatements(this.preparedStatements),
 			}),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -6074,11 +6114,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		) {
 			const name = this.preparedStatementRegistry.admit(sql);
 			if (name !== undefined) {
-				return executor.query<T>({
-					name,
-					text: sql,
-					values: [...parameters],
-				}) as Promise<MaybeMultipleQueryResults<T>>;
+				try {
+					return (await executor.query<T>({
+						name,
+						text: sql,
+						values: [...parameters],
+					})) as MaybeMultipleQueryResults<T>;
+				} catch (error) {
+					if (!isInvalidatedPreparedStatementError(error)) throw error;
+					this.preparedStatementRegistry.tombstone(sql);
+					if (
+						isPoolClientLike(executor) &&
+						poolClientTransactionOpen(executor) !== false
+					) {
+						throw error;
+					}
+					return executor.query<T>(sql, [...parameters]) as Promise<
+						MaybeMultipleQueryResults<T>
+					>;
+				}
 			}
 		}
 		if (parameters === undefined) {

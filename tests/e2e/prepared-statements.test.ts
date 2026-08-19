@@ -143,4 +143,62 @@ describe('adapter prepared statements', () => {
 			await close();
 		}
 	});
+
+	it('recovers unnamed after result-shape DDL invalidates a named plan', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const table = `"${SCHEMA}".invalidated_plan`;
+			const sql = `SELECT * FROM ${table} WHERE id = $1`;
+			const query = compiled<{ id: number; added?: string }>(sql, [1]);
+
+			await adapter.executeDDL(
+				`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+			);
+			await adapter.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+			await adapter.execute(query);
+			await adapter.execute(query);
+			expect(await preparedCount(client, sql)).toBe(1);
+			await adapter.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
+
+			await expect(adapter.execute(query)).resolves.toEqual([
+				{ id: 1, added: null },
+			]);
+			await expect(adapter.execute(query)).resolves.toEqual([
+				{ id: 1, added: null },
+			]);
+			expect(await preparedCount(client, sql)).toBe(1);
+		} finally {
+			await close();
+		}
+	});
+
+	it.each([
+		'DEALLOCATE ALL',
+		'DISCARD ALL',
+	])('recovers unnamed after %s clears node-postgres server plans', async (reset) => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sql = 'SELECT $1::int AS value';
+			const query = compiled<{ value: number }>(sql, [9]);
+
+			await adapter.execute(query);
+			await adapter.execute(query);
+			expect(await preparedCount(client, sql)).toBe(1);
+			await adapter.executeRaw(reset);
+
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
+			expect(await preparedCount(client, sql)).toBe(0);
+		} finally {
+			await close();
+		}
+	});
 });
