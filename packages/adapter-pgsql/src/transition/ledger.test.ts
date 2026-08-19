@@ -1,6 +1,3 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { LedgerChainMember, LedgerReservationRow } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -14,6 +11,7 @@ import {
 	createPgLedgerShapeAllowance,
 	ensurePgLedger,
 	hasPgLedgerCandidateFingerprint,
+	PG_LEDGER_DEPARSE_FIXTURES,
 	PG_LEDGER_MIN_SERVER_VERSION_NUM,
 	PgLedgerPhysicalShapeValidationError,
 	PgLedgerStorageUnsupportedError,
@@ -33,11 +31,6 @@ import {
 } from './ledger-spec.js';
 
 const target = { scope: 'schema', schema: 'tenant_a' } as const;
-
-const ledgerDeparseFixtureDirectory = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	'ledger-deparse-fixtures',
-);
 
 function assertNonEmptyStringRecord(value: unknown, field: string): void {
 	expect(value, `${field} must be an object`).toBeTypeOf('object');
@@ -638,10 +631,7 @@ describe('managed ledger storage', () => {
 	});
 
 	it('keeps every supported PostgreSQL major covered by a valid deparse fixture', async () => {
-		const fixtureFiles = await readdir(ledgerDeparseFixtureDirectory);
-		const fixtureMajors = fixtureFiles
-			.map((filename) => /^pg-(\d+)\.json$/.exec(filename)?.[1])
-			.filter((major): major is string => major !== undefined)
+		const fixtureMajors = Object.keys(PG_LEDGER_DEPARSE_FIXTURES)
 			.map(Number)
 			.sort((left, right) => left - right);
 		expect(
@@ -662,11 +652,7 @@ describe('managed ledger storage', () => {
 		expect(fixtureMajors).toEqual(supportedMajors);
 
 		for (const major of supportedMajors) {
-			const filename = resolve(
-				ledgerDeparseFixtureDirectory,
-				`pg-${major}.json`,
-			);
-			const fixture: unknown = JSON.parse(await readFile(filename, 'utf8'));
+			const fixture: unknown = PG_LEDGER_DEPARSE_FIXTURES[major];
 			expect(fixture, `pg-${major}.json must be an object`).toBeTypeOf(
 				'object',
 			);

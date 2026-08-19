@@ -1,7 +1,4 @@
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
 	type LedgerChainMember,
 	type LedgerClaimKind,
@@ -23,6 +20,18 @@ import {
 } from './constants.js';
 import { classifyPgWrite } from './database-writability.js';
 import type { TransitionJournalQueryable } from './journal.js';
+import pg15DeparseFixture from './ledger-deparse-fixtures/pg-15.json' with {
+	type: 'json',
+};
+import pg16DeparseFixture from './ledger-deparse-fixtures/pg-16.json' with {
+	type: 'json',
+};
+import pg17DeparseFixture from './ledger-deparse-fixtures/pg-17.json' with {
+	type: 'json',
+};
+import pg18DeparseFixture from './ledger-deparse-fixtures/pg-18.json' with {
+	type: 'json',
+};
 import {
 	generatePgLedgerExpectedManifest,
 	PG_LEDGER_SPEC,
@@ -159,6 +168,15 @@ type LedgerDeparseFixture = Readonly<{
 	defaults: Readonly<Record<string, string>>;
 }>;
 
+export const PG_LEDGER_DEPARSE_FIXTURES: Readonly<
+	Record<number, LedgerDeparseFixture>
+> = {
+	15: pg15DeparseFixture,
+	16: pg16DeparseFixture,
+	17: pg17DeparseFixture,
+	18: pg18DeparseFixture,
+};
+
 function pgSqlState(error: unknown): string | undefined {
 	if (!error || typeof error !== 'object') return undefined;
 	const code = (error as { code?: unknown }).code;
@@ -187,42 +205,7 @@ export function classifyPgLedgerShapeError(
 async function readLedgerDeparseFixture(
 	major: number,
 ): Promise<LedgerDeparseFixture | undefined> {
-	const here = dirname(fileURLToPath(import.meta.url));
-	const candidates = [
-		// tsup copies the published fixtures to dist/.  Keep this first so a
-		// workspace consumer never depends on a repository-relative fallback.
-		resolve(here, `pg-${major}.json`),
-		resolve(here, 'ledger-deparse-fixtures', `pg-${major}.json`),
-		resolve(
-			process.cwd(),
-			'packages/adapter-pgsql/src/transition/ledger-deparse-fixtures',
-			`pg-${major}.json`,
-		),
-	];
-	for (const filename of candidates) {
-		try {
-			const parsed: unknown = JSON.parse(await readFile(filename, 'utf8'));
-			if (
-				parsed &&
-				typeof parsed === 'object' &&
-				'checks' in parsed &&
-				'defaults' in parsed &&
-				typeof (parsed as { checks: unknown }).checks === 'object' &&
-				typeof (parsed as { defaults: unknown }).defaults === 'object'
-			)
-				return parsed as LedgerDeparseFixture;
-		} catch (error) {
-			if (
-				!(
-					error &&
-					typeof error === 'object' &&
-					(error as { code?: unknown }).code === 'ENOENT'
-				)
-			)
-				throw error;
-		}
-	}
-	return undefined;
+	return PG_LEDGER_DEPARSE_FIXTURES[major];
 }
 
 function stringArray(value: unknown): readonly string[] | undefined {
