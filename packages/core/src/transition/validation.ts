@@ -1,12 +1,22 @@
 import type {
 	Assumption,
+	CatalogueIdentity,
+	DeclarableResourceAddress,
 	GuardedPlanStep,
+	JsonObject,
+	JsonValue,
+	LedgerPayload,
+	ManagedStepLifecycle,
+	ManagedStepSelectionRequirement,
+	NormalizedManagedStep,
 	ObservationContext,
 	OperationEffectAssessment,
 	PhysicalOperation,
 	ProofClaim,
 	ProvenPlanShape,
 	ResourceAddress,
+	TableIR,
+	TableReaddressAddress,
 	TransitionFragment,
 } from '@dbsp/types';
 import { stableJson } from './stable-json.js';
@@ -30,6 +40,551 @@ export type TransitionRelationalValidationInput =
 export type TransitionRelationalValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly detail: string };
+
+declare const validatedManagedStepManifestBrand: unique symbol;
+
+/** A manifest normalized and accepted by the managed lifecycle boundary. */
+export interface ValidatedManagedStepManifest {
+	readonly steps: readonly NormalizedManagedStep[];
+	readonly [validatedManagedStepManifestBrand]: 'dbsp-validated-managed-step-manifest';
+}
+
+export type ValidatedManagedStepManifestResult =
+	| { readonly ok: true; readonly manifest: ValidatedManagedStepManifest }
+	| { readonly ok: false; readonly detail: string };
+
+const DECLARABLE_KINDS = new Set([
+	'table',
+	'column',
+	'index',
+	'constraint',
+	'enum',
+	'sequence',
+	'extension',
+]);
+
+const CLASSIFICATIONS = new Set([
+	'non-destructive',
+	'removal',
+	'data-destructive',
+	'paired-readdress',
+]);
+
+const CLAIM_KINDS = new Set([
+	'adopt-intent',
+	'intent',
+	'retire-intent',
+	'readdress-intent',
+]);
+
+class ManifestParseError extends Error {}
+
+function parseError(detail: string): never {
+	throw new ManifestParseError(detail);
+}
+
+function record(value: unknown, detail: string): Record<string, unknown> {
+	if (!value || typeof value !== 'object' || Array.isArray(value))
+		return parseError(detail);
+	return value as Record<string, unknown>;
+}
+
+function nonEmptyString(value: unknown, detail: string): string {
+	if (typeof value !== 'string' || value.length === 0)
+		return parseError(detail);
+	return value;
+}
+
+function strings(value: unknown, detail: string): readonly string[] {
+	if (!Array.isArray(value)) return parseError(detail);
+	return value.map((item) => nonEmptyString(item, detail));
+}
+
+function canonicalJson(value: unknown, detail: string): JsonValue {
+	if (value === null || typeof value === 'string' || typeof value === 'boolean')
+		return value;
+	if (typeof value === 'number') {
+		if (!Number.isFinite(value)) return parseError(detail);
+		return value;
+	}
+	if (!value || typeof value !== 'object') return parseError(detail);
+	if (Array.isArray(value))
+		return value.map((item) => canonicalJson(item, detail));
+	if (Object.getPrototypeOf(value) !== Object.prototype)
+		return parseError(detail);
+	const result: Record<string, JsonValue> = {};
+	for (const [key, item] of Object.entries(value)) {
+		if (item === undefined) return parseError(detail);
+		result[key] = canonicalJson(item, detail);
+	}
+	return result;
+}
+
+function catalogueIdentity(value: unknown, detail: string): CatalogueIdentity {
+	const source = record(value, detail);
+	if (typeof source.format !== 'number' || !Number.isInteger(source.format))
+		return parseError(detail);
+	const identityValue = canonicalJson(source.value, detail);
+	if (
+		!identityValue ||
+		Array.isArray(identityValue) ||
+		typeof identityValue !== 'object'
+	)
+		return parseError(detail);
+	return {
+		engine: nonEmptyString(source.engine, detail),
+		format: source.format,
+		value: identityValue as JsonObject,
+	};
+}
+
+/** Parse parent containment while deliberately dropping scope and observed identity. */
+function resourceParent(value: unknown, detail: string): ResourceAddress {
+	const source = record(value, detail);
+	const parent = source.parent;
+	return {
+		engine: nonEmptyString(source.engine, detail),
+		database: nonEmptyString(source.database, detail),
+		...(source.schema === undefined
+			? {}
+			: { schema: nonEmptyString(source.schema, detail) }),
+		...(parent === undefined ? {} : { parent: resourceParent(parent, detail) }),
+		kind: nonEmptyString(source.kind, detail),
+		name: nonEmptyString(source.name, detail),
+	};
+}
+
+type ManagedLedgerAddress = DeclarableResourceAddress & {
+	readonly scope: 'schema' | 'database';
+};
+
+function ledgerAddress(value: unknown, detail: string): ManagedLedgerAddress {
+	const source = record(value, detail);
+	if (source.scope !== 'schema' && source.scope !== 'database')
+		return parseError(detail);
+	const kind = nonEmptyString(source.kind, detail);
+	if (!DECLARABLE_KINDS.has(kind)) return parseError(detail);
+	const identity =
+		source.catalogueIdentity === undefined
+			? undefined
+			: catalogueIdentity(source.catalogueIdentity, detail);
+	const qualifiedBy =
+		source.qualifiedBy === undefined
+			? undefined
+			: strings(source.qualifiedBy, detail);
+	return {
+		scope: source.scope,
+		engine: nonEmptyString(source.engine, detail),
+		database: nonEmptyString(source.database, detail),
+		...(source.schema === undefined
+			? {}
+			: { schema: nonEmptyString(source.schema, detail) }),
+		...(source.parent === undefined
+			? {}
+			: { parent: resourceParent(source.parent, detail) }),
+		kind: kind as DeclarableResourceAddress['kind'],
+		name: nonEmptyString(source.name, detail),
+		...(identity === undefined ? {} : { catalogueIdentity: identity }),
+		...(qualifiedBy === undefined ? {} : { qualifiedBy }),
+	};
+}
+
+function payload(value: unknown, detail: string): LedgerPayload {
+	const source = record(value, detail);
+	return {
+		value: canonicalJson(source.value, detail),
+		digest: nonEmptyString(source.digest, detail),
+	};
+}
+
+function selection(
+	value: unknown,
+	detail: string,
+): ManagedStepSelectionRequirement {
+	const source = record(value, detail);
+	if (
+		source.kind !== 'replacement' &&
+		source.kind !== 'adoption' &&
+		source.kind !== 'readdress' &&
+		source.kind !== 'optional-action'
+	)
+		return parseError(detail);
+	return {
+		kind: source.kind,
+		selector: nonEmptyString(source.selector, detail),
+	};
+}
+
+function readdressEndpoint(
+	value: unknown,
+	detail: string,
+): TableReaddressAddress {
+	const source = record(value, detail);
+	return {
+		name: nonEmptyString(source.name, detail),
+		...(source.schema === undefined
+			? {}
+			: { schema: nonEmptyString(source.schema, detail) }),
+		...(source.kind === undefined
+			? {}
+			: { kind: nonEmptyString(source.kind, detail) }),
+		...(source.database === undefined
+			? {}
+			: { database: nonEmptyString(source.database, detail) }),
+	};
+}
+
+function lifecycle(value: unknown, detail: string): ManagedStepLifecycle {
+	const source = record(value, detail);
+	if (source.kind === 'adoption')
+		return {
+			kind: 'adoption',
+			shape: canonicalJson(source.shape, detail) as unknown as TableIR,
+		};
+	if (source.kind === 'adoption-refused') return { kind: 'adoption-refused' };
+	if (source.kind === 'readdress') {
+		const declaration = record(source.declaration, detail);
+		return {
+			kind: 'readdress',
+			declaration: {
+				from: readdressEndpoint(declaration.from, detail),
+				to: readdressEndpoint(declaration.to, detail),
+			},
+		};
+	}
+	return parseError(detail);
+}
+
+function deepFreeze<T>(value: T): T {
+	if (value !== null && typeof value === 'object') {
+		for (const child of Object.values(value)) deepFreeze(child);
+		Object.freeze(value);
+	}
+	return value;
+}
+
+function parseStep(value: unknown, index: number): NormalizedManagedStep {
+	const source = record(value, `managed step ${index} is not an object`);
+	const stepKey = nonEmptyString(
+		source.stepKey,
+		`managed step ${index} has invalid step key`,
+	);
+	const prefix = `managed step ${stepKey}`;
+	const order = source.order;
+	if (typeof order !== 'number' || !Number.isInteger(order) || order < 0)
+		return parseError(`${prefix} has invalid order`);
+	if (typeof source.requiresVacancy !== 'boolean')
+		return parseError(`${prefix} has invalid vacancy flag`);
+	if (!CLASSIFICATIONS.has(source.classification as string))
+		return parseError(`${prefix} has invalid classification`);
+	if (!CLAIM_KINDS.has(source.claimKind as string))
+		return parseError(`${prefix} has invalid lifecycle claim kind`);
+	if (
+		source.replayPolicy !== 'recorded' &&
+		source.replayPolicy !== 'fresh-live-only'
+	)
+		return parseError(`${prefix} has invalid replay policy`);
+	const address =
+		source.address === undefined
+			? undefined
+			: ledgerAddress(source.address, `${prefix} has invalid address`);
+	const closureSource =
+		source.closure === undefined
+			? undefined
+			: record(source.closure, `${prefix} has invalid closure`);
+	const closure =
+		closureSource === undefined
+			? undefined
+			: {
+					root: ledgerAddress(
+						closureSource.root,
+						`${prefix} has invalid closure root`,
+					),
+					members: (() => {
+						if (!Array.isArray(closureSource.members))
+							return parseError(`${prefix} has invalid closure members`);
+						return closureSource.members.map((member) => {
+							const parsed = record(
+								member,
+								`${prefix} has invalid closure member`,
+							);
+							return {
+								plannedClaimKey: nonEmptyString(
+									parsed.plannedClaimKey,
+									`${prefix} has invalid closure member`,
+								),
+								address: ledgerAddress(
+									parsed.address,
+									`${prefix} has invalid closure member`,
+								),
+							};
+						});
+					})(),
+				};
+	if ((address === undefined) === (closure === undefined))
+		return parseError(
+			`${prefix} must have exactly one address or closure root`,
+		);
+	const statementBundle = record(
+		source.statementBundle,
+		`${prefix} has invalid statement bundle`,
+	);
+	if (!Array.isArray(statementBundle.statements))
+		return parseError(`${prefix} has invalid statement bundle`);
+	const expectedDeclaration =
+		source.expectedDeclaration === undefined
+			? undefined
+			: payload(
+					source.expectedDeclaration,
+					`${prefix} has invalid expected declaration`,
+				);
+	const expectedCatalogueIdentity =
+		source.expectedCatalogueIdentity === undefined
+			? undefined
+			: catalogueIdentity(
+					source.expectedCatalogueIdentity,
+					`${prefix} has invalid expected catalogue identity`,
+				);
+	const parsed: NormalizedManagedStep = {
+		stepKey,
+		order,
+		segmentId: nonEmptyString(
+			source.segmentId,
+			`${prefix} has invalid segment id`,
+		),
+		dependencyOrder: strings(
+			source.dependencyOrder,
+			`${prefix} has invalid dependencies`,
+		),
+		...(address === undefined ? {} : { address }),
+		...(closure === undefined ? {} : { closure }),
+		claimKind: source.claimKind as NormalizedManagedStep['claimKind'],
+		plannedClaimKeys: strings(
+			source.plannedClaimKeys,
+			`${prefix} has invalid planned claim keys`,
+		),
+		statementBundle: {
+			statements: statementBundle.statements.map((statement, ordinal) => {
+				const parsedStatement = record(
+					statement,
+					`${prefix} has an invalid statement bundle`,
+				);
+				if (parsedStatement.ordinal !== ordinal)
+					return parseError(`${prefix} has an invalid statement bundle`);
+				return {
+					ordinal,
+					sql: nonEmptyString(
+						parsedStatement.sql,
+						`${prefix} has an invalid statement bundle`,
+					),
+				};
+			}),
+		},
+		classification:
+			source.classification as NormalizedManagedStep['classification'],
+		requiresVacancy: source.requiresVacancy,
+		...(expectedDeclaration === undefined ? {} : { expectedDeclaration }),
+		...(expectedCatalogueIdentity === undefined
+			? {}
+			: { expectedCatalogueIdentity }),
+		...(source.selection === undefined
+			? {}
+			: {
+					selection: selection(
+						source.selection,
+						`${prefix} has invalid selection`,
+					),
+				}),
+		...(source.lifecycle === undefined
+			? {}
+			: {
+					lifecycle: lifecycle(
+						source.lifecycle,
+						`${prefix} has invalid lifecycle`,
+					),
+				}),
+		replayPolicy: source.replayPolicy,
+	};
+	return parsed;
+}
+
+function validateLifecycleCoupling(
+	step: NormalizedManagedStep,
+): string | undefined {
+	const lifecycle = step.lifecycle;
+	if (step.selection?.kind === 'replacement') {
+		if (lifecycle)
+			return `replacement step ${step.stepKey} has invalid lifecycle coupling`;
+		if (
+			(step.classification === 'removal' &&
+				step.claimKind === 'retire-intent' &&
+				!step.requiresVacancy) ||
+			(step.classification === 'non-destructive' &&
+				step.claimKind === 'intent' &&
+				step.requiresVacancy)
+		)
+			return undefined;
+		return `replacement step ${step.stepKey} has invalid lifecycle coupling`;
+	}
+	if (
+		step.classification === 'removal' &&
+		(step.claimKind !== 'retire-intent' || step.requiresVacancy)
+	)
+		return `removal step ${step.stepKey} has an invalid lifecycle claim`;
+	if (step.classification !== 'removal' && step.claimKind === 'retire-intent')
+		return `non-removal step ${step.stepKey} cannot retire a managed address`;
+	if (
+		step.classification === 'paired-readdress' &&
+		lifecycle?.kind !== 'readdress'
+	)
+		return `readdress step ${step.stepKey} has invalid lifecycle coupling`;
+	if (!lifecycle) return undefined;
+	if (lifecycle.kind === 'adoption') {
+		if (
+			step.claimKind !== 'adopt-intent' ||
+			step.classification !== 'non-destructive' ||
+			step.requiresVacancy ||
+			step.selection?.kind !== 'adoption' ||
+			!step.address ||
+			!step.expectedDeclaration ||
+			!step.expectedCatalogueIdentity ||
+			step.statementBundle.statements.length !== 0
+		)
+			return `adoption step ${step.stepKey} has invalid lifecycle coupling`;
+		return undefined;
+	}
+	if (lifecycle.kind === 'readdress') {
+		if (
+			step.claimKind !== 'readdress-intent' ||
+			step.classification !== 'paired-readdress' ||
+			step.requiresVacancy ||
+			step.selection?.kind !== 'readdress' ||
+			!step.address ||
+			step.address.kind !== 'table'
+		)
+			return `readdress step ${step.stepKey} has invalid lifecycle coupling`;
+		return undefined;
+	}
+	if (
+		step.classification !== 'non-destructive' ||
+		step.claimKind !== 'intent' ||
+		step.requiresVacancy ||
+		!step.address ||
+		step.statementBundle.statements.length !== 0
+	)
+		return `adoption-refused step ${step.stepKey} has invalid lifecycle coupling`;
+	return undefined;
+}
+
+function validatedManifest(
+	steps: readonly NormalizedManagedStep[],
+): ValidatedManagedStepManifest {
+	return deepFreeze({ steps }) as ValidatedManagedStepManifest;
+}
+
+/**
+ * Generic lifecycle invariants for adapter-produced normalized managed steps.
+ * Mapping a concrete DDL kind remains adapter work; core only validates the
+ * durable protocol shape before it becomes digest-covered plan material.
+ */
+export function validateNormalizedManagedStepManifest(
+	steps: readonly NormalizedManagedStep[],
+): ValidatedManagedStepManifestResult {
+	let parsedSteps: readonly NormalizedManagedStep[];
+	try {
+		parsedSteps = steps.map((step, index) => parseStep(step, index));
+	} catch (error) {
+		return {
+			ok: false,
+			detail:
+				error instanceof ManifestParseError
+					? error.message
+					: error instanceof Error
+						? error.message
+						: String(error),
+		};
+	}
+	const keys = new Set<string>();
+	const stepsByKey = new Map<string, NormalizedManagedStep>();
+	const plannedClaimKeys = new Set<string>();
+	for (const [index, step] of parsedSteps.entries()) {
+		if (step.order !== index)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has non-contiguous order`,
+			};
+		if (keys.has(step.stepKey))
+			return {
+				ok: false,
+				detail: `duplicate managed step key ${step.stepKey}`,
+			};
+		keys.add(step.stepKey);
+		stepsByKey.set(step.stepKey, step);
+		if (step.plannedClaimKeys.length === 0)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has no planned claim key`,
+			};
+		for (const plannedClaimKey of step.plannedClaimKeys) {
+			if (plannedClaimKeys.has(plannedClaimKey))
+				return {
+					ok: false,
+					detail: `duplicate planned claim key ${plannedClaimKey}`,
+				};
+			plannedClaimKeys.add(plannedClaimKey);
+		}
+		if (
+			step.statementBundle.statements.some(
+				(statement, ordinal) =>
+					statement.ordinal !== ordinal || statement.sql.length === 0,
+			)
+		)
+			return {
+				ok: false,
+				detail: `managed step ${step.stepKey} has an invalid statement bundle`,
+			};
+		if (
+			step.classification === 'removal' &&
+			step.replayPolicy !== 'fresh-live-only'
+		)
+			return {
+				ok: false,
+				detail: `removal step ${step.stepKey} is not fresh-live-only`,
+			};
+		if (step.classification !== 'removal' && step.replayPolicy !== 'recorded')
+			return {
+				ok: false,
+				detail: `non-removal step ${step.stepKey} is not recorded-replayable`,
+			};
+		const lifecycleError = validateLifecycleCoupling(step);
+		if (lifecycleError)
+			return {
+				ok: false,
+				detail: lifecycleError,
+			};
+	}
+	for (const step of parsedSteps) {
+		for (const dependency of step.dependencyOrder) {
+			if (!keys.has(dependency))
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} references missing dependency ${dependency}`,
+				};
+			if (dependency === step.stepKey)
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} depends on itself`,
+				};
+			const dependencyStep = stepsByKey.get(dependency);
+			if (dependencyStep && dependencyStep.order >= step.order)
+				return {
+					ok: false,
+					detail: `managed step ${step.stepKey} depends on a non-preceding step ${dependency}`,
+				};
+		}
+	}
+	return { ok: true, manifest: validatedManifest(parsedSteps) };
+}
 
 function sameTrustRoot(
 	left: Assumption['asserter'],

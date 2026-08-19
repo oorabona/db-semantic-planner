@@ -9,6 +9,8 @@ export interface ContainerCommandFailure extends Error {
 export interface DumpRestoreOptions {
 	readonly sourceDatabase: string;
 	readonly targetDatabase: string;
+	/** Limit the archive to one PostgreSQL schema when the lineage fixture needs it. */
+	readonly schema?: string;
 	readonly username?: string;
 }
 
@@ -85,7 +87,7 @@ export async function dumpAndRestoreInLocalPostgresContainer(
 
 	const shell = [
 		'set -o pipefail',
-		`pg_dump --format=custom --no-owner --no-privileges --username ${shellQuote(username)} --dbname ${shellQuote(options.sourceDatabase)} | pg_restore --clean --if-exists --no-owner --no-privileges --username ${shellQuote(username)} --dbname ${shellQuote(options.targetDatabase)}`,
+		`pg_dump --format=custom ${options.schema === undefined ? '' : `--schema ${shellQuote(options.schema)}`} --no-owner --no-privileges --username ${shellQuote(username)} --dbname ${shellQuote(options.sourceDatabase)} | pg_restore --clean --if-exists --no-owner --no-privileges --username ${shellQuote(username)} --dbname ${shellQuote(options.targetDatabase)}`,
 	].join('; ');
 	await execInLocalPostgresContainer(['bash', '-lc', shell]);
 }

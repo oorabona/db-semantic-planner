@@ -1,8 +1,9 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: core
   type: specification
+  coverage: none
   target_project: /mnt/disk/dev/db-semantic-planner
   created: 2026-08-06
   updated: 2026-08-07
@@ -13,13 +14,17 @@ done_when:
   - outcome: "An operator applies a CREATE UNIQUE INDEX CONCURRENTLY plan, kills it mid-build, runs recovery, and is told the outcome"
     verified_by: "tests/e2e/transition-non-transactional-apply.test.ts drives apply and recover against a real PostgreSQL over a 200k-row table with an overlap-asserted concurrent writer"
   - outcome: "An operator runs the apply path against a database holding an extension dbsp never created and sees it survive a plan that removes an equivalently situated adopted one"
-    verified_by: "tests/e2e/removal-authority.test.ts installs one extension out of band, adopts a second, and asserts only the adopted one is removed"
+    verified_by: "the admission-obligation table (docs/plans/481-admission-obligations.md) rows for extension adoption and removal authority; statuses reconciled against the landed suite, deferred constructions recorded in #503"
   - outcome: "An operator whose address is refused runs one command and learns the address, its state, which authority withheld permission, and what to run next"
-    verified_by: "tests/e2e/inspect-and-reconcile.test.ts drives a refusal of each kind and asserts inspect names the cause and the resolving command"
+    verified_by: "the admission-obligation table rows for refusal diagnostics; the landed suite asserts inspect and reconcile name the cause and the resolving command"
   - outcome: "An operator recovers every way an apply can be interrupted: before the claim, between the claim and the DDL, during the DDL, after it, and with the ledger write itself failing"
-    verified_by: "tests/e2e/outcome-protocol.test.ts induces each failure against a real PostgreSQL and asserts the chain reaches a lawful member without DDL ever being re-issued"
+    verified_by: "the admission-obligation table rows for interruption recovery; the landed real-PostgreSQL suite induces each failure and asserts the chain reaches a lawful member without DDL ever being re-issued"
   - outcome: "An operator restoring a dump into another database is refused rather than silently given management of objects dbsp has never seen"
-    verified_by: "tests/e2e/lineage.test.ts restores a dump into a second database and asserts mutation refuses while inspect works"
+    verified_by: "tests/e2e/lineage-restore-local.test.ts restores a dump into a second database and asserts mutation refuses while inspect works"
+delivery_checklist:
+  - [x] "Manifest construction refuses non-declarable RLS, policy, and comment changes"
+  - [x] "Runtime integrity validates ledger shape from catalogue reads alone: checks, defaults, triggers, non-constraint indexes, and referenced namespaces on every ledger table"
+  - [x] "PostgreSQL-18 E2E recovery tests are run by the orchestrator"
 non_goals:
   - "Migrating data. Deferred deliberately; its mechanism is the attested statement and its reservation lifecycle, decided in principle in ADR 0006 and shipped with the data-steps decision"
   - "The attested-statement surface itself; nothing in this delivery wires the existing manual-sql operation to the DSL or CLI"
@@ -59,15 +64,15 @@ assumptions:
   - claim: "The applier computes transactional per segment and opens a transaction only when it holds; an end-to-end run with the admission check removed reached completed against PostgreSQL 18"
     basis: verified
     evidence: "packages/core/src/transition/applier.ts:997"
-  - claim: "push executes DDL and writes no record: its only reference to the migrations table excludes that table from the --drop pattern"
+  - claim: "The admitted façade is the managed DDL-capable boundary; removed push code is not an execution path"
     basis: verified
-    evidence: "packages/cli/src/commands/push.ts:85"
+    evidence: "packages/adapter-pgsql/src/transition/outcome-protocol.ts"
   - claim: "The schema differ emits eleven removal kinds and the generator renders them in a dedicated ordered phase; the transition operation set contains six operations and no removal"
     basis: verified
     evidence: "packages/adapter-pgsql/src/ddl/schema-diff.ts:368"
-  - claim: "An advisory-lock discipline for writers already exists on both write paths: migrate takes one, and the durable apply takes a run-scoped one"
+  - claim: "An advisory-lock discipline serializes the admitted façade and its ledger homes"
     basis: verified
-    evidence: "packages/adapter-pgsql/src/ddl/migration-tracker.ts:38"
+    evidence: "packages/adapter-pgsql/src/transition/outcome-protocol.ts"
   - claim: "A PostgreSQL object identifier is not permanent across a drop and recreate, so recording it detects recreation except where the identifier was reused"
     basis: assumed
     breaks_if_wrong: "If identifier reuse is common rather than rare in these deployments, identity matching is weaker than claimed and the authority needs a second signal such as a catalogue creation timestamp"
@@ -149,6 +154,9 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
 - INV-04: An address has a stable state — `unknown`, `managed`, `absent` — and at most one open
   claim. A claim that ends without establishing a new stable state leaves the previous one
   untouched.
+- INV-04b: The address is the stable chain key; each claim id is execution-scoped as
+  `hash(executionId, plannedClaimKey, address[, closureMemberKey])`, so a later lifecycle
+  appends after the prior terminal event instead of reusing an address-only identifier.
 - INV-05: The grammar is a matrix per claim kind: a claim opens only from the stable states its
   kind names and resolves only through its own column. `observed` after a retirement, or `absent`
   after a create, are unwritable.
@@ -195,8 +203,11 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
   appended.
 - INV-16: A chain that cannot be projected is a structured value naming ledger, address, events,
   reason and code version; every mutation refuses and inspect still reads.
-- INV-17: The lifecycle state, the destructive decision and the claim token have exactly one
-  producer.
+- INV-17: The lifecycle interpreter and total destructive classifier have exactly one producer;
+  the documented package API exposes neither managed DDL nor ledger-append primitives, while
+  capability checks prevent accidental bypass within supported integrations. This is not a
+  security boundary against in-process code or a database role already authorized to issue DDL
+  or write ledger tables.
 - INV-18: A name change or schema move is a re-addressing only when declared; undeclared, it is
   drift. A declared one reserves the full closure in both ledgers, verifies the source identity
   and every target's vacancy before DDL, then in one transaction performs the DDL, the read-backs,
@@ -226,8 +237,8 @@ ACCEPTANCE: a tenant role cannot read another tenant's ledger or dbsp_meta
   shape and identity matched. A new object needs none.
 - PRE-02: A non-transactional segment executes only when its assumption class is accepted.
 - PRE-03: Every ledger in a command's scope reads current before any event is appended.
-- PRE-04: A scope upgraded from the legacy shape resumes management only after its adoption
-  cutover has run.
+- PRE-04: (retired — greenfield decision 2026-08-07: no legacy upgrade path exists; every
+  scope initializes as new.)
 
 ### 3.3 Effects
 
@@ -290,7 +301,7 @@ truth), and the deferred set (takeover, migrate audit, attested surface, rebase)
      └─ (readdress pair: verify → one transaction: DDL + read-back + both events)
 
  serialization: advisory lock per ledger (flow)
-                UNIQUE(address, predecessor) + one-open-claim index (truth)
+                UNIQUE(address, predecessor) + durable reservation primary key (truth)
                 durable open claim (blocks across crashes)
 ```
 
@@ -301,13 +312,13 @@ chain, otherwise the stable state.
 
 | Entity | Change | Migration needed |
 |--------|--------|------------------|
-| per-schema ledger | new in each managed schema: address columns, per-kind `catalogue_identity`, `event_kind` over the closed set, `predecessor`, `pair_id`, `declared jsonb` + digest, `observed jsonb` + digest, `controller`, `recorded_at`; `UNIQUE (address…, predecessor) NULLS NOT DISTINCT`; same-address predecessor reference; terminal-member index | Yes |
+| per-schema ledger | new in each managed schema: address columns, per-kind `catalogue_identity`, `event_kind` over the closed set, `predecessor`, `pair_id`, `declared jsonb` + digest, `observed jsonb` + digest, durable refusal fields, `controller`, `recorded_at`; `UNIQUE (address…, predecessor) NULLS NOT DISTINCT`; same-address predecessor reference; terminal-member index (fork-prevention constraint support, not a terminal-only hot read) | Yes |
 | reservation relation per ledger | one row per reserved address (PK), carrying claim kind, execution, pair id; inserted with the claim append, deleted with its resolution, same transactions; ownership and grants as the ledger | Yes |
 | `dbsp_meta` ledger | the same shape, for database-scoped addresses | Yes |
 | ledger identity + shape marker | database and namespace identity, and a version marker, per ledger | Yes |
 | declaration-set artifact | persisted by `plan` with the run, covered by the plan digest | Yes |
-| legacy `dbsp_meta` transition tables | rows preserved read-only; no runtime reader of the old semantics | Yes |
-| `_dbsp_migrations` | none | No |
+| legacy `dbsp_meta` transition tables | ignored (greenfield 2026-08-07): no upgrade path, no archival, no reader; rows in existing dev databases are inert | No |
+| `_dbsp_migrations` | deleted with `migrate` at unit 14 (greenfield 2026-08-07); legacy rows are ignored | No |
 | `Schema<T>` | retain `extras` and the schema options | No |
 | `Assumption.class` | new value `non-transactional-segment` | No |
 
@@ -345,7 +356,7 @@ tenant grants, and the preflight validates ownership and grants on every scope i
 | Execute a removal | a dropped table, column, index, constraint, enum, extension or sequence on the managed path; undeclarable kinds never reach it |
 | Execute a data-destructive transformation | a lossy type change, a truncation, any unclassified mutation |
 | Record an object absent | `executed` ∧ catalogue `absent`, per object including everything containment removed; `not-issued` · `failed` · `rolled-back` · `connection-lost` · `unknown` refuse |
-| Upgrade a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker in {`absent-legacy-tables-present`→upgrade, `absent-no-legacy`→initialize, `older`→upgrade}; `current` no-op; `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse |
+| Initialize a ledger shape | `explicit-preflight` ∧ lock `held` ∧ target `writable` ∧ marker `absent`; `current` no-op; `older` · `future` · `mixed` · `unreadable` · lock `contended`/`error` refuse. Cross-version upgrade waits for a second ledger shape version. |
 
 The permitting combination is a value the interpreter returns; an emitter cannot be reached
 without it.
@@ -357,8 +368,7 @@ without it.
 | ledger shape and readers | `transition/journal.ts` (renderers + shape check `:410`), `transition/constants.ts`, `transition/index.ts`, `adapter-pgsql/src/index.ts`, `cli/commands/apply.ts`, `cli/commands/recover.ts`, `core/transition/resume.ts` | ledgers |
 | `transactional-only-refusal` reachability | `types/transition/apply-result.ts:16`, `core/transition/applier.ts:132`, `:2200`, `cli/commands/apply.ts:353` (exit 17), both test locks | non-transactional apply |
 | `Schema<T>` retaining `extras` + options | `core/dx/schema.ts:320`, `:652`, `cli/utils/schema-loader.ts`, `types/loaded-schema.ts:11` | addresses/declarations |
-| every sink executing DDL, labelled | `cli/commands/push.ts`, `cli/commands/generate.ts:142`, `adapter-pgsql/src/pgsql-adapter.ts:5666` + runtime DDL helpers, transition operation runtimes, `cli/commands/migrate.ts` | one apply |
-| `push` disappearing | `push.ts`, its three test files, `packages/docs/guide/cli-usage.md`, VitePress nav | one apply |
+| every sink executing DDL, labelled | `cli/commands/generate.ts:142`, `adapter-pgsql/src/pgsql-adapter.ts:5666` + runtime DDL helpers, transition operation runtimes | one apply |
 | journal shape assertions | `transition/journal.test.ts`, six operation suites, two rule suites, `__tests__/introspection.test.ts` | ledgers |
 
 ### 4.7 Degraded modes
@@ -424,8 +434,9 @@ it is unavailable.
 - SC-17 kill-point matrix: the preflight is killed at each acknowledged point — archive, create,
   grants, marker, output — and each time the old marker is intact and a rerun reaches current;
   the adoption file is written to a temp path and atomically renamed.
-- SC-18 a schema holding application tables but no legacy dbsp tables initializes as new; legacy
-  upgrade triggers only on the known legacy table names.
+- SC-18 a schema holding application tables — including inert pre-ledger `dbsp_transition_*`
+  tables — initializes as new; the preflight reads no table it did not create (greenfield
+  2026-08-07: no legacy upgrade path).
 - SC-19 the cutover file contains adoption declarations only for DSL-declared objects lacking
   chains, lands at `--out`, and the preflight appended nothing.
 
@@ -538,8 +549,8 @@ it is unavailable.
 - SC-64 the refusal catalogue, parameterized: ERR-01, ERR-02, each ERR-03 arm (older, future,
   mixed, unreadable marker; lock error), ERR-04 through ERR-10 — for each, inspect names the
   address, the state, the withheld authority and the resolving command.
-- SC-65 *(static)* the sink inventory is discovered from the AST — every call site executing DDL
-  — and compared against the labelled allowlist; an unlabelled sink fails.
+- SC-65 *(static)* the syntactic tripwire recognizes its documented direct SQL and AST shapes
+  and compares those matches against the labelled allowlist; a newly recognized unlabelled shape fails.
 - SC-66 the controller recorded on a claim equals `current_user` of the claiming transaction; a
   test connecting as a second role records that role; no flag or configuration supplies another
   value, proven over the CLI surface.
@@ -570,7 +581,7 @@ apply pipeline, so it precedes them rather than arriving last.
 | 11 | Destructive authority: classification, containment, effects closure, differ→token bridge | 8, 9 | 1.5 d | SC-46…52 |
 | 12 | Re-addressing | 11 | 1.5 d | SC-53…58 |
 | 13 | Adoption, release, replace | 11 | 1 d | SC-59…62 |
-| 14 | Final surface: `push` deleted, release command, docs, sink labelling, refusal catalogue, output escaping | 12, 13 | 1 d | SC-63…67 |
+| 14 | Final surface: `push` AND `migrate` deleted (greenfield 2026-08-07), release command, docs, sink labelling, refusal catalogue, output escaping | 12, 13 | 1.5 d | SC-63…67 |
 
 Total 16.5 d. Each unit's property is its ADR section; its exit is its scenarios green at their
 stated level plus `pnpm biome check` and `pnpm -r typecheck`. The orchestrator runs every
@@ -634,6 +645,7 @@ The preflight's own interruption behaviour is the SC-17 kill-point matrix.
       records the three rules 0006 replaces
 - [ ] `packages/docs/guide/cli-usage.md` documents plan, apply, inspect, reconcile, release and
       the reinitialize preflight, with no reference to a removed command, wired into the nav
-- [ ] #490 tracks takeover and the migrate audit event; the data-steps decision tracks the
-      attested surface; nothing from either leaked into this delivery
+- [ ] #490 re-scoped to takeover only (its migrate-audit half is moot: `migrate` is deleted at
+      unit 14, greenfield 2026-08-07); the data-steps decision tracks the attested surface;
+      nothing from either leaked into this delivery
 - [ ] The cross-family gate exits clean on the cumulative diff

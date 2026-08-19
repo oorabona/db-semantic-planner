@@ -2209,7 +2209,7 @@ describe('createApplier', () => {
 		expect(observed[0]?.outcome).toBe('unknown-step-result');
 	});
 
-	it('reports unknown-step-result when commit outcome is uncertain', async () => {
+	it('OBL-LOCK3 reports commit ambiguity without an observed-journal write', async () => {
 		const observed: StepJournal[] = [];
 		const rt: OperationRuntime = {
 			...runtime(
@@ -2251,7 +2251,7 @@ describe('createApplier', () => {
 			'commit outcome uncertain',
 		);
 		expect(result.journals[0]?.outcome).toBe('unknown-step-result');
-		expect(observed[0]?.outcome).toBe('unknown-step-result');
+		expect(observed).toEqual([]);
 	});
 
 	it('keeps a committed segment completed when the post-commit observed journal write fails', async () => {

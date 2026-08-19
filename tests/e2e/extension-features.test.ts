@@ -78,23 +78,21 @@ function valuesNonDecreasing(values: number[]): boolean {
 	return true;
 }
 
-function skipWithoutVector(
-	ctx: { skip: (note?: string) => void },
+function requireVector(
 	capabilities: ExtensionFeatureCapabilities | undefined,
 ): void {
 	if (!capabilities?.vector) {
-		ctx.skip(
+		throw new Error(
 			`pgvector extension is not available: ${capabilities?.vectorError ?? 'CREATE EXTENSION vector did not succeed'}`,
 		);
 	}
 }
 
-function skipWithoutPgSearch(
-	ctx: { skip: (note?: string) => void },
+function requirePgSearch(
 	capabilities: ExtensionFeatureCapabilities | undefined,
 ): void {
 	if (!capabilities?.pgSearch) {
-		ctx.skip(
+		throw new Error(
 			`ParadeDB pg_search extension is not available: ${capabilities?.pgSearchError ?? 'CREATE EXTENSION pg_search did not succeed'}`,
 		);
 	}
@@ -149,8 +147,8 @@ describe('extension feature real-DB e2e', () => {
 	});
 
 	describe('pgvector distances', () => {
-		it('orders nearest neighbours by cosine similarity and raw cosine distance', async (ctx) => {
-			skipWithoutVector(ctx, capabilities);
+		it('orders nearest neighbours by cosine similarity and raw cosine distance', async () => {
+			requireVector(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 
@@ -187,8 +185,8 @@ describe('extension feature real-DB e2e', () => {
 			expect(asNumber(rawRows.at(-1)?.distance)).toBeGreaterThan(1);
 		});
 
-		it('orders nearest neighbours by L2 distance', async (ctx) => {
-			skipWithoutVector(ctx, capabilities);
+		it('orders nearest neighbours by L2 distance', async () => {
+			requireVector(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 
@@ -207,8 +205,8 @@ describe('extension feature real-DB e2e', () => {
 			expect(asNumber(rows.at(-1)?.distance)).toBeGreaterThan(9);
 		});
 
-		it('orders nearest neighbours by inner product distance', async (ctx) => {
-			skipWithoutVector(ctx, capabilities);
+		it('orders nearest neighbours by inner product distance', async () => {
+			requireVector(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 
@@ -233,8 +231,8 @@ describe('extension feature real-DB e2e', () => {
 	});
 
 	describe('hnsw vector index', () => {
-		it('runs an hnsw-backed distance-ordered query with the same nearest-neighbour order', async (ctx) => {
-			skipWithoutVector(ctx, capabilities);
+		it('runs an hnsw-backed distance-ordered query with the same nearest-neighbour order', async () => {
+			requireVector(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 
@@ -259,8 +257,8 @@ describe('extension feature real-DB e2e', () => {
 	});
 
 	describe('ParadeDB BM25', () => {
-		it('ranks BM25 search results by term frequency and exposes relative scores', async (ctx) => {
-			skipWithoutPgSearch(ctx, capabilities);
+		it('ranks BM25 search results by term frequency and exposes relative scores', async () => {
+			requirePgSearch(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 
@@ -285,8 +283,8 @@ describe('extension feature real-DB e2e', () => {
 			expect(scores[0]!).toBeGreaterThan(scores[2]!);
 		});
 
-		it('combines parse, boost, and booleanSearch so boosted title matches outrank body-only frequency', async (ctx) => {
-			skipWithoutPgSearch(ctx, capabilities);
+		it('combines parse, boost, and booleanSearch so boosted title matches outrank body-only frequency', async () => {
+			requirePgSearch(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 			const boostedQuery = booleanSearch([
@@ -309,8 +307,8 @@ describe('extension feature real-DB e2e', () => {
 			expect(scores[0]!).toBeGreaterThan(scores[1]!);
 		});
 
-		it('ranks fullTextSearch/textScore results through the high-level BM25 helper', async (ctx) => {
-			skipWithoutPgSearch(ctx, capabilities);
+		it('ranks fullTextSearch/textScore results through the high-level BM25 helper', async () => {
+			requirePgSearch(capabilities);
 			const adapter = await getTestAdapter();
 			const orm = createOrm({ model: extensionFeaturesModel, adapter });
 

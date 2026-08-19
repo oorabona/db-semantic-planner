@@ -24,6 +24,7 @@ import type {
 	ProvenPlanShape,
 	RecognitionResult,
 	ResourceAddress,
+	ResourceSelector,
 	RuleRef,
 	SemanticArtifactRef,
 	TransitionCandidate,
@@ -33,6 +34,7 @@ import type {
 	TransitionSessionClient,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
+import { sameLedgerAddress } from '@dbsp/types';
 import { transitionCompareCurrentModel } from './comparator.js';
 import {
 	type CompositionOperation,
@@ -68,6 +70,87 @@ const PROVER_ARTIFACT: SemanticArtifactRef = {
 const NON_TRANSACTIONAL_SEGMENT_ASSUMPTION_ID = assumptionId(
 	'dbsp.core.transition.prover.non-transactional-segment',
 );
+
+const DECLARABLE_KINDS = new Set([
+	'table',
+	'column',
+	'index',
+	'constraint',
+	'enum',
+	'sequence',
+	'extension',
+]);
+
+function declarableKind(
+	kind: string,
+): import('@dbsp/types').DeclarableKind | undefined {
+	if (kind === 'check-constraint') return 'constraint';
+	if (kind === 'type') return 'enum';
+	return DECLARABLE_KINDS.has(kind)
+		? (kind as import('@dbsp/types').DeclarableKind)
+		: undefined;
+}
+
+function claimAddressFromSelector(
+	selector: ResourceSelector,
+	context: ObservationContext,
+): import('@dbsp/types').ManagedStepClaimMaterial['address'] | undefined {
+	if (!selector.kind || !selector.name) return undefined;
+	const kind = declarableKind(selector.kind);
+	if (!kind) return undefined;
+	const parent = selector.within;
+	const schema = selector.schema ?? parent?.schema ?? context.targetSchema;
+	if (kind !== 'extension' && !schema) return undefined;
+	return {
+		engine: context.engine,
+		database: context.databaseId,
+		...(kind === 'extension' ? {} : { schema }),
+		...(parent === undefined ? {} : { parent }),
+		kind,
+		name: selector.name,
+		scope: kind === 'extension' ? 'database' : 'schema',
+	};
+}
+
+/**
+ * A managed claim is deliberately derived only while the plan is being
+ * proved.  The executor receives this immutable material and never parses SQL
+ * or re-renders an operation to recover it.
+ */
+function managedClaimMaterial(
+	runtime: RegisteredOperationSemantics,
+	operation: PhysicalOperation,
+	context: ObservationContext,
+): import('@dbsp/types').ManagedStepClaimMaterial | undefined {
+	if (runtime.executionContractEligibility?.eligible !== true) return undefined;
+	if (!runtime.renderPlanSql) return undefined;
+	const sql = runtime.renderPlanSql(operation, context);
+	if (!sql.trim()) return undefined;
+	const effects = runtime.effectsOf(operation, context).effects;
+	const writes = effects.writes;
+	const addresses = writes
+		.map((write) => claimAddressFromSelector(write, context))
+		.filter(
+			(
+				address,
+			): address is import('@dbsp/types').ManagedStepClaimMaterial['address'] =>
+				address !== undefined,
+		);
+	if (addresses.length !== 1) return undefined;
+	const address = addresses[0];
+	if (!address) return undefined;
+	const readsAddress = effects.reads
+		.map((read) => claimAddressFromSelector(read, context))
+		.some((read) => read !== undefined && sameLedgerAddress(address, read));
+	return {
+		claimId: claimId(`dbsp.transition.plan.${operation.ref}`),
+		plannedClaimKey: `step:${operation.ref}/root`,
+		address,
+		claimKind: 'intent',
+		statementBundle: { statements: [{ ordinal: 0, sql }] },
+		requiresVacancy: !readsAddress,
+	};
+}
 
 function sameArtifact(
 	left: SemanticArtifactRef,
@@ -1304,6 +1387,7 @@ async function proveTransitions(
 		{
 			readonly fragment: TransitionFragment;
 			readonly operation: PhysicalOperation;
+			readonly semantics: RegisteredOperationSemantics;
 			readonly effects: OperationEffectAssessment;
 			readonly fingerprints: ReturnType<
 				RegisteredOperationSemantics['buildFingerprints']
@@ -1910,6 +1994,7 @@ async function proveTransitions(
 				stepInputs.set(operation.ref, {
 					fragment,
 					operation,
+					semantics,
 					effects,
 					fingerprints,
 					requiredClaims,
@@ -2037,32 +2122,37 @@ async function proveTransitions(
 	}
 	const primaryClaim =
 		planClaims[0]?.id ?? claimId('dbsp.transition.claim.plan');
-	const guardedPlan: ProvenPlanShape = {
-		observations: planEvidence,
-		claims: planClaims,
-		assumptions,
-		preconditions: fragments.flatMap((fragment) =>
-			fragment.obligations.map((obligation) => ({
-				proposition: obligation.proposition,
-				scope: obligation.scope,
-			})),
-		),
-		segments: composition.segments,
-		steps: composition.operations.map((entry) => {
-			const input = stepInputs.get(entry.operation.ref);
-			if (!input) {
-				throw new Error(
-					`internal error: missing composed operation ${entry.operation.ref}`,
-				);
-			}
-			const currentStepId = `step:${entry.operation.ref}`;
-			const segmentId = segmentByStepId.get(currentStepId);
-			if (!segmentId) {
-				throw new Error(
-					`internal error: composed step ${currentStepId} has no segment`,
-				);
-			}
+	const guardedSteps = composition.operations.map((entry) => {
+		const input = stepInputs.get(entry.operation.ref);
+		if (!input) {
+			throw new Error(
+				`internal error: missing composed operation ${entry.operation.ref}`,
+			);
+		}
+		const currentStepId = `step:${entry.operation.ref}`;
+		const segmentId = segmentByStepId.get(currentStepId);
+		if (!segmentId) {
+			throw new Error(
+				`internal error: composed step ${currentStepId} has no segment`,
+			);
+		}
+		const managedClaim = managedClaimMaterial(
+			input.semantics,
+			input.operation,
+			sharedProofContext ?? context,
+		);
+		if (
+			input.semantics.executionContractEligibility?.eligible === true &&
+			managedClaim === undefined
+		) {
 			return {
+				kind: 'underivable-managed-claim' as const,
+				operation: input.operation,
+			};
+		}
+		return {
+			kind: 'step' as const,
+			step: {
 				stepId: currentStepId,
 				segmentId,
 				operation: input.operation,
@@ -2074,7 +2164,37 @@ async function proveTransitions(
 				guards: input.guards,
 				restsOnAssumptions: input.restsOnAssumptions,
 				selectionRationale: input.fragment.selectionRationale,
-			};
+				...(managedClaim === undefined ? {} : { managedClaim }),
+			},
+		};
+	});
+	const underivable = guardedSteps.find(
+		(step) => step.kind === 'underivable-managed-claim',
+	);
+	if (underivable) {
+		return {
+			kind: 'blocked',
+			assessment: uncomposable(
+				fragments,
+				`managed-eligible operation ${underivable.operation.ref} cannot derive immutable managed claim material`,
+			),
+		};
+	}
+	const guardedPlan: ProvenPlanShape = {
+		observations: planEvidence,
+		claims: planClaims,
+		assumptions,
+		preconditions: fragments.flatMap((fragment) =>
+			fragment.obligations.map((obligation) => ({
+				proposition: obligation.proposition,
+				scope: obligation.scope,
+			})),
+		),
+		segments: composition.segments,
+		steps: guardedSteps.map((entry) => {
+			if (entry.kind !== 'step')
+				throw new Error('internal error: blocked managed claim reached plan');
+			return entry.step;
 		}),
 		postconditions: [],
 	};

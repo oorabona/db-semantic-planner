@@ -55,6 +55,7 @@ export type ChangeKind =
 	// Tables
 	| 'create_table'
 	| 'drop_table'
+	| 'readdress_table'
 	// Columns
 	| 'add_column'
 	| 'drop_column'
@@ -243,6 +244,31 @@ export function compareSchemata(
 		? normalizeTableMap(schema.tables, plugin)
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
+	const declaredReaddresses = new Map(
+		[...schema.tables]
+			.filter(([, table]) => table.readdress !== undefined)
+			.map(
+				([, table]) =>
+					[
+						schemaNaming.toDatabase(table.name),
+						{
+							from: {
+								...table.readdress!.from,
+								name: schemaNaming.toDatabase(table.readdress!.from.name),
+							},
+							to: {
+								...table.readdress!.to,
+								name: schemaNaming.toDatabase(table.readdress!.to.name),
+							},
+						},
+					] as const,
+			),
+	);
+	const readdressSources = new Set(
+		[...declaredReaddresses.values()].map(
+			(declaration) => declaration.from.name,
+		),
+	);
 	const externalTables = new Set(
 		[...(schema.externalTables ?? [])].map((name) =>
 			plugin ? plugin.toDatabase(name) : name,
@@ -267,6 +293,82 @@ export function compareSchemata(
 
 	// 1. Tables that exist in schema but not in DB → create_table
 	for (const [name, schemaTable] of schemaTables) {
+		const readdress = declaredReaddresses.get(name);
+		const sourcePresent = readdress && dbTables.has(readdress.from.name);
+		const targetPresent = dbTables.has(name);
+		if (readdress) {
+			if (sourcePresent && !targetPresent) {
+				changes.push({
+					kind: 'readdress_table',
+					table: name,
+					destructive: false,
+					details: `Re-address table "${readdress.from.name}" to "${name}"`,
+					meta: {
+						readdress,
+						table: schemaTable,
+						readdressAssessment: 'source-only',
+						sourcePresent: true,
+						targetPresent: false,
+					},
+				});
+				continue;
+			}
+			if (sourcePresent && targetPresent) {
+				// Do not declare success or silently suppress the source deletion when
+				// both names are occupied. This remains a planning refusal, not a ledger
+				// event: no executable readdress material exists for it.
+				changes.push({
+					kind: 'readdress_table',
+					table: name,
+					destructive: false,
+					details: `Refuse re-address table "${readdress.from.name}" to "${name}": target is occupied`,
+					meta: {
+						readdress,
+						table: schemaTable,
+						readdressAssessment: 'target-occupied',
+						sourcePresent: true,
+						targetPresent: true,
+					},
+				});
+				continue;
+			}
+			if (!sourcePresent && targetPresent) {
+				// The physical target may be the completed side of a prior paired
+				// readdress. Keep the declaration visible so the pair ledger is
+				// validated by the readdress executor; never degrade to comparison.
+				changes.push({
+					kind: 'readdress_table',
+					table: name,
+					destructive: false,
+					details: `Validate completed re-address table "${readdress.from.name}" to "${name}"`,
+					meta: {
+						readdress,
+						table: schemaTable,
+						readdressAssessment: 'target-only',
+						sourcePresent: false,
+						targetPresent: true,
+					},
+				});
+				continue;
+			}
+			// A declaration is not permission to turn a missing source into a
+			// fresh table. Keep the diagnostic visible to planning, which refuses
+			// it before any manifest can be built.
+			changes.push({
+				kind: 'readdress_table',
+				table: name,
+				destructive: false,
+				details: `Refuse re-address table "${readdress.from.name}" to "${name}": source is absent`,
+				meta: {
+					readdress,
+					table: schemaTable,
+					readdressAssessment: 'source-missing',
+					sourcePresent: false,
+					targetPresent: false,
+				},
+			});
+			continue;
+		}
 		if (!dbTables.has(name)) {
 			changes.push({
 				kind: 'create_table',
@@ -363,7 +465,11 @@ export function compareSchemata(
 
 	// 2. Tables that exist in DB but not in schema → drop_table
 	for (const [name] of dbTables) {
-		if (!schemaTables.has(name) && !externalTables.has(name)) {
+		if (
+			!schemaTables.has(name) &&
+			!externalTables.has(name) &&
+			!readdressSources.has(name)
+		) {
 			changes.push({
 				kind: 'drop_table',
 				table: name,
@@ -373,10 +479,17 @@ export function compareSchemata(
 		}
 	}
 
+	// `destructive` is a compatibility projection for legacy renderers. It is
+	// deliberately not an authority input: generator orchestration classifies
+	// every mutation independently through its total classifier.
+	const classifiedChanges = changes.map((change) => ({
+		...change,
+		destructive: change.destructive,
+	}));
 	return {
-		changes,
-		hasDestructive: changes.some((c) => c.destructive),
-		summary: buildSummary(changes),
+		changes: classifiedChanges,
+		hasDestructive: classifiedChanges.some((c) => c.destructive),
+		summary: buildSummary(classifiedChanges),
 	};
 }
 
@@ -1624,18 +1737,25 @@ function comparePolicies(
 	db: TableIR,
 	changes: SchemaChange[],
 ): void {
-	const schemaRlsEnabled = schema.rlsEnabled ?? false;
+	// RLS and policies have no declarable managed representation.  An omitted
+	// property is therefore *not* a request to remove live access controls.
+	// Keep the two aspects independently opt-in so a future producer that can
+	// declare one of them does not accidentally start managing the other.
+	const managesRls = schema.rlsEnabled !== undefined;
+	const managesPolicies = schema.policies !== undefined;
+	if (!managesRls && !managesPolicies) return;
+	const schemaRlsEnabled = schema.rlsEnabled;
 	const dbRlsEnabled = db.rlsEnabled ?? false;
 
 	// RLS enabled state changed
-	if (schemaRlsEnabled && !dbRlsEnabled) {
+	if (managesRls && schemaRlsEnabled && !dbRlsEnabled) {
 		changes.push({
 			kind: 'enable_rls',
 			table: schema.name,
 			destructive: false,
 			details: `Enable RLS on table "${schema.name}"`,
 		});
-	} else if (!schemaRlsEnabled && dbRlsEnabled) {
+	} else if (managesRls && !schemaRlsEnabled && dbRlsEnabled) {
 		changes.push({
 			kind: 'disable_rls',
 			table: schema.name,
@@ -1644,7 +1764,8 @@ function comparePolicies(
 		});
 	}
 
-	const schemaPolicies = schema.policies ?? [];
+	if (!managesPolicies) return;
+	const schemaPolicies = schema.policies!;
 	const dbPolicies = db.policies ?? [];
 
 	const schemaMap = new Map<string, PolicyIR>(

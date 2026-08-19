@@ -23,6 +23,7 @@ import {
 	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 } from './index-feature-capabilities.js';
 import { reserveTransitionJournalRun } from './journal.js';
+import { withPgManagedOutcomeRuntime } from './managed-outcome-runtime.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';
@@ -63,6 +64,14 @@ type ExecutionContractAwareOperation = {
 		| { readonly eligible: true }
 		| { readonly eligible: false; readonly detail: string };
 };
+
+function withEligiblePgManagedOutcomeRuntime<
+	T extends ExecutionContractAwareOperation,
+>(runtime: T) {
+	return runtime.executionContractEligibility.eligible
+		? withPgManagedOutcomeRuntime(runtime)
+		: runtime;
+}
 
 const PG_TRANSACTION_DOMAIN = 'postgresql.transition.connection';
 
@@ -150,12 +159,22 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 	];
 	const operationSemantics = [
-		createAttachLogicalIdentityOperationRuntime(),
-		createAlterColumnSetNotNullOperationRuntime(),
-		createAlterTableAddCheckOperationRuntime(),
-		createAlterTypeAddValueOperationRuntime(),
-		createCreateUniqueIndexConcurrentlyOperationRuntime(),
-		createManualSqlOperationRuntime(),
+		withEligiblePgManagedOutcomeRuntime(
+			createAttachLogicalIdentityOperationRuntime(),
+		),
+		withEligiblePgManagedOutcomeRuntime(
+			createAlterColumnSetNotNullOperationRuntime(),
+		),
+		withEligiblePgManagedOutcomeRuntime(
+			createAlterTableAddCheckOperationRuntime(),
+		),
+		withEligiblePgManagedOutcomeRuntime(
+			createAlterTypeAddValueOperationRuntime(),
+		),
+		withEligiblePgManagedOutcomeRuntime(
+			createCreateUniqueIndexConcurrentlyOperationRuntime(),
+		),
+		withEligiblePgManagedOutcomeRuntime(createManualSqlOperationRuntime()),
 	] satisfies readonly ExecutionContractAwareOperation[];
 	return {
 		rules: [

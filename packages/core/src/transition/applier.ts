@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -11,6 +12,7 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
+	LedgerPayload,
 	ObservationContext,
 	OperationEffectAssessment,
 	OutcomeReason,
@@ -26,6 +28,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import { matchLiveObservationContext } from './context-match.js';
+import { mintDurablyLoadedRun } from './durably-loaded-run.js';
 import { validateExecutionContract } from './execution-contract.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type {
@@ -52,6 +55,7 @@ import {
 	acquireTransitionLease,
 	createTransitionLessor,
 	isTransitionLessor,
+	markTransitionClientCompromised,
 	planOperationSession,
 	type TransitionLease,
 	type TransitionLeaseFailure,
@@ -87,6 +91,12 @@ type DurableExecutionCarrier = {
 	readonly plan: InProcessProvenPlan;
 	readonly assessment: ApplicableAssessment;
 	readonly __durableRun?: TransitionRunMetadata;
+	readonly __durablyLoadedRun?: import('./durably-loaded-run.js').DurablyLoadedRun;
+	/**
+	 * The first delivery attempt remains run-scoped for durable journal and
+	 * recovery compatibility. A replay receives a fresh attempt identity.
+	 */
+	readonly __executionId?: string;
 	readonly __executionBoundary?: Extract<
 		ExecutionContextBoundary,
 		{ readonly kind: 'durable-contract' }
@@ -132,7 +142,17 @@ export type DurableApplyRefusalCode =
 	| 'transactional-only-refusal'
 	| 'operation-unavailable'
 	| 'assumption-not-accepted'
-	| 'authorization-write-failed';
+	| 'authorization-write-failed'
+	| 'database-read-only';
+
+function isDatabaseReadOnlyError(error: unknown): boolean {
+	return (
+		error !== null &&
+		typeof error === 'object' &&
+		'code' in error &&
+		(error as { readonly code?: unknown }).code === 'database-read-only'
+	);
+}
 
 function durableRefusal(
 	code: DurableApplyRefusalCode,
@@ -266,6 +286,31 @@ function evidenceIds(
 		.map((observation) => observation.id);
 }
 
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const record = value as Record<string, unknown>;
+	return `{${Object.keys(record)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+		.join(',')}}`;
+}
+
+function managedOutcomeReadBack(
+	observations: readonly IssuedObservation[],
+): LedgerPayload {
+	const value = {
+		observations: observations.map((observation) => ({
+			request: observation.request,
+			result: observation.result,
+		})),
+	} as unknown as LedgerPayload['value'];
+	return {
+		value,
+		digest: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+	};
+}
+
 function recordedAt(): string {
 	return new Date().toISOString();
 }
@@ -292,10 +337,12 @@ function fingerprintMatches(
 function intentRecord(
 	step: ProvenPlanStep,
 	run: TransitionRunMetadata,
+	executionId: string,
 ): DurableIntentRecord {
 	return {
 		runId: run.runId,
 		run,
+		executionId,
 		stepId: step.stepId,
 		operation: step.operation,
 		recordedAt: recordedAt(),
@@ -757,6 +804,15 @@ export function createApplier(
 				}
 			}
 			const run = carrier.__durableRun ?? createTransitionRunMetadata(plan);
+			// A regular apply can only receive a plan minted by prove() in this
+			// process.  Durable apply supplies the stricter load-path witness below.
+			const durablyLoadedRun =
+				carrier.__durablyLoadedRun ?? mintDurablyLoadedRun(run);
+			// A durable run is the reviewed plan, not one of its execution attempts.
+			// Every admitted attempt gets an opaque fresh identity; a prior committed
+			// step fact is refused by applyDurable before this path is reached.
+			const executionId =
+				carrier.__executionId ?? `dbsp.transition.execution.${randomUUID()}`;
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
@@ -981,7 +1037,7 @@ export function createApplier(
 						step,
 						semantics,
 						operationIssuer,
-						intent: intentRecord(step, run),
+						intent: intentRecord(step, run, executionId),
 						coordinatorBinding: registry.transactionCoordinatorFor(semantics),
 					});
 				}
@@ -1103,7 +1159,13 @@ export function createApplier(
 				}[] = [];
 				try {
 					lease = await acquireTransitionLease(target);
-					client = { opaqueClient: lease.session };
+					const leasedSession = lease.session;
+					client = {
+						opaqueClient: leasedSession,
+						markClientCompromised: () => {
+							markTransitionClientCompromised(leasedSession);
+						},
+					};
 					const executionClient = client;
 					if (executionBoundary.kind === 'durable-contract')
 						activeContext = executionBoundary.context;
@@ -1278,6 +1340,68 @@ export function createApplier(
 							}
 							return preIntentRefusal(mismatch);
 						}
+						const managedClaim =
+							executionBoundary.kind === 'durable-contract'
+								? entry.step.managedClaim
+								: undefined;
+						if (
+							executionBoundary.kind === 'durable-contract' &&
+							entry.semantics.executionContractEligibility?.eligible === true &&
+							!managedClaim
+						) {
+							return preIntentRefusal(
+								operationFailedNotAppliedReason(
+									entry.step,
+									'managed-eligible step has no immutable managed claim material',
+								),
+							);
+						}
+						if (managedClaim) {
+							const preflightManagedOutcome =
+								entry.semantics.preflightManagedOutcome;
+							if (preflightManagedOutcome) {
+								const detail = await preflightManagedOutcome(executionClient, {
+									claim: managedClaim,
+									run,
+									transactional,
+									lockTimeoutMs: lockTimeoutMs(
+										entry.semantics,
+										entry.step,
+										stepContext,
+									),
+								});
+								if (detail) {
+									if (transactionStarted && !committed) {
+										try {
+											await rollbackAndPrepareObservedJournalWrite(
+												segmentCoordinator,
+												executionClient,
+												lockTimeoutMs(
+													entry.semantics,
+													entry.step,
+													activeContext,
+												),
+											);
+										} catch (cleanupError) {
+											return preIntentRefusal(
+												operationFailedNotAppliedReason(
+													entry.step,
+													errorDetail(
+														applyAndRollbackFailure(
+															new Error(detail),
+															cleanupError,
+														),
+													),
+												),
+											);
+										}
+									}
+									return preIntentRefusal(
+										operationFailedNotAppliedReason(entry.step, detail),
+									);
+								}
+							}
+						}
 
 						// Mark before awaiting: a write error can still mean the intent
 						// reached durable storage, so downstream recovery must remain
@@ -1362,19 +1486,52 @@ export function createApplier(
 								activeNonRollbackableOperationExecuted = true;
 							},
 						};
-						const executionOutcome = await entry.semantics.executeOperation(
-							{
-								opaqueClient: planOperationSession(
-									executionClient.opaqueClient,
-								),
-							},
-							entry.step.operation,
-							stepContext,
-							entry.step.guards.filter(
-								(guard) => guard.phase === 'during-operation',
-							),
-							nonRollbackableExecutionTracker,
-						);
+						const executionOutcome = managedClaim
+							? await (() => {
+									const executeManagedOutcome =
+										entry.semantics.executeManagedOutcome;
+									if (!executeManagedOutcome)
+										throw new Error(
+											`managed claim ${managedClaim.plannedClaimKey} has no outcome execution adapter`,
+										);
+									return executeManagedOutcome(executionClient, {
+										claim: managedClaim,
+										run,
+										durablyLoadedRun,
+										executionId,
+										transactional,
+										lockTimeoutMs: lockTimeoutMs(
+											entry.semantics,
+											entry.step,
+											stepContext,
+										),
+										readBack: async () => {
+											const observed = await entry.semantics.observeOperation(
+												executionClient,
+												entry.step.operation,
+												stepContext,
+												'after',
+												entry.operationIssuer,
+											);
+											return managedOutcomeReadBack(observed.observations);
+										},
+									});
+								})()
+							: await entry.semantics.executeOperation(
+									{
+										opaqueClient: planOperationSession(
+											executionClient.opaqueClient,
+										),
+										markClientCompromised:
+											executionClient.markClientCompromised,
+									},
+									entry.step.operation,
+									stepContext,
+									entry.step.guards.filter(
+										(guard) => guard.phase === 'during-operation',
+									),
+									nonRollbackableExecutionTracker,
+								);
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
 								await rollbackAndPrepareObservedJournalWrite(
@@ -1720,7 +1877,7 @@ export function createApplier(
 									journals: [...journals, unknown],
 									observations,
 								};
-								return resultWithObservedJournal({
+								return await resultWithObservedJournal({
 									semantics: entry.semantics,
 									client: executionClient,
 									journal: unknown,
@@ -1787,13 +1944,10 @@ export function createApplier(
 				} catch (error) {
 					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
-						if (client && transactionStarted) {
-							await rollbackAndPrepareObservedJournalWrite(
-								segmentCoordinator,
-								client,
-								lockTimeoutMs(active.semantics, active.step, activeContext),
-							).catch(() => undefined);
-						}
+						// COMMIT may have reached PostgreSQL even though its acknowledgement
+						// was lost. This lease must never return to the pool, and no observed
+						// journal append may turn transport ambiguity into a claimed fact.
+						client?.markClientCompromised();
 						const journal = unknownJournal(active.intent);
 						const result = {
 							assessment: assessment(
@@ -1811,13 +1965,7 @@ export function createApplier(
 							journals: [...journals, journal],
 							observations,
 						};
-						return resultWithObservedJournal({
-							semantics: active.semantics,
-							client,
-							journal,
-							result,
-							outcomeDurable: true,
-						});
+						return result;
 					}
 					let rollbackAttempted = false;
 					let rollbackSucceeded = false;
@@ -2266,6 +2414,7 @@ export function createApplier(
 			}
 			if (!semantic.ok)
 				return durableRefusal('plan-validation-failed', semantic.detail);
+			const durablyLoadedRun = mintDurablyLoadedRun(loaded.run);
 			for (const assumption of plan.assumptions) {
 				if (!assumptionAccepted(assumption, input.policy)) {
 					return durableRefusal(
@@ -2300,9 +2449,11 @@ export function createApplier(
 				}
 				if (!prepared.ok)
 					return durableRefusal(
-						prepared.kind === 'failed'
-							? 'execution-preflight-failed'
-							: 'execution-contract-refused',
+						prepared.kind === 'read-only'
+							? 'database-read-only'
+							: prepared.kind === 'failed'
+								? 'execution-preflight-failed'
+								: 'execution-contract-refused',
 						prepared.detail,
 					);
 				try {
@@ -2334,6 +2485,8 @@ export function createApplier(
 							plan,
 							assessment: derivedApplicableAssessment(plan),
 							__durableRun: loaded.run,
+							__durablyLoadedRun: durablyLoadedRun,
+							__executionId: `dbsp.transition.execution.${randomUUID()}`,
 							__executionBoundary: {
 								kind: 'durable-contract',
 								context: prepared.context,
@@ -2345,7 +2498,9 @@ export function createApplier(
 					return { ...result, durableOutcome: durableExecutionOutcome(result) };
 				} catch (error) {
 					return durableRefusal(
-						'execution-failed',
+						isDatabaseReadOnlyError(error)
+							? 'database-read-only'
+							: 'execution-failed',
 						`execution phase failed: ${errorDetail(error)}`,
 					);
 				}

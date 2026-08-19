@@ -4,6 +4,10 @@
 
 Accepted. It is the execution decision ADR 0003 deferred.
 
+> ADR 0006 (Accepted) replaces this ADR's transactional-only admission rule,
+> intent-after-observation ordering rule, and separate direct/file-based DDL
+> execution rule.
+
 ## Decision
 
 `dbsp apply <run-id>` executes a plan that `dbsp plan` proved and recorded.
@@ -25,6 +29,9 @@ transaction — `CREATE UNIQUE INDEX CONCURRENTLY` is the case that exists — i
 plannable, reviewable and recorded, and then refused at admission. Durable
 atomicity is claimed per run, and a segment that cannot be wrapped cannot carry
 that claim.
+
+> Superseded by ADR 0006: admitted execution now owns both transactional and
+> non-transactional outcome protocols. This paragraph is historical only.
 
 Admission decides before authorization, before intent, and before any planned
 DDL: the loaded plan must hash to the supplied digest and to the recorded one,
@@ -52,6 +59,10 @@ no event. This boundary rests on a pack obligation: `setLockTimeout`,
 `acquireLocks`, `observeContext`, `observeOperation`, and fingerprint construction
 must perform no DDL or external effect; `executeOperation` is the first callback
 allowed to do so. Physical
+
+> Superseded by ADR 0006: a durable claim is appended before managed DDL under
+> the outcome protocol; failed live admission resolves through `refused`.
+
 identity is compared as cluster system identifier, database OID and namespace
 OIDs, because a database answering to the same name is not the same database,
 and the apply preflight additionally re-derives the contract's requirements and
@@ -110,6 +121,9 @@ provenance, and mapping planner steps onto legacy rows would begin the
 recorded-state decision silently. The two ledgers coexist and, by convention
 rather than by construction, do not claim the same operation.
 
+> Superseded by ADR 0006: direct `push` and file-based managed execution are
+> deleted. This paragraph remains as historical migration-tracker provenance.
+
 An operator must run `plan`, keep its digest, and pass that digest to `apply`.
 That is deliberate friction: it is what ties the artifact that was read to the
 artifact that runs.
@@ -118,6 +132,8 @@ The transactional-only restriction means the concurrent-index path is currently
 plannable but not applicable through this command. Lifting it is a decision about
 what durable atomicity means for a segment that cannot be wrapped, not an
 implementation gap to fill quietly.
+
+> Superseded by ADR 0006's non-transactional `executing` and recovery protocol.
 
 What is claimed here is bounded. `restsOnAssumptions` records which step relies
 on an external-DDL exclusion and its scope, and `excludedOrUnknownFacts` carries

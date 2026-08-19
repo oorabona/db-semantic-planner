@@ -1,0 +1,21 @@
+{
+	"checks": {
+		"dbsp_ledger_event.dbsp_ledger_declared_digest_pair": "((declared IS NULL) = (declared_digest IS NULL))",
+		"dbsp_ledger_event.dbsp_ledger_event_kind_closed": "(event_kind = ANY (ARRAY['adopt-intent'::text, 'adopt'::text, 'intent'::text, 'retire-intent'::text, 'readdress-intent'::text, 'refused'::text, 'executing'::text, 'observed'::text, 'absent'::text, 'indeterminate'::text, 'resolved'::text, 'readdressed-to'::text, 'readdressed-from'::text, 'released'::text]))",
+		"dbsp_ledger_event.dbsp_ledger_observed_digest_pair": "((observed IS NULL) = (observed_digest IS NULL))",
+		"dbsp_ledger_event.dbsp_ledger_refusal_payload": "((event_kind = 'refused'::text) = ((refusal_code IS NOT NULL) AND (refusal_cause IS NOT NULL) AND (refusal_state IS NOT NULL) AND (refusal_withheld_authority IS NOT NULL) AND (refusal_resolving_command IS NOT NULL)))",
+		"dbsp_ledger_identity.dbsp_ledger_identity_id_check": "id",
+		"dbsp_ledger_marker.dbsp_ledger_marker_id_check": "id",
+		"dbsp_ledger_marker.dbsp_ledger_marker_version_check": "(version >= 1)",
+		"dbsp_ledger_reservation.dbsp_ledger_reservation_check": "(((home_ledger_scope = 'database'::text) AND (home_ledger_schema IS NULL)) OR ((home_ledger_scope = 'schema'::text) AND (home_ledger_schema IS NOT NULL)))",
+		"dbsp_ledger_reservation.dbsp_ledger_reservation_claim_kind_check": "(claim_kind = ANY (ARRAY['adopt-intent'::text, 'intent'::text, 'retire-intent'::text, 'readdress-intent'::text]))",
+		"dbsp_ledger_reservation.dbsp_ledger_reservation_home_ledger_scope_check": "(home_ledger_scope = ANY (ARRAY['schema'::text, 'database'::text]))"
+	},
+	"defaults": {
+		"dbsp_ledger_event.controller": "CURRENT_USER",
+		"dbsp_ledger_event.controller_oid": "((CURRENT_USER)::regrole)::oid",
+		"dbsp_ledger_event.recorded_at": "now()",
+		"dbsp_ledger_identity.id": "true",
+		"dbsp_ledger_marker.id": "true"
+	}
+}

@@ -124,6 +124,7 @@ class FakeEnumPool {
 	readonly queries: string[] = [];
 	readonly runs = new Map<string, Record<string, unknown>>();
 	readonly plans = new Map<string, Record<string, unknown>>();
+	readonly outcomeClaims: string[] = [];
 	labels: string[];
 	readonly schema: string;
 
@@ -150,6 +151,7 @@ class FakeEnumPool {
 					target_context_digest: { type: 'text', notNull: true },
 					database_id: { type: 'text', notNull: true },
 					core_version: { type: 'text', notNull: true },
+					replayability: { type: 'text', notNull: true },
 					started_at: { type: 'timestamp with time zone', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -162,6 +164,7 @@ class FakeEnumPool {
 				relkind: 'r',
 				columns: {
 					run_id: { type: 'text', notNull: true },
+					bound_run_id: { type: 'text', notNull: true },
 					plan: { type: 'jsonb', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -230,6 +233,40 @@ class FakeEnumPool {
 
 	async query(sql: string, params?: readonly unknown[]) {
 		this.queries.push(sql);
+		// Managed execution now admits only against a current ledger. Keep this
+		// runtime mock honest rather than bypassing the ledger-currency oracle.
+		if (sql.startsWith('SELECT to_regclass'))
+			return { rows: [{ relation: `${this.schema}.dbsp_ledger_marker` }] };
+		if (
+			sql.includes('SELECT version FROM') &&
+			sql.includes('dbsp_ledger_marker')
+		)
+			return { rows: [{ version: 1 }] };
+		if (sql.includes('dbsp_ledger_identity'))
+			return {
+				rows: [
+					{
+						cluster_system_identifier: 'enum-system',
+						database_oid: '5',
+						namespace_oid: '2200',
+					},
+				],
+			};
+		if (
+			sql.startsWith(
+				'SELECT (pg_catalog.pg_control_system()).system_identifier::text',
+			) &&
+			sql.includes('AS cluster_system_identifier')
+		)
+			return {
+				rows: [
+					{
+						cluster_system_identifier: 'enum-system',
+						database_oid: '5',
+						namespace_oid: '2200',
+					},
+				],
+			};
 		if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
 		if (sql === 'SHOW client_encoding')
 			return { rows: [{ client_encoding: 'UTF8' }] };
@@ -267,6 +304,7 @@ class FakeEnumPool {
 				database_id,
 				core_version,
 				started_at,
+				bound_run_id,
 				plan,
 			] = params ?? [];
 			if (!this.runs.has(String(run_id))) {
@@ -276,10 +314,12 @@ class FakeEnumPool {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 				this.plans.set(String(run_id), {
 					run_id,
+					bound_run_id,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
@@ -301,16 +341,18 @@ class FakeEnumPool {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 			}
 			return { rows: [] };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
-			const [run_id, plan] = params ?? [];
+			const [run_id, bound_run_id, plan] = params ?? [];
 			if (!this.plans.has(String(run_id))) {
 				this.plans.set(String(run_id), {
 					run_id,
+					bound_run_id,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
@@ -331,6 +373,40 @@ class FakeEnumPool {
 			};
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
+			return { rows: [] };
+		}
+		if (
+			sql.startsWith('SELECT event_id') &&
+			sql.includes('dbsp_ledger_event')
+		) {
+			return {
+				rows: this.outcomeClaims.map((event_id) => ({
+					event_id,
+					address_engine: 'postgresql',
+					address_database: 'test',
+					address_schema: this.schema,
+					address_parent: null,
+					address_kind: 'enum',
+					address_name: 'status',
+					catalogue_identity: null,
+					event_kind: 'intent',
+					predecessor: null,
+					pair_id: null,
+					declared: null,
+					declared_digest: null,
+					observed: null,
+					observed_digest: null,
+					controller: 'tenant_owner',
+					recorded_at: null,
+				})),
+			};
+		}
+		if (
+			sql.startsWith('WITH appended AS (INSERT INTO') &&
+			sql.includes('dbsp_ledger_event') &&
+			params?.[0] !== undefined
+		) {
+			this.outcomeClaims.push(String(params[0]));
 			return { rows: [] };
 		}
 		if (sql === 'SHOW server_version_num') {
@@ -401,8 +477,11 @@ class FakeEnumPool {
 			}
 			return { rows: [] };
 		}
-		if (sql.includes('pg_advisory_xact_lock')) {
-			return { rows: [] };
+		if (
+			sql.includes('pg_advisory_xact_lock') ||
+			sql.includes('pg_try_advisory_xact_lock')
+		) {
+			return { rows: [{ locked: true }] };
 		}
 		return { rows: [] };
 	}

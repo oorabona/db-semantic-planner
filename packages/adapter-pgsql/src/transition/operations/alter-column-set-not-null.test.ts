@@ -82,6 +82,7 @@ function journalRunRow(run: TransitionRunMetadata) {
 		target_context_digest: run.targetContextDigest,
 		database_id: run.databaseId,
 		core_version: run.coreVersion,
+		replayability: 'replayable',
 		started_at: run.startedAt,
 	};
 }
@@ -96,6 +97,7 @@ function journalTableShape(table: string) {
 				target_context_digest: { type: 'text', notNull: true },
 				database_id: { type: 'text', notNull: true },
 				core_version: { type: 'text', notNull: true },
+				replayability: { type: 'text', notNull: true },
 				started_at: { type: 'timestamp with time zone', notNull: true },
 			},
 			primary_key: ['run_id'],
@@ -108,6 +110,7 @@ function journalTableShape(table: string) {
 			relkind: 'r',
 			columns: {
 				run_id: { type: 'text', notNull: true },
+				bound_run_id: { type: 'text', notNull: true },
 				plan: { type: 'jsonb', notNull: true },
 			},
 			primary_key: ['run_id'],
@@ -448,7 +451,9 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 						return { rows: [journalTableShape(String(params?.[1]))] };
 					}
 					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run_plan"')) {
-						return { rows: [{ run_id: run.runId }] };
+						return {
+							rows: [{ run_id: run.runId, bound_run_id: run.runId }],
+						};
 					}
 					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
 						return { rows: [journalRunRow(run)] };

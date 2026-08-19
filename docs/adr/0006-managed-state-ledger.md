@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. It decides what ADR 0005 left open: the recorded-state model, the atomicity of the
+Accepted. It decides what ADR 0005 left open: the recorded-state model, the atomicity of the
 change/record couple, and — because they turn out to be the same decision — how many commands may
 write DDL. It supersedes three rules of ADR 0005, named in "What ADR 0005 no longer says".
 
@@ -25,13 +25,17 @@ extension removes its member objects, which PostgreSQL defines and which may inc
 DSL cannot declare — those members are inside the extension's containment, adopted and removed
 with it, and they are the one place an undeclarable object is touched by a managed plan.
 
-Outside that path, `migrate` executes SQL this decision cannot attribute,
-and the adapter's runtime DDL helpers execute what their caller asks. Neither is constrained; what
-they do to a managed object surfaces as drift at the next plan or inspect. Every execution sink is
-labelled: token-gated managed DDL, explicitly unmanaged API, or removed. A sink that is none of
-the three is a defect.
+Outside that path, the adapter's runtime DDL helpers execute what their caller
+asks. They are explicitly unmanaged; what they do to a managed object surfaces
+as drift at the next plan or inspect. Every execution sink is classified:
+token-gated managed DDL, explicitly unmanaged API, or removed. A sink that is
+none of the three is a defect. Enforcement of that rule is code review plus a
+syntactic tripwire (`packages/adapter-pgsql/src/ddl-execution-sinks.syntactic-tripwire.static.test.ts`)
+whose recognized grammar is documented in the test itself; dynamic SQL,
+aliased or wrapped query calls, and configuration-object dispatch sit outside
+the tripwire's sight and are caught only by review.
 
-Changing what the DSL cannot declare is done through `migrate` today. An attested-statement
+Changing what the DSL cannot declare awaits an attested-statement
 surface — a native statement with an author-declared blast radius, riding a reservation lifecycle
 that touches no managed state — is decided in principle as the mechanism for that and for data
 steps, and ships with the data-steps decision, not here. The unwired operation it builds on
@@ -47,10 +51,14 @@ undeclarable kind is excluded from managed plans entirely, so the differ's `drop
 `drop_comment` outputs never reach managed execution. Widening the DSL widens the managed scope
 by itself.
 
+**Non-declarable means no manifest.** RLS controls, policies, and comments may
+remain schema-diff diagnostics, but the sole manifest-construction boundary
+refuses them before an address, claim, reservation, or DDL bundle exists.
+
 ### The ledger is partitioned by object scope, and tenant schemas are a trust boundary
 
-A schema-scoped object's events live in a ledger inside its own schema, as `_dbsp_migrations`
-does and for the same reason: tenant schemas are a trust boundary in the deployments this serves.
+A schema-scoped object's events live in a ledger inside its own schema: tenant schemas are a
+trust boundary in the deployments this serves.
 A database-scoped object — an extension above all — cannot belong to a tenant schema; its events
 live in `dbsp_meta`, to which no tenant role holds a grant. An address is schema-scoped or
 database-scoped and never both, so exactly one ledger records any address.
@@ -70,8 +78,7 @@ table-wide maximum can name an earlier fact as the latest one.
 
 Three mechanisms share the serialization work, each doing the job the others cannot:
 
-- **An advisory lock per ledger** serializes live writers, the way `migrate` and the durable
-  apply already take one. Application code sees no retry path.
+- **An advisory lock per ledger** serializes live writers. Application code sees no retry path.
 - **A reservation relation** — one row per reserved address, primary-keyed on the canonical
   address — is inserted in the same transaction as the claim's append and deleted in the same
   transaction as its resolution. At most one open claim per address is then a primary-key fact.
@@ -110,12 +117,11 @@ and resolves only through its own column:
 | `retire-intent` | `managed` | `refused` | `executing` → `absent` \| `indeterminate` |
 | `readdress-intent` (paired, per closure member) | source `managed`; target `unknown` \| `absent` | `refused` on both | pair events, or `refused` on both — no `executing`, see below |
 | `adopt-intent` | `unknown` | `refused` | `adopt` (read-back, one transaction, no DDL) |
-| `release-intent` | `managed` | `refused` | `released` (no DDL, one transaction) |
 
 A replacement is not a kind: it is a `retire-intent` then an `intent` (create), two claims, two
-tokens. Adoption and release go through the same reservation as every claim — they change durable
-management state, so they are serialized, lineage-checked and owner-checked like any other; their
-DDL-free bodies ride one transaction, so a crash leaves nothing.
+tokens. Adoption goes through its reservation. Release is the one deliberate direct terminal:
+the closed fourteen-kind grammar contains no `release-intent`; it is still serialized,
+lineage-checked and owner-checked in one transaction before appending `released`.
 
 `resolved` closes an `indeterminate` and only an `indeterminate`. Its stable outcome is drawn
 from the original claim's column — `managed` or the prior stable state for an `intent`, `absent`
@@ -357,26 +363,32 @@ the declaration no longer names is what apply does, under the destructive author
 published command is a major version of `@dbsp/cli`, taken now. The cutover's adoption file is
 written to an explicit `--out` path, never guessed.
 
-### `migrate` stays, and records only what it can know
+### `migrate` is deleted with `push` (greenfield decision, 2026-08-07)
 
-`migrate apply` and `migrate rollback` keep `_dbsp_migrations` unchanged and per-schema — it is a
-live data contract and a file-idempotency key, not a shim. Their `execution-audit` ledger event is
-deferred with #490; until then their effect on managed objects is what it is today: visible as
-drift at the next plan or inspect. Arbitrary SQL can dispatch dynamically, change `search_path`
-and cross transaction boundaries, so no honest object-level fact can be derived from its text.
+The project has no production consumers, so the managed model ships greenfield: `migrate apply`,
+`migrate rollback`, `_dbsp_migrations` and the migration-file machinery are deleted in the same
+CLI major that deletes `push`. Nothing reads or migrates their tables; rows left in existing
+development databases are inert. This supersedes the earlier "migrate stays" position and the
+`execution-audit` half of #490. The reasoning that arbitrary SQL yields no honest object-level
+fact stands — it is why hand-written steps enter the managed model as attested statements
+(tracked separately), not why a parallel unrecorded executor should survive.
 
 ### Reshaping the shipped metadata
 
-A shape marker per ledger records its version; every command reads it before acting. **Legacy
-detection is by the known legacy tables** — `dbsp_meta.dbsp_transition_run` and its siblings —
-never by "a schema that contains tables", which would misread every application schema. The
-preflight's scope set is an explicit input: the schemas the operator names, plus `dbsp_meta`. It
-proceeds per scope in its own transaction, marker written last, reports current / unchanged /
-failed / not-attempted per scope, and an interrupted scope repeats from its old marker. Ordinary
-commands refuse any scope that is not current. Legacy rows are preserved read-only; no runtime
-reader of the old semantics is kept; nothing is backfilled. The cutover writes adoption
-declarations only for objects the current DSL declares that no chain covers — deriving candidates
-from introspection instead would offer to adopt everything in sight.
+A shape marker per ledger records its version; every command reads it before acting. There is
+no legacy upgrade path (greenfield decision, 2026-08-07): every scope initializes as new, and
+the preflight deliberately validates pre-existing candidate ledger tables before accepting them;
+counterfeit or incomplete shapes refuse. Unrelated pre-ledger `dbsp_transition_*` tables in
+existing development databases are inert. The marker still versions the NEW ledger
+shape: older, future, mixed, and unreadable markers all refuse in `dbsp preflight --reinitialize`.
+Cross-version marker upgrade is out of scope until a second ledger shape version exists
+(greenfield means no older marker exists today). The preflight's scope set is an explicit input:
+the schemas the operator names, plus `dbsp_meta`. It proceeds per scope in its own transaction,
+writes the marker only after creating and validating the fresh ledger shape, reports current /
+unchanged / failed / not-attempted per scope, and an interrupted scope repeats from its old
+marker. Ordinary commands refuse any scope that is not current. The cutover writes adoption declarations only
+for objects the current DSL declares that no chain covers — deriving candidates from
+introspection instead would offer to adopt everything in sight.
 
 ### Lineage
 
@@ -403,7 +415,8 @@ across preflight, append, DDL and recovery write.
 ### Scale
 
 Chains accumulate on the order of 10^5–10^6 events a year at the stated workload. The terminal
-member is an indexed lookup; a tenant's projection reads only its own ledger. Full history is
+predecessor index supports the no-fork constraint; projection deliberately reads one address's
+complete chain because admission needs its lineage, not only the terminal. Full history is
 retained: archival would need a verified checkpoint first, and neither is built here.
 
 ### Observability
@@ -428,8 +441,9 @@ must precede any competing writer, so it is appended first, and a failed precond
 `refused` — the run stays pristine because nothing ran, which is what the old ordering achieved
 by writing nothing.
 
-**"`dbsp migrate apply` is unchanged and stays file-based."** It stays file-based; its audit
-event is deferred with #490.
+**Direct `push`, and file-based execution, remain available.** Both are
+deleted. Managed DDL has one apply path; caller-owned DDL remains explicitly
+unmanaged.
 
 ## Delivery
 
@@ -445,6 +459,23 @@ reservation lifecycle and data steps (with the data-steps decision); an in-place
 
 ## Consequences
 
+### Threat model and declared bounds
+
+The ledger defends against cooperating deployment roles using dbsp: controller
+ownership prevents takeover, the admitted-execution facade rejects fabricated
+in-process inputs at its boundary, and claim/resolution recovery records a
+crash or a lost COMMIT acknowledgement without treating it as a successful
+operation. External DDL is detected by catalogue identity and operation
+read-back before management is re-established.
+
+These are detection and coordination guarantees, not a privilege boundary. A
+superuser or table owner can race name resolution between the identity read and
+DDL; dbsp detects that conflict post-hoc through its identity/read-back checks
+but cannot prevent it. The published `@dbsp/adapter-pgsql/internal` subpath is
+unsupported for external integrations; in-process code using it is trusted by
+declaration, as stated above, and it is not a security boundary. Advisory locks bind only cooperating dbsp
+processes; they do not constrain direct PostgreSQL clients.
+
 Two of the three writers become one and one ceases to exist. The managed scope is narrower than
 the DDL path's reach, and the guarantee says so. A stored state drifting from its own history is
 inexpressible; an event history drifting from database reality is not — an `executing` whose DDL
@@ -453,4 +484,5 @@ authority, why establishing `managed` requires a read-back, and why the outcome 
 Durable claims and non-transactional DDL still cannot share a transaction; the claim is durable
 before the DDL, an open claim blocks, and recovery resolves against live state — which is what
 was measured, and is weaker than atomicity. Returning a schema to an earlier state is not
-offered, and separating a plan identity from an execution identity is not decided here.
+offered. Plan identity names immutable reviewed material; execution identity names a concrete
+attempt and its reservations. They are separate by construction.

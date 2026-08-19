@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { semanticArtifactId } from '@dbsp/core';
-import type { ApplyResult } from '@dbsp/types';
+import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	APPLY_OUTCOME_CONTRACT,
@@ -10,6 +10,7 @@ import {
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
 	exitCodeForApplyOutcome,
+	generatorRunHasPriorStepEvents,
 	hasReusableAuthorization,
 	outcomeForApplyResult,
 	policyDigest,
@@ -82,6 +83,14 @@ describe('dbsp apply contract and policy', () => {
 		]);
 	});
 
+	it('publishes a distinct outcome when PostgreSQL cannot accept writes', () => {
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'database-read-only',
+			34,
+			'target cannot accept managed writes',
+		]);
+	});
+
 	it.each([
 		['operation-failed-not-applied', 'planned', 'operation-failed-not-applied'],
 		['partially-applied', 'partially-applied', 'partially-applied'],
@@ -126,6 +135,95 @@ describe('dbsp apply contract and policy', () => {
 				'acceptance[1]',
 			),
 		).toThrow('acceptance[1].withinScope[0].within.kind');
+	});
+
+	it.each([
+		[
+			'an unknown trust-root union member',
+			{
+				class: 'manual-proof',
+				fromTrustRoot: { kind: 'machine', identity: 'operator' },
+			},
+		],
+		['an empty acceptance class', { class: '' }],
+		[
+			'an extra top-level acceptance key',
+			{ class: 'manual-proof', attacker: true },
+		],
+	] as const)('OBL-CLI4 rejects %s in --accept and --accept-policy input', (_attack, value) => {
+		expect(() => validateAssumptionAcceptance(value)).toThrow();
+	});
+
+	it('accepts an opaque versioned catalogue identity envelope without interpreting its payload', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'other-engine',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'other-engine',
+								format: 2,
+								value: { opaque: ['payload'] },
+							},
+						},
+					},
+				],
+			}),
+		).not.toThrow();
+	});
+
+	it('rejects a malformed catalogue identity envelope with its address path', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'postgresql',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'postgresql',
+								format: 0,
+								value: {},
+							},
+						},
+					},
+				],
+			}),
+		).toThrow('acceptance.withinScope[0].within.catalogueIdentity.format');
+	});
+
+	it('rejects an extraneous catalogue identity field as catalogue identity input', () => {
+		expect(() =>
+			validateAssumptionAcceptance({
+				class: 'manual-proof',
+				withinScope: [
+					{
+						within: {
+							engine: 'postgresql',
+							database: 'db',
+							kind: 'table',
+							name: 'users',
+							catalogueIdentity: {
+								engine: 'postgresql',
+								format: 1,
+								value: {},
+								oid: '100',
+							},
+						},
+					},
+				],
+			}),
+		).toThrow(
+			'acceptance.withinScope[0].within.catalogueIdentity.oid is not a valid catalogue identity field',
+		);
 	});
 
 	it('mutation: policy digest changes with object spelling or duplicate selector order', () => {
@@ -173,6 +271,49 @@ describe('dbsp apply contract and policy', () => {
 		});
 	});
 
+	it('keys the generator replay gate to the loaded run, not a shared plan or address', () => {
+		const sharedPlanDigest = 'same-reviewed-plan';
+		const sharedAddress = {
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant',
+			kind: 'table',
+			name: 'accounts',
+		};
+		const attempted = {
+			run: { runId: 'run-attempted', planDigest: sharedPlanDigest },
+			events: [
+				{
+					runId: 'run-attempted',
+					address: sharedAddress,
+				} as unknown as TransitionRunJournal['events'][number],
+			],
+		};
+		const fresh = {
+			run: { runId: 'run-fresh', planDigest: sharedPlanDigest },
+			events: [],
+		};
+
+		expect(generatorRunHasPriorStepEvents(attempted)).toBe(true);
+		expect(generatorRunHasPriorStepEvents(fresh)).toBe(false);
+	});
+
+	it('does not treat durable generator attempt mappings as a step-scoped fact', () => {
+		const executionId = 'dbsp.generator.execution.attempt-1';
+		expect(
+			generatorRunHasPriorStepEvents({
+				events: [
+					{
+						event: 'intent',
+						stepId: `dbsp.generator.attempt:${executionId}`,
+						operationRef: 'dbsp.generator.attempt',
+						record: { executionId },
+					} as never,
+				],
+			}),
+		).toBe(false);
+	});
+
 	it('reports a rejecting pool cleanup beside a successful apply outcome', async () => {
 		const close = vi.fn(async () => {
 			throw new Error('pool shutdown failed');
@@ -214,6 +355,58 @@ describe('dbsp apply contract and policy', () => {
 				'plan-digest',
 				policy,
 				grants,
+			),
+		).toBe(false);
+	});
+
+	it.each([
+		['plan digest', { runId: 'run-reviewed', planDigest: 'other-plan' }],
+		['policy', { runId: 'run-reviewed', policy: [{ class: 'other-proof' }] }],
+		[
+			'grants',
+			{
+				runId: 'run-reviewed',
+				grants: [{ assumptionId: 'assumption:2', grant: 0 }],
+			},
+		],
+		['actor', { runId: 'run-reviewed', actor: 'other-operator' }],
+		[
+			'authorization time',
+			{ runId: 'run-reviewed', authorizedAt: '2026-07-30T00:00:00.000Z' },
+		],
+	] as const)('OBL-CLI4 refuses a reused durable authorization with one changed %s binding', (_field, changed) => {
+		const policy = [{ class: 'manual-proof' }] as const;
+		const grants = [{ assumptionId: 'assumption:1', grant: 0 }] as const;
+		const variant = changed as Partial<{
+			runId: string;
+			planDigest: string;
+			policy: typeof policy;
+			grants: typeof grants;
+			actor: string;
+			authorizedAt: string;
+		}>;
+		const record = {
+			policy,
+			grants,
+			actor: 'operator',
+			authorizedAt: '2026-07-29T00:00:00.000Z',
+			digest: authorizationDigest(
+				'run-reviewed',
+				'plan-digest',
+				policy,
+				grants,
+				'operator',
+				'2026-07-29T00:00:00.000Z',
+			),
+		};
+		const candidate = { ...record, ...variant };
+		expect(
+			hasReusableAuthorization(
+				[candidate],
+				variant.runId ?? 'run-reviewed',
+				variant.planDigest ?? 'plan-digest',
+				variant.policy ?? policy,
+				variant.grants ?? grants,
 			),
 		).toBe(false);
 	});

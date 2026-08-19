@@ -1,4 +1,22 @@
 export {
+	executePgDeclaredAdoption,
+	type PgAdoptionPreflightResult,
+	type PgAdoptionResult,
+	type PgDeclaredAdoptionInput,
+	type PgPersistedDeclaredAdoptionInput,
+	preflightPgDeclaredAdoption,
+} from './adoption.js';
+export {
+	type PgCatalogueIdentityQueryable,
+	readPgCatalogueIdentity,
+} from './catalogue-identity.js';
+export {
+	findPgLedgerTerminalMember,
+	type PgLedgerAddressChain,
+	readPgLedgerAddressChain,
+	readPgLedgerControllerOid,
+} from './chain-reader.js';
+export {
 	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
@@ -11,6 +29,10 @@ export {
 	COLUMN_EXISTS_OBSERVATION,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
+	DBSP_LEDGER_EVENT_TABLE,
+	DBSP_LEDGER_IDENTITY_TABLE,
+	DBSP_LEDGER_MARKER_TABLE,
+	DBSP_LEDGER_RESERVATION_TABLE,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
 	DBSP_TRANSITION_AUTHORIZATION_TABLE,
@@ -36,6 +58,15 @@ export {
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
+export {
+	assertPgDatabaseWritable,
+	classifyPgDatabaseWritability,
+	classifyPgWrite,
+	DATABASE_READ_ONLY_OUTCOME,
+	isPgDatabaseReadOnlyError,
+	PgDatabaseReadOnlyError,
+	type PgDatabaseWritability,
+} from './database-writability.js';
 export {
 	createPgExecutionContract,
 	evaluatePgExecutionContract,
@@ -65,7 +96,29 @@ export {
 	renderCreateTransitionRunPlanTableSql,
 	renderCreateTransitionRunTableSql,
 	type TransitionJournalQueryable,
+	TransitionRunIdentityMismatchError,
 } from './journal.js';
+export {
+	acquirePgLedgerLocks,
+	ensureDbspMetaLedger,
+	ensurePgLedger,
+	ensurePgLedgerStorageVersion,
+	PG_LEDGER_MIN_SERVER_VERSION_NUM,
+	PG_LEDGER_SHAPE_VERSION,
+	type PgLedgerLockResult,
+	PgLedgerStorageUnsupportedError,
+	type PgLedgerTarget,
+	readPgLedgerReservationsForExecution,
+	recordPgLedgerIdentity,
+	renderCreateLedgerEventTableSql,
+	renderCreateLedgerIdentityTableSql,
+	renderCreateLedgerImmutabilityFunctionSql,
+	renderCreateLedgerImmutabilityTriggerSql,
+	renderCreateLedgerMarkerTableSql,
+	renderCreateLedgerReservationTableSql,
+	renderCreateLedgerTerminalMemberIndexSql,
+	writePgLedgerShapeMarker,
+} from './ledger.js';
 export {
 	acquirePgTransitionClient,
 	createPgTransitionLessor,
@@ -73,11 +126,17 @@ export {
 	type PgTransitionRunLockResult,
 	withPgTransitionRunLock,
 } from './lessor.js';
-// The …FromClient helpers stay internal: the supported entry points acquire and
-// release their own lease, so a caller never has to hold one to read context.
+export {
+	validatePgManagedLedgerCurrency,
+	withPgManagedOutcomeRuntime,
+} from './managed-outcome-runtime.js';
+// Most callers should use the …FromLessor helpers, which acquire and release a
+// lease themselves.  Reconciliation already owns an exclusive session, so it
+// uses the client helper to keep its context read on that same live session.
 export {
 	createPgObservationIssuer,
 	executePgObservationFromLessor,
+	readPgObservationContextFromClient,
 	readPgObservationContextFromLessor,
 } from './observation-issuer.js';
 export {
@@ -109,6 +168,7 @@ export {
 	renderInsertLogicalIdentitySql,
 } from './operations/attach-logical-identity.js';
 export {
+	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	type CreateUniqueIndexConcurrentlyPayload,
 	createCreateUniqueIndexConcurrentlyOperationRuntime,
 	type IndexSet,
@@ -121,9 +181,72 @@ export {
 	normalizeManualSqlPayload,
 } from './operations/manual-sql.js';
 export {
+	executePgAdmittedOperation,
+	executePgDestructiveOutcome,
+	type PgAdmittedOperation,
+	type PgAdmittedOperationResult,
+	type PgLockedRun,
+	type PgOutcomeCheckpoint,
+	type PgOutcomeCheckpointObserver,
+	type PgOutcomeClaimGroupAdmission,
+	type PgOutcomeClaimGroupRequest,
+	type PgOutcomeClaimGroupResolution,
+	type PgOutcomeClaimRequest,
+	type PgOutcomeExecutionRequest,
+	type PgOutcomeNonTransactionalRequest,
+	type PgOutcomeOperationReadBackFactory,
+	type PgOutcomeReadBackFactory,
+	type PgOutcomeRecoveryRequest,
+	type PgOutcomeRecoveryResult,
+	type PgOutcomeResolution,
+	type PgOutcomeResolutionAppendResult,
+	type PgOutcomeResult,
+	type PgOutcomeTransactionalRequest,
+	readPgOutcomeRecoveryReadBack,
+	recoverPgOutcomeClaim,
+	resolvePgDestructiveOutcome,
+	validatePgLedgerRuntimeIntegrity,
+} from './outcome-protocol.js';
+export {
 	createPgTransitionPack,
 	type PgTransitionPackOptions,
 } from './pack.js';
+export {
+	classifyPgReaddressRecovery,
+	classifyPgReaddressSupport,
+	executePgPersistedTableReaddress,
+	type PgPersistedReaddressInput,
+	type PgReaddressPairRecoveryResult,
+	type PgReaddressResult,
+	recoverPgReaddressPair,
+	renderPgTableReaddressStatements,
+} from './readdress.js';
+export {
+	assembleReinitializePreflightScopeReports,
+	classifyPgLedgerMarker,
+	type PgLedgerScopeCurrency,
+	type PgReinitializePreflightOptions,
+	type PgReinitializePreflightPool,
+	type ReinitializePreflightCheckpoint,
+	type ReinitializePreflightObserver,
+	readPgLedgerMarker,
+	readPgLedgerScopeCurrency,
+	readVerifiedPgLedgerReservationsForPair,
+	runPgReinitializePreflight,
+	selectReinitializeAdoptionCandidates,
+} from './reinitialize-preflight.js';
+export {
+	type PgReleaseResult,
+	releasePgManagedAddress,
+} from './release.js';
+export {
+	classifyRemovalEffectsClosure,
+	containmentAuthorityOutcome,
+	type PgRemovalEffectAddress,
+	type PgRemovalEffectsClosure,
+	readPgRemovalEffectsClosure,
+	reservationsForRemovalClosure,
+} from './removal-containment.js';
 export {
 	type AddCheckMatch,
 	type AddCheckRuleOptions,

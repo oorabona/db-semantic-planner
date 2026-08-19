@@ -210,6 +210,8 @@ export default withMermaid(
 					// and the bare form is what actually reaches the bundler.
 					'node:crypto': path.resolve(__dirname, 'theme/node-crypto-stub.ts'),
 					crypto: path.resolve(__dirname, 'theme/node-crypto-stub.ts'),
+					'node:util': path.resolve(__dirname, 'theme/node-util-stub.ts'),
+					util: path.resolve(__dirname, 'theme/node-util-stub.ts'),
 				},
 			},
 			optimizeDeps: {

@@ -35,7 +35,10 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
-import { DBSP_META_SCHEMA } from './transition/constants.js';
+import {
+	DBSP_META_SCHEMA,
+	isDbspLedgerInfrastructureTable,
+} from './transition/constants.js';
 import {
 	logicalIdentityCarrierTableStatus,
 	qualifiedLogicalIdentitySideTable,
@@ -1364,7 +1367,11 @@ export async function introspectWithExecutor(
 	// dbsp-owned metadata lives in a shared schema and is never surfaced as
 	// managed user tables for a target introspection.
 	let tableNames =
-		schema === DBSP_META_SCHEMA ? [] : Array.from(tableColumns.keys());
+		schema === DBSP_META_SCHEMA
+			? []
+			: Array.from(tableColumns.keys()).filter(
+					(tableName) => !isDbspLedgerInfrastructureTable(tableName),
+				);
 	tableNames = filterTables(tableNames, options);
 
 	// Build TableIR map

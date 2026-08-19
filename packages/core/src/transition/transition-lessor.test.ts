@@ -3,6 +3,7 @@ import {
 	acquireTransitionLease,
 	createTransitionLessor,
 	isTransitionLessor,
+	markTransitionClientCompromised,
 	type TransitionLease,
 } from './transition-lessor.js';
 
@@ -334,6 +335,19 @@ describe('transition lease release', () => {
 
 		expect(release).toHaveBeenCalledOnce();
 		expect(release).toHaveBeenCalledWith(error);
+	});
+
+	it('destroys a client marked compromised by outcome code', async () => {
+		const release = vi.fn();
+		const lease = await acquireTransitionLease(
+			createTransitionLessor(async () => ({ query: vi.fn(), release })),
+		);
+
+		markTransitionClientCompromised(lease.session);
+		await lease.release();
+
+		expect(release).toHaveBeenCalledOnce();
+		expect(release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
 	});
 
 	it.each([

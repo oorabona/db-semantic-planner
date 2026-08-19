@@ -70,6 +70,18 @@ const planOperationQueries = new WeakMap<
 	object,
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
+const compromisedTransitionSessions = new WeakSet<object>();
+
+/**
+ * Outcome code may poison the current lease when a transport or protocol fault
+ * leaves its backend unsafe for reuse. The release boundary consumes this bit
+ * and returns the client with a truthy error so pg destroys it.
+ */
+export function markTransitionClientCompromised(
+	session: TransitionSessionClient,
+): void {
+	compromisedTransitionSessions.add(session as object);
+}
 
 /**
  * Mint the session passed to an operation's executeOperation() method.
@@ -227,8 +239,17 @@ export async function acquireTransitionLease(
 		}
 		closed = true;
 		try {
-			const returned: unknown = failure
-				? release.call(raw, releaseArgument(failure))
+			const effectiveFailure =
+				failure ??
+				(compromisedTransitionSessions.has(session as object)
+					? {
+							error: new Error(
+								'transition execution marked its leased client compromised',
+							),
+						}
+					: undefined);
+			const returned: unknown = effectiveFailure
+				? release.call(raw, releaseArgument(effectiveFailure))
 				: release.call(raw);
 			void Promise.resolve(returned).catch(() => undefined);
 		} catch {

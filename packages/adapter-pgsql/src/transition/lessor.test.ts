@@ -5,9 +5,26 @@ import {
 import { Client, Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { evaluatePgExecutionContract } from './execution-contract.js';
-import { createPgTransitionLessor, withPgTransitionRunLock } from './lessor.js';
+import {
+	createPgTransitionLessor,
+	isDeadPgConnectionError,
+	withPgTransitionRunLock,
+} from './lessor.js';
 
 describe('createPgTransitionLessor', () => {
+	it.each([
+		[{ code: 'ECONNRESET' }, true],
+		[{ code: 'EPIPE' }, true],
+		[{ code: 'ETIMEDOUT' }, true],
+		[{ code: '57P01' }, true],
+		[{ code: '57P02' }, true],
+		[{ code: '57P03' }, true],
+		[{ code: '40001', message: 'could not serialize access' }, false],
+		[{ code: '23505', message: 'duplicate key value' }, false],
+	])('classifies dead PostgreSQL connections conservatively: %o', (error, dead) => {
+		expect(isDeadPgConnectionError(error)).toBe(dead);
+	});
+
 	it('uses the pool acquisition function through the core-minted lessor', async () => {
 		const client = {
 			query: vi.fn(async (sql: string) =>
@@ -257,6 +274,71 @@ describe('createPgTransitionLessor', () => {
 });
 
 describe('withPgTransitionRunLock cleanup', () => {
+	it('preserves the primary result and skips unlock after the locked backend dies', async () => {
+		const dead = Object.assign(
+			new Error(
+				'Client has encountered a connection error and is not queryable',
+			),
+			{ code: '57P01' },
+		);
+		let unlockAttempts = 0;
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql === 'SELECT force_backend_death') throw dead;
+				if (sql.includes('pg_advisory_unlock')) {
+					unlockAttempts += 1;
+					return { rows: [{ unlocked: true }] };
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = {
+			connect: vi.fn(async () => client),
+		} as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(pool, 'run:dead-backend', async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				try {
+					await planOperationSession(lease.session).query(
+						'SELECT force_backend_death',
+					);
+				} catch (error) {
+					expect(error).toBe(dead);
+					return { kind: 'outcome-recovery-required' as const };
+				} finally {
+					await lease.release();
+				}
+			}),
+		).resolves.toEqual({
+			kind: 'acquired',
+			value: { kind: 'outcome-recovery-required' },
+		});
+		expect(unlockAttempts).toBe(0);
+		expect(client.release).toHaveBeenCalledWith(dead);
+	});
+
 	it.each([
 		{
 			name: 'returns false',
@@ -277,6 +359,20 @@ describe('withPgTransitionRunLock cleanup', () => {
 					return { rows: [{ client_encoding: 'UTF8' }] };
 				if (sql.includes('pg_try_advisory_lock'))
 					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks'))
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: '"$user", public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
 				if (sql.includes('pg_advisory_unlock')) return unlock();
 				return { rows: [] };
 			}),
@@ -303,6 +399,11 @@ describe('withPgTransitionRunLock statement origin', () => {
 	function lockedPool() {
 		let lockHeld = true;
 		let encoding = 'UTF8';
+		const sessionUser = 'dbsp';
+		let currentUser = 'dbsp';
+		let standardConformingStrings = 'on';
+		const searchPath = '"$user", public';
+		const timeZone = 'Etc/UTC';
 		const client = {
 			query: vi.fn(async (sql: string) => {
 				if (sql === "SET client_encoding TO 'UTF8'") {
@@ -315,7 +416,17 @@ describe('withPgTransitionRunLock statement origin', () => {
 					return { rows: [{ locked: true }] };
 				if (sql.includes('FROM pg_catalog.pg_locks')) {
 					return {
-						rows: [{ run_lock_held: lockHeld, client_encoding: encoding }],
+						rows: [
+							{
+								run_lock_held: lockHeld,
+								session_user: sessionUser,
+								current_user: currentUser,
+								standard_conforming_strings: standardConformingStrings,
+								search_path: searchPath,
+								client_encoding: encoding,
+								time_zone: timeZone,
+							},
+						],
 					};
 				}
 				if (sql.includes('pg_advisory_unlock')) {
@@ -329,6 +440,18 @@ describe('withPgTransitionRunLock statement origin', () => {
 				}
 				if (sql === "SET NAMES 'LATIN1'") {
 					encoding = 'LATIN1';
+					return { rows: [] };
+				}
+				if (sql === "SET client_encoding TO 'LATIN1'") {
+					encoding = 'LATIN1';
+					return { rows: [] };
+				}
+				if (sql === 'SET ROLE dbsp_member') {
+					currentUser = 'dbsp_member';
+					return { rows: [] };
+				}
+				if (sql === "SET standard_conforming_strings TO 'off'") {
+					standardConformingStrings = 'off';
 					return { rows: [] };
 				}
 				return { rows: [] };
@@ -372,8 +495,8 @@ describe('withPgTransitionRunLock statement origin', () => {
 		expect(evaluation!).toEqual({ ok: true });
 	});
 
-	it('mutation: a plan operation releasing the run lock is refused by the operation-origin invariant check', async () => {
-		const { pool } = lockedPool();
+	it('mutation: a plan operation issuing pg_advisory_unlock_all is refused and its connection is destroyed', async () => {
+		const { client, pool } = lockedPool();
 		let failure: unknown;
 
 		await expect(
@@ -381,7 +504,7 @@ describe('withPgTransitionRunLock statement origin', () => {
 				const lease = await acquireExclusiveTransitionLease(target);
 				try {
 					await planOperationSession(lease.session).query(
-						'SELECT pg_catalog.pg_advisory_unlock(1)',
+						'SELECT pg_catalog.pg_advisory_unlock_all()',
 					);
 				} catch (error) {
 					failure = error;
@@ -394,18 +517,19 @@ describe('withPgTransitionRunLock statement origin', () => {
 
 		expect(failure).toBeInstanceOf(Error);
 		expect((failure as Error).message).toBe(
-			'durable plan operation may not release the run lock or change client_encoding',
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
 		);
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
-	it('mutation: an alternative encoding spelling from a plan operation is refused without SQL text matching', async () => {
+	it('mutation: a plan operation issuing SET ROLE to a member role is refused and its connection is destroyed', async () => {
 		const { client, pool } = lockedPool();
 		let failure: unknown;
 
-		await withPgTransitionRunLock(pool, 'run:plan-encoding', async (target) => {
+		await withPgTransitionRunLock(pool, 'run:plan-role', async (target) => {
 			const lease = await acquireExclusiveTransitionLease(target);
 			try {
-				await planOperationSession(lease.session).query("SET NAMES 'LATIN1'");
+				await planOperationSession(lease.session).query('SET ROLE dbsp_member');
 			} catch (error) {
 				failure = error;
 			} finally {
@@ -416,7 +540,62 @@ describe('withPgTransitionRunLock statement origin', () => {
 
 		expect(failure).toBeInstanceOf(Error);
 		expect((failure as Error).message).toBe(
-			'durable plan operation may not release the run lock or change client_encoding',
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+		);
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('mutation: a plan operation SET on a contract-declared setting is refused and its connection is destroyed', async () => {
+		const { client, pool } = lockedPool();
+		let failure: unknown;
+
+		await withPgTransitionRunLock(pool, 'run:plan-encoding', async (target) => {
+			const lease = await acquireExclusiveTransitionLease(target);
+			try {
+				await planOperationSession(lease.session).query(
+					"SET standard_conforming_strings TO 'off'",
+				);
+			} catch (error) {
+				failure = error;
+			} finally {
+				await lease.release();
+			}
+			return undefined;
+		});
+
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toBe(
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+		);
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it.each([
+		"SET NAMES 'LATIN1'",
+		"SET client_encoding TO 'LATIN1'",
+	])('mutation: a plan operation using %s violates the encoding invariant and closes the run', async (statement) => {
+		const { client, pool } = lockedPool();
+		let failure: unknown;
+
+		await withPgTransitionRunLock(
+			pool,
+			'run:plan-encoding-spelling',
+			async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				try {
+					await planOperationSession(lease.session).query(statement);
+				} catch (error) {
+					failure = error;
+				} finally {
+					await lease.release();
+				}
+				return undefined;
+			},
+		);
+
+		expect(failure).toBeInstanceOf(Error);
+		expect((failure as Error).message).toBe(
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
 		);
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
 	});
@@ -436,7 +615,7 @@ describe('withPgTransitionRunLock statement origin', () => {
 					await expect(
 						planOperationSession(lease.session).query('SELECT 1'),
 					).rejects.toThrow(
-						'durable plan operation may not release the run lock or change client_encoding',
+						'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
 					);
 				} finally {
 					await lease.release();

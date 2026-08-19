@@ -17,6 +17,8 @@ export interface OneShotInsertFailpointTarget {
 
 export interface OneShotInsertFailpoint {
 	readonly name: string;
+	readonly triggerName: string;
+	readonly functionName: string;
 	readonly message: string;
 	readonly target: OneShotInsertFailpointTarget;
 	/** True once the trigger has consumed its non-transactional sequence value. */
@@ -108,6 +110,8 @@ export async function armOneShotInsertFailpoint(
 
 	return {
 		name,
+		triggerName,
+		functionName,
 		message,
 		target,
 		hasFired,

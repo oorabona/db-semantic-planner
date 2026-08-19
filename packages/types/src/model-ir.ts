@@ -451,6 +451,22 @@ export interface TableIR {
 	/** Table name in database */
 	readonly name: string;
 
+	/**
+	 * An explicit address change for this table.  The desired table remains
+	 * identified by `name`; `from` and `to` make the otherwise ambiguous
+	 * rename/schema move an authored transition rather than inferred drift.
+	 */
+	readonly readdress?: TableReaddressDeclaration;
+
+	/**
+	 * Declare that this named, pre-existing table is to enter managed state.
+	 * Existing objects are otherwise drift; adoption is never inferred.
+	 */
+	readonly adopt?: true;
+
+	/** Request a reviewed retire-and-create replacement of this unchanged table. */
+	readonly replace?: true;
+
 	/** Stable logical identity, when attached by an engine-neutral carrier. */
 	readonly logicalIdentity?: LogicalIdentity;
 
@@ -487,6 +503,22 @@ export interface TableIR {
 
 	/** Row-Level Security policies */
 	readonly policies?: readonly PolicyIR[];
+}
+
+/** One endpoint of an authored table re-addressing declaration. */
+export interface TableReaddressAddress {
+	readonly name: string;
+	readonly schema?: string;
+	/** Deliberately carried through so the command can refuse the named kind. */
+	readonly kind?: string;
+	/** Deliberately carried through so the command can refuse cross-database moves. */
+	readonly database?: string;
+}
+
+/** A declared rename or schema move; execution currently supports tables only. */
+export interface TableReaddressDeclaration {
+	readonly from: TableReaddressAddress;
+	readonly to: TableReaddressAddress;
 }
 
 /**

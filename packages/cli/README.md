@@ -41,8 +41,8 @@ npx dbsp repl --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
 # Verify schema against a live database (drift detection)
 npx dbsp verify --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
 
-# Push schema changes to the database
-npx dbsp push --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
+# Prove and record a managed schema change
+npx dbsp plan ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb --schema public
 
 # Generate DDL SQL for provisioning
 npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
@@ -54,8 +54,8 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 |---------|-------------|
 | `dbsp repl` | Interactive REPL with NQL syntax, tab-completion, and query history |
 | `dbsp verify` | Compare schema against live database; exit code 1 on drift |
-| `dbsp push` | Apply schema changes (DDL provisioning) with advisory lock |
-| `dbsp migrate` | Generate and apply UP/DOWN migration files |
+| `dbsp plan` | Prove and record a managed schema transition |
+| `dbsp apply [run-id]` | Persist-and-present or execute exactly one recorded plan |
 | `dbsp generate ddl` | Generate SQL CREATE TABLE statements for provisioning |
 | `dbsp introspect` | Generate schema.ts from database introspection |
 
@@ -64,7 +64,7 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 `dbsp plan` prints a `Run id` and `Plan digest`. Apply carries both:
 
 ```bash
-dbsp apply <run-id> --plan-digest <sha256> --db <url>
+dbsp apply <run-id> --plan-digest <sha256> --db postgres://user:pass@localhost/mydb
 ```
 
 Before authorization or planned DDL, apply recomputes the stored plan's digest and compares it
@@ -82,10 +82,10 @@ plans have the same content digest.
 - **REPL with completion** — Tab-complete table names, columns, NQL keywords, and relation paths
 - **Query history** — Persistent history across sessions
 - **Batch mode** — Use `repl --eval` for single queries or `repl --input` for batch files
-- **DDL provisioning** — `push` computes schema diff and applies the minimum required DDL
-- **Destructive-change safety** — Warns before dropping columns or tables; `--force` required
+- **Managed apply** — `plan` records a reviewed transition and `apply` executes it
+- **Destructive-change safety** — managed removal requires recorded authority
 - **Drift detection** — `verify` compares live introspection against declared schema
-- **Migration tracking** — `migrate` generates UP/DOWN migration files with advisory locks
+- **Ledger history** — inspect and reconcile preserve verified managed outcomes
 - **JSON output** — `--json` flag on most commands for CI pipeline integration
 
 ## Documentation

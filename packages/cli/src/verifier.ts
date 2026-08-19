@@ -15,10 +15,19 @@ import type { ChangeKind, SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 
 export type DriftSeverity = 'error' | 'warning' | 'info';
 
+/** The observed occupancy state of a declared paired table re-address. */
+export type ReaddressDriftState =
+	| 'source-only'
+	| 'target-only'
+	| 'target-occupied'
+	| 'source-missing'
+	| 'unknown';
+
 export type DriftType =
 	// Tables
 	| 'missing_table_in_db'
 	| 'missing_table_in_schema'
+	| 'readdress_table'
 	// Columns
 	| 'missing_column_in_db'
 	| 'missing_column_in_schema'
@@ -68,6 +77,12 @@ export interface DriftIssue {
 	column?: string;
 	/** Issue type for programmatic handling */
 	type: DriftType;
+	/** Present for a declared re-address; describes its executable/refused state. */
+	readdress?: {
+		readonly state: ReaddressDriftState;
+		readonly sourcePresent?: boolean;
+		readonly targetPresent?: boolean;
+	};
 }
 
 export interface VerifyResult {
@@ -93,6 +108,7 @@ const CHANGE_TO_DRIFT: Record<
 > = {
 	create_table: { type: 'missing_table_in_db', severity: 'error' },
 	drop_table: { type: 'missing_table_in_schema', severity: 'warning' },
+	readdress_table: { type: 'readdress_table', severity: 'error' },
 	add_column: { type: 'missing_column_in_db', severity: 'error' },
 	drop_column: { type: 'missing_column_in_schema', severity: 'info' },
 	alter_column_type: { type: 'type_mismatch', severity: 'error' },
@@ -142,6 +158,32 @@ function changeToDriftIssue(change: SchemaChange): DriftIssue {
 		type: 'type_mismatch' as DriftType,
 		severity: 'warning' as DriftSeverity,
 	};
+	if (change.kind === 'readdress_table') {
+		const assessment = change.meta?.readdressAssessment;
+		const state: ReaddressDriftState =
+			assessment === 'source-only' ||
+			assessment === 'target-only' ||
+			assessment === 'target-occupied' ||
+			assessment === 'source-missing'
+				? assessment
+				: 'unknown';
+		const sourcePresent = change.meta?.sourcePresent;
+		const targetPresent = change.meta?.targetPresent;
+		return {
+			severity:
+				state === 'source-only' || state === 'target-only'
+					? 'warning'
+					: mapping.severity,
+			type: mapping.type,
+			table: change.table,
+			message: change.details,
+			readdress: {
+				state,
+				...(typeof sourcePresent === 'boolean' ? { sourcePresent } : {}),
+				...(typeof targetPresent === 'boolean' ? { targetPresent } : {}),
+			},
+		};
+	}
 	return {
 		severity: mapping.severity,
 		type: mapping.type,

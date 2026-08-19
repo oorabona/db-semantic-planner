@@ -107,7 +107,7 @@ export interface DurableApplyInput {
 		| {
 				readonly ok: false;
 				/** Omitted by legacy adapters; treated as a contract refusal. */
-				readonly kind?: 'refused' | 'failed';
+				readonly kind?: 'refused' | 'failed' | 'read-only';
 				readonly detail: string;
 		  }
 	>;
@@ -153,6 +153,10 @@ export type {
 	CapabilityDescriptor,
 	Comparator,
 	CompareOutcome,
+	DestructiveAction,
+	DestructiveAuthorityEvidence,
+	DestructiveAuthorityPermit,
+	DestructiveDecision,
 	DurableIntentRecord,
 	ExclusiveTransitionTarget,
 	FingerprintManifest,
@@ -187,6 +191,16 @@ export {
 	type ObservationContextMatchResult,
 	observationContextDigest,
 } from './context-match.js';
+export {
+	admitRecordedIdentity,
+	assertCanonicalizableJson,
+	bindDeclarationSet,
+	type DeclarationAddressContext,
+	type DeclarationNamingStrategy,
+	declarationSetFromModel,
+	validateDeclarationModel,
+} from './declaration.js';
+export type { AdmittedDestructiveOutcomeClaim } from './destructive-authority.js';
 export {
 	type EnumAddDelta,
 	type EnumAddDeltaOptions,
@@ -225,6 +239,19 @@ export {
 	indexDelta,
 	normalizedIndex,
 } from './index-delta.js';
+export {
+	interpretLedgerLifecycle,
+	LEDGER_LIFECYCLE_GRAMMAR,
+	LEDGER_PROJECTION_CODE_VERSION,
+	type LedgerChainProjectionInput,
+	projectLedgerChain,
+} from './lifecycle-interpreter.js';
+export {
+	classifyOutcomeRecovery,
+	findUniqueLedgerTerminal,
+	outcomeClaimEventId,
+	outcomeClaimId,
+} from './outcome-protocol.js';
 export { transitionPlanDigest } from './plan-digest.js';
 export { createProver } from './prover.js';
 export {
@@ -233,6 +260,8 @@ export {
 	type ExecutionCoordinator,
 	type GuardExecutionResult,
 	isOperationRuntime,
+	type ManagedOutcomeExecutionRequest,
+	type ManagedOutcomePreflightRequest,
 	type NonRollbackableExecutionTracker,
 	type OperationFingerprints,
 	type OperationObservation,
@@ -264,7 +293,10 @@ export {
 	resumeTransitionRun,
 	type VerifiedRecoveryJournal,
 } from './resume.js';
-export { createTransitionRunMetadata } from './run-metadata.js';
+export {
+	createTransitionRunMetadata,
+	markGeneratorRemovalNonReplayable,
+} from './run-metadata.js';
 export {
 	createStagedTransitionOrchestrator,
 	type StagedTransitionInput,
@@ -294,5 +326,8 @@ export {
 export {
 	type TransitionRelationalValidationInput,
 	type TransitionRelationalValidationResult,
+	type ValidatedManagedStepManifest,
+	type ValidatedManagedStepManifestResult,
+	validateNormalizedManagedStepManifest,
 	validateTransitionRelationalInvariants,
 } from './validation.js';

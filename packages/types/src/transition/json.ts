@@ -1,7 +1,9 @@
+export type JsonObject = { readonly [k: string]: JsonValue };
+
 export type JsonValue =
 	| null
 	| boolean
 	| number
 	| string
 	| readonly JsonValue[]
-	| { readonly [k: string]: JsonValue };
+	| JsonObject;

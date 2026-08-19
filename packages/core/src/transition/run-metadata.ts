@@ -60,5 +60,13 @@ export function createTransitionRunMetadata(
 		databaseId: context.databaseId,
 		coreVersion: TRANSITION_PLANNER_ARTIFACT.version,
 		startedAt: new Date().toISOString(),
+		replayability: 'replayable',
 	};
+}
+
+/** Label a generator removal before persistence; it can never become replayable. */
+export function markGeneratorRemovalNonReplayable(
+	run: TransitionRunMetadata,
+): TransitionRunMetadata {
+	return { ...run, replayability: 'non-replayable-generator-removal' };
 }

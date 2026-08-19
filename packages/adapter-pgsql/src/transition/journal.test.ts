@@ -1,6 +1,7 @@
 import { transitionPlanDigest } from '@dbsp/core';
 import type {
 	DurableIntentRecord,
+	NormalizedManagedStep,
 	PhysicalOperation,
 	ProvenPlanShape,
 	StepJournal,
@@ -44,6 +45,47 @@ const plan = {
 	persisted: true,
 } as unknown as ProvenPlanShape;
 
+const managedAddress = {
+	scope: 'schema' as const,
+	engine: 'postgresql' as const,
+	database: 'db',
+	schema: 'public',
+	kind: 'table' as const,
+	name: 'orders',
+};
+
+function managedPlan(step: NormalizedManagedStep): ProvenPlanShape {
+	return {
+		observations: [],
+		claims: [],
+		assumptions: [],
+		preconditions: [],
+		segments: [],
+		steps: [step],
+		postconditions: [],
+		generator: { kind: 'schema-differ-generator', changes: [] },
+	} as unknown as ProvenPlanShape;
+}
+
+function managedStep(
+	overrides: Partial<NormalizedManagedStep>,
+): NormalizedManagedStep {
+	return {
+		stepKey: 'generator:0',
+		order: 0,
+		segmentId: 'generator:0',
+		dependencyOrder: [],
+		address: managedAddress,
+		claimKind: 'intent',
+		plannedClaimKeys: ['generator:0:root'],
+		statementBundle: { statements: [{ ordinal: 0, sql: 'SELECT 1' }] },
+		classification: 'non-destructive',
+		requiresVacancy: false,
+		replayPolicy: 'recorded',
+		...overrides,
+	};
+}
+
 function run(): TransitionRunMetadata {
 	return {
 		runId: 'run:journal',
@@ -51,6 +93,7 @@ function run(): TransitionRunMetadata {
 		targetContextDigest: 'context-digest',
 		databaseId: 'database-id',
 		coreVersion: '0.1.0',
+		replayability: 'replayable',
 		startedAt: '2026-07-17T00:00:00.000Z',
 	};
 }
@@ -82,6 +125,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					target_context_digest: { type: 'text', notNull: true },
 					database_id: { type: 'text', notNull: true },
 					core_version: { type: 'text', notNull: true },
+					replayability: { type: 'text', notNull: true },
 					started_at: {
 						type: 'timestamp with time zone',
 						notNull: true,
@@ -97,6 +141,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 				relkind: 'r',
 				columns: {
 					run_id: { type: 'text', notNull: true },
+					bound_run_id: { type: 'text', notNull: true },
 					plan: { type: 'jsonb', notNull: true },
 				},
 				primary_key: ['run_id'],
@@ -194,20 +239,23 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 					target_context_digest,
 					database_id,
 					core_version,
+					replayability: 'replayable',
 					started_at,
 				});
 				this.plans.set(String(run_id), {
 					run_id,
-					plan: JSON.parse(String(params[6])) as unknown,
+					bound_run_id: params[6],
+					plan: JSON.parse(String(params[7])) as unknown,
 				});
 			}
 			return { rows: [] };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run_plan"')) {
-			const [runId, plan] = params;
+			const [runId, boundRunId, plan] = params;
 			if (!this.plans.has(String(runId))) {
 				this.plans.set(String(runId), {
 					run_id: runId,
+					bound_run_id: boundRunId,
 					plan: JSON.parse(String(plan)) as unknown,
 				});
 			}
@@ -288,6 +336,110 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it.each([
+		[
+			'adoption',
+			managedPlan(
+				managedStep({
+					claimKind: 'adopt-intent',
+					statementBundle: { statements: [] },
+					lifecycle: { kind: 'adoption', shape: {} as never },
+					selection: { kind: 'adoption', selector: 'table:orders' },
+					expectedDeclaration: {
+						value: { table: 'orders' },
+						digest: 'declared',
+					},
+					expectedCatalogueIdentity: {
+						engine: 'postgresql',
+						format: 1,
+						value: { oid: '42' },
+					},
+				}),
+			),
+		],
+		['generator', managedPlan(managedStep({ requiresVacancy: true }))],
+		[
+			'removal',
+			managedPlan(
+				(() => {
+					const { address: _address, ...step } = managedStep({
+						closure: { root: managedAddress, members: [] },
+						claimKind: 'retire-intent',
+						classification: 'removal',
+						replayPolicy: 'fresh-live-only',
+					});
+					return step as NormalizedManagedStep;
+				})(),
+			),
+		],
+		[
+			'readdress',
+			managedPlan(
+				managedStep({
+					claimKind: 'readdress-intent',
+					classification: 'paired-readdress',
+					selection: { kind: 'readdress', selector: 'table:orders' },
+					lifecycle: {
+						kind: 'readdress',
+						declaration: {
+							from: { database: 'db', name: 'orders' },
+							to: { database: 'db', name: 'orders_archive' },
+						},
+					},
+				}),
+			),
+		],
+	] as const)('is reflexive for a persisted %s managed plan', async (kind, value) => {
+		const executor = new FakeJournalExecutor();
+		const metadata = {
+			...run(),
+			runId: `run:reflexive:${kind}`,
+			planDigest: transitionPlanDigest(value),
+		};
+		await createPgTransitionRunPersister(asPool(executor)).persist(
+			metadata,
+			value,
+		);
+		const loaded = await readTransitionJournal(executor, metadata.runId);
+		expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
+	});
+
+	it('SC-22: keeps the declaration digest stable across the jsonb plan round trip', async () => {
+		const executor = new FakeJournalExecutor();
+		const declarationPlan = {
+			...plan,
+			declarations: {
+				version: 1 as const,
+				declarations: [
+					{
+						address: {
+							engine: 'postgresql',
+							database: 'db',
+							schema: 'public',
+							kind: 'table',
+							name: 'users',
+						},
+						fragment: { z: 1, a: { second: true, first: false } },
+						digest: 'fragment-digest',
+					},
+				],
+				digest: 'set-digest',
+			},
+		} as unknown as ProvenPlanShape;
+		const metadata: TransitionRunMetadata = {
+			...run(),
+			runId: 'run:jsonb-declarations',
+			planDigest: transitionPlanDigest(declarationPlan),
+		};
+		await createPgTransitionRunPersister(asPool(executor)).persist(
+			metadata,
+			declarationPlan,
+		);
+		const loaded = await readTransitionJournal(executor, metadata.runId);
+		expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
+		expect(loaded.plan.declarations).toEqual(declarationPlan.declarations);
+	});
+
 	it('reserves the persisted run row with a transaction-scoped lock for later append reuse', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
@@ -317,7 +469,7 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow(/authorization table foreign key drifted/);
 	});
 
-	it('mutation: allowing authorization after a step event creates approval after an attempt', async () => {
+	it('OBL-RUN2 refuses authorization after a durable step event makes the run recover-only', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		await persistRun(executor, metadata);
@@ -423,20 +575,39 @@ describe('transition journal primitive', () => {
 		).toBe(true);
 	});
 
-	it('persists an idempotent run/plan pair and rejects plan drift', async () => {
+	it('OBL-RUN7 refuses a stored-plan mutation between idempotent persists', async () => {
 		const executor = new FakeJournalExecutor();
 		const metadata = run();
 		const persister = createPgTransitionRunPersister(asPool(executor));
 
 		await persister.persist(metadata, plan);
-		await persister.persist(metadata, plan);
-		const driftedPlan = { ...plan };
-		Object.assign(driftedPlan, { persisted: false });
-		await expect(persister.persist(metadata, driftedPlan)).rejects.toThrow(
-			/digest does not match/,
+		executor.plans.set(metadata.runId, {
+			run_id: metadata.runId,
+			bound_run_id: metadata.runId,
+			plan: { ...plan, persisted: false },
+		});
+		await expect(persister.persist(metadata, plan)).rejects.toThrow(
+			/different proven plan/,
 		);
 		expect(executor.runs.get(metadata.runId)).toBeDefined();
-		expect(executor.plans.get(metadata.runId)?.plan).toEqual(plan);
+	});
+
+	it('OBL-RUN7 refuses journal-column type drift before it persists a run', async () => {
+		const executor = new FakeJournalExecutor();
+		executor.shapeOverrides.set('dbsp_transition_journal', {
+			...executor.tableShape('dbsp_transition_journal'),
+			columns: {
+				...(executor.tableShape('dbsp_transition_journal').columns as Record<
+					string,
+					Record<string, unknown>
+				>),
+				recorded_at: { type: 'text', notNull: true },
+			},
+		});
+		await expect(persistRun(executor, run())).rejects.toThrow(
+			/event journal table columns drifted/,
+		);
+		expect(executor.runs.size).toBe(0);
 	});
 
 	it('writes the run and plan with one autocommit statement, never a transaction', async () => {
@@ -473,6 +644,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 
@@ -524,12 +696,44 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 
 		await expect(
 			readTransitionJournal(executor, metadata.runId),
 		).rejects.toThrow(/no persisted proven plan and is non-resumable/);
+	});
+
+	it('OBL-RUN3 refuses a plan row whose durable bound run id differs from its key', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		const stored = executor.plans.get(metadata.runId);
+		if (!stored) throw new Error('expected persisted plan');
+		executor.plans.set(metadata.runId, {
+			...stored,
+			bound_run_id: 'run:copied-from',
+		});
+
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow('bound id does not match');
+	});
+
+	it('fails closed on a corrupt replayability value instead of defaulting it to replayable', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		await persistRun(executor, metadata);
+		const stored = executor.runs.get(metadata.runId);
+		if (!stored) throw new Error('expected persisted run');
+		executor.runs.set(metadata.runId, {
+			...stored,
+			replayability: 'tampered-non-replayable',
+		});
+		await expect(
+			readTransitionJournal(executor, metadata.runId),
+		).rejects.toThrow('invalid replayability');
 	});
 
 	it.each([
@@ -544,10 +748,12 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 		executor.plans.set(metadata.runId, {
 			run_id: metadata.runId,
+			bound_run_id: metadata.runId,
 			plan: corruptPlan,
 		});
 
@@ -751,6 +957,7 @@ describe('transition journal primitive', () => {
 			target_context_digest: metadata.targetContextDigest,
 			database_id: metadata.databaseId,
 			core_version: metadata.coreVersion,
+			replayability: 'replayable',
 			started_at: metadata.startedAt,
 		});
 

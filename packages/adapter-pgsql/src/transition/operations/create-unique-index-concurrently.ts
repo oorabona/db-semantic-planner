@@ -873,6 +873,21 @@ async function readTargetIndexCatalogValue(
 	};
 }
 
+/**
+ * Recovery has no authority to turn an interrupted concurrent build into an
+ * outcome unless its postcondition is established. An invalid retained target
+ * is deliberately reported in the operation's own admission words.
+ */
+export async function assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid(
+	executor: Queryable,
+	operation: PhysicalOperation,
+): Promise<void> {
+	const payload = payloadOf(operation);
+	const catalog = await readTargetIndexCatalogValue(executor, payload);
+	if (catalog.index && (!catalog.index.valid || !catalog.index.ready))
+		throw new Error('target index name is already present');
+}
+
 async function targetIndexAbsent(
 	executor: Queryable,
 	payload: CreateUniqueIndexConcurrentlyPayload,

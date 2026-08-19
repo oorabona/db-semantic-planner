@@ -10,6 +10,10 @@ import type { ModelIR } from './model-ir.js';
  */
 export interface LoadedSchema {
 	readonly definition: Record<string, unknown>;
+	/** Retained schema() inputs used when per-object declarations are sliced. */
+	readonly constraints?: unknown;
+	readonly extras?: unknown;
+	readonly options?: unknown;
 	readonly model: ModelIR;
 	readonly tableNames: readonly string[];
 }

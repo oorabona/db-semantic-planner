@@ -32,6 +32,7 @@ import type {
 	RelationIR,
 	RelationType,
 	TableIR,
+	TableReaddressDeclaration,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
 import type { InferTables } from './schema-tables-types.js';
@@ -222,6 +223,12 @@ export interface SchemaTableOptions {
 	}>;
 	/** Composite foreign keys for this table (use ref() with columns/references) */
 	foreignKeys?: RefDefinition[];
+	/** Explicit rename or schema move for this desired table. */
+	readdress?: TableReaddressDeclaration;
+	/** Explicitly bring this existing table under managed state. */
+	adopt?: true;
+	/** Request a reviewed retire-and-create replacement of this table. */
+	replace?: true;
 }
 
 /**
@@ -322,6 +329,10 @@ export interface Schema<T extends SchemaDefinition> {
 	readonly definition: T;
 	/** Table-level constraints supplied to schema() or reconstructed from introspection */
 	readonly constraints?: SchemaConstraints;
+	/** Schema-wide objects supplied to schema(); retained for durable declarations. */
+	readonly extras?: SchemaExtras;
+	/** Planning inputs supplied to schema(); retained without changing model semantics. */
+	readonly options?: SchemaOptions;
 	/** Converted ModelIR for use with ORM */
 	readonly model: ModelIR;
 	/** Table names */
@@ -682,6 +693,8 @@ export function schema<const T extends SchemaDefinition>(
 	return {
 		definition,
 		...(constraints !== undefined ? { constraints } : {}),
+		...(extras !== undefined ? { extras } : {}),
+		...(options !== undefined ? { options } : {}),
 		model,
 		tableNames,
 		tables,
@@ -1545,6 +1558,17 @@ function buildTables(
 	for (const tableName of tableNames) {
 		const tableDef = definition[tableName];
 		if (!tableDef) continue;
+		const lifecycleDirectives = [
+			constraints?.[tableName]?.adopt === true ? 'adopt' : undefined,
+			constraints?.[tableName]?.replace === true ? 'replace' : undefined,
+			constraints?.[tableName]?.readdress === undefined
+				? undefined
+				: 'readdress',
+		].filter((directive): directive is string => directive !== undefined);
+		if (lifecycleDirectives.length > 1)
+			throw new Error(
+				`schema table ${tableName} cannot set more than one lifecycle directive (${lifecycleDirectives.join(', ')})`,
+			);
 
 		const { columns, foreignKeys, primaryKey } = buildColumnsForTable(
 			tableName,
@@ -1559,6 +1583,15 @@ function buildTables(
 
 		const table: TableIR = {
 			name: tableName,
+			...(constraints?.[tableName]?.adopt === true
+				? { adopt: true as const }
+				: {}),
+			...(constraints?.[tableName]?.replace === true
+				? { replace: true as const }
+				: {}),
+			...(constraints?.[tableName]?.readdress
+				? { readdress: constraints[tableName].readdress }
+				: {}),
 			columns,
 			...(finalPk !== undefined ? { primaryKey: finalPk } : {}),
 			foreignKeys: [...foreignKeys, ...extraForeignKeys],

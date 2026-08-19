@@ -35,6 +35,8 @@ export type {
 	RequiredEnumLabelIR,
 	SequenceIR,
 	TableIR,
+	TableReaddressAddress,
+	TableReaddressDeclaration,
 } from '@dbsp/types';
 
 import type {

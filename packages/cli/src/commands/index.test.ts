@@ -29,8 +29,6 @@ import { Command, CommanderError } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateCommand } from './generate.js';
 import { introspectCommand } from './introspect.js';
-import { migrateCommand } from './migrate.js';
-import { pushCommand } from './push.js';
 import { replCommand } from './repl.js';
 import { verifyCommand } from './verify.js';
 
@@ -51,8 +49,6 @@ function buildProgram(): Command {
 	for (const cmd of [
 		generateCommand,
 		introspectCommand,
-		migrateCommand,
-		pushCommand,
 		replCommand,
 		verifyCommand,
 	]) {
@@ -174,6 +170,181 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toBe('');
 	});
 
+	it.each([
+		[
+			'apply',
+			['apply', '--db', 'postgres://fixture', '--format', 'json'],
+			29,
+			{
+				outcome: 'apply-failed',
+				error: 'no-argument apply requires --schema-file <path>',
+			},
+		],
+		[
+			'inspect',
+			['inspect', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				outcome: 'inspect-failed',
+				error: expect.stringMatching(/ENOTFOUND|EAI_AGAIN/),
+			},
+		],
+		[
+			'plan',
+			['plan', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining(
+					"missing required argument 'schema-file'",
+				),
+			},
+		],
+		[
+			'recover',
+			[
+				'recover',
+				'--db',
+				'postgres://must-not-connect',
+				'--plan-digest',
+				'digest',
+				'--format',
+				'json',
+			],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'run-id'"),
+			},
+		],
+		[
+			'reconcile',
+			['reconcile', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'run-id'"),
+			},
+		],
+		[
+			'release',
+			['release', '--db', 'postgres://fixture', '--format', 'json'],
+			1,
+			{
+				status: 'error',
+				error: expect.stringContaining("missing required argument 'address'"),
+			},
+		],
+	] as const)(
+		'OBL-CLI1 refusal: %s emits exactly one JSON result document',
+		(_command, invocation, expectedStatus, expected) => {
+			const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+			const repositoryRoot = fileURLToPath(
+				new URL('../../../../', import.meta.url),
+			);
+			const completed = spawnSync(
+				process.execPath,
+				['--import', 'tsx', cliPath, ...invocation],
+				{
+					cwd: repositoryRoot,
+					encoding: 'utf8',
+					env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+				},
+			);
+
+			expect(completed.status).toBe(expectedStatus);
+			const document = JSON.parse(completed.stdout) as Record<string, unknown>;
+			expect(document).toMatchObject(expected);
+			// JSON.parse consumes the complete input, so this also rejects a second
+			// document. The serializer intentionally uses readable two-space JSON.
+			expect(completed.stdout.trim()).toBe(JSON.stringify(document, null, 2));
+			expect(completed.stdout.trim().startsWith('{')).toBe(true);
+			expect(completed.stderr).toBe('');
+		},
+		15_000,
+	);
+
+	it('OBL-RUN8 refuses fresh acceptance input on the recover command surface', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				'recover',
+				'run-reviewed',
+				'--db',
+				'postgres://must-not-connect',
+				'--plan-digest',
+				'digest',
+				'--accept',
+				'non-transactional-segment',
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("unknown option '--accept'"),
+		});
+		expect(completed.stderr).toBe('');
+	});
+
+	it.each([
+		['apply', ['apply']],
+		['plan', ['plan', 'schema.ts']],
+		['inspect', ['inspect', 'table:users']],
+		['recover', ['recover', 'run-reviewed']],
+		['reconcile', ['reconcile', 'run-reviewed']],
+		['release', ['release', 'table:users']],
+	] as const)('OBL-CLI2 escapes control bytes through the %s command error path', (_command, invocation) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const controlOption = '--attacker-\u001b[2J\u0007';
+		const completed = spawnSync(
+			process.execPath,
+			[
+				'--import',
+				'tsx',
+				cliPath,
+				...invocation,
+				'--db',
+				'postgres://must-not-connect',
+				...(_command === 'recover' ? ['--plan-digest', 'digest'] : []),
+				controlOption,
+				'--format',
+				'json',
+			],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).not.toContain('\u001b');
+		expect(completed.stdout).not.toContain('\u0007');
+		const document = JSON.parse(completed.stdout) as Record<string, unknown>;
+		expect(document).toMatchObject({ status: 'error' });
+		expect(String(document.error)).toContain('unknown option');
+		expect(completed.stdout).toContain('\\u001b');
+		expect(completed.stderr).toBe('');
+	});
+
 	it('emits one JSON document without root stderr for plan JSON selected after an unknown root option [mutation: let root Commander write stderr]', () => {
 		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
 		const repositoryRoot = fileURLToPath(
@@ -220,5 +391,28 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.status).toBe(1);
 		expect(completed.stdout).toBe('');
 		expect(completed.stderr).toContain("unknown command 'plna'");
+	});
+
+	it.each([
+		'push',
+		'migrate',
+	] as const)('SC-63: %s remains an unknown command after the greenfield surface removal', (command) => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, command],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+
+		expect(completed.status).toBe(1);
+		expect(completed.stdout).toBe('');
+		expect(completed.stderr).toContain(`unknown command '${command}'`);
 	});
 });

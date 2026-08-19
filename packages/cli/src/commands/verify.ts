@@ -12,6 +12,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
+import { printCliJson } from '../utils/output.js';
 import { loadSchema } from '../utils/schema-loader.js';
 import { formatVerifyResult, verifyFromDiff } from '../verifier.js';
 
@@ -81,17 +82,11 @@ export const verifyCommand = new Command('verify')
 					if (options.json) {
 						// Exclude the full diff meta from JSON output (too verbose)
 						const { diff: _diff, ...jsonResult } = result;
-						console.log(
-							JSON.stringify(
-								{
-									...jsonResult,
-									summary: diff.summary,
-									hasDestructive: diff.hasDestructive,
-								},
-								null,
-								2,
-							),
-						);
+						printCliJson({
+							...jsonResult,
+							summary: diff.summary,
+							hasDestructive: diff.hasDestructive,
+						});
 					} else {
 						console.log(formatVerifyResult(result));
 					}
@@ -108,9 +103,7 @@ export const verifyCommand = new Command('verify')
 					error instanceof Error ? error.message : 'Unknown error occurred';
 				// CC-2+EH-7: If --json, error goes to stdout as JSON; otherwise stderr
 				if (options.json) {
-					console.log(
-						JSON.stringify({ status: 'error', error: message }, null, 2),
-					);
+					printCliJson({ status: 'error', error: message });
 				} else {
 					console.error(`❌ Error: ${message}`);
 				}

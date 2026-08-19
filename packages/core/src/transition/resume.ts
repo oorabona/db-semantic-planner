@@ -741,11 +741,17 @@ async function withObservedStep<T>(
 	let lease: TransitionLease | undefined;
 	let failed = false;
 	let failure: unknown;
+	let clientCompromised = false;
 	try {
 		let observation: StepObservation;
 		try {
 			lease = await acquireTransitionTargetLease(target);
-			const client: TransitionExecutionClient = { opaqueClient: lease.session };
+			const client: TransitionExecutionClient = {
+				opaqueClient: lease.session,
+				markClientCompromised: () => {
+					clientCompromised = true;
+				},
+			};
 			let context = await runtime.observeContext(
 				client,
 				step.operation,
@@ -791,7 +797,17 @@ async function withObservedStep<T>(
 		}
 	} finally {
 		if (lease) {
-			await lease.release(failed ? { error: failure } : undefined);
+			await lease.release(
+				failed || clientCompromised
+					? {
+							error:
+								failure ??
+								new Error(
+									'transition observation marked its PostgreSQL client compromised',
+								),
+						}
+					: undefined,
+			);
 		}
 	}
 }

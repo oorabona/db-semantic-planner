@@ -9,6 +9,7 @@ import type {
 	TransitionQueryClient,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
+import { classifyPgWrite } from './database-writability.js';
 
 export type PgTransitionRunLockResult<T> =
 	| { readonly kind: 'acquired'; readonly value: T }
@@ -23,6 +24,35 @@ export type PgTransitionClientLease = {
 		readonly rows: readonly Record<string, unknown>[];
 	}>;
 	release(error?: unknown): void;
+};
+
+/**
+ * The whole state set which a plan operation is never allowed to change.
+ *
+ * Keep this closed and named here. These settings are the complete PostgreSQL
+ * execution-contract vocabulary, including the provenance-only clauses: plan
+ * SQL must not be able to turn either its rendering prerequisites or its
+ * reviewed session provenance into a different execution environment.
+ */
+const DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS = [
+	{
+		setting: 'standard_conforming_strings',
+		column: 'standard_conforming_strings',
+	},
+	{ setting: 'search_path', column: 'search_path' },
+	{ setting: 'client_encoding', column: 'client_encoding' },
+	{ setting: 'TimeZone', column: 'time_zone' },
+] as const;
+
+type DurablePlanOperationInvariantSnapshot = {
+	readonly sessionUser: string;
+	readonly currentUser: string;
+	readonly settings: Readonly<
+		Record<
+			(typeof DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS)[number]['column'],
+			string
+		>
+	>;
 };
 
 /**
@@ -148,32 +178,46 @@ export async function withPgTransitionRunLock<T>(
 	let locked = false;
 	let bodyFailed = false;
 	let cleanupFailure: Error | undefined;
+	let deadConnectionFailure: Error | undefined;
 	let value: T | undefined;
 	let callbackLive = false;
 	let planOperationViolatedInvariant = false;
+	const query = async (sql: string, params?: unknown) => {
+		try {
+			return (await client.query(sql, params as never)) as {
+				readonly rows: readonly Record<string, unknown>[];
+			};
+		} catch (error) {
+			if (isDeadPgConnectionError(error))
+				deadConnectionFailure = asError(error);
+			throw error;
+		}
+	};
 	try {
-		await configurePgUtf8(client);
-		const result = await client.query(
+		await configurePgUtf8({ query });
+		const result = await query(
 			'SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked',
 			[key.toString()],
 		);
 		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
 		locked = true;
+		const invariants = await captureDurablePlanOperationInvariants(client, key);
 		const lessor = createTransitionLessor(
 			async () =>
 				({
 					// This channel is adapter-owned infrastructure: execution-contract
 					// setup, authorization, journals, and lock cleanup are not plan SQL.
-					query: (sql: string, params?: unknown) =>
-						client.query(sql, params as never) as Promise<{
-							readonly rows: readonly Record<string, unknown>[];
-						}>,
+					query: (sql: string, params?: unknown) => query(sql, params),
 					// Core only selects this channel for executeOperation().  Guarding
 					// the origin rather than parsing SQL means every spelling reaches the
 					// same invariant check, while our own SET/SHOW contract clauses do not.
 					queryPlanOperation: async (sql: string, params?: unknown) => {
 						try {
-							await assertDurablePlanOperationInvariants(client, key);
+							await assertDurablePlanOperationInvariants(
+								client,
+								key,
+								invariants,
+							);
 						} catch (error) {
 							// A failed check at either boundary makes this session unsafe to
 							// pool, even if the final unlock happens to succeed.
@@ -187,14 +231,16 @@ export async function withPgTransitionRunLock<T>(
 							| undefined;
 						let queryFailure: unknown;
 						try {
-							result = await (client.query(sql, params as never) as Promise<{
-								readonly rows: readonly Record<string, unknown>[];
-							}>);
+							result = await classifyPgWrite(() => query(sql, params));
 						} catch (error) {
 							queryFailure = error;
 						}
 						try {
-							await assertDurablePlanOperationInvariants(client, key);
+							await assertDurablePlanOperationInvariants(
+								client,
+								key,
+								invariants,
+							);
 						} catch (error) {
 							planOperationViolatedInvariant = true;
 							throw error;
@@ -216,9 +262,11 @@ export async function withPgTransitionRunLock<T>(
 		throw error;
 	} finally {
 		callbackLive = false;
-		if (locked) {
+		// A dead backend has already released its session advisory locks.  Asking
+		// that client to unlock would only mask the callback's primary outcome.
+		if (locked && !deadConnectionFailure) {
 			try {
-				const unlock = await client.query(
+				const unlock = await query(
 					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
 					[key.toString()],
 				);
@@ -227,9 +275,10 @@ export async function withPgTransitionRunLock<T>(
 						'PostgreSQL transition run lock cleanup failed: pg_advisory_unlock did not confirm ownership',
 					);
 			} catch (error) {
-				cleanupFailure = new Error(
-					`PostgreSQL transition run lock cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				if (!isDeadPgConnectionError(error))
+					cleanupFailure = new Error(
+						`PostgreSQL transition run lock cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
 			}
 		}
 		// An unconfirmed unlock may leave a session advisory lock behind. pg-pool
@@ -237,6 +286,7 @@ export async function withPgTransitionRunLock<T>(
 		// safe cleanup because PostgreSQL releases session locks on disconnect.
 		client.release(
 			cleanupFailure ??
+				deadConnectionFailure ??
 				(planOperationViolatedInvariant
 					? new Error(
 							'PostgreSQL transition plan operation violated the exclusive session invariants',
@@ -246,6 +296,38 @@ export async function withPgTransitionRunLock<T>(
 	}
 	if (cleanupFailure && !bodyFailed) throw cleanupFailure;
 	return { kind: 'acquired', value: value as T };
+}
+
+/** pg-pool only evicts a checked-out client when release receives a truthy error. */
+export function isDeadPgConnectionError(error: unknown): boolean {
+	if (
+		error == null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return false;
+	const candidate = error as {
+		readonly code?: unknown;
+		readonly message?: unknown;
+	};
+	if (
+		candidate.code === '57P01' ||
+		candidate.code === '57P02' ||
+		candidate.code === '57P03' ||
+		candidate.code === 'ECONNRESET' ||
+		candidate.code === 'EPIPE' ||
+		candidate.code === 'ETIMEDOUT'
+	)
+		return true;
+	return (
+		typeof candidate.message === 'string' &&
+		/connection (?:terminated|ended|closed|lost)|client has encountered a connection error/iu.test(
+			candidate.message,
+		)
+	);
+}
+
+function asError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
 }
 
 /**
@@ -276,11 +358,56 @@ async function configurePgUtf8(client: {
  * state check, not a SQL recognizer: alternative spelling, comments, compound
  * statements, and future PostgreSQL syntax all get the same answer.
  */
+async function captureDurablePlanOperationInvariants(
+	client: PoolClient,
+	key: bigint,
+): Promise<DurablePlanOperationInvariantSnapshot> {
+	const row = await readDurablePlanOperationInvariants(client, key);
+	if (row.runLockHeld !== true) {
+		throw new Error(
+			'PostgreSQL transition run lock was not held while capturing durable plan operation invariants',
+		);
+	}
+	return {
+		sessionUser: row.sessionUser,
+		currentUser: row.currentUser,
+		settings: row.settings,
+	};
+}
+
 async function assertDurablePlanOperationInvariants(
 	client: PoolClient,
 	key: bigint,
+	expected: DurablePlanOperationInvariantSnapshot,
 ): Promise<void> {
+	const row = await readDurablePlanOperationInvariants(client, key);
+	if (
+		row.runLockHeld !== true ||
+		row.sessionUser !== expected.sessionUser ||
+		row.currentUser !== expected.currentUser ||
+		DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.some(
+			({ column }) => row.settings[column] !== expected.settings[column],
+		)
+	) {
+		throw new Error(
+			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+		);
+	}
+}
+
+async function readDurablePlanOperationInvariants(
+	client: PoolClient,
+	key: bigint,
+): Promise<{
+	readonly runLockHeld: boolean;
+	readonly sessionUser: string;
+	readonly currentUser: string;
+	readonly settings: DurablePlanOperationInvariantSnapshot['settings'];
+}> {
 	const { classId, objectId } = advisoryLockIds(key);
+	const settingColumns = DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.map(
+		({ setting, column }) => `current_setting('${setting}') AS ${column}`,
+	).join(',\n\t\t\t\t');
 	const row = (
 		await client.query(
 			`SELECT
@@ -294,15 +421,36 @@ async function assertDurablePlanOperationInvariants(
 						AND objsubid = 1
 						AND granted
 				) AS run_lock_held,
-				current_setting('client_encoding') AS client_encoding`,
+				session_user::text AS session_user,
+				current_user::text AS current_user,
+				${settingColumns}`,
 			[classId, objectId],
 		)
 	).rows[0];
-	if (row?.run_lock_held !== true || row.client_encoding !== 'UTF8') {
+	const settings = Object.fromEntries(
+		DURABLE_PLAN_OPERATION_INVARIANT_SETTINGS.map(({ column }) => [
+			column,
+			readDurablePlanOperationInvariantString(row, column),
+		]),
+	) as DurablePlanOperationInvariantSnapshot['settings'];
+	return {
+		runLockHeld: row?.run_lock_held === true,
+		sessionUser: readDurablePlanOperationInvariantString(row, 'session_user'),
+		currentUser: readDurablePlanOperationInvariantString(row, 'current_user'),
+		settings,
+	};
+}
+
+function readDurablePlanOperationInvariantString(
+	row: Record<string, unknown> | undefined,
+	column: string,
+): string {
+	const value = row?.[column];
+	if (typeof value !== 'string')
 		throw new Error(
-			'durable plan operation may not release the run lock or change client_encoding',
+			`PostgreSQL transition run invariant probe returned no string ${column}`,
 		);
-	}
+	return value;
 }
 
 function advisoryLockIds(key: bigint): {

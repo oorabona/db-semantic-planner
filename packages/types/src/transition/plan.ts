@@ -16,16 +16,20 @@
  * - Journal record stepIds are consistent with intent.stepId; ApplyResult.observations is a superset of every ObservedOutcomeRecord.observations.
  */
 
+import type { TableIR, TableReaddressDeclaration } from '../model-ir.js';
+import type { DeclarationSet } from './declaration.js';
 import type { ExecutionContract } from './execution-contract.js';
 import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
 import type { ApplyGuard, GuardProtocol, RecoveryArtefact } from './guard.js';
+import type { LedgerClaimKind, LedgerPayload } from './ledger.js';
 import type { EvidenceId, IssuedObservation } from './observation.js';
 import type {
 	ClaimSelector,
 	OperationExecutionSemantics,
 	PhysicalOperation,
 } from './operation.js';
+import type { ClaimStatementBundle } from './outcome-protocol.js';
 import type {
 	Assumption,
 	AssumptionId,
@@ -33,7 +37,97 @@ import type {
 	ProofClaim,
 	Proposition,
 } from './proof.js';
-import type { ResourceAddress } from './resource.js';
+import type { DeclarableResourceAddress, ResourceAddress } from './resource.js';
+
+/**
+ * The generator and recorded transition planner share this immutable execution
+ * vocabulary.  It intentionally does not reuse GuardedPlanStep: generated DDL
+ * has no transition-operation graph or fingerprint protocol, but it must carry
+ * the complete claim, SQL, selection, and replay contract before it is shown.
+ */
+export type ManagedStepClassification =
+	| 'non-destructive'
+	| 'removal'
+	| 'data-destructive'
+	| 'paired-readdress';
+
+export type ManagedStepReplayPolicy = 'recorded' | 'fresh-live-only';
+
+export interface ManagedStepClosureMember {
+	readonly plannedClaimKey: string;
+	readonly address: DeclarableResourceAddress & {
+		readonly scope: 'schema' | 'database';
+	};
+}
+
+export interface ManagedStepSelectionRequirement {
+	readonly kind: 'replacement' | 'adoption' | 'readdress' | 'optional-action';
+	readonly selector: string;
+}
+
+/**
+ * Reviewed lifecycle material.  It lives beside the claim and SQL in the
+ * normalized manifest; generator provenance is never an execution source.
+ */
+export type ManagedStepLifecycle =
+	| {
+			readonly kind: 'adoption';
+			readonly shape: TableIR;
+	  }
+	| {
+			readonly kind: 'adoption-refused';
+	  }
+	| {
+			readonly kind: 'readdress';
+			readonly declaration: TableReaddressDeclaration;
+	  };
+
+/** A digest-covered, ordered unit of managed DDL. */
+export interface NormalizedManagedStep {
+	readonly stepKey: string;
+	readonly order: number;
+	readonly segmentId: string;
+	readonly dependencyOrder: readonly string[];
+	/** Root address, unless the operation declares a destructive closure root. */
+	readonly address?: DeclarableResourceAddress & {
+		readonly scope: 'schema' | 'database';
+	};
+	readonly closure?: {
+		readonly root: DeclarableResourceAddress & {
+			readonly scope: 'schema' | 'database';
+		};
+		readonly members: readonly ManagedStepClosureMember[];
+	};
+	readonly claimKind: LedgerClaimKind;
+	readonly plannedClaimKeys: readonly string[];
+	readonly statementBundle: ClaimStatementBundle;
+	readonly classification: ManagedStepClassification;
+	readonly requiresVacancy: boolean;
+	readonly expectedDeclaration?: LedgerPayload;
+	readonly expectedCatalogueIdentity?: import('./resource.js').CatalogueIdentity;
+	readonly selection?: ManagedStepSelectionRequirement;
+	readonly lifecycle?: ManagedStepLifecycle;
+	readonly replayPolicy: ManagedStepReplayPolicy;
+}
+
+/**
+ * Immutable managed-outcome material carried by a plan step.  It is produced
+ * while proving, covered by the plan digest, and is the only source an
+ * executor may use for the address or statement bundle of a managed claim.
+ */
+export interface ManagedStepClaimMaterial {
+	/** Legacy plan-local label retained for serialized-plan compatibility; never a ledger event id. */
+	readonly claimId: string;
+	/** Stable only inside this persisted plan; execution mints the claim id. */
+	readonly plannedClaimKey: string;
+	readonly address: DeclarableResourceAddress & {
+		readonly scope: 'schema' | 'database';
+	};
+	readonly claimKind: LedgerClaimKind;
+	readonly statementBundle: ClaimStatementBundle;
+	/** True only when the plan writes an address it did not read. */
+	readonly requiresVacancy: boolean;
+}
 
 export interface ExecutableAssertion {
 	readonly proposition: Proposition;
@@ -43,6 +137,8 @@ export interface ExecutableAssertion {
 export interface DurableIntentRecord {
 	readonly runId?: string;
 	readonly run?: TransitionRunMetadata;
+	/** One apply attempt, deliberately distinct from the durable reviewed run. */
+	readonly executionId?: string;
 	readonly stepId: string;
 	readonly operation: PhysicalOperation;
 	readonly recordedAt: string;
@@ -68,6 +164,8 @@ export interface TransitionRunMetadata {
 	readonly databaseId: string;
 	readonly coreVersion: string;
 	readonly startedAt: string;
+	/** Generator removal runs are inspectable but must be freshly re-planned. */
+	readonly replayability?: 'replayable' | 'non-replayable-generator-removal';
 }
 
 export type TransitionJournalEventName = 'intent' | 'completion' | 'observed';
@@ -175,6 +273,8 @@ export interface GuardedPlanStep {
 	readonly guards: readonly ApplyGuard[];
 	readonly restsOnAssumptions: readonly AssumptionId[];
 	readonly selectionRationale: RuleSelectionRationale;
+	/** Present exactly for a managed DDL operation with a fixed plan-time sink. */
+	readonly managedClaim?: ManagedStepClaimMaterial;
 }
 
 export interface GuardedPlanSegment {
@@ -216,6 +316,11 @@ export interface ProvenPlanStep extends Omit<GuardedPlanStep, 'guards'> {
 
 export interface ProvenPlanShape extends Omit<GuardedPlan, 'steps'> {
 	readonly steps: readonly ProvenPlanStep[];
+	/**
+	 * Present on newly persisted declarative runs. It is inside the plan document
+	 * deliberately: the plan digest therefore covers the declaration set.
+	 */
+	readonly declarations?: DeclarationSet;
 }
 
 /**
