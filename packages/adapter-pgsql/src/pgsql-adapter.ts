@@ -355,6 +355,10 @@ const preparedStatementRegistries = new WeakMap<
 		readonly registry: PreparedStatementRegistry;
 	}
 >();
+const disabledPreparedStatementsByClient = new WeakMap<
+	PoolClient,
+	Set<string>
+>();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -2254,7 +2258,24 @@ function clonePreparedStatements(
 }
 
 function isInvalidatedPreparedStatementError(error: unknown): boolean {
-	return isPgErrorWithCode(error, '0A000') || isPgErrorWithCode(error, '26000');
+	return (
+		isPgErrorWithCode(error, '0A000') ||
+		isPgErrorWithCode(error, '26000') ||
+		isPgErrorWithCode(error, '42P05')
+	);
+}
+
+function isPreparedStatementDisabled(client: PoolClient, sql: string): boolean {
+	return disabledPreparedStatementsByClient.get(client)?.has(sql) ?? false;
+}
+
+function disablePreparedStatement(client: PoolClient, sql: string): void {
+	let disabledTexts = disabledPreparedStatementsByClient.get(client);
+	if (disabledTexts === undefined) {
+		disabledTexts = new Set();
+		disabledPreparedStatementsByClient.set(client, disabledTexts);
+	}
+	disabledTexts.add(sql);
 }
 
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
@@ -6112,27 +6133,39 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters !== undefined &&
 			parameters.length > 0
 		) {
-			const name = this.preparedStatementRegistry.admit(sql);
-			if (name !== undefined) {
+			const client = isPoolClientLike(executor)
+				? executor
+				: await executor.connect();
+			const releaseClient = client !== executor;
+			let releaseError: Error | boolean | undefined;
+			try {
+				if (isPreparedStatementDisabled(client, sql)) {
+					return client.query<T>(sql, [...parameters]) as Promise<
+						MaybeMultipleQueryResults<T>
+					>;
+				}
+				const name = this.preparedStatementRegistry.admit(sql);
+				if (name === undefined) {
+					return client.query<T>(sql, [...parameters]) as Promise<
+						MaybeMultipleQueryResults<T>
+					>;
+				}
 				try {
-					return (await executor.query<T>({
+					return (await client.query<T>({
 						name,
 						text: sql,
 						values: [...parameters],
 					})) as MaybeMultipleQueryResults<T>;
 				} catch (error) {
 					if (!isInvalidatedPreparedStatementError(error)) throw error;
-					this.preparedStatementRegistry.tombstone(sql);
-					if (
-						isPoolClientLike(executor) &&
-						poolClientTransactionOpen(executor) !== false
-					) {
-						throw error;
-					}
-					return executor.query<T>(sql, [...parameters]) as Promise<
-						MaybeMultipleQueryResults<T>
-					>;
+					disablePreparedStatement(client, sql);
+					throw error;
 				}
+			} catch (error) {
+				releaseError = error instanceof Error ? error : true;
+				throw error;
+			} finally {
+				if (releaseClient) client.release(releaseError);
 			}
 		}
 		if (parameters === undefined) {

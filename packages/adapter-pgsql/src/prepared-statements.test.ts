@@ -67,15 +67,6 @@ describe('prepared statement naming', () => {
 		).toEqual(new Set());
 	});
 
-	it('tombstones invalidated text permanently', () => {
-		const registry = new PreparedStatementRegistry(1, (sql) => `ps_${sql}`);
-
-		registry.admit('SELECT $1');
-		expect(registry.admit('SELECT $1')).toBe('ps_SELECT $1');
-		registry.tombstone('SELECT $1');
-		expect(registry.admit('SELECT $1')).toBeUndefined();
-	});
-
 	it('defaults the cap and rejects invalid caps', () => {
 		expect(normalizeMaxPreparedStatements(undefined)).toBe(500);
 		expect(() => normalizeMaxPreparedStatements(0)).toThrow(/positive integer/);

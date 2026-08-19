@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
@@ -144,7 +145,7 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('recovers unnamed after result-shape DDL invalidates a named plan', async () => {
+	it('uses unnamed execution after result-shape DDL invalidates a named plan', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -164,9 +165,9 @@ describe('adapter prepared statements', () => {
 			expect(await preparedCount(client, sql)).toBe(1);
 			await adapter.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
 
-			await expect(adapter.execute(query)).resolves.toEqual([
-				{ id: 1, added: null },
-			]);
+			await expect(adapter.execute(query)).rejects.toMatchObject({
+				code: '0A000',
+			});
 			await expect(adapter.execute(query)).resolves.toEqual([
 				{ id: 1, added: null },
 			]);
@@ -179,7 +180,7 @@ describe('adapter prepared statements', () => {
 	it.each([
 		'DEALLOCATE ALL',
 		'DISCARD ALL',
-	])('recovers unnamed after %s clears node-postgres server plans', async (reset) => {
+	])('uses unnamed execution after %s clears node-postgres server plans', async (reset) => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -194,11 +195,116 @@ describe('adapter prepared statements', () => {
 			expect(await preparedCount(client, sql)).toBe(1);
 			await adapter.executeRaw(reset);
 
-			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
+			await expect(adapter.execute(query)).rejects.toMatchObject({
+				code: '26000',
+			});
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
 			expect(await preparedCount(client, sql)).toBe(0);
 		} finally {
 			await close();
+		}
+	});
+
+	it('does not replay a named execution that raises a recognized SQLSTATE', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sequence = `"${SCHEMA}".no_replay_sequence`;
+			const fn = `"${SCHEMA}".raise_0a000_after_nextval`;
+			const sql = `SELECT ${fn}($1) AS value`;
+			const query = compiled<{ value: number }>(sql, [0]);
+
+			await adapter.executeDDL(`CREATE SEQUENCE ${sequence}`);
+			await adapter.executeDDL(`
+				CREATE FUNCTION ${fn}(should_fail integer) RETURNS integer
+				LANGUAGE plpgsql AS $$
+				BEGIN
+					IF should_fail = 1 THEN
+						PERFORM nextval('${SCHEMA}.no_replay_sequence');
+						RAISE EXCEPTION 'expected named execution failure' USING ERRCODE = '0A000';
+					END IF;
+					RETURN should_fail;
+				END;
+				$$`);
+
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
+			await expect(
+				adapter.execute(compiled<{ value: number }>(sql, [1])),
+			).rejects.toMatchObject({ code: '0A000' });
+			expect(
+				(
+					await client.query<{ last_value: string; is_called: boolean }>(
+						`SELECT last_value::text, is_called FROM ${sequence}`,
+					)
+				).rows,
+			).toEqual([{ last_value: '1', is_called: true }]);
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
+		} finally {
+			await close();
+		}
+	});
+
+	it('disables a duplicate external prepared statement name on its client', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sql = 'SELECT $1::int AS value';
+			const name = `dbsp_ps_${createHash('sha256')
+				.update(sql)
+				.digest('hex')
+				.slice(0, 32)}`;
+			const query = compiled<{ value: number }>(sql, [11]);
+
+			await client.query(`PREPARE ${name}(integer) AS ${sql}`);
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 11 }]);
+			await expect(adapter.execute(query)).rejects.toMatchObject({
+				code: '42P05',
+			});
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 11 }]);
+		} finally {
+			await close();
+		}
+	});
+
+	it('keeps named execution enabled on a healthy pool client after another resets', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 2,
+		});
+		const first = await pool.connect();
+		const second = await pool.connect();
+		try {
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT $1::int AS value';
+
+			await (adapter as any).issueConnectionQuery(first, sql, [13], true);
+			await (adapter as any).issueConnectionQuery(first, sql, [13], true);
+			await (adapter as any).issueConnectionQuery(second, sql, [13], true);
+			expect(await preparedCount(first, sql)).toBe(1);
+			expect(await preparedCount(second, sql)).toBe(1);
+
+			await first.query('DISCARD ALL');
+			await expect(
+				(adapter as any).issueConnectionQuery(first, sql, [13], true),
+			).rejects.toMatchObject({ code: '26000' });
+			await expect(
+				(adapter as any).issueConnectionQuery(first, sql, [13], true),
+			).resolves.toMatchObject({ rows: [{ value: 13 }] });
+			expect(await preparedCount(first, sql)).toBe(0);
+			expect(await preparedCount(second, sql)).toBe(1);
+			await expect(
+				(adapter as any).issueConnectionQuery(second, sql, [13], true),
+			).resolves.toMatchObject({ rows: [{ value: 13 }] });
+		} finally {
+			first.release();
+			second.release();
+			await pool.end();
 		}
 	});
 });

@@ -27,7 +27,6 @@ export class PreparedStatementRegistry {
 	private readonly namesByText = new Map<string, string>();
 	private readonly textsByName = new Map<string, string>();
 	private readonly collisionTexts = new Set<string>();
-	private readonly tombstonedTexts = new Set<string>();
 
 	constructor(
 		private readonly maxStatements: number,
@@ -37,7 +36,6 @@ export class PreparedStatementRegistry {
 	/** Returns a name only from the second sighting onward. */
 	admit(sql: string): string | undefined {
 		const textKey = sql;
-		if (this.tombstonedTexts.has(sql)) return undefined;
 		if (this.collisionTexts.has(sql)) return undefined;
 
 		const knownName = this.namesByText.get(textKey);
@@ -65,16 +63,6 @@ export class PreparedStatementRegistry {
 		this.namesByText.set(textKey, name);
 		this.textsByName.set(name, sql);
 		return name;
-	}
-
-	/**
-	 * Permanently falls back to unnamed execution for a statement whose server
-	 * plan was invalidated. The named admission and name collision bookkeeping
-	 * remain reserved: no DEALLOCATE can safely release node-postgres' cache.
-	 */
-	tombstone(sql: string): void {
-		this.tombstonedTexts.add(sql);
-		this.candidates.delete(sql);
 	}
 }
 

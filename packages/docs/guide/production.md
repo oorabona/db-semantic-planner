@@ -137,10 +137,13 @@ Do not issue external `DEALLOCATE` for adapter-managed statement names:
 node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
 cached plan; `DEALLOCATE ALL`, `DISCARD ALL`, and connection/proxy resets can
-return `26000`. On either error from a named execution, dbsp permanently falls
-back to unnamed execution for that SQL on the shared pool/client registry. Outside
-a transaction it retries the failed call once unnamed. Inside a transaction the
-original error still propagates, while later transactions use the unnamed path.
+return `26000`; an externally created statement with an adapter-derived name can
+return `42P05`. On one of these errors from a named execution, dbsp propagates the
+original error and disables named execution for that SQL on the affected physical
+connection only. Future calls on that connection use the unnamed path; healthy
+pool connections remain eligible for named execution. This means one visible,
+recoverable failure can follow DDL, `DISCARD`, or a reset, and each adapter call is
+executed at most once.
 
 ---
 
