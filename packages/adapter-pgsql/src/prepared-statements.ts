@@ -62,6 +62,7 @@ export class PreparedStatementRegistry {
 
 		this.namesByText.set(textKey, name);
 		this.textsByName.set(name, sql);
+		if (this.namesByText.size >= this.maxStatements) this.candidates.clear();
 		return name;
 	}
 }

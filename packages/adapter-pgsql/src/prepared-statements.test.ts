@@ -54,13 +54,14 @@ describe('prepared statement naming', () => {
 		expect(registry.admit('B')).toBe('ps_B');
 	});
 
-	it('does not retain candidates once named admission is full', () => {
-		const registry = new PreparedStatementRegistry(1, (sql) => `ps_${sql}`);
+	it('clears cold candidates when named admission becomes full', () => {
+		const registry = new PreparedStatementRegistry(2, (sql) => `ps_${sql}`);
 
-		registry.admit('admitted');
-		registry.admit('admitted');
-		registry.admit('cold one');
-		registry.admit('cold two');
+		registry.admit('A');
+		registry.admit('B');
+		registry.admit('B');
+		registry.admit('C');
+		registry.admit('C');
 
 		expect(
 			(registry as unknown as { candidates: Set<string> }).candidates,

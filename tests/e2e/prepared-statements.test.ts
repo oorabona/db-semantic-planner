@@ -36,14 +36,19 @@ async function getIsolatedClient(): Promise<{
 	readonly close: () => Promise<void>;
 }> {
 	const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
-	const client = await pool.connect();
-	return {
-		client,
-		async close() {
-			client.release();
-			await pool.end();
-		},
-	};
+	try {
+		const client = await pool.connect();
+		return {
+			client,
+			async close() {
+				client.release();
+				await pool.end();
+			},
+		};
+	} catch (error) {
+		await pool.end();
+		throw error;
+	}
 }
 
 describe('adapter prepared statements', () => {
@@ -177,6 +182,41 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('uses unnamed execution after result-shape DDL invalidates a named plan in a caller-owned transaction', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const table = `"${SCHEMA}".invalidated_plan_in_transaction`;
+			const sql = `SELECT * FROM ${table} WHERE id = $1`;
+			const query = compiled<{ id: number; added?: string }>(sql, [1]);
+
+			await adapter.executeDDL(
+				`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+			);
+			await adapter.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+			await adapter.execute(query);
+			await adapter.execute(query);
+			await client.query('BEGIN');
+			try {
+				await adapter.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
+
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '0A000',
+				});
+				await expect(adapter.execute(query)).resolves.toEqual([
+					{ id: 1, added: null },
+				]);
+			} finally {
+				await client.query('ROLLBACK');
+			}
+		} finally {
+			await close();
+		}
+	});
+
 	it.each([
 		'DEALLOCATE ALL',
 		'DISCARD ALL',
@@ -277,9 +317,11 @@ describe('adapter prepared statements', () => {
 			connectionString: process.env.DATABASE_URL,
 			max: 2,
 		});
-		const first = await pool.connect();
-		const second = await pool.connect();
+		let first: PoolClient | undefined;
+		let second: PoolClient | undefined;
 		try {
+			first = await pool.connect();
+			second = await pool.connect();
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
 			const sql = 'SELECT $1::int AS value';
 
@@ -302,8 +344,8 @@ describe('adapter prepared statements', () => {
 				(adapter as any).issueConnectionQuery(second, sql, [13], true),
 			).resolves.toMatchObject({ rows: [{ value: 13 }] });
 		} finally {
-			first.release();
-			second.release();
+			first?.release();
+			second?.release();
 			await pool.end();
 		}
 	});

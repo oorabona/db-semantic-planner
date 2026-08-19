@@ -4,6 +4,7 @@
  * Tests adapter interface implementation without database connection.
  */
 
+import { createHash } from 'node:crypto';
 import type { PlanReport } from '@dbsp/core';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
@@ -35,6 +36,16 @@ function testQuery<T = unknown>(
 		{ sql, parameters },
 		'pgsql-adapter-unit-test',
 	);
+}
+
+function deferredPromise<T>() {
+	let resolve: (value: T | PromiseLike<T>) => void;
+	let reject: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve: resolve!, reject: reject! };
 }
 
 // ============================================================================
@@ -509,6 +520,46 @@ describe('PgsqlAdapter', () => {
 			expect(client.release).toHaveBeenNthCalledWith(2, undefined);
 		});
 
+		it.each([
+			'first sighting',
+			'disabled statement',
+		])('waits for an unnamed %s query before releasing a pooled client', async (fallback) => {
+			const pool = createMockPool();
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			vi.mocked(pool.connect as any).mockResolvedValue(client);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const query = testQuery(sql, [7]);
+			const deferred = deferredPromise<unknown>();
+			const error = new Error(`unnamed ${fallback} failure`);
+
+			if (fallback === 'disabled statement') {
+				vi.mocked(client.query)
+					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+					.mockRejectedValueOnce({ code: '0A000' })
+					.mockReturnValueOnce(deferred.promise as any);
+				await adapter.execute(query);
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '0A000',
+				});
+				vi.mocked(client.release).mockClear();
+			} else {
+				vi.mocked(client.query).mockReturnValueOnce(deferred.promise as any);
+			}
+
+			const operation = adapter.execute(query);
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(client.release).not.toHaveBeenCalled();
+
+			deferred.reject(error);
+			await expect(operation).rejects.toBe(error);
+			expect(client.release).toHaveBeenCalledExactlyOnceWith(error);
+		});
+
 		it('does not name compiled executions without parameters', async () => {
 			const pool = createMockPool();
 			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
@@ -618,6 +669,53 @@ describe('PgsqlAdapter', () => {
 			).rejects.toBe(error);
 			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
 
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('disables a matching node-postgres local statement-name collision for future calls', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				connection: { parsedStatements: {} as Record<string, string> },
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const name = `dbsp_ps_${createHash('sha256')
+				.update(sql)
+				.digest('hex')
+				.slice(0, 32)}`;
+			(client as any).connection.parsedStatements[name] =
+				'SELECT id FROM other_users WHERE id = $1';
+			const collision = new Error(
+				`Prepared statements must be unique - '${name}' was used for a different statement`,
+			);
+			vi.mocked(client.query).mockImplementation((config: any) => {
+				if (
+					typeof config === 'object' &&
+					(client as any).connection.parsedStatements[config.name] !==
+						config.text
+				) {
+					return Promise.reject(collision);
+				}
+				return Promise.resolve({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			});
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(collision);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+
+			expect((client as any).connection.parsedStatements[name]).not.toBe(sql);
+			expect(client.query).toHaveBeenNthCalledWith(2, {
+				name,
+				text: sql,
+				values: [7],
+			});
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
 		});
 	});

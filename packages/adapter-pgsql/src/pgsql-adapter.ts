@@ -2265,6 +2265,17 @@ function isInvalidatedPreparedStatementError(error: unknown): boolean {
 	);
 }
 
+function isDriverPreparedStatementNameCollision(
+	error: unknown,
+	name: string,
+): boolean {
+	return (
+		error instanceof Error &&
+		error.message ===
+			`Prepared statements must be unique - '${name}' was used for a different statement`
+	);
+}
+
 function isPreparedStatementDisabled(client: PoolClient, sql: string): boolean {
 	return disabledPreparedStatementsByClient.get(client)?.has(sql) ?? false;
 }
@@ -6140,15 +6151,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			let releaseError: Error | boolean | undefined;
 			try {
 				if (isPreparedStatementDisabled(client, sql)) {
-					return client.query<T>(sql, [...parameters]) as Promise<
-						MaybeMultipleQueryResults<T>
-					>;
+					return (await client.query<T>(sql, [
+						...parameters,
+					])) as MaybeMultipleQueryResults<T>;
 				}
 				const name = this.preparedStatementRegistry.admit(sql);
 				if (name === undefined) {
-					return client.query<T>(sql, [...parameters]) as Promise<
-						MaybeMultipleQueryResults<T>
-					>;
+					return (await client.query<T>(sql, [
+						...parameters,
+					])) as MaybeMultipleQueryResults<T>;
 				}
 				try {
 					return (await client.query<T>({
@@ -6157,7 +6168,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						values: [...parameters],
 					})) as MaybeMultipleQueryResults<T>;
 				} catch (error) {
-					if (!isInvalidatedPreparedStatementError(error)) throw error;
+					if (
+						!isInvalidatedPreparedStatementError(error) &&
+						!isDriverPreparedStatementNameCollision(error, name)
+					)
+						throw error;
 					disablePreparedStatement(client, sql);
 					throw error;
 				}
