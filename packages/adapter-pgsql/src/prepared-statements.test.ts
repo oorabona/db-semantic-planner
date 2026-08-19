@@ -1,61 +1,77 @@
 import { describe, expect, it } from 'vitest';
 import {
-	derivePreparedStatementName,
 	normalizeMaxPreparedStatements,
+	PREPARED_STATEMENT_NAMESPACE,
 	PreparedStatementRegistry,
 } from './prepared-statements.js';
 
-describe('prepared statement naming', () => {
-	it('derives a stable 128-bit SHA-256 name from the full SQL text', () => {
-		const sql = 'SELECT * FROM inventory WHERE sku = $1';
-		const name = derivePreparedStatementName(sql);
-
-		expect(name).toMatch(/^dbsp_ps_[0-9a-f]{32}$/);
-		expect(derivePreparedStatementName(sql)).toBe(name);
-		expect(derivePreparedStatementName(`${sql} -- distinct text`)).not.toBe(
-			name,
-		);
-	});
-
-	it('admits a text on its second sighting and keeps it admitted', () => {
-		const registry = new PreparedStatementRegistry(2, (sql) => `ps_${sql}`);
+describe('prepared statement admission', () => {
+	it('admits a text on its second sighting and keeps its allocated name', () => {
+		const registry = new PreparedStatementRegistry(2);
 
 		expect(registry.admit('one')).toBeUndefined();
-		expect(registry.admit('one')).toBe('ps_one');
-		expect(registry.admit('one')).toBe('ps_one');
+		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
+		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
 	});
 
-	it('keeps a hash collision unnamed permanently for the second text', () => {
-		const registry = new PreparedStatementRegistry(2, () => 'ps_collision');
-		const first = 'SELECT * FROM collision_table WHERE id = $1';
-		const second = 'SELECT * FROM collision_table WHERE id = $2';
+	it('allocates distinct monotonic names that never repeat after a tombstone', () => {
+		const registry = new PreparedStatementRegistry(3);
 
-		expect(registry.admit(first)).toBeUndefined();
-		expect(registry.admit(first)).toBe('ps_collision');
-		expect(registry.admit(second)).toBeUndefined();
-		expect(registry.admit(second)).toBeUndefined();
-		expect(registry.admit(second)).toBeUndefined();
+		registry.admit('one');
+		const first = registry.admit('one');
+		registry.tombstone('one');
+		expect(registry.admit('one')).toBeUndefined();
+		registry.admit('two');
+		const second = registry.admit('two');
+
+		expect(first).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
+		expect(second).toBe(`${PREPARED_STATEMENT_NAMESPACE}2`);
+		expect(second).not.toBe(first);
 	});
 
 	it('does not admit text number cap plus one', () => {
-		const registry = new PreparedStatementRegistry(1, (sql) => `ps_${sql}`);
+		const registry = new PreparedStatementRegistry(1);
 
 		expect(registry.admit('one')).toBeUndefined();
-		expect(registry.admit('one')).toBe('ps_one');
+		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
 		expect(registry.admit('two')).toBeUndefined();
 		expect(registry.admit('two')).toBeUndefined();
+	});
+
+	it('keeps the cap under concurrent admission and reuses each allocated name', async () => {
+		const registry = new PreparedStatementRegistry(2);
+
+		await Promise.all(
+			['one', 'two'].map((sql) =>
+				Promise.resolve().then(() => registry.admit(sql)),
+			),
+		);
+		const names = await Promise.all(
+			['one', 'two', 'one', 'two'].map((sql) =>
+				Promise.resolve().then(() => registry.admit(sql)),
+			),
+		);
+
+		expect(new Set(names)).toEqual(
+			new Set([
+				`${PREPARED_STATEMENT_NAMESPACE}1`,
+				`${PREPARED_STATEMENT_NAMESPACE}2`,
+			]),
+		);
+		expect(registry.admit('three')).toBeUndefined();
+		expect(registry.admit('three')).toBeUndefined();
 	});
 
 	it('evicts the oldest cold candidate so a later hot text is admitted', () => {
-		const registry = new PreparedStatementRegistry(1, (sql) => `ps_${sql}`);
+		const registry = new PreparedStatementRegistry(1);
 
 		expect(registry.admit('A')).toBeUndefined();
 		expect(registry.admit('B')).toBeUndefined();
-		expect(registry.admit('B')).toBe('ps_B');
+		expect(registry.admit('B')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
 	});
 
 	it('clears cold candidates when named admission becomes full', () => {
-		const registry = new PreparedStatementRegistry(2, (sql) => `ps_${sql}`);
+		const registry = new PreparedStatementRegistry(2);
 
 		registry.admit('A');
 		registry.admit('B');

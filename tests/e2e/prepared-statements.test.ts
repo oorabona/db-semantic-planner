@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
@@ -41,8 +42,11 @@ async function getIsolatedClient(): Promise<{
 		return {
 			client,
 			async close() {
-				client.release();
-				await pool.end();
+				try {
+					client.release();
+				} finally {
+					await pool.end();
+				}
 			},
 		};
 	} catch (error) {
@@ -60,8 +64,11 @@ describe('adapter prepared statements', () => {
 	});
 
 	afterAll(async () => {
-		await dropSchema(SCHEMA);
-		await closeTestDb();
+		try {
+			await dropSchema(SCHEMA);
+		} finally {
+			await closeTestDb();
+		}
 	});
 
 	it('leaves no server-side statements when disabled', async () => {
@@ -287,7 +294,7 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('disables a duplicate external prepared statement name on its client', async () => {
+	it('tombstones a duplicate external prepared statement name on its client', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -295,10 +302,7 @@ describe('adapter prepared statements', () => {
 				preparedStatements: true,
 			});
 			const sql = 'SELECT $1::int AS value';
-			const name = `dbsp_ps_${createHash('sha256')
-				.update(sql)
-				.digest('hex')
-				.slice(0, 32)}`;
+			const name = 'dbsp_ps_1';
 			const query = compiled<{ value: number }>(sql, [11]);
 
 			await client.query(`PREPARE ${name}(integer) AS ${sql}`);
@@ -312,7 +316,7 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('keeps named execution enabled on a healthy pool client after another resets', async () => {
+	it('disables naming pool-wide after one client resets while another pool stays eligible', async () => {
 		const pool = new Pool({
 			connectionString: process.env.DATABASE_URL,
 			max: 2,
@@ -343,10 +347,102 @@ describe('adapter prepared statements', () => {
 			await expect(
 				(adapter as any).issueConnectionQuery(second, sql, [13], true),
 			).resolves.toMatchObject({ rows: [{ value: 13 }] });
+			const otherPool = new Pool({
+				connectionString: process.env.DATABASE_URL,
+				max: 1,
+			});
+			try {
+				const otherAdapter = createPgsqlAdapter(otherPool, {
+					preparedStatements: true,
+				});
+				await otherAdapter.execute(compiled(sql, [13]));
+				await otherAdapter.execute(compiled(sql, [13]));
+				const otherClient = await otherPool.connect();
+				try {
+					expect(await preparedCount(otherClient, sql)).toBe(1);
+				} finally {
+					otherClient.release();
+				}
+			} finally {
+				await otherPool.end();
+			}
 		} finally {
 			first?.release();
 			second?.release();
 			await pool.end();
+		}
+	});
+
+	it('rejects a pending named pool query after backend termination without terminating the child process', async () => {
+		const applicationName = `dbsp-prepared-${randomUUID()}`;
+		const childSource = `
+			import { Pool } from 'pg';
+			import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+			import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
+			const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, application_name: process.env.DBSP_APPLICATION_NAME });
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const compiled = (value) => projectionlessCompiledQuery({ sql: 'SELECT pg_sleep(30) WHERE $1::boolean', parameters: [value] }, 'prepared-statements-transport-child');
+			await adapter.execute(compiled(false));
+			await adapter.execute(compiled(false));
+			try {
+				await adapter.execute(compiled(true));
+				console.error('pending named query unexpectedly resolved');
+				process.exitCode = 1;
+			} catch (error) {
+				console.log('named-query-rejected:' + (error && typeof error === 'object' && 'code' in error ? error.code : 'unknown'));
+			} finally {
+				await pool.end();
+			}
+		`;
+		const child = spawn(
+			process.execPath,
+			['--import', 'tsx', '--input-type=module', '--eval', childSource],
+			{
+				env: {
+					...process.env,
+					DBSP_APPLICATION_NAME: applicationName,
+				},
+				stdio: ['ignore', 'pipe', 'pipe'],
+			},
+		);
+		let stdout = '';
+		let stderr = '';
+		child.stdout?.on('data', (chunk: Buffer) => {
+			stdout += chunk.toString();
+		});
+		child.stderr?.on('data', (chunk: Buffer) => {
+			stderr += chunk.toString();
+		});
+		try {
+			const pool = await getTestPool();
+			let pid: number | undefined;
+			for (let attempt = 0; attempt < 100 && pid === undefined; attempt += 1) {
+				const result = await pool.query<{ pid: number }>(
+					`SELECT pid FROM pg_catalog.pg_stat_activity
+					 WHERE application_name = $1 AND state = 'active'
+					 ORDER BY backend_start DESC LIMIT 1`,
+					[applicationName],
+				);
+				pid = result.rows[0]?.pid;
+				if (pid === undefined)
+					await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			expect(pid).toBeTypeOf('number');
+			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
+				pid,
+			]);
+			const exited = await new Promise<{
+				code: number | null;
+				signal: NodeJS.Signals | null;
+			}>((resolve, reject) => {
+				child.once('error', reject);
+				child.once('exit', (code, signal) => resolve({ code, signal }));
+			});
+			expect(exited).toEqual({ code: 0, signal: null });
+			expect(stdout.trim()).toBe('named-query-rejected:57P01');
+			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
+		} finally {
+			if (child.exitCode === null) child.kill('SIGKILL');
 		}
 	});
 });

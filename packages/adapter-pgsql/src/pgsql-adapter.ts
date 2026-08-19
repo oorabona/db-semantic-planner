@@ -355,10 +355,6 @@ const preparedStatementRegistries = new WeakMap<
 		readonly registry: PreparedStatementRegistry;
 	}
 >();
-const disabledPreparedStatementsByClient = new WeakMap<
-	PoolClient,
-	Set<string>
->();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -2024,7 +2020,7 @@ function getNqlBindingProjection(
  * Options for PgsqlAdapter.
  */
 export interface PgsqlPreparedStatementsOptions {
-	/** Maximum distinct compiled statements admitted per pool/client (default: 500). */
+	/** Maximum distinct compiled statements admitted per executor (default: 500). */
 	readonly maxStatements?: number;
 }
 
@@ -2255,38 +2251,6 @@ function clonePreparedStatements(
 	config: NormalizedPreparedStatementsConfig,
 ): false | PgsqlPreparedStatementsOptions {
 	return config === false ? false : { maxStatements: config.maxStatements };
-}
-
-function isInvalidatedPreparedStatementError(error: unknown): boolean {
-	return (
-		isPgErrorWithCode(error, '0A000') ||
-		isPgErrorWithCode(error, '26000') ||
-		isPgErrorWithCode(error, '42P05')
-	);
-}
-
-function isDriverPreparedStatementNameCollision(
-	error: unknown,
-	name: string,
-): boolean {
-	return (
-		error instanceof Error &&
-		error.message ===
-			`Prepared statements must be unique - '${name}' was used for a different statement`
-	);
-}
-
-function isPreparedStatementDisabled(client: PoolClient, sql: string): boolean {
-	return disabledPreparedStatementsByClient.get(client)?.has(sql) ?? false;
-}
-
-function disablePreparedStatement(client: PoolClient, sql: string): void {
-	let disabledTexts = disabledPreparedStatementsByClient.get(client);
-	if (disabledTexts === undefined) {
-		disabledTexts = new Set();
-		disabledPreparedStatementsByClient.set(client, disabledTexts);
-	}
-	disabledTexts.add(sql);
 }
 
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
@@ -6144,43 +6108,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters !== undefined &&
 			parameters.length > 0
 		) {
-			const client = isPoolClientLike(executor)
-				? executor
-				: await executor.connect();
-			const releaseClient = client !== executor;
-			let releaseError: Error | boolean | undefined;
+			const name = this.preparedStatementRegistry.admit(sql);
+			if (name === undefined) {
+				return executor.query<T>(sql, [...parameters]) as Promise<
+					MaybeMultipleQueryResults<T>
+				>;
+			}
 			try {
-				if (isPreparedStatementDisabled(client, sql)) {
-					return (await client.query<T>(sql, [
-						...parameters,
-					])) as MaybeMultipleQueryResults<T>;
-				}
-				const name = this.preparedStatementRegistry.admit(sql);
-				if (name === undefined) {
-					return (await client.query<T>(sql, [
-						...parameters,
-					])) as MaybeMultipleQueryResults<T>;
-				}
-				try {
-					return (await client.query<T>({
-						name,
-						text: sql,
-						values: [...parameters],
-					})) as MaybeMultipleQueryResults<T>;
-				} catch (error) {
-					if (
-						!isInvalidatedPreparedStatementError(error) &&
-						!isDriverPreparedStatementNameCollision(error, name)
-					)
-						throw error;
-					disablePreparedStatement(client, sql);
-					throw error;
-				}
+				return (await executor.query<T>({
+					name,
+					text: sql,
+					values: [...parameters],
+				})) as MaybeMultipleQueryResults<T>;
 			} catch (error) {
-				releaseError = error instanceof Error ? error : true;
+				// The recognized server invalidations must never be retried. Tombstoning
+				// every named failure also fails closed for an otherwise-unreachable
+				// driver-local duplicate-name failure without matching its message.
+				this.preparedStatementRegistry.tombstone(sql);
 				throw error;
-			} finally {
-				if (releaseClient) client.release(releaseError);
 			}
 		}
 		if (parameters === undefined) {

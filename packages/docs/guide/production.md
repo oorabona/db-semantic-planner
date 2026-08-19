@@ -120,12 +120,21 @@ admission is full, new candidate text is not retained. There is no adapter-issue
 `DEALLOCATE`.
 
 Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
-connection prepares an admitted statement independently, so `maxStatements`
-bounds the statements that this adapter can create on each connection. The cap is
-configured pool-wide: every adapter sharing the same `Pool` (or the same borrowed
-`PoolClient`) must use the same `maxStatements`, and constructing one with a
-different cap fails. If you use PgBouncer in transaction-pooling mode, it must be
-configured with `max_prepared_statements`; otherwise leave this option off.
+connection prepares an admitted statement independently. `maxStatements` is an
+executor-scoped upper bound on the distinct names dbsp can create per underlying
+connection; it is not an inventory of statements the server currently holds. The
+cap is configured pool-wide: every adapter sharing the same `Pool` (or the same
+borrowed `PoolClient`) must use the same `maxStatements`, and constructing one
+with a different cap fails. If you use PgBouncer in transaction-pooling mode, it
+must be configured with `max_prepared_statements`; otherwise leave this option off.
+
+dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
+node-postgres owns checkout, query error handling, release, and backpressure. dbsp
+does not attach a client error listener. The application must still handle idle
+pool-client failures with `pool.on('error', handler)` as node-postgres requires.
+Names are allocated from the reserved `dbsp_ps_` namespace with a monotonically
+increasing executor-local sequence. Do not issue your own named statements in
+that namespace on the same `Pool` or borrowed `PoolClient`.
 
 PostgreSQL considers a generic plan only after five custom executions, and adopts
 it only when its estimated cost is competitive. Parameter-sensitive queries can
@@ -137,13 +146,13 @@ Do not issue external `DEALLOCATE` for adapter-managed statement names:
 node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
 cached plan; `DEALLOCATE ALL`, `DISCARD ALL`, and connection/proxy resets can
-return `26000`; an externally created statement with an adapter-derived name can
-return `42P05`. On one of these errors from a named execution, dbsp propagates the
-original error and disables named execution for that SQL on the affected physical
-connection only. Future calls on that connection use the unnamed path; healthy
-pool connections remain eligible for named execution. This means one visible,
-recoverable failure can follow DDL, `DISCARD`, or a reset, and each adapter call is
-executed at most once.
+return `26000`; an externally created statement in the reserved namespace can
+return `42P05`. On one of these errors from a named execution, dbsp tombstones the
+SQL before propagating the original error. Future calls use the unnamed path for
+the executor lifetime. For a `Pool`, this is pool-wide: one client reset disables
+naming for that SQL on every pool client. That is a throughput regression, never
+a transparent retry or a new application error; each adapter call executes at
+most once.
 
 ---
 
