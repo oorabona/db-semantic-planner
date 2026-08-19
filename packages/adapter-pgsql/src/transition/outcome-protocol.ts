@@ -421,7 +421,12 @@ export type PgAdmittedOperationResult =
 	| PgOutcomeResult
 	| PgDestructiveOutcomeResult
 	| { readonly kind: 'executed-paired-readdress'; readonly pairId: string }
-	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string }
+	| {
+			readonly kind: 'outcome-recovery-required';
+			readonly claimId: string;
+			readonly reason: string;
+	  };
 
 interface AdmittedPermitRecord {
 	readonly claim?: AdmittedOutcomeClaim;
@@ -610,7 +615,12 @@ export type PgDestructiveOutcomeResult =
 	 */
 	| { readonly kind: 'outcome-protocol-pending'; readonly reason: string }
 	| OutcomeProtocolRefusal
-	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string }
+	| {
+			readonly kind: 'outcome-recovery-required';
+			readonly claimId: string;
+			readonly reason: string;
+	  };
 
 /**
  * High-level managed destructive execution. It owns claim admission and the
@@ -635,6 +645,11 @@ async function runPgDestructiveOutcome(
 		if (!('destructivePermit' in admission))
 			return refusal('destructive admission did not mint an authority permit');
 		let executingCommitted = false;
+		const recoveryRequired = (reason: string): PgDestructiveOutcomeResult => ({
+			kind: 'outcome-recovery-required',
+			claimId: admission.plan.claimId,
+			reason,
+		});
 		try {
 			// Persist the send boundary before the first autocommitted statement.
 			await begin(session, request.lockTimeoutMs);
@@ -699,16 +714,16 @@ async function runPgDestructiveOutcome(
 				await commitPgOutcome(session, request.observer);
 				executingCommitted = true;
 			} catch (error) {
-				return {
-					kind: 'outcome-transport-ambiguous',
-					reason: new PgCommitAcknowledgementAmbiguousError(error).message,
-				};
+				if (error instanceof PgCommitDeterministicFailureError) throw error;
+				if (error instanceof PgCommitAcknowledgementAmbiguousError)
+					return recoveryRequired(error.message);
+				throw error;
 			}
 			const sent = await executePgDestructiveBundle(session, {
 				claim: admission as AdmittedDestructiveOutcomeClaim,
 				statements: request.plan.statementBundle.statements,
 			});
-			if (sent) return sent;
+			if (sent) return recoveryRequired(sent.reason);
 			await checkpoint(request.observer, 'ddl-completed-before-read-back');
 			const resolution = await readBackAndResolve(
 				session,
@@ -735,14 +750,16 @@ async function runPgDestructiveOutcome(
 					reason:
 						'destructive read-back found a surviving closure member; the claim remains indeterminate',
 				};
-			return resolved ?? { kind: 'executed-destructive-outcome' };
+			return resolved
+				? recoveryRequired(resolved.reason)
+				: { kind: 'executed-destructive-outcome' };
 		} catch (error) {
 			await rollback(session);
+			if (error instanceof PgCommitDeterministicFailureError) throw error;
 			if (error instanceof PgCommitAcknowledgementAmbiguousError)
-				return { kind: 'outcome-transport-ambiguous', reason: error.message };
+				return recoveryRequired(error.message);
 			markPgOutcomeSessionCompromised(session, error);
-			if (executingCommitted)
-				return { kind: 'outcome-protocol-pending', reason: detail(error) };
+			if (executingCommitted) return recoveryRequired(detail(error));
 			return refusal(detail(error));
 		}
 	});
@@ -838,6 +855,11 @@ export async function resolvePgDestructiveOutcome(
 			return undefined;
 		} catch (error) {
 			if (begun) await rollback(session);
+			if (
+				error instanceof PgCommitDeterministicFailureError ||
+				error instanceof PgCommitAcknowledgementAmbiguousError
+			)
+				throw error;
 			return refusal(detail(error));
 		}
 	});
@@ -1126,6 +1148,7 @@ async function recoverPgAdmittedReaddressPairOnSession(
 		return decision;
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return { kind: 'pending', reason: detail(error) };
@@ -1662,6 +1685,7 @@ async function openPgOutcomeClaimOnSession(
 		return admission;
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
 		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 		markPgOutcomeSessionCompromised(executor, error);
 		return refusal(detail(error));
@@ -1774,6 +1798,11 @@ export async function openPgOutcomeClaimGroup(
 			return { root: admissions[0]!, members: admissions.slice(1) };
 		} catch (error) {
 			if (begun) await rollback(session);
+			if (
+				error instanceof PgCommitDeterministicFailureError ||
+				error instanceof PgCommitAcknowledgementAmbiguousError
+			)
+				throw error;
 			return { root: refusal(detail(error)), members: [] };
 		}
 	});
@@ -1847,6 +1876,11 @@ export async function resolvePgOutcomeClaimGroup(
 			return undefined;
 		} catch (error) {
 			if (begun) await rollback(session);
+			if (
+				error instanceof PgCommitDeterministicFailureError ||
+				error instanceof PgCommitAcknowledgementAmbiguousError
+			)
+				throw error;
 			return refusal(detail(error));
 		}
 	});
@@ -2119,6 +2153,7 @@ async function runPgTransactionalOutcomeOnSession(
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
 		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 		return refusal(detail(error));
 	}
@@ -2178,6 +2213,7 @@ async function runPgPairedReaddressOperation(
 	verdicts: AdmissionVerdicts,
 ): Promise<PgAdmittedOperationResult> {
 	let begun = false;
+	let ddlMayHaveBeenSent = false;
 	try {
 		await begin(executor, request.lockTimeoutMs);
 		begun = true;
@@ -2274,6 +2310,7 @@ async function runPgPairedReaddressOperation(
 				);
 			}
 		}
+		ddlMayHaveBeenSent = true;
 		const sent = await sendPgPairedReaddressBundle(
 			executor,
 			mintPairedReaddressPermit(
@@ -2348,6 +2385,20 @@ async function runPgPairedReaddressOperation(
 		return { kind: 'executed-paired-readdress', pairId: request.pairId };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			if (ddlMayHaveBeenSent)
+				return {
+					kind: 'outcome-recovery-required',
+					claimId: request.members[0]?.sourceClaimId ?? request.pairId,
+					reason: error.message,
+				};
+		if (ddlMayHaveBeenSent)
+			return {
+				kind: 'outcome-recovery-required',
+				claimId: request.members[0]?.sourceClaimId ?? request.pairId,
+				reason: detail(error),
+			};
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		markPgOutcomeSessionCompromised(executor, error);
@@ -2597,6 +2648,7 @@ export async function executePgAdmittedOperation(
 					);
 		});
 	} catch (error) {
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return refusal(detail(error));
@@ -2774,6 +2826,9 @@ async function runPgNonTransactionalOutcomeOnSession(
 		return { kind: 'executed-outcome-claim', claim: admission };
 	} catch (error) {
 		await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
+		if (error instanceof PgCommitAcknowledgementAmbiguousError)
+			if (executingCommitted) return recoveryRequired(error.message);
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		if (executingCommitted) {
@@ -2962,6 +3017,7 @@ async function recoverPgOutcomeClaimOnSession(
 		return { kind: 'outcome-recovery-appended', classification, append };
 	} catch (error) {
 		if (begun) await rollback(executor);
+		if (error instanceof PgCommitDeterministicFailureError) throw error;
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		markPgOutcomeSessionCompromised(executor, error);

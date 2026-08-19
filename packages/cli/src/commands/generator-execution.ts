@@ -289,6 +289,8 @@ type GeneratedColumnPostcondition = {
 	readonly nullable?: boolean;
 	readonly hasDefault?: boolean;
 	readonly default?: string;
+	readonly collation?: string | null;
+	readonly identity?: 'always' | 'byDefault' | null;
 };
 
 type GeneratedPostcondition =
@@ -297,7 +299,63 @@ type GeneratedPostcondition =
 			readonly columns: readonly GeneratedColumnPostcondition[];
 	  }
 	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
+	| {
+			readonly kind: 'constraint';
+			readonly constraint:
+				| { readonly type: 'p' | 'u'; readonly columns: readonly string[] }
+				| {
+						readonly type: 'f';
+						readonly columns: readonly string[];
+						readonly references: {
+							readonly schema?: string;
+							readonly table: string;
+							readonly columns: readonly string[];
+						};
+						readonly onDelete: string;
+						readonly onUpdate: string;
+						readonly deferred: boolean;
+						readonly notValid: boolean;
+				  }
+				| {
+						readonly type: 'c';
+						readonly definition: string;
+						readonly notValid: boolean;
+				  };
+	  }
+	| { readonly kind: 'index'; readonly definition: string }
+	| { readonly kind: 'enum'; readonly labels: readonly string[] }
+	| {
+			readonly kind: 'sequence';
+			readonly startValue?: string;
+			readonly incrementBy?: string;
+			readonly minValue?: string;
+			readonly maxValue?: string;
+			readonly cycle?: boolean;
+	  }
+	| { readonly kind: 'extension'; readonly version?: string }
+	| { readonly kind: 'absent' }
 	| { readonly kind: 'exempt'; readonly reason: string };
+
+function textList(value: unknown): readonly string[] {
+	return Array.isArray(value) ? value.map((item) => String(item)) : [];
+}
+
+function foreignKeyAction(code: unknown): string | undefined {
+	switch (code) {
+		case 'a':
+			return 'NO ACTION';
+		case 'r':
+			return 'RESTRICT';
+		case 'c':
+			return 'CASCADE';
+		case 'n':
+			return 'SET NULL';
+		case 'd':
+			return 'SET DEFAULT';
+		default:
+			return undefined;
+	}
+}
 
 function generatedPostcondition(
 	step: NormalizedManagedStep,
@@ -309,17 +367,7 @@ function generatedPostcondition(
 			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
 		);
 	const postcondition = value as GeneratedPostcondition;
-	if (postcondition.kind === 'table' && Array.isArray(postcondition.columns))
-		return postcondition;
-	if (
-		postcondition.kind === 'column' &&
-		postcondition.column !== undefined &&
-		typeof postcondition.column.name === 'string'
-	)
-		return postcondition;
-	throw new Error(
-		`generated ${address.kind} step ${step.stepKey} has malformed structural postcondition`,
-	);
+	return postcondition;
 }
 
 /**
@@ -332,8 +380,6 @@ export async function readGeneratedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
-	const statement = step.statementBundle.statements.at(-1)?.sql;
-	if (!statement) throw new Error(`generated step ${step.stepKey} has no SQL`);
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
 		const postcondition = generatedPostcondition(step, address);
@@ -348,7 +394,7 @@ export async function readGeneratedPostcondition(
 			);
 		const row = (
 			await executor.query(
-				`SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
+				`SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation collation ON collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
 				[address.schema, parent, address.name],
 			)
 		).rows[0];
@@ -362,6 +408,14 @@ export async function readGeneratedPostcondition(
 					: undefined;
 		const actualDefault =
 			row.column_default == null ? undefined : String(row.column_default);
+		const actualCollation =
+			row.collation_name == null ? null : String(row.collation_name);
+		const actualIdentity =
+			row.identity_kind === 'a'
+				? 'always'
+				: row.identity_kind === 'd'
+					? 'byDefault'
+					: null;
 		if (expected.type !== undefined && !dbTypesEqual(type, expected.type))
 			throw new Error(
 				`generated column ${address.name} type postcondition differs`,
@@ -383,6 +437,17 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated column ${address.name} default postcondition differs`,
 			);
+		if (
+			expected.collation !== undefined &&
+			actualCollation !== expected.collation
+		)
+			throw new Error(
+				`generated column ${address.name} collation postcondition differs`,
+			);
+		if (expected.identity !== undefined && actualIdentity !== expected.identity)
+			throw new Error(
+				`generated column ${address.name} identity postcondition differs`,
+			);
 		return generatedPayload({
 			kind: 'column',
 			type,
@@ -391,24 +456,61 @@ export async function readGeneratedPostcondition(
 		});
 	}
 	if (address.kind === 'constraint' && parent && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'constraint')
+			throw new Error(
+				`generated constraint ${address.name} has a non-constraint structural postcondition`,
+			);
+		const expected = postcondition.constraint;
 		const row = (
 			await executor.query(
-				`SELECT constraint.conname AS constraint_name, constraint.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint.oid, true) AS constraint_definition FROM pg_catalog.pg_constraint constraint JOIN pg_catalog.pg_class relation ON relation.oid = constraint.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint.conname = $3`,
+				`SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint_item.oid, true) AS constraint_definition, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_schema, referenced_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS referenced_columns, constraint_item.confdeltype AS on_delete, constraint_item.confupdtype AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
 				[address.schema, parent, address.name],
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated constraint ${address.name} is absent`);
 		const definition = String(row.constraint_definition ?? '');
-		const expected = /\bADD\s+CONSTRAINT\s+(?:"[^"]+"|\S+)\s+(.+?);?$/iu.exec(
-			statement,
-		)?.[1];
+		if (String(row.constraint_type) !== expected.type)
+			throw new Error(
+				`generated constraint ${address.name} postcondition differs`,
+			);
 		if (
-			expected &&
-			normalizedDefinition(definition) !== normalizedDefinition(expected)
+			(expected.type === 'p' || expected.type === 'u') &&
+			JSON.stringify(textList(row.key_columns)) !==
+				JSON.stringify(expected.columns)
 		)
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
 			);
+		if (expected.type === 'c') {
+			if (
+				normalizedDefinition(definition) !==
+					normalizedDefinition(expected.definition) ||
+				(row.is_validated === true) === expected.notValid
+			)
+				throw new Error(
+					`generated constraint ${address.name} postcondition differs`,
+				);
+		}
+		if (expected.type === 'f') {
+			if (
+				JSON.stringify(textList(row.key_columns)) !==
+					JSON.stringify(expected.columns) ||
+				String(row.referenced_table ?? '') !== expected.references.table ||
+				(expected.references.schema !== undefined &&
+					String(row.referenced_schema ?? '') !== expected.references.schema) ||
+				JSON.stringify(textList(row.referenced_columns)) !==
+					JSON.stringify(expected.references.columns) ||
+				foreignKeyAction(row.on_delete) !== expected.onDelete ||
+				foreignKeyAction(row.on_update) !== expected.onUpdate ||
+				(row.is_deferrable === true && row.is_deferred === true) !==
+					expected.deferred ||
+				(row.is_validated === true) === expected.notValid
+			)
+				throw new Error(
+					`generated constraint ${address.name} postcondition differs`,
+				);
+		}
 		return generatedPayload({
 			kind: 'constraint',
 			type: String(row.constraint_type ?? ''),
@@ -416,6 +518,11 @@ export async function readGeneratedPostcondition(
 		});
 	}
 	if (address.kind === 'index' && parent && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'index')
+			throw new Error(
+				`generated index ${address.name} has a non-index structural postcondition`,
+			);
 		const row = (
 			await executor.query(
 				`SELECT index_relation.relname AS index_name, index_meta.indisunique AS is_unique, pg_catalog.pg_get_indexdef(index_meta.indexrelid, 0, true) AS index_definition FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
@@ -424,7 +531,10 @@ export async function readGeneratedPostcondition(
 		).rows[0];
 		if (!row) throw new Error(`generated index ${address.name} is absent`);
 		const definition = String(row.index_definition ?? '');
-		if (normalizedDefinition(definition) !== normalizedDefinition(statement))
+		if (
+			normalizedDefinition(definition) !==
+			normalizedDefinition(postcondition.definition)
+		)
 			throw new Error(`generated index ${address.name} postcondition differs`);
 		return generatedPayload({
 			kind: 'index',
@@ -482,6 +592,11 @@ export async function readGeneratedPostcondition(
 		});
 	}
 	if (address.kind === 'enum' && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'enum')
+			throw new Error(
+				`generated enum ${address.name} has a non-enum structural postcondition`,
+			);
 		const rows = (
 			await executor.query(
 				`SELECT enum_label.enumlabel AS label FROM pg_catalog.pg_type type JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace JOIN pg_catalog.pg_enum enum_label ON enum_label.enumtypid = type.oid WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum_label.enumsortorder`,
@@ -489,9 +604,16 @@ export async function readGeneratedPostcondition(
 			)
 		).rows;
 		const labels = rows.map((row) => String(row.label));
+		if (JSON.stringify(labels) !== JSON.stringify(postcondition.labels))
+			throw new Error(`generated enum ${address.name} postcondition differs`);
 		return generatedPayload({ kind: 'enum', labels });
 	}
 	if (address.kind === 'sequence' && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'sequence')
+			throw new Error(
+				`generated sequence ${address.name} has a non-sequence structural postcondition`,
+			);
 		const row = (
 			await executor.query(
 				`SELECT sequence.start_value::text AS start_value, sequence.increment_by::text AS increment_by, sequence.min_value::text AS min_value, sequence.max_value::text AS max_value, sequence.cache_size::text AS cache_size, sequence.cycle AS cycle FROM pg_catalog.pg_sequences sequence WHERE sequence.schemaname = $1 AND sequence.sequencename = $2`,
@@ -499,9 +621,35 @@ export async function readGeneratedPostcondition(
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated sequence ${address.name} is absent`);
+		const actual = {
+			startValue: String(row.start_value),
+			incrementBy: String(row.increment_by),
+			minValue: String(row.min_value),
+			maxValue: String(row.max_value),
+			cycle: row.cycle === true,
+		};
+		for (const key of [
+			'startValue',
+			'incrementBy',
+			'minValue',
+			'maxValue',
+			'cycle',
+		] as const)
+			if (
+				postcondition[key] !== undefined &&
+				postcondition[key] !== actual[key]
+			)
+				throw new Error(
+					`generated sequence ${address.name} postcondition differs`,
+				);
 		return generatedPayload({ kind: 'sequence', ...row });
 	}
 	if (address.kind === 'extension') {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'extension')
+			throw new Error(
+				`generated extension ${address.name} has a non-extension structural postcondition`,
+			);
 		const row = (
 			await executor.query(
 				`SELECT extension.extversion AS version FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
@@ -509,6 +657,13 @@ export async function readGeneratedPostcondition(
 			)
 		).rows[0];
 		if (!row)
+			throw new Error(
+				`generated extension ${address.name} version postcondition differs`,
+			);
+		if (
+			postcondition.version !== undefined &&
+			String(row.version) !== postcondition.version
+		)
 			throw new Error(
 				`generated extension ${address.name} version postcondition differs`,
 			);
@@ -1180,13 +1335,23 @@ export async function executeGeneratorPlan(input: {
 				| {
 						readonly kind: 'outcome-transport-ambiguous';
 						readonly reason: string;
+				  }
+				| {
+						readonly kind: 'outcome-recovery-required';
+						readonly claimId: string;
+						readonly reason: string;
 				  };
-			if (executed.kind !== 'executed-destructive-outcome')
-				if (executed.kind === 'outcome-transport-ambiguous')
-					return {
-						outcome: 'execution-failed',
-						detail: executed.reason,
-					};
+			if (executed.kind === 'outcome-recovery-required')
+				return {
+					outcome: 'recovery-required',
+					claimId: executed.claimId,
+					detail: `claim ${executed.claimId} remains open and requires recovery: ${executed.reason}`,
+				};
+			if (executed.kind === 'outcome-transport-ambiguous')
+				return {
+					outcome: 'execution-failed',
+					detail: executed.reason,
+				};
 			if (executed.kind === 'outcome-protocol-pending')
 				return partial(
 					`destructive claim ${claim.claimId} remains pending after executing: ${executed.reason}`,

@@ -21,6 +21,7 @@ import type {
 	LedgerAddress,
 	LedgerClaimKind,
 	LedgerReservationRow,
+	TableIR,
 	TableReaddressDeclaration,
 } from '@dbsp/types';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -77,6 +78,25 @@ function reservation(
 		pairId,
 		rootClaimId,
 		homeLedger: { scope: 'schema', schema: value.schema! },
+	};
+}
+
+/** The persisted re-address test producer mirrors the declared ModelIR shape. */
+function readdressTable(name: string): TableIR {
+	return {
+		name,
+		columns: [
+			{ name: 'id', type: 'bigint', nullable: false, identity: 'byDefault' },
+			{
+				name: 'payload',
+				type: 'text',
+				originalDbType: 'bytea',
+				nullable: false,
+			},
+		],
+		primaryKey: ['id'],
+		foreignKeys: [],
+		indexes: [],
 	};
 }
 
@@ -216,7 +236,10 @@ async function applyPersistedReaddress(input: {
 			kind: 'readdress_table',
 			table: sourceName,
 			details: `readdress ${sourceName}`,
-			meta: { readdress: input.declaration },
+			meta: {
+				readdress: input.declaration,
+				table: readdressTable(input.declaration.to.name),
+			},
 		} as never,
 		database: input.database,
 		schema: input.targetSchema,
@@ -234,6 +257,13 @@ async function applyPersistedReaddress(input: {
 				input.declaration.to.name,
 			),
 		),
+	});
+	expect(step.expectedDeclaration?.value).toEqual({
+		kind: 'table',
+		columns: [
+			{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
+			{ name: 'payload', type: 'bytea', nullable: false, hasDefault: false },
+		],
 	});
 	Object.assign(step, {
 		classification: 'paired-readdress',

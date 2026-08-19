@@ -77,6 +77,7 @@ describe('declared table re-addressing in schema diff', () => {
 			kind: 'readdress_table',
 			table: 'new_users',
 			meta: {
+				table: { name: 'new_users' },
 				readdressAssessment: 'source-only',
 				readdress: {
 					from: { name: 'old_users' },
@@ -89,7 +90,10 @@ describe('declared table re-addressing in schema diff', () => {
 		expect(targetOnly).toHaveLength(1);
 		expect(targetOnly[0]).toMatchObject({
 			kind: 'readdress_table',
-			meta: { readdressAssessment: 'target-only' },
+			meta: {
+				table: { name: 'new_users' },
+				readdressAssessment: 'target-only',
+			},
 		});
 
 		const bothPresent = compare(
@@ -98,7 +102,29 @@ describe('declared table re-addressing in schema diff', () => {
 		expect(bothPresent).toHaveLength(1);
 		expect(bothPresent[0]).toMatchObject({
 			kind: 'readdress_table',
-			meta: { readdressAssessment: 'target-occupied' },
+			meta: {
+				table: { name: 'new_users' },
+				readdressAssessment: 'target-occupied',
+			},
 		});
+	});
+
+	it('carries the desired ModelIR table through every refused re-address state', () => {
+		const desired = model([
+			table('accounts', {
+				from: { name: 'users' },
+				to: { name: 'accounts' },
+			}),
+		]);
+		for (const live of [
+			model([]),
+			model([table('users'), table('accounts')]),
+		]) {
+			const change = compareSchemata(desired, live).changes[0];
+			expect(change).toMatchObject({
+				kind: 'readdress_table',
+				meta: { table: { name: 'accounts' } },
+			});
+		}
 	});
 });

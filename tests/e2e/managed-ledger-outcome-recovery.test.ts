@@ -278,9 +278,16 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 					? { executingEventId: `ambiguous-${mode}-executing` }
 					: {}),
 			};
-			await expect(runPersistedOutcome(pool, request)).resolves.toMatchObject({
-				kind: 'outcome-transport-ambiguous',
-			});
+			await expect(runPersistedOutcome(pool, request)).resolves.toMatchObject(
+				_path === 'non-transactional terminal'
+					? {
+							// The terminal COMMIT was already sent after executing committed,
+							// so its open claim propagates as recovery-required.
+							kind: 'outcome-recovery-required',
+							claimId: input.plan.claimId,
+						}
+					: { kind: 'outcome-transport-ambiguous' },
+			);
 		}
 		const events = await pool.query<{ event_kind: string }>(
 			`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 ORDER BY recorded_at, event_id`,

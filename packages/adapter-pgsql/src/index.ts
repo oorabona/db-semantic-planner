@@ -51,6 +51,7 @@ export {
 	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
 	type GenerateDDLOptions,
 	type GeneratedMutationClassification,
+	type GeneratedPostcondition,
 	generateCreateIndex,
 	generateDDL,
 	generateDownSQL,

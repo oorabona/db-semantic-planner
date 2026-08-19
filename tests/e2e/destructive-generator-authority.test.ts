@@ -884,8 +884,12 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			await pool.query(`REVOKE ${quote(catalogueReader)} FROM ${quote(role)}`);
 			resume?.();
 			await expect(running).resolves.toMatchObject({
-				outcome: 'execution-failed',
-				detail: expect.stringMatching(/pending|permission denied/i),
+				// The catalogue read is revoked after the executing fact is durable,
+				// so the open claim propagates through recovery-required.
+				outcome: 'recovery-required',
+				detail: expect.stringMatching(
+					/claim .* remains open and requires recovery: .*permission denied/i,
+				),
 			});
 			const terminals = await pool.query<{ event_kind: string }>(
 				`SELECT event_kind FROM ${quote(schema)}.${quote(DBSP_LEDGER_EVENT_TABLE)} WHERE address_name = $1 AND event_kind IN ('absent', 'refused', 'indeterminate') ORDER BY recorded_at`,

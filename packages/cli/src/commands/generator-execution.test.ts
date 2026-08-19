@@ -128,6 +128,17 @@ describe('generator execution fixture shim', () => {
 			'constraint',
 			{
 				...dataDestructiveStep,
+				expectedDeclaration: {
+					value: {
+						kind: 'constraint',
+						constraint: {
+							type: 'c',
+							definition: 'CHECK (id > 0)',
+							notValid: false,
+						},
+					},
+					digest: 'constraint-postcondition',
+				},
 				statementBundle: {
 					statements: [
 						{
@@ -149,6 +160,13 @@ describe('generator execution fixture shim', () => {
 			'index',
 			{
 				...dataDestructiveStep,
+				expectedDeclaration: {
+					value: {
+						kind: 'index',
+						definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+					},
+					digest: 'index-postcondition',
+				},
 				statementBundle: {
 					statements: [
 						{
@@ -178,6 +196,62 @@ describe('generator execution fixture shim', () => {
 				{ query: vi.fn().mockResolvedValue({ rows }) },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
+			),
+		).rejects.toThrow('postcondition differs');
+	});
+
+	it.each([
+		[
+			'enum labels',
+			{ kind: 'enum', labels: ['draft', 'paid'] },
+			{
+				...dataDestructiveStep.address,
+				kind: 'enum' as const,
+				name: 'order_state',
+			},
+			[{ label: 'draft' }],
+		],
+		[
+			'sequence properties',
+			{ kind: 'sequence', startValue: '7', incrementBy: '3', cycle: false },
+			{
+				...dataDestructiveStep.address,
+				kind: 'sequence' as const,
+				name: 'order_number',
+			},
+			[
+				{
+					start_value: '7',
+					increment_by: '1',
+					min_value: '1',
+					max_value: '100',
+					cache_size: '1',
+					cycle: false,
+				},
+			],
+		],
+		[
+			'extension version',
+			{ kind: 'extension', version: '1.3' },
+			{
+				...dataDestructiveStep.address,
+				scope: 'database' as const,
+				kind: 'extension' as const,
+				name: 'pgcrypto',
+			},
+			[{ version: '1.2' }],
+		],
+	] as const)('refuses a changed generated %s rather than recording observed', async (_name, value, address, rows) => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: { value, digest: 'typed-postcondition' },
+			address,
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows }) },
+				step,
+				address as never,
 			),
 		).rejects.toThrow('postcondition differs');
 	});
@@ -292,6 +366,32 @@ describe('generator execution fixture shim', () => {
 			claimId: 'open-claim',
 			detail:
 				'claim open-claim remains open and requires recovery: sender disconnected after executing committed',
+		});
+	});
+
+	it('maps a destructive transport recovery to the claim-bearing exit outcome', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-recovery-required',
+			claimId: 'destructive-open-claim',
+			reason: 'terminal COMMIT acknowledgement was lost',
+		});
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [dataDestructiveStep] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				accepts: ['destructive-plan-accepted:reviewed-plan'],
+				runId: 'reviewed-run',
+			}),
+		).resolves.toEqual({
+			outcome: 'recovery-required',
+			claimId: 'destructive-open-claim',
+			detail:
+				'claim destructive-open-claim remains open and requires recovery: terminal COMMIT acknowledgement was lost',
 		});
 	});
 });

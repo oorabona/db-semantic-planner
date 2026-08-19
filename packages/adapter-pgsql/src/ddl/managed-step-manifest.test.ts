@@ -3,9 +3,61 @@ import { describe, expect, it } from 'vitest';
 import {
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
+	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('carries a typed target table postcondition for a re-address step', () => {
+		const step = createPgsqlGeneratedManagedStep({
+			change: {
+				kind: 'readdress_table',
+				table: 'accounts',
+				destructive: false,
+				details: 'readdress users to accounts',
+				meta: {
+					table: {
+						name: 'accounts',
+						columns: [{ name: 'id', type: 'bigint', nullable: false }],
+						primaryKey: ['id'],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+			database: 'app',
+			schema: 'public',
+			stepKey: 'generator:readdress',
+			order: 0,
+			statements: ['ALTER TABLE "public"."users" RENAME TO "accounts"'],
+		});
+		expect(step.expectedDeclaration?.value).toEqual({
+			kind: 'table',
+			columns: [
+				{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
+			],
+		});
+	});
+
+	it('refuses a re-address step without its typed target table postcondition', () => {
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'readdress_table',
+					table: 'accounts',
+					destructive: false,
+					details: 'readdress users to accounts',
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:readdress-missing-table',
+				order: 0,
+				statements: ['ALTER TABLE "public"."users" RENAME TO "accounts"'],
+			}),
+		).toThrow(
+			'generator planning refuses readdress_table: missing typed table postcondition',
+		);
+	});
+
 	it('maps a foreign key to its named constraint address at planning time', () => {
 		const step = createPgsqlGeneratedManagedStep({
 			change: {
@@ -13,7 +65,12 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				table: 'orders',
 				destructive: false,
 				details: 'add FK',
-				meta: { fk: { columns: ['account_id'] } },
+				meta: {
+					fk: {
+						columns: ['account_id'],
+						references: { table: 'accounts', columns: ['id'] },
+					},
+				},
 			},
 			database: 'app',
 			schema: 'public',
@@ -213,5 +270,85 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			],
 		});
+	});
+
+	it('derives typed catalogue expectations for every non-column declarable creation', () => {
+		const expectation = (
+			change: Parameters<typeof generatedPostconditionForChange>[0]['change'],
+		) => generatedPostconditionForChange({ change, schema: 'tenant' })?.value;
+		expect(
+			expectation({
+				kind: 'add_check_constraint',
+				table: 'orders',
+				destructive: false,
+				details: 'quoted check',
+				meta: {
+					check: { name: 'Order Check', expression: 'CHECK ("Total" > 0)' },
+				},
+			}),
+		).toEqual({
+			kind: 'constraint',
+			constraint: {
+				type: 'c',
+				definition: 'CHECK ("Total" > 0)',
+				notValid: false,
+			},
+		});
+		expect(
+			expectation({
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'multi-column index',
+				meta: {
+					index: {
+						name: 'orders_pair_idx',
+						columns: ['account_id', 'created_at'],
+					},
+				},
+			}),
+		).toMatchObject({
+			kind: 'index',
+			definition: expect.stringContaining('"account_id", "created_at"'),
+		});
+		expect(
+			expectation({
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'enum',
+				meta: { enum: { name: 'order_state', values: ['draft', 'paid'] } },
+			}),
+		).toEqual({ kind: 'enum', labels: ['draft', 'paid'] });
+		expect(
+			expectation({
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: 'sequence',
+				meta: {
+					sequence: {
+						name: 'order_number',
+						startWith: 7,
+						incrementBy: 3,
+						cycle: false,
+					},
+				},
+			}),
+		).toEqual({
+			kind: 'sequence',
+			startValue: '7',
+			incrementBy: '3',
+			cycle: false,
+		});
+		expect(
+			expectation({
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: 'versioned extension',
+				meta: { extension: 'pgcrypto', extensionVersion: '1.3' },
+			}),
+		).toEqual({ kind: 'extension', version: '1.3' });
 	});
 });

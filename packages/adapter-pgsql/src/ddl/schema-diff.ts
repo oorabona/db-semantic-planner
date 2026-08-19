@@ -324,6 +324,7 @@ export function compareSchemata(
 					details: `Refuse re-address table "${readdress.from.name}" to "${name}": target is occupied`,
 					meta: {
 						readdress,
+						table: schemaTable,
 						readdressAssessment: 'target-occupied',
 						sourcePresent: true,
 						targetPresent: true,
@@ -360,6 +361,7 @@ export function compareSchemata(
 				details: `Refuse re-address table "${readdress.from.name}" to "${name}": source is absent`,
 				meta: {
 					readdress,
+					table: schemaTable,
 					readdressAssessment: 'source-missing',
 					sourcePresent: false,
 					targetPresent: false,

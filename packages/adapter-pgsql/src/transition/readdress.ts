@@ -72,7 +72,12 @@ export type PgReaddressResult =
 	| { readonly outcome: 'completed'; readonly pairId: string }
 	| { readonly outcome: 'no-op' }
 	| { readonly outcome: 'readdress-unsupported'; readonly detail: string }
-	| { readonly outcome: 'readdress-refused'; readonly detail: string };
+	| { readonly outcome: 'readdress-refused'; readonly detail: string }
+	| {
+			readonly outcome: 'recovery-required';
+			readonly claimId: string;
+			readonly detail: string;
+	  };
 
 export interface PgPersistedReaddressInput {
 	readonly executor: TransitionJournalQueryable;
@@ -716,6 +721,12 @@ export async function executePgPersistedTableReaddress(
 	});
 	if (result.kind === 'executed-paired-readdress')
 		return { outcome: 'completed', pairId };
+	if (result.kind === 'outcome-recovery-required')
+		return {
+			outcome: 'recovery-required',
+			claimId: result.claimId,
+			detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
+		};
 	return {
 		outcome: 'readdress-refused',
 		detail:
