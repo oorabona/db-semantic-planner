@@ -2,7 +2,7 @@
 
 # Admission-obligation coverage audit
 
-Working audit only; do not commit.  Status is based on the construction in the
+Status is based on the construction in the
 test body, not an OBL/SC label or a shared implementation seam.  `partial` means
 the cited test genuinely constructs the stated subset, but not every construction
 in the obligation's attack cell.  “No public-surface test” is material where the

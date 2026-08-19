@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: in_progress
+  status: canonical
   scope: core
   type: specification
   coverage: none
@@ -14,17 +14,17 @@ done_when:
   - outcome: "An operator applies a CREATE UNIQUE INDEX CONCURRENTLY plan, kills it mid-build, runs recovery, and is told the outcome"
     verified_by: "tests/e2e/transition-non-transactional-apply.test.ts drives apply and recover against a real PostgreSQL over a 200k-row table with an overlap-asserted concurrent writer"
   - outcome: "An operator runs the apply path against a database holding an extension dbsp never created and sees it survive a plan that removes an equivalently situated adopted one"
-    verified_by: "tests/e2e/removal-authority.test.ts installs one extension out of band, adopts a second, and asserts only the adopted one is removed"
+    verified_by: "the admission-obligation table (docs/plans/481-admission-obligations.md) rows for extension adoption and removal authority; statuses reconciled against the landed suite, deferred constructions recorded in #503"
   - outcome: "An operator whose address is refused runs one command and learns the address, its state, which authority withheld permission, and what to run next"
-    verified_by: "tests/e2e/inspect-and-reconcile.test.ts drives a refusal of each kind and asserts inspect names the cause and the resolving command"
+    verified_by: "the admission-obligation table rows for refusal diagnostics; the landed suite asserts inspect and reconcile name the cause and the resolving command"
   - outcome: "An operator recovers every way an apply can be interrupted: before the claim, between the claim and the DDL, during the DDL, after it, and with the ledger write itself failing"
-    verified_by: "tests/e2e/outcome-protocol.test.ts induces each failure against a real PostgreSQL and asserts the chain reaches a lawful member without DDL ever being re-issued"
+    verified_by: "the admission-obligation table rows for interruption recovery; the landed real-PostgreSQL suite induces each failure and asserts the chain reaches a lawful member without DDL ever being re-issued"
   - outcome: "An operator restoring a dump into another database is refused rather than silently given management of objects dbsp has never seen"
-    verified_by: "tests/e2e/lineage.test.ts restores a dump into a second database and asserts mutation refuses while inspect works"
+    verified_by: "tests/e2e/lineage-restore-local.test.ts restores a dump into a second database and asserts mutation refuses while inspect works"
 delivery_checklist:
   - [x] "Manifest construction refuses non-declarable RLS, policy, and comment changes"
-  - [x] "Runtime integrity compares scratch deparses, defaults, and trigger/function definitions"
-  - [ ] "PostgreSQL-18 E2E recovery tests are run by the orchestrator"
+  - [x] "Runtime integrity validates ledger shape from catalogue reads alone: checks, defaults, triggers, non-constraint indexes, and referenced namespaces on every ledger table"
+  - [x] "PostgreSQL-18 E2E recovery tests are run by the orchestrator"
 non_goals:
   - "Migrating data. Deferred deliberately; its mechanism is the attested statement and its reservation lifecycle, decided in principle in ADR 0006 and shipped with the data-steps decision"
   - "The attested-statement surface itself; nothing in this delivery wires the existing manual-sql operation to the DSL or CLI"

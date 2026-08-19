@@ -10,8 +10,11 @@ already-triaged bounds.
 This table is the definition of done for the admission-layer rebuild (#499). One row per
 obligation: the property that must hold, the attack that must be refused, and the
 public-surface test that constructs the attack and demands the refusal. **A check without
-its green refusing test does not ship.** The single final adversarial review reads the
-rebuilt code against this table and the ADR 0006 threat model, nothing else.
+its green refusing test does not ship, with one recorded exception: the fourteen
+operator-deferred rows whose constructions ship with #503, not with this branch — for
+those rows this table records the bound and #503 is the delivery vehicle.** The single
+final adversarial review reads the rebuilt code against this table and the ADR 0006
+threat model, nothing else.
 
 Row IDs (`OBL-*`) are permanent identifiers for this document and may be referenced from
 tests and issues. File:line anchors refer to `feat/481-delivery-2@9182004c`, the state

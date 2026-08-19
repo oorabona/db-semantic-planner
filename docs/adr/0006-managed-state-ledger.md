@@ -27,9 +27,13 @@ with it, and they are the one place an undeclarable object is touched by a manag
 
 Outside that path, the adapter's runtime DDL helpers execute what their caller
 asks. They are explicitly unmanaged; what they do to a managed object surfaces
-as drift at the next plan or inspect. Every execution sink is labelled:
+as drift at the next plan or inspect. Every execution sink is classified:
 token-gated managed DDL, explicitly unmanaged API, or removed. A sink that is
-none of the three is a defect.
+none of the three is a defect. Enforcement of that rule is code review plus a
+syntactic tripwire (`packages/adapter-pgsql/src/ddl-execution-sinks.syntactic-tripwire.static.test.ts`)
+whose recognized grammar is documented in the test itself; dynamic SQL,
+aliased or wrapped query calls, and configuration-object dispatch sit outside
+the tripwire's sight and are caught only by review.
 
 Changing what the DSL cannot declare awaits an attested-statement
 surface — a native statement with an author-declared blast radius, riding a reservation lifecycle
