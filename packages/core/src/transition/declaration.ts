@@ -9,6 +9,7 @@ import type {
 	ModelIR,
 	ResourceAddress,
 } from '@dbsp/types';
+import { canonicalResourceParent } from '@dbsp/types';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import { stableJson } from './stable-json.js';
@@ -109,7 +110,9 @@ function address<K extends DeclarableKind>(
 		engine: context.engine,
 		database: context.database,
 		...(kind === 'extension' ? {} : { schema: context.schema }),
-		...(parent === undefined ? {} : { parent }),
+		...(parent === undefined
+			? {}
+			: { parent: canonicalResourceParent(parent) }),
 		kind,
 		name,
 		...(identity === undefined ? {} : { catalogueIdentity: identity }),

@@ -22,6 +22,14 @@ function schemaOf(address: ResourceAddress): string {
 	return address.schema;
 }
 
+function parentOf(address: ResourceAddress): ResourceAddress {
+	if (!address.parent)
+		throw new Error(
+			`catalogue identity for ${address.kind} ${address.name} requires a parent address`,
+		);
+	return address.parent;
+}
+
 /**
  * Re-read the PostgreSQL catalogue identity for one managed address. The
  * adapter deliberately returns absence as undefined; callers decide whether an
@@ -42,12 +50,15 @@ export async function readPgCatalogueIdentity(
 			).rows[0];
 			break;
 		case 'index':
-			row = (
-				await executor.query(
-					`SELECT index_relation.oid::text AS oid FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2 AND index_relation.relkind IN ('i', 'I') AND ($3::text IS NULL OR parent_relation.relname = $3)`,
-					[schemaOf(address), address.name, address.parent?.name ?? null],
-				)
-			).rows[0];
+			{
+				const parent = parentOf(address);
+				row = (
+					await executor.query(
+						`SELECT index_relation.oid::text AS oid FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2 AND index_relation.relkind IN ('i', 'I') AND parent_relation.relname = $3`,
+						[schemaOf(address), address.name, parent.name],
+					)
+				).rows[0];
+			}
 			break;
 		case 'sequence':
 			row = (
@@ -74,30 +85,33 @@ export async function readPgCatalogueIdentity(
 			).rows[0];
 			break;
 		case 'constraint':
-			row = (
-				await executor.query(
-					`SELECT constraint_row.oid::text AS oid FROM pg_catalog.pg_constraint constraint_row JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = constraint_row.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND constraint_row.conname = $2 AND ($3::text IS NULL OR parent_relation.relname = $3)`,
-					[schemaOf(address), address.name, address.parent?.name ?? null],
-				)
-			).rows[0];
+			{
+				const parent = parentOf(address);
+				row = (
+					await executor.query(
+						`SELECT constraint_row.oid::text AS oid FROM pg_catalog.pg_constraint constraint_row JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = constraint_row.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND constraint_row.conname = $2 AND parent_relation.relname = $3`,
+						[schemaOf(address), address.name, parent.name],
+					)
+				).rows[0];
+			}
 			break;
 		case 'policy':
-			row = (
-				await executor.query(
-					`SELECT policy.oid::text AS oid FROM pg_catalog.pg_policy policy JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = policy.polrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND policy.polname = $2 AND ($3::text IS NULL OR parent_relation.relname = $3)`,
-					[schemaOf(address), address.name, address.parent?.name ?? null],
-				)
-			).rows[0];
+			{
+				const parent = parentOf(address);
+				row = (
+					await executor.query(
+						`SELECT policy.oid::text AS oid FROM pg_catalog.pg_policy policy JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = policy.polrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND policy.polname = $2 AND parent_relation.relname = $3`,
+						[schemaOf(address), address.name, parent.name],
+					)
+				).rows[0];
+			}
 			break;
 		case 'column': {
-			if (!address.parent)
-				throw new Error(
-					`catalogue identity for column ${address.name} requires a parent address`,
-				);
+			const parent = parentOf(address);
 			row = (
 				await executor.query(
 					`SELECT parent_relation.oid::text AS parent_oid FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = parent_relation.relnamespace WHERE namespace.nspname = $1 AND parent_relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
-					[schemaOf(address), address.parent.name, address.name],
+					[schemaOf(address), parent.name, address.name],
 				)
 			).rows[0];
 			if (!row) return undefined;
@@ -109,7 +123,7 @@ export async function readPgCatalogueIdentity(
 			return {
 				...address,
 				parent: {
-					...address.parent,
+					...parent,
 					catalogueIdentity: {
 						engine: 'postgresql',
 						format: 1,

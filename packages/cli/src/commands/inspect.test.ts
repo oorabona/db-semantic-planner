@@ -1,5 +1,6 @@
+import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
 import { projectLedgerChain } from '@dbsp/core';
-import { type LedgerAddress, refusalFor } from '@dbsp/types';
+import { type LedgerAddress, ledgerAddressKey, refusalFor } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	inspectAddress,
@@ -122,6 +123,45 @@ describe('inspect address selection', () => {
 			kind: 'extension',
 			name: 'hstore',
 		});
+	});
+
+	it('C10 gives generated and inspect-side child addresses the same ledger key', () => {
+		const generated = createPgsqlGeneratedManagedStep({
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'create index',
+				meta: {
+					index: { name: 'orders_created_at_idx', columns: ['created_at'] },
+				},
+			},
+			database: 'app',
+			schema: 'tenant',
+			stepKey: 'generator:index',
+			order: 0,
+			statements: ['CREATE INDEX orders_created_at_idx ON orders (created_at)'],
+		});
+		const inspected = inspectAddress(
+			'app',
+			'tenant',
+			'index:orders_created_at_idx',
+			'table',
+			'table:orders',
+		);
+		expect(ledgerAddressKey(generated.address!)).toBe(
+			ledgerAddressKey(inspected),
+		);
+	});
+
+	it.each([
+		'index:orders_created_at_idx',
+		'constraint:orders_pkey',
+		'policy:tenant_policy',
+	])('C03 tells inspect users that child %s needs --parent', (selector) => {
+		expect(() => inspectAddress('app', 'tenant', selector)).toThrow(
+			'requires --parent <kind:name>',
+		);
 	});
 });
 

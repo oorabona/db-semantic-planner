@@ -10,12 +10,13 @@ import {
 	readPgLedgerMarker,
 } from '@dbsp/adapter-pgsql';
 import { acquireTransitionLease, projectLedgerChain } from '@dbsp/core';
-import type {
-	LedgerAddress,
-	LedgerChainProjection,
-	LedgerHome,
-	LedgerStableState,
-	RefusalCode,
+import {
+	canonicalResourceParent,
+	type LedgerAddress,
+	type LedgerChainProjection,
+	type LedgerHome,
+	type LedgerStableState,
+	type RefusalCode,
 } from '@dbsp/types';
 import { Command } from 'commander';
 import { createDbConnection } from '../utils/db-utils.js';
@@ -220,6 +221,13 @@ export function inspectAddress(
 		: undefined;
 	if (parent && (!parent.kind || !parent.name))
 		throw new Error('inspect parent address must be kind:name');
+	if (
+		!parent &&
+		['column', 'index', 'constraint', 'policy'].includes(parsed.kind)
+	)
+		throw new Error(
+			`inspect address ${parsed.kind}:${parsed.name} requires --parent <kind:name>`,
+		);
 	return {
 		scope,
 		engine: 'postgresql',
@@ -227,13 +235,13 @@ export function inspectAddress(
 		...(scope === 'schema' ? { schema } : {}),
 		...(parent
 			? {
-					parent: {
+					parent: canonicalResourceParent({
 						engine: 'postgresql',
 						database,
 						...(scope === 'schema' ? { schema } : {}),
 						kind: parent.kind as LedgerAddress['kind'],
 						name: parent.name,
-					},
+					}),
 				}
 			: {}),
 		kind: parsed.kind as LedgerAddress['kind'],
@@ -385,7 +393,10 @@ export const inspectCommand = new Command('inspect')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--schema <name>', 'Schema ledger to read', 'public')
 	.option('--kind <kind>', 'Kind for an unqualified address', 'table')
-	.option('--parent <kind:name>', 'Parent for column, index, or constraint')
+	.option(
+		'--parent <kind:name>',
+		'Required parent for column, index, constraint, or policy',
+	)
 	.option('--database-ledger', 'Read the database ledger (for extensions)')
 	.option('--format <format>', 'Output format: text or json', 'text')
 	.action(async (address: string | undefined, options: InspectOptions) => {

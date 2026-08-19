@@ -145,9 +145,25 @@ function errorDetail(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** Apply maps only the two non-resumable persisted-plan failure contracts. */
+function isInvalidNonResumablePersistedRunError(
+	error: unknown,
+	runId: string,
+): error is Error {
+	return (
+		error instanceof Error &&
+		(error.message ===
+			'dbsp transition run plan row is invalid and non-resumable' ||
+			error.message ===
+				`dbsp transition run ${runId} has no persisted proven plan and is non-resumable`)
+	);
+}
+
 class RecordedPlanDigestMismatchError extends Error {
-	constructor() {
-		super('persisted generator plan digest does not match the recorded review');
+	constructor(
+		detail = 'persisted generator plan digest does not match the recorded review',
+	) {
+		super(detail);
 		this.name = 'RecordedPlanDigestMismatchError';
 	}
 }
@@ -1002,6 +1018,20 @@ async function runApplyInternal(
 	try {
 		persisted = await loadOnLessor(createPgTransitionLessor(owned), runId);
 	} catch (error) {
+		if (isInvalidNonResumablePersistedRunError(error, runId)) {
+			const refusal: ApplyCommandResult = {
+				outcome: 'plan-digest-mismatch',
+				runId,
+				result: {
+					assessment: {
+						reasons: [{ detail: error.message }],
+					},
+				} as unknown as ApplyResult,
+			};
+			return pool === undefined
+				? withPoolCleanupReported(refusal, () => owned.end())
+				: refusal;
+		}
 		if (error instanceof TransitionRunIdentityMismatchError) {
 			const refusal: ApplyCommandResult = {
 				outcome: 'run-id-mismatch',
@@ -1055,19 +1085,29 @@ async function runApplyInternal(
 						throw new Error(
 							'persisted generator run has no recorded planning schema and is non-resumable',
 						);
-					const manifest = validateNormalizedManagedStepManifest(
-						current.plan.steps as unknown as readonly NormalizedManagedStep[],
-					);
-					if (!manifest.ok)
-						throw new Error(
-							`persisted generator manifest is invalid: ${manifest.detail}`,
+					let actualDigest: string;
+					try {
+						actualDigest = transitionPlanDigest(current.plan);
+					} catch (error) {
+						// Persisted generator material is hostile input at apply. The
+						// digest boundary must refuse it rather than let parser detail
+						// escape as a command exception.
+						throw new RecordedPlanDigestMismatchError(
+							`persisted generator manifest is invalid: ${errorDetail(error)}`,
 						);
-					const actualDigest = transitionPlanDigest(current.plan);
+					}
 					if (
 						actualDigest !== current.run.planDigest ||
 						actualDigest !== expectedPlanDigest
 					)
 						throw new RecordedPlanDigestMismatchError();
+					const manifest = validateNormalizedManagedStepManifest(
+						current.plan.steps as unknown as readonly NormalizedManagedStep[],
+					);
+					if (!manifest.ok)
+						throw new RecordedPlanDigestMismatchError(
+							`persisted generator manifest is invalid: ${manifest.detail}`,
+						);
 					if (generatorRunHasPriorStepEvents(current))
 						return {
 							outcome: 'prior-step-events-refusal' as const,

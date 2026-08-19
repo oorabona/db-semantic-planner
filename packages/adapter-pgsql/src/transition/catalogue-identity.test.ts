@@ -69,4 +69,34 @@ describe('PostgreSQL managed catalogue identities', () => {
 			},
 		});
 	});
+
+	it.each([
+		'index',
+		'constraint',
+		'policy',
+	] as const)('C03 refuses a %s identity lookup without its table parent', async (kind) => {
+		const query = new QueryRecorder([{ oid: '42' }]);
+		await expect(
+			readPgCatalogueIdentity(query, {
+				...table,
+				kind,
+				name: `${kind}_name`,
+			}),
+		).rejects.toThrow(
+			`catalogue identity for ${kind} ${kind}_name requires a parent address`,
+		);
+		expect(query.calls).toHaveLength(0);
+	});
+
+	it('C03 binds child identity SQL to the supplied parent without an optional-parent clause', async () => {
+		const query = new QueryRecorder([{ oid: '42' }]);
+		await readPgCatalogueIdentity(query, {
+			...table,
+			kind: 'constraint',
+			name: 'orders_account_key',
+			parent: table,
+		});
+		expect(query.calls[0]?.sql).toContain('parent_relation.relname = $3');
+		expect(query.calls[0]?.sql).not.toContain('IS NULL OR');
+	});
 });

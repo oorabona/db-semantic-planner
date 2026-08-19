@@ -36,6 +36,29 @@ export interface LedgerAddress extends ResourceAddress {
 }
 
 /**
+ * Construct the one parent shape used by ledger-bearing child addresses.
+ *
+ * A parent identifies containment only. Ledger scope belongs to the child
+ * address, while a catalogue identity is an observed, non-address fact. Keep
+ * both out of this recursive serialization so every producer names a physical
+ * child the same way.
+ */
+export function canonicalResourceParent(
+	address: ResourceAddress,
+): ResourceAddress {
+	return {
+		engine: address.engine,
+		database: address.database,
+		...(address.schema === undefined ? {} : { schema: address.schema }),
+		...(address.parent === undefined
+			? {}
+			: { parent: canonicalResourceParent(address.parent) }),
+		kind: address.kind,
+		name: address.name,
+	};
+}
+
+/**
  * JSON-compatible structural serialization whose object-member order is stable.
  * Ledger parents are persisted through PostgreSQL jsonb, which normalizes that
  * order before a later read-back.

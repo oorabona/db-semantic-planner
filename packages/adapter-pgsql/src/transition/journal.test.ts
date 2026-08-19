@@ -342,7 +342,9 @@ describe('transition journal primitive', () => {
 			managedPlan(
 				managedStep({
 					claimKind: 'adopt-intent',
+					statementBundle: { statements: [] },
 					lifecycle: { kind: 'adoption', shape: {} as never },
+					selection: { kind: 'adoption', selector: 'table:orders' },
 					expectedDeclaration: {
 						value: { table: 'orders' },
 						digest: 'declared',
@@ -374,6 +376,9 @@ describe('transition journal primitive', () => {
 			'readdress',
 			managedPlan(
 				managedStep({
+					claimKind: 'readdress-intent',
+					classification: 'paired-readdress',
+					selection: { kind: 'readdress', selector: 'table:orders' },
 					lifecycle: {
 						kind: 'readdress',
 						declaration: {

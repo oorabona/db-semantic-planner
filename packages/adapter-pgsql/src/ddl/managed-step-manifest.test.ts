@@ -1,3 +1,4 @@
+import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	assertDeclarableChangeKind,
@@ -52,6 +53,63 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			name: 'idx_orders_created_at',
 			parent: { kind: 'table', name: 'orders' },
 		});
+	});
+
+	it('C10 gives a generated child the inspect-side canonical ledger key', () => {
+		const step = createPgsqlGeneratedManagedStep({
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'create index',
+				meta: {
+					index: { name: 'orders_created_at_idx', columns: ['created_at'] },
+				},
+			},
+			database: 'app',
+			schema: 'public',
+			stepKey: 'generator:canonical-child',
+			order: 0,
+			statements: ['CREATE INDEX orders_created_at_idx ON orders (created_at)'],
+		});
+		const inspectSide = {
+			scope: 'schema' as const,
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'public',
+			kind: 'index' as const,
+			name: 'orders_created_at_idx',
+			parent: canonicalResourceParent({
+				engine: 'postgresql',
+				database: 'app',
+				schema: 'public',
+				kind: 'table',
+				name: 'orders',
+			}),
+		};
+		expect(ledgerAddressKey(step.address!)).toBe(ledgerAddressKey(inspectSide));
+	});
+
+	it.each([
+		{ columns: [] },
+		{ columns: [''] },
+	])('E01 refuses an empty generated column list: %j', ({ columns }) => {
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'create_index',
+					table: 'orders',
+					destructive: false,
+					details: 'create index',
+					meta: { index: { columns } },
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:empty-columns',
+				order: 0,
+				statements: ['CREATE INDEX ignored ON orders (id)'],
+			}),
+		).toThrow('generator planning refuses create_index: missing typed columns');
 	});
 
 	it.each([

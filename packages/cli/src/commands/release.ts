@@ -98,7 +98,10 @@ export const releaseCommand = new Command('release')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--schema <name>', 'Schema ledger containing the address', 'public')
 	.option('--kind <kind>', 'Kind for an unqualified address', 'table')
-	.option('--parent <kind:name>', 'Parent for column, index, or constraint')
+	.option(
+		'--parent <kind:name>',
+		'Required parent for column, index, constraint, or policy',
+	)
 	.option(
 		'--database-ledger',
 		'Release from the database ledger (for extensions)',

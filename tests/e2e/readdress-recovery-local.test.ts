@@ -297,6 +297,7 @@ async function applyPersistedReaddress(input: {
 		throw new Error(
 			`apply did not execute persisted readdress: ${applied.outcome}`,
 		);
+	if (input.corruptPersistedMaterial !== undefined) return applied;
 	return applied.result as unknown as {
 		readonly outcome: string;
 		readonly detail?: string;
@@ -580,18 +581,31 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 		] as const) {
 			const { schema, database: databaseId } = await fixture();
 			const pool = await getTestPool();
+			const target = `${name}_target`;
 			await createManagedTable(schema, databaseId, name);
 			await expect(
 				applyPersistedReaddress({
 					database: databaseId,
 					targetSchema: schema,
-					declaration: { from: { name }, to: { name: `${name}_target` } },
+					declaration: { from: { name }, to: { name: target } },
 					corruptPersistedMaterial,
 				}),
-			).rejects.toThrow(error);
+			).resolves.toMatchObject({
+				outcome: 'plan-digest-mismatch',
+				result: {
+					assessment: {
+						reasons: [{ detail: expect.stringContaining(error) }],
+					},
+				},
+			});
 			await expect(
-				pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
-			).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
+				pool.query(
+					'SELECT to_regclass($1) AS source, to_regclass($2) AS target',
+					[`${schema}.${name}`, `${schema}.${target}`],
+				),
+			).resolves.toMatchObject({
+				rows: [{ source: `${schema}.${name}`, target: null }],
+			});
 		}
 	});
 

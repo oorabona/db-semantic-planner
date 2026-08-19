@@ -4,6 +4,7 @@ import type {
 	LedgerClaimKind,
 	NormalizedManagedStep,
 } from '@dbsp/types';
+import { canonicalResourceParent } from '@dbsp/types';
 import { renderColumnDbType } from '../db-type.js';
 import {
 	classifyGeneratedMutation,
@@ -236,7 +237,11 @@ function text(value: unknown, label: string): string {
 }
 
 function stringList(value: unknown, label: string): readonly string[] {
-	if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.some((item) => typeof item !== 'string' || item.length === 0)
+	)
 		throw new Error(
 			`generator planning refuses ${label}: missing typed columns`,
 		);
@@ -289,7 +294,7 @@ function childAddress(
 		schema,
 		kind,
 		name,
-		parent: tableAddress(database, schema, table),
+		parent: canonicalResourceParent(tableAddress(database, schema, table)),
 	};
 }
 

@@ -636,7 +636,9 @@ describe('removal effects closure', () => {
 				...root,
 				kind,
 				name: `${kind}_root`,
-				...(kind === 'column' ? { parent: root } : {}),
+				...(kind === 'column' || kind === 'index' || kind === 'constraint'
+					? { parent: root }
+					: {}),
 			};
 			const closure = await readPgRemovalEffectsClosure({
 				executor: {

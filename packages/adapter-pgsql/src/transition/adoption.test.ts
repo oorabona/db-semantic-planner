@@ -16,7 +16,10 @@ vi.mock('./outcome-protocol.js', () => ({
 	executePgAdmittedOperation: mocks.executeAdmitted,
 }));
 
-import { executePgDeclaredAdoption } from './adoption.js';
+import {
+	executePgDeclaredAdoption,
+	type PgPersistedDeclaredAdoptionInput,
+} from './adoption.js';
 
 const address = {
 	scope: 'schema' as const,
@@ -33,7 +36,10 @@ const declaration = {
 };
 const executor = { query: vi.fn() };
 
-function persisted() {
+function persisted(): Pick<
+	PgPersistedDeclaredAdoptionInput,
+	'run' | 'manifest' | 'recomputedPlanDigest' | 'approval' | 'step'
+> {
 	return {
 		run: { runId: 'run-1', planDigest: 'digest' } as never,
 		manifest: {} as never,
@@ -50,7 +56,7 @@ function persisted() {
 			expectedDeclaration: declaration,
 			expectedCatalogueIdentity: identity,
 			lifecycle: { kind: 'adoption', shape: {} },
-		} as never,
+		} as unknown as PgPersistedDeclaredAdoptionInput['step'],
 	};
 }
 
@@ -184,6 +190,45 @@ describe('declared PostgreSQL adoption admission', () => {
 				shapeMatches: async () => true,
 			}),
 		).resolves.toEqual({ outcome: 'no-op' });
+	});
+
+	it.each([
+		[
+			'SQL outside lifecycle material',
+			(value: ReturnType<typeof persisted>) => ({
+				...value,
+				step: {
+					...value.step,
+					statementBundle: { statements: [{ ordinal: 0, sql: 'SELECT 1' }] },
+				},
+			}),
+		],
+		[
+			'substituted declaration',
+			(value: ReturnType<typeof persisted>) => ({
+				...value,
+				step: {
+					...value.step,
+					expectedDeclaration: { ...declaration, digest: 'substituted' },
+				},
+			}),
+		],
+	] as const)('C02 validates %s before a no-op-capable preflight', async (_label, mutate) => {
+		const result = await executePgDeclaredAdoption({
+			executor,
+			...mutate(persisted()),
+			home: { scope: 'schema', schema: 'tenant' },
+			address,
+			declaration,
+			expectedCatalogueIdentity: identity,
+			shapeMatches: async () => true,
+		});
+		expect(result).toMatchObject({
+			outcome: 'execution-failed',
+			detail: expect.stringContaining('adoption step adoption:accounts'),
+		});
+		expect(mocks.readChain).not.toHaveBeenCalled();
+		expect(mocks.readIdentity).not.toHaveBeenCalled();
 	});
 
 	it('re-reads a completed adoption when the token gate reports a concurrent close', async () => {

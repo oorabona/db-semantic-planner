@@ -127,10 +127,6 @@ export async function executePgDeclaredAdoption(
 	input: PgPersistedDeclaredAdoptionInput,
 ): Promise<PgAdoptionResult> {
 	try {
-		// This explanatory preflight does not mint authority: the same facts are
-		// re-read by verifyLiveAdmission after the claim/reservation is open.
-		const preflight = await preflightPgDeclaredAdoption(input);
-		if (preflight.outcome !== 'ready') return preflight;
 		const lifecycle = input.step.lifecycle;
 		const plannedClaimKey = input.step.plannedClaimKeys[0];
 		if (
@@ -156,6 +152,11 @@ export async function executePgDeclaredAdoption(
 				outcome: 'execution-failed',
 				detail: `adoption step ${input.step.stepKey} carries SQL outside adoption lifecycle material`,
 			};
+		// This explanatory preflight does not mint authority: the same facts are
+		// re-read by verifyLiveAdmission after the claim/reservation is open. It
+		// runs only after every no-op-capable persisted material check above.
+		const preflight = await preflightPgDeclaredAdoption(input);
+		if (preflight.outcome !== 'ready') return preflight;
 		const executionId = `dbsp.generator.execution.${input.run.runId}`;
 		const claimId = outcomeClaimId(executionId, plannedClaimKey, input.address);
 		const outcomeRequest: PgOutcomeTransactionalRequest = {
