@@ -1,6 +1,24 @@
+import { createHash } from 'node:crypto';
+
 export const DEFAULT_MAX_PREPARED_STATEMENTS = 500;
 /** Namespace reserved for names created by dbsp on an executor. */
 export const PREPARED_STATEMENT_NAMESPACE = 'dbsp_ps_';
+
+export type PreparedStatementNameHasher = (sql: string) => string;
+
+/**
+ * Produces a PostgreSQL-safe node-postgres statement name from 128 bits of
+ * SHA-256 of the complete SQL text.
+ *
+ * Node-postgres reuses its statement mapping by name, so distinct text must
+ * never deliberately share a name.
+ */
+export function derivePreparedStatementName(sql: string): string {
+	return `${PREPARED_STATEMENT_NAMESPACE}${createHash('sha256')
+		.update(sql)
+		.digest('hex')
+		.slice(0, 32)}`;
+}
 
 /**
  * Executor-scoped admission, naming, and tombstone registry for named statements.
@@ -13,10 +31,13 @@ export const PREPARED_STATEMENT_NAMESPACE = 'dbsp_ps_';
 export class PreparedStatementRegistry {
 	private readonly candidates = new Set<string>();
 	private readonly namesByText = new Map<string, string>();
+	private readonly textsByName = new Map<string, string>();
 	private readonly tombstones = new Set<string>();
-	private nextName = 1;
 
-	constructor(private readonly maxStatements: number) {}
+	constructor(
+		private readonly maxStatements: number,
+		private readonly hashName: PreparedStatementNameHasher = derivePreparedStatementName,
+	) {}
 
 	/** Returns a name only from the second sighting onward. */
 	admit(sql: string): string | undefined {
@@ -38,8 +59,14 @@ export class PreparedStatementRegistry {
 
 		if (this.namesByText.size >= this.maxStatements) return undefined;
 
-		const name = `${PREPARED_STATEMENT_NAMESPACE}${this.nextName++}`;
+		const name = this.hashName(sql);
+		const existingText = this.textsByName.get(name);
+		if (existingText !== undefined && existingText !== sql) {
+			this.tombstone(sql);
+			return undefined;
+		}
 		this.namesByText.set(textKey, name);
+		this.textsByName.set(name, sql);
 		if (this.namesByText.size >= this.maxStatements) this.candidates.clear();
 		return name;
 	}
@@ -55,10 +82,11 @@ export function normalizeMaxPreparedStatements(
 	maxStatements: number | undefined,
 ): number {
 	const resolved = maxStatements ?? DEFAULT_MAX_PREPARED_STATEMENTS;
-	if (!Number.isSafeInteger(resolved) || resolved < 1) {
+	if (!Number.isSafeInteger(resolved))
+		throw new Error('preparedStatements.maxStatements must be a safe integer.');
+	if (resolved < 1)
 		throw new Error(
-			'preparedStatements.maxStatements must be a positive integer.',
+			'preparedStatements.maxStatements must be greater than zero.',
 		);
-	}
 	return resolved;
 }

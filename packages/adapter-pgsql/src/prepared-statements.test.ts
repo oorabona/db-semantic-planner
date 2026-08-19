@@ -1,20 +1,45 @@
 import { describe, expect, it } from 'vitest';
 import {
+	derivePreparedStatementName,
 	normalizeMaxPreparedStatements,
-	PREPARED_STATEMENT_NAMESPACE,
 	PreparedStatementRegistry,
 } from './prepared-statements.js';
 
 describe('prepared statement admission', () => {
+	it('derives a stable 128-bit SHA-256 name from the complete SQL text', () => {
+		const sql = 'SELECT * FROM inventory WHERE sku = $1';
+		const name = derivePreparedStatementName(sql);
+
+		expect(name).toMatch(/^dbsp_ps_[0-9a-f]{32}$/);
+		expect(name.length).toBeLessThanOrEqual(63);
+		expect(derivePreparedStatementName(sql)).toBe(name);
+		expect(derivePreparedStatementName(`${sql} -- distinct text`)).not.toBe(
+			name,
+		);
+	});
+
 	it('admits a text on its second sighting and keeps its allocated name', () => {
 		const registry = new PreparedStatementRegistry(2);
 
 		expect(registry.admit('one')).toBeUndefined();
-		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
-		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
+		expect(registry.admit('one')).toBe(derivePreparedStatementName('one'));
+		expect(registry.admit('one')).toBe(derivePreparedStatementName('one'));
 	});
 
-	it('allocates distinct monotonic names that never repeat after a tombstone', () => {
+	it('uses the same digest-derived name for one SQL in separate registries', () => {
+		const poolRegistry = new PreparedStatementRegistry(2);
+		const borrowedClientRegistry = new PreparedStatementRegistry(2);
+		const sql = 'SELECT id FROM users WHERE id = $1';
+
+		poolRegistry.admit(sql);
+		borrowedClientRegistry.admit(sql);
+		expect(poolRegistry.admit(sql)).toBe(derivePreparedStatementName(sql));
+		expect(borrowedClientRegistry.admit(sql)).toBe(
+			derivePreparedStatementName(sql),
+		);
+	});
+
+	it('keeps a tombstoned text unnamed without affecting another text', () => {
 		const registry = new PreparedStatementRegistry(3);
 
 		registry.admit('one');
@@ -24,16 +49,28 @@ describe('prepared statement admission', () => {
 		registry.admit('two');
 		const second = registry.admit('two');
 
-		expect(first).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
-		expect(second).toBe(`${PREPARED_STATEMENT_NAMESPACE}2`);
+		expect(first).toBe(derivePreparedStatementName('one'));
+		expect(second).toBe(derivePreparedStatementName('two'));
 		expect(second).not.toBe(first);
+	});
+
+	it('leaves a digest collision permanently unnamed for the second text', () => {
+		const registry = new PreparedStatementRegistry(2, () => 'ps_collision');
+		const first = 'SELECT * FROM collision_table WHERE id = $1';
+		const second = 'SELECT * FROM collision_table WHERE id = $2';
+
+		expect(registry.admit(first)).toBeUndefined();
+		expect(registry.admit(first)).toBe('ps_collision');
+		expect(registry.admit(second)).toBeUndefined();
+		expect(registry.admit(second)).toBeUndefined();
+		expect(registry.admit(second)).toBeUndefined();
 	});
 
 	it('does not admit text number cap plus one', () => {
 		const registry = new PreparedStatementRegistry(1);
 
 		expect(registry.admit('one')).toBeUndefined();
-		expect(registry.admit('one')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
+		expect(registry.admit('one')).toBe(derivePreparedStatementName('one'));
 		expect(registry.admit('two')).toBeUndefined();
 		expect(registry.admit('two')).toBeUndefined();
 	});
@@ -54,8 +91,8 @@ describe('prepared statement admission', () => {
 
 		expect(new Set(names)).toEqual(
 			new Set([
-				`${PREPARED_STATEMENT_NAMESPACE}1`,
-				`${PREPARED_STATEMENT_NAMESPACE}2`,
+				derivePreparedStatementName('one'),
+				derivePreparedStatementName('two'),
 			]),
 		);
 		expect(registry.admit('three')).toBeUndefined();
@@ -67,7 +104,7 @@ describe('prepared statement admission', () => {
 
 		expect(registry.admit('A')).toBeUndefined();
 		expect(registry.admit('B')).toBeUndefined();
-		expect(registry.admit('B')).toBe(`${PREPARED_STATEMENT_NAMESPACE}1`);
+		expect(registry.admit('B')).toBe(derivePreparedStatementName('B'));
 	});
 
 	it('clears cold candidates when named admission becomes full', () => {
@@ -84,8 +121,13 @@ describe('prepared statement admission', () => {
 		).toEqual(new Set());
 	});
 
-	it('defaults the cap and rejects invalid caps', () => {
+	it('defaults the cap and rejects each invalid cap class accurately', () => {
 		expect(normalizeMaxPreparedStatements(undefined)).toBe(500);
-		expect(() => normalizeMaxPreparedStatements(0)).toThrow(/positive integer/);
+		expect(() => normalizeMaxPreparedStatements(0)).toThrow(
+			/must be greater than zero/,
+		);
+		expect(() =>
+			normalizeMaxPreparedStatements(Number.MAX_SAFE_INTEGER + 1),
+		).toThrow(/must be a safe integer/);
 	});
 });

@@ -121,20 +121,24 @@ admission is full, new candidate text is not retained. There is no adapter-issue
 
 Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
 connection prepares an admitted statement independently. `maxStatements` is an
-executor-scoped upper bound on the distinct names dbsp can create per underlying
-connection; it is not an inventory of statements the server currently holds. The
-cap is configured pool-wide: every adapter sharing the same `Pool` (or the same
-borrowed `PoolClient`) must use the same `maxStatements`, and constructing one
-with a different cap fails. If you use PgBouncer in transaction-pooling mode, it
-must be configured with `max_prepared_statements`; otherwise leave this option off.
+executor-scoped upper bound on the distinct names dbsp can admit through that
+registry; it is not an inventory of statements the server currently holds. The cap
+is configured executor-wide: every adapter sharing the same `Pool` (or the same
+borrowed `PoolClient`) must use the same `maxStatements`, and constructing one with
+a different cap fails. This bound is not combined across a pool adapter and a
+borrowed-client adapter that happen to use the same physical connection, so that
+connection can exceed either executor's cap. If you use PgBouncer in
+transaction-pooling mode, it must be configured with `max_prepared_statements`;
+otherwise leave this option off.
 
 dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
 node-postgres owns checkout, query error handling, release, and backpressure. dbsp
 does not attach a client error listener. The application must still handle idle
 pool-client failures with `pool.on('error', handler)` as node-postgres requires.
-Names are allocated from the reserved `dbsp_ps_` namespace with a monotonically
-increasing executor-local sequence. Do not issue your own named statements in
-that namespace on the same `Pool` or borrowed `PoolClient`.
+Names are derived from a truncated SHA-256 digest of the complete SQL text in the
+reserved `dbsp_ps_` namespace. The same SQL therefore has the same name across
+executors. Do not issue your own named statements in that namespace on the same
+`Pool` or borrowed `PoolClient`.
 
 PostgreSQL considers a generic plan only after five custom executions, and adopts
 it only when its estimated cost is competitive. Parameter-sensitive queries can

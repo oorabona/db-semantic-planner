@@ -2214,8 +2214,11 @@ function getOrCreatePreparedStatementRegistry(
 		return registry;
 	}
 	if (configured.maxStatements !== maxStatements) {
+		const executorKind = isPoolClientLike(executor)
+			? 'borrowed client'
+			: 'pool';
 		throw new Error(
-			`preparedStatements.maxStatements is configured pool-wide for this executor: ` +
+			`preparedStatements.maxStatements is configured ${executorKind}-wide: ` +
 				`expected ${configured.maxStatements}, received ${maxStatements}.`,
 		);
 	}
@@ -6121,10 +6124,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					values: [...parameters],
 				})) as MaybeMultipleQueryResults<T>;
 			} catch (error) {
-				// The recognized server invalidations must never be retried. Tombstoning
-				// every named failure also fails closed for an otherwise-unreachable
-				// driver-local duplicate-name failure without matching its message.
-				this.preparedStatementRegistry.tombstone(sql);
+				if (
+					isPgErrorWithCode(error, '0A000') ||
+					isPgErrorWithCode(error, '26000') ||
+					isPgErrorWithCode(error, '42P05')
+				) {
+					// Invalidated named statements are never retried in-call. Later calls
+					// use the unnamed path for this executor.
+					this.preparedStatementRegistry.tombstone(sql);
+				}
 				throw error;
 			}
 		}

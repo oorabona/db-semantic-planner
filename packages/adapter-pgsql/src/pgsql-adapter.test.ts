@@ -145,7 +145,7 @@ describe('PgsqlAdapter', () => {
 			expect(() =>
 				createPgsqlAdapter(pool, { preparedStatements: { maxStatements: 2 } }),
 			).toThrow(
-				/preparedStatements\.maxStatements is configured pool-wide.*expected 1, received 2/,
+				/preparedStatements\.maxStatements is configured pool-wide: expected 1, received 2/,
 			);
 		});
 
@@ -172,7 +172,7 @@ describe('PgsqlAdapter', () => {
 					preparedStatements: { maxStatements: 2 },
 				}),
 			).toThrow(
-				/preparedStatements\.maxStatements is configured pool-wide.*expected 1, received 2/,
+				/preparedStatements\.maxStatements is configured borrowed client-wide: expected 1, received 2/,
 			);
 		});
 	});
@@ -506,7 +506,7 @@ describe('PgsqlAdapter', () => {
 			expect(pool.connect).not.toHaveBeenCalled();
 			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, [7]);
 			expect(pool.query).toHaveBeenNthCalledWith(2, {
-				name: expect.stringMatching(/^dbsp_ps_[1-9][0-9]*$/),
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
 				text: query.sql,
 				values: [7],
 			});
@@ -576,7 +576,7 @@ describe('PgsqlAdapter', () => {
 			).resolves.toMatchObject({ rows: [{ id: 7 }] });
 
 			expect(client.query).toHaveBeenNthCalledWith(2, {
-				name: expect.stringMatching(/^dbsp_ps_[1-9][0-9]*$/),
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
 				text: sql,
 				values: [7],
 			});
@@ -624,7 +624,7 @@ describe('PgsqlAdapter', () => {
 
 			expect(pool.query).toHaveBeenNthCalledWith(3, sql, [7]);
 			expect(otherPool.query).toHaveBeenLastCalledWith({
-				name: expect.stringMatching(/^dbsp_ps_[1-9][0-9]*$/),
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
 				text: sql,
 				values: [7],
 			});
@@ -654,16 +654,18 @@ describe('PgsqlAdapter', () => {
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
 		});
 
-		it('fails closed on an unexpected driver-local duplicate-name rejection', async () => {
+		it.each([
+			'23505',
+			'57014',
+		])('keeps naming admitted after a non-invalidation SQLSTATE %s', async (code) => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
-				connection: { parsedStatements: {} as Record<string, string> },
 			}) as unknown as PoolClient;
 			const sql = 'SELECT id FROM users WHERE id = $1';
-			const collision = new Error('Prepared statements must be unique');
+			const error = { code };
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
-				.mockRejectedValueOnce(collision)
+				.mockRejectedValueOnce(error)
 				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
 			const adapter = createPgsqlAdapter(client, {
 				borrowedClient: true,
@@ -673,17 +675,21 @@ describe('PgsqlAdapter', () => {
 			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
 			await expect(
 				(adapter as any).issueConnectionQuery(client, sql, [7], true),
-			).rejects.toBe(collision);
+			).rejects.toBe(error);
 			await expect(
 				(adapter as any).issueConnectionQuery(client, sql, [7], true),
 			).resolves.toMatchObject({ rows: [{ id: 7 }] });
 
 			expect(client.query).toHaveBeenNthCalledWith(2, {
-				name: expect.stringMatching(/^dbsp_ps_[1-9][0-9]*$/),
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
 				text: sql,
 				values: [7],
 			});
-			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+			expect(client.query).toHaveBeenNthCalledWith(3, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: sql,
+				values: [7],
+			});
 		});
 	});
 

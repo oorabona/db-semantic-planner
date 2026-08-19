@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
@@ -157,6 +157,47 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('uses digest-derived names safely through a pool and borrowed client on one connection', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
+		try {
+			const poolAdapter = createPgsqlAdapter(pool, {
+				preparedStatements: true,
+			});
+			const poolSql = 'SELECT $1::int AS value';
+			const clientSql = 'SELECT $1::int + 1 AS value';
+
+			await expect(
+				poolAdapter.execute(compiled(poolSql, [5])),
+			).resolves.toEqual([{ value: 5 }]);
+			await expect(
+				poolAdapter.execute(compiled(poolSql, [6])),
+			).resolves.toEqual([{ value: 6 }]);
+
+			const client = await pool.connect();
+			try {
+				const clientAdapter = createPgsqlAdapter(client, {
+					borrowedClient: true,
+					preparedStatements: true,
+				});
+				await expect(
+					clientAdapter.execute(compiled(clientSql, [5])),
+				).resolves.toEqual([{ value: 6 }]);
+				await expect(
+					clientAdapter.execute(compiled(clientSql, [6])),
+				).resolves.toEqual([{ value: 7 }]);
+				expect(await preparedCount(client, poolSql)).toBe(1);
+				expect(await preparedCount(client, clientSql)).toBe(1);
+			} finally {
+				client.release();
+			}
+		} finally {
+			await pool.end();
+		}
+	});
+
 	it('uses unnamed execution after result-shape DDL invalidates a named plan', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
@@ -302,7 +343,10 @@ describe('adapter prepared statements', () => {
 				preparedStatements: true,
 			});
 			const sql = 'SELECT $1::int AS value';
-			const name = 'dbsp_ps_1';
+			const name = `dbsp_ps_${createHash('sha256')
+				.update(sql)
+				.digest('hex')
+				.slice(0, 32)}`;
 			const query = compiled<{ value: number }>(sql, [11]);
 
 			await client.query(`PREPARE ${name}(integer) AS ${sql}`);
@@ -405,6 +449,19 @@ describe('adapter prepared statements', () => {
 				stdio: ['ignore', 'pipe', 'pipe'],
 			},
 		);
+		const childExit = new Promise<
+			| { readonly kind: 'error'; readonly error: Error }
+			| {
+					readonly kind: 'exit';
+					readonly code: number | null;
+					readonly signal: NodeJS.Signals | null;
+			  }
+		>((resolve) => {
+			child.once('error', (error) => resolve({ kind: 'error', error }));
+			child.once('exit', (code, signal) =>
+				resolve({ kind: 'exit', code, signal }),
+			);
+		});
 		let stdout = '';
 		let stderr = '';
 		child.stdout?.on('data', (chunk: Buffer) => {
@@ -431,18 +488,15 @@ describe('adapter prepared statements', () => {
 			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
 				pid,
 			]);
-			const exited = await new Promise<{
-				code: number | null;
-				signal: NodeJS.Signals | null;
-			}>((resolve, reject) => {
-				child.once('error', reject);
-				child.once('exit', (code, signal) => resolve({ code, signal }));
-			});
-			expect(exited).toEqual({ code: 0, signal: null });
+			const exited = await childExit;
+			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
 			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
 		} finally {
-			if (child.exitCode === null) child.kill('SIGKILL');
+			if (child.exitCode === null) {
+				child.kill('SIGKILL');
+				await childExit;
+			}
 		}
 	});
 });
