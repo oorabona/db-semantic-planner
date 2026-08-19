@@ -1,3 +1,6 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { LedgerChainMember, LedgerReservationRow } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -11,6 +14,7 @@ import {
 	createPgLedgerShapeAllowance,
 	ensurePgLedger,
 	hasPgLedgerCandidateFingerprint,
+	PG_LEDGER_MIN_SERVER_VERSION_NUM,
 	PgLedgerPhysicalShapeValidationError,
 	PgLedgerStorageUnsupportedError,
 	readPgLedgerReservationsForPair,
@@ -29,6 +33,23 @@ import {
 } from './ledger-spec.js';
 
 const target = { scope: 'schema', schema: 'tenant_a' } as const;
+
+const ledgerDeparseFixtureDirectory = resolve(
+	dirname(fileURLToPath(import.meta.url)),
+	'ledger-deparse-fixtures',
+);
+
+function assertNonEmptyStringRecord(value: unknown, field: string): void {
+	expect(value, `${field} must be an object`).toBeTypeOf('object');
+	expect(value, `${field} must not be null`).not.toBeNull();
+	expect(Array.isArray(value), `${field} must not be an array`).toBe(false);
+	const entries = Object.entries(value as Record<string, unknown>);
+	expect(entries, `${field} must not be empty`).not.toHaveLength(0);
+	for (const [key, entry] of entries) {
+		expect(key, `${field} record key must not be empty`).not.toBe('');
+		expect(entry, `${field}.${key} must be a string`).toBeTypeOf('string');
+	}
+}
 
 function sorted<T>(values: Iterable<T>): T[] {
 	return [...values].sort();
@@ -569,6 +590,51 @@ describe('managed ledger storage', () => {
 		).rejects.toMatchObject({
 			outcome: { kind: 'unsupported-major', major: 9999 },
 		});
+	});
+
+	it('keeps every supported PostgreSQL major covered by a valid deparse fixture', async () => {
+		const fixtureFiles = await readdir(ledgerDeparseFixtureDirectory);
+		const fixtureMajors = fixtureFiles
+			.map((filename) => /^pg-(\d+)\.json$/.exec(filename)?.[1])
+			.filter((major): major is string => major !== undefined)
+			.map(Number)
+			.sort((left, right) => left - right);
+		expect(
+			fixtureMajors,
+			'at least one deparse fixture is required',
+		).not.toHaveLength(0);
+
+		const minimumMajor = PG_LEDGER_MIN_SERVER_VERSION_NUM / 10000;
+		expect(
+			Number.isSafeInteger(minimumMajor),
+			'ledger storage floor must identify a PostgreSQL major',
+		).toBe(true);
+		const maximumMajor = fixtureMajors.at(-1)!;
+		const supportedMajors = Array.from(
+			{ length: maximumMajor - minimumMajor + 1 },
+			(_, index) => minimumMajor + index,
+		);
+		expect(fixtureMajors).toEqual(supportedMajors);
+
+		for (const major of supportedMajors) {
+			const filename = resolve(
+				ledgerDeparseFixtureDirectory,
+				`pg-${major}.json`,
+			);
+			const fixture: unknown = JSON.parse(await readFile(filename, 'utf8'));
+			expect(fixture, `pg-${major}.json must be an object`).toBeTypeOf(
+				'object',
+			);
+			expect(fixture, `pg-${major}.json must not be null`).not.toBeNull();
+			assertNonEmptyStringRecord(
+				(fixture as { checks?: unknown }).checks,
+				`pg-${major}.json checks`,
+			);
+			assertNonEmptyStringRecord(
+				(fixture as { defaults?: unknown }).defaults,
+				`pg-${major}.json defaults`,
+			);
+		}
 	});
 
 	it('uses a reject-only four-relation fingerprint', () => {
