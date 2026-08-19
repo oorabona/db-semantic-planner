@@ -135,6 +135,10 @@ import {
 } from './naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
+	normalizeMaxPreparedStatements,
+	PreparedStatementRegistry,
+} from './prepared-statements.js';
+import {
 	finalizeEnvelope,
 	fromCompiledQuery,
 	fromOutputDescriptors,
@@ -344,6 +348,13 @@ type QueryResultMetadata = {
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
+const preparedStatementRegistries = new WeakMap<
+	Pool | PoolClient,
+	{
+		readonly maxStatements: number;
+		readonly registry: PreparedStatementRegistry;
+	}
+>();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -352,6 +363,8 @@ type StatementExecutionOptions = {
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
+	/** Set only by execute()/executeWithMeta() for compiled parameterized SQL. */
+	readonly prepareEligible?: boolean;
 	readonly rawSqlStatement?: boolean;
 };
 
@@ -547,6 +560,21 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 		error !== null &&
 		'code' in error &&
 		(error as { code?: unknown }).code === code
+	);
+}
+
+/**
+ * node-postgres throws this before sending a query when its client-local parsed
+ * statement map already associates our exact name with other SQL. It has no
+ * SQLSTATE, so recognize only its canonical message for the attempted name.
+ */
+function isDriverLocalPreparedStatementNameCollision(
+	error: unknown,
+	attemptedName: string,
+): boolean {
+	const message = `Prepared statements must be unique - '${attemptedName}' was used for a different statement`;
+	return (
+		error instanceof Error && !('code' in error) && error.message === message
 	);
 }
 
@@ -2006,6 +2034,11 @@ function getNqlBindingProjection(
 /**
  * Options for PgsqlAdapter.
  */
+export interface PgsqlPreparedStatementsOptions {
+	/** Maximum distinct compiled statements admitted per executor (default: 500). */
+	readonly maxStatements?: number;
+}
+
 export interface PgsqlAdapterOptions {
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
@@ -2024,6 +2057,11 @@ export interface PgsqlAdapterOptions {
 	readonly defaultPkColumnName?: string;
 	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
 	readonly deriveFkColumnName?: FkColumnDerivation;
+	/**
+	 * Opt in to node-postgres named prepared statements for compiled queries with
+	 * parameters. `true` uses the default statement cap; an object overrides it.
+	 */
+	readonly preparedStatements?: boolean | PgsqlPreparedStatementsOptions;
 }
 
 export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
@@ -2070,6 +2108,7 @@ interface PgsqlAdapterInternalOptions
 	readonly rollbackOnlyScope?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
 	readonly dbspScopeState?: DbspScopeState;
+	readonly preparedStatementRegistry?: PreparedStatementRegistry;
 }
 
 type PgsqlPublicAdapterConstructionOptions =
@@ -2093,6 +2132,7 @@ type PgsqlAdapterInternalConstructionOverrides =
 		readonly rollbackOnlyScope?: true;
 		readonly dbspScopeToken?: DbspScopeToken;
 		readonly dbspScopeState?: DbspScopeState;
+		readonly preparedStatementRegistry?: PreparedStatementRegistry;
 	};
 
 function isPgsqlAdapterInternalOptions(
@@ -2170,6 +2210,67 @@ function getDbspScopeStateOption(
 		: undefined;
 }
 
+function getPreparedStatementRegistryOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): PreparedStatementRegistry | undefined {
+	return isPgsqlAdapterInternalOptions(options)
+		? options.preparedStatementRegistry
+		: undefined;
+}
+
+function getOrCreatePreparedStatementRegistry(
+	executor: Pool | PoolClient,
+	maxStatements: number,
+): PreparedStatementRegistry {
+	const configured = preparedStatementRegistries.get(executor);
+	if (configured === undefined) {
+		const registry = new PreparedStatementRegistry(maxStatements);
+		preparedStatementRegistries.set(executor, { maxStatements, registry });
+		return registry;
+	}
+	if (configured.maxStatements !== maxStatements) {
+		const executorKind = isPoolClientLike(executor)
+			? 'borrowed client'
+			: 'pool';
+		throw new Error(
+			`preparedStatements.maxStatements is configured ${executorKind}-wide: ` +
+				`expected ${configured.maxStatements}, received ${maxStatements}.`,
+		);
+	}
+	return configured.registry;
+}
+
+type NormalizedPreparedStatementsConfig =
+	| false
+	| Readonly<{ maxStatements: number }>;
+
+function normalizePreparedStatements(
+	value: unknown,
+): NormalizedPreparedStatementsConfig {
+	if (value === undefined || value === false) return false;
+	if (value === true) {
+		return Object.freeze({
+			maxStatements: normalizeMaxPreparedStatements(undefined),
+		});
+	}
+	if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+		throw new Error(
+			'preparedStatements must be true, false, or a non-null options object.',
+		);
+	}
+	return Object.freeze({
+		maxStatements: normalizeMaxPreparedStatements(
+			(value as PgsqlPreparedStatementsOptions).maxStatements,
+		),
+	});
+}
+
+function clonePreparedStatements(
+	config: NormalizedPreparedStatementsConfig,
+): false | PgsqlPreparedStatementsOptions {
+	return config === false ? false : { maxStatements: config.maxStatements };
+}
+
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
 	connection: Pool | PoolClient | undefined,
 	options: PgsqlAdapterConstructionOptions,
@@ -2214,6 +2315,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
+	private readonly preparedStatements: NormalizedPreparedStatementsConfig;
+	private readonly preparedStatementRegistry:
+		| PreparedStatementRegistry
+		| undefined;
 	private readonly _capabilities: AdapterCapabilities;
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
@@ -2289,6 +2394,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
+		this.preparedStatements = normalizePreparedStatements(
+			options?.preparedStatements,
+		);
+		if (this.preparedStatements !== false) {
+			const { maxStatements } = this.preparedStatements;
+			this.preparedStatementRegistry =
+				getPreparedStatementRegistryOption(options) ??
+				(this.pool !== undefined
+					? getOrCreatePreparedStatementRegistry(this.pool, maxStatements)
+					: this.client !== undefined
+						? getOrCreatePreparedStatementRegistry(this.client, maxStatements)
+						: undefined);
+		} else {
+			this.preparedStatementRegistry = undefined;
+		}
 		this.defaultPk = options?.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options?.deriveFkColumnName ?? defaultFkDerivation;
 
@@ -2339,12 +2459,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			(overrides.rollbackOnlyScope ?? this.rollbackOnlyScope)
 				? true
 				: undefined;
+		const preparedStatementRegistry = this.preparedStatementRegistry;
 		const hasInternalOptions =
 			adapterManagedTransaction === true ||
 			adapterManagedPinnedConnection === true ||
 			rollbackOnlyScope === true ||
 			scopeToken !== undefined ||
-			scopeState !== undefined;
+			scopeState !== undefined ||
+			preparedStatementRegistry !== undefined;
 		return {
 			...(hasInternalOptions && {
 				[pgsqlAdapterInternalOptionsKey]: true as const,
@@ -2353,6 +2475,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
 			...(this.model !== undefined && { model: this.model }),
 			...(this.logger !== undefined && { logger: this.logger }),
+			...(this.preparedStatements !== false && {
+				preparedStatements: clonePreparedStatements(this.preparedStatements),
+			}),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.borrowedClient && { borrowedClient: true as const }),
@@ -2364,6 +2489,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(rollbackOnlyScope === true && { rollbackOnlyScope }),
 			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
 			...(scopeState !== undefined && { dbspScopeState: scopeState }),
+			...(preparedStatementRegistry !== undefined && {
+				preparedStatementRegistry,
+			}),
 			...overrides,
 		};
 	}
@@ -3092,7 +3220,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const guardedQuery = guardCompiledQuery(query, 'execute');
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
-		>(guardedQuery.sql, guardedQuery.parameters);
+		>(guardedQuery.sql, guardedQuery.parameters, { prepareEligible: true });
 		const metadata = queryResultMetadata(result);
 		const rows = this.transformResultRows(result.rows, guardedQuery) as T[];
 		return {
@@ -5827,6 +5955,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				executor,
 				sql,
 				parameters,
+				options.prepareEligible ?? false,
 			);
 			if (options.inspectTransactionControl !== false) {
 				await this.assertNoTransactionControlCommand(
@@ -5989,7 +6118,40 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		executor: Pool | PoolClient,
 		sql: string,
 		parameters: readonly unknown[] | undefined,
+		prepareEligible: boolean,
 	): Promise<MaybeMultipleQueryResults<T>> {
+		if (
+			this.preparedStatementRegistry !== undefined &&
+			prepareEligible &&
+			parameters !== undefined &&
+			parameters.length > 0
+		) {
+			const name = this.preparedStatementRegistry.admit(sql);
+			if (name === undefined) {
+				return executor.query<T>(sql, [...parameters]) as Promise<
+					MaybeMultipleQueryResults<T>
+				>;
+			}
+			try {
+				return (await executor.query<T>({
+					name,
+					text: sql,
+					values: [...parameters],
+				})) as MaybeMultipleQueryResults<T>;
+			} catch (error) {
+				if (
+					isPgErrorWithCode(error, '0A000') ||
+					isPgErrorWithCode(error, '26000') ||
+					isPgErrorWithCode(error, '42P05') ||
+					isDriverLocalPreparedStatementNameCollision(error, name)
+				) {
+					// Invalidated named statements are never retried in-call. Later calls
+					// use the unnamed path for this executor.
+					this.preparedStatementRegistry.tombstone(sql);
+				}
+				throw error;
+			}
+		}
 		if (parameters === undefined) {
 			return executor.query<T>(sql) as Promise<MaybeMultipleQueryResults<T>>;
 		}
