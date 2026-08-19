@@ -6,15 +6,15 @@ title: CLI Usage
 
 `dbsp` has one managed DDL execution path: plan a change, then apply it. A
 no-argument `apply` creates, persists, and presents a fresh managed run; an
-`apply <run-id>` executes exactly that recorded run. There is no direct schema
-execution command or file-based execution command.
+`apply <run-id>` executes exactly that replayable recorded run. There is no
+direct schema execution command or file-based execution command.
 
 ## Managed workflow
 
 | Command | Purpose |
 | --- | --- |
 | `dbsp plan` | Compare declared and live state, prove a managed plan, and record it. |
-| `dbsp apply [run-id]` | Present and execute one managed plan; without an id it persists before presenting. |
+| `dbsp apply [run-id]` | Present and execute one replayable managed plan; without an id it persists before presenting. |
 | `dbsp inspect [address]` | Read the ledger and live state without repairing it. |
 | `dbsp reconcile <run-id>` | Classify a previously recorded run against live state. |
 | `dbsp release <address>` | Release managed authority when its safety checks permit it. |
@@ -27,9 +27,10 @@ dbsp apply "$RUN_ID" --db "$DATABASE_URL" --plan-digest "$PLAN_DIGEST" --accept 
 dbsp inspect table:users --db "$DATABASE_URL" --schema "$DBSP_SCHEMA" --format json
 ```
 
-`--dry-run` on no-argument `apply` does not persist a run. Declining a presented
-run leaves the persisted run retrievable with `inspect` and eligible for the
-recorded `apply <run-id>` path. `--yes` accepts the presentation step.
+`--dry-run` on no-argument `apply` does not persist a run. Keep the run ID and
+digest printed by `plan` or `apply`: a recorded `apply <run-id>` is available
+only for replayable runs. A declined removal is not replayable; re-plan it when
+you are ready to proceed. `--yes` accepts the presentation step.
 
 ## Other local tools
 

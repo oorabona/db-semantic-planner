@@ -125,6 +125,7 @@ type LedgerConstraintRow = {
 	readonly check_expression: unknown;
 	readonly connullsnotdistinct: unknown;
 	readonly key_columns: unknown;
+	readonly referenced_table_schema: unknown;
 	readonly referenced_table_name: unknown;
 	readonly referenced_columns: unknown;
 	readonly confupdtype: unknown;
@@ -267,7 +268,7 @@ async function readLedgerConstraints(
 	schema: string,
 ): Promise<readonly LedgerConstraintRow[]> {
 	const constraints = await executor.query(
-		`SELECT relation.relname AS table_name, constraint_item.conname AS constraint_name, constraint_item.contype, pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid) AS check_expression, constraint_index.indnullsnotdistinct AS connullsnotdistinct, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_relation.relname AS referenced_table_name, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS referenced_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = referenced_column.attnum ORDER BY referenced_column.position) AS referenced_columns, constraint_item.confupdtype, constraint_item.confdeltype, constraint_item.condeferrable, constraint_item.condeferred, constraint_item.convalidated FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_index constraint_index ON constraint_index.indexrelid = constraint_item.conindid WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND constraint_item.contype IN ('p', 'c', 'u', 'f') ORDER BY relation.relname, constraint_item.oid`,
+		`SELECT relation.relname AS table_name, constraint_item.conname AS constraint_name, constraint_item.contype, pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid) AS check_expression, constraint_index.indnullsnotdistinct AS connullsnotdistinct, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_table_schema, referenced_relation.relname AS referenced_table_name, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS referenced_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = referenced_column.attnum ORDER BY referenced_column.position) AS referenced_columns, constraint_item.confupdtype, constraint_item.confdeltype, constraint_item.condeferrable, constraint_item.condeferred, constraint_item.convalidated FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace LEFT JOIN pg_catalog.pg_index constraint_index ON constraint_index.indexrelid = constraint_item.conindid WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND constraint_item.contype IN ('p', 'c', 'u', 'f') ORDER BY relation.relname, constraint_item.oid`,
 		[schema, DBSP_LEDGER_TABLES],
 	);
 	// PostgreSQL 18 records NOT NULL as pg_constraint rows with contype = 'n'.
@@ -371,14 +372,14 @@ export async function validatePgLedgerPhysicalShape(
 	);
 }
 
-async function readLedgerImmutabilityTriggers(
+async function readLedgerTriggers(
 	executor: TransitionJournalQueryable,
 	schema: string,
-	tableName: string,
+	tableNames: readonly string[],
 ): Promise<readonly LedgerTriggerRow[]> {
 	const result = await executor.query(
-		`SELECT namespace.nspname AS table_schema, relation.relname AS table_name, trigger_item.tgname AS trigger_name, trigger_item.tgenabled AS trigger_enabled, trigger_item.tgtype::text AS trigger_type, pg_catalog.encode(trigger_item.tgargs, 'hex') AS trigger_arguments, trigger_item.tgdeferrable AS trigger_deferrable, trigger_item.tginitdeferred AS trigger_initially_deferred, procedure_namespace.nspname AS function_schema, procedure.proname AS function_name, pg_catalog.pg_get_function_identity_arguments(procedure.oid) AS function_identity_arguments, pg_catalog.pg_get_function_result(procedure.oid) AS function_result, language.lanname AS function_language, procedure.prokind AS function_kind, procedure.provolatile AS function_volatility, procedure.proisstrict AS function_is_strict, procedure.prosecdef AS function_is_security_definer, procedure.proleakproof AS function_is_leakproof, procedure.proconfig IS NULL AS function_config_is_null, procedure.prosrc AS function_source, pg_catalog.pg_get_triggerdef(trigger_item.oid, false) AS trigger_definition FROM pg_catalog.pg_trigger trigger_item JOIN pg_catalog.pg_class relation ON relation.oid = trigger_item.tgrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_proc procedure ON procedure.oid = trigger_item.tgfoid JOIN pg_catalog.pg_namespace procedure_namespace ON procedure_namespace.oid = procedure.pronamespace JOIN pg_catalog.pg_language language ON language.oid = procedure.prolang WHERE namespace.nspname = $1 AND relation.relname = $2 AND NOT trigger_item.tgisinternal ORDER BY trigger_item.tgname`,
-		[schema, tableName],
+		`SELECT namespace.nspname AS table_schema, relation.relname AS table_name, trigger_item.tgname AS trigger_name, trigger_item.tgenabled AS trigger_enabled, trigger_item.tgtype::text AS trigger_type, pg_catalog.encode(trigger_item.tgargs, 'hex') AS trigger_arguments, trigger_item.tgdeferrable AS trigger_deferrable, trigger_item.tginitdeferred AS trigger_initially_deferred, procedure_namespace.nspname AS function_schema, procedure.proname AS function_name, pg_catalog.pg_get_function_identity_arguments(procedure.oid) AS function_identity_arguments, pg_catalog.pg_get_function_result(procedure.oid) AS function_result, language.lanname AS function_language, procedure.prokind AS function_kind, procedure.provolatile AS function_volatility, procedure.proisstrict AS function_is_strict, procedure.prosecdef AS function_is_security_definer, procedure.proleakproof AS function_is_leakproof, procedure.proconfig IS NULL AS function_config_is_null, procedure.prosrc AS function_source, pg_catalog.pg_get_triggerdef(trigger_item.oid, false) AS trigger_definition FROM pg_catalog.pg_trigger trigger_item JOIN pg_catalog.pg_class relation ON relation.oid = trigger_item.tgrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_proc procedure ON procedure.oid = trigger_item.tgfoid JOIN pg_catalog.pg_namespace procedure_namespace ON procedure_namespace.oid = procedure.pronamespace JOIN pg_catalog.pg_language language ON language.oid = procedure.prolang WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND NOT trigger_item.tgisinternal ORDER BY relation.relname, trigger_item.tgname`,
+		[schema, tableNames],
 	);
 	return result.rows as readonly LedgerTriggerRow[];
 }
@@ -395,11 +396,9 @@ export async function createPgLedgerShapeAllowance(
 ): Promise<PgLedgerShapeAllowance> {
 	const tableName =
 		generatePgLedgerExpectedManifest().immutabilityTrigger.tableName;
-	const triggers = await readLedgerImmutabilityTriggers(
-		executor,
-		ledgerSchema(target),
+	const triggers = await readLedgerTriggers(executor, ledgerSchema(target), [
 		tableName,
-	);
+	]);
 	const matching = triggers.filter(
 		(trigger) => trigger.trigger_name === triggerName,
 	);
@@ -533,7 +532,8 @@ async function validatePgLedgerPhysicalShapeFacts(
 				(constraint.columns !== undefined &&
 					!hasColumns(row.key_columns, constraint.columns)) ||
 				(constraint.referencedTable !== undefined &&
-					row.referenced_table_name !== constraint.referencedTable) ||
+					(row.referenced_table_name !== constraint.referencedTable ||
+						row.referenced_table_schema !== ledgerSchema(target))) ||
 				(constraint.referencedColumns !== undefined &&
 					!hasColumns(row.referenced_columns, constraint.referencedColumns))
 			)
@@ -558,6 +558,22 @@ async function validatePgLedgerPhysicalShapeFacts(
 		}
 	}
 	const defaults = await readLedgerDefaults(executor, ledgerSchema(target));
+	const expectedDefaultKeys = new Set(
+		manifest.tables.flatMap((definition) =>
+			definition.columns
+				.filter((column) => column.defaultSql !== undefined)
+				.map((column) => `${definition.name}.${column.name}`),
+		),
+	);
+	for (const defaultRow of defaults) {
+		const key = `${String(defaultRow.table_name)}.${String(defaultRow.column_name)}`;
+		if (!expectedDefaultKeys.has(key))
+			throw ledgerPhysicalShapeError(
+				target,
+				String(defaultRow.table_name),
+				`has an unexpected default for ${String(defaultRow.column_name)}`,
+			);
+	}
 	for (const definition of manifest.tables) {
 		for (const column of definition.columns.filter(
 			(candidate) => candidate.defaultSql !== undefined,
@@ -578,25 +594,15 @@ async function validatePgLedgerPhysicalShapeFacts(
 				);
 		}
 	}
-	const triggers = await readLedgerImmutabilityTriggers(
+	const triggers = await readLedgerTriggers(
 		executor,
 		ledgerSchema(target),
-		manifest.immutabilityTrigger.tableName,
+		DBSP_LEDGER_TABLES,
 	);
-	if (allowance === undefined && triggers.length !== 1)
-		throw ledgerPhysicalShapeError(
-			target,
-			manifest.immutabilityTrigger.tableName,
-			'has an unexpected immutability trigger set',
-		);
-	if (allowance !== undefined && triggers.length !== 2)
-		throw ledgerPhysicalShapeError(
-			target,
-			manifest.immutabilityTrigger.tableName,
-			'has an unexpected immutability trigger set',
-		);
 	const trigger = triggers.find(
-		(candidate) => candidate.trigger_name === manifest.immutabilityTrigger.name,
+		(candidate) =>
+			candidate.table_name === manifest.immutabilityTrigger.tableName &&
+			candidate.trigger_name === manifest.immutabilityTrigger.name,
 	);
 	if (!trigger)
 		throw ledgerPhysicalShapeError(
@@ -631,27 +637,36 @@ async function validatePgLedgerPhysicalShapeFacts(
 			manifest.immutabilityTrigger.tableName,
 			'has an unexpected immutability trigger or function definition',
 		);
-	if (
-		allowance !== undefined &&
-		!triggers.some(
-			(candidate) =>
-				candidate !== trigger &&
-				matchesLedgerShapeAllowance(allowance, target, candidate),
-		)
-	)
+	const unexpectedTrigger = triggers.find(
+		(candidate) =>
+			candidate !== trigger &&
+			!matchesLedgerShapeAllowance(allowance, target, candidate),
+	);
+	if (unexpectedTrigger)
 		throw ledgerPhysicalShapeError(
 			target,
-			manifest.immutabilityTrigger.tableName,
-			'has an unexpected immutability trigger set',
+			String(unexpectedTrigger.table_name),
+			'has an unexpected trigger set',
 		);
 
 	const indexes = await executor.query(
-		`SELECT relation.relname AS table_name, index_relation.relname AS index_name, index_definition.indisprimary, index_definition.indisunique, index_definition.indisvalid, index_definition.indisready, ARRAY(SELECT attribute.attname::text FROM unnest(index_definition.indkey) WITH ORDINALITY AS index_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum = index_column.attnum ORDER BY index_column.position) AS index_columns FROM pg_catalog.pg_index index_definition JOIN pg_catalog.pg_class relation ON relation.oid = index_definition.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_definition.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY index_definition.indexrelid`,
-		[ledgerSchema(target), DBSP_LEDGER_EVENT_TABLE],
+		`SELECT relation.relname AS table_name, index_relation.relname AS index_name, index_definition.indisprimary, index_definition.indisunique, index_definition.indisvalid, index_definition.indisready, ARRAY(SELECT attribute.attname::text FROM unnest(index_definition.indkey) WITH ORDINALITY AS index_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum = index_column.attnum ORDER BY index_column.position) AS index_columns FROM pg_catalog.pg_index index_definition JOIN pg_catalog.pg_class relation ON relation.oid = index_definition.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_definition.indexrelid LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_definition.indexrelid WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND constraint_item.oid IS NULL ORDER BY relation.relname, index_definition.indexrelid`,
+		[ledgerSchema(target), DBSP_LEDGER_TABLES],
 	);
+	const indexRows = indexes.rows as readonly LedgerIndexRow[];
+	const expectedIndexCount = manifest.tables.reduce(
+		(count, definition) => count + (definition.indexes?.length ?? 0),
+		0,
+	);
+	if (indexRows.length !== expectedIndexCount)
+		throw ledgerPhysicalShapeError(
+			target,
+			String(indexRows[0]?.table_name ?? DBSP_LEDGER_EVENT_TABLE),
+			'has an unexpected non-constraint index set',
+		);
 	for (const definition of manifest.tables) {
 		for (const index of definition.indexes ?? []) {
-			const actual = (indexes.rows as readonly LedgerIndexRow[]).find(
+			const actual = indexRows.find(
 				(row) =>
 					row.table_name === definition.name && row.index_name === index.name,
 			);

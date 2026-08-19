@@ -7,7 +7,25 @@ import { describe, expect, it } from 'vitest';
 const adapterSource = dirname(fileURLToPath(import.meta.url));
 const repository = join(adapterSource, '..', '..', '..');
 
-const DDL_SINK_ALLOWLIST: Readonly<Record<string, string>> = {
+/**
+ * This is a deliberately narrow syntactic tripwire, not a complete DDL-sink
+ * inventory. It recognizes only the following grammar:
+ *
+ * - a literal, no-substitution template, template head, left-hand string
+ *   concatenation, or parenthesized version thereof beginning (after
+ *   whitespace) with ALTER, CREATE, DROP, GRANT, REVOKE, or TRUNCATE;
+ * - that expression, or a known binding for it, passed as the first argument
+ *   to a direct `.query(...)` call or to a direct one-argument forwarder that
+ *   calls `.query(...)`; and
+ * - a direct `.query(statement.sql)` planned-statement sender, plus the few
+ *   named executor entry points below.
+ *
+ * It structurally cannot see dynamic SQL, leading comments, other SQL command
+ * forms, aliased or destructured query calls, configuration-object calls, or
+ * wrappers beyond the direct forwarder shape above. Those are non-goals of the
+ * tripwire and need a different analysis if they ever become in scope.
+ */
+const DDL_TRIPWIRE_ALLOWLIST: Readonly<Record<string, string>> = {
 	'transition/operations/alter-column-set-not-null.ts':
 		'token-gated managed DDL',
 	'transition/operations/alter-table-add-check.ts': 'token-gated managed DDL',
@@ -162,7 +180,7 @@ function hasDdlSink(source: string, file: string): boolean {
 	return found;
 }
 
-describe('SC-65 DDL execution sink inventory', () => {
+describe('SC-65 DDL execution syntactic tripwire', () => {
 	it('rejects a DDL binding forwarded through executor.query', () => {
 		expect(
 			hasDdlSink(
@@ -181,7 +199,7 @@ describe('SC-65 DDL execution sink inventory', () => {
 		).toBe(true);
 	});
 
-	it('AST-discovers only labelled managed or explicitly unmanaged DDL sinks', async () => {
+	it('requires labels for every syntactically recognized DDL shape', async () => {
 		const adapterFiles = await sourceFiles(adapterSource);
 		const cliSource = join(repository, 'packages/cli/src');
 		const cliFiles = await sourceFiles(cliSource);
@@ -197,9 +215,9 @@ describe('SC-65 DDL execution sink inventory', () => {
 			.map((file) => relative(adapterSource, file))
 			.sort();
 
-		expect(discovered).toEqual(Object.keys(DDL_SINK_ALLOWLIST).sort());
+		expect(discovered).toEqual(Object.keys(DDL_TRIPWIRE_ALLOWLIST).sort());
 		for (const sink of discovered)
-			expect(DDL_SINK_ALLOWLIST[sink]).toMatch(
+			expect(DDL_TRIPWIRE_ALLOWLIST[sink]).toMatch(
 				/token-gated managed DDL|explicitly unmanaged(?: API| test fixture API)|ledger bootstrap and explicitly managed storage API|separately privileged ledger cutover/u,
 			);
 	}, 20_000);

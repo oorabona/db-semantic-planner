@@ -72,7 +72,7 @@ row requires CLI/package-root evidence.
 | OBL-CLI4 | covered | `packages/cli/src/commands/apply.test.ts: OBL-CLI4 rejects unknown trust-root union members, empty classes, and extra acceptance keys in --accept and --accept-policy input`; `packages/cli/src/commands/apply.test.ts: OBL-CLI4 refuses a reused durable authorization with one changed plan digest/policy/grants/actor/authorization time binding`; `packages/cli/src/commands/apply.test.ts: mutation: reusing an authorization from another run replays approval across run ids` | — |
 | OBL-CLI5 | covered | `packages/docs/.vitepress/theme/cli-usage.test.ts: validates the documented managed-workflow arguments`; `tests/e2e/cli-usage.test.ts: OBL-CLI5 executes every managed-workflow example as written, including the completed recorded apply` | — |
 | OBL-CLI6 | audit-evidence | gap | No enumerated, quoted four-surface consistency checklist was found. The export/header/guide/ADR prose exists, but it is not the required final-review artifact. |
-| OBL-CLI7 | audit-evidence | `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts: SC-65 DDL execution sink inventory` | Evidence artifact lives in that static test's `DDL_SINK_ALLOWLIST`, generated AST discovery, and label assertions; it is the machine-derived sink inventory requested by the row. |
+| OBL-CLI7 | audit-evidence | `packages/adapter-pgsql/src/ddl-execution-sinks.syntactic-tripwire.static.test.ts: SC-65 DDL execution syntactic tripwire` | The static test documents its narrow recognized grammar and requires labels for every syntactically recognized shape; it is not a complete execution-sink inventory. |
 | OBL-CLI8 | covered | `packages/cli/src/commands/preflight.test.ts: OBL-CLI8 refuses usage when each required preflight flag is omitted before it opens a database` | — |
 | OBL-CLI9 | covered | `tests/e2e/adoption-release-replace-drift.test.ts: SC-60 / OBL-CLI9: release refusals preserve each object; success makes the address unknown` | — |
 | OBL-CLI10 | covered | `tests/e2e/managed-outcome-wiring.test.ts: OBL-CLI10 parameterizes apply, recover, and reconcile across all four marker states with zero appends`; `tests/e2e/adoption-release-replace-drift.test.ts: OBL-CLI10 parameterizes public release across the same marker states and preserves the object`; `tests/e2e/database-read-only-local.test.ts: classifies apply, recover, reconcile, and public release under default_transaction_read_only`; `tests/e2e/lineage-restore-local.test.ts: OBL-CLI10 refuses all four mutations on restored lineage while inspect remains readable and reinitialize archives the lineage` | 26/26: marker 16, read-only 4, lineage 4, inspect complement 1, reinitialize complement 1. |
@@ -101,11 +101,8 @@ OBL-REC7, OBL-REC13, OBL-REC14.
 ### Audit evidence
 
 1 gap: OBL-CLI6 needs the quoted four-surface final-review checklist.  OBL-CLI7
-has an evidence artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.static.test.ts`.
+has a syntactic-tripwire artifact at `packages/adapter-pgsql/src/ddl-execution-sinks.syntactic-tripwire.static.test.ts`.
 
 The status totals are **52 covered, 12 partial, 1 gap, and 2 audit-evidence**.
-Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
-artifact.  All 67 table rows are accounted for.
-The status totals are **39 covered, 23 partial, 3 gap, and 2 audit-evidence**.
-Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required inventory
-artifact.  All 67 table rows are accounted for.
+Of the audit rows, OBL-CLI6 is itself a gap; OBL-CLI7 has the required tripwire
+artifact. All 67 table rows are accounted for.

@@ -164,6 +164,7 @@ function createdLedgerInvariantConstraintRows() {
 					? (checkKeyColumns[constraint.name] ?? [])
 					: (constraint.columns ?? []),
 			referenced_table_name: constraint.referencedTable ?? null,
+			referenced_table_schema: constraint.referencedTable ? 'tenant_a' : null,
 			referenced_columns: constraint.referencedColumns ?? [],
 			confupdtype: constraint.type === 'f' ? 'a' : ' ',
 			confdeltype: constraint.type === 'f' ? 'a' : ' ',
@@ -257,21 +258,6 @@ function createdLedgerDdlLiveProjection() {
 				? checks[`${row.table_name}.${row.constraint_name}`]
 				: undefined,
 	}));
-	const constraintBackingIndexes = PG_LEDGER_SPEC.flatMap((definition) =>
-		definition.constraints
-			.filter(
-				(constraint) => constraint.type === 'p' || constraint.type === 'u',
-			)
-			.map((constraint) => ({
-				table_name: definition.name,
-				index_name: constraint.name,
-				indisprimary: constraint.type === 'p',
-				indisunique: true,
-				indisvalid: true,
-				indisready: true,
-				index_columns: constraint.columns ?? [],
-			})),
-	);
 	return {
 		tables: createdLedgerTableRows(),
 		columns: createdLedgerColumnRows(),
@@ -280,7 +266,7 @@ function createdLedgerDdlLiveProjection() {
 			default_definition: defaults[`${row.table_name}.${row.column_name}`],
 		})),
 		constraints,
-		indexes: [...constraintBackingIndexes, ...createdLedgerTerminalIndexRows()],
+		indexes: createdLedgerTerminalIndexRows(),
 		triggers: createdLedgerImmutabilityTriggerRows(),
 	};
 }

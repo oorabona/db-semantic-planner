@@ -549,8 +549,8 @@ it is unavailable.
 - SC-64 the refusal catalogue, parameterized: ERR-01, ERR-02, each ERR-03 arm (older, future,
   mixed, unreadable marker; lock error), ERR-04 through ERR-10 — for each, inspect names the
   address, the state, the withheld authority and the resolving command.
-- SC-65 *(static)* the sink inventory is discovered from the AST — every call site executing DDL
-  — and compared against the labelled allowlist; an unlabelled sink fails.
+- SC-65 *(static)* the syntactic tripwire recognizes its documented direct SQL and AST shapes
+  and compares those matches against the labelled allowlist; a newly recognized unlabelled shape fails.
 - SC-66 the controller recorded on a claim equals `current_user` of the claiming transaction; a
   test connecting as a second role records that role; no flag or configuration supplies another
   value, proven over the CLI surface.

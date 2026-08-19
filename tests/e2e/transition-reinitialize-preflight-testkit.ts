@@ -24,10 +24,21 @@ export function uniqueName(prefix: string): string {
 }
 
 /**
- * A role fixture must not pass DATABASE_URL through to pg: URL credentials
- * take precedence over `user` and would silently run these checks as the
- * deployment superuser.
+ * Clone DATABASE_URL before passing it to pg: URL credentials take precedence
+ * over `user`, so replace them in the URL while preserving its transport
+ * options (including SSL, socket, and caller query settings).
  */
+export function rolePoolConfig(
+	connectionString: string,
+	role: string,
+	password: string,
+): pg.PoolConfig {
+	const url = new URL(connectionString);
+	url.username = role;
+	url.password = password;
+	return { connectionString: url.toString(), max: 2 };
+}
+
 export async function rolePool(
 	role: string,
 	password: string,
@@ -35,20 +46,7 @@ export async function rolePool(
 	const connectionString = process.env.DATABASE_URL;
 	if (!connectionString)
 		throw new Error('DATABASE_URL is required for role fixture');
-	const url = new URL(connectionString);
-	const database = decodeURIComponent(url.pathname.replace(/^\//, ''));
-	if (!url.hostname || !database)
-		throw new Error(
-			'DATABASE_URL must include a host and database for role fixture',
-		);
-	const pool = new pg.Pool({
-		host: url.hostname,
-		...(url.port === '' ? {} : { port: Number(url.port) }),
-		database,
-		user: role,
-		password,
-		max: 2,
-	});
+	const pool = new pg.Pool(rolePoolConfig(connectionString, role, password));
 	try {
 		const identity = await pool.query<{ current_user: string }>(
 			'SELECT current_user',
