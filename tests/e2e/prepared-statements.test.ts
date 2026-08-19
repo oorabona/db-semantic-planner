@@ -419,6 +419,8 @@ describe('adapter prepared statements', () => {
 
 	it('rejects a pending named pool query after backend termination without terminating the child process', async () => {
 		const applicationName = `dbsp-prepared-${randomUUID()}`;
+		const readinessMarker = 'ready-for-termination';
+		const childWaitTimeoutMs = 55_000;
 		const childSource = `
 			import { Pool } from 'pg';
 			import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
@@ -430,6 +432,7 @@ describe('adapter prepared statements', () => {
 			await adapter.execute(compiled(false));
 			await adapter.execute(compiled(false));
 			try {
+				console.log('${readinessMarker}');
 				await adapter.execute(compiled(true));
 				console.error('pending named query unexpectedly resolved');
 				process.exitCode = 1;
@@ -465,31 +468,77 @@ describe('adapter prepared statements', () => {
 		});
 		let stdout = '';
 		let stderr = '';
+		let resolveReadiness: (() => void) | undefined;
+		const readiness = new Promise<void>((resolve) => {
+			resolveReadiness = resolve;
+		});
 		child.stdout?.on('data', (chunk: Buffer) => {
 			stdout += chunk.toString();
+			if (stdout.includes(`${readinessMarker}\n`)) resolveReadiness?.();
 		});
 		child.stderr?.on('data', (chunk: Buffer) => {
 			stderr += chunk.toString();
 		});
 		try {
+			const childFailure = (exited: Awaited<typeof childClose>) =>
+				new Error(
+					`child exited before backend termination (${exited.kind === 'exit' ? `code ${exited.code}, signal ${exited.signal}` : exited.error.message})\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+				);
+			const childExitFailure = () =>
+				childClose.then((exited) => Promise.reject(childFailure(exited)));
+			const waitFor = <T>(label: string, promise: Promise<T>) => {
+				let timeout: ReturnType<typeof setTimeout> | undefined;
+				return Promise.race([
+					promise,
+					childExitFailure(),
+					new Promise<T>((_resolve, reject) => {
+						timeout = setTimeout(
+							() =>
+								reject(
+									new Error(
+										`timed out waiting for ${label}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+									),
+								),
+							childWaitTimeoutMs,
+						);
+					}),
+				]).finally(() => {
+					if (timeout !== undefined) clearTimeout(timeout);
+				});
+			};
+
+			await waitFor('child readiness marker', readiness);
 			const pool = await getTestPool();
-			let pid: number | undefined;
-			for (let attempt = 0; attempt < 100 && pid === undefined; attempt += 1) {
-				const result = await pool.query<{ pid: number }>(
-					`SELECT pid FROM pg_catalog.pg_stat_activity
+			const pid = await waitFor(
+				'active child backend',
+				(async () => {
+					const deadline = Date.now() + childWaitTimeoutMs;
+					while (true) {
+						const result = await pool.query<{ pid: number }>(
+							`SELECT pid FROM pg_catalog.pg_stat_activity
 					 WHERE application_name = $1 AND state = 'active'
 					 ORDER BY backend_start DESC LIMIT 1`,
-					[applicationName],
-				);
-				pid = result.rows[0]?.pid;
-				if (pid === undefined)
-					await new Promise((resolve) => setTimeout(resolve, 25));
-			}
+							[applicationName],
+						);
+						const pid = result.rows[0]?.pid;
+						if (pid !== undefined) return pid;
+						const remaining = deadline - Date.now();
+						if (remaining <= 0)
+							throw new Error(
+								`timed out waiting for active child backend\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+							);
+						await new Promise((resolve) =>
+							setTimeout(resolve, Math.min(100, remaining)),
+						);
+					}
+				})(),
+			);
 			expect(pid).toBeTypeOf('number');
 			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
 				pid,
 			]);
 			const exited = await childClose;
+			stdout = stdout.replace(`${readinessMarker}\n`, '');
 			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
 			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
