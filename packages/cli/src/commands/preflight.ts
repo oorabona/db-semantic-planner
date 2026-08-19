@@ -4,6 +4,7 @@ import { mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
 	escapeDiagnosticText,
+	getNamingPluginForDbCasing,
 	type PgReinitializePreflightPool,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -116,11 +117,15 @@ function declarationsForScopes(
 	model: Awaited<ReturnType<typeof loadSchema>>['model'],
 	database: string,
 	scopes: readonly string[],
+	naming: Parameters<typeof declarationSetFromModel>[2],
 ): DeclarationSet {
 	const declarations = scopes.flatMap(
 		(schema) =>
-			declarationSetFromModel(model, { engine: 'postgresql', database, schema })
-				.declarations,
+			declarationSetFromModel(
+				model,
+				{ engine: 'postgresql', database, schema },
+				naming,
+			).declarations,
 	);
 	// Database-scoped declarations (extensions) are shared by every tenant
 	// model, while their home ledger is singular. Keep one exact declaration.
@@ -177,6 +182,7 @@ export async function runPreflight(
 			loaded.model,
 			database,
 			options.scopes,
+			getNamingPluginForDbCasing(loaded.dbCasing ?? 'preserve'),
 		);
 		return await runPgReinitializePreflight({
 			pool: connection.pool as unknown as PgReinitializePreflightPool,

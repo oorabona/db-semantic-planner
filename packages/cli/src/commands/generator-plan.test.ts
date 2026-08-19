@@ -1,7 +1,10 @@
 import { validateNormalizedManagedStepManifest } from '@dbsp/core';
 import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { linearizeGeneratedManagedStepDependencies } from './generator-plan.js';
+import {
+	linearizeGeneratedManagedStepDependencies,
+	persistedLifecycleDirectiveError,
+} from './generator-plan.js';
 
 function step(order: number, stepKey: string): NormalizedManagedStep {
 	return {
@@ -44,5 +47,20 @@ describe('generated managed-step dependencies', () => {
 		// A successful validation now returns the opaque, normalized manifest that
 		// the executor binds to the recorded digest; do not discard that authority.
 		expect(validateNormalizedManagedStepManifest(manifest).ok).toBe(true);
+	});
+
+	it('refuses persisted manifests that combine lifecycle directives for one table', () => {
+		const adoption = {
+			...step(0, 'adoption'),
+			selection: { kind: 'adoption' as const, selector: 'table:table_0' },
+		};
+		const readdress = {
+			...step(1, 'readdress'),
+			address: adoption.address!,
+			selection: { kind: 'readdress' as const, selector: 'table:table_0' },
+		};
+		expect(persistedLifecycleDirectiveError([adoption, readdress])).toBe(
+			'persisted lifecycle for table_0 cannot set adoption and readdress together',
+		);
 	});
 });

@@ -224,6 +224,50 @@ export function linearizeGeneratedManagedStepDependencies(
 	return linearized;
 }
 
+/**
+ * A durable manifest is an execution boundary, so lifecycle exclusivity is
+ * checked again after deserialization instead of trusting its producer.
+ */
+export function persistedLifecycleDirectiveError(
+	steps: readonly NormalizedManagedStep[],
+): string | undefined {
+	const directivesByTable = new Map<string, Set<string>>();
+	for (const step of steps) {
+		const directive = step.selection?.kind;
+		if (
+			directive !== 'adoption' &&
+			directive !== 'replacement' &&
+			directive !== 'readdress'
+		)
+			continue;
+		const address = step.address ?? step.closure?.root;
+		if (address?.kind !== 'table') continue;
+		const key = [
+			address.engine,
+			address.database,
+			address.schema ?? '',
+			address.name,
+		].join('\u0000');
+		const directives = directivesByTable.get(key) ?? new Set<string>();
+		directives.add(directive);
+		directivesByTable.set(key, directives);
+		if (directives.size > 1)
+			return `persisted lifecycle for ${address.name} cannot set ${[...directives].sort().join(' and ')} together`;
+	}
+	return undefined;
+}
+
+function declaredLifecycleDirectiveError(table: TableIR): string | undefined {
+	const directives = [
+		table.adopt === true ? 'adopt' : undefined,
+		table.replace === true ? 'replace' : undefined,
+		table.readdress === undefined ? undefined : 'readdress',
+	].filter((directive): directive is string => directive !== undefined);
+	return directives.length > 1
+		? `declared lifecycle for ${table.name} cannot set ${directives.join(' and ')} together`
+		: undefined;
+}
+
 function assessment(): PlanAssessment {
 	return {
 		decision: 'applicable',
@@ -345,19 +389,20 @@ export async function runGeneratorPlan(input: {
 			},
 		);
 		const declaredLifecycleWork = [...loaded.model.tables.values()].some(
-			(table) => table.adopt === true || table.replace === true,
+			(table) =>
+				table.adopt === true ||
+				table.replace === true ||
+				table.readdress !== undefined,
 		);
-		const contradictoryLifecycle = [...loaded.model.tables.values()].find(
-			(table) => table.adopt === true && table.replace === true,
-		);
-		if (contradictoryLifecycle)
-			throw new Error(
-				`declared lifecycle for ${contradictoryLifecycle.name} cannot set adopt and replace together`,
-			);
+		const lifecycleError = [...loaded.model.tables.values()]
+			.map(declaredLifecycleDirectiveError)
+			.find((detail) => detail !== undefined);
+		if (lifecycleError) throw new Error(lifecycleError);
 		const readdressRefusal = diff.changes.find(
 			(change) =>
 				change.kind === 'readdress_table' &&
-				typeof change.meta?.readdressAssessment === 'string',
+				(change.meta?.readdressAssessment === 'source-missing' ||
+					change.meta?.readdressAssessment === 'target-occupied'),
 		);
 		if (readdressRefusal)
 			throw new Error(

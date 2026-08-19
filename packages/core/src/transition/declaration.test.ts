@@ -99,6 +99,75 @@ describe('managed declaration slicing', () => {
 		);
 	});
 
+	it('uses the physical naming strategy for every declarable address and parent', () => {
+		const declarations = declarationSetFromModel(
+			{
+				...model(
+					table({
+						name: 'postComments',
+						columns: [{ name: 'postId', type: 'uuid', nullable: false }],
+						primaryKey: 'postId',
+						foreignKeys: [
+							{
+								columns: ['postId'],
+								references: { table: 'blogPosts', columns: ['id'] },
+							},
+						],
+						indexes: [{ name: 'postCommentsPostIdIdx', columns: ['postId'] }],
+						checkConstraints: [
+							{ name: 'postCommentsCheck', expression: 'post_id IS NOT NULL' },
+						],
+					}),
+				),
+				enums: new Map([
+					['commentStatus', { name: 'commentStatus', values: ['open'] }],
+				]),
+				sequences: new Map([['postCommentsSeq', { name: 'postCommentsSeq' }]]),
+			},
+			context,
+			{
+				toDatabase: (name) =>
+					name.replace(/([a-z0-9])([A-Z])/gu, '$1_$2').toLowerCase(),
+			},
+		);
+		expect(
+			declarations.declarations.map((declaration) => ({
+				kind: declaration.address.kind,
+				name: declaration.address.name,
+				parent: declaration.address.parent?.name,
+			})),
+		).toEqual(
+			expect.arrayContaining([
+				{ kind: 'table', name: 'post_comments', parent: undefined },
+				{ kind: 'column', name: 'post_id', parent: 'post_comments' },
+				{
+					kind: 'index',
+					name: 'post_comments_post_id_idx',
+					parent: 'post_comments',
+				},
+				{
+					kind: 'constraint',
+					name: 'pk_post_comments',
+					parent: 'post_comments',
+				},
+				{
+					kind: 'constraint',
+					name: 'fk_post_comments_post_id',
+					parent: 'post_comments',
+				},
+				{
+					kind: 'constraint',
+					name: 'post_comments_check',
+					parent: 'post_comments',
+				},
+				{ kind: 'enum', name: 'comment_status', parent: undefined },
+				{ kind: 'sequence', name: 'post_comments_seq', parent: undefined },
+			]),
+		);
+		expect(JSON.stringify(declarations)).not.toContain('postComments');
+		expect(JSON.stringify(declarations)).not.toContain('postId');
+	});
+
 	it('SC-24: refuses admission when a same-name live object has another identity', () => {
 		const recorded = {
 			engine: 'postgresql',

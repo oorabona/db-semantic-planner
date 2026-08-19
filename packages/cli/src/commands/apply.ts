@@ -50,7 +50,10 @@ import {
 	type GeneratorExecutionResult,
 } from './generator-execution.js';
 import type { GeneratorDurablePlan } from './generator-plan.js';
-import { runGeneratorPlan } from './generator-plan.js';
+import {
+	persistedLifecycleDirectiveError,
+	runGeneratorPlan,
+} from './generator-plan.js';
 import {
 	exitCodeForPlanResult,
 	formatPlanHuman,
@@ -1107,6 +1110,13 @@ async function runApplyInternal(
 					if (!manifest.ok)
 						throw new RecordedPlanDigestMismatchError(
 							`persisted generator manifest is invalid: ${manifest.detail}`,
+						);
+					const lifecycleError = persistedLifecycleDirectiveError(
+						manifest.manifest.steps,
+					);
+					if (lifecycleError)
+						throw new RecordedPlanDigestMismatchError(
+							`persisted generator manifest is invalid: ${lifecycleError}`,
 						);
 					if (generatorRunHasPriorStepEvents(current))
 						return {

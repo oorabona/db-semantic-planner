@@ -60,4 +60,45 @@ describe('declared table re-addressing in schema diff', () => {
 			'drop_table',
 		]);
 	});
+
+	it('normalizes both endpoints and assesses every occupied readdress state', () => {
+		const desired = model([
+			table('newUsers', {
+				from: { name: 'oldUsers' },
+				to: { name: 'newUsers' },
+			}),
+		]);
+		const compare = (db: ModelIR) =>
+			compareSchemata(desired, db, { dbCasing: 'snake_case' }).changes;
+
+		const sourceOnly = compare(model([table('old_users')]));
+		expect(sourceOnly).toHaveLength(1);
+		expect(sourceOnly[0]).toMatchObject({
+			kind: 'readdress_table',
+			table: 'new_users',
+			meta: {
+				readdressAssessment: 'source-only',
+				readdress: {
+					from: { name: 'old_users' },
+					to: { name: 'new_users' },
+				},
+			},
+		});
+
+		const targetOnly = compare(model([table('new_users')]));
+		expect(targetOnly).toHaveLength(1);
+		expect(targetOnly[0]).toMatchObject({
+			kind: 'readdress_table',
+			meta: { readdressAssessment: 'target-only' },
+		});
+
+		const bothPresent = compare(
+			model([table('old_users'), table('new_users')]),
+		);
+		expect(bothPresent).toHaveLength(1);
+		expect(bothPresent[0]).toMatchObject({
+			kind: 'readdress_table',
+			meta: { readdressAssessment: 'target-occupied' },
+		});
+	});
 });

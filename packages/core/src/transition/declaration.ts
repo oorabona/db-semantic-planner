@@ -20,6 +20,19 @@ export interface DeclarationAddressContext {
 	readonly schema: string;
 }
 
+/**
+ * The declaration layer deliberately depends on this small structural naming
+ * boundary rather than an adapter package. Callers pass the same strategy that
+ * comparison and proof use for the target database.
+ */
+export interface DeclarationNamingStrategy {
+	toDatabase(identifier: string): string;
+}
+
+const identityDeclarationNaming: DeclarationNamingStrategy = {
+	toDatabase: (identifier) => identifier,
+};
+
 function jsonError(path: string, detail: string): Error {
 	return new Error(
 		`declaration is not canonicalizable JSON at ${path}: ${detail}`,
@@ -154,25 +167,22 @@ function tableAddress(
 export function declarationSetFromModel(
 	model: ModelIR,
 	context: DeclarationAddressContext,
+	naming: DeclarationNamingStrategy = identityDeclarationNaming,
 ): DeclarationSet {
 	const declarations: ManagedDeclaration[] = [];
+	const toDatabase = (identifier: string) => naming.toDatabase(identifier);
 	for (const [tableKey, table] of [...model.tables].sort(([a], [b]) =>
 		a < b ? -1 : a > b ? 1 : 0,
 	)) {
 		const tablePath = `schema.tables[${JSON.stringify(tableKey)}]`;
-		const parent = tableAddress(context, table.name);
+		const tableName = toDatabase(table.name);
+		const parent = tableAddress(context, tableName);
 		declarations.push(
-			declaration(
-				context,
-				'table',
-				table.name,
-				{ name: table.name },
-				tablePath,
-			),
+			declaration(context, 'table', tableName, { name: tableName }, tablePath),
 		);
 		for (const [index, column] of table.columns.entries()) {
 			const fragment = {
-				name: column.name,
+				name: toDatabase(column.name),
 				type: column.type,
 				nullable: column.nullable,
 				...optional('js', column.js),
@@ -193,7 +203,7 @@ export function declarationSetFromModel(
 				declaration(
 					context,
 					'column',
-					column.name,
+					toDatabase(column.name),
 					fragment,
 					`${tablePath}.columns[${index}]`,
 					parent,
@@ -203,49 +213,83 @@ export function declarationSetFromModel(
 		for (const [index, item] of table.indexes.entries()) {
 			// These addresses are physical PostgreSQL names, shared with the
 			// generator manifest. Positional pseudo-names cannot be adopted.
-			const name = item.name ?? `idx_${table.name}_${item.columns.join('_')}`;
+			const physicalItem = {
+				...item,
+				...(item.name === undefined ? {} : { name: toDatabase(item.name) }),
+				columns: item.columns.map(toDatabase),
+				...(item.include === undefined
+					? {}
+					: { include: item.include.map(toDatabase) }),
+				...(item.opclass === undefined
+					? {}
+					: {
+							opclass: Object.fromEntries(
+								Object.entries(item.opclass).map(([key, value]) => [
+									toDatabase(key),
+									value,
+								]),
+							),
+						}),
+			};
+			const name =
+				physicalItem.name ??
+				`idx_${tableName}_${physicalItem.columns.join('_')}`;
 			declarations.push(
 				declaration(
 					context,
 					'index',
 					name,
-					item,
+					physicalItem,
 					`${tablePath}.indexes[${index}]`,
 					parent,
 				),
 			);
 		}
 		if (table.primaryKey !== undefined) {
+			const columns =
+				typeof table.primaryKey === 'string'
+					? toDatabase(table.primaryKey)
+					: table.primaryKey.map(toDatabase);
 			declarations.push(
 				declaration(
 					context,
 					'constraint',
-					`pk_${table.name}`,
-					{ kind: 'primary-key', columns: table.primaryKey },
+					`pk_${tableName}`,
+					{ kind: 'primary-key', columns },
 					`${tablePath}.primaryKey`,
 					parent,
 				),
 			);
 		}
 		for (const [index, item] of table.foreignKeys.entries()) {
+			const physicalItem = {
+				...item,
+				columns: item.columns.map(toDatabase),
+				references: {
+					...item.references,
+					table: toDatabase(item.references.table),
+					columns: item.references.columns.map(toDatabase),
+				},
+			};
 			declarations.push(
 				declaration(
 					context,
 					'constraint',
-					`fk_${table.name}_${item.columns.join('_')}`,
-					{ kind: 'foreign-key', ...item },
+					`fk_${tableName}_${physicalItem.columns.join('_')}`,
+					{ kind: 'foreign-key', ...physicalItem },
 					`${tablePath}.foreignKeys[${index}]`,
 					parent,
 				),
 			);
 		}
 		for (const [index, item] of (table.checkConstraints ?? []).entries()) {
+			const physicalItem = { ...item, name: toDatabase(item.name) };
 			declarations.push(
 				declaration(
 					context,
 					'constraint',
-					item.name,
-					{ kind: 'check', ...item },
+					physicalItem.name,
+					{ kind: 'check', ...physicalItem },
 					`${tablePath}.checkConstraints[${index}]`,
 					parent,
 				),
@@ -259,8 +303,8 @@ export function declarationSetFromModel(
 			declaration(
 				context,
 				'enum',
-				name,
-				item,
+				toDatabase(name),
+				{ ...item, name: toDatabase(item.name) },
 				`schema.enums[${JSON.stringify(name)}]`,
 			),
 		);
@@ -272,8 +316,8 @@ export function declarationSetFromModel(
 			declaration(
 				context,
 				'sequence',
-				name,
-				item,
+				toDatabase(name),
+				{ ...item, name: toDatabase(item.name) },
 				`schema.sequences[${JSON.stringify(name)}]`,
 			),
 		);

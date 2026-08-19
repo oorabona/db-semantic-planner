@@ -12,6 +12,7 @@ import {
 	createPgTransitionRunPersister,
 	ensureTransitionJournal,
 	escapeDiagnosticText,
+	getNamingPluginForDbCasing,
 	PgExecutionContractDerivationError,
 	pgTargetIdentityMismatch,
 	readPgExecutionTargetFromClient,
@@ -470,11 +471,15 @@ export async function runPlan(
 				);
 				const durablePlan = bindDeclarationSet(
 					contractedPlan,
-					declarationSetFromModel(loaded.model, {
-						engine: context.engine,
-						database: context.databaseId,
-						schema: options.schema ?? 'public',
-					}),
+					declarationSetFromModel(
+						loaded.model,
+						{
+							engine: context.engine,
+							database: context.databaseId,
+							schema: options.schema ?? 'public',
+						},
+						getNamingPluginForDbCasing(loaded.dbCasing ?? 'preserve'),
+					),
 				);
 				const run = createTransitionRunMetadata(durablePlan);
 				const proofContext = prove.plan.observations.find(

@@ -46,6 +46,47 @@ function verify(schemaModel: ModelIR, dbModel: ModelIR) {
 // ============================================================================
 
 describe('verify (via compareSchemata)', () => {
+	it('reports declared readdress drift with its state and blocks refused work', () => {
+		const desired = makeModel([
+			[
+				'accounts',
+				makeTable({
+					name: 'accounts',
+					readdress: {
+						from: { name: 'users' },
+						to: { name: 'accounts' },
+					},
+				}),
+			],
+		]);
+		const refused = verify(desired, makeModel([]));
+		expect(refused).toMatchObject({
+			valid: false,
+			issues: [
+				{
+					type: 'readdress_table',
+					severity: 'error',
+					readdress: { state: 'source-missing' },
+				},
+			],
+		});
+
+		const executable = verify(
+			desired,
+			makeModel([['users', makeTable({ name: 'users' })]]),
+		);
+		expect(executable).toMatchObject({
+			valid: true,
+			issues: [
+				{
+					type: 'readdress_table',
+					severity: 'warning',
+					readdress: { state: 'source-only' },
+				},
+			],
+		});
+	});
+
 	describe('table-level drift', () => {
 		it('should detect missing table in database', () => {
 			const schemaModel = makeModel([

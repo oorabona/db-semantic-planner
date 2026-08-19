@@ -304,6 +304,52 @@ describe('dbsp plan outcomes', () => {
 		expect(runMetadata.planDigest).toBe(transitionPlanDigest(result.plan!));
 	});
 
+	it('binds declarations using the schema physical naming strategy', async () => {
+		const camelCaseModel = {
+			...model,
+			tables: new Map([
+				[
+					'postComments',
+					{
+						name: 'postComments',
+						columns: [{ name: 'postId', type: 'uuid', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
+			]),
+		} as ModelIR;
+		const { result } = await run(
+			{ kind: 'transitions', candidates: [], obligations: [] },
+			{ kind: 'proven', plan: provenPlan(), assessment: applicable },
+			{
+				loadSchema: vi.fn().mockResolvedValue({
+					model: camelCaseModel,
+					definition: {},
+					tableNames: ['postComments'],
+					dbCasing: 'snake_case',
+				}),
+			},
+		);
+		expect(result.plan?.declarations?.declarations).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					address: expect.objectContaining({
+						kind: 'table',
+						name: 'post_comments',
+					}),
+				}),
+				expect.objectContaining({
+					address: expect.objectContaining({
+						kind: 'column',
+						name: 'post_id',
+						parent: expect.objectContaining({ name: 'post_comments' }),
+					}),
+				}),
+			]),
+		);
+	});
+
 	it('OBL-RUN9 rejects a non-canonicalizable declaration before comparison or persistence', async () => {
 		const deps = dependencies(
 			{ kind: 'no-drift', claimedInvariant: { kind: 'test', scope: [] } },

@@ -1558,12 +1558,16 @@ function buildTables(
 	for (const tableName of tableNames) {
 		const tableDef = definition[tableName];
 		if (!tableDef) continue;
-		if (
-			constraints?.[tableName]?.adopt === true &&
-			constraints[tableName].replace === true
-		)
+		const lifecycleDirectives = [
+			constraints?.[tableName]?.adopt === true ? 'adopt' : undefined,
+			constraints?.[tableName]?.replace === true ? 'replace' : undefined,
+			constraints?.[tableName]?.readdress === undefined
+				? undefined
+				: 'readdress',
+		].filter((directive): directive is string => directive !== undefined);
+		if (lifecycleDirectives.length > 1)
 			throw new Error(
-				`schema table ${tableName} cannot set adopt and replace together`,
+				`schema table ${tableName} cannot set more than one lifecycle directive (${lifecycleDirectives.join(', ')})`,
 			);
 
 		const { columns, foreignKeys, primaryKey } = buildColumnsForTable(
