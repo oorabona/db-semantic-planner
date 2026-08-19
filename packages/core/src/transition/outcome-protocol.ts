@@ -476,6 +476,14 @@ export async function classifyOutcomeRecovery(
 				'recovery operation read-back cannot verify effect after executing',
 			);
 		if (
+			claim.stableStateBeforeClaim === 'managed' &&
+			readBack.effect !== 'applied'
+		)
+			return recoveryPending(
+				input,
+				'recovery executing managed modification requires an operation-specific applied read-back',
+			);
+		if (
 			claim.stableStateBeforeClaim !== 'managed' &&
 			!input.acceptedExternalDdlExclusion
 		)

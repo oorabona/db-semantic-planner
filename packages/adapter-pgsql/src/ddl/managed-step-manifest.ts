@@ -1,12 +1,15 @@
+import { createHash } from 'node:crypto';
 import type {
 	DeclarableResourceAddress,
 	LedgerClaimKind,
 	NormalizedManagedStep,
 } from '@dbsp/types';
+import { renderColumnDbType } from '../db-type.js';
 import {
 	classifyGeneratedMutation,
 	type GeneratedMutationClassification,
 } from './destructive-classification.js';
+import { formatSqlDefault } from './phases/utils.js';
 import type { ChangeKind, SchemaChange } from './schema-diff.js';
 
 type Address = DeclarableResourceAddress & {
@@ -14,6 +17,158 @@ type Address = DeclarableResourceAddress & {
 };
 
 type Meta = Readonly<Record<string, unknown>>;
+
+type GeneratedColumnPostcondition = {
+	readonly name: string;
+	readonly type?: string;
+	readonly nullable?: boolean;
+	readonly hasDefault?: boolean;
+	readonly default?: string;
+};
+
+type GeneratedPostcondition =
+	| {
+			readonly kind: 'table';
+			readonly columns: readonly GeneratedColumnPostcondition[];
+	  }
+	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
+	| { readonly kind: 'exempt'; readonly reason: string };
+
+function postconditionPayload(
+	value: GeneratedPostcondition,
+): import('@dbsp/types').LedgerPayload {
+	return {
+		value,
+		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+	};
+}
+
+function requiredColumn(
+	value: unknown,
+	label: string,
+): import('@dbsp/types').ColumnIR {
+	if (!value || typeof value !== 'object' || Array.isArray(value))
+		throw new Error(
+			`generator planning refuses ${label}: missing typed column`,
+		);
+	const column = value as import('@dbsp/types').ColumnIR;
+	if (typeof column.name !== 'string' || typeof column.nullable !== 'boolean')
+		throw new Error(
+			`generator planning refuses ${label}: missing typed column`,
+		);
+	return column;
+}
+
+function columnPostcondition(
+	column: import('@dbsp/types').ColumnIR,
+	schema: string,
+	primaryKey = false,
+): GeneratedColumnPostcondition {
+	const hasDefault = column.default !== undefined;
+	return {
+		name: column.name,
+		type: renderColumnDbType(column, schema),
+		nullable: primaryKey ? false : column.nullable,
+		hasDefault,
+		...(hasDefault
+			? { default: formatSqlDefault(column.default, 'generator postcondition') }
+			: {}),
+	};
+}
+
+/**
+ * Capture the ModelIR/SchemaChange shape that the executor must read back.
+ * This is deliberately assembled before SQL rendering becomes the only durable
+ * source, and is therefore covered by the normalized managed-step digest.
+ */
+export function generatedPostconditionForChange(input: {
+	readonly change: SchemaChange;
+	readonly schema: string;
+}): import('@dbsp/types').LedgerPayload | undefined {
+	const { change, schema } = input;
+	if (change.kind === 'create_table') {
+		const table = change.meta?.table;
+		if (!table || typeof table !== 'object' || Array.isArray(table))
+			throw new Error(
+				'generator planning refuses create_table: missing typed table postcondition',
+			);
+		const shape = table as import('@dbsp/types').TableIR;
+		const primaryKey = new Set(
+			shape.primaryKey === undefined
+				? []
+				: typeof shape.primaryKey === 'string'
+					? [shape.primaryKey]
+					: shape.primaryKey,
+		);
+		return postconditionPayload({
+			kind: 'table',
+			columns: shape.columns.map((column) =>
+				columnPostcondition(column, schema, primaryKey.has(column.name)),
+			),
+		});
+	}
+	const column =
+		change.kind === 'add_column'
+			? requiredColumn(change.meta?.column, change.kind)
+			: change.kind === 'alter_column_type' && change.meta?.column !== undefined
+				? requiredColumn(change.meta.column, change.kind)
+				: undefined;
+	if (column)
+		return postconditionPayload({
+			kind: 'column',
+			column: columnPostcondition(column, schema),
+		});
+	if (change.kind === 'alter_column_type') {
+		// Older SchemaChange producers legitimately carry only the target SQL
+		// bundle. Preserve that accepted planning surface; it is a deliberate
+		// postcondition exemption because no trustworthy target type exists in
+		// the change material to compare against catalogue state.
+		return postconditionPayload({
+			kind: 'exempt',
+			reason: 'legacy alter_column_type has no typed target column',
+		});
+	}
+	if (change.kind === 'alter_column_nullable') {
+		const name = text(change.column, change.kind);
+		const nullable = change.meta?.nullable;
+		if (typeof nullable !== 'boolean')
+			throw new Error(
+				'generator planning refuses alter_column_nullable: missing typed nullable postcondition',
+			);
+		return postconditionPayload({
+			kind: 'column',
+			column: { name, nullable },
+		});
+	}
+	if (change.kind === 'alter_column_default') {
+		const name = text(change.column, change.kind);
+		const hasDefault = change.meta?.default !== undefined;
+		return postconditionPayload({
+			kind: 'column',
+			column: {
+				name,
+				hasDefault,
+				...(hasDefault
+					? {
+							default: formatSqlDefault(
+								change.meta?.default,
+								'generator postcondition',
+							),
+						}
+					: {}),
+			},
+		});
+	}
+	// Every declarable generator step carries an explicit postcondition policy.
+	// The remaining address kinds are verified by their existing catalogue
+	// projection (or, for removals, an `absent` terminal), rather than by a
+	// ModelIR column shape. Keeping that exemption in the digest makes the
+	// boundary visible and prevents a later silent no-postcondition fallback.
+	return postconditionPayload({
+		kind: 'exempt',
+		reason: `${change.kind} uses its address-specific catalogue projection`,
+	});
+}
 
 /**
  * The only change-kind boundary between diagnostic schema diffing and managed
@@ -303,6 +458,10 @@ export function createPgsqlGeneratedManagedStep(input: {
 			: classification === 'paired-readdress'
 				? 'readdress-intent'
 				: 'intent';
+	const expectedDeclaration = generatedPostconditionForChange({
+		change: input.change,
+		schema: input.schema,
+	});
 	return {
 		stepKey: input.stepKey,
 		order: input.order,
@@ -316,6 +475,7 @@ export function createPgsqlGeneratedManagedStep(input: {
 		},
 		classification,
 		requiresVacancy: createsAddress(input.change),
+		...(expectedDeclaration === undefined ? {} : { expectedDeclaration }),
 		replayPolicy: classification === 'removal' ? 'fresh-live-only' : 'recorded',
 	};
 }

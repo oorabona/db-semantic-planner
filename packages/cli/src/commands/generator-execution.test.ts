@@ -51,6 +51,13 @@ describe('generator execution fixture shim', () => {
 		[
 			{
 				...dataDestructiveStep,
+				expectedDeclaration: {
+					value: {
+						kind: 'column',
+						column: { name: 'id', type: 'bigint' },
+					},
+					digest: 'column-postcondition',
+				},
 				address: {
 					...dataDestructiveStep.address,
 					kind: 'column' as const,
@@ -59,52 +66,6 @@ describe('generator execution fixture shim', () => {
 				},
 			},
 			[{ column_type: 'integer', is_not_null: true, column_default: null }],
-		],
-		[
-			{
-				...dataDestructiveStep,
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT accounts_check CHECK (id > 0)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'constraint' as const,
-					name: 'accounts_check',
-					parent: dataDestructiveStep.address,
-				},
-			},
-			[{ constraint_type: 'c', constraint_definition: 'CHECK (id < 0)' }],
-		],
-		[
-			{
-				...dataDestructiveStep,
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'index' as const,
-					name: 'accounts_id_idx',
-					parent: dataDestructiveStep.address,
-				},
-			},
-			[
-				{
-					is_unique: false,
-					index_definition:
-						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
-				},
-			],
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
@@ -119,6 +80,15 @@ describe('generator execution fixture shim', () => {
 	it('normalizes PostgreSQL primary-key attnotnull on CREATE TABLE read-back', async () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'table',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+					],
+				},
+				digest: 'table-postcondition',
+			},
 			statementBundle: {
 				statements: [
 					{
@@ -153,9 +123,77 @@ describe('generator execution fixture shim', () => {
 		});
 	});
 
+	it.each([
+		[
+			'constraint',
+			{
+				...dataDestructiveStep,
+				statementBundle: {
+					statements: [
+						{
+							ordinal: 0,
+							sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT accounts_check CHECK (id > 0)',
+						},
+					],
+				},
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'constraint' as const,
+					name: 'accounts_check',
+					parent: dataDestructiveStep.address,
+				},
+			},
+			[{ constraint_type: 'c', constraint_definition: 'CHECK (id < 0)' }],
+		],
+		[
+			'index',
+			{
+				...dataDestructiveStep,
+				statementBundle: {
+					statements: [
+						{
+							ordinal: 0,
+							sql: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+						},
+					],
+				},
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'index' as const,
+					name: 'accounts_id_idx',
+					parent: dataDestructiveStep.address,
+				},
+			},
+			[
+				{
+					is_unique: false,
+					index_definition:
+						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
+				},
+			],
+		],
+	] as const)('retains the structural %s postcondition guard', async (_kind, step, rows) => {
+		await expect(
+			readGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows }) },
+				step as unknown as NormalizedManagedStep,
+				step.address! as never,
+			),
+		).rejects.toThrow('postcondition differs');
+	});
+
 	it('reads CREATE TABLE columns when a separately-rendered constraint follows it', async () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'table',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+					],
+				},
+				digest: 'table-postcondition',
+			},
 			statementBundle: {
 				statements: [
 					{

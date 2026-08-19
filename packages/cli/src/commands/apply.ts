@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
+	appendIntentJournal,
 	appendTransitionAuthorization,
 	createPgTransitionLessor,
 	createPgTransitionPack,
@@ -32,6 +33,7 @@ import type {
 	AssumptionAcceptance,
 	LedgerAddress,
 	NormalizedManagedStep,
+	PhysicalOperation,
 	ResourceAddress,
 	ResourceSelector,
 	TransitionRunAuthorization,
@@ -85,8 +87,29 @@ export interface ApplyOptions {
 export function generatorRunHasPriorStepEvents(
 	loaded: Pick<TransitionRunJournal, 'events'>,
 ): boolean {
-	return loaded.events.length > 0;
+	return loaded.events.some((event) => {
+		const executionId =
+			event.event === 'intent' && 'executionId' in event.record
+				? event.record.executionId
+				: undefined;
+		return !(
+			typeof executionId === 'string' &&
+			event.stepId === `dbsp.generator.attempt:${executionId}` &&
+			event.operationRef === 'dbsp.generator.attempt'
+		);
+	});
 }
+
+const GENERATOR_ATTEMPT_OPERATION: Omit<PhysicalOperation, 'payload'> = {
+	ref: 'dbsp.generator.attempt',
+	operationKind: {
+		artifact: {
+			id: 'dbsp.postgresql.generator' as PhysicalOperation['operationKind']['artifact']['id'],
+			version: '1',
+		},
+		name: 'GeneratorAttempt',
+	},
+};
 
 /**
  * The just-persisted generator-removal exception is an in-module capability,
@@ -1058,6 +1081,25 @@ async function runApplyInternal(
 						planDigest: actualDigest,
 						schema: recordedSchema,
 						approval: { approvals: policy.accepts },
+						recordAttempt: async (executionId) => {
+							const journalLease =
+								await acquireExclusiveTransitionLease(target);
+							try {
+								await appendIntentJournal(journalLease.session, {
+									runId: current.run.runId,
+									run: current.run,
+									executionId,
+									stepId: `dbsp.generator.attempt:${executionId}`,
+									operation: {
+										...GENERATOR_ATTEMPT_OPERATION,
+										payload: { executionId },
+									},
+									recordedAt: new Date().toISOString(),
+								});
+							} finally {
+								await journalLease.release();
+							}
+						},
 						...(options.replace === undefined
 							? {}
 							: { replaces: options.replace }),

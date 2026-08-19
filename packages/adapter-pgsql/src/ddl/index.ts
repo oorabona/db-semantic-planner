@@ -40,6 +40,7 @@ export {
 export {
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
+	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 export {
 	generateDownSQL,

@@ -3,11 +3,13 @@
 import { randomUUID } from 'node:crypto';
 import {
 	camelCaseNaming,
+	createPgsqlGeneratedManagedStep,
 	derivePostgresqlCapabilitiesForVersion,
 	generateDDL,
 } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 import { afterAll, describe, expect, it } from 'vitest';
+import { readGeneratedPostcondition } from '../../packages/cli/src/commands/generator-execution.js';
 import {
 	closeTestDb,
 	createSchema,
@@ -35,6 +37,76 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL DDL generator restored guarantees', () => {
+	it('OBL-GEN-POST1 mutation: raw catalogue spellings must not reject a numeric/function-default/CHECK quoted table read-back', async () => {
+		const schemaName = `postcondition_${randomUUID().replaceAll('-', '')}`;
+		await createSchema(schemaName);
+		try {
+			const step = createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'create_table',
+					table: 'QuotedTable',
+					destructive: false,
+					details: 'create quoted postcondition fixture',
+					meta: {
+						table: {
+							name: 'QuotedTable',
+							columns: [
+								{
+									name: 'Amount',
+									type: 'number',
+									originalDbType: 'numeric(10,2)',
+									nullable: false,
+								},
+								{
+									name: 'CreatedAt',
+									type: 'timestamp',
+									nullable: false,
+									default: { sql: 'now()' },
+								},
+							],
+							primaryKey: undefined,
+							foreignKeys: [],
+							indexes: [],
+							checkConstraints: [
+								{
+									name: 'quoted_amount_nonnegative',
+									expression: '"Amount" >= 0',
+								},
+							],
+						},
+					},
+				},
+				database: await getTestPool().then(async (pool) =>
+					String(
+						(await pool.query('SELECT current_database() AS name')).rows[0]
+							?.name,
+					),
+				),
+				schema: schemaName,
+				stepKey: 'generator:quoted-postcondition',
+				order: 0,
+				statements: [
+					`CREATE TABLE ${quoteIdent(schemaName)}."QuotedTable" ("Amount" numeric(10,2) NOT NULL, "CreatedAt" timestamptz NOT NULL DEFAULT now(), CONSTRAINT "quoted_amount_nonnegative" CHECK ("Amount" >= 0))`,
+				],
+			});
+			const pool = await getTestPool();
+			await executeDdl(step.statementBundle.statements.map((item) => item.sql));
+			await expect(
+				readGeneratedPostcondition(pool, step, step.address!),
+			).resolves.toMatchObject({ value: { kind: 'table' } });
+			await expect(
+				pool.query(
+					`SELECT conname FROM pg_constraint WHERE conrelid = $1::regclass AND conname = 'quoted_amount_nonnegative'`,
+					[`${schemaName}."QuotedTable"`],
+				),
+			).resolves.toMatchObject({
+				rows: [{ conname: 'quoted_amount_nonnegative' }],
+			});
+		} finally {
+			await dropSchema(schemaName);
+		}
+	});
+
 	it('provisions a verbatim mixed-case schemaName while camel-case object names transform', async () => {
 		const desired = schema({
 			orderEvents: {

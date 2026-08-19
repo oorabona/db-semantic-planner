@@ -105,4 +105,55 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			requiresVacancy: true,
 		});
 	});
+
+	it('carries ModelIR table postconditions without deriving them from rendered SQL', () => {
+		const step = createPgsqlGeneratedManagedStep({
+			change: {
+				kind: 'create_table',
+				table: 'ledger',
+				destructive: false,
+				details: 'create ledger',
+				meta: {
+					table: {
+						name: 'ledger',
+						columns: [
+							{
+								name: 'Amount',
+								type: 'number',
+								originalDbType: 'numeric(10,2)',
+								nullable: false,
+								default: { sql: 'round(random() * 10, 2)' },
+							},
+						],
+						primaryKey: ['Amount'],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{ name: 'ledger_amount_check', expression: '"Amount" >= 0' },
+						],
+					},
+				},
+			},
+			database: 'app',
+			schema: 'public',
+			stepKey: 'generator:postcondition',
+			order: 0,
+			statements: [
+				'CREATE TABLE public.ledger ("Amount" numeric(10, 2) DEFAULT round(random() * 10, 2), CHECK ("Amount" >= 0))',
+			],
+		});
+
+		expect(step.expectedDeclaration?.value).toEqual({
+			kind: 'table',
+			columns: [
+				{
+					name: 'Amount',
+					type: 'numeric(10,2)',
+					nullable: false,
+					hasDefault: true,
+					default: 'round(random() * 10, 2)',
+				},
+			],
+		});
+	});
 });

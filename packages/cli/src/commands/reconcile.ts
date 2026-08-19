@@ -239,7 +239,7 @@ function readdressRecoveryReport(
 	};
 }
 
-function unresolvedRecoveryDetail(
+export function unresolvedRecoveryDetail(
 	reports: readonly ReconcileRecoveryReport[],
 ): string | undefined {
 	const unresolved = reports.filter(
@@ -248,6 +248,8 @@ function unresolvedRecoveryDetail(
 			report.outcome === 'blocked' ||
 			report.outcome === 'malformed-chain' ||
 			report.outcome === 'protocol-refused' ||
+			report.outcome === 'transport-ambiguous' ||
+			report.outcome === 'no-open-claim' ||
 			report.outcome === 'indeterminate-pair',
 	);
 	if (unresolved.length === 0) return undefined;
@@ -271,13 +273,12 @@ export function formatReconcileHuman(result: ReconcileResult): string {
  * actual apply attempts. Greenfield recovery never treats a run id as an
  * execution id: that legacy fallback could attach an unrelated reservation.
  */
-function executionIdsForRun(
+export function executionIdsForRun(
 	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
 ): readonly string[] {
-	// A newly persisted run's first execution scope is its durable run id. Later
-	// replay attempts are recorded in the transition journal with their distinct
-	// execution ids. This is a run-to-execution mapping, not the old fallback
-	// that treated an arbitrary execution id as a run id after lookup failed.
+	// Attempt records are additive. Keep every documented pre-attempt scope so
+	// interrupted executions produced before (or while persisting) an attempt
+	// record remain recoverable, then add each durably recorded attempt.
 	const executionIds = new Set<string>([journal.run.runId]);
 	for (const event of journal.events) {
 		const record = event.record;
@@ -295,9 +296,6 @@ function executionIdsForRun(
 		)
 			executionIds.add(record.intent.executionId);
 	}
-	// Generator executions deliberately use a deterministic execution scope
-	// derived from the durable run id. Its persisted plan has no ordinary core
-	// intent journal event, so include that one documented scope for recovery.
 	if ('generator' in journal.plan)
 		executionIds.add(`dbsp.generator.execution.${journal.run.runId}`);
 	return [...executionIds];

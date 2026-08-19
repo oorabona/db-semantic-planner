@@ -15,6 +15,7 @@ import {
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionLessor,
 	createPgTransitionRunPersister,
+	generatedPostconditionForChange,
 	generateMigrationSQL,
 	readPgCatalogueIdentity,
 	renderPgTableReaddressStatements,
@@ -571,6 +572,23 @@ export async function runGeneratorPlan(input: {
 				table: change.table,
 			};
 			if (change.kind === 'replace_table' && change.replacement) {
+				const replacementTable = [...loaded.model.tables.values()].find(
+					(table) => table.name === change.table,
+				);
+				const replacementPostcondition = generatedPostconditionForChange({
+					change: {
+						kind: 'create_table',
+						table: change.table,
+						destructive: false,
+						details: `Create replacement table "${change.table}"`,
+						meta: { table: replacementTable },
+					},
+					schema,
+				});
+				if (replacementPostcondition === undefined)
+					throw new Error(
+						`generator planning refuses replacement ${change.table}: missing table postcondition`,
+					);
 				const selector = {
 					kind: 'replacement' as const,
 					selector: `table:${change.table}`,
@@ -593,6 +611,7 @@ export async function runGeneratorPlan(input: {
 						statements: change.replacement.createStatements,
 						selection: selector,
 						requiresVacancy: true,
+						expectedDeclaration: replacementPostcondition,
 					}),
 				);
 				continue;

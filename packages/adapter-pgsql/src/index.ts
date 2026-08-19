@@ -28,6 +28,8 @@ export {
 	type PrecompiledJoinDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+// PostgreSQL type spelling/canonicalization boundary.
+export { dbTypesEqual } from './db-type.js';
 // DDL Generation
 export {
 	type AddedEnumValue,
@@ -52,6 +54,7 @@ export {
 	generateCreateIndex,
 	generateDDL,
 	generateDownSQL,
+	generatedPostconditionForChange,
 	generateMigrationSQL,
 	type IndexCapabilityContext,
 	IndexFeatureUnsupportedError,
@@ -229,6 +232,7 @@ export {
 	type AttachLogicalIdentityPayload,
 	acquirePgLedgerLocks,
 	acquirePgTransitionClient,
+	appendIntentJournal,
 	appendTransitionAuthorization,
 	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid,
 	assertPgDatabaseWritable,

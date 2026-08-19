@@ -4,12 +4,14 @@ import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import {
+	appendIntentJournal,
 	classifyGeneratedMutation,
 	classifyRemovalEffectsClosure,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
+	DBSP_TRANSITION_JOURNAL_TABLE,
 	readPgCatalogueIdentity,
 	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
@@ -20,7 +22,11 @@ import {
 	openPgOutcomeClaimGroup,
 	resolvePgOutcomeClaimGroup,
 } from '@dbsp/adapter-pgsql/internal';
-import { outcomeClaimId, transitionPlanDigest } from '@dbsp/core';
+import {
+	outcomeClaimId,
+	semanticArtifactId,
+	transitionPlanDigest,
+} from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	CascadeCoveredOutcomeClaimPlan,
@@ -1139,7 +1145,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		expect(terminals.rows).toEqual([]);
 	});
 
-	it('SC-68: reconcile finds an interrupted generator claim by durable run id', async () => {
+	it('SC-68 / OBL-GEN-ATTEMPT1 mutation: killing a generator after its durable reservation leaves both recorded retries discoverable by run id', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();
 		await pool.query(
@@ -1160,23 +1166,41 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 		);
 		const runId = `dbsp-generator-${randomUUID()}`;
 		const planDigest = transitionPlanDigest(plan);
-		await createPgTransitionRunPersister(pool).persist(
-			{
-				runId,
-				planDigest,
-				targetContextDigest: 'fixture',
-				databaseId,
-				coreVersion: 'fixture',
-				startedAt: new Date().toISOString(),
-				replayability: 'non-replayable-generator-removal',
-			},
-			plan,
-		);
+		const run = {
+			runId,
+			planDigest,
+			targetContextDigest: 'fixture',
+			databaseId,
+			coreVersion: 'fixture',
+			startedAt: new Date().toISOString(),
+			replayability: 'non-replayable-generator-removal' as const,
+		};
+		await createPgTransitionRunPersister(pool).persist(run, plan);
 		const step = plan.steps[0]!;
 		if (!isNormalizedManagedStep(step))
 			throw new Error('generator plan step is not normalized');
 		const plannedClaimKey = step.plannedClaimKeys[0]!;
-		const executionId = `dbsp.generator.execution.${runId}`;
+		const executionId = `dbsp.generator.execution.${randomUUID()}`;
+		const retryExecutionId = `dbsp.generator.execution.${randomUUID()}`;
+		for (const recordedExecutionId of [executionId, retryExecutionId])
+			await appendIntentJournal(pool, {
+				run,
+				runId,
+				executionId: recordedExecutionId,
+				stepId: `dbsp.generator.attempt:${recordedExecutionId}`,
+				operation: {
+					ref: 'dbsp.generator.attempt',
+					operationKind: {
+						artifact: {
+							id: semanticArtifactId('dbsp.postgresql.generator'),
+							version: '1',
+						},
+						name: 'GeneratorAttempt',
+					},
+					payload: { executionId: recordedExecutionId },
+				},
+				recordedAt: new Date().toISOString(),
+			});
 		const claimId = outcomeClaimId(executionId, plannedClaimKey, address);
 		const opened = await openFixtureOutcomeClaim(pool, {
 			claimId,
@@ -1211,5 +1235,13 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				[`${claimId}:reconcile:${runId}`],
 			),
 		).resolves.toMatchObject({ rows: [{ event_kind: 'refused' }] });
+		await expect(
+			pool.query<{ execution_id: string }>(
+				`SELECT record ->> 'executionId' AS execution_id FROM dbsp_meta.${DBSP_TRANSITION_JOURNAL_TABLE} WHERE run_id = $1 AND event = 'intent' ORDER BY seq`,
+				[runId],
+			),
+		).resolves.toMatchObject({
+			rows: [{ execution_id: executionId }, { execution_id: retryExecutionId }],
+		});
 	});
 });

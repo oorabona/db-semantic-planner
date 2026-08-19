@@ -71,7 +71,14 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 				},
 			],
 		},
-		events: [],
+		events: [
+			{
+				event: 'intent',
+				record: {
+					executionId: 'dbsp.generator.execution.run:generator',
+				},
+			} as never,
+		],
 	})),
 	readVerifiedPgLedgerReservationsForPair: vi.fn(),
 	recoverPgReaddressPair: vi.fn(),
@@ -120,7 +127,12 @@ vi.mock('@dbsp/core', () => ({
 	transitionPlanDigest: vi.fn(() => 'digest:generator'),
 }));
 
-import { classifyReconcileFailure, runReconcile } from './reconcile.js';
+import {
+	classifyReconcileFailure,
+	executionIdsForRun,
+	runReconcile,
+	unresolvedRecoveryDetail,
+} from './reconcile.js';
 
 describe('reconcile durable outcome ordering', () => {
 	function resetFixture(): void {
@@ -142,6 +154,47 @@ describe('reconcile durable outcome ordering', () => {
 		['catalogue', new Error('opaque'), 'catalogue'],
 	] as const)('OBL-REC3 keeps the %s cause distinct', (cause, error, stage) => {
 		expect(classifyReconcileFailure(error, stage)).toBe(cause);
+	});
+
+	it.each([
+		'transport-ambiguous',
+		'no-open-claim',
+	] as const)('never treats %s as completed recovery', (outcome) => {
+		expect(
+			unresolvedRecoveryDetail([
+				{
+					address: {
+						scope: 'schema',
+						engine: 'postgresql',
+						database: 'app',
+						schema: 'tenant',
+						kind: 'table',
+						name: 'accounts',
+					},
+					outcome,
+				},
+			]),
+		).toContain(outcome);
+	});
+
+	it('keeps documented generator scopes and adds every durable attempt', () => {
+		const executionId = 'dbsp.generator.execution.attempt-2';
+		expect(
+			executionIdsForRun({
+				run: { runId: 'run:generator', planDigest: 'digest:generator' },
+				plan: { generator: {}, steps: [] },
+				events: [
+					{
+						event: 'intent',
+						record: { executionId },
+					} as never,
+				],
+			} as never),
+		).toEqual([
+			'run:generator',
+			executionId,
+			'dbsp.generator.execution.run:generator',
+		]);
 	});
 	it('commits an interrupted generator refusal through the pool-owned outcome session', async () => {
 		resetFixture();

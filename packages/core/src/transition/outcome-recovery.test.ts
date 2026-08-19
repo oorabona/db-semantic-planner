@@ -198,10 +198,20 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		});
 	});
 
-	it('classifies executing modify and retire claims from the original grammar column', async () => {
+	it('keeps an executing managed modification pending without an applied-effect verifier', async () => {
 		expect(
 			await recover(openClaim('intent', 'executing', 'managed'), present, {
 				evidence: true,
+			}),
+		).toMatchObject({
+			kind: 'outcome-recovery-pending',
+			reason:
+				'recovery executing managed modification requires an operation-specific applied read-back',
+		});
+		expect(
+			await recover(openClaim('intent', 'executing', 'managed'), present, {
+				evidence: true,
+				effect: 'applied',
 			}),
 		).toMatchObject({
 			kind: 'outcome-recovery-append',

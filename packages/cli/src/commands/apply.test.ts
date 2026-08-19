@@ -298,6 +298,22 @@ describe('dbsp apply contract and policy', () => {
 		expect(generatorRunHasPriorStepEvents(fresh)).toBe(false);
 	});
 
+	it('does not treat durable generator attempt mappings as a step-scoped fact', () => {
+		const executionId = 'dbsp.generator.execution.attempt-1';
+		expect(
+			generatorRunHasPriorStepEvents({
+				events: [
+					{
+						event: 'intent',
+						stepId: `dbsp.generator.attempt:${executionId}`,
+						operationRef: 'dbsp.generator.attempt',
+						record: { executionId },
+					} as never,
+				],
+			}),
+		).toBe(false);
+	});
+
 	it('reports a rejecting pool cleanup beside a successful apply outcome', async () => {
 		const close = vi.fn(async () => {
 			throw new Error('pool shutdown failed');

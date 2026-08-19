@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import {
 	compareSchemata,
 	createPgsqlAdapter,
+	dbTypesEqual,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
@@ -282,92 +283,43 @@ function generatedPayload(value: unknown): LedgerPayload {
 	};
 }
 
-function sqlStringList(source: string): readonly string[] {
-	return [...source.matchAll(/'(?:''|[^'])+'/gu)].map((match) =>
-		match[0].slice(1, -1).replaceAll("''", "'"),
-	);
-}
-
-function sqlIdentifierList(source: string): readonly string[] {
-	return source
-		.split(',')
-		.map((identifier) => identifier.trim())
-		.map((identifier) =>
-			/^"((?:""|[^"])*)"$/u.test(identifier)
-				? identifier.slice(1, -1).replaceAll('""', '"')
-				: identifier,
-		)
-		.filter((identifier) => identifier.length > 0);
-}
-
-/**
- * PostgreSQL makes every PRIMARY KEY member `attnotnull`, including a column
- * whose CREATE TABLE clause omits an explicit NOT NULL.  Read the structural
- * table constraint so the expected shape uses the same catalogue fact.
- */
-function primaryKeyColumnNames(statement: string): ReadonlySet<string> {
-	const columns = new Set<string>();
-	for (const match of statement.matchAll(
-		/(?:\bCONSTRAINT\s+(?:"(?:""|[^"])+"|[^\s(]+)\s+)?\bPRIMARY\s+KEY\s*\(([^)]*)\)/giu,
-	))
-		for (const column of sqlIdentifierList(match[1] ?? '')) columns.add(column);
-	return columns;
-}
-
-function createTableColumnSpecifications(statement: string): readonly {
+type GeneratedColumnPostcondition = {
 	readonly name: string;
-	readonly type: string;
-	readonly nullable: boolean;
+	readonly type?: string;
+	readonly nullable?: boolean;
+	readonly hasDefault?: boolean;
 	readonly default?: string;
-}[] {
-	const body = /\bCREATE\s+TABLE\b[\s\S]*?\(([\s\S]*)\)\s*;?$/iu.exec(
-		statement,
-	)?.[1];
-	if (!body) return [];
-	const primaryKeyColumns = primaryKeyColumnNames(statement);
-	return body
-		.split(',')
-		.map((part) => part.trim())
-		.filter(
-			(part) =>
-				part.length > 0 &&
-				!/^(?:CONSTRAINT|PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK)\b/iu.test(
-					part,
-				),
-		)
-		.map((part) => {
-			const match = /^(?:"([^"]+)"|([^\s]+))\s+(.+)$/u.exec(part);
-			if (!match)
-				throw new Error(
-					`generated table column definition is unreadable: ${part}`,
-				);
-			const definition = match[3];
-			const name = match[1] ?? match[2];
-			if (definition === undefined || name === undefined)
-				throw new Error(
-					`generated table column definition is unreadable: ${part}`,
-				);
-			const type = definition
-				.split(
-					/\s+(?:NOT\s+NULL|NULL|DEFAULT|PRIMARY\s+KEY|UNIQUE|REFERENCES|CHECK)\b/iu,
-				)[0]
-				?.trim();
-			if (!type)
-				throw new Error(`generated table column type is unreadable: ${part}`);
-			const defaultMatch =
-				/\bDEFAULT\s+(.+?)(?=\s+(?:NOT\s+NULL|NULL|PRIMARY\s+KEY|UNIQUE|REFERENCES|CHECK)\b|$)/iu.exec(
-					definition,
-				);
-			return {
-				name,
-				type,
-				nullable:
-					!/\bNOT\s+NULL\b/iu.test(definition) && !primaryKeyColumns.has(name),
-				...(defaultMatch?.[1] === undefined
-					? {}
-					: { default: defaultMatch[1].trim() }),
-			};
-		});
+};
+
+type GeneratedPostcondition =
+	| {
+			readonly kind: 'table';
+			readonly columns: readonly GeneratedColumnPostcondition[];
+	  }
+	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
+	| { readonly kind: 'exempt'; readonly reason: string };
+
+function generatedPostcondition(
+	step: NormalizedManagedStep,
+	address: LedgerAddress,
+): GeneratedPostcondition {
+	const value = step.expectedDeclaration?.value;
+	if (!value || typeof value !== 'object' || Array.isArray(value))
+		throw new Error(
+			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
+		);
+	const postcondition = value as GeneratedPostcondition;
+	if (postcondition.kind === 'table' && Array.isArray(postcondition.columns))
+		return postcondition;
+	if (
+		postcondition.kind === 'column' &&
+		postcondition.column !== undefined &&
+		typeof postcondition.column.name === 'string'
+	)
+		return postcondition;
+	throw new Error(
+		`generated ${address.kind} step ${step.stepKey} has malformed structural postcondition`,
+	);
 }
 
 /**
@@ -380,19 +332,20 @@ export async function readGeneratedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
-	// CREATE TABLE can be followed by its separately-rendered primary-key or
-	// foreign-key statements. The table projection is defined by the CREATE
-	// statement, not the trailing constraint statement.
-	const statement =
-		(address.kind === 'table'
-			? step.statementBundle.statements.find((candidate) =>
-					/\bCREATE\s+TABLE\b/iu.test(candidate.sql),
-				)
-			: undefined
-		)?.sql ?? step.statementBundle.statements.at(-1)?.sql;
+	const statement = step.statementBundle.statements.at(-1)?.sql;
 	if (!statement) throw new Error(`generated step ${step.stepKey} has no SQL`);
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'column')
+			throw new Error(
+				`generated column ${address.name} has a non-column structural postcondition`,
+			);
+		const expected = postcondition.column;
+		if (expected.name !== address.name)
+			throw new Error(
+				`generated column ${address.name} structural postcondition names another column`,
+			);
 		const row = (
 			await executor.query(
 				`SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
@@ -409,32 +362,24 @@ export async function readGeneratedPostcondition(
 					: undefined;
 		const actualDefault =
 			row.column_default == null ? undefined : String(row.column_default);
-		const typeMatch = /\bTYPE\s+(.+?)(?:\s+USING\b|;|$)/iu.exec(statement);
-		if (
-			typeMatch &&
-			normalizedDefinition(type) !== normalizedDefinition(typeMatch[1] ?? '')
-		)
+		if (expected.type !== undefined && !dbTypesEqual(type, expected.type))
 			throw new Error(
 				`generated column ${address.name} type postcondition differs`,
 			);
-		if (/\bSET\s+NOT\s+NULL\b/iu.test(statement) && nullable !== false)
+		if (expected.nullable !== undefined && nullable !== expected.nullable)
 			throw new Error(
 				`generated column ${address.name} nullability postcondition differs`,
 			);
-		if (/\bDROP\s+NOT\s+NULL\b/iu.test(statement) && nullable !== true)
-			throw new Error(
-				`generated column ${address.name} nullability postcondition differs`,
-			);
-		const defaultMatch = /\bSET\s+DEFAULT\s+(.+?);?$/iu.exec(statement);
 		if (
-			defaultMatch &&
-			normalizedDefinition(actualDefault ?? '') !==
-				normalizedDefinition(defaultMatch[1] ?? '')
+			expected.hasDefault === true &&
+			(actualDefault === undefined ||
+				expected.default === undefined ||
+				actualDefault !== expected.default)
 		)
 			throw new Error(
 				`generated column ${address.name} default postcondition differs`,
 			);
-		if (/\bDROP\s+DEFAULT\b/iu.test(statement) && actualDefault !== undefined)
+		if (expected.hasDefault === false && actualDefault !== undefined)
 			throw new Error(
 				`generated column ${address.name} default postcondition differs`,
 			);
@@ -488,13 +433,18 @@ export async function readGeneratedPostcondition(
 		});
 	}
 	if (address.kind === 'table' && address.schema) {
+		const postcondition = generatedPostcondition(step, address);
+		if (postcondition.kind !== 'table')
+			throw new Error(
+				`generated table ${address.name} has a non-table structural postcondition`,
+			);
 		const rows = (
 			await executor.query(
 				`SELECT attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attnum > 0 AND NOT attribute.attisdropped ORDER BY attribute.attnum`,
 				[address.schema, address.name],
 			)
 		).rows;
-		const expected = createTableColumnSpecifications(statement);
+		const expected = postcondition.columns;
 		if (expected.length === 0 || rows.length !== expected.length)
 			throw new Error(
 				`generated table ${address.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(rows)}`,
@@ -503,12 +453,18 @@ export async function readGeneratedPostcondition(
 			const actual = rows.find((row) => row.column_name === specification.name);
 			if (
 				!actual ||
-				normalizedDefinition(String(actual.column_type ?? '')) !==
-					normalizedDefinition(specification.type) ||
-				(actual.is_not_null !== true) !== specification.nullable ||
-				(specification.default !== undefined &&
-					normalizedDefinition(String(actual.column_default ?? '')) !==
-						normalizedDefinition(specification.default))
+				(specification.type !== undefined &&
+					!dbTypesEqual(
+						String(actual.column_type ?? ''),
+						specification.type,
+					)) ||
+				(specification.nullable !== undefined &&
+					(actual.is_not_null !== true) !== specification.nullable) ||
+				(specification.hasDefault === true &&
+					(specification.default === undefined ||
+						actual.column_default == null ||
+						String(actual.column_default) !== specification.default)) ||
+				(specification.hasDefault === false && actual.column_default != null)
 			)
 				throw new Error(
 					`generated table ${address.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
@@ -533,20 +489,6 @@ export async function readGeneratedPostcondition(
 			)
 		).rows;
 		const labels = rows.map((row) => String(row.label));
-		const createLabels = /\bAS\s+ENUM\s*\(([\s\S]*)\)/iu.exec(statement)?.[1];
-		const expected = createLabels
-			? sqlStringList(createLabels)
-			: sqlStringList(statement);
-		const expectedFirst = expected[0];
-		if (
-			expectedFirst === undefined ||
-			(createLabels
-				? !isDeepStrictEqual(labels, expected)
-				: !labels.includes(expectedFirst))
-		)
-			throw new Error(
-				`generated enum ${address.name} labels postcondition differs`,
-			);
 		return generatedPayload({ kind: 'enum', labels });
 	}
 	if (address.kind === 'sequence' && address.schema) {
@@ -557,29 +499,6 @@ export async function readGeneratedPostcondition(
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated sequence ${address.name} is absent`);
-		const expectedNumber = (keyword: string) =>
-			new RegExp(`\\b${keyword}\\s+(?:BY\\s+)?(-?\\d+)`, 'iu').exec(
-				statement,
-			)?.[1];
-		const checks: readonly [string, string | undefined][] = [
-			['start_value', expectedNumber('START')],
-			['increment_by', expectedNumber('INCREMENT')],
-			['min_value', expectedNumber('MINVALUE')],
-			['max_value', expectedNumber('MAXVALUE')],
-			['cache_size', expectedNumber('CACHE')],
-		];
-		if (
-			checks.some(
-				([field, expected]) =>
-					expected !== undefined && String(row[field] ?? '') !== expected,
-			) ||
-			(/\bCYCLE\b/iu.test(statement) &&
-				!/\bNO\s+CYCLE\b/iu.test(statement) &&
-				row.cycle !== true)
-		)
-			throw new Error(
-				`generated sequence ${address.name} properties postcondition differs`,
-			);
 		return generatedPayload({ kind: 'sequence', ...row });
 	}
 	if (address.kind === 'extension') {
@@ -589,8 +508,7 @@ export async function readGeneratedPostcondition(
 				[address.name],
 			)
 		).rows[0];
-		const expected = /\bVERSION\s+'([^']+)'/iu.exec(statement)?.[1];
-		if (!row || (expected !== undefined && row.version !== expected))
+		if (!row)
 			throw new Error(
 				`generated extension ${address.name} version postcondition differs`,
 			);
@@ -737,6 +655,8 @@ export async function executeGeneratorPlan(input: {
 	readonly approval?: ScopedApprovalSet;
 	/** Durable witness minted while apply holds this run's journal lock. */
 	readonly run: PgLockedRun;
+	/** Appends the run-to-attempt mapping before any ledger claim may be opened. */
+	readonly recordAttempt?: (executionId: string) => Promise<void>;
 	/** Test-only admitted-path observation; absent from every CLI invocation. */
 	readonly observer?: PgOutcomeCheckpointObserver;
 	/** @deprecated Compatibility shim for old direct fixtures. */
@@ -757,6 +677,7 @@ export async function executeGeneratorPlan(input: {
 	};
 	const completedStepKeys: string[] = [];
 	let destructiveRefusal: { readonly withheldAuthority: string } | undefined;
+	let destructiveClosureReplanRequired = false;
 	const partial = (detail: string): GeneratorExecutionResult =>
 		completedStepKeys.length === 0
 			? { outcome: 'execution-failed', detail }
@@ -776,6 +697,7 @@ export async function executeGeneratorPlan(input: {
 		// claim namespace. The caller has already refused any prior step-scoped
 		// durable fact; a zero-event retry therefore gets a fresh attempt identity.
 		const executionId = `dbsp.generator.execution.${randomUUID()}`;
+		await input.recordAttempt?.(executionId);
 		const steps = managedSteps(manifest);
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
@@ -1073,11 +995,13 @@ export async function executeGeneratorPlan(input: {
 					});
 					if (
 						step.classification === 'removal' &&
-						containment?.kind === 'all-contained-or-managed' &&
-						lockedAuthority.containment?.kind === 'all-contained-or-managed' &&
-						containment.closureDigest !==
-							lockedAuthority.containment.closureDigest
+						(containment?.kind !== 'all-contained-or-managed' ||
+							lockedAuthority.containment?.kind !==
+								'all-contained-or-managed' ||
+							containment.closureDigest !==
+								lockedAuthority.containment.closureDigest)
 					) {
+						destructiveClosureReplanRequired = true;
 						const decision = decideDestructiveDecision(
 							{ kind: 'removal', address },
 							{ ...lockedAuthority.evidence, containment: 'undecidable' },
@@ -1270,7 +1194,9 @@ export async function executeGeneratorPlan(input: {
 			if (executed.kind !== 'executed-destructive-outcome')
 				return {
 					outcome: 'destructive-authority-refused',
-					detail: executed.reason,
+					detail: destructiveClosureReplanRequired
+						? `${executed.reason}; destructive closure changed under lock; replan required`
+						: executed.reason,
 					...(destructiveRefusal === undefined &&
 					withheldDestructiveAuthorityFromReason(executed.reason) === undefined
 						? {}
