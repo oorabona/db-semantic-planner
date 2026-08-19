@@ -82,6 +82,11 @@ export type GeneratorExecutionResult =
 			readonly refusal?: { readonly withheldAuthority: string };
 	  }
 	| { readonly outcome: 'prior-step-events-refusal'; readonly detail: string }
+	| {
+			readonly outcome: 'recovery-required';
+			readonly claimId: string;
+			readonly detail: string;
+	  }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 function modelForAdoption(table: TableIR): ModelIR {
@@ -972,6 +977,12 @@ export async function executeGeneratorPlan(input: {
 						},
 					},
 				});
+				if (result.kind === 'outcome-recovery-required')
+					return {
+						outcome: 'recovery-required',
+						claimId: result.claimId,
+						detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
+					};
 				if ('reason' in result) return partial(result.reason);
 				completedStepKeys.push(step.stepKey);
 				continue;

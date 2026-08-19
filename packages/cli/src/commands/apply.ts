@@ -536,6 +536,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 		56,
 		'execution phase failed after preflight; inspect the run with recover',
 	],
+	[
+		'recovery-required',
+		64,
+		'an admitted non-transactional claim remains open; run recover with the reported claim reference',
+	],
 	['database-read-only', 34, 'target cannot accept managed writes'],
 	[
 		'destructive-authority-refused',

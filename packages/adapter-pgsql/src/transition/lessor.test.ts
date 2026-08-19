@@ -5,9 +5,26 @@ import {
 import { Client, Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { evaluatePgExecutionContract } from './execution-contract.js';
-import { createPgTransitionLessor, withPgTransitionRunLock } from './lessor.js';
+import {
+	createPgTransitionLessor,
+	isDeadPgConnectionError,
+	withPgTransitionRunLock,
+} from './lessor.js';
 
 describe('createPgTransitionLessor', () => {
+	it.each([
+		[{ code: 'ECONNRESET' }, true],
+		[{ code: 'EPIPE' }, true],
+		[{ code: 'ETIMEDOUT' }, true],
+		[{ code: '57P01' }, true],
+		[{ code: '57P02' }, true],
+		[{ code: '57P03' }, true],
+		[{ code: '40001', message: 'could not serialize access' }, false],
+		[{ code: '23505', message: 'duplicate key value' }, false],
+	])('classifies dead PostgreSQL connections conservatively: %o', (error, dead) => {
+		expect(isDeadPgConnectionError(error)).toBe(dead);
+	});
+
 	it('uses the pool acquisition function through the core-minted lessor', async () => {
 		const client = {
 			query: vi.fn(async (sql: string) =>
@@ -257,6 +274,71 @@ describe('createPgTransitionLessor', () => {
 });
 
 describe('withPgTransitionRunLock cleanup', () => {
+	it('preserves the primary result and skips unlock after the locked backend dies', async () => {
+		const dead = Object.assign(
+			new Error(
+				'Client has encountered a connection error and is not queryable',
+			),
+			{ code: '57P01' },
+		);
+		let unlockAttempts = 0;
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql === 'SELECT force_backend_death') throw dead;
+				if (sql.includes('pg_advisory_unlock')) {
+					unlockAttempts += 1;
+					return { rows: [{ unlocked: true }] };
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = {
+			connect: vi.fn(async () => client),
+		} as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(pool, 'run:dead-backend', async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				try {
+					await planOperationSession(lease.session).query(
+						'SELECT force_backend_death',
+					);
+				} catch (error) {
+					expect(error).toBe(dead);
+					return { kind: 'outcome-recovery-required' as const };
+				} finally {
+					await lease.release();
+				}
+			}),
+		).resolves.toEqual({
+			kind: 'acquired',
+			value: { kind: 'outcome-recovery-required' },
+		});
+		expect(unlockAttempts).toBe(0);
+		expect(client.release).toHaveBeenCalledWith(dead);
+	});
+
 	it.each([
 		{
 			name: 'returns false',

@@ -162,10 +162,14 @@ describe.sequential('OBL checkpoint windows', () => {
 				const pool = await getTestPool();
 				await pool.query(mutate(schema));
 				await child.acknowledge('post-lock-integrity-before-append');
+				const expectedExitCode =
+					_path === 'non-transactional terminal append' ? 1 : 0;
 				expect(
 					await waitFor('integrity-refusal child exit', child.exited),
 				).toMatchObject({
-					code: 0,
+					// Only the terminal checkpoint follows the committed executing append;
+					// its drift is outcome-recovery-required, not a refusal.
+					code: expectedExitCode,
 				});
 			} finally {
 				await child.terminate('SIGKILL');

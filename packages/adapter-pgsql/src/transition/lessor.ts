@@ -262,7 +262,9 @@ export async function withPgTransitionRunLock<T>(
 		throw error;
 	} finally {
 		callbackLive = false;
-		if (locked) {
+		// A dead backend has already released its session advisory locks.  Asking
+		// that client to unlock would only mask the callback's primary outcome.
+		if (locked && !deadConnectionFailure) {
 			try {
 				const unlock = await query(
 					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
@@ -273,9 +275,10 @@ export async function withPgTransitionRunLock<T>(
 						'PostgreSQL transition run lock cleanup failed: pg_advisory_unlock did not confirm ownership',
 					);
 			} catch (error) {
-				cleanupFailure = new Error(
-					`PostgreSQL transition run lock cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
-				);
+				if (!isDeadPgConnectionError(error))
+					cleanupFailure = new Error(
+						`PostgreSQL transition run lock cleanup failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
 			}
 		}
 		// An unconfirmed unlock may leave a session advisory lock behind. pg-pool
@@ -296,7 +299,7 @@ export async function withPgTransitionRunLock<T>(
 }
 
 /** pg-pool only evicts a checked-out client when release receives a truthy error. */
-function isDeadPgConnectionError(error: unknown): boolean {
+export function isDeadPgConnectionError(error: unknown): boolean {
 	if (
 		error == null ||
 		(typeof error !== 'object' && typeof error !== 'function')
@@ -309,7 +312,10 @@ function isDeadPgConnectionError(error: unknown): boolean {
 	if (
 		candidate.code === '57P01' ||
 		candidate.code === '57P02' ||
-		candidate.code === '57P03'
+		candidate.code === '57P03' ||
+		candidate.code === 'ECONNRESET' ||
+		candidate.code === 'EPIPE' ||
+		candidate.code === 'ETIMEDOUT'
 	)
 		return true;
 	return (

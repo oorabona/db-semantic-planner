@@ -54,6 +54,7 @@ import {
 	readPgLedgerReservationsForPairInTransaction,
 	validatePgLedgerPhysicalShape,
 } from './ledger.js';
+import { isDeadPgConnectionError } from './lessor.js';
 import {
 	createPostLockAdmissionEvidence,
 	isPostLockAdmissionEvidence,
@@ -121,7 +122,7 @@ export interface LiveAdmissionVerdict {
 }
 
 type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
-	release(): void;
+	release(error?: unknown): void;
 };
 
 type PoolTransitionJournalQueryable = TransitionJournalQueryable & {
@@ -154,11 +155,56 @@ export async function withPgOutcomeSession<T>(
 ): Promise<T> {
 	if (!isPoolQueryable(executor)) return work(executor);
 	const session = await executor.connect();
+	let failed = false;
+	let failure: unknown;
 	try {
 		return await work(session);
+	} catch (error) {
+		failed = true;
+		failure = error;
+		throw error;
 	} finally {
-		session.release();
+		session.release(
+			compromisedPgOutcomeSessions.get(session) ??
+				(!failed || isConfirmedPgServerError(failure)
+					? undefined
+					: asPgSessionReleaseError(failure)),
+		);
 	}
+}
+
+const compromisedPgOutcomeSessions = new WeakMap<object, Error>();
+
+function asPgSessionReleaseError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+function pgSqlState(error: unknown): string | undefined {
+	if (
+		error == null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return undefined;
+	const code = (error as { readonly code?: unknown }).code;
+	return typeof code === 'string' && /^[0-9A-Z]{5}$/u.test(code)
+		? code
+		: undefined;
+}
+
+/** A SQLSTATE is a server acknowledgement, except for known dead backends. */
+function isConfirmedPgServerError(error: unknown): boolean {
+	return pgSqlState(error) !== undefined && !isDeadPgConnectionError(error);
+}
+
+function markPgOutcomeSessionCompromised(
+	session: TransitionJournalQueryable,
+	error: unknown,
+): void {
+	if (isConfirmedPgServerError(error)) return;
+	compromisedPgOutcomeSessions.set(
+		session as object,
+		asPgSessionReleaseError(error),
+	);
 }
 
 /**
@@ -182,8 +228,12 @@ export async function withPgTransitionTransaction<T>(
 			return result;
 		} catch (error) {
 			if (!committed && !commitAttempted) await rollback(session);
-			if (commitAttempted)
+			if (commitAttempted) {
+				if (isConfirmedPgServerError(error))
+					throw new PgCommitDeterministicFailureError(error);
+				markPgOutcomeSessionCompromised(session, error);
 				throw new PgCommitAcknowledgementAmbiguousError(error);
+			}
 			throw error;
 		}
 	});
@@ -199,6 +249,16 @@ export class PgCommitAcknowledgementAmbiguousError extends Error {
 			},
 		);
 		this.name = 'PgCommitAcknowledgementAmbiguousError';
+	}
+}
+
+/** PostgreSQL acknowledged that COMMIT did not take effect. */
+export class PgCommitDeterministicFailureError extends Error {
+	constructor(cause: unknown) {
+		super(`PostgreSQL COMMIT was rejected by the server: ${detail(cause)}`, {
+			cause,
+		});
+		this.name = 'PgCommitDeterministicFailureError';
 	}
 }
 
@@ -231,6 +291,9 @@ async function commitPgOutcome(
 		await executor.query('COMMIT');
 		await checkpoint(observer, 'commit-acknowledged');
 	} catch (error) {
+		if (isConfirmedPgServerError(error))
+			throw new PgCommitDeterministicFailureError(error);
+		markPgOutcomeSessionCompromised(executor, error);
 		throw new PgCommitAcknowledgementAmbiguousError(error);
 	}
 }
@@ -677,6 +740,7 @@ async function runPgDestructiveOutcome(
 			await rollback(session);
 			if (error instanceof PgCommitAcknowledgementAmbiguousError)
 				return { kind: 'outcome-transport-ambiguous', reason: error.message };
+			markPgOutcomeSessionCompromised(session, error);
 			if (executingCommitted)
 				return { kind: 'outcome-protocol-pending', reason: detail(error) };
 			return refusal(detail(error));
@@ -889,7 +953,12 @@ export type PgOutcomeResult =
 			readonly claim: AdmittedOutcomeClaim;
 	  }
 	| OutcomeProtocolRefusal
-	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string };
+	| { readonly kind: 'outcome-transport-ambiguous'; readonly reason: string }
+	| {
+			readonly kind: 'outcome-recovery-required';
+			readonly claimId: string;
+			readonly reason: string;
+	  };
 
 export type PgPairedReaddressRecoveryDecision =
 	| { readonly kind: 'refused'; readonly reason: string }
@@ -1298,7 +1367,10 @@ async function begin(
 async function rollback(executor: TransitionJournalQueryable): Promise<void> {
 	try {
 		await executor.query('ROLLBACK');
-	} catch {
+	} catch (error) {
+		// A failed rollback leaves transaction and protocol state unknowable.  The
+		// outer outcome-session bracket consumes this marker at pool release.
+		markPgOutcomeSessionCompromised(executor, error);
 		// The original PostgreSQL words are the only useful refusal detail.
 	}
 }
@@ -1591,6 +1663,7 @@ async function openPgOutcomeClaimOnSession(
 	} catch (error) {
 		if (begun) await rollback(executor);
 		if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
+		markPgOutcomeSessionCompromised(executor, error);
 		return refusal(detail(error));
 	}
 }
@@ -2277,6 +2350,7 @@ async function runPgPairedReaddressOperation(
 		if (begun) await rollback(executor);
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
+		markPgOutcomeSessionCompromised(executor, error);
 		return refusal(detail(error));
 	}
 }
@@ -2545,6 +2619,12 @@ async function runPgNonTransactionalOutcomeOnSession(
 		verdicts.run,
 	);
 	if (admission.kind !== 'admitted-outcome-claim') return admission;
+	let executingCommitted = false;
+	const recoveryRequired = (reason: string): PgOutcomeResult => ({
+		kind: 'outcome-recovery-required',
+		claimId: admission.plan.claimId,
+		reason,
+	});
 	try {
 		await begin(executor, request.lockTimeoutMs);
 		const executingLock = await acquirePgLedgerLocks(
@@ -2634,6 +2714,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			predecessor: executingPredecessor,
 		});
 		await commitPgOutcome(executor, request.observer);
+		executingCommitted = true;
 		await request.onExecutingCommitted?.();
 		const sent = await sendPgAdmittedBundle(executor, {
 			permit: mintAdmittedPermit(
@@ -2646,7 +2727,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			),
 			statements: admission.plan.statementBundle.statements,
 		});
-		if (sent) return sent;
+		if (sent) return recoveryRequired(sent.reason);
 		await checkpoint(request.observer, 'ddl-completed-before-read-back');
 		await begin(executor, request.lockTimeoutMs);
 		const terminalLock = await acquirePgLedgerLocks(
@@ -2655,7 +2736,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 		);
 		if (terminalLock.kind !== 'acquired') {
 			await rollback(executor);
-			return refusal('ledger advisory lock is busy');
+			return recoveryRequired('ledger advisory lock is busy');
 		}
 		await checkpoint(request.observer, 'post-lock-integrity-before-append');
 		await createPostLockAdmissionEvidence(executor, terminalLock.proof);
@@ -2666,7 +2747,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 		);
 		if (terminalIntegrity) {
 			await rollback(executor);
-			return terminalIntegrity;
+			return recoveryRequired(terminalIntegrity.reason);
 		}
 		const terminalPredecessor = await currentTerminalPredecessor(
 			executor,
@@ -2695,6 +2776,11 @@ async function runPgNonTransactionalOutcomeOnSession(
 		await rollback(executor);
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
+		if (executingCommitted) {
+			markPgOutcomeSessionCompromised(executor, error);
+			return recoveryRequired(detail(error));
+		}
+		markPgOutcomeSessionCompromised(executor, error);
 		return refusal(detail(error));
 	}
 }
@@ -2878,6 +2964,7 @@ async function recoverPgOutcomeClaimOnSession(
 		if (begun) await rollback(executor);
 		if (error instanceof PgCommitAcknowledgementAmbiguousError)
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
+		markPgOutcomeSessionCompromised(executor, error);
 		return refusal(detail(error));
 	}
 }

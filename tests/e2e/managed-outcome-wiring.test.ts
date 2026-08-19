@@ -1115,7 +1115,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 	});
 
 	describe.sequential('run-scoped reconciliation', () => {
-		it('refuses only the killed run at the committed executing-to-send gate and leaves a concurrent claim open', async () => {
+		it('requires recovery for only the killed run at the committed executing-to-send gate and leaves a concurrent claim open', async () => {
 			const schema = testSchema('reconcile');
 			await provision(schema);
 			await createUsers(schema, 10);
@@ -1164,7 +1164,8 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			]);
 			releaseSend();
 			await expect(running).resolves.toMatchObject({
-				kind: 'outcome-protocol-refused',
+				kind: 'outcome-recovery-required',
+				claimId: interruptedExecutionClaim.claimId,
 			});
 			expect(
 				(

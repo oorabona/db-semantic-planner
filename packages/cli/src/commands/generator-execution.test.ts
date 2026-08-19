@@ -222,4 +222,38 @@ describe('generator execution fixture shim', () => {
 		expect(Object.isFrozen(manifest)).toBe(true);
 		expect(Object.isFrozen(manifest.steps)).toBe(true);
 	});
+
+	it('preserves a post-executing open claim as recovery-required', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-recovery-required',
+			claimId: 'open-claim',
+			reason: 'sender disconnected after executing committed',
+		});
+		const step: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'CREATE TABLE tenant.accounts (id integer)' },
+				],
+			},
+			classification: 'non-destructive',
+		};
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+			}),
+		).resolves.toEqual({
+			outcome: 'recovery-required',
+			claimId: 'open-claim',
+			detail:
+				'claim open-claim remains open and requires recovery: sender disconnected after executing committed',
+		});
+	});
 });

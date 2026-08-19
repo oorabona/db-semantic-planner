@@ -395,7 +395,7 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 		expect(terminals.rows).toEqual([]);
 	});
 
-	it('SC-33: a kill at executing acknowledgement recovers as refused with no catalogue effect', async () => {
+	it('SC-33: a kill after executing commits requires recovery with no catalogue effect', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();
 		client.on('error', () => undefined);
@@ -429,7 +429,8 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 			await pool.query('SELECT pg_terminate_backend($1::int)', [pid]);
 			continueSend();
 			await expect(running).resolves.toMatchObject({
-				kind: 'outcome-protocol-refused',
+				kind: 'outcome-recovery-required',
+				claimId: input.plan.claimId,
 			});
 			await expect(
 				recoverPgOutcomeClaim(pool, recovery(input, 'acknowledged-refused')),

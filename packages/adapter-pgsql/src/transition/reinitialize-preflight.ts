@@ -35,6 +35,7 @@ import {
 	validatePgLedgerPhysicalShape,
 	writePgLedgerShapeMarker,
 } from './ledger.js';
+import { isDeadPgConnectionError } from './lessor.js';
 
 export type ReinitializePreflightCheckpoint =
 	| 'archive'
@@ -56,6 +57,38 @@ export interface PgReinitializePreflightClient
 
 export interface PgReinitializePreflightPool {
 	connect(): Promise<PgReinitializePreflightClient>;
+}
+
+function isConfirmedPgServerError(error: unknown): boolean {
+	if (
+		error == null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return false;
+	const code = (error as { readonly code?: unknown }).code;
+	return (
+		typeof code === 'string' &&
+		/^[0-9A-Z]{5}$/u.test(code) &&
+		!isDeadPgConnectionError(error)
+	);
+}
+
+function releasePreflightClient(
+	client: PgReinitializePreflightClient,
+	failed: boolean,
+	failure: unknown,
+	rollbackFailed: boolean,
+): void {
+	client.release?.(
+		!failed ||
+			(!rollbackFailed &&
+				(isConfirmedPgServerError(failure) ||
+					isPgDatabaseReadOnlyError(failure)))
+			? undefined
+			: failure instanceof Error
+				? failure
+				: new Error(String(failure)),
+	);
 }
 
 export interface PgReinitializePreflightOptions {
@@ -541,6 +574,9 @@ async function processScope(
 ): Promise<ReinitializePreflightScopeReport> {
 	const client = await pool.connect();
 	let begun = false;
+	let failed = false;
+	let releaseFailure: unknown;
+	let rollbackFailed = false;
 	let failureStep: ReinitializePreflightFailureStep = 'advisory-lock';
 	try {
 		await client.query('BEGIN');
@@ -652,10 +688,14 @@ async function processScope(
 		begun = false;
 		return { ledger: current.home, outcome: 'current', marker: current.marker };
 	} catch (error) {
+		failed = true;
+		releaseFailure = error;
 		if (begun) {
 			try {
 				await client.query('ROLLBACK');
-			} catch {
+			} catch (rollbackError) {
+				rollbackFailed = true;
+				releaseFailure = rollbackError;
 				// The original PostgreSQL denial remains the useful report detail.
 			}
 		}
@@ -669,7 +709,7 @@ async function processScope(
 			failureStep,
 		);
 	} finally {
-		client.release?.();
+		releasePreflightClient(client, failed, releaseFailure, rollbackFailed);
 	}
 }
 
@@ -769,6 +809,9 @@ async function readChainAddresses(
 ): Promise<ReadonlySet<string>> {
 	const client = await pool.connect();
 	let begun = false;
+	let failed = false;
+	let releaseFailure: unknown;
+	let rollbackFailed = false;
 	try {
 		await client.query('BEGIN');
 		begun = true;
@@ -812,16 +855,20 @@ async function readChainAddresses(
 		begun = false;
 		return addresses;
 	} catch (error) {
+		failed = true;
+		releaseFailure = error;
 		if (begun) {
 			try {
 				await client.query('ROLLBACK');
-			} catch {
+			} catch (rollbackError) {
+				rollbackFailed = true;
+				releaseFailure = rollbackError;
 				// Preserve the original PostgreSQL timeout or denial.
 			}
 		}
 		throw error;
 	} finally {
-		client.release?.();
+		releasePreflightClient(client, failed, releaseFailure, rollbackFailed);
 	}
 }
 
@@ -837,6 +884,9 @@ export async function runPgReinitializePreflight(
 	const inspectionClient = await options.pool.connect();
 	let inspections: readonly ReinitializePreflightScopeInspection[];
 	let inspectionBegun = false;
+	let failed = false;
+	let releaseFailure: unknown;
+	let rollbackFailed = false;
 	try {
 		await inspectionClient.query('BEGIN');
 		inspectionBegun = true;
@@ -863,16 +913,25 @@ export async function runPgReinitializePreflight(
 		await inspectionClient.query('COMMIT');
 		inspectionBegun = false;
 	} catch (error) {
+		failed = true;
+		releaseFailure = error;
 		if (inspectionBegun) {
 			try {
 				await inspectionClient.query('ROLLBACK');
-			} catch {
+			} catch (rollbackError) {
+				rollbackFailed = true;
+				releaseFailure = rollbackError;
 				// The original PostgreSQL error remains the useful failure.
 			}
 		}
 		throw error;
 	} finally {
-		inspectionClient.release?.();
+		releasePreflightClient(
+			inspectionClient,
+			failed,
+			releaseFailure,
+			rollbackFailed,
+		);
 	}
 	const markerFailure = inspections.find(
 		({ marker }) =>

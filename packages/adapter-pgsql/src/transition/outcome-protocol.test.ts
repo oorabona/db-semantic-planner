@@ -17,7 +17,9 @@ import {
 	lockPgJournalRun,
 	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
+	PgCommitDeterministicFailureError,
 	recoverPgOutcomeClaim,
+	withPgOutcomeSession,
 	withPgTransitionTransaction,
 } from './outcome-protocol.js';
 
@@ -751,6 +753,46 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			withPgTransitionTransaction(executor, async () => 'completed'),
 		).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
+	});
+
+	it('keeps a SQLSTATE-confirmed COMMIT refusal deterministic', async () => {
+		const sql: string[] = [];
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				sql.push(statement);
+				if (statement === 'COMMIT') {
+					const error = new Error('deferred constraint violation');
+					Object.assign(error, { code: '23514' });
+					throw error;
+				}
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			withPgTransitionTransaction(executor, async () => 'completed'),
+		).rejects.toBeInstanceOf(PgCommitDeterministicFailureError);
+		expect(sql).toEqual(['BEGIN', 'COMMIT']);
+	});
+
+	it('evicts an outcome session after an unclassified transport failure', async () => {
+		const release = vi.fn();
+		const error = Object.assign(new Error('socket reset'), {
+			code: 'ECONNRESET',
+		});
+		await expect(
+			withPgOutcomeSession(
+				{
+					connect: vi.fn(async () => ({
+						query: vi.fn(),
+						release,
+					})),
+				} as never,
+				async () => {
+					throw error;
+				},
+			),
+		).rejects.toBe(error);
+		expect(release).toHaveBeenCalledWith(error);
 	});
 
 	/* Direct-runner cases are re-pointed to persisted real-PG coverage. */
