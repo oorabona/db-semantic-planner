@@ -14,16 +14,17 @@ This guide covers best practices for deploying db-semantic-planner in production
 ## Table of Contents
 
 1. [Connection Pooling](#connection-pooling)
-2. [Timeout Management](#timeout-management)
-3. [Multi-Tenant Isolation](#multi-tenant-isolation)
-4. [Error Handling](#error-handling)
-5. [Observability & Logging](#observability--logging)
-6. [Streaming Large Results](#streaming-large-results)
-7. [Query Analysis](#query-analysis)
-8. [Rate Limiting](#rate-limiting)
-9. [Security Hardening](#security-hardening)
-10. [Health Checks](#health-checks)
-11. [Performance Tuning](#performance-tuning)
+2. [Prepared Statements](#prepared-statements)
+3. [Timeout Management](#timeout-management)
+4. [Multi-Tenant Isolation](#multi-tenant-isolation)
+5. [Error Handling](#error-handling)
+6. [Observability & Logging](#observability--logging)
+7. [Streaming Large Results](#streaming-large-results)
+8. [Query Analysis](#query-analysis)
+9. [Rate Limiting](#rate-limiting)
+10. [Security Hardening](#security-hardening)
+11. [Health Checks](#health-checks)
+12. [Performance Tuning](#performance-tuning)
 
 ---
 
@@ -94,6 +95,70 @@ setInterval(() => {
   });
 }, 60000);
 ```
+
+---
+
+## Prepared Statements
+
+The PostgreSQL adapter leaves named server-side prepared statements **off by
+default**. Opt in only for workloads that repeatedly execute the same compiled,
+parameterized SQL on long-lived PostgreSQL connections:
+
+```typescript
+const adapter = createPgsqlAdapter(pool, {
+  preparedStatements: { maxStatements: 500 }, // `true` uses the same default
+});
+```
+
+Only compiled `execute()` / `executeWithMeta()` calls with at least one parameter
+are eligible. Raw SQL, DDL, cursor commands, and transaction plumbing always use
+the existing unnamed driver calls. A statement is admitted on its second sighting
+and normally remains admitted. First sightings occupy a bounded recency window; when
+that window is full, its oldest candidate is evicted, so a candidate evicted
+between sightings must be seen again before it can be admitted. Once named
+admission is full, new candidate text is not retained. There is no adapter-issued
+`DEALLOCATE`.
+
+Preparation is per physical PostgreSQL connection. With a `pg.Pool`, each pool
+connection prepares an admitted statement independently. `maxStatements` is an
+executor-scoped upper bound on the distinct names dbsp can admit through that
+registry; it is not an inventory of statements the server currently holds. The cap
+is configured executor-wide for adapters created by the same loaded dbsp module
+instance: every adapter sharing the same `Pool` (or the same borrowed `PoolClient`)
+must use the same `maxStatements`, and constructing one with a different cap fails.
+Duplicate installations maintain independent registries, so this same-cap enforcement
+and bound do not combine across module instances. This bound is not combined across a
+pool adapter and a borrowed-client adapter that happen to use the same physical
+connection, so that connection can exceed either executor's cap. If you use PgBouncer in
+transaction-pooling mode, it must be configured with `max_prepared_statements`;
+otherwise leave this option off.
+
+dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
+node-postgres owns checkout, query error handling, release, and backpressure. dbsp
+does not attach a client error listener. The application must still handle idle
+pool-client failures with `pool.on('error', handler)` as node-postgres requires.
+Names are derived from a truncated SHA-256 digest of the complete SQL text in the
+reserved `dbsp_ps_` namespace. The same SQL therefore has the same name across
+executors. Do not issue your own named statements in that namespace on the same
+`Pool` or borrowed `PoolClient`.
+
+PostgreSQL considers a generic plan only after five custom executions, and adopts
+it only when its estimated cost is competitive. Parameter-sensitive queries can
+therefore continue to use custom plans. To observe planning cost in
+`pg_stat_statements`, enable `pg_stat_statements.track_planning`; it is hidden by
+default.
+
+Do not issue external `DEALLOCATE` for adapter-managed statement names:
+node-postgres keeps its own per-connection statement map and cannot safely be
+resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
+cached plan; after `DEALLOCATE ALL`, `DISCARD ALL`, or a connection/proxy reset, the
+next named execution can return `26000`; an externally created statement in the reserved namespace can
+return `42P05`. On one of these errors from a named execution, dbsp tombstones the
+SQL before propagating the original error. Future calls use the unnamed path for
+the executor lifetime. For a `Pool`, this is pool-wide: one client reset disables
+naming for that SQL on every pool client. That is a throughput regression, never
+a transparent retry or a new application error; each adapter call executes at
+most once.
 
 ---
 
@@ -719,4 +784,3 @@ CREATE INDEX idx_categories_parent_id ON categories(parent_id);
 ## See Also
 
 - [Getting Started](./getting-started) - Installation and first query
-

@@ -178,6 +178,7 @@ export {
 	type PgsqlBorrowedClientAdapterOptions,
 	PgsqlPinnedConnectionAbortSignalError,
 	type PgsqlPoolAdapterOptions,
+	type PgsqlPreparedStatementsOptions,
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,

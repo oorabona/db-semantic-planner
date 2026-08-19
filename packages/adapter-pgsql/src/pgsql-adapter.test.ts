@@ -13,6 +13,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 } from './pgsql-adapter.js';
+import { derivePreparedStatementName } from './prepared-statements.js';
 
 // ============================================================================
 // Mock Pool
@@ -35,6 +36,16 @@ function testQuery<T = unknown>(
 		{ sql, parameters },
 		'pgsql-adapter-unit-test',
 	);
+}
+
+function deferredPromise<T>() {
+	let resolve: (value: T | PromiseLike<T>) => void;
+	let reject: (reason?: unknown) => void;
+	const promise = new Promise<T>((promiseResolve, promiseReject) => {
+		resolve = promiseResolve;
+		reject = promiseReject;
+	});
+	return { promise, resolve: resolve!, reject: reject! };
 }
 
 // ============================================================================
@@ -88,6 +99,81 @@ describe('PgsqlAdapter', () => {
 
 			expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
 				/createPgsqlAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
+			);
+		});
+
+		it.each([
+			'false',
+			0,
+			null,
+		])('rejects an invalid preparedStatements value: %s', (preparedStatements) => {
+			expect(
+				() =>
+					new PgsqlAdapter(undefined, {
+						preparedStatements,
+					} as any),
+			).toThrow(
+				/preparedStatements must be true, false, or a non-null options object/,
+			);
+		});
+
+		it('normalizes prepared statements independently of later caller mutation', () => {
+			const pool = createMockPool();
+			const preparedStatements = { maxStatements: 1 };
+			const adapter = createPgsqlAdapter(pool, { preparedStatements });
+			preparedStatements.maxStatements = 2;
+
+			const scoped = adapter.withSchema('tenant_1') as PgsqlAdapter;
+			const parentConfig = (adapter as any).preparedStatements;
+			const childConfig = (scoped as any).preparedStatements;
+			expect(parentConfig.maxStatements).toBe(1);
+			expect(childConfig).not.toBe(parentConfig);
+			expect(childConfig.maxStatements).toBe(1);
+		});
+
+		it('shares equal prepared-statement caps and rejects conflicting pool caps', () => {
+			const pool = createMockPool();
+			const first = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+			const equal = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			expect((equal as any).preparedStatementRegistry).toBe(
+				(first as any).preparedStatementRegistry,
+			);
+			expect(() =>
+				createPgsqlAdapter(pool, { preparedStatements: { maxStatements: 2 } }),
+			).toThrow(
+				/preparedStatements\.maxStatements is configured pool-wide: expected 1, received 2/,
+			);
+		});
+
+		it('shares equal prepared-statement caps and rejects conflicting client caps', () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const first = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+			const equal = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			expect((equal as any).preparedStatementRegistry).toBe(
+				(first as any).preparedStatementRegistry,
+			);
+			expect(() =>
+				createPgsqlAdapter(client, {
+					borrowedClient: true,
+					preparedStatements: { maxStatements: 2 },
+				}),
+			).toThrow(
+				/preparedStatements\.maxStatements is configured borrowed client-wide: expected 1, received 2/,
 			);
 		});
 	});
@@ -404,6 +490,266 @@ describe('PgsqlAdapter', () => {
 			expect(results).not.toHaveProperty('command');
 			expect(pool.query).toHaveBeenCalledWith(query.sql, query.parameters);
 		});
+
+		it('uses a named config object only after the second eligible compiled execution', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [{ id: 7 }],
+				rowCount: 1,
+				command: 'SELECT',
+			} as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery('SELECT id FROM users WHERE id = $1', [7]);
+
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(query)).resolves.toEqual([{ id: 7 }]);
+
+			expect(pool.connect).not.toHaveBeenCalled();
+			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, [7]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: query.sql,
+				values: [7],
+			});
+		});
+
+		it('does not manually acquire or release a pooled client while a query is pending', async () => {
+			const pool = createMockPool();
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const query = testQuery(sql, [7]);
+			const deferred = deferredPromise<unknown>();
+			const error = new Error('pool query failure');
+			vi.mocked(pool.query).mockReturnValueOnce(deferred.promise as any);
+
+			const operation = adapter.execute(query);
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(pool.connect).not.toHaveBeenCalled();
+
+			deferred.reject(error);
+			await expect(operation).rejects.toBe(error);
+			expect(pool.connect).not.toHaveBeenCalled();
+		});
+
+		it('does not name compiled executions without parameters', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery('SELECT 1');
+
+			await adapter.execute(query);
+			await adapter.execute(query);
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, query.sql, []);
+			expect(pool.query).toHaveBeenNthCalledWith(2, query.sql, []);
+		});
+
+		it('tombstones an invalidated named statement before its rejection is observable', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const error = { code: '0A000' };
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			const failed = (adapter as any).issueConnectionQuery(
+				client,
+				sql,
+				[7],
+				true,
+			);
+			const tombstoneAtObservation = failed.catch(() =>
+				(adapter as any).preparedStatementRegistry.admit(sql),
+			);
+			await expect(tombstoneAtObservation).resolves.toBeUndefined();
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+
+			expect(client.query).toHaveBeenNthCalledWith(2, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: sql,
+				values: [7],
+			});
+			expect(client.query).toHaveBeenCalledTimes(3);
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('tombstones a pool statement for every client while another pool stays eligible', async () => {
+			const pool = createMockPool();
+			const otherPool = createMockPool();
+			const error = { code: '26000' };
+			vi.mocked(pool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			vi.mocked(otherPool.query).mockResolvedValue({
+				rows: [{ id: 7 }],
+				rowCount: 1,
+			} as any);
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: true,
+			});
+			const otherAdapter = createPgsqlAdapter(otherPool, {
+				preparedStatements: true,
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await (adapter as any).issueConnectionQuery(pool, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(pool, sql, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(pool, sql, [7], true);
+			await (otherAdapter as any).issueConnectionQuery(
+				otherPool,
+				sql,
+				[7],
+				true,
+			);
+			await (otherAdapter as any).issueConnectionQuery(
+				otherPool,
+				sql,
+				[7],
+				true,
+			);
+
+			expect(pool.query).toHaveBeenNthCalledWith(3, sql, [7]);
+			expect(otherPool.query).toHaveBeenLastCalledWith({
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: sql,
+				values: [7],
+			});
+		});
+
+		it('tombstones a duplicate prepared statement name without retrying it', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const error = { code: '42P05' };
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('tombstones an exact-name driver-local collision without retrying it', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = new Error(
+				`Prepared statements must be unique - '${derivePreparedStatementName(sql)}' was used for a different statement`,
+			);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+		});
+
+		it('keeps naming after a driver-local collision names another statement', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = new Error(
+				"Prepared statements must be unique - 'dbsp_ps_unexpected' was used for a different statement",
+			);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+
+			expect(client.query).toHaveBeenNthCalledWith(3, {
+				name: derivePreparedStatementName(sql),
+				text: sql,
+				values: [7],
+			});
+		});
+
+		it.each([
+			'23505',
+			'57014',
+		])('keeps naming admitted after a non-invalidation SQLSTATE %s', async (code) => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = { code };
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+
+			expect(client.query).toHaveBeenNthCalledWith(2, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: sql,
+				values: [7],
+			});
+			expect(client.query).toHaveBeenNthCalledWith(3, {
+				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
+				text: sql,
+				values: [7],
+			});
+		});
 	});
 
 	describe('executeWithMeta', () => {
@@ -534,6 +880,38 @@ describe('PgsqlAdapter', () => {
 
 			expect(results).toEqual(mockRows);
 			expect(pool.query).toHaveBeenCalledWith(sql, params);
+		});
+
+		it('never names raw SQL even when prepared statements are enabled', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [{ id: 1 }] } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT id FROM users WHERE id = $1';
+
+			await adapter.executeRaw(sql, [1]);
+			await adapter.executeRaw(sql, [1]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, sql, [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, sql, [1]);
+		});
+	});
+
+	describe('preparedStatements disabled', () => {
+		it('preserves each existing driver argument shape', async () => {
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({ rows: [], rowCount: 0 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: false });
+
+			await adapter.execute(testQuery('SELECT $1', [1]));
+			await adapter.executeRaw('SELECT $1', [1]);
+			await adapter.executeDDL('CREATE TABLE disabled_path_test (id integer)');
+
+			expect(pool.query).toHaveBeenNthCalledWith(1, 'SELECT $1', [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(2, 'SELECT $1', [1]);
+			expect(pool.query).toHaveBeenNthCalledWith(
+				3,
+				'CREATE TABLE disabled_path_test (id integer)',
+			);
 		});
 	});
 
