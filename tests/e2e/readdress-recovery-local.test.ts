@@ -2,6 +2,7 @@
 
 import { randomUUID } from 'node:crypto';
 import {
+	acquirePgLedgerLocks,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
 	readPgCatalogueIdentity,
@@ -389,6 +390,54 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 				row.address,
 			);
 			expect(chain.terminalMember).toMatchObject({ eventKind: 'refused' });
+		}
+	});
+
+	it('resolves every paired recovery terminal under one held advisory-lock transaction', async () => {
+		const { schema, database: databaseId } = await fixture();
+		const pool = await getTestPool();
+		await createManagedTable(schema, databaseId, 'atomic_pair_source');
+		const rows = await appendInterruptedPair({
+			source: address(schema, databaseId, 'atomic_pair_source'),
+			target: address(schema, databaseId, 'atomic_pair_target'),
+			executionId: unique('run'),
+			pairId: unique('pair'),
+		});
+		const pairId = rows[0]?.pairId;
+		const executionId = rows[0]?.executionId;
+		if (!pairId || !executionId) throw new Error('fixture pair is incomplete');
+		const probe = await pool.connect();
+		try {
+			await expect(
+				recoverPgAdmittedReaddressPair(pool, {
+					pairId,
+					executionId,
+					reservations: rows,
+					assess: async () => {
+						await probe.query('BEGIN');
+						try {
+							const lock = await acquirePgLedgerLocks(
+								probe,
+								rows.map((row) => row.homeLedger),
+							);
+							expect(lock.kind).toBe('busy');
+						} finally {
+							await probe.query('ROLLBACK');
+						}
+						return { kind: 'refused', reason: 'verified untouched pair' };
+					},
+				}),
+			).resolves.toMatchObject({ kind: 'refused' });
+			for (const row of rows) {
+				const chain = await readPgLedgerAddressChain(
+					pool,
+					row.homeLedger,
+					row.address,
+				);
+				expect(chain.terminalMember).toMatchObject({ eventKind: 'refused' });
+			}
+		} finally {
+			probe.release();
 		}
 	});
 

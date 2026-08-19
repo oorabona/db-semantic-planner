@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { ensurePgLedger } from '@dbsp/adapter-pgsql';
 import {
+	appendPgLedgerClaim,
 	classifyPgLedgerPhysicalShape,
 	readPgLedgerReservationsForPair,
 } from '@dbsp/adapter-pgsql/internal';
+import type { LedgerReservationRow } from '@dbsp/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import { dropSchema, getTestPool } from './testkit/index.js';
 import { rolePool } from './transition-reinitialize-preflight-testkit.js';
@@ -81,6 +83,77 @@ describe('ledger catalogue statement capture', () => {
 				kind: 'unverifiable',
 				cause: '42501',
 			});
+		} finally {
+			await reader?.end();
+			await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);
+			await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
+		}
+	});
+
+	it('keeps discovery usable after an unreadable early candidate and finds a later reservation home', async () => {
+		const pool = await getTestPool();
+		const unreadable = `a_ledger_unreadable_${randomUUID().replaceAll('-', '')}`;
+		const readable = `z_ledger_readable_${randomUUID().replaceAll('-', '')}`;
+		const role = `ledger_discovery_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const password = `password_${randomUUID()}`;
+		schemas.push(unreadable, readable);
+		let reader: Awaited<ReturnType<typeof rolePool>> | undefined;
+		try {
+			for (const schema of [unreadable, readable]) {
+				await pool.query(`CREATE SCHEMA ${quoteIdent(schema)}`);
+				await ensurePgLedger(pool, { scope: 'schema', schema });
+			}
+			const pairId = 'OBL-REC4-savepoint-discovery';
+			const reservation: LedgerReservationRow = {
+				address: {
+					scope: 'schema',
+					engine: 'postgresql',
+					database: 'ledger_catalogue_e2e',
+					schema: readable,
+					kind: 'table',
+					name: 'discoverable',
+				},
+				claimKind: 'readdress-intent',
+				executionId: 'savepoint-discovery-execution',
+				pairId,
+				rootClaimId: 'savepoint-discovery-claim',
+				homeLedger: { scope: 'schema', schema: readable },
+			};
+			await appendPgLedgerClaim(
+				pool,
+				{ scope: 'schema', schema: readable },
+				{
+					eventId: reservation.rootClaimId,
+					address: reservation.address,
+					eventKind: 'readdress-intent',
+					pairId,
+				},
+				[reservation],
+			);
+			await pool.query(
+				`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
+			);
+			for (const schema of [unreadable, readable])
+				await pool.query(
+					`GRANT USAGE ON SCHEMA ${quoteIdent(schema)} TO ${quoteIdent(role)}`,
+				);
+			for (const table of [
+				'dbsp_ledger_event',
+				'dbsp_ledger_reservation',
+				'dbsp_ledger_identity',
+				'dbsp_ledger_marker',
+			])
+				await pool.query(
+					`GRANT SELECT ON TABLE ${quoteIdent(readable)}.${quoteIdent(table)} TO ${quoteIdent(role)}`,
+				);
+			reader = await rolePool(role, password);
+			const discovered = await readPgLedgerReservationsForPair(reader, pairId);
+			expect(discovered.candidates).toContainEqual({
+				target: { scope: 'schema', schema: unreadable },
+				kind: 'unverifiable',
+				cause: '42501',
+			});
+			expect(discovered).toContainEqual(reservation);
 		} finally {
 			await reader?.end();
 			await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);

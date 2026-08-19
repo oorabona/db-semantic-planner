@@ -11,6 +11,7 @@ import {
 import {
 	appendPgLedgerProgress,
 	appendPgOutcomeResolution,
+	createPgLedgerShapeAllowance,
 	lockPgJournalRun,
 	openPgOutcomeClaim,
 	PgCommitAcknowledgementAmbiguousError,
@@ -369,6 +370,31 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 		expect(terminals.rows).toEqual([]);
 	});
 
+	it('refuses a drifted ledger before a recovery terminal append', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(
+			schema,
+			'drifted_recovery',
+			'drifted-recovery-claim',
+		);
+		await openExecuting(pool, input);
+		await pool.query(
+			`CREATE FUNCTION ${quoteIdent(schema)}.extra_ledger_trigger() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END; $$`,
+		);
+		await pool.query(
+			`CREATE TRIGGER extra_ledger_trigger BEFORE INSERT ON ${quoteIdent(schema)}.dbsp_ledger_event FOR EACH ROW EXECUTE FUNCTION ${quoteIdent(schema)}.extra_ledger_trigger()`,
+		);
+
+		await expect(
+			recoverPgOutcomeClaim(pool, recovery(input, 'drifted-recovery-refused')),
+		).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
+		const terminals = await pool.query<{ event_kind: string }>(
+			`SELECT event_kind FROM ${quoteIdent(schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'refused'`,
+			[input.plan.address.name],
+		);
+		expect(terminals.rows).toEqual([]);
+	});
+
 	it('SC-33: a kill at executing acknowledgement recovers as refused with no catalogue effect', async () => {
 		const { pool, schema } = await fixture();
 		const client = await pool.connect();
@@ -458,18 +484,83 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 			value: 'append-fault-refused',
 		});
 		try {
+			const firstRecoveryAllowance = await createPgLedgerShapeAllowance(
+				pool,
+				{ scope: 'schema', schema },
+				failpoint.triggerName,
+			);
 			await expect(
-				recoverPgOutcomeClaim(pool, recovery(input, 'append-fault-refused')),
+				recoverPgOutcomeClaim(pool, {
+					...recovery(input, 'append-fault-refused'),
+					ledgerShapeAllowance: firstRecoveryAllowance,
+				}),
 			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
 			await failpoint.assertFired();
+			const retryRecoveryAllowance = await createPgLedgerShapeAllowance(
+				pool,
+				{ scope: 'schema', schema },
+				failpoint.triggerName,
+			);
 			await expect(
-				recoverPgOutcomeClaim(pool, recovery(input, 'append-fault-refused')),
+				recoverPgOutcomeClaim(pool, {
+					...recovery(input, 'append-fault-refused'),
+					ledgerShapeAllowance: retryRecoveryAllowance,
+				}),
 			).resolves.toMatchObject({ kind: 'outcome-recovery-appended' });
 			const events = await pool.query<{ count: string }>(
 				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE predecessor = $1`,
 				['append-fault-claim-executing'],
 			);
 			expect(events.rows[0]?.count).toBe('1');
+		} finally {
+			await failpoint.disarm();
+		}
+	});
+
+	it('CAP-1: a failpoint-named trigger without an allowance is refused', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(schema, 'hostile_name', 'hostile-name-claim');
+		await openExecuting(pool, input);
+		const failpoint = await armOneShotInsertFailpoint(pool, {
+			schema,
+			table: 'dbsp_ledger_event',
+			column: 'event_id',
+			value: 'hostile-name-refused',
+		});
+		try {
+			await expect(
+				recoverPgOutcomeClaim(pool, recovery(input, 'hostile-name-refused')),
+			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
+		} finally {
+			await failpoint.disarm();
+		}
+	});
+
+	it('CAP-2: an allowance refuses its trigger after its WHEN clause changes', async () => {
+		const { pool, schema } = await fixture();
+		const input = makeClaim(schema, 'hostile_when', 'hostile-when-claim');
+		await openExecuting(pool, input);
+		const failpoint = await armOneShotInsertFailpoint(pool, {
+			schema,
+			table: 'dbsp_ledger_event',
+			column: 'event_id',
+			value: 'hostile-when-refused',
+		});
+		const ledgerShapeAllowance = await createPgLedgerShapeAllowance(
+			pool,
+			{ scope: 'schema', schema },
+			failpoint.triggerName,
+		);
+		try {
+			await pool.query(
+				`DROP TRIGGER ${quoteIdent(failpoint.triggerName)} ON ${quoteIdent(schema)}."dbsp_ledger_event"; CREATE TRIGGER ${quoteIdent(failpoint.triggerName)} BEFORE INSERT ON ${quoteIdent(schema)}."dbsp_ledger_event" FOR EACH ROW WHEN (NEW."event_id" IS NOT DISTINCT FROM 'hostile-when-refused' AND NEW."predecessor" IS NOT NULL) EXECUTE FUNCTION ${quoteIdent(schema)}.${quoteIdent(failpoint.functionName)}()`,
+			);
+			await expect(
+				recoverPgOutcomeClaim(pool, {
+					...recovery(input, 'hostile-when-refused'),
+					ledgerShapeAllowance,
+				}),
+			).resolves.toMatchObject({ kind: 'outcome-protocol-refused' });
 		} finally {
 			await failpoint.disarm();
 		}

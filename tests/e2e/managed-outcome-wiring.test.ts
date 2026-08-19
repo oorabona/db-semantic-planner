@@ -186,6 +186,7 @@ async function installPgControlInsertTrigger(input: {
 async function cliReadRole(input: {
 	readonly db: string;
 	readonly schema: string;
+	readonly writeLedgerEvent?: boolean;
 }): Promise<string> {
 	const pool = await getTestPool();
 	const role = `dbsp_cli_reader_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
@@ -207,6 +208,10 @@ async function cliReadRole(input: {
 			.map((table) => `${quoteIdent('dbsp_meta')}.${quoteIdent(table)}`)
 			.join(', ')} TO ${quoteIdent(role)}`,
 	);
+	if (input.writeLedgerEvent)
+		await pool.query(
+			`GRANT INSERT ON TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} TO ${quoteIdent(role)}; GRANT DELETE ON TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_RESERVATION_TABLE)} TO ${quoteIdent(role)}`,
+		);
 	await pool.query(
 		`GRANT SELECT ON TABLE ${[
 			DBSP_LEDGER_EVENT_TABLE,
@@ -217,10 +222,37 @@ async function cliReadRole(input: {
 			.map((table) => `${quoteIdent(input.schema)}.${quoteIdent(table)}`)
 			.join(', ')} TO ${quoteIdent(role)}`,
 	);
+	await pool.query(
+		`GRANT SELECT ON TABLE ${[
+			DBSP_LEDGER_EVENT_TABLE,
+			DBSP_LEDGER_IDENTITY_TABLE,
+			DBSP_LEDGER_MARKER_TABLE,
+			DBSP_LEDGER_RESERVATION_TABLE,
+		]
+			.map((table) => `${quoteIdent('dbsp_meta')}.${quoteIdent(table)}`)
+			.join(', ')} TO ${quoteIdent(role)}`,
+	);
 	const url = new URL(input.db);
 	url.username = role;
 	url.password = password;
 	return url.toString();
+}
+
+async function installPgControlResolutionPolicy(input: {
+	readonly schema: string;
+	readonly payload: string;
+}): Promise<void> {
+	const pool = await getTestPool();
+	const functionName = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const reservationPolicy = `allow_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const eventSelectPolicy = `allow_pg_control_${randomUUID().replaceAll('-', '')}`;
+	const eventInsertPolicy = `raise_pg_control_${randomUUID().replaceAll('-', '')}`;
+	await pool.query(
+		`CREATE FUNCTION ${quoteIdent(input.schema)}.${quoteIdent(functionName)}() RETURNS boolean LANGUAGE plpgsql AS $body$ BEGIN RAISE EXCEPTION '%', '${input.payload.replaceAll("'", "''")}'; END; $body$`,
+	);
+	await pool.query(
+		`ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_RESERVATION_TABLE)} ENABLE ROW LEVEL SECURITY; ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_RESERVATION_TABLE)} FORCE ROW LEVEL SECURITY; CREATE POLICY ${quoteIdent(reservationPolicy)} ON ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_RESERVATION_TABLE)} FOR SELECT USING (true); ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} ENABLE ROW LEVEL SECURITY; ALTER TABLE ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} FORCE ROW LEVEL SECURITY; CREATE POLICY ${quoteIdent(eventSelectPolicy)} ON ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} FOR SELECT USING (true); CREATE POLICY ${quoteIdent(eventInsertPolicy)} ON ${quoteIdent(input.schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} FOR INSERT WITH CHECK (${quoteIdent(input.schema)}.${quoteIdent(functionName)}())`,
+	);
 }
 
 async function installPgControlReadPolicy(input: {
@@ -2089,17 +2121,19 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			it('OBL-CLI2 reconcile: escapes a PostgreSQL resolution trigger payload on its command exception path', async () => {
 				const { planned, schema } = await openedCliReconcile('cli2_rec');
 				const payload = controlPayload();
-				await installPgControlInsertTrigger({
+				await installPgControlResolutionPolicy({
 					schema,
-					tableSchema: schema,
-					table: DBSP_LEDGER_EVENT_TABLE,
 					payload,
 				});
 				const completed = spawnCli([
 					'reconcile',
 					planned.runId,
 					'--db',
-					planned.db,
+					await cliReadRole({
+						db: planned.db,
+						schema,
+						writeLedgerEvent: true,
+					}),
 					'--format',
 					'json',
 				]);

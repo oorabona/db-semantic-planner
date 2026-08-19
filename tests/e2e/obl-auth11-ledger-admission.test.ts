@@ -104,6 +104,16 @@ describeWithE2eCapabilities(
 						statements.push(text);
 						return reader.query(text, values as never[]);
 					},
+					connect: async () => {
+						const client = await reader.connect();
+						return {
+							query: async (text: string, values?: readonly unknown[]) => {
+								statements.push(text);
+								return client.query(text, values as never[]);
+							},
+							release: () => client.release(),
+						};
+					},
 				};
 				await expect(
 					classifyPgLedgerPhysicalShape(readOnlyExecutor, {
@@ -166,8 +176,17 @@ describeWithE2eCapabilities(
 				const statementClasses = new Set(
 					statements.map((text) => text.trim().split(/\s+/u)[0]?.toUpperCase()),
 				);
+				// Every allowed verb is either SELECT or read-only transaction control.
 				expect(statementClasses).toEqual(
-					new Set(['BEGIN', 'COMMIT', 'SELECT', 'SET']),
+					new Set([
+						'BEGIN',
+						'COMMIT',
+						'RELEASE',
+						'ROLLBACK',
+						'SAVEPOINT',
+						'SELECT',
+						'SET',
+					]),
 				);
 				expect(
 					statements.some((text) =>

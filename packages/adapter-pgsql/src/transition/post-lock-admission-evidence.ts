@@ -4,6 +4,7 @@ import {
 	classifyPgLedgerPhysicalShape,
 	isPgOrderedLedgerLocks,
 	type PgLedgerPhysicalShapeOutcome,
+	type PgLedgerShapeAllowance,
 	type PgLedgerTarget,
 	type PgOrderedLedgerLocks,
 } from './ledger.js';
@@ -35,6 +36,7 @@ type PostLockAdmissionEvidenceSeams = {
 	readonly classifyShape: (
 		executor: TransitionJournalQueryable,
 		home: PgLedgerTarget,
+		allowance?: PgLedgerShapeAllowance,
 	) => Promise<PgLedgerPhysicalShapeOutcome>;
 	readonly readCurrency: typeof readPgLedgerScopeCurrency;
 	readonly readSessionIdentity: (
@@ -87,13 +89,14 @@ export async function createPostLockAdmissionEvidence(
 	executor: TransitionJournalQueryable,
 	locks: PgOrderedLedgerLocks,
 	seams: PostLockAdmissionEvidenceSeams = productionSeams,
+	allowance?: PgLedgerShapeAllowance,
 ): Promise<PostLockAdmissionEvidence> {
 	if (!isPgOrderedLedgerLocks(locks))
 		throw new PostLockAdmissionEvidenceError(
 			'ordered ledger locks were not acquired by this adapter',
 		);
 	for (const home of locks.homes) {
-		const shape = await seams.classifyShape(executor, home);
+		const shape = await seams.classifyShape(executor, home, allowance);
 		assertPgLedgerPhysicalShapeVerified(shape);
 		const currency = await seams.readCurrency(executor, home);
 		if (currency.kind !== 'current')

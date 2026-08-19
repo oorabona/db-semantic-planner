@@ -840,8 +840,10 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		});
 		expect(pool.connect).toHaveBeenCalledOnce();
 		expect(pool.query).not.toHaveBeenCalled();
-		expect(session.query).toHaveBeenCalledWith('BEGIN');
-		expect(session.query).toHaveBeenCalledWith('ROLLBACK');
+		expect(session.query).toHaveBeenCalledWith(
+			'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+		);
+		expect(session.query).toHaveBeenCalledWith('COMMIT');
 		expect(release).toHaveBeenCalledOnce();
 	});
 

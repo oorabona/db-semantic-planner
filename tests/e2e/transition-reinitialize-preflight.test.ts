@@ -311,6 +311,34 @@ describe('SC-15a #481 pre-existing ledger-shape admission', () => {
 		);
 		expect(foreignMarker.rows[0]?.exists).toBe(false);
 	});
+
+	it('refuses a foreign partial database ledger without completing its missing relations', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SCHEMA ${quoteIdent(DBSP_META_SCHEMA)}`);
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)} (id text PRIMARY KEY)`,
+		);
+
+		const report = await runPreflight([]);
+		expect(
+			report.scopes.find((scope) => scope.ledger.scope === 'database'),
+		).toMatchObject({
+			outcome: 'failed',
+			refusal: { code: 'reinitialize-preflight-failed' },
+			reason: { step: 'create' },
+		});
+		for (const table of [
+			DBSP_LEDGER_IDENTITY_TABLE,
+			DBSP_LEDGER_MARKER_TABLE,
+			DBSP_LEDGER_RESERVATION_TABLE,
+		]) {
+			const relation = await pool.query<{ exists: boolean }>(
+				'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+				[`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`],
+			);
+			expect(relation.rows[0]?.exists).toBe(false);
+		}
+	});
 });
 
 describeWithE2eCapabilities(

@@ -47,8 +47,11 @@ import {
 	appendPgLedgerProgress,
 	appendPgLedgerResolution,
 	appendPgLedgerResolutionGroup,
+	PgLedgerPhysicalShapeValidationError,
+	type PgLedgerShapeAllowance,
 	type PgLedgerTarget,
-	readPgLedgerReservationsForPair,
+	readPgLedgerReservationsForPairInHomes,
+	readPgLedgerReservationsForPairInTransaction,
 	validatePgLedgerPhysicalShape,
 } from './ledger.js';
 import {
@@ -847,6 +850,8 @@ export interface PgOutcomeRecoveryRequest {
 	readonly readBack: PgOutcomeReadBackFactory;
 	readonly operationReadBack?: PgOutcomeOperationReadBackFactory;
 	readonly lockTimeoutMs?: number;
+	/** Internal-only, in-memory allowance for one harness-installed trigger. */
+	readonly ledgerShapeAllowance?: PgLedgerShapeAllowance;
 	/** Optional E2E observer for recovery's committing transaction. */
 	readonly observer?: PgOutcomeCheckpointObserver;
 }
@@ -932,30 +937,20 @@ async function recoverPgAdmittedReaddressPairOnSession(
 	try {
 		await begin(executor, undefined);
 		begun = true;
-		const initial = await readPgLedgerReservationsForPair(
+		const transactionId = await readPgTransactionId(executor);
+		const initial = await readPgLedgerReservationsForPairInTransaction(
 			executor,
 			request.pairId,
 		);
-		const homes = initial.map((row) => row.homeLedger);
-		const lock = await acquirePgLedgerLocks(executor, homes);
-		if (lock.kind !== 'acquired') {
-			await executor.query('ROLLBACK');
-			begun = false;
-			return { kind: 'pending', reason: 'ledger advisory lock is busy' };
-		}
-		const durable = await readPgLedgerReservationsForPair(
-			executor,
-			request.pairId,
-		);
-		const key = (rows: readonly LedgerReservationRow[]) =>
+		const reservationKey = (rows: readonly LedgerReservationRow[]) =>
 			rows
 				.map((row) => canonicalJson(row))
 				.sort()
 				.join('\n');
 		if (
-			durable.length === 0 ||
-			key(durable) !== key(request.reservations) ||
-			durable.some((row) => row.executionId !== request.executionId)
+			initial.length === 0 ||
+			reservationKey(initial) !== reservationKey(request.reservations) ||
+			initial.some((row) => row.executionId !== request.executionId)
 		) {
 			await executor.query('ROLLBACK');
 			begun = false;
@@ -965,17 +960,57 @@ async function recoverPgAdmittedReaddressPairOnSession(
 					're-address recovery reservation subset is not the durable execution closure',
 			};
 		}
-		const seen = new Set<string>();
-		for (const home of homes) {
-			const homeKey = `${home.scope}:${home.schema ?? ''}`;
-			if (seen.has(homeKey)) continue;
-			seen.add(homeKey);
-			const currency = await readPgLedgerScopeCurrency(executor, home);
-			if (currency.kind !== 'current') {
-				await executor.query('ROLLBACK');
-				begun = false;
-				return { kind: 'pending', reason: currencyRefusal(currency).reason };
-			}
+		const homes = uniquePgLedgerHomes(initial.map((row) => row.homeLedger));
+		const lock = await acquirePgLedgerLocks(executor, homes);
+		if (lock.kind !== 'acquired') {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return { kind: 'pending', reason: 'ledger advisory lock is busy' };
+		}
+		assertPgTransactionId(
+			transactionId,
+			await readPgTransactionId(executor),
+			'advisory lock',
+		);
+		const postLockEvidence = await createPostLockAdmissionEvidence(
+			executor,
+			lock.proof,
+		);
+		const liveAdmission = await checkLiveAdmission(postLockEvidence);
+		if ('kind' in liveAdmission) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return { kind: 'pending', reason: liveAdmission.reason };
+		}
+		const integrity = await validatePgLedgerRuntimeIntegrity(executor, homes);
+		if (integrity) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return { kind: 'pending', reason: integrity.reason };
+		}
+		const durable = await readPgLedgerReservationsForPairInHomes(
+			executor,
+			request.pairId,
+			homes,
+		);
+		assertPgTransactionId(
+			transactionId,
+			await readPgTransactionId(executor),
+			'reservation reread',
+		);
+		if (
+			durable.length === 0 ||
+			reservationKey(durable) !== reservationKey(initial) ||
+			reservationKey(durable) !== reservationKey(request.reservations) ||
+			durable.some((row) => row.executionId !== request.executionId)
+		) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return {
+				kind: 'pending',
+				reason:
+					're-address recovery reservation subset is not the durable execution closure',
+			};
 		}
 		const decision = await request.assess(executor, durable);
 		if (decision.kind === 'pending') {
@@ -1012,6 +1047,11 @@ async function recoverPgAdmittedReaddressPairOnSession(
 				);
 			}
 		}
+		assertPgTransactionId(
+			transactionId,
+			await readPgTransactionId(executor),
+			'pair terminal append',
+		);
 		await commitPgOutcome(executor, request.observer);
 		begun = false;
 		return decision;
@@ -1021,6 +1061,40 @@ async function recoverPgAdmittedReaddressPairOnSession(
 			return { kind: 'outcome-transport-ambiguous', reason: error.message };
 		return { kind: 'pending', reason: detail(error) };
 	}
+}
+
+function uniquePgLedgerHomes(
+	homes: readonly PgLedgerTarget[],
+): readonly PgLedgerTarget[] {
+	const unique = new Map<string, PgLedgerTarget>();
+	for (const home of homes)
+		unique.set(`${home.scope}:${home.schema ?? ''}`, home);
+	return [...unique.values()];
+}
+
+async function readPgTransactionId(
+	executor: TransitionJournalQueryable,
+): Promise<string> {
+	const result = await executor.query(
+		'SELECT pg_catalog.txid_current()::text AS transaction_id',
+	);
+	const transactionId = result.rows[0]?.transaction_id;
+	if (typeof transactionId !== 'string')
+		throw new Error(
+			'paired recovery could not prove its PostgreSQL transaction identity',
+		);
+	return transactionId;
+}
+
+function assertPgTransactionId(
+	expected: string,
+	actual: string,
+	phase: string,
+): void {
+	if (actual !== expected)
+		throw new Error(
+			`paired recovery transaction changed across ${phase}; refusing split pair resolution`,
+		);
 }
 
 function refusal(reason: string): OutcomeProtocolRefusal {
@@ -2644,6 +2718,10 @@ async function recoverPgOutcomeClaimOnSession(
 ): Promise<PgOutcomeRecoveryResult> {
 	let begun = false;
 	try {
+		if (request.reservations.length === 0)
+			return refusal(
+				'outcome recovery reservation subset is not the live open claim',
+			);
 		await begin(executor, request.lockTimeoutMs);
 		begun = true;
 		const target = targetForAddress(request.address, 'recovery target');
@@ -2667,6 +2745,44 @@ async function recoverPgOutcomeClaimOnSession(
 					? 'ledger advisory lock is busy'
 					: detail(lock.error),
 			);
+		}
+		let postLockEvidence: PostLockAdmissionEvidence;
+		try {
+			postLockEvidence = await createPostLockAdmissionEvidence(
+				executor,
+				lock.proof,
+				undefined,
+				request.ledgerShapeAllowance,
+			);
+		} catch (error) {
+			if (
+				error instanceof PgLedgerPhysicalShapeValidationError &&
+				error.outcome.kind !== 'shape-wrong'
+			) {
+				// The session can be gone with the catalogue read, so its rollback
+				// acknowledgement is not evidence against the pending outcome.
+				await rollback(executor);
+				begun = false;
+				return {
+					kind: 'outcome-recovery-pending',
+					address: request.address,
+					reason: detail(error),
+					reasonCode: 'catalogue-unavailable',
+				};
+			}
+			throw error;
+		}
+		const liveAdmission = await checkLiveAdmission(postLockEvidence);
+		if ('kind' in liveAdmission) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return liveAdmission;
+		}
+		const integrity = await validatePgLedgerRuntimeIntegrity(executor, homes);
+		if (integrity) {
+			await executor.query('ROLLBACK');
+			begun = false;
+			return integrity;
 		}
 		const currencyHomes = new Set<string>();
 		for (const home of homes) {

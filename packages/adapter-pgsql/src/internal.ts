@@ -13,7 +13,9 @@ export {
 	appendPgLedgerResolution,
 	appendPgLedgerResolutionGroup,
 	classifyPgLedgerPhysicalShape,
+	createPgLedgerShapeAllowance,
 	type PgLedgerPhysicalShapeOutcome,
+	type PgLedgerShapeAllowance,
 	readPgLedgerReservationsForPair,
 } from './transition/ledger.js';
 export {

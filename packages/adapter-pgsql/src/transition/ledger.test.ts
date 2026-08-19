@@ -8,6 +8,7 @@ import {
 	appendPgLedgerResolutionGroup,
 	assertPgLedgerPhysicalShapeVerified,
 	classifyPgLedgerShapeError,
+	createPgLedgerShapeAllowance,
 	ensurePgLedger,
 	hasPgLedgerCandidateFingerprint,
 	PgLedgerPhysicalShapeValidationError,
@@ -191,6 +192,8 @@ function createdLedgerImmutabilityTriggerRows() {
 	const spec = PG_LEDGER_IMMUTABILITY_TRIGGER_SPEC;
 	return [
 		{
+			table_schema: 'tenant_a',
+			table_name: 'dbsp_ledger_event',
 			trigger_name: spec.name,
 			trigger_enabled: spec.enabled,
 			// PG 18's tgtype includes the row-trigger bit for FOR EACH ROW.
@@ -199,6 +202,7 @@ function createdLedgerImmutabilityTriggerRows() {
 			trigger_deferrable: spec.deferrable,
 			trigger_initially_deferred: spec.initiallyDeferred,
 			function_name: spec.functionName,
+			function_schema: 'tenant_a',
 			function_identity_arguments: spec.functionIdentityArguments,
 			function_result: spec.functionResult,
 			function_language: spec.functionLanguage,
@@ -209,6 +213,7 @@ function createdLedgerImmutabilityTriggerRows() {
 			function_is_leakproof: spec.functionIsLeakproof,
 			function_config_is_null: spec.functionConfigIsNull,
 			function_source: spec.functionBody,
+			trigger_definition: 'CREATE TRIGGER dbsp_ledger_event_immutable',
 		},
 	];
 }
@@ -311,6 +316,66 @@ describe('managed ledger storage', () => {
 		await expect(
 			validatePgLedgerPhysicalShape({ query }, target),
 		).resolves.toBeUndefined();
+	});
+
+	it('admits only the factory-registered full trigger identity', async () => {
+		const live = createdLedgerDdlLiveProjection();
+		let triggers = [
+			...live.triggers,
+			{
+				...live.triggers[0],
+				trigger_name: 'harness_probe_trigger',
+				function_name: 'harness_probe_function',
+				function_source: 'BEGIN RETURN NEW; END',
+				trigger_definition:
+					'CREATE TRIGGER harness_probe_trigger BEFORE INSERT ON tenant_a.dbsp_ledger_event FOR EACH ROW WHEN ((new.event_id IS NOT NULL)) EXECUTE FUNCTION tenant_a.harness_probe_function()',
+			},
+		];
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql ===
+				"SELECT current_setting('server_version_num') AS server_version_num"
+			)
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return { rows: live.constraints };
+			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
+				return { rows: live.defaults };
+			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
+				return { rows: triggers };
+			if (sql.includes('FROM pg_catalog.pg_index index_definition'))
+				return { rows: live.indexes };
+			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+				return { rows: live.columns };
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: live.tables };
+			return { rows: [] };
+		});
+		const allowance = await createPgLedgerShapeAllowance(
+			{ query },
+			target,
+			'harness_probe_trigger',
+		);
+		await expect(
+			validatePgLedgerPhysicalShape({ query }, target, allowance),
+		).resolves.toBeUndefined();
+		triggers = triggers.map((trigger) =>
+			trigger.trigger_name === 'harness_probe_trigger'
+				? {
+						...trigger,
+						trigger_definition: `${trigger.trigger_definition} /* altered WHEN */`,
+					}
+				: trigger,
+		);
+		await expect(
+			validatePgLedgerPhysicalShape({ query }, target, allowance),
+		).rejects.toMatchObject({
+			outcome: { kind: 'shape-wrong' },
+		});
 	});
 
 	it.each([
@@ -563,7 +628,7 @@ describe('managed ledger storage', () => {
 		expect(query).toHaveBeenCalledOnce();
 	});
 
-	it('records the shape marker after creating every additive table', async () => {
+	it('writes the shape marker only after the immutability function and trigger', async () => {
 		const query = vi.fn(async (sql: string) =>
 			sql === 'SHOW server_version_num'
 				? { rows: [{ server_version_num: '150000' }] }
@@ -574,8 +639,14 @@ describe('managed ledger storage', () => {
 		expect(sql).toContain('dbsp_ledger_reservation');
 		expect(sql).toContain('dbsp_ledger_identity');
 		expect(sql).toContain('dbsp_ledger_marker');
-		expect(sql).toContain('dbsp_ledger_event_immutable');
-		expect(sql).toContain('INSERT INTO "tenant_a"."dbsp_ledger_marker"');
+		const functionIndex = sql.indexOf('dbsp_ledger_event_immutable');
+		const triggerIndex = sql.lastIndexOf('CREATE TRIGGER');
+		const markerIndex = sql.indexOf(
+			'INSERT INTO "tenant_a"."dbsp_ledger_marker"',
+		);
+		expect(functionIndex).toBeGreaterThan(-1);
+		expect(triggerIndex).toBeGreaterThan(functionIndex);
+		expect(markerIndex).toBeGreaterThan(triggerIndex);
 	});
 
 	it('can defer the marker for the reinitialize-preflight final step', async () => {
@@ -755,6 +826,95 @@ describe('managed ledger storage', () => {
 			query.mock.calls.slice(2);
 		expect(groupRootResolution?.[0]).toContain('DELETE FROM');
 		expect(containedResolution?.[0]).not.toContain('DELETE FROM');
+	});
+
+	it('matches group reservations by canonical ledger address identity', async () => {
+		const parent = {
+			scope: 'schema',
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant_a',
+			kind: 'table',
+			name: 'parent_accounts',
+		} as const;
+		const sameParentDifferentOrder = {
+			name: 'parent_accounts',
+			kind: 'table',
+			schema: 'tenant_a',
+			database: 'app',
+			engine: 'postgresql',
+			scope: 'schema',
+		} as const;
+		const root = {
+			...claim,
+			eventId: 'claim-ordered-parent',
+			eventKind: 'retire-intent' as const,
+			claimGroupId: 'claim-ordered-parent',
+			rootClaimId: 'claim-ordered-parent',
+			address: { ...claim.address, parent },
+		};
+		const child = {
+			...claim,
+			eventId: 'claim-ordered-parent-child',
+			eventKind: 'retire-intent' as const,
+			claimGroupId: 'claim-ordered-parent',
+			rootClaimId: 'claim-ordered-parent',
+			address: {
+				...claim.address,
+				kind: 'column',
+				name: 'accounts.id',
+			},
+		};
+		const query = vi.fn(async () => ({ rows: [] }));
+		await expect(
+			appendPgLedgerClaimGroup(
+				{ query },
+				root,
+				[child],
+				[
+					{
+						...reservation,
+						address: { ...root.address, parent: sameParentDifferentOrder },
+						claimKind: 'retire-intent',
+						rootClaimId: 'claim-ordered-parent',
+					},
+					{
+						...reservation,
+						address: child.address,
+						claimKind: 'retire-intent',
+						rootClaimId: 'claim-ordered-parent',
+					},
+				],
+			),
+		).resolves.toBeUndefined();
+		expect(query).toHaveBeenCalledTimes(2);
+		await expect(
+			appendPgLedgerResolutionGroup(
+				{ query },
+				'claim-ordered-parent',
+				[
+					{
+						...root,
+						eventId: 'absent-ordered-parent',
+						eventKind: 'absent',
+						predecessor: root.eventId,
+					},
+					{
+						...child,
+						eventId: 'absent-ordered-parent-child',
+						eventKind: 'absent',
+						predecessor: child.eventId,
+					},
+				],
+				[
+					{
+						address: { ...root.address, parent: sameParentDifferentOrder },
+					},
+					{ address: child.address },
+				],
+			),
+		).resolves.toBeUndefined();
+		expect(query).toHaveBeenCalledTimes(4);
 	});
 
 	it('makes a resolution append and its reservation release one statement', async () => {

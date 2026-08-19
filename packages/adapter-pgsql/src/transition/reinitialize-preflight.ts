@@ -587,7 +587,8 @@ async function processScope(
 		let initializedDatabaseLedger = false;
 		if (
 			current.home.scope === 'database' &&
-			current.marker.kind !== 'current'
+			current.marker.kind !== 'current' &&
+			!preexistingLedger
 		) {
 			failureStep = 'create';
 			await ensureDbspMetaLedger(client, { writeMarker: false });

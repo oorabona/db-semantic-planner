@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type {
-	LedgerChainMember,
-	LedgerClaimKind,
-	LedgerEventKind,
-	LedgerHome,
-	LedgerIdentity,
-	LedgerReservationRow,
+import {
+	type LedgerChainMember,
+	type LedgerClaimKind,
+	type LedgerEventKind,
+	type LedgerHome,
+	type LedgerIdentity,
+	type LedgerReservationRow,
+	ledgerAddressKey,
 } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import {
@@ -72,6 +73,8 @@ type LedgerDefaultRow = {
 };
 
 type LedgerTriggerRow = {
+	readonly table_schema: unknown;
+	readonly table_name: unknown;
 	readonly trigger_name: unknown;
 	readonly trigger_enabled: unknown;
 	readonly trigger_type: unknown;
@@ -79,6 +82,7 @@ type LedgerTriggerRow = {
 	readonly trigger_deferrable: unknown;
 	readonly trigger_initially_deferred: unknown;
 	readonly function_name: unknown;
+	readonly function_schema: unknown;
 	readonly function_identity_arguments: unknown;
 	readonly function_result: unknown;
 	readonly function_language: unknown;
@@ -89,7 +93,30 @@ type LedgerTriggerRow = {
 	readonly function_is_leakproof: unknown;
 	readonly function_config_is_null: unknown;
 	readonly function_source: unknown;
+	readonly trigger_definition: unknown;
 };
+
+declare const ledgerShapeAllowanceBrand: unique symbol;
+
+/**
+ * An in-process allowance for one non-ledger trigger observed immediately
+ * after trusted harness setup. Its contents are deliberately not structural:
+ * only the internal factory can register a value in the WeakSet below.
+ */
+export interface PgLedgerShapeAllowance {
+	readonly [ledgerShapeAllowanceBrand]: 'dbsp-ledger-shape-allowance';
+}
+
+type LedgerShapeAllowanceIdentity = Readonly<{
+	target: PgLedgerTarget;
+	trigger: LedgerTriggerRow;
+}>;
+
+const ledgerShapeAllowanceTokens = new WeakSet<object>();
+const ledgerShapeAllowanceIdentities = new WeakMap<
+	object,
+	LedgerShapeAllowanceIdentity
+>();
 
 type LedgerConstraintRow = {
 	readonly table_name: unknown;
@@ -274,6 +301,7 @@ async function readLedgerDefaults(
 export async function classifyPgLedgerPhysicalShape(
 	executor: TransitionJournalQueryable,
 	target: PgLedgerTarget,
+	allowance?: PgLedgerShapeAllowance,
 ): Promise<PgLedgerPhysicalShapeOutcome> {
 	let major: number | undefined;
 	try {
@@ -290,18 +318,20 @@ export async function classifyPgLedgerPhysicalShape(
 		if (!fixture) return { kind: 'unsupported-major', major };
 		await executor.query('SET LOCAL search_path = pg_catalog');
 		await executor.query('SET LOCAL quote_all_identifiers = off');
-		await validatePgLedgerPhysicalShapeFacts(executor, target, fixture);
+		await validatePgLedgerPhysicalShapeFacts(
+			executor,
+			target,
+			fixture,
+			allowance,
+		);
 		return { kind: 'verified' };
 	} catch (error) {
-		const sqlstate = pgSqlState(error);
-		if (sqlstate) return classifyPgLedgerShapeError(error);
-		return {
-			kind: 'shape-wrong',
-			artefact:
-				error instanceof Error
-					? error.message
-					: 'unreadable catalogue projection',
-		};
+		if (
+			error instanceof Error &&
+			error.message.startsWith('ledger physical shape:')
+		)
+			return { kind: 'shape-wrong', artefact: error.message };
+		return classifyPgLedgerShapeError(error);
 	}
 }
 
@@ -334,9 +364,10 @@ export function assertPgLedgerPhysicalShapeVerified(
 export async function validatePgLedgerPhysicalShape(
 	executor: TransitionJournalQueryable,
 	target: PgLedgerTarget,
+	allowance?: PgLedgerShapeAllowance,
 ): Promise<void> {
 	assertPgLedgerPhysicalShapeVerified(
-		await classifyPgLedgerPhysicalShape(executor, target),
+		await classifyPgLedgerPhysicalShape(executor, target, allowance),
 	);
 }
 
@@ -346,10 +377,67 @@ async function readLedgerImmutabilityTriggers(
 	tableName: string,
 ): Promise<readonly LedgerTriggerRow[]> {
 	const result = await executor.query(
-		`SELECT trigger_item.tgname AS trigger_name, trigger_item.tgenabled AS trigger_enabled, trigger_item.tgtype::text AS trigger_type, pg_catalog.encode(trigger_item.tgargs, 'hex') AS trigger_arguments, trigger_item.tgdeferrable AS trigger_deferrable, trigger_item.tginitdeferred AS trigger_initially_deferred, procedure.proname AS function_name, pg_catalog.pg_get_function_identity_arguments(procedure.oid) AS function_identity_arguments, pg_catalog.pg_get_function_result(procedure.oid) AS function_result, language.lanname AS function_language, procedure.prokind AS function_kind, procedure.provolatile AS function_volatility, procedure.proisstrict AS function_is_strict, procedure.prosecdef AS function_is_security_definer, procedure.proleakproof AS function_is_leakproof, procedure.proconfig IS NULL AS function_config_is_null, procedure.prosrc AS function_source FROM pg_catalog.pg_trigger trigger_item JOIN pg_catalog.pg_class relation ON relation.oid = trigger_item.tgrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_proc procedure ON procedure.oid = trigger_item.tgfoid JOIN pg_catalog.pg_language language ON language.oid = procedure.prolang WHERE namespace.nspname = $1 AND relation.relname = $2 AND NOT trigger_item.tgisinternal ORDER BY trigger_item.tgname`,
+		`SELECT namespace.nspname AS table_schema, relation.relname AS table_name, trigger_item.tgname AS trigger_name, trigger_item.tgenabled AS trigger_enabled, trigger_item.tgtype::text AS trigger_type, pg_catalog.encode(trigger_item.tgargs, 'hex') AS trigger_arguments, trigger_item.tgdeferrable AS trigger_deferrable, trigger_item.tginitdeferred AS trigger_initially_deferred, procedure_namespace.nspname AS function_schema, procedure.proname AS function_name, pg_catalog.pg_get_function_identity_arguments(procedure.oid) AS function_identity_arguments, pg_catalog.pg_get_function_result(procedure.oid) AS function_result, language.lanname AS function_language, procedure.prokind AS function_kind, procedure.provolatile AS function_volatility, procedure.proisstrict AS function_is_strict, procedure.prosecdef AS function_is_security_definer, procedure.proleakproof AS function_is_leakproof, procedure.proconfig IS NULL AS function_config_is_null, procedure.prosrc AS function_source, pg_catalog.pg_get_triggerdef(trigger_item.oid, false) AS trigger_definition FROM pg_catalog.pg_trigger trigger_item JOIN pg_catalog.pg_class relation ON relation.oid = trigger_item.tgrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_proc procedure ON procedure.oid = trigger_item.tgfoid JOIN pg_catalog.pg_namespace procedure_namespace ON procedure_namespace.oid = procedure.pronamespace JOIN pg_catalog.pg_language language ON language.oid = procedure.prolang WHERE namespace.nspname = $1 AND relation.relname = $2 AND NOT trigger_item.tgisinternal ORDER BY trigger_item.tgname`,
 		[schema, tableName],
 	);
 	return result.rows as readonly LedgerTriggerRow[];
+}
+
+/**
+ * Mint a one-request allowance for one exact live trigger. This is exported
+ * only from the adapter's `/internal` surface: consumers cannot forge the
+ * WeakMap registration or serialize it into an ordinary recovery request.
+ */
+export async function createPgLedgerShapeAllowance(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+	triggerName: string,
+): Promise<PgLedgerShapeAllowance> {
+	const tableName =
+		generatePgLedgerExpectedManifest().immutabilityTrigger.tableName;
+	const triggers = await readLedgerImmutabilityTriggers(
+		executor,
+		ledgerSchema(target),
+		tableName,
+	);
+	const matching = triggers.filter(
+		(trigger) => trigger.trigger_name === triggerName,
+	);
+	if (matching.length !== 1)
+		throw new Error(
+			`ledger shape allowance requires exactly one live trigger named ${triggerName}`,
+		);
+	const allowance = Object.freeze({}) as PgLedgerShapeAllowance;
+	ledgerShapeAllowanceTokens.add(allowance);
+	ledgerShapeAllowanceIdentities.set(allowance, {
+		target: Object.freeze({ ...target }),
+		trigger: Object.freeze({ ...matching[0]! }),
+	});
+	return allowance;
+}
+
+function matchesLedgerShapeAllowance(
+	allowance: PgLedgerShapeAllowance | undefined,
+	target: PgLedgerTarget,
+	trigger: LedgerTriggerRow,
+): boolean {
+	if (!allowance || typeof allowance !== 'object') return false;
+	if (!ledgerShapeAllowanceTokens.has(allowance)) return false;
+	const identity = ledgerShapeAllowanceIdentities.get(allowance);
+	if (
+		!identity ||
+		identity.target.scope !== target.scope ||
+		identity.target.schema !== target.schema
+	)
+		return false;
+	const matched = Object.entries(identity.trigger).every(
+		([key, value]) => trigger[key as keyof LedgerTriggerRow] === value,
+	);
+	if (matched) {
+		ledgerShapeAllowanceTokens.delete(allowance);
+		ledgerShapeAllowanceIdentities.delete(allowance);
+	}
+	return matched;
 }
 
 /**
@@ -365,6 +453,7 @@ async function validatePgLedgerPhysicalShapeFacts(
 	executor: TransitionJournalQueryable,
 	target: PgLedgerTarget,
 	fixture: LedgerDeparseFixture,
+	allowance?: PgLedgerShapeAllowance,
 ): Promise<void> {
 	const manifest = generatePgLedgerExpectedManifest();
 	const tables = await executor.query(
@@ -494,13 +583,27 @@ async function validatePgLedgerPhysicalShapeFacts(
 		ledgerSchema(target),
 		manifest.immutabilityTrigger.tableName,
 	);
-	if (triggers.length !== 1)
+	if (allowance === undefined && triggers.length !== 1)
 		throw ledgerPhysicalShapeError(
 			target,
 			manifest.immutabilityTrigger.tableName,
 			'has an unexpected immutability trigger set',
 		);
-	const trigger = triggers[0]!;
+	if (allowance !== undefined && triggers.length !== 2)
+		throw ledgerPhysicalShapeError(
+			target,
+			manifest.immutabilityTrigger.tableName,
+			'has an unexpected immutability trigger set',
+		);
+	const trigger = triggers.find(
+		(candidate) => candidate.trigger_name === manifest.immutabilityTrigger.name,
+	);
+	if (!trigger)
+		throw ledgerPhysicalShapeError(
+			target,
+			manifest.immutabilityTrigger.tableName,
+			'has an unexpected immutability trigger set',
+		);
 	const expectedTrigger = manifest.immutabilityTrigger;
 	if (
 		trigger.trigger_name !== expectedTrigger.name ||
@@ -527,6 +630,19 @@ async function validatePgLedgerPhysicalShapeFacts(
 			target,
 			manifest.immutabilityTrigger.tableName,
 			'has an unexpected immutability trigger or function definition',
+		);
+	if (
+		allowance !== undefined &&
+		!triggers.some(
+			(candidate) =>
+				candidate !== trigger &&
+				matchesLedgerShapeAllowance(allowance, target, candidate),
+		)
+	)
+		throw ledgerPhysicalShapeError(
+			target,
+			manifest.immutabilityTrigger.tableName,
+			'has an unexpected immutability trigger set',
 		);
 
 	const indexes = await executor.query(
@@ -665,6 +781,25 @@ export type PgLedgerReservationsForPair = readonly LedgerReservationRow[] & {
 	readonly candidates: readonly PgLedgerReservationCandidateOutcome[];
 };
 
+type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
+	release(): void;
+};
+
+type PoolTransitionJournalQueryable = TransitionJournalQueryable & {
+	connect(): Promise<ReleasableTransitionJournalQueryable>;
+};
+
+/** A Pool's query method does not retain a transaction session. */
+function isPoolQueryable(
+	executor: TransitionJournalQueryable,
+): executor is PoolTransitionJournalQueryable {
+	return (
+		'connect' in executor &&
+		typeof executor.connect === 'function' &&
+		!('release' in executor && typeof executor.release === 'function')
+	);
+}
+
 type LedgerDiscoveryRow = {
 	readonly nspname: unknown;
 	readonly table_name: unknown;
@@ -729,65 +864,40 @@ export async function readPgLedgerReservationsForPair(
 	executor: TransitionJournalQueryable,
 	pairId: string,
 ): Promise<PgLedgerReservationsForPair> {
+	// The public discovery API owns a repeatable-read transaction. Pin a Pool
+	// first: BEGIN and SAVEPOINT on Pool.query() can otherwise land on different
+	// PostgreSQL backends, which is indistinguishable from autocommit here.
+	if (isPoolQueryable(executor)) {
+		const session = await executor.connect();
+		try {
+			return await readPgLedgerReservationsForPairOwnTransaction(
+				session,
+				pairId,
+			);
+		} finally {
+			session.release();
+		}
+	}
+	return readPgLedgerReservationsForPairOwnTransaction(executor, pairId);
+}
+
+async function readPgLedgerReservationsForPairOwnTransaction(
+	executor: TransitionJournalQueryable,
+	pairId: string,
+): Promise<PgLedgerReservationsForPair> {
 	let begun = false;
 	try {
 		await executor.query(
 			'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
 		);
 		begun = true;
-		const discovered = await executor.query(
-			`SELECT namespace.nspname, relation.relname AS table_name, relation.relkind AS relation_kind, ARRAY(SELECT attribute.attname::text FROM pg_catalog.pg_attribute attribute WHERE attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped ORDER BY attribute.attnum) AS column_names FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = ANY($1::text[]) ORDER BY namespace.nspname, relation.relname`,
-			[generatePgLedgerExpectedManifest().tables.map((table) => table.name)],
+		const result = await readPgLedgerReservationsForPairInTransaction(
+			executor,
+			pairId,
 		);
-		const grouped = new Map<string, LedgerDiscoveryRow[]>();
-		for (const row of discovered.rows as readonly LedgerDiscoveryRow[]) {
-			if (typeof row.nspname !== 'string') continue;
-			const entries = grouped.get(row.nspname) ?? [];
-			entries.push(row);
-			grouped.set(row.nspname, entries);
-		}
-		const candidates: PgLedgerReservationCandidateOutcome[] = [];
-		const reservations: LedgerReservationRow[] = [];
-		for (const [schema, rows] of grouped) {
-			if (!rows.some((row) => row.table_name === DBSP_LEDGER_RESERVATION_TABLE))
-				continue;
-			const target: PgLedgerTarget =
-				schema === DBSP_META_SCHEMA
-					? { scope: 'database' }
-					: { scope: 'schema', schema };
-			if (!hasPgLedgerCandidateFingerprint(rows)) {
-				candidates.push({ target, kind: 'not-ledger-shape' });
-				continue;
-			}
-			try {
-				const outcome = await classifyPgLedgerPhysicalShape(executor, target);
-				const classified = candidateOutcome(target, outcome);
-				if (classified.kind !== 'verified') {
-					candidates.push(classified);
-					continue;
-				}
-				const marker = await readPgLedgerMarker(executor, target);
-				if (marker.kind !== 'current') {
-					candidates.push({ target, kind: 'not-ledger-shape' });
-					continue;
-				}
-				reservations.push(
-					...(await readPgLedgerReservationsForPairInHomes(executor, pairId, [
-						target,
-					])),
-				);
-				candidates.push(classified);
-			} catch (error) {
-				const classified = candidateOutcome(
-					target,
-					classifyPgLedgerShapeError(error),
-				);
-				candidates.push(classified);
-			}
-		}
 		await executor.query('COMMIT');
 		begun = false;
-		return withCandidateOutcomes(reservations, candidates);
+		return result;
 	} catch (error) {
 		if (begun) {
 			try {
@@ -798,6 +908,79 @@ export async function readPgLedgerReservationsForPair(
 		}
 		throw error;
 	}
+}
+
+/**
+ * Transaction-neutral discovery for a caller that already owns its pinned
+ * PostgreSQL transaction.  In particular, paired recovery uses this variant
+ * after it has begun and before it takes the closure locks.
+ */
+export async function readPgLedgerReservationsForPairInTransaction(
+	executor: TransitionJournalQueryable,
+	pairId: string,
+): Promise<PgLedgerReservationsForPair> {
+	const discovered = await executor.query(
+		`SELECT namespace.nspname, relation.relname AS table_name, relation.relkind AS relation_kind, ARRAY(SELECT attribute.attname::text FROM pg_catalog.pg_attribute attribute WHERE attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped ORDER BY attribute.attnum) AS column_names FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE relation.relname = ANY($1::text[]) ORDER BY namespace.nspname, relation.relname`,
+		[generatePgLedgerExpectedManifest().tables.map((table) => table.name)],
+	);
+	const grouped = new Map<string, LedgerDiscoveryRow[]>();
+	for (const row of discovered.rows as readonly LedgerDiscoveryRow[]) {
+		if (typeof row.nspname !== 'string') continue;
+		const entries = grouped.get(row.nspname) ?? [];
+		entries.push(row);
+		grouped.set(row.nspname, entries);
+	}
+	const candidates: PgLedgerReservationCandidateOutcome[] = [];
+	const reservations: LedgerReservationRow[] = [];
+	let candidateIndex = 0;
+	for (const [schema, rows] of grouped) {
+		if (!rows.some((row) => row.table_name === DBSP_LEDGER_RESERVATION_TABLE))
+			continue;
+		const target: PgLedgerTarget =
+			schema === DBSP_META_SCHEMA
+				? { scope: 'database' }
+				: { scope: 'schema', schema };
+		if (!hasPgLedgerCandidateFingerprint(rows)) {
+			candidates.push({ target, kind: 'not-ledger-shape' });
+			continue;
+		}
+		const savepoint = `dbsp_ledger_discovery_${candidateIndex}`;
+		candidateIndex += 1;
+		await executor.query(`SAVEPOINT ${savepoint}`);
+		try {
+			const outcome = await classifyPgLedgerPhysicalShape(executor, target);
+			const classified = candidateOutcome(target, outcome);
+			if (classified.kind !== 'verified') {
+				candidates.push(classified);
+				continue;
+			}
+			const marker = await readPgLedgerMarker(executor, target);
+			if (marker.kind !== 'current') {
+				candidates.push({ target, kind: 'not-ledger-shape' });
+				continue;
+			}
+			reservations.push(
+				...(await readPgLedgerReservationsForPairInHomes(executor, pairId, [
+					target,
+				])),
+			);
+			candidates.push(classified);
+		} catch (error) {
+			const classified = candidateOutcome(
+				target,
+				classifyPgLedgerShapeError(error),
+			);
+			candidates.push(classified);
+		} finally {
+			// classifyPgLedgerPhysicalShape deliberately returns SQL failures as
+			// outcomes. PostgreSQL has nevertheless marked this transaction
+			// aborted, so reset every candidate's work before inspecting the next
+			// one while retaining the discovery snapshot.
+			await executor.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+			await executor.query(`RELEASE SAVEPOINT ${savepoint}`);
+		}
+	}
+	return withCandidateOutcomes(reservations, candidates);
 }
 
 /** Read a re-address pair only from ledger homes already admitted by a caller. */
@@ -1063,10 +1246,10 @@ export async function ensurePgLedger(
 	await executor.query(renderCreateLedgerReservationTableSql(target));
 	await executor.query(renderCreateLedgerIdentityTableSql(target));
 	await executor.query(renderCreateLedgerMarkerTableSql(target));
-	if (options.writeMarker !== false)
-		await writePgLedgerShapeMarker(executor, target);
 	await executor.query(renderCreateLedgerImmutabilityFunctionSql(target));
 	await executor.query(renderCreateLedgerImmutabilityTriggerSql(target));
+	if (options.writeMarker !== false)
+		await writePgLedgerShapeMarker(executor, target);
 }
 
 export async function ensureDbspMetaLedger(
@@ -1228,7 +1411,7 @@ export async function appendPgLedgerClaimGroup(
 		);
 	const byAddress = new Map<string, LedgerWriteMember>();
 	const addressKey = (member: Pick<LedgerWriteMember, 'address'>) =>
-		JSON.stringify(addressValues(member as LedgerWriteMember));
+		ledgerAddressKey(member.address);
 	for (const claim of claims) {
 		ensureClaimEvent(claim.eventKind);
 		assertTargetMatchesAddress(targetForAddress(claim.address), claim);
@@ -1289,7 +1472,7 @@ export async function appendPgLedgerResolutionGroup(
 			'ledger resolution group requires exactly one reservation per terminal',
 		);
 	const addressKey = (member: Pick<LedgerWriteMember, 'address'>) =>
-		JSON.stringify(addressValues(member as LedgerWriteMember));
+		ledgerAddressKey(member.address);
 	const memberAddresses = new Set<string>();
 	for (const member of members) {
 		ensureResolutionEvent(member.eventKind);
