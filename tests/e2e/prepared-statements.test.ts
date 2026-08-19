@@ -1,5 +1,6 @@
-import { spawn } from 'node:child_process';
+import { fork } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
@@ -421,36 +422,18 @@ describe('adapter prepared statements', () => {
 		const applicationName = `dbsp-prepared-${randomUUID()}`;
 		const readinessMarker = 'ready-for-termination';
 		const childWaitTimeoutMs = 55_000;
-		const childSource = `
-			import { Pool } from 'pg';
-			import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-			import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
-			const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1, application_name: process.env.DBSP_APPLICATION_NAME });
-			pool.on('error', () => {});
-			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
-			const compiled = (value) => projectionlessCompiledQuery({ sql: 'SELECT pg_sleep(30) WHERE $1::boolean', parameters: [value] }, 'prepared-statements-transport-child');
-			await adapter.execute(compiled(false));
-			await adapter.execute(compiled(false));
-			try {
-				console.log('${readinessMarker}');
-				await adapter.execute(compiled(true));
-				console.error('pending named query unexpectedly resolved');
-				process.exitCode = 1;
-			} catch (error) {
-				console.log('named-query-rejected:' + (error && typeof error === 'object' && 'code' in error ? error.code : 'unknown'));
-			} finally {
-				await pool.end();
-			}
-		`;
-		const child = spawn(
-			process.execPath,
-			['--import', 'tsx', '--input-type=module', '--eval', childSource],
+		const child = fork(
+			fileURLToPath(
+				new URL('./prepared-statements-transport-child.ts', import.meta.url),
+			),
+			[],
 			{
 				env: {
 					...process.env,
 					DBSP_APPLICATION_NAME: applicationName,
 				},
-				stdio: ['ignore', 'pipe', 'pipe'],
+				execArgv: ['--import', 'tsx'],
+				stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 			},
 		);
 		const childClose = new Promise<
