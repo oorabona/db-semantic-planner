@@ -2169,17 +2169,16 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					),
 				).resolves.toMatchObject({ outcome: 'completed' });
 				const payload = controlPayload();
-				await installPgControlInsertTrigger({
+				await installPgControlReadPolicy({
 					schema,
-					tableSchema: schema,
-					table: DBSP_LEDGER_EVENT_TABLE,
+					table: DBSP_LEDGER_MARKER_TABLE,
 					payload,
 				});
 				const completed = spawnCli([
 					'release',
 					'enum:status',
 					'--db',
-					planned.db,
+					await cliReadRole({ db: planned.db, schema }),
 					'--schema',
 					schema,
 					'--format',

@@ -440,6 +440,51 @@ describe('managed ledger storage', () => {
 		);
 	});
 
+	it('evicts a pooled pair-read session after a lost COMMIT acknowledgement', async () => {
+		const commitError = Object.assign(new Error('connection reset'), {
+			code: 'ECONNRESET',
+		});
+		const session = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === 'COMMIT') throw commitError;
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = {
+			query: vi.fn(),
+			connect: vi.fn(async () => session),
+		};
+
+		await expect(readPgLedgerReservationsForPair(pool, 'pair-1')).rejects.toBe(
+			commitError,
+		);
+		expect(session.release).toHaveBeenCalledWith(commitError);
+	});
+
+	it('returns a rolled-back deterministic pair-read session to the pool normally', async () => {
+		const discoveryError = Object.assign(new Error('permission denied'), {
+			code: '42501',
+		});
+		const session = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('FROM pg_catalog.pg_class relation'))
+					throw discoveryError;
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = {
+			query: vi.fn(),
+			connect: vi.fn(async () => session),
+		};
+
+		await expect(readPgLedgerReservationsForPair(pool, 'pair-1')).rejects.toBe(
+			discoveryError,
+		);
+		expect(session.release).toHaveBeenCalledWith(undefined);
+	});
+
 	it('never maps an unknown SQLSTATE to verified', () => {
 		expect(classifyPgLedgerShapeError({ code: 'XX000' }).kind).not.toBe(
 			'verified',

@@ -6,6 +6,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
 	classifyRemovalEffectsClosure,
+	type PgRemovalEffectAddress,
 	readPgRemovalEffectsClosure,
 	removalClosureDigest,
 	reservationsForRemovalClosure,
@@ -117,6 +118,63 @@ describe('removal effects closure', () => {
 		expect(removalClosureDigest(root, loaded)).toBe(
 			removalClosureDigest(root, effects),
 		);
+	});
+
+	it('versions the closure digest and binds physical identity and ownership classification', () => {
+		const physical = {
+			address: dependent,
+			physicalIdentity: {
+				classId: '1259',
+				objectId: '9001',
+				objectSubId: '0',
+				parentClassId: '1259',
+				parentObjectId: '42',
+				parentObjectSubId: '0',
+				dependencyType: 'n',
+			},
+		} as const;
+		const ordinary = removalClosureDigest(root, [physical]);
+		const internal = removalClosureDigest(root, [
+			{ ...physical, internalOwned: true },
+		]);
+		const recreated = removalClosureDigest(root, [
+			{
+				...physical,
+				physicalIdentity: { ...physical.physicalIdentity, objectId: '9002' },
+			},
+		]);
+		expect(ordinary).toMatch(/^v2:/u);
+		expect(internal).not.toBe(ordinary);
+		expect(recreated).not.toBe(ordinary);
+	});
+
+	it('classifies a dense closure with one indexed ownership root', () => {
+		const effects: PgRemovalEffectAddress[] = [];
+		let parent = { ...root, name: 'external_0' } as LedgerAddress;
+		effects.push({ address: parent });
+		for (let index = 1; index < 48; index += 1) {
+			const address = {
+				...root,
+				kind: 'table',
+				name: `external_${index}`,
+				parent,
+			} as LedgerAddress;
+			effects.push({ address });
+			parent = address;
+		}
+		let ownershipCalls = 0;
+		const closure = classifyRemovalEffectsClosure({
+			root,
+			effects,
+			isManaged: (address) => {
+				ownershipCalls += 1;
+				return address.name === 'external_0';
+			},
+		});
+		expect(closure.kind).toBe('all-contained-or-managed');
+		if (closure.kind !== 'all-contained-or-managed') return;
+		expect(ownershipCalls).toBe(1);
+		expect(closure.managedDependents).toEqual([effects[0]!.address]);
 	});
 
 	it('parent-accounts extension members without per-member reservations', () => {
@@ -252,6 +310,12 @@ describe('removal effects closure', () => {
 		// real PostgreSQL syntax/type check remains the E2E orchestrator battery.
 		expect(queries[1]).toContain(
 			"('pg_attrdef'::regclass, 'attribute_default')",
+		);
+		expect(queries[1]).toContain(
+			'cascade(classid, objid, objsubid, refclassid, refobjid, refobjsubid, deptype)',
+		);
+		expect(queries[1]).toContain(
+			'removal_effects(classid, objid, objsubid, refclassid, refobjid, refobjsubid, deptype)',
 		);
 		expect(queries[1]).toContain(
 			"catalogue_class.class_key = 'attribute_default' AS attribute_default",

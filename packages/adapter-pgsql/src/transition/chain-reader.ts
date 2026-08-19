@@ -5,7 +5,7 @@ import type {
 	LedgerPayload,
 	RefusalCode,
 } from '@dbsp/types';
-import { REFUSAL_VOCABULARY } from '@dbsp/types';
+import { ledgerAddressParentJson, REFUSAL_VOCABULARY } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import { DBSP_LEDGER_EVENT_TABLE, DBSP_META_SCHEMA } from './constants.js';
 import type { TransitionJournalQueryable } from './journal.js';
@@ -70,7 +70,7 @@ function addressParameters(address: LedgerAddress): readonly unknown[] {
 		address.engine,
 		address.database,
 		address.schema ?? '',
-		JSON.stringify(address.parent ?? null),
+		ledgerAddressParentJson(address),
 		address.kind,
 		address.name,
 	];

@@ -50,7 +50,7 @@ export function canonicalResourceParent(
 		engine: address.engine,
 		database: address.database,
 		...(address.schema === undefined ? {} : { schema: address.schema }),
-		...(address.parent === undefined
+		...(address.parent === undefined || address.parent === null
 			? {}
 			: { parent: canonicalResourceParent(address.parent) }),
 		kind: address.kind,
@@ -88,7 +88,30 @@ function normalizedParent(
 	parent: ResourceAddress | null | undefined,
 ): Record<string, unknown> | null {
 	if (parent === null || parent === undefined) return null;
-	return { ...parent, parent: normalizedParent(parent.parent) };
+	const canonical = canonicalResourceParent(parent);
+	return {
+		engine: canonical.engine,
+		database: canonical.database,
+		...(canonical.schema === undefined ? {} : { schema: canonical.schema }),
+		parent: normalizedParent(canonical.parent),
+		kind: canonical.kind,
+		name: canonical.name,
+	};
+}
+
+/** The complete address tuple that names one physical ledger row. */
+function canonicalLedgerAddress(
+	address: LedgerAddress,
+): Record<string, unknown> {
+	return {
+		scope: address.scope,
+		engine: address.engine,
+		database: address.database,
+		...(address.schema === undefined ? {} : { schema: address.schema }),
+		parent: normalizedParent(address.parent),
+		kind: address.kind,
+		name: address.name,
+	};
 }
 
 /**
@@ -99,24 +122,20 @@ export function sameLedgerAddress(
 	left: LedgerAddress,
 	right: LedgerAddress,
 ): boolean {
-	return (
-		left.scope === right.scope &&
-		left.engine === right.engine &&
-		left.database === right.database &&
-		left.schema === right.schema &&
-		left.kind === right.kind &&
-		left.name === right.name &&
-		canonicalJson(normalizedParent(left.parent)) ===
-			canonicalJson(normalizedParent(right.parent))
-	);
+	return ledgerAddressKey(left) === ledgerAddressKey(right);
 }
 
 /** A canonical map key with the same key-order-insensitive parent semantics. */
 export function ledgerAddressKey(address: LedgerAddress): string {
-	return canonicalJson({
-		...address,
-		parent: normalizedParent(address.parent),
-	});
+	return canonicalJson(canonicalLedgerAddress(address));
+}
+
+/**
+ * Canonical parent representation for PostgreSQL's `address_parent` column.
+ * Catalogue observations never create another physical ledger address.
+ */
+export function ledgerAddressParentJson(address: LedgerAddress): string {
+	return canonicalJson(normalizedParent(address.parent));
 }
 
 export interface LedgerPayload {

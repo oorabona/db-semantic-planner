@@ -18,10 +18,8 @@ import {
 	appendPgLedgerRelease,
 	type PgLedgerTarget,
 } from './ledger.js';
-import {
-	validatePgLedgerRuntimeIntegrity,
-	withPgTransitionTransaction,
-} from './outcome-protocol.js';
+import { withPgTransitionTransaction } from './outcome-protocol.js';
+import { createPostLockAdmissionEvidence } from './post-lock-admission-evidence.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 type ControllerIdentity = { readonly name: string; readonly oid: string };
@@ -163,13 +161,9 @@ export async function releasePgManagedAddress(input: {
 				if (lock.kind !== 'acquired') {
 					return releaseRefusal(input.address, 'ERR-08', 'unknown');
 				}
-				const integrity = await validatePgLedgerRuntimeIntegrity(executor, [
-					input.home,
-				]);
-				if (integrity)
-					return releaseRefusal(input.address, 'ERR-06', 'unknown');
-				const currency = await readPgLedgerScopeCurrency(executor, input.home);
-				if (currency.kind !== 'current') {
+				try {
+					await createPostLockAdmissionEvidence(executor, lock.proof);
+				} catch {
 					return releaseRefusal(input.address, 'ERR-06', 'unknown');
 				}
 				const chain = await readPgLedgerAddressChain(

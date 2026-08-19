@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
 	readControllerOid: vi.fn(),
 	appendRelease: vi.fn(),
 	physicalIntegrity: vi.fn(),
+	postLockEvidence: vi.fn(),
 	project: vi.fn(),
 }));
 
@@ -18,6 +19,9 @@ vi.mock('./ledger.js', () => ({
 	classifyPgLedgerPhysicalShape: vi.fn(),
 	isPgOrderedLedgerLocks: vi.fn(),
 	validatePgLedgerPhysicalShape: mocks.physicalIntegrity,
+}));
+vi.mock('./post-lock-admission-evidence.js', () => ({
+	createPostLockAdmissionEvidence: mocks.postLockEvidence,
 }));
 vi.mock('./reinitialize-preflight.js', () => ({
 	readPgLedgerScopeCurrency: mocks.currency,
@@ -79,7 +83,7 @@ function currentManaged(controller = 'owner', controllerOid = '10') {
 describe('PostgreSQL release admission', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.physicalIntegrity.mockResolvedValue(undefined);
+		mocks.postLockEvidence.mockResolvedValue({});
 	});
 
 	it.each([
@@ -163,6 +167,23 @@ describe('PostgreSQL release admission', () => {
 		expect(mocks.locks).not.toHaveBeenCalled();
 	});
 
+	it('refuses post-lock physical-shape evidence failure before reading or appending', async () => {
+		mocks.locks.mockResolvedValue({ kind: 'acquired', proof: {} });
+		mocks.postLockEvidence.mockRejectedValue(new Error('counterfeit ledger'));
+		await expect(
+			releasePgManagedAddress({
+				executor: executor(),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			refusal: expect.objectContaining({ code: 'ERR-06' }),
+		});
+		expect(mocks.readChain).not.toHaveBeenCalled();
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+	});
+
 	it('OBL-CLI10: names a read-only database before release reads or appends', async () => {
 		const client = executor();
 		client.query.mockImplementation(async (sql: string) => {
@@ -195,7 +216,17 @@ describe('PostgreSQL release admission', () => {
 	});
 
 	it('appends exactly the released terminal shape atomically on success', async () => {
-		currentManaged();
+		const proof = {};
+		mocks.locks.mockResolvedValue({ kind: 'acquired', proof });
+		mocks.currency.mockResolvedValue({ kind: 'current' });
+		mocks.readChain.mockResolvedValue({
+			terminalMember: { eventId: 'observed', address, controller: 'owner' },
+		});
+		mocks.readControllerOid.mockResolvedValue('10');
+		mocks.project.mockReturnValue({
+			kind: 'projected-ledger-chain',
+			stableState: 'managed',
+		});
 		const client = executor();
 		await expect(
 			releasePgManagedAddress({
@@ -204,6 +235,7 @@ describe('PostgreSQL release admission', () => {
 				address,
 			}),
 		).resolves.toEqual({ outcome: 'released' });
+		expect(mocks.postLockEvidence).toHaveBeenCalledWith(client, proof);
 		expect(mocks.appendRelease).toHaveBeenCalledWith(
 			client,
 			{ scope: 'schema', schema: 'tenant' },

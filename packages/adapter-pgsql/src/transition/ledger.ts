@@ -10,6 +10,7 @@ import {
 	type LedgerIdentity,
 	type LedgerReservationRow,
 	ledgerAddressKey,
+	ledgerAddressParentJson,
 } from '@dbsp/types';
 import { validateIdentifier } from '../validate.js';
 import {
@@ -30,6 +31,7 @@ import {
 	renderCreateLedgerIndexFromSpec,
 	renderCreateLedgerTableFromSpec,
 } from './ledger-spec.js';
+import { isDeadPgConnectionError } from './lessor.js';
 import { readPgLedgerMarker } from './reinitialize-preflight.js';
 
 const CLAIM_EVENT_KINDS = new Set<LedgerEventKind>([
@@ -797,7 +799,7 @@ export type PgLedgerReservationsForPair = readonly LedgerReservationRow[] & {
 };
 
 type ReleasableTransitionJournalQueryable = TransitionJournalQueryable & {
-	release(): void;
+	release(error?: unknown): void;
 };
 
 type PoolTransitionJournalQueryable = TransitionJournalQueryable & {
@@ -884,13 +886,17 @@ export async function readPgLedgerReservationsForPair(
 	// PostgreSQL backends, which is indistinguishable from autocommit here.
 	if (isPoolQueryable(executor)) {
 		const session = await executor.connect();
+		let releaseError: Error | undefined;
 		try {
 			return await readPgLedgerReservationsForPairOwnTransaction(
 				session,
 				pairId,
+				(error) => {
+					releaseError = asPairReadReleaseError(error);
+				},
 			);
 		} finally {
-			session.release();
+			session.release(releaseError);
 		}
 	}
 	return readPgLedgerReservationsForPairOwnTransaction(executor, pairId);
@@ -899,8 +905,10 @@ export async function readPgLedgerReservationsForPair(
 async function readPgLedgerReservationsForPairOwnTransaction(
 	executor: TransitionJournalQueryable,
 	pairId: string,
+	markCompromised?: (error: unknown) => void,
 ): Promise<PgLedgerReservationsForPair> {
 	let begun = false;
+	let commitAttempted = false;
 	try {
 		await executor.query(
 			'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
@@ -910,19 +918,41 @@ async function readPgLedgerReservationsForPairOwnTransaction(
 			executor,
 			pairId,
 		);
+		commitAttempted = true;
 		await executor.query('COMMIT');
 		begun = false;
 		return result;
 	} catch (error) {
+		let rollbackFailed = false;
 		if (begun) {
 			try {
 				await executor.query('ROLLBACK');
 			} catch {
-				// Preserve the discovery failure, never a cleanup failure.
+				// Preserve the discovery failure, never a cleanup failure, but do not
+				// return a session whose transaction state is now unknowable.
+				rollbackFailed = true;
 			}
 		}
+		if (commitAttempted || rollbackFailed || isPairReadTransportError(error))
+			markCompromised?.(error);
 		throw error;
 	}
+}
+
+function asPairReadReleaseError(error: unknown): Error {
+	return error instanceof Error ? error : new Error(String(error));
+}
+
+function isPairReadTransportError(error: unknown): boolean {
+	if (isDeadPgConnectionError(error)) return true;
+	if (
+		error == null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return true;
+	const code = (error as { readonly code?: unknown }).code;
+	if (typeof code !== 'string') return true;
+	return !/^[0-9A-Z]{5}$/u.test(code) || code.startsWith('08');
 }
 
 /**
@@ -1092,7 +1122,7 @@ function addressValues(member: LedgerWriteMember): readonly unknown[] {
 		// The empty spelling keeps database-scoped addresses non-null, so the
 		// same-address predecessor constraint is enforced for them too.
 		member.address.schema ?? '',
-		JSON.stringify(member.address.parent ?? null),
+		ledgerAddressParentJson(member.address),
 		member.address.kind,
 		member.address.name,
 	];

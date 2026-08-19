@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type LedgerAddress, sameLedgerAddress } from './ledger.js';
+import {
+	type LedgerAddress,
+	ledgerAddressKey,
+	ledgerAddressParentJson,
+	sameLedgerAddress,
+} from './ledger.js';
 
 const address: LedgerAddress = {
 	scope: 'schema',
@@ -25,6 +30,51 @@ describe('ledger address equality', () => {
 		);
 		expect(sameLedgerAddress(address, { ...address, scope: 'database' })).toBe(
 			false,
+		);
+	});
+
+	it('uses only the canonical address tuple for both equality and map keys', () => {
+		const persisted: LedgerAddress = {
+			...address,
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '41' },
+			},
+			qualifiedBy: ['catalogue'],
+			parent: {
+				...address.parent!,
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '40' },
+				},
+				qualifiedBy: ['persisted'],
+			},
+		};
+		const observed: LedgerAddress = {
+			...address,
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '99' },
+			},
+			qualifiedBy: ['inspection'],
+			parent: {
+				...address.parent!,
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '98' },
+				},
+				qualifiedBy: ['observed'],
+			},
+		};
+
+		expect(sameLedgerAddress(persisted, observed)).toBe(true);
+		expect(ledgerAddressKey(persisted)).toBe(ledgerAddressKey(observed));
+		expect(ledgerAddressParentJson(persisted)).toBe(
+			ledgerAddressParentJson(observed),
 		);
 	});
 });
