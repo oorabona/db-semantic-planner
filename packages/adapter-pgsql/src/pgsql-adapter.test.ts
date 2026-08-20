@@ -572,6 +572,104 @@ describe('PgsqlAdapter', () => {
 			expect(serverPool.query).toHaveBeenNthCalledWith(4, sqlB, [8]);
 		});
 
+		it.each([
+			{
+				label: 'ECONNREFUSED-shaped error',
+				error: Object.assign(new Error('connect ECONNREFUSED'), {
+					code: 'ECONNREFUSED',
+				}),
+			},
+			{
+				label: 'wrong-name driver-local collision',
+				error: new Error(
+					"Prepared statements must be unique - 'dbsp_ps_unexpected' was used for a different statement",
+				),
+			},
+			{
+				label: 'truncated driver-local collision prefix',
+				error: new Error("Prepared statements must be unique - '"),
+			},
+			{
+				label: 'error with an own undefined code',
+				error: Object.assign(new Error('connection failed'), {
+					code: undefined,
+				}),
+			},
+		])('releases a borrowed-client admission after a non-server-reported $label', async ({
+			error,
+		}) => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sqlA = 'SELECT id FROM client_admission_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM client_admission_b WHERE id = $1';
+			const queryA = testQuery(sqlA, [7]);
+			const queryB = testQuery(sqlB, [8]);
+			vi.mocked(client.query).mockImplementation((statement: any) => {
+				if (
+					typeof statement === 'string' &&
+					statement.startsWith('SAVEPOINT ')
+				) {
+					return Promise.reject({ code: '25P01' });
+				}
+				if (typeof statement === 'object' && statement.text === sqlA)
+					return Promise.reject(error);
+				if (statement === sqlA)
+					return Promise.resolve({ rows: [{ id: 7 }], rowCount: 1 } as any);
+				return Promise.resolve({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			});
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await expect(adapter.execute(queryA)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(queryA)).rejects.toBe(error);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+
+			expect(client.query).toHaveBeenNthCalledWith(8, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
+		});
+
+		it('retains a borrowed-client admission after a SQLSTATE-shaped positionless error', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sqlA = 'SELECT id FROM client_admission_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM client_admission_b WHERE id = $1';
+			const queryA = testQuery(sqlA, [7]);
+			const queryB = testQuery(sqlB, [8]);
+			const error = { code: '23505' };
+			vi.mocked(client.query).mockImplementation((statement: any) => {
+				if (
+					typeof statement === 'string' &&
+					statement.startsWith('SAVEPOINT ')
+				) {
+					return Promise.reject({ code: '25P01' });
+				}
+				if (typeof statement === 'object' && statement.text === sqlA)
+					return Promise.reject(error);
+				if (statement === sqlA)
+					return Promise.resolve({ rows: [{ id: 7 }], rowCount: 1 } as any);
+				return Promise.resolve({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			});
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await expect(adapter.execute(queryA)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(queryA)).rejects.toBe(error);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+
+			expect(client.query).toHaveBeenNthCalledWith(8, sqlB, [8]);
+		});
+
 		it('does not manually acquire or release a pooled client while a query is pending', async () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
@@ -796,38 +894,6 @@ describe('PgsqlAdapter', () => {
 			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
 
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
-		});
-
-		it('keeps naming after a driver-local collision names another statement', async () => {
-			const client = Object.assign(createMockPool(), {
-				release: vi.fn(),
-			}) as unknown as PoolClient;
-			const sql = 'SELECT id FROM users WHERE id = $1';
-			const error = new Error(
-				"Prepared statements must be unique - 'dbsp_ps_unexpected' was used for a different statement",
-			);
-			vi.mocked(client.query)
-				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
-				.mockRejectedValueOnce(error)
-				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-			});
-
-			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
-			await expect(
-				(adapter as any).issueConnectionQuery(client, sql, [7], true),
-			).rejects.toBe(error);
-			await expect(
-				(adapter as any).issueConnectionQuery(client, sql, [7], true),
-			).resolves.toMatchObject({ rows: [{ id: 7 }] });
-
-			expect(client.query).toHaveBeenNthCalledWith(3, {
-				name: derivePreparedStatementName(sql),
-				text: sql,
-				values: [7],
-			});
 		});
 
 		it.each([

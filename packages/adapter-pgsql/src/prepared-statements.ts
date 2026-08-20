@@ -65,8 +65,10 @@ export class PreparedStatementRegistry {
 	) {}
 
 	/**
-	 * Reserves a name only from the second sighting onward. Call confirm after
-	 * successful named execution, or abort when that execution fails.
+	 * Reserves a name only from the second sighting onward. Call confirm to commit
+	 * executor-scoped admission after a successful named execution or a failure the
+	 * caller classified as server-reported. Call abort for a failure the caller
+	 * classified as never having reached server acceptance.
 	 */
 	admit(sql: string): PreparedStatementAdmission | undefined {
 		const fingerprint = derivePreparedStatementFingerprint(sql);
@@ -110,7 +112,7 @@ export class PreparedStatementRegistry {
 		return reservation;
 	}
 
-	/** Confirms a reservation only after PostgreSQL accepted its named execution. */
+	/** Commits executor-scoped admission after a successful named execution or a caller-classified server-reported failure. */
 	confirm(reservation: PreparedStatementReservation): void {
 		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
 		if (
@@ -123,7 +125,7 @@ export class PreparedStatementRegistry {
 		this.namesByFingerprint.set(reservation.fingerprint, reservation.name);
 	}
 
-	/** Aborts only this still-pending attempt, never a later confirmation. */
+	/** Aborts only this still-pending attempt after a caller-classified failure that never reached server acceptance, never a later confirmation. */
 	abort(reservation: PreparedStatementReservation): void {
 		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
 		if (
