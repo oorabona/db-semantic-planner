@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -53,6 +53,52 @@ async function getIsolatedClient(): Promise<{
 	} catch (error) {
 		await pool.end();
 		throw error;
+	}
+}
+
+async function expectPoolOwnedScopeToReplaceQuarantinedClient(
+	runScope: (
+		adapter: any,
+		callback: (scope: any) => Promise<void>,
+	) => Promise<void>,
+): Promise<void> {
+	const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+	try {
+		const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+		const sql = 'SELECT pg_backend_pid()::int AS pid, $1::int AS value';
+		const name = `dbsp_ps_${createHash('sha256')
+			.update(sql)
+			.digest('hex')
+			.slice(0, 32)}`;
+		const query = compiled<{ pid: number; value: number }>(sql, [17]);
+		let quarantinedPid: number | undefined;
+
+		await expect(
+			runScope(adapter, async (scope) => {
+				quarantinedPid = (await scope.execute(query))[0]?.pid;
+				await scope.execute(query);
+				await scope.executeRaw(`DEALLOCATE ${name}`);
+				await expect(scope.execute(query)).rejects.toMatchObject({
+					code: '26000',
+					routine: 'FetchPreparedStatement',
+				});
+			}),
+		).rejects.toThrow(
+			/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
+		);
+		expect(quarantinedPid).toEqual(expect.any(Number));
+
+		const replacement = await adapter.execute(query);
+		expect(replacement).toEqual([expect.objectContaining({ value: 17 })]);
+		expect(replacement[0]?.pid).not.toBe(quarantinedPid);
+		const replacementClient = await pool.connect();
+		try {
+			expect(await preparedCount(replacementClient, sql)).toBe(1);
+		} finally {
+			replacementClient.release();
+		}
+	} finally {
+		await pool.end();
 	}
 }
 
@@ -158,6 +204,39 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('frees failed Parse reservations so a later hot query can prepare', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 2 },
+			});
+			const failedSql = [
+				'SELECT $1::dbsp_missing_type_one AS value',
+				'SELECT $1::dbsp_missing_type_two AS value',
+			];
+
+			for (const sql of failedSql) {
+				const query = compiled<{ value: number }>(sql, [1]);
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '42704',
+				});
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '42704',
+				});
+				expect(await preparedCount(client, sql)).toBe(0);
+			}
+
+			const hotSql = 'SELECT $1::int AS value';
+			const hotQuery = compiled<{ value: number }>(hotSql, [19]);
+			await expect(adapter.execute(hotQuery)).resolves.toEqual([{ value: 19 }]);
+			await expect(adapter.execute(hotQuery)).resolves.toEqual([{ value: 19 }]);
+			expect(await preparedCount(client, hotSql)).toBe(1);
+		} finally {
+			await close();
+		}
+	});
+
 	it('uses digest-derived names safely through a pool and borrowed client on one connection', async () => {
 		const pool = new Pool({
 			connectionString: process.env.DATABASE_URL,
@@ -221,6 +300,7 @@ describe('adapter prepared statements', () => {
 
 			await expect(adapter.execute(query)).rejects.toMatchObject({
 				code: '0A000',
+				routine: 'RevalidateCachedQuery',
 			});
 			await expect(adapter.execute(query)).resolves.toEqual([
 				{ id: 1, added: null },
@@ -254,6 +334,7 @@ describe('adapter prepared statements', () => {
 
 				await expect(adapter.execute(query)).rejects.toMatchObject({
 					code: '0A000',
+					routine: 'RevalidateCachedQuery',
 				});
 				await expect(adapter.execute(query)).resolves.toEqual([
 					{ id: 1, added: null },
@@ -286,6 +367,7 @@ describe('adapter prepared statements', () => {
 
 			await expect(adapter.execute(query)).rejects.toMatchObject({
 				code: '26000',
+				routine: 'FetchPreparedStatement',
 			});
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
 			expect(await preparedCount(client, sql)).toBe(0);
@@ -294,26 +376,64 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('does not replay a named execution that raises a recognized SQLSTATE', async () => {
+	it('runs every admitted SQL unnamed after one verified client-wide reset failure', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
-			const sequence = `"${SCHEMA}".no_replay_sequence`;
-			const fn = `"${SCHEMA}".raise_0a000_after_nextval`;
-			const sql = `SELECT ${fn}($1) AS value`;
-			const query = compiled<{ value: number }>(sql, [0]);
+			const firstSql = 'SELECT $1::int AS value';
+			const secondSql = 'SELECT $1::int + 1 AS value';
+			const thirdSql = 'SELECT $1::int + 2 AS value';
+			const first = compiled<{ value: number }>(firstSql, [9]);
+			const second = compiled<{ value: number }>(secondSql, [9]);
+			const third = compiled<{ value: number }>(thirdSql, [9]);
+
+			for (const query of [first, second, third]) {
+				await adapter.execute(query);
+				await adapter.execute(query);
+			}
+			expect(await preparedCount(client)).toBe(3);
+			await adapter.executeRaw('DEALLOCATE ALL');
+
+			await expect(adapter.execute(first)).rejects.toMatchObject({
+				code: '26000',
+				routine: 'FetchPreparedStatement',
+			});
+			await expect(adapter.execute(second)).resolves.toEqual([{ value: 10 }]);
+			await expect(adapter.execute(third)).resolves.toEqual([{ value: 11 }]);
+			expect(await preparedCount(client)).toBe(0);
+		} finally {
+			await close();
+		}
+	});
+
+	it.each([
+		'0A000',
+		'26000',
+		'42P05',
+	])('keeps naming after PL/pgSQL raises spoofable SQLSTATE %s exactly once', async (code) => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const suffix = code.toLowerCase();
+			const sequence = `"${SCHEMA}".no_replay_sequence_${suffix}`;
+			const fn = `"${SCHEMA}".raise_${suffix}_after_nextval`;
+			const sql = `SELECT ${fn}($1, $2) AS value`;
+			const query = compiled<{ value: number }>(sql, [0, code]);
 
 			await adapter.executeDDL(`CREATE SEQUENCE ${sequence}`);
 			await adapter.executeDDL(`
-				CREATE FUNCTION ${fn}(should_fail integer) RETURNS integer
+				CREATE FUNCTION ${fn}(should_fail integer, error_code text) RETURNS integer
 				LANGUAGE plpgsql AS $$
 				BEGIN
 					IF should_fail = 1 THEN
-						PERFORM nextval('${SCHEMA}.no_replay_sequence');
-						RAISE EXCEPTION 'expected named execution failure' USING ERRCODE = '0A000';
+						PERFORM nextval('${SCHEMA}.no_replay_sequence_${suffix}');
+						RAISE EXCEPTION 'expected named execution failure' USING ERRCODE = error_code;
 					END IF;
 					RETURN should_fail;
 				END;
@@ -321,8 +441,8 @@ describe('adapter prepared statements', () => {
 
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
 			await expect(
-				adapter.execute(compiled<{ value: number }>(sql, [1])),
-			).rejects.toMatchObject({ code: '0A000' });
+				adapter.execute(compiled<{ value: number }>(sql, [1, code])),
+			).rejects.toMatchObject({ code, routine: 'exec_stmt_raise' });
 			expect(
 				(
 					await client.query<{ last_value: string; is_called: boolean }>(
@@ -330,13 +450,21 @@ describe('adapter prepared statements', () => {
 					)
 				).rows,
 			).toEqual([{ last_value: '1', is_called: true }]);
+			const querySpy = vi.spyOn(client, 'query');
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
+			expect(querySpy).toHaveBeenCalledWith({
+				name: `dbsp_ps_${createHash('sha256').update(sql).digest('hex').slice(0, 32)}`,
+				text: sql,
+				values: [0, code],
+			});
+			querySpy.mockRestore();
+			expect(await preparedCount(client, sql)).toBe(1);
 		} finally {
 			await close();
 		}
 	});
 
-	it('tombstones a duplicate external prepared statement name on its client', async () => {
+	it('quarantines a duplicate external prepared statement name on its client', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -354,6 +482,7 @@ describe('adapter prepared statements', () => {
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 11 }]);
 			await expect(adapter.execute(query)).rejects.toMatchObject({
 				code: '42P05',
+				routine: 'StorePreparedStatement',
 			});
 			await expect(adapter.execute(query)).resolves.toEqual([{ value: 11 }]);
 		} finally {
@@ -361,7 +490,7 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('disables naming pool-wide after one client resets while another pool stays eligible', async () => {
+	it('quarantines result-shape DDL on one borrowed client without affecting another client', async () => {
 		const pool = new Pool({
 			connectionString: process.env.DATABASE_URL,
 			max: 2,
@@ -372,7 +501,15 @@ describe('adapter prepared statements', () => {
 			first = await pool.connect();
 			second = await pool.connect();
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
-			const sql = 'SELECT $1::int AS value';
+			const table = 'prepared_statements_client_local';
+			const sql = `SELECT * FROM ${table} WHERE id = $1`;
+
+			for (const client of [first, second]) {
+				await client.query(
+					`CREATE TEMP TABLE ${table} (id integer PRIMARY KEY)`,
+				);
+				await client.query(`INSERT INTO ${table} (id) VALUES (13)`);
+			}
 
 			await (adapter as any).issueConnectionQuery(first, sql, [13], true);
 			await (adapter as any).issueConnectionQuery(first, sql, [13], true);
@@ -380,37 +517,28 @@ describe('adapter prepared statements', () => {
 			expect(await preparedCount(first, sql)).toBe(1);
 			expect(await preparedCount(second, sql)).toBe(1);
 
-			await first.query('DISCARD ALL');
+			await first.query(`ALTER TABLE ${table} ADD COLUMN added text`);
 			await expect(
 				(adapter as any).issueConnectionQuery(first, sql, [13], true),
-			).rejects.toMatchObject({ code: '26000' });
+			).rejects.toMatchObject({
+				code: '0A000',
+				routine: 'RevalidateCachedQuery',
+			});
 			await expect(
 				(adapter as any).issueConnectionQuery(first, sql, [13], true),
-			).resolves.toMatchObject({ rows: [{ value: 13 }] });
-			expect(await preparedCount(first, sql)).toBe(0);
+			).resolves.toMatchObject({ rows: [{ id: 13, added: null }] });
+			expect(await preparedCount(first, sql)).toBe(1);
 			expect(await preparedCount(second, sql)).toBe(1);
+			const secondQuerySpy = vi.spyOn(second, 'query');
 			await expect(
 				(adapter as any).issueConnectionQuery(second, sql, [13], true),
-			).resolves.toMatchObject({ rows: [{ value: 13 }] });
-			const otherPool = new Pool({
-				connectionString: process.env.DATABASE_URL,
-				max: 1,
+			).resolves.toMatchObject({ rows: [{ id: 13 }] });
+			expect(secondQuerySpy).toHaveBeenCalledWith({
+				name: `dbsp_ps_${createHash('sha256').update(sql).digest('hex').slice(0, 32)}`,
+				text: sql,
+				values: [13],
 			});
-			try {
-				const otherAdapter = createPgsqlAdapter(otherPool, {
-					preparedStatements: true,
-				});
-				await otherAdapter.execute(compiled(sql, [13]));
-				await otherAdapter.execute(compiled(sql, [13]));
-				const otherClient = await otherPool.connect();
-				try {
-					expect(await preparedCount(otherClient, sql)).toBe(1);
-				} finally {
-					otherClient.release();
-				}
-			} finally {
-				await otherPool.end();
-			}
+			secondQuerySpy.mockRestore();
 		} finally {
 			first?.release();
 			second?.release();
@@ -418,10 +546,66 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('pool queries recover named execution on a replacement client after DISCARD ALL', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
+		try {
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sql = 'SELECT $1::int AS value';
+			const query = compiled<{ value: number }>(sql, [13]);
+
+			await adapter.execute(query);
+			await adapter.execute(query);
+			const resetClient = await pool.connect();
+			try {
+				expect(await preparedCount(resetClient, sql)).toBe(1);
+				await resetClient.query('DISCARD ALL');
+			} finally {
+				resetClient.release();
+			}
+
+			await expect(adapter.execute(query)).rejects.toMatchObject({
+				code: '26000',
+				routine: 'FetchPreparedStatement',
+			});
+			await expect(adapter.execute(query)).resolves.toEqual([{ value: 13 }]);
+
+			const replacementClient = await pool.connect();
+			try {
+				expect(await preparedCount(replacementClient, sql)).toBe(1);
+			} finally {
+				replacementClient.release();
+			}
+		} finally {
+			await pool.end();
+		}
+	});
+
+	it('replaces a quarantined client after a pinned pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.withPinnedConnection(callback),
+		);
+	});
+
+	it('replaces a quarantined client after a transaction pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.transaction(callback),
+		);
+	});
+
+	it('replaces a quarantined client after a scratch pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.withScratchScope(callback),
+		);
+	});
+
 	it('rejects a pending named pool query after backend termination without terminating the child process', async () => {
 		const applicationName = `dbsp-prepared-${randomUUID()}`;
 		const readinessMarker = 'ready-for-termination';
-		const childWaitTimeoutMs = 55_000;
+		// Keep all child phases inside this test's explicit 60s Vitest timeout.
+		const childDeadline = Date.now() + 52_000;
 		const child = fork(
 			fileURLToPath(
 				new URL('./prepared-statements-transport-child.ts', import.meta.url),
@@ -449,8 +633,32 @@ describe('adapter prepared statements', () => {
 				resolve({ kind: 'exit', code, signal }),
 			);
 		});
+		let stopPolling = false;
+		void childClose.then(() => {
+			stopPolling = true;
+		});
 		let stdout = '';
 		let stderr = '';
+		const waitForChildCloseDuringCleanup = (label: string) => {
+			const cleanupDeadline = Date.now() + 5_000;
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			return Promise.race([
+				childClose,
+				new Promise<Awaited<typeof childClose>>((_resolve, reject) => {
+					timeout = setTimeout(
+						() =>
+							reject(
+								new Error(
+									`timed out waiting for ${label} during cleanup after 5s\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+								),
+							),
+						Math.max(0, cleanupDeadline - Date.now()),
+					);
+				}),
+			]).finally(() => {
+				if (timeout !== undefined) clearTimeout(timeout);
+			});
+		};
 		let resolveReadiness: (() => void) | undefined;
 		const readiness = new Promise<void>((resolve) => {
 			resolveReadiness = resolve;
@@ -462,6 +670,8 @@ describe('adapter prepared statements', () => {
 		child.stderr?.on('data', (chunk: Buffer) => {
 			stderr += chunk.toString();
 		});
+		let testFailure: unknown;
+		let cleanupFailure: unknown;
 		try {
 			const childFailure = (exited: Awaited<typeof childClose>) =>
 				new Error(
@@ -469,11 +679,18 @@ describe('adapter prepared statements', () => {
 				);
 			const childExitFailure = () =>
 				childClose.then((exited) => Promise.reject(childFailure(exited)));
-			const waitFor = <T>(label: string, promise: Promise<T>) => {
+			const waitUntil = <T>(label: string, promise: Promise<T>) => {
+				const remaining = childDeadline - Date.now();
+				if (remaining <= 0) {
+					return Promise.reject(
+						new Error(
+							`timed out waiting for ${label}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+						),
+					);
+				}
 				let timeout: ReturnType<typeof setTimeout> | undefined;
 				return Promise.race([
 					promise,
-					childExitFailure(),
 					new Promise<T>((_resolve, reject) => {
 						timeout = setTimeout(
 							() =>
@@ -482,21 +699,23 @@ describe('adapter prepared statements', () => {
 										`timed out waiting for ${label}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
 									),
 								),
-							childWaitTimeoutMs,
+							remaining,
 						);
 					}),
 				]).finally(() => {
 					if (timeout !== undefined) clearTimeout(timeout);
 				});
 			};
+			const waitFor = <T>(label: string, promise: Promise<T>) =>
+				waitUntil(label, Promise.race([promise, childExitFailure()]));
+			const waitForChildClose = (label: string) => waitUntil(label, childClose);
 
 			await waitFor('child readiness marker', readiness);
 			const pool = await getTestPool();
 			const pid = await waitFor(
 				'active child backend',
 				(async () => {
-					const deadline = Date.now() + childWaitTimeoutMs;
-					while (true) {
+					while (!stopPolling) {
 						const result = await pool.query<{ pid: number }>(
 							`SELECT pid FROM pg_catalog.pg_stat_activity
 					 WHERE application_name = $1 AND state = 'active'
@@ -505,7 +724,7 @@ describe('adapter prepared statements', () => {
 						);
 						const pid = result.rows[0]?.pid;
 						if (pid !== undefined) return pid;
-						const remaining = deadline - Date.now();
+						const remaining = childDeadline - Date.now();
 						if (remaining <= 0)
 							throw new Error(
 								`timed out waiting for active child backend\nstdout:\n${stdout}\nstderr:\n${stderr}`,
@@ -514,22 +733,42 @@ describe('adapter prepared statements', () => {
 							setTimeout(resolve, Math.min(100, remaining)),
 						);
 					}
+					throw new Error('stopped polling after child close');
 				})(),
 			);
 			expect(pid).toBeTypeOf('number');
 			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
 				pid,
 			]);
-			const exited = await childClose;
+			const exited = await waitForChildClose(
+				'child close after backend termination',
+			);
 			stdout = stdout.replace(`${readinessMarker}\n`, '');
 			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
 			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
+		} catch (error) {
+			testFailure = error;
 		} finally {
+			stopPolling = true;
 			if (child.exitCode === null) {
 				child.kill('SIGKILL');
-				await childClose;
+				try {
+					await waitForChildCloseDuringCleanup('child close after SIGKILL');
+				} catch (cleanupError) {
+					cleanupFailure = cleanupError;
+				}
 			}
 		}
-	});
+		if (testFailure !== undefined) {
+			if (cleanupFailure !== undefined) {
+				throw new AggregateError(
+					[testFailure, cleanupFailure],
+					'transport test failed and child cleanup also failed',
+				);
+			}
+			throw testFailure;
+		}
+		if (cleanupFailure !== undefined) throw cleanupFailure;
+	}, 60_000);
 });

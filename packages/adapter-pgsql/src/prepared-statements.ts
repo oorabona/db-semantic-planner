@@ -6,6 +6,28 @@ export const PREPARED_STATEMENT_NAMESPACE = 'dbsp_ps_';
 
 export type PreparedStatementNameHasher = (sql: string) => string;
 
+export interface PreparedStatementReservation {
+	readonly fingerprint: string;
+	readonly name: string;
+	readonly generation: number;
+}
+
+export interface PreparedStatementAdmission {
+	readonly name: string;
+	/** Present only until a named execution has demonstrated the name is usable. */
+	readonly reservation?: PreparedStatementReservation;
+}
+
+interface PendingPreparedStatement {
+	readonly name: string;
+	readonly generations: Set<number>;
+}
+
+/** Full SHA-256 identity used for bounded registry bookkeeping. */
+export function derivePreparedStatementFingerprint(sql: string): string {
+	return createHash('sha256').update(sql).digest('hex');
+}
+
 /**
  * Produces a PostgreSQL-safe node-postgres statement name from 128 bits of
  * SHA-256 of the complete SQL text.
@@ -14,14 +36,12 @@ export type PreparedStatementNameHasher = (sql: string) => string;
  * never deliberately share a name.
  */
 export function derivePreparedStatementName(sql: string): string {
-	return `${PREPARED_STATEMENT_NAMESPACE}${createHash('sha256')
-		.update(sql)
-		.digest('hex')
-		.slice(0, 32)}`;
+	return `${PREPARED_STATEMENT_NAMESPACE}${derivePreparedStatementFingerprint(sql).slice(0, 32)}`;
 }
 
 /**
- * Executor-scoped admission, naming, and tombstone registry for named statements.
+ * Executor-scoped admission, naming, and collision-protection registry for named
+ * statements.
  *
  * Candidates are retained only until their second sighting. They form a
  * bounded recency window: when it is full, the oldest candidate is evicted.
@@ -30,51 +50,129 @@ export function derivePreparedStatementName(sql: string): string {
  */
 export class PreparedStatementRegistry {
 	private readonly candidates = new Set<string>();
-	private readonly namesByText = new Map<string, string>();
-	private readonly textsByName = new Map<string, string>();
-	private readonly tombstones = new Set<string>();
+	private readonly namesByFingerprint = new Map<string, string>();
+	private readonly fingerprintsByName = new Map<string, string>();
+	private readonly pendingByFingerprint = new Map<
+		string,
+		PendingPreparedStatement
+	>();
+	private readonly collisionRejectedFingerprints = new Set<string>();
+	private nextGeneration = 0;
 
 	constructor(
 		private readonly maxStatements: number,
 		private readonly hashName: PreparedStatementNameHasher = derivePreparedStatementName,
 	) {}
 
-	/** Returns a name only from the second sighting onward. */
-	admit(sql: string): string | undefined {
-		const textKey = sql;
-		if (this.tombstones.has(sql)) return undefined;
+	/**
+	 * Reserves a name only from the second sighting onward. Call confirm to commit
+	 * executor-scoped admission after a successful named execution or a failure the
+	 * caller classified as server-reported. Call abort for a failure the caller
+	 * classified as never having reached server acceptance.
+	 */
+	admit(sql: string): PreparedStatementAdmission | undefined {
+		const fingerprint = derivePreparedStatementFingerprint(sql);
+		if (this.collisionRejectedFingerprints.has(fingerprint)) return undefined;
 
-		const knownName = this.namesByText.get(textKey);
-		if (knownName !== undefined) return knownName;
+		const knownName = this.namesByFingerprint.get(fingerprint);
+		if (knownName !== undefined) return { name: knownName };
 
-		if (!this.candidates.delete(sql)) {
-			if (this.namesByText.size >= this.maxStatements) return undefined;
+		const pending = this.pendingByFingerprint.get(fingerprint);
+		if (pending !== undefined) {
+			return this.reserveAttempt(fingerprint, pending);
+		}
+
+		if (!this.candidates.delete(fingerprint)) {
+			if (this.atCapacity()) return undefined;
 			if (this.candidates.size >= this.maxStatements) {
 				const oldest = this.candidates.values().next().value;
 				if (oldest !== undefined) this.candidates.delete(oldest);
 			}
-			this.candidates.add(sql);
+			this.candidates.add(fingerprint);
 			return undefined;
 		}
 
-		if (this.namesByText.size >= this.maxStatements) return undefined;
+		if (this.atCapacity()) return undefined;
 
 		const name = this.hashName(sql);
-		const existingText = this.textsByName.get(name);
-		if (existingText !== undefined && existingText !== sql) {
-			this.tombstone(sql);
+		const existingFingerprint = this.fingerprintsByName.get(name);
+		if (
+			existingFingerprint !== undefined &&
+			existingFingerprint !== fingerprint
+		) {
+			this.rejectHashCollision(fingerprint);
 			return undefined;
 		}
-		this.namesByText.set(textKey, name);
-		this.textsByName.set(name, sql);
-		if (this.namesByText.size >= this.maxStatements) this.candidates.clear();
-		return name;
+		this.fingerprintsByName.set(name, fingerprint);
+		const reservation = this.reserveAttempt(fingerprint, {
+			name,
+			generations: new Set(),
+		});
+		if (this.atCapacity()) this.candidates.clear();
+		return reservation;
 	}
 
-	/** Permanently disables named execution for this text on this executor. */
-	tombstone(sql: string): void {
-		this.tombstones.add(sql);
-		this.candidates.delete(sql);
+	/** Commits executor-scoped admission after a successful named execution or a caller-classified server-reported failure. */
+	confirm(reservation: PreparedStatementReservation): void {
+		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
+		if (
+			pending === undefined ||
+			pending.name !== reservation.name ||
+			!pending.generations.has(reservation.generation)
+		)
+			return;
+		this.pendingByFingerprint.delete(reservation.fingerprint);
+		this.namesByFingerprint.set(reservation.fingerprint, reservation.name);
+	}
+
+	/** Aborts only this still-pending attempt after a caller-classified failure that never reached server acceptance, never a later confirmation. */
+	abort(reservation: PreparedStatementReservation): void {
+		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
+		if (
+			pending === undefined ||
+			pending.name !== reservation.name ||
+			!pending.generations.delete(reservation.generation)
+		)
+			return;
+		if (pending.generations.size !== 0) return;
+		this.pendingByFingerprint.delete(reservation.fingerprint);
+		if (
+			this.fingerprintsByName.get(reservation.name) === reservation.fingerprint
+		) {
+			this.fingerprintsByName.delete(reservation.name);
+		}
+	}
+
+	private atCapacity(): boolean {
+		return (
+			this.namesByFingerprint.size + this.pendingByFingerprint.size >=
+			this.maxStatements
+		);
+	}
+
+	private reserveAttempt(
+		fingerprint: string,
+		pending: PendingPreparedStatement,
+	): PreparedStatementAdmission {
+		this.pendingByFingerprint.set(fingerprint, pending);
+		const reservation = {
+			fingerprint,
+			name: pending.name,
+			generation: this.nextGeneration++,
+		};
+		pending.generations.add(reservation.generation);
+		return { name: pending.name, reservation };
+	}
+
+	/** Keeps a colliding full fingerprint unnamed within a bounded registry. */
+	private rejectHashCollision(fingerprint: string): void {
+		if (this.collisionRejectedFingerprints.size >= this.maxStatements) {
+			const oldest = this.collisionRejectedFingerprints.values().next().value;
+			if (oldest !== undefined)
+				this.collisionRejectedFingerprints.delete(oldest);
+		}
+		this.collisionRejectedFingerprints.add(fingerprint);
+		this.candidates.delete(fingerprint);
 	}
 }
 

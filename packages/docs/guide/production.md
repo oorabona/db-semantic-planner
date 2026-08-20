@@ -132,6 +132,10 @@ pool adapter and a borrowed-client adapter that happen to use the same physical
 connection, so that connection can exceed either executor's cap. If you use PgBouncer in
 transaction-pooling mode, it must be configured with `max_prepared_statements`;
 otherwise leave this option off.
+Registry bookkeeping retains full SHA-256 fingerprints, not SQL text, so persistent
+fingerprint/name state remains proportional to `maxStatements` even when query texts are
+large. Pending reservation state is additionally proportional to concurrently in-flight named
+attempts.
 
 dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
 node-postgres owns checkout, query error handling, release, and backpressure. dbsp
@@ -142,9 +146,10 @@ reserved `dbsp_ps_` namespace. The same SQL therefore has the same name across
 executors. Do not issue your own named statements in that namespace on the same
 `Pool` or borrowed `PoolClient`.
 
-PostgreSQL considers a generic plan only after five custom executions, and adopts
-it only when its estimated cost is competitive. Parameter-sensitive queries can
-therefore continue to use custom plans. To observe planning cost in
+With the default `plan_cache_mode=auto`, PostgreSQL considers a generic plan only
+after five custom executions, and adopts it only when its estimated cost is
+competitive; `force_custom_plan` and `force_generic_plan` override this behavior.
+Parameter-sensitive queries can therefore continue to use custom plans. To observe planning cost in
 `pg_stat_statements`, enable `pg_stat_statements.track_planning`; it is hidden by
 default.
 
@@ -153,12 +158,27 @@ node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
 cached plan; after `DEALLOCATE ALL`, `DISCARD ALL`, or a connection/proxy reset, the
 next named execution can return `26000`; an externally created statement in the reserved namespace can
-return `42P05`. On one of these errors from a named execution, dbsp tombstones the
-SQL before propagating the original error. Future calls use the unnamed path for
-the executor lifetime. For a `Pool`, this is pool-wide: one client reset disables
-naming for that SQL on every pool client. That is a throughput regression, never
-a transparent retry or a new application error; each adapter call executes at
-most once.
+return `42P05`. dbsp always propagates that failed call once; it never retries an
+adapter call in place. For a direct `Pool` query, node-postgres releases the
+errored client and removes it from the pool, so a replacement connection prepares
+the same name cleanly on its next eligible execution. There is no pool-wide
+failure state or downgrade.
+
+For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
+client after PostgreSQL identifies a prepared-statement infrastructure failure:
+`0A000` from `RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or
+node-postgres's exact local duplicate-name error affect that SQL only. A verified
+`26000` from `FetchPreparedStatement` means all server-side prepared state on that
+client was lost, so every later eligible SQL runs unnamed on it. An absent or
+unexpected PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE
+matches, so application-raised errors cannot cause the fallback. Every adapter call
+still executes at most once.
+
+The caller still owns a borrowed client: if it returns that client to a pool after
+one of these propagated errors, it must call `client.release(error)` so the pool
+destroys it. dbsp-owned pinned, transaction, and scratch scopes do this themselves;
+they never return a quarantined client to their pool as healthy. Replacing a borrowed
+client starts with no quarantine.
 
 ---
 
