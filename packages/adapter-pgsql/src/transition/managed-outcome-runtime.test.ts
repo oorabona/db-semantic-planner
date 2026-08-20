@@ -60,6 +60,27 @@ describe('PostgreSQL managed outcome runtime', () => {
 		});
 	});
 
+	it('preserves recovery-required and compromises the execution client', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-recovery-required',
+			claimId: 'open-claim',
+			reason: 'sender disconnected',
+		});
+		const runtime = withPgManagedOutcomeRuntime({});
+		const markClientCompromised = vi.fn();
+		await expect(
+			runtime.executeManagedOutcome(
+				{ opaqueClient: { query: vi.fn() }, markClientCompromised } as never,
+				request,
+			),
+		).resolves.toEqual({
+			kind: 'recovery-required',
+			claimId: 'open-claim',
+			detail: 'sender disconnected',
+		});
+		expect(markClientCompromised).toHaveBeenCalledOnce();
+	});
+
 	it('preserves transport ambiguity and compromises the execution client', async () => {
 		executePgAdmittedOperation.mockResolvedValue({
 			kind: 'outcome-transport-ambiguous',
