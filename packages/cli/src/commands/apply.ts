@@ -692,12 +692,130 @@ export function outcomeForApplyResult(
 	return 'context-mismatch';
 }
 
-export function formatApplyHuman(result: {
-	readonly outcome: string;
+type CoreApplyCommandResult = {
+	readonly outcome: Exclude<
+		ApplyOutcome,
+		| 'run-busy'
+		| 'plan-digest-required'
+		| 'non-replayable-generator-run'
+		| 'policy-invalid'
+		| 'apply-failed'
+	>;
 	readonly runId: string;
-	readonly result?: ApplyResult;
-	readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
-}): string {
+	readonly result: ApplyResult;
+	readonly refusal?: PreAppendRefusal;
+};
+
+type GeneratorApplyCommandResult = {
+	readonly [Outcome in GeneratorExecutionResult['outcome']]: {
+		readonly outcome: Outcome;
+		readonly runId: string;
+		readonly result: Extract<
+			GeneratorExecutionResult,
+			{ readonly outcome: Outcome }
+		>;
+		readonly refusal?: PreAppendRefusal;
+	};
+}[GeneratorExecutionResult['outcome']];
+
+function generatorApplyCommandResult(
+	execution: GeneratorExecutionResult,
+	runId: string,
+	refusal: PreAppendRefusal | undefined,
+): GeneratorApplyCommandResult {
+	const fields = refusal === undefined ? {} : { refusal };
+	switch (execution.outcome) {
+		case 'completed':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'partially-applied':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'selection-incomplete':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'adoption-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'readdress-unsupported':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'readdress-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'destructive-authority-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'prior-step-events-refusal':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'recovery-required':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'transport-ambiguous':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'execution-failed':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+	}
+}
+
+type ApplyHumanResult =
+	| (ApplyCommandResult & {
+			readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
+	  })
+	| {
+			readonly outcome: string;
+			readonly runId: string;
+			readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
+	  };
+
+export function formatApplyHuman(result: ApplyHumanResult): string {
 	const line = `${result.outcome}: ${result.runId}`;
 	if (result.refusal) {
 		if ('address' in result.refusal)
@@ -710,24 +828,54 @@ export function formatApplyHuman(result: {
 			`resolving command: ${escapeDiagnosticText(result.refusal.resolvingCommand)}`,
 		].join('\n');
 	}
-	if (result.result?.unresolvedOutcome) {
-		const unresolved = result.result.unresolvedOutcome;
-		return unresolved.kind === 'recovery-required'
-			? [
-					line,
-					`claim: ${escapeDiagnosticText(unresolved.claimId)}`,
-					`detail: ${escapeDiagnosticText(unresolved.detail)}`,
-					`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
-				].join('\n')
-			: [
-					line,
-					`detail: ${escapeDiagnosticText(unresolved.detail)}`,
-					`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
-				].join('\n');
+	if (!('result' in result)) return line;
+	if ('assessment' in result.result) {
+		if (result.result.unresolvedOutcome) {
+			const unresolved = result.result.unresolvedOutcome;
+			return unresolved.kind === 'recovery-required'
+				? [
+						line,
+						`claim: ${escapeDiagnosticText(unresolved.claimId)}`,
+						`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+						`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+					].join('\n')
+				: [
+						line,
+						`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+						`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+					].join('\n');
+		}
+		if (result.outcome !== 'plan-digest-mismatch') return line;
+		const detail = result.result.assessment.reasons[0]?.detail;
+		return detail ? `${line}\n${detail}` : line;
 	}
-	if (result.outcome !== 'plan-digest-mismatch' || !result.result) return line;
-	const detail = result.result.assessment.reasons[0]?.detail;
-	return detail ? `${line}\n${detail}` : line;
+	const execution = result.result;
+	switch (execution.outcome) {
+		case 'completed':
+			return line;
+		case 'recovery-required':
+			return [
+				line,
+				`claim: ${escapeDiagnosticText(execution.claimId)}`,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
+		case 'transport-ambiguous':
+			return [
+				line,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
+		case 'partially-applied':
+		case 'selection-incomplete':
+		case 'adoption-refused':
+		case 'readdress-unsupported':
+		case 'readdress-refused':
+		case 'destructive-authority-refused':
+		case 'prior-step-events-refusal':
+		case 'execution-failed':
+			return `${line}\ndetail: ${escapeDiagnosticText(execution.detail)}`;
+	}
 }
 
 function acceptanceMatches(
@@ -767,19 +915,8 @@ function recordedPlanRefusal(): RecordedPlanRefusal {
 }
 
 export type ApplyCommandResult = (
-	| {
-			readonly outcome: Exclude<
-				ApplyOutcome,
-				| 'run-busy'
-				| 'plan-digest-required'
-				| 'non-replayable-generator-run'
-				| 'policy-invalid'
-				| 'apply-failed'
-			>;
-			readonly runId: string;
-			readonly result: ApplyResult;
-			readonly refusal?: PreAppendRefusal;
-	  }
+	| CoreApplyCommandResult
+	| GeneratorApplyCommandResult
 	| {
 			readonly outcome: 'run-busy' | 'plan-digest-required';
 			readonly runId: string;
@@ -808,7 +945,7 @@ export type NoArgumentApplyResult =
 			readonly plan: PlanResult;
 			readonly runId: string;
 			readonly planDigest: string;
-			readonly result: ApplyCommandResult | GeneratorExecutionResult;
+			readonly result: ApplyCommandResult;
 	  };
 
 function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
@@ -820,26 +957,6 @@ function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
 		(plan as { generator?: { kind?: unknown } }).generator?.kind ===
 			'schema-differ-generator'
 	);
-}
-
-/** Normalize generator-only unresolved outcomes into the public apply result contract. */
-export function applyResultForGeneratorExecution(
-	execution: GeneratorExecutionResult,
-): ApplyResult {
-	const unresolvedOutcome =
-		execution.outcome === 'recovery-required'
-			? {
-					kind: 'recovery-required' as const,
-					claimId: execution.claimId,
-					detail: execution.detail,
-				}
-			: execution.outcome === 'transport-ambiguous'
-				? { kind: 'transport-ambiguous' as const, detail: execution.detail }
-				: undefined;
-	return {
-		...execution,
-		...(unresolvedOutcome === undefined ? {} : { unresolvedOutcome }),
-	} as unknown as ApplyResult;
 }
 
 /** Every mapped command refusal needs a real plan address; never invent one. */
@@ -1224,14 +1341,11 @@ async function runApplyInternal(
 									withheldAuthority,
 								},
 							};
-				result = {
-					outcome: execution.outcome as ApplyOutcome,
+				result = generatorApplyCommandResult(
+					execution,
 					runId,
-					result: applyResultForGeneratorExecution(execution),
-					...(preAppendRefusal === undefined
-						? {}
-						: { refusal: preAppendRefusal }),
-				} as ApplyCommandResult;
+					preAppendRefusal,
+				);
 			}
 		} else {
 			const locked = await withPgTransitionRunLock(
@@ -1449,13 +1563,7 @@ export const applyCommand = new Command('apply')
 				else if (result.outcome === 'not-executable') {
 					// The planner already rendered the concrete no-drift/blocked reason.
 				} else if (result.outcome !== 'dry-run' && 'result' in result)
-					console.log(
-						'runId' in result.result
-							? formatApplyHuman(result.result)
-							: `${result.result.outcome}${
-									'detail' in result.result ? `: ${result.result.detail}` : ''
-								}`,
-					);
+					console.log(formatApplyHuman(result.result));
 			}
 			process.exitCode = exitCode;
 			return;

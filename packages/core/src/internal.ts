@@ -21,3 +21,4 @@ export {
 	consumeClaimToken,
 	mintClaimToken,
 } from './transition/outcome-protocol.js';
+export { markTransitionClientCompromised } from './transition/transition-lessor.js';

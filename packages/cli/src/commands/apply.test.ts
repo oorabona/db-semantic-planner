@@ -4,9 +4,9 @@ import { join } from 'node:path';
 import { semanticArtifactId } from '@dbsp/core';
 import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { serializeCliJson } from '../utils/output.js';
 import {
 	APPLY_OUTCOME_CONTRACT,
-	applyResultForGeneratorExecution,
 	authorizationDigest,
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
@@ -152,17 +152,43 @@ describe('dbsp apply contract and policy', () => {
 			'transport-ambiguous',
 			['detail: generator commit acknowledgement lost'],
 		],
-	] as const)('normalizes generator-shaped unresolved %s for human apply output', (execution, outcome, lines) => {
-		const applyResult = applyResultForGeneratorExecution(execution);
+	] as const)('renders generator-shaped unresolved %s for human apply output', (execution, outcome, lines) => {
 		const text = formatApplyHuman({
 			outcome,
 			runId: 'generator-run-1',
-			result: applyResult,
+			result: execution,
 		});
 		for (const line of lines) expect(text).toContain(line);
 		expect(text).toContain(
 			'resolving command: dbsp reconcile --db <database> generator-run-1',
 		);
+	});
+
+	it.each([
+		{
+			outcome: 'recovery-required' as const,
+			claimId: 'generator-open-claim',
+			detail: 'generator sender disconnected',
+		},
+		{
+			outcome: 'transport-ambiguous' as const,
+			detail: 'generator commit acknowledgement lost',
+		},
+	] as const)('serializes generator unresolved output without core assessment fields', (execution) => {
+		const document = JSON.parse(
+			serializeCliJson({
+				outcome: execution.outcome,
+				runId: 'generator-run-1',
+				result: execution,
+			}),
+		) as { readonly result: Record<string, unknown> };
+		expect(document).toMatchObject({
+			outcome: execution.outcome,
+			runId: 'generator-run-1',
+			result: execution,
+		});
+		expect(document.result).not.toHaveProperty('assessment');
+		expect(document.result).not.toHaveProperty('unresolvedOutcome');
 	});
 
 	it('gives unresolvedOutcome precedence over an otherwise completed durable outcome', () => {

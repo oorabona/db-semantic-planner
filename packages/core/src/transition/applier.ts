@@ -2497,6 +2497,7 @@ export function createApplier(
 				}
 			}
 			let lease: TransitionLease | undefined;
+			let leaseReleaseFailure: TransitionLeaseFailure | undefined;
 			try {
 				lease = await acquireExclusiveTransitionLease(input.target);
 			} catch (error) {
@@ -2547,7 +2548,9 @@ export function createApplier(
 					// apply() owns logical segment leases, but this outer durable
 					// boundary owns the physical connection until apply() has settled:
 					// post-step observed-journal writes still use this session.
-					release: () => undefined,
+					release: (error?: unknown) => {
+						if (error) leaseReleaseFailure = { error };
+					},
 				}));
 				// Await before this try's finally returns the physical lease. A bare
 				// return would run finally while apply() still owns its logical leases
@@ -2578,7 +2581,7 @@ export function createApplier(
 					);
 				}
 			} finally {
-				if (lease) await lease.release();
+				if (lease) await lease.release(leaseReleaseFailure);
 			}
 		},
 		async resume(journal, readContext, policy, target, admitRecovery) {

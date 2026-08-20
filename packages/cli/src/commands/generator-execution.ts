@@ -72,10 +72,8 @@ export type GeneratorExecutionResult =
 	  }
 	| { readonly outcome: 'selection-incomplete'; readonly detail: string }
 	| { readonly outcome: 'adoption-refused'; readonly detail: string }
-	| {
-			readonly outcome: 'readdress-unsupported' | 'readdress-refused';
-			readonly detail: string;
-	  }
+	| { readonly outcome: 'readdress-unsupported'; readonly detail: string }
+	| { readonly outcome: 'readdress-refused'; readonly detail: string }
 	| {
 			readonly outcome: 'destructive-authority-refused';
 			readonly detail: string;

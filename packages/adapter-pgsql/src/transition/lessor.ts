@@ -182,6 +182,7 @@ export async function withPgTransitionRunLock<T>(
 	let value: T | undefined;
 	let callbackLive = false;
 	let planOperationViolatedInvariant = false;
+	let leaseReleaseFailure: Error | undefined;
 	const query = async (sql: string, params?: unknown) => {
 		try {
 			return (await client.query(sql, params as never)) as {
@@ -251,7 +252,9 @@ export async function withPgTransitionRunLock<T>(
 						};
 					},
 					// Segment cleanup must not give back the session that owns the run lock.
-					release: () => undefined,
+					release: (error?: unknown) => {
+						if (error) leaseReleaseFailure = asError(error);
+					},
 				}) as TransitionQueryClient,
 		);
 		callbackLive = true;
@@ -287,6 +290,7 @@ export async function withPgTransitionRunLock<T>(
 		client.release(
 			cleanupFailure ??
 				deadConnectionFailure ??
+				leaseReleaseFailure ??
 				(planOperationViolatedInvariant
 					? new Error(
 							'PostgreSQL transition plan operation violated the exclusive session invariants',

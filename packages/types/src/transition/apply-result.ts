@@ -56,7 +56,7 @@ export interface ApplyResult {
 	readonly durableOutcome?: DurableApplyOutcome;
 	/** Present only on the recovery entry point. */
 	readonly recoveryOutcome?: RecoveryOutcome;
-	/** An admitted managed claim remains unresolved and must not be retried. When present, it is the operative outcome and durableOutcome mirrors its kind. */
+	/** An admitted managed claim remains unresolved and must not be retried. */
 	readonly unresolvedOutcome?:
 		| {
 				readonly kind: 'recovery-required';

@@ -3293,6 +3293,50 @@ describe('createApplier', () => {
 		});
 	});
 
+	it('evicts the durable preflight lease when a nested execution lease is transport-ambiguous', async () => {
+		const release = vi.fn();
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(
+					async () =>
+						({
+							kind: 'transport-ambiguous',
+							detail: 'runtime lost the commit acknowledgement',
+						}) as const,
+				),
+			}),
+		};
+		const journal = durableJournal();
+		const target = createExclusiveTransitionTarget(
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+			() => true,
+		);
+
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target,
+			authorize: vi.fn(async () => undefined),
+		});
+
+		expect(result.unresolvedOutcome).toMatchObject({
+			kind: 'transport-ambiguous',
+		});
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('reports transport ambiguity and compromises the client when recovery rollback fails', async () => {
 		const release = vi.fn();
 		const rt: OperationRuntime = {

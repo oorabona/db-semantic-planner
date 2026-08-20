@@ -120,6 +120,7 @@ export interface DurableApplyInput {
 }
 
 export type DurableApplyResult = ApplyResult & {
+	/** When unresolvedOutcome is present, durableOutcome mirrors its kind. */
 	readonly durableOutcome: DurableApplyOutcome;
 };
 

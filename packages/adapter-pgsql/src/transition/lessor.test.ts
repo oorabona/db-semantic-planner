@@ -2,6 +2,7 @@ import {
 	acquireExclusiveTransitionLease,
 	planOperationSession,
 } from '@dbsp/core';
+import { markTransitionClientCompromised } from '@dbsp/core/internal';
 import { Client, Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { evaluatePgExecutionContract } from './execution-contract.js';
@@ -274,6 +275,47 @@ describe('createPgTransitionLessor', () => {
 });
 
 describe('withPgTransitionRunLock cleanup', () => {
+	it('evicts a lock-owned client when an exclusive lease is marked compromised', async () => {
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(pool, 'run:compromised-lease', async (target) => {
+				const lease = await acquireExclusiveTransitionLease(target);
+				markTransitionClientCompromised(lease.session);
+				await lease.release();
+			}),
+		).resolves.toEqual({ kind: 'acquired', value: undefined });
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('preserves the primary result and skips unlock after the locked backend dies', async () => {
 		const dead = Object.assign(
 			new Error(
