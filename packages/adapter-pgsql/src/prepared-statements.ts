@@ -6,6 +6,23 @@ export const PREPARED_STATEMENT_NAMESPACE = 'dbsp_ps_';
 
 export type PreparedStatementNameHasher = (sql: string) => string;
 
+export interface PreparedStatementReservation {
+	readonly fingerprint: string;
+	readonly name: string;
+	readonly generation: number;
+}
+
+export interface PreparedStatementAdmission {
+	readonly name: string;
+	/** Present only until a named execution has demonstrated the name is usable. */
+	readonly reservation?: PreparedStatementReservation;
+}
+
+interface PendingPreparedStatement {
+	readonly name: string;
+	readonly generations: Set<number>;
+}
+
 /** Full SHA-256 identity used for bounded registry bookkeeping. */
 export function derivePreparedStatementFingerprint(sql: string): string {
 	return createHash('sha256').update(sql).digest('hex');
@@ -35,23 +52,36 @@ export class PreparedStatementRegistry {
 	private readonly candidates = new Set<string>();
 	private readonly namesByFingerprint = new Map<string, string>();
 	private readonly fingerprintsByName = new Map<string, string>();
+	private readonly pendingByFingerprint = new Map<
+		string,
+		PendingPreparedStatement
+	>();
 	private readonly collisionRejectedFingerprints = new Set<string>();
+	private nextGeneration = 0;
 
 	constructor(
 		private readonly maxStatements: number,
 		private readonly hashName: PreparedStatementNameHasher = derivePreparedStatementName,
 	) {}
 
-	/** Returns a name only from the second sighting onward. */
-	admit(sql: string): string | undefined {
+	/**
+	 * Reserves a name only from the second sighting onward. Call confirm after
+	 * successful named execution, or abort when that execution fails.
+	 */
+	admit(sql: string): PreparedStatementAdmission | undefined {
 		const fingerprint = derivePreparedStatementFingerprint(sql);
 		if (this.collisionRejectedFingerprints.has(fingerprint)) return undefined;
 
 		const knownName = this.namesByFingerprint.get(fingerprint);
-		if (knownName !== undefined) return knownName;
+		if (knownName !== undefined) return { name: knownName };
+
+		const pending = this.pendingByFingerprint.get(fingerprint);
+		if (pending !== undefined) {
+			return this.reserveAttempt(fingerprint, pending);
+		}
 
 		if (!this.candidates.delete(fingerprint)) {
-			if (this.namesByFingerprint.size >= this.maxStatements) return undefined;
+			if (this.atCapacity()) return undefined;
 			if (this.candidates.size >= this.maxStatements) {
 				const oldest = this.candidates.values().next().value;
 				if (oldest !== undefined) this.candidates.delete(oldest);
@@ -60,7 +90,7 @@ export class PreparedStatementRegistry {
 			return undefined;
 		}
 
-		if (this.namesByFingerprint.size >= this.maxStatements) return undefined;
+		if (this.atCapacity()) return undefined;
 
 		const name = this.hashName(sql);
 		const existingFingerprint = this.fingerprintsByName.get(name);
@@ -71,11 +101,65 @@ export class PreparedStatementRegistry {
 			this.rejectHashCollision(fingerprint);
 			return undefined;
 		}
-		this.namesByFingerprint.set(fingerprint, name);
 		this.fingerprintsByName.set(name, fingerprint);
-		if (this.namesByFingerprint.size >= this.maxStatements)
-			this.candidates.clear();
-		return name;
+		const reservation = this.reserveAttempt(fingerprint, {
+			name,
+			generations: new Set(),
+		});
+		if (this.atCapacity()) this.candidates.clear();
+		return reservation;
+	}
+
+	/** Confirms a reservation only after PostgreSQL accepted its named execution. */
+	confirm(reservation: PreparedStatementReservation): void {
+		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
+		if (
+			pending === undefined ||
+			pending.name !== reservation.name ||
+			!pending.generations.has(reservation.generation)
+		)
+			return;
+		this.pendingByFingerprint.delete(reservation.fingerprint);
+		this.namesByFingerprint.set(reservation.fingerprint, reservation.name);
+	}
+
+	/** Aborts only this still-pending attempt, never a later confirmation. */
+	abort(reservation: PreparedStatementReservation): void {
+		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
+		if (
+			pending === undefined ||
+			pending.name !== reservation.name ||
+			!pending.generations.delete(reservation.generation)
+		)
+			return;
+		if (pending.generations.size !== 0) return;
+		this.pendingByFingerprint.delete(reservation.fingerprint);
+		if (
+			this.fingerprintsByName.get(reservation.name) === reservation.fingerprint
+		) {
+			this.fingerprintsByName.delete(reservation.name);
+		}
+	}
+
+	private atCapacity(): boolean {
+		return (
+			this.namesByFingerprint.size + this.pendingByFingerprint.size >=
+			this.maxStatements
+		);
+	}
+
+	private reserveAttempt(
+		fingerprint: string,
+		pending: PendingPreparedStatement,
+	): PreparedStatementAdmission {
+		this.pendingByFingerprint.set(fingerprint, pending);
+		const reservation = {
+			fingerprint,
+			name: pending.name,
+			generation: this.nextGeneration++,
+		};
+		pending.generations.add(reservation.generation);
+		return { name: pending.name, reservation };
 	}
 
 	/** Keeps a colliding full fingerprint unnamed within a bounded registry. */

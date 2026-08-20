@@ -203,6 +203,39 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('frees failed Parse reservations so a later hot query can prepare', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 2 },
+			});
+			const failedSql = [
+				'SELECT $1::dbsp_missing_type_one AS value',
+				'SELECT $1::dbsp_missing_type_two AS value',
+			];
+
+			for (const sql of failedSql) {
+				const query = compiled<{ value: number }>(sql, [1]);
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '42704',
+				});
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '42704',
+				});
+				expect(await preparedCount(client, sql)).toBe(0);
+			}
+
+			const hotSql = 'SELECT $1::int AS value';
+			const hotQuery = compiled<{ value: number }>(hotSql, [19]);
+			await expect(adapter.execute(hotQuery)).resolves.toEqual([{ value: 19 }]);
+			await expect(adapter.execute(hotQuery)).resolves.toEqual([{ value: 19 }]);
+			expect(await preparedCount(client, hotSql)).toBe(1);
+		} finally {
+			await close();
+		}
+	});
+
 	it('uses digest-derived names safely through a pool and borrowed client on one connection', async () => {
 		const pool = new Pool({
 			connectionString: process.env.DATABASE_URL,
@@ -599,8 +632,32 @@ describe('adapter prepared statements', () => {
 				resolve({ kind: 'exit', code, signal }),
 			);
 		});
+		let stopPolling = false;
+		void childClose.then(() => {
+			stopPolling = true;
+		});
 		let stdout = '';
 		let stderr = '';
+		const waitForChildCloseDuringCleanup = (label: string) => {
+			const cleanupDeadline = Date.now() + 5_000;
+			let timeout: ReturnType<typeof setTimeout> | undefined;
+			return Promise.race([
+				childClose,
+				new Promise<Awaited<typeof childClose>>((_resolve, reject) => {
+					timeout = setTimeout(
+						() =>
+							reject(
+								new Error(
+									`timed out waiting for ${label} during cleanup after 5s\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+								),
+							),
+						Math.max(0, cleanupDeadline - Date.now()),
+					);
+				}),
+			]).finally(() => {
+				if (timeout !== undefined) clearTimeout(timeout);
+			});
+		};
 		let resolveReadiness: (() => void) | undefined;
 		const readiness = new Promise<void>((resolve) => {
 			resolveReadiness = resolve;
@@ -612,6 +669,8 @@ describe('adapter prepared statements', () => {
 		child.stderr?.on('data', (chunk: Buffer) => {
 			stderr += chunk.toString();
 		});
+		let testFailure: unknown;
+		let cleanupFailure: unknown;
 		try {
 			const childFailure = (exited: Awaited<typeof childClose>) =>
 				new Error(
@@ -655,7 +714,7 @@ describe('adapter prepared statements', () => {
 			const pid = await waitFor(
 				'active child backend',
 				(async () => {
-					while (true) {
+					while (!stopPolling) {
 						const result = await pool.query<{ pid: number }>(
 							`SELECT pid FROM pg_catalog.pg_stat_activity
 					 WHERE application_name = $1 AND state = 'active'
@@ -673,6 +732,7 @@ describe('adapter prepared statements', () => {
 							setTimeout(resolve, Math.min(100, remaining)),
 						);
 					}
+					throw new Error('stopped polling after child close');
 				})(),
 			);
 			expect(pid).toBeTypeOf('number');
@@ -686,11 +746,28 @@ describe('adapter prepared statements', () => {
 			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
 			expect(stderr).not.toMatch(/Unhandled 'error'|unhandled error event/i);
+		} catch (error) {
+			testFailure = error;
 		} finally {
+			stopPolling = true;
 			if (child.exitCode === null) {
 				child.kill('SIGKILL');
-				await waitForChildClose('child close after SIGKILL');
+				try {
+					await waitForChildCloseDuringCleanup('child close after SIGKILL');
+				} catch (cleanupError) {
+					cleanupFailure = cleanupError;
+				}
 			}
 		}
+		if (testFailure !== undefined) {
+			if (cleanupFailure !== undefined) {
+				throw new AggregateError(
+					[testFailure, cleanupFailure],
+					'transport test failed and child cleanup also failed',
+				);
+			}
+			throw testFailure;
+		}
+		if (cleanupFailure !== undefined) throw cleanupFailure;
 	}, 60_000);
 });

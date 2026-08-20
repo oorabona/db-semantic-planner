@@ -610,6 +610,48 @@ function isVerifiedPreparedStatementInfrastructureError(
 	);
 }
 
+/**
+ * A PostgreSQL error without a source position has reached Bind or Execute,
+ * after Parse accepted the named statement.
+ */
+function didNamedExecutionReachExecution(error: unknown): boolean {
+	if (typeof error !== 'object' || error === null) return false;
+	const { code, position } = error as {
+		readonly code?: unknown;
+		readonly position?: unknown;
+	};
+	return (
+		typeof code === 'string' &&
+		/^[0-9A-Z]{5}$/.test(code) &&
+		position === undefined &&
+		!isVerifiedPreparedStatementInfrastructureError(error)
+	);
+}
+
+function shouldAbortPreparedStatementReservation(
+	error: unknown,
+	executor: Pool | PoolClient,
+	attemptedName: string,
+): boolean {
+	if (
+		typeof error === 'object' &&
+		error !== null &&
+		'position' in error &&
+		(error as { readonly position?: unknown }).position !== undefined
+	)
+		return true;
+	if (isDriverLocalPreparedStatementNameCollision(error, attemptedName))
+		return true;
+	// A pool may have accepted this name on a different physical client before a
+	// later client reports missing state; retain the executor-scoped name there.
+	if (!isPoolClientLike(executor)) return false;
+	if (didNamedExecutionReachExecution(error)) return false;
+	return !(
+		error instanceof Error &&
+		error.message.startsWith("Prepared statements must be unique - '")
+	);
+}
+
 function isVerifiedClientWidePreparedStatementLoss(error: unknown): boolean {
 	if (typeof error !== 'object' || error === null) return false;
 	const { code, routine } = error as {
@@ -6216,23 +6258,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					MaybeMultipleQueryResults<T>
 				>;
 			}
-			const name = this.preparedStatementRegistry.admit(sql);
-			if (name === undefined) {
+			const admission = this.preparedStatementRegistry.admit(sql);
+			if (admission === undefined) {
 				return executor.query<T>(sql, [...parameters]) as Promise<
 					MaybeMultipleQueryResults<T>
 				>;
 			}
 			try {
-				return (await executor.query<T>({
-					name,
+				const result = (await executor.query<T>({
+					name: admission.name,
 					text: sql,
 					values: [...parameters],
 				})) as MaybeMultipleQueryResults<T>;
+				if (admission.reservation !== undefined)
+					this.preparedStatementRegistry.confirm(admission.reservation);
+				return result;
 			} catch (error) {
+				if (admission.reservation !== undefined) {
+					if (
+						shouldAbortPreparedStatementReservation(
+							error,
+							executor,
+							admission.name,
+						)
+					) {
+						this.preparedStatementRegistry.abort(admission.reservation);
+					} else this.preparedStatementRegistry.confirm(admission.reservation);
+				}
 				if (
 					isPoolClientLike(executor) &&
 					(isVerifiedPreparedStatementInfrastructureError(error) ||
-						isDriverLocalPreparedStatementNameCollision(error, name))
+						isDriverLocalPreparedStatementNameCollision(error, admission.name))
 				) {
 					// The failed call is never retried. A verified 26000 means this
 					// physical client lost all server-side prepared state; the other
