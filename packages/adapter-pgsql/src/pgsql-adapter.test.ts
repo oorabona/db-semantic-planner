@@ -555,7 +555,6 @@ describe('PgsqlAdapter', () => {
 
 		it.each([
 			{ code: '0A000', routine: 'RevalidateCachedQuery' },
-			{ code: '26000', routine: 'FetchPreparedStatement' },
 			{ code: '42P05', routine: 'StorePreparedStatement' },
 		])('quarantines a verified $code named-statement failure before rejection is observable', async (error) => {
 			const client = Object.assign(createMockPool(), {
@@ -604,6 +603,40 @@ describe('PgsqlAdapter', () => {
 				text: sqlB,
 				values: [8],
 			});
+		});
+
+		it('quarantines every admitted SQL after a verified client-wide statement loss', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const error = { code: '26000', routine: 'FetchPreparedStatement' };
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValue({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const sqlA = 'SELECT id FROM users WHERE id = $1';
+			const sqlB = 'SELECT id FROM accounts WHERE id = $1';
+
+			await (adapter as any).issueConnectionQuery(client, sqlA, [7], true);
+			await (adapter as any).issueConnectionQuery(client, sqlB, [8], true);
+			await (adapter as any).issueConnectionQuery(client, sqlA, [7], true);
+			await (adapter as any).issueConnectionQuery(client, sqlB, [8], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sqlA, [7], true),
+			).rejects.toBe(error);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sqlB, [8], true),
+			).resolves.toMatchObject({ rows: [{ id: 8 }] });
+
+			expect(client.query).toHaveBeenNthCalledWith(6, sqlB, [8]);
 		});
 
 		it('does not quarantine a pool query after a verified failure', async () => {

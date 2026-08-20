@@ -132,6 +132,8 @@ pool adapter and a borrowed-client adapter that happen to use the same physical
 connection, so that connection can exceed either executor's cap. If you use PgBouncer in
 transaction-pooling mode, it must be configured with `max_prepared_statements`;
 otherwise leave this option off.
+Registry bookkeeping retains full SHA-256 fingerprints, not SQL text, so its retained
+memory remains proportional to `maxStatements` even when query texts are large.
 
 dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
 node-postgres owns checkout, query error handling, release, and backpressure. dbsp
@@ -160,15 +162,21 @@ errored client and removes it from the pool, so a replacement connection prepare
 the same name cleanly on its next eligible execution. There is no pool-wide
 failure state or downgrade.
 
-For a caller-borrowed, pinned, or transaction client, dbsp falls back to unnamed
-execution for that SQL on that physical client only when PostgreSQL identifies the
-failure as its prepared-statement infrastructure: `0A000` from
-`RevalidateCachedQuery`, `26000` from `FetchPreparedStatement`, or `42P05` from
-`StorePreparedStatement`. It also does so for node-postgres's exact local
-duplicate-name error, which is necessarily client-local. An absent or unexpected
-PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE matches, so
-application-raised errors cannot cause the fallback. Replacing a borrowed client
-starts with no quarantine. Every adapter call still executes at most once.
+For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
+client after PostgreSQL identifies a prepared-statement infrastructure failure:
+`0A000` from `RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or
+node-postgres's exact local duplicate-name error affect that SQL only. A verified
+`26000` from `FetchPreparedStatement` means all server-side prepared state on that
+client was lost, so every later eligible SQL runs unnamed on it. An absent or
+unexpected PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE
+matches, so application-raised errors cannot cause the fallback. Every adapter call
+still executes at most once.
+
+The caller still owns a borrowed client: if it returns that client to a pool after
+one of these propagated errors, it must call `client.release(error)` so the pool
+destroys it. dbsp-owned pinned, transaction, and scratch scopes do this themselves;
+they never return a quarantined client to their pool as healthy. Replacing a borrowed
+client starts with no quarantine.
 
 ---
 

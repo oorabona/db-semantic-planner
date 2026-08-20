@@ -6,6 +6,11 @@ export const PREPARED_STATEMENT_NAMESPACE = 'dbsp_ps_';
 
 export type PreparedStatementNameHasher = (sql: string) => string;
 
+/** Full SHA-256 identity used for bounded registry bookkeeping. */
+export function derivePreparedStatementFingerprint(sql: string): string {
+	return createHash('sha256').update(sql).digest('hex');
+}
+
 /**
  * Produces a PostgreSQL-safe node-postgres statement name from 128 bits of
  * SHA-256 of the complete SQL text.
@@ -14,10 +19,7 @@ export type PreparedStatementNameHasher = (sql: string) => string;
  * never deliberately share a name.
  */
 export function derivePreparedStatementName(sql: string): string {
-	return `${PREPARED_STATEMENT_NAMESPACE}${createHash('sha256')
-		.update(sql)
-		.digest('hex')
-		.slice(0, 32)}`;
+	return `${PREPARED_STATEMENT_NAMESPACE}${derivePreparedStatementFingerprint(sql).slice(0, 32)}`;
 }
 
 /**
@@ -31,9 +33,9 @@ export function derivePreparedStatementName(sql: string): string {
  */
 export class PreparedStatementRegistry {
 	private readonly candidates = new Set<string>();
-	private readonly namesByText = new Map<string, string>();
-	private readonly textsByName = new Map<string, string>();
-	private readonly collisionRejectedTexts = new Set<string>();
+	private readonly namesByFingerprint = new Map<string, string>();
+	private readonly fingerprintsByName = new Map<string, string>();
+	private readonly collisionRejectedFingerprints = new Set<string>();
 
 	constructor(
 		private readonly maxStatements: number,
@@ -42,40 +44,49 @@ export class PreparedStatementRegistry {
 
 	/** Returns a name only from the second sighting onward. */
 	admit(sql: string): string | undefined {
-		const textKey = sql;
-		if (this.collisionRejectedTexts.has(sql)) return undefined;
+		const fingerprint = derivePreparedStatementFingerprint(sql);
+		if (this.collisionRejectedFingerprints.has(fingerprint)) return undefined;
 
-		const knownName = this.namesByText.get(textKey);
+		const knownName = this.namesByFingerprint.get(fingerprint);
 		if (knownName !== undefined) return knownName;
 
-		if (!this.candidates.delete(sql)) {
-			if (this.namesByText.size >= this.maxStatements) return undefined;
+		if (!this.candidates.delete(fingerprint)) {
+			if (this.namesByFingerprint.size >= this.maxStatements) return undefined;
 			if (this.candidates.size >= this.maxStatements) {
 				const oldest = this.candidates.values().next().value;
 				if (oldest !== undefined) this.candidates.delete(oldest);
 			}
-			this.candidates.add(sql);
+			this.candidates.add(fingerprint);
 			return undefined;
 		}
 
-		if (this.namesByText.size >= this.maxStatements) return undefined;
+		if (this.namesByFingerprint.size >= this.maxStatements) return undefined;
 
 		const name = this.hashName(sql);
-		const existingText = this.textsByName.get(name);
-		if (existingText !== undefined && existingText !== sql) {
-			this.rejectHashCollision(sql);
+		const existingFingerprint = this.fingerprintsByName.get(name);
+		if (
+			existingFingerprint !== undefined &&
+			existingFingerprint !== fingerprint
+		) {
+			this.rejectHashCollision(fingerprint);
 			return undefined;
 		}
-		this.namesByText.set(textKey, name);
-		this.textsByName.set(name, sql);
-		if (this.namesByText.size >= this.maxStatements) this.candidates.clear();
+		this.namesByFingerprint.set(fingerprint, name);
+		this.fingerprintsByName.set(name, fingerprint);
+		if (this.namesByFingerprint.size >= this.maxStatements)
+			this.candidates.clear();
 		return name;
 	}
 
-	/** Keeps a text whose derived name collides with another text unnamed. */
-	private rejectHashCollision(sql: string): void {
-		this.collisionRejectedTexts.add(sql);
-		this.candidates.delete(sql);
+	/** Keeps a colliding full fingerprint unnamed within a bounded registry. */
+	private rejectHashCollision(fingerprint: string): void {
+		if (this.collisionRejectedFingerprints.size >= this.maxStatements) {
+			const oldest = this.collisionRejectedFingerprints.values().next().value;
+			if (oldest !== undefined)
+				this.collisionRejectedFingerprints.delete(oldest);
+		}
+		this.collisionRejectedFingerprints.add(fingerprint);
+		this.candidates.delete(fingerprint);
 	}
 }
 

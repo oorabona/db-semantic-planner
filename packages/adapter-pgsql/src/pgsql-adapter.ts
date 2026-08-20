@@ -135,6 +135,7 @@ import {
 } from './naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
+	derivePreparedStatementFingerprint,
 	normalizeMaxPreparedStatements,
 	PreparedStatementRegistry,
 } from './prepared-statements.js';
@@ -362,9 +363,14 @@ const preparedStatementRegistries = new WeakMap<
  * This is deliberately client-local: a pooled query releases its errored
  * client, so no failure state must outlive that client through the pool.
  */
-const quarantinedPreparedStatementTexts = new WeakMap<
+type PreparedStatementQuarantine = {
+	allStatements: boolean;
+	readonly fingerprints: Set<string>;
+};
+
+const preparedStatementQuarantines = new WeakMap<
 	PoolClient,
-	Set<string>
+	PreparedStatementQuarantine
 >();
 
 type StatementExecutionOptions = {
@@ -604,20 +610,52 @@ function isVerifiedPreparedStatementInfrastructureError(
 	);
 }
 
+function isVerifiedClientWidePreparedStatementLoss(error: unknown): boolean {
+	if (typeof error !== 'object' || error === null) return false;
+	const { code, routine } = error as {
+		readonly code?: unknown;
+		readonly routine?: unknown;
+	};
+	return code === '26000' && routine === 'FetchPreparedStatement';
+}
+
 function isPreparedStatementQuarantined(
 	client: PoolClient,
 	sql: string,
 ): boolean {
-	return quarantinedPreparedStatementTexts.get(client)?.has(sql) ?? false;
+	const quarantine = preparedStatementQuarantines.get(client);
+	return (
+		quarantine?.allStatements === true ||
+		quarantine?.fingerprints.has(derivePreparedStatementFingerprint(sql)) ===
+			true
+	);
 }
 
-function quarantinePreparedStatement(client: PoolClient, sql: string): void {
-	const quarantined = quarantinedPreparedStatementTexts.get(client);
-	if (quarantined !== undefined) {
-		quarantined.add(sql);
+function hasPreparedStatementQuarantine(client: PoolClient): boolean {
+	return preparedStatementQuarantines.has(client);
+}
+
+function quarantinePreparedStatement(
+	client: PoolClient,
+	sql: string,
+	clientWide: boolean,
+): void {
+	const quarantine = preparedStatementQuarantines.get(client);
+	if (quarantine !== undefined) {
+		if (clientWide) {
+			quarantine.allStatements = true;
+			quarantine.fingerprints.clear();
+		} else if (!quarantine.allStatements) {
+			quarantine.fingerprints.add(derivePreparedStatementFingerprint(sql));
+		}
 		return;
 	}
-	quarantinedPreparedStatementTexts.set(client, new Set([sql]));
+	preparedStatementQuarantines.set(client, {
+		allStatements: clientWide,
+		fingerprints: clientWide
+			? new Set()
+			: new Set([derivePreparedStatementFingerprint(sql)]),
+	});
 }
 
 function describeTransactionOptionValue(value: unknown): string {
@@ -5054,11 +5092,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private releaseClient(client: PoolClient, error?: Error | boolean): void {
-		if (error === undefined) {
+		if (error === undefined && !hasPreparedStatementQuarantine(client)) {
 			client.release();
 			return;
 		}
-		client.release(error);
+		// A client-local fallback is only valid while the caller owns this exact
+		// physical connection. Pool-owned scopes must not return it as healthy.
+		client.release(error ?? true);
 	}
 
 	private async rollbackAndReleaseSavepoint(
@@ -6194,9 +6234,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					(isVerifiedPreparedStatementInfrastructureError(error) ||
 						isDriverLocalPreparedStatementNameCollision(error, name))
 				) {
-					// The failed call is never retried. Only this physical client falls
-					// back to unnamed execution on later calls.
-					quarantinePreparedStatement(executor, sql);
+					// The failed call is never retried. A verified 26000 means this
+					// physical client lost all server-side prepared state; the other
+					// verified failures remain text-scoped.
+					quarantinePreparedStatement(
+						executor,
+						sql,
+						isVerifiedClientWidePreparedStatementLoss(error),
+					);
 				}
 				throw error;
 			}

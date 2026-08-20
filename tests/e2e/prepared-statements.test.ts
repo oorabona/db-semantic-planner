@@ -56,6 +56,51 @@ async function getIsolatedClient(): Promise<{
 	}
 }
 
+async function expectPoolOwnedScopeToReplaceQuarantinedClient(
+	runScope: (
+		adapter: any,
+		callback: (scope: any) => Promise<void>,
+	) => Promise<void>,
+): Promise<void> {
+	const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
+	try {
+		const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+		const sql = 'SELECT pg_backend_pid()::int AS pid, $1::int AS value';
+		const name = `dbsp_ps_${createHash('sha256')
+			.update(sql)
+			.digest('hex')
+			.slice(0, 32)}`;
+		const query = compiled<{ pid: number; value: number }>(sql, [17]);
+		let quarantinedPid: number | undefined;
+
+		await expect(
+			runScope(adapter, async (scope) => {
+				quarantinedPid = (await scope.execute(query))[0]?.pid;
+				await scope.execute(query);
+				await scope.executeRaw(`DEALLOCATE ${name}`);
+				await expect(scope.execute(query)).rejects.toMatchObject({
+					code: '26000',
+					routine: 'FetchPreparedStatement',
+				});
+			}),
+		).rejects.toThrow(
+			/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
+		);
+
+		const replacement = await adapter.execute(query);
+		expect(replacement).toEqual([expect.objectContaining({ value: 17 })]);
+		expect(replacement[0]?.pid).not.toBe(quarantinedPid);
+		const replacementClient = await pool.connect();
+		try {
+			expect(await preparedCount(replacementClient, sql)).toBe(1);
+		} finally {
+			replacementClient.release();
+		}
+	} finally {
+		await pool.end();
+	}
+}
+
 describe('adapter prepared statements', () => {
 	beforeAll(async () => {
 		await dropSchema(SCHEMA);
@@ -297,6 +342,39 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('runs every admitted SQL unnamed after one verified client-wide reset failure', async () => {
+		const { client, close } = await getIsolatedClient();
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const firstSql = 'SELECT $1::int AS value';
+			const secondSql = 'SELECT $1::int + 1 AS value';
+			const thirdSql = 'SELECT $1::int + 2 AS value';
+			const first = compiled<{ value: number }>(firstSql, [9]);
+			const second = compiled<{ value: number }>(secondSql, [9]);
+			const third = compiled<{ value: number }>(thirdSql, [9]);
+
+			for (const query of [first, second, third]) {
+				await adapter.execute(query);
+				await adapter.execute(query);
+			}
+			expect(await preparedCount(client)).toBe(3);
+			await adapter.executeRaw('DEALLOCATE ALL');
+
+			await expect(adapter.execute(first)).rejects.toMatchObject({
+				code: '26000',
+				routine: 'FetchPreparedStatement',
+			});
+			await expect(adapter.execute(second)).resolves.toEqual([{ value: 10 }]);
+			await expect(adapter.execute(third)).resolves.toEqual([{ value: 11 }]);
+			expect(await preparedCount(client)).toBe(0);
+		} finally {
+			await close();
+		}
+	});
+
 	it.each([
 		'0A000',
 		'26000',
@@ -471,10 +549,29 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('replaces a quarantined client after a pinned pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.withPinnedConnection(callback),
+		);
+	});
+
+	it('replaces a quarantined client after a transaction pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.transaction(callback),
+		);
+	});
+
+	it('replaces a quarantined client after a scratch pool-owned scope', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
+			adapter.withScratchScope(callback),
+		);
+	});
+
 	it('rejects a pending named pool query after backend termination without terminating the child process', async () => {
 		const applicationName = `dbsp-prepared-${randomUUID()}`;
 		const readinessMarker = 'ready-for-termination';
-		const childWaitTimeoutMs = 55_000;
+		// Keep all child phases inside this test's explicit 60s Vitest timeout.
+		const childDeadline = Date.now() + 52_000;
 		const child = fork(
 			fileURLToPath(
 				new URL('./prepared-statements-transport-child.ts', import.meta.url),
@@ -522,11 +619,18 @@ describe('adapter prepared statements', () => {
 				);
 			const childExitFailure = () =>
 				childClose.then((exited) => Promise.reject(childFailure(exited)));
-			const waitFor = <T>(label: string, promise: Promise<T>) => {
+			const waitUntil = <T>(label: string, promise: Promise<T>) => {
+				const remaining = childDeadline - Date.now();
+				if (remaining <= 0) {
+					return Promise.reject(
+						new Error(
+							`timed out waiting for ${label}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
+						),
+					);
+				}
 				let timeout: ReturnType<typeof setTimeout> | undefined;
 				return Promise.race([
 					promise,
-					childExitFailure(),
 					new Promise<T>((_resolve, reject) => {
 						timeout = setTimeout(
 							() =>
@@ -535,20 +639,22 @@ describe('adapter prepared statements', () => {
 										`timed out waiting for ${label}\nstdout:\n${stdout}\nstderr:\n${stderr}`,
 									),
 								),
-							childWaitTimeoutMs,
+							remaining,
 						);
 					}),
 				]).finally(() => {
 					if (timeout !== undefined) clearTimeout(timeout);
 				});
 			};
+			const waitFor = <T>(label: string, promise: Promise<T>) =>
+				waitUntil(label, Promise.race([promise, childExitFailure()]));
+			const waitForChildClose = (label: string) => waitUntil(label, childClose);
 
 			await waitFor('child readiness marker', readiness);
 			const pool = await getTestPool();
 			const pid = await waitFor(
 				'active child backend',
 				(async () => {
-					const deadline = Date.now() + childWaitTimeoutMs;
 					while (true) {
 						const result = await pool.query<{ pid: number }>(
 							`SELECT pid FROM pg_catalog.pg_stat_activity
@@ -558,7 +664,7 @@ describe('adapter prepared statements', () => {
 						);
 						const pid = result.rows[0]?.pid;
 						if (pid !== undefined) return pid;
-						const remaining = deadline - Date.now();
+						const remaining = childDeadline - Date.now();
 						if (remaining <= 0)
 							throw new Error(
 								`timed out waiting for active child backend\nstdout:\n${stdout}\nstderr:\n${stderr}`,
@@ -573,7 +679,9 @@ describe('adapter prepared statements', () => {
 			await pool.query('SELECT pg_catalog.pg_terminate_backend($1::int)', [
 				pid,
 			]);
-			const exited = await childClose;
+			const exited = await waitForChildClose(
+				'child close after backend termination',
+			);
 			stdout = stdout.replace(`${readinessMarker}\n`, '');
 			expect(exited).toEqual({ kind: 'exit', code: 0, signal: null });
 			expect(stdout.trim()).toBe('named-query-rejected:57P01');
@@ -581,8 +689,8 @@ describe('adapter prepared statements', () => {
 		} finally {
 			if (child.exitCode === null) {
 				child.kill('SIGKILL');
-				await childClose;
+				await waitForChildClose('child close after SIGKILL');
 			}
 		}
-	});
+	}, 60_000);
 });

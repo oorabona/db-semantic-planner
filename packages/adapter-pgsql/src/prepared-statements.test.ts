@@ -64,7 +64,7 @@ describe('prepared statement admission', () => {
 		);
 	});
 
-	it('leaves a digest collision permanently unnamed for the second text', () => {
+	it('leaves a retained digest collision unnamed for the second text', () => {
 		const registry = new PreparedStatementRegistry(2, () => 'ps_collision');
 		const first = 'SELECT * FROM collision_table WHERE id = $1';
 		const second = 'SELECT * FROM collision_table WHERE id = $2';
@@ -129,6 +129,38 @@ describe('prepared statement admission', () => {
 		expect(
 			(registry as unknown as { candidates: Set<string> }).candidates,
 		).toEqual(new Set());
+	});
+
+	it('retains full fingerprints rather than SQL text in its bounded state', () => {
+		const registry = new PreparedStatementRegistry(2);
+		const distinctiveSql = `SELECT '${'distinctive-registry-marker-'.repeat(512)}'`;
+		const otherSql = "SELECT 'other-registry-marker'";
+
+		registry.admit(distinctiveSql);
+		registry.admit(distinctiveSql);
+		registry.admit(otherSql);
+		registry.admit(otherSql);
+
+		const state = registry as unknown as {
+			candidates: Set<string>;
+			namesByFingerprint: Map<string, string>;
+			fingerprintsByName: Map<string, string>;
+			collisionRejectedFingerprints: Set<string>;
+		};
+		const retained = [
+			...state.candidates,
+			...state.namesByFingerprint.keys(),
+			...state.namesByFingerprint.values(),
+			...state.fingerprintsByName.keys(),
+			...state.fingerprintsByName.values(),
+			...state.collisionRejectedFingerprints,
+		];
+
+		expect(retained).not.toContain(distinctiveSql);
+		expect(retained).not.toContain(otherSql);
+		expect([...state.namesByFingerprint.keys()]).toEqual(
+			expect.arrayContaining([expect.stringMatching(/^[0-9a-f]{64}$/)]),
+		);
 	});
 
 	it('defaults the cap', () => {
