@@ -543,15 +543,14 @@ export class PgsqlTransactionTimeoutError extends Error {
 }
 
 /**
- * A `pg.PoolClient` is a `pg.Pool` plus `release()`, and that difference is the one
- * that matters: a client is checked out, so it may be sitting in somebody's
- * transaction.
+ * A `pg.PoolClient` is a `pg.Pool` plus `release()`, and that structural shape
+ * identifies the physical executor form. Reservation confirmation and prepared
+ * statement quarantine behavior key on that form; the caller's declaration still
+ * determines ownership and lifecycle.
  *
- * Read only to REJECT a mismatch, never to decide how a connection is treated —
- * the caller's declaration decides that. And it must not throw: the type says
- * `Pool | PoolClient`, but a JavaScript caller reaches this with whatever they
- * like, and a shape check that raises a TypeError on `undefined` tells them
- * nothing about what they did wrong.
+ * It must not throw: the type says `Pool | PoolClient`, but a JavaScript caller
+ * reaches this with whatever they like, and a shape check that raises a TypeError
+ * on `undefined` tells them nothing about what they did wrong.
  */
 function isPoolClientLike(
 	connection: Pool | PoolClient | undefined,
@@ -611,8 +610,9 @@ function isVerifiedPreparedStatementInfrastructureError(
 }
 
 /**
- * A PostgreSQL error without a source position has reached Bind or Execute,
- * after Parse accepted the named statement.
+ * A SQLSTATE-shaped, positionless failure is conservatively treated as
+ * server-reported for reservation accounting. Its shape does not prove which
+ * protocol phase was reached.
  */
 function didNamedExecutionReachExecution(error: unknown): boolean {
 	return (
@@ -648,10 +648,7 @@ function shouldAbortPreparedStatementReservation(
 	// later client reports missing state; retain the executor-scoped name there.
 	if (!isPoolClientLike(executor)) return !hasPostgresSqlStateCode(error);
 	if (didNamedExecutionReachExecution(error)) return false;
-	return !(
-		error instanceof Error &&
-		error.message.startsWith("Prepared statements must be unique - '")
-	);
+	return true;
 }
 
 function isVerifiedClientWidePreparedStatementLoss(error: unknown): boolean {
