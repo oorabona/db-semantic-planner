@@ -3237,6 +3237,96 @@ describe('createApplier', () => {
 		expect(release).toHaveBeenCalledWith(failure);
 	});
 
+	it('rolls back a core-owned transaction before returning recovery-required', async () => {
+		const rollback = vi.fn(async () => undefined);
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(
+					async () =>
+						({
+							kind: 'recovery-required',
+							claimId: 'open-claim',
+							detail: 'runtime could not determine terminal state',
+						}) as const,
+				),
+			}),
+			rollback,
+		};
+		const result = await createApplier(durableRegistry(rt), persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(rollback).toHaveBeenCalledOnce();
+		expect(result.unresolvedOutcome).toEqual({
+			kind: 'recovery-required',
+			claimId: 'open-claim',
+			detail: 'runtime could not determine terminal state',
+		});
+	});
+
+	it('rolls back a core-owned transaction before returning transport-ambiguous', async () => {
+		const rollback = vi.fn(async () => undefined);
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(
+					async () =>
+						({
+							kind: 'transport-ambiguous',
+							detail: 'runtime lost the commit acknowledgement',
+						}) as const,
+				),
+			}),
+			rollback,
+		};
+		const result = await createApplier(durableRegistry(rt), persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(rollback).toHaveBeenCalledOnce();
+		expect(result.unresolvedOutcome).toEqual({
+			kind: 'transport-ambiguous',
+			detail: 'runtime lost the commit acknowledgement',
+		});
+	});
+
+	it('reports transport ambiguity and compromises the client when recovery rollback fails', async () => {
+		const release = vi.fn();
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(
+					async () =>
+						({
+							kind: 'recovery-required',
+							claimId: 'open-claim',
+							detail: 'runtime could not determine terminal state',
+						}) as const,
+				),
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback connection lost');
+			}),
+		};
+		const result = await createApplier(durableRegistry(rt), persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+		);
+
+		expect(result.unresolvedOutcome).toEqual({
+			kind: 'transport-ambiguous',
+			detail:
+				'rollback failed after recovery-required: rollback connection lost',
+		});
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('uses the operation pack issuer for apply-time observations', async () => {
 		const wrongExecute = vi.fn(async () => evidence());
 		const correctExecute = vi.fn(async () => evidence());

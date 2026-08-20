@@ -1534,6 +1534,34 @@ export function createApplier(
 									nonRollbackableExecutionTracker,
 								);
 						if (executionOutcome.kind === 'recovery-required') {
+							if (transactionStarted && !committed) {
+								try {
+									await rollbackAndPrepareObservedJournalWrite(
+										segmentCoordinator,
+										executionClient,
+										lockTimeoutMs(entry.semantics, entry.step, activeContext),
+									);
+									transactionStarted = false;
+								} catch (cleanupError) {
+									executionClient.markClientCompromised();
+									return resultWithJournalWriteWarnings({
+										assessment: assessment(
+											partiallyAppliedReason(
+												entry.step,
+												`claim ${executionOutcome.claimId} remains open and rollback is ambiguous: ${errorDetail(cleanupError)}`,
+											),
+											'outcome-unknown',
+											'human-intervention-required',
+										),
+										journals,
+										observations,
+										unresolvedOutcome: {
+											kind: 'transport-ambiguous',
+											detail: `rollback failed after recovery-required: ${errorDetail(cleanupError)}`,
+										},
+									});
+								}
+							}
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
@@ -1549,19 +1577,32 @@ export function createApplier(
 							});
 						}
 						if (executionOutcome.kind === 'transport-ambiguous') {
+							let detail = executionOutcome.detail;
+							if (transactionStarted && !committed) {
+								try {
+									await rollbackAndPrepareObservedJournalWrite(
+										segmentCoordinator,
+										executionClient,
+										lockTimeoutMs(entry.semantics, entry.step, activeContext),
+									);
+									transactionStarted = false;
+								} catch (cleanupError) {
+									detail = `${detail}; rollback failed: ${errorDetail(cleanupError)}`;
+								}
+							}
 							executionClient.markClientCompromised();
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
 										entry.step,
-										`managed outcome transport is ambiguous: ${executionOutcome.detail}`,
+										`managed outcome transport is ambiguous: ${detail}`,
 									),
 									'outcome-unknown',
 									'human-intervention-required',
 								),
 								journals,
 								observations,
-								unresolvedOutcome: executionOutcome,
+								unresolvedOutcome: { kind: 'transport-ambiguous', detail },
 							});
 						}
 						if (executionOutcome.kind === 'guard-failed') {

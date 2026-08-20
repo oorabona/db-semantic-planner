@@ -400,6 +400,7 @@ describe('generator execution fixture shim', () => {
 				schema: 'tenant',
 				accepts: ['destructive-plan-accepted:reviewed-plan'],
 				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
 
@@ -441,6 +442,7 @@ describe('generator execution fixture shim', () => {
 				planDigest: 'reviewed-plan',
 				schema: 'tenant',
 				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({
 			outcome: 'recovery-required',
@@ -474,6 +476,7 @@ describe('generator execution fixture shim', () => {
 				planDigest: 'reviewed-plan',
 				schema: 'tenant',
 				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({
 			outcome: 'transport-ambiguous',
@@ -498,6 +501,7 @@ describe('generator execution fixture shim', () => {
 				schema: 'tenant',
 				accepts: ['destructive-plan-accepted:reviewed-plan'],
 				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({
 			outcome: 'recovery-required',
@@ -523,6 +527,7 @@ describe('generator execution fixture shim', () => {
 				schema: 'tenant',
 				accepts: ['destructive-plan-accepted:reviewed-plan'],
 				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({
 			outcome: 'transport-ambiguous',

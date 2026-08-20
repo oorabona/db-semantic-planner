@@ -6,6 +6,7 @@ import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	APPLY_OUTCOME_CONTRACT,
+	applyResultForGeneratorExecution,
 	authorizationDigest,
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
@@ -131,6 +132,50 @@ describe('dbsp apply contract and policy', () => {
 		expect(
 			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
 		).toContain('resolving command: dbsp reconcile --db <database> run-1');
+	});
+
+	it.each([
+		[
+			{
+				outcome: 'recovery-required',
+				claimId: 'generator-open-claim',
+				detail: 'generator sender disconnected',
+			},
+			'recovery-required',
+			['claim: generator-open-claim', 'detail: generator sender disconnected'],
+		],
+		[
+			{
+				outcome: 'transport-ambiguous',
+				detail: 'generator commit acknowledgement lost',
+			},
+			'transport-ambiguous',
+			['detail: generator commit acknowledgement lost'],
+		],
+	] as const)('normalizes generator-shaped unresolved %s for human apply output', (execution, outcome, lines) => {
+		const applyResult = applyResultForGeneratorExecution(execution);
+		const text = formatApplyHuman({
+			outcome,
+			runId: 'generator-run-1',
+			result: applyResult,
+		});
+		for (const line of lines) expect(text).toContain(line);
+		expect(text).toContain(
+			'resolving command: dbsp reconcile --db <database> generator-run-1',
+		);
+	});
+
+	it('gives unresolvedOutcome precedence over an otherwise completed durable outcome', () => {
+		const applyResult = {
+			...result('completed', 'context-mismatch'),
+			durableOutcome: 'completed',
+			unresolvedOutcome: {
+				kind: 'recovery-required',
+				claimId: 'still-open',
+				detail: 'claim remains unresolved',
+			},
+		} as ApplyResult;
+		expect(outcomeForApplyResult(applyResult)).toBe('recovery-required');
 	});
 
 	it.each([

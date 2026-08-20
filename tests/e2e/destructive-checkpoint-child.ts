@@ -79,6 +79,7 @@ void (async () => {
 			}),
 		),
 		runId,
+		recordAttempt: async () => undefined,
 		accepts: [`destructive-plan-accepted:${planDigest}`],
 		observer: checkpoint,
 	});

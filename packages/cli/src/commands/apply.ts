@@ -663,6 +663,7 @@ export function exitCodeForApplyOutcome(outcome: ApplyOutcome): number {
 export function outcomeForApplyResult(
 	result: ApplyResult,
 ): ApplyExecutionOutcome {
+	if (result.unresolvedOutcome) return result.unresolvedOutcome.kind;
 	if (result.durableOutcome && isApplyExecutionOutcome(result.durableOutcome))
 		return result.durableOutcome;
 	// A committed earlier segment is the operator-facing fact.  Do not let the
@@ -819,6 +820,26 @@ function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
 		(plan as { generator?: { kind?: unknown } }).generator?.kind ===
 			'schema-differ-generator'
 	);
+}
+
+/** Normalize generator-only unresolved outcomes into the public apply result contract. */
+export function applyResultForGeneratorExecution(
+	execution: GeneratorExecutionResult,
+): ApplyResult {
+	const unresolvedOutcome =
+		execution.outcome === 'recovery-required'
+			? {
+					kind: 'recovery-required' as const,
+					claimId: execution.claimId,
+					detail: execution.detail,
+				}
+			: execution.outcome === 'transport-ambiguous'
+				? { kind: 'transport-ambiguous' as const, detail: execution.detail }
+				: undefined;
+	return {
+		...execution,
+		...(unresolvedOutcome === undefined ? {} : { unresolvedOutcome }),
+	} as unknown as ApplyResult;
 }
 
 /** Every mapped command refusal needs a real plan address; never invent one. */
@@ -1206,7 +1227,7 @@ async function runApplyInternal(
 				result = {
 					outcome: execution.outcome as ApplyOutcome,
 					runId,
-					result: execution as unknown as ApplyResult,
+					result: applyResultForGeneratorExecution(execution),
 					...(preAppendRefusal === undefined
 						? {}
 						: { refusal: preAppendRefusal }),

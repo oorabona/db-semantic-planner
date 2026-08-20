@@ -812,7 +812,7 @@ export async function executeGeneratorPlan(input: {
 	/** Durable witness minted while apply holds this run's journal lock. */
 	readonly run: PgLockedRun;
 	/** Appends the run-to-attempt mapping before any ledger claim may be opened. */
-	readonly recordAttempt?: (executionId: string) => Promise<void>;
+	readonly recordAttempt: (executionId: string) => Promise<void>;
 	/** Test-only admitted-path observation; absent from every CLI invocation. */
 	readonly observer?: PgOutcomeCheckpointObserver;
 	/** @deprecated Compatibility shim for old direct fixtures. */
@@ -850,7 +850,7 @@ export async function executeGeneratorPlan(input: {
 		// The attempt id is random, journaled before any step, and is the namespace
 		// claims bind to. Reconciliation discovers it from the journal.
 		const executionId = `dbsp.generator.execution.${randomUUID()}`;
-		await input.recordAttempt?.(executionId);
+		await input.recordAttempt(executionId);
 		const steps = managedSteps(manifest);
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
