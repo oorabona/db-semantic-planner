@@ -64,21 +64,6 @@ describe('prepared statement admission', () => {
 		);
 	});
 
-	it('keeps a tombstoned text unnamed without affecting another text', () => {
-		const registry = new PreparedStatementRegistry(3);
-
-		registry.admit('one');
-		const first = registry.admit('one');
-		registry.tombstone('one');
-		expect(registry.admit('one')).toBeUndefined();
-		registry.admit('two');
-		const second = registry.admit('two');
-
-		expect(first).toBe(derivePreparedStatementName('one'));
-		expect(second).toBe(derivePreparedStatementName('two'));
-		expect(second).not.toBe(first);
-	});
-
 	it('leaves a digest collision permanently unnamed for the second text', () => {
 		const registry = new PreparedStatementRegistry(2, () => 'ps_collision');
 		const first = 'SELECT * FROM collision_table WHERE id = $1';
@@ -151,10 +136,37 @@ describe('prepared statement admission', () => {
 	});
 
 	it.each([
-		[null, /must be a safe integer/],
-		[0, /must be greater than zero/],
-		[Number.MAX_SAFE_INTEGER + 1, /must be a safe integer/],
-	])('rejects invalid cap %s', (invalidCap, message) => {
-		expect(() => normalizeMaxPreparedStatements(invalidCap)).toThrow(message);
+		{ label: 'null', value: null, message: /must be a safe integer/ },
+		{ label: 'zero', value: 0, message: /must be greater than zero/ },
+		{ label: 'negative', value: -1, message: /must be greater than zero/ },
+		{ label: 'fractional', value: 1.5, message: /must be a safe integer/ },
+		{ label: 'NaN', value: Number.NaN, message: /must be a safe integer/ },
+		{
+			label: 'positive infinity',
+			value: Number.POSITIVE_INFINITY,
+			message: /must be a safe integer/,
+		},
+		{
+			label: 'negative infinity',
+			value: Number.NEGATIVE_INFINITY,
+			message: /must be a safe integer/,
+		},
+		{
+			label: 'oversized integer',
+			value: Number.MAX_SAFE_INTEGER + 1,
+			message: /must be a safe integer/,
+		},
+		{ label: 'string', value: '1', message: /must be a safe integer/ },
+		{ label: 'array', value: [], message: /must be a safe integer/ },
+		{
+			label: 'function',
+			value: () => undefined,
+			message: /must be a safe integer/,
+		},
+	])('rejects invalid cap $label', ({ value, message }) => {
+		expect(() => normalizeMaxPreparedStatements(value as any)).toThrowError(
+			Error,
+		);
+		expect(() => normalizeMaxPreparedStatements(value as any)).toThrow(message);
 	});
 });

@@ -356,6 +356,17 @@ const preparedStatementRegistries = new WeakMap<
 	}
 >();
 
+/**
+ * Named statements that a specific physical client can no longer execute.
+ *
+ * This is deliberately client-local: a pooled query releases its errored
+ * client, so no failure state must outlive that client through the pool.
+ */
+const quarantinedPreparedStatementTexts = new WeakMap<
+	PoolClient,
+	Set<string>
+>();
+
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
 	readonly allowAncestorScopeToken?: boolean;
@@ -576,6 +587,37 @@ function isDriverLocalPreparedStatementNameCollision(
 	return (
 		error instanceof Error && !('code' in error) && error.message === message
 	);
+}
+
+function isVerifiedPreparedStatementInfrastructureError(
+	error: unknown,
+): boolean {
+	if (typeof error !== 'object' || error === null) return false;
+	const { code, routine } = error as {
+		readonly code?: unknown;
+		readonly routine?: unknown;
+	};
+	return (
+		(code === '0A000' && routine === 'RevalidateCachedQuery') ||
+		(code === '26000' && routine === 'FetchPreparedStatement') ||
+		(code === '42P05' && routine === 'StorePreparedStatement')
+	);
+}
+
+function isPreparedStatementQuarantined(
+	client: PoolClient,
+	sql: string,
+): boolean {
+	return quarantinedPreparedStatementTexts.get(client)?.has(sql) ?? false;
+}
+
+function quarantinePreparedStatement(client: PoolClient, sql: string): void {
+	const quarantined = quarantinedPreparedStatementTexts.get(client);
+	if (quarantined !== undefined) {
+		quarantined.add(sql);
+		return;
+	}
+	quarantinedPreparedStatementTexts.set(client, new Set([sql]));
 }
 
 function describeTransactionOptionValue(value: unknown): string {
@@ -6126,6 +6168,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters !== undefined &&
 			parameters.length > 0
 		) {
+			if (
+				isPoolClientLike(executor) &&
+				isPreparedStatementQuarantined(executor, sql)
+			) {
+				return executor.query<T>(sql, [...parameters]) as Promise<
+					MaybeMultipleQueryResults<T>
+				>;
+			}
 			const name = this.preparedStatementRegistry.admit(sql);
 			if (name === undefined) {
 				return executor.query<T>(sql, [...parameters]) as Promise<
@@ -6140,14 +6190,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				})) as MaybeMultipleQueryResults<T>;
 			} catch (error) {
 				if (
-					isPgErrorWithCode(error, '0A000') ||
-					isPgErrorWithCode(error, '26000') ||
-					isPgErrorWithCode(error, '42P05') ||
-					isDriverLocalPreparedStatementNameCollision(error, name)
+					isPoolClientLike(executor) &&
+					(isVerifiedPreparedStatementInfrastructureError(error) ||
+						isDriverLocalPreparedStatementNameCollision(error, name))
 				) {
-					// Invalidated named statements are never retried in-call. Later calls
-					// use the unnamed path for this executor.
-					this.preparedStatementRegistry.tombstone(sql);
+					// The failed call is never retried. Only this physical client falls
+					// back to unnamed execution on later calls.
+					quarantinePreparedStatement(executor, sql);
 				}
 				throw error;
 			}

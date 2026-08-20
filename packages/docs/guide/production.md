@@ -153,12 +153,21 @@ node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
 cached plan; after `DEALLOCATE ALL`, `DISCARD ALL`, or a connection/proxy reset, the
 next named execution can return `26000`; an externally created statement in the reserved namespace can
-return `42P05`. On one of these errors from a named execution, dbsp tombstones the
-SQL before propagating the original error. Future calls use the unnamed path for
-the executor lifetime. For a `Pool`, this is pool-wide: one client reset disables
-naming for that SQL on every pool client. That is a throughput regression, never
-a transparent retry or a new application error; each adapter call executes at
-most once.
+return `42P05`. dbsp always propagates that failed call once; it never retries an
+adapter call in place. For a direct `Pool` query, node-postgres releases the
+errored client and removes it from the pool, so a replacement connection prepares
+the same name cleanly on its next eligible execution. There is no pool-wide
+failure state or downgrade.
+
+For a caller-borrowed, pinned, or transaction client, dbsp falls back to unnamed
+execution for that SQL on that physical client only when PostgreSQL identifies the
+failure as its prepared-statement infrastructure: `0A000` from
+`RevalidateCachedQuery`, `26000` from `FetchPreparedStatement`, or `42P05` from
+`StorePreparedStatement`. It also does so for node-postgres's exact local
+duplicate-name error, which is necessarily client-local. An absent or unexpected
+PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE matches, so
+application-raised errors cannot cause the fallback. Replacing a borrowed client
+starts with no quarantine. Every adapter call still executes at most once.
 
 ---
 

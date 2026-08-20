@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.5.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.4.0...adapter-pgsql-v3.5.0) (2026-08-20)
+
+
+### Features
+
+* **adapter-pgsql:** Add opt-in server-side prepared statements for compiled queries ([#489](https://github.com/oorabona/db-semantic-planner/issues/489)) ([#525](https://github.com/oorabona/db-semantic-planner/issues/525)) ([6c639d1](https://github.com/oorabona/db-semantic-planner/commit/6c639d1a638c4f4129a94a0d342f06468c927ace))
+
 ## [3.4.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.3.0...adapter-pgsql-v3.4.0) (2026-07-31)
 
 
