@@ -132,8 +132,10 @@ pool adapter and a borrowed-client adapter that happen to use the same physical
 connection, so that connection can exceed either executor's cap. If you use PgBouncer in
 transaction-pooling mode, it must be configured with `max_prepared_statements`;
 otherwise leave this option off.
-Registry bookkeeping retains full SHA-256 fingerprints, not SQL text, so its retained
-memory remains proportional to `maxStatements` even when query texts are large.
+Registry bookkeeping retains full SHA-256 fingerprints, not SQL text, so persistent
+fingerprint/name state remains proportional to `maxStatements` even when query texts are
+large. Pending reservation state is additionally proportional to concurrently in-flight named
+attempts.
 
 dbsp calls `pool.query({ name, text, values })` directly for pooled executions;
 node-postgres owns checkout, query error handling, release, and backpressure. dbsp

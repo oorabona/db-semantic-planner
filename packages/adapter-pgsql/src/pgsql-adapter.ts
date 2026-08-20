@@ -615,17 +615,19 @@ function isVerifiedPreparedStatementInfrastructureError(
  * after Parse accepted the named statement.
  */
 function didNamedExecutionReachExecution(error: unknown): boolean {
-	if (typeof error !== 'object' || error === null) return false;
-	const { code, position } = error as {
-		readonly code?: unknown;
-		readonly position?: unknown;
-	};
 	return (
-		typeof code === 'string' &&
-		/^[0-9A-Z]{5}$/.test(code) &&
-		position === undefined &&
+		hasPostgresSqlStateCode(error) &&
+		(error as { readonly position?: unknown }).position === undefined &&
 		!isVerifiedPreparedStatementInfrastructureError(error)
 	);
+}
+
+function hasPostgresSqlStateCode(error: unknown): boolean {
+	if (typeof error !== 'object' || error === null) return false;
+	const { code } = error as {
+		readonly code?: unknown;
+	};
+	return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code);
 }
 
 function shouldAbortPreparedStatementReservation(
@@ -644,7 +646,7 @@ function shouldAbortPreparedStatementReservation(
 		return true;
 	// A pool may have accepted this name on a different physical client before a
 	// later client reports missing state; retain the executor-scoped name there.
-	if (!isPoolClientLike(executor)) return false;
+	if (!isPoolClientLike(executor)) return !hasPostgresSqlStateCode(error);
 	if (didNamedExecutionReachExecution(error)) return false;
 	return !(
 		error instanceof Error &&

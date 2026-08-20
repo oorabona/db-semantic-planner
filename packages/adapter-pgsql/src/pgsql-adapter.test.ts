@@ -521,6 +521,57 @@ describe('PgsqlAdapter', () => {
 			});
 		});
 
+		it('releases a pool admission after a connection failure but retains it after a server error', async () => {
+			const sqlA = 'SELECT id FROM pool_admission_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM pool_admission_b WHERE id = $1';
+			const queryA = testQuery(sqlA, [7]);
+			const queryB = testQuery(sqlB, [8]);
+			const connectionError = Object.assign(new Error('connect ECONNREFUSED'), {
+				code: 'ECONNREFUSED',
+			});
+			const pool = createMockPool();
+			vi.mocked(pool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(connectionError)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await expect(adapter.execute(queryA)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(queryA)).rejects.toBe(connectionError);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(4, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
+
+			const serverError = {
+				code: '26000',
+				routine: 'FetchPreparedStatement',
+			};
+			const serverPool = createMockPool();
+			vi.mocked(serverPool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(serverError)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const serverAdapter = createPgsqlAdapter(serverPool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await expect(serverAdapter.execute(queryA)).resolves.toEqual([{ id: 7 }]);
+			await expect(serverAdapter.execute(queryA)).rejects.toBe(serverError);
+			await expect(serverAdapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+			await expect(serverAdapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+
+			expect(serverPool.query).toHaveBeenNthCalledWith(4, sqlB, [8]);
+		});
+
 		it('does not manually acquire or release a pooled client while a query is pending', async () => {
 			const pool = createMockPool();
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
