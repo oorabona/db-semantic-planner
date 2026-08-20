@@ -8,9 +8,7 @@ const repositoryRoot = resolve(
 );
 
 export default defineConfig({
-	// This config lives in a workspace package solely so tsc checks the E2E
-	// sources. Pin Vitest's root to the repository: otherwise its include glob
-	// is evaluated from this package and falls back to Vitest's default suite.
+	// Pin Vitest's discovery root when this config is loaded from another working directory.
 	root: repositoryRoot,
 	test: {
 		include: ['tests/e2e/**/*.test.ts'],

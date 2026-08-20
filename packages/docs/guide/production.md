@@ -142,9 +142,10 @@ reserved `dbsp_ps_` namespace. The same SQL therefore has the same name across
 executors. Do not issue your own named statements in that namespace on the same
 `Pool` or borrowed `PoolClient`.
 
-PostgreSQL considers a generic plan only after five custom executions, and adopts
-it only when its estimated cost is competitive. Parameter-sensitive queries can
-therefore continue to use custom plans. To observe planning cost in
+With the default `plan_cache_mode=auto`, PostgreSQL considers a generic plan only
+after five custom executions, and adopts it only when its estimated cost is
+competitive; `force_custom_plan` and `force_generic_plan` override this behavior.
+Parameter-sensitive queries can therefore continue to use custom plans. To observe planning cost in
 `pg_stat_statements`, enable `pg_stat_statements.track_planning`; it is hidden by
 default.
 

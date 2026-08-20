@@ -564,38 +564,46 @@ describe('PgsqlAdapter', () => {
 			}) as unknown as PoolClient;
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
-				.mockResolvedValue({ rows: [{ id: 7 }], rowCount: 1 } as any);
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValue({ rows: [{ id: 8 }], rowCount: 1 } as any);
 			const adapter = createPgsqlAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
 			});
-			const sql = 'SELECT id FROM users WHERE id = $1';
+			const sqlA = 'SELECT id FROM users WHERE id = $1';
+			const sqlB = 'SELECT id FROM accounts WHERE id = $1';
 
-			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await (adapter as any).issueConnectionQuery(client, sqlA, [7], true);
+			await (adapter as any).issueConnectionQuery(client, sqlB, [8], true);
 			const failed = (adapter as any).issueConnectionQuery(
 				client,
-				sql,
+				sqlA,
 				[7],
 				true,
 			);
-			const registryAtObservation = failed.catch(() =>
-				(adapter as any).preparedStatementRegistry.admit(sql),
+			const fallbackAtObservation = failed.catch(() =>
+				(adapter as any).issueConnectionQuery(client, sqlA, [7], true),
 			);
-			await expect(registryAtObservation).resolves.toBe(
-				derivePreparedStatementName(sql),
-			);
+			await expect(fallbackAtObservation).resolves.toMatchObject({
+				rows: [{ id: 7 }],
+			});
 			await expect(
-				(adapter as any).issueConnectionQuery(client, sql, [7], true),
-			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+				(adapter as any).issueConnectionQuery(client, sqlB, [8], true),
+			).resolves.toMatchObject({ rows: [{ id: 8 }] });
 
-			expect(client.query).toHaveBeenNthCalledWith(2, {
+			expect(client.query).toHaveBeenNthCalledWith(3, {
 				name: expect.stringMatching(/^dbsp_ps_[0-9a-f]{32}$/),
-				text: sql,
+				text: sqlA,
 				values: [7],
 			});
-			expect(client.query).toHaveBeenCalledTimes(3);
-			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
+			expect(client.query).toHaveBeenNthCalledWith(4, sqlA, [7]);
+			expect(client.query).toHaveBeenNthCalledWith(5, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
 		});
 
 		it('does not quarantine a pool query after a verified failure', async () => {
