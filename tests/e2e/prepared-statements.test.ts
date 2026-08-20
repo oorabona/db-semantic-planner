@@ -86,6 +86,7 @@ async function expectPoolOwnedScopeToReplaceQuarantinedClient(
 		).rejects.toThrow(
 			/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
 		);
+		expect(quarantinedPid).toEqual(expect.any(Number));
 
 		const replacement = await adapter.execute(query);
 		expect(replacement).toEqual([expect.objectContaining({ value: 17 })]);
