@@ -88,6 +88,7 @@ export type GeneratorExecutionResult =
 			readonly claimId: string;
 			readonly detail: string;
 	  }
+	| { readonly outcome: 'transport-ambiguous'; readonly detail: string }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
 
 function modelForAdoption(table: TableIR): ModelIR {
@@ -846,11 +847,8 @@ export async function executeGeneratorPlan(input: {
 				};
 	try {
 		const database = await databaseId(input.pool);
-		// Reconciliation selects reservations by the persisted run identity.  The
-		// execution scope is deterministic for that run, never a disconnected UUID.
-		// A persisted generator run identifies reviewed material, never a reusable
-		// claim namespace. The caller has already refused any prior step-scoped
-		// durable fact; a zero-event retry therefore gets a fresh attempt identity.
+		// The attempt id is random, journaled before any step, and is the namespace
+		// claims bind to. Reconciliation discovers it from the journal.
 		const executionId = `dbsp.generator.execution.${randomUUID()}`;
 		await input.recordAttempt?.(executionId);
 		const steps = managedSteps(manifest);
@@ -941,6 +939,7 @@ export async function executeGeneratorPlan(input: {
 					manifest,
 					recomputedPlanDigest: input.planDigest,
 					approval,
+					executionId,
 					step,
 					home: home(address),
 					address,
@@ -954,9 +953,11 @@ export async function executeGeneratorPlan(input: {
 					completedStepKeys.push(step.stepKey);
 					continue;
 				}
-				return adopted.outcome === 'adoption-refused'
-					? { outcome: 'adoption-refused', detail: adopted.detail }
-					: { outcome: 'execution-failed', detail: adopted.detail };
+				if (adopted.outcome === 'adoption-refused')
+					return { outcome: 'adoption-refused', detail: adopted.detail };
+				if (adopted.outcome === 'recovery-required') return adopted;
+				if (adopted.outcome === 'transport-ambiguous') return adopted;
+				return { outcome: 'execution-failed', detail: adopted.detail };
 			}
 			if (step.lifecycle?.kind === 'readdress') {
 				const result = await executePgPersistedTableReaddress({
@@ -965,6 +966,7 @@ export async function executeGeneratorPlan(input: {
 					manifest,
 					recomputedPlanDigest: input.planDigest,
 					approval,
+					executionId,
 					step,
 					database,
 					targetSchema: input.schema,
@@ -1060,6 +1062,8 @@ export async function executeGeneratorPlan(input: {
 						claimId: result.claimId,
 						detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
 					};
+				if (result.kind === 'outcome-transport-ambiguous')
+					return { outcome: 'transport-ambiguous', detail: result.reason };
 				if ('reason' in result) return partial(result.reason);
 				completedStepKeys.push(step.stepKey);
 				continue;
@@ -1348,10 +1352,7 @@ export async function executeGeneratorPlan(input: {
 					detail: `claim ${executed.claimId} remains open and requires recovery: ${executed.reason}`,
 				};
 			if (executed.kind === 'outcome-transport-ambiguous')
-				return {
-					outcome: 'execution-failed',
-					detail: executed.reason,
-				};
+				return { outcome: 'transport-ambiguous', detail: executed.reason };
 			if (executed.kind === 'outcome-protocol-pending')
 				return partial(
 					`destructive claim ${claim.claimId} remains pending after executing: ${executed.reason}`,

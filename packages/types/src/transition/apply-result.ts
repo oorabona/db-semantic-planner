@@ -27,7 +27,9 @@ export type DurableApplyOutcome =
 	| 'run-id-mismatch'
 	| 'load-failed'
 	| 'plan-digest-mismatch'
-	| 'database-read-only';
+	| 'database-read-only'
+	| 'recovery-required'
+	| 'transport-ambiguous';
 
 /** Stable phase-owned result of recovery classification. */
 export type RecoveryOutcome =
@@ -54,4 +56,12 @@ export interface ApplyResult {
 	readonly durableOutcome?: DurableApplyOutcome;
 	/** Present only on the recovery entry point. */
 	readonly recoveryOutcome?: RecoveryOutcome;
+	/** An admitted managed claim remains unresolved and must not be retried. */
+	readonly unresolvedOutcome?:
+		| {
+				readonly kind: 'recovery-required';
+				readonly claimId: string;
+				readonly detail: string;
+		  }
+		| { readonly kind: 'transport-ambiguous'; readonly detail: string };
 }

@@ -3,6 +3,9 @@ import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
+const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
+const executePgDeclaredAdoption = vi.hoisted(() => vi.fn());
+const executePgPersistedTableReaddress = vi.hoisted(() => vi.fn());
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
@@ -10,6 +13,12 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
 			executePgAdmittedOperation(...args),
+		preflightPgDeclaredAdoption: (...args: unknown[]) =>
+			preflightPgDeclaredAdoption(...args),
+		executePgDeclaredAdoption: (...args: unknown[]) =>
+			executePgDeclaredAdoption(...args),
+		executePgPersistedTableReaddress: (...args: unknown[]) =>
+			executePgPersistedTableReaddress(...args),
 	};
 });
 
@@ -47,6 +56,78 @@ const dataDestructiveStep: NormalizedManagedStep = {
 };
 
 describe('generator execution fixture shim', () => {
+	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
+		const attempts: string[] = [];
+		preflightPgDeclaredAdoption.mockResolvedValue({ outcome: 'ready' });
+		executePgDeclaredAdoption.mockResolvedValue({ outcome: 'completed' });
+		executePgPersistedTableReaddress.mockResolvedValue({
+			outcome: 'completed',
+			pairId: 'pair',
+		});
+		const lifecycleStep = (kind: 'adoption' | 'readdress') =>
+			({
+				...dataDestructiveStep,
+				stepKey: kind,
+				order: kind === 'adoption' ? 0 : 1,
+				segmentId:
+					kind === 'adoption' ? 'generator-segment-0' : 'generator-segment-1',
+				plannedClaimKeys: [`${kind}:root`],
+				claimKind: kind === 'adoption' ? 'adopt-intent' : 'readdress-intent',
+				classification:
+					kind === 'adoption' ? 'non-destructive' : 'paired-readdress',
+				statementBundle: { statements: [] },
+				selection: { kind, selector: 'table:accounts' },
+				lifecycle:
+					kind === 'adoption'
+						? { kind, shape: {} }
+						: {
+								kind,
+								declaration: {
+									from: { name: 'accounts' },
+									to: { name: 'accounts_next' },
+								},
+							},
+				...(kind === 'adoption'
+					? {
+							expectedDeclaration: {
+								value: { kind: 'table' },
+								digest: 'declared',
+							},
+							expectedCatalogueIdentity: {
+								engine: 'postgresql',
+								format: 1,
+								value: { oid: '1' },
+							},
+						}
+					: {}),
+			}) as unknown as NormalizedManagedStep;
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: {
+					steps: [lifecycleStep('adoption'), lifecycleStep('readdress')],
+				},
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async (executionId) => {
+					attempts.push(executionId);
+				},
+			}),
+		).resolves.toEqual({ outcome: 'completed' });
+		const executionId = attempts[0];
+		expect(executionId).toMatch(/^dbsp\.generator\.execution\./);
+		expect(executePgDeclaredAdoption).toHaveBeenCalledWith(
+			expect.objectContaining({ executionId }),
+		);
+		expect(executePgPersistedTableReaddress).toHaveBeenCalledWith(
+			expect.objectContaining({ executionId }),
+		);
+	});
+
 	it.each([
 		[
 			{
@@ -369,6 +450,37 @@ describe('generator execution fixture shim', () => {
 		});
 	});
 
+	it('preserves a non-destructive transport ambiguity', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-transport-ambiguous',
+			reason: 'commit acknowledgement lost',
+		});
+		const step: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'CREATE TABLE tenant.accounts (id integer)' },
+				],
+			},
+			classification: 'non-destructive',
+		};
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+			}),
+		).resolves.toEqual({
+			outcome: 'transport-ambiguous',
+			detail: 'commit acknowledgement lost',
+		});
+	});
+
 	it('maps a destructive transport recovery to the claim-bearing exit outcome', async () => {
 		executePgAdmittedOperation.mockResolvedValue({
 			kind: 'outcome-recovery-required',
@@ -392,6 +504,29 @@ describe('generator execution fixture shim', () => {
 			claimId: 'destructive-open-claim',
 			detail:
 				'claim destructive-open-claim remains open and requires recovery: terminal COMMIT acknowledgement was lost',
+		});
+	});
+
+	it('preserves a destructive transport ambiguity', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-transport-ambiguous',
+			reason: 'terminal commit acknowledgement lost',
+		});
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [dataDestructiveStep] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				accepts: ['destructive-plan-accepted:reviewed-plan'],
+				runId: 'reviewed-run',
+			}),
+		).resolves.toEqual({
+			outcome: 'transport-ambiguous',
+			detail: 'terminal commit acknowledgement lost',
 		});
 	});
 });

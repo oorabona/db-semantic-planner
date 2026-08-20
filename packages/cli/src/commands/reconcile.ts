@@ -119,6 +119,7 @@ export interface ReconcileRecoveryReport {
 type PgRecoveryReportKind =
 	| 'appended'
 	| 'already-appended'
+	| 'indeterminate-appended'
 	| 'no-open-claim'
 	| 'pending'
 	| 'blocked'
@@ -127,6 +128,19 @@ type PgRecoveryReportKind =
 	| 'transport-ambiguous'
 	| 'refused-pair'
 	| 'indeterminate-pair';
+
+function isUnresolvedRecoveryOutcome(report: ReconcileRecoveryReport): boolean {
+	return (
+		report.outcome === 'pending' ||
+		report.outcome === 'blocked' ||
+		report.outcome === 'malformed-chain' ||
+		report.outcome === 'protocol-refused' ||
+		report.outcome === 'transport-ambiguous' ||
+		report.outcome === 'no-open-claim' ||
+		report.outcome === 'indeterminate-appended' ||
+		report.outcome === 'indeterminate-pair'
+	);
+}
 
 function ledgerHome(address: LedgerReservationRow['address']): LedgerHome {
 	if (address.scope === 'database') return { scope: 'database' };
@@ -156,10 +170,13 @@ function recoveryReport(
 	result: Awaited<ReturnType<typeof recoverPgOutcomeClaim>>,
 ): ReconcileRecoveryReport {
 	if (result.kind === 'outcome-recovery-appended') {
+		const indeterminate =
+			result.classification.resolution.eventKind === 'indeterminate';
 		return {
 			address,
-			outcome:
-				result.append.kind === 'already-appended-outcome-resolution'
+			outcome: indeterminate
+				? 'indeterminate-appended'
+				: result.append.kind === 'already-appended-outcome-resolution'
 					? 'already-appended'
 					: 'appended',
 			reason: result.classification.resolution.reason,
@@ -242,16 +259,7 @@ function readdressRecoveryReport(
 export function unresolvedRecoveryDetail(
 	reports: readonly ReconcileRecoveryReport[],
 ): string | undefined {
-	const unresolved = reports.filter(
-		(report) =>
-			report.outcome === 'pending' ||
-			report.outcome === 'blocked' ||
-			report.outcome === 'malformed-chain' ||
-			report.outcome === 'protocol-refused' ||
-			report.outcome === 'transport-ambiguous' ||
-			report.outcome === 'no-open-claim' ||
-			report.outcome === 'indeterminate-pair',
-	);
+	const unresolved = reports.filter(isUnresolvedRecoveryOutcome);
 	if (unresolved.length === 0) return undefined;
 	return unresolved
 		.map(
@@ -263,9 +271,20 @@ export function unresolvedRecoveryDetail(
 
 export function formatReconcileHuman(result: ReconcileResult): string {
 	const line = `${escapeDiagnosticText(result.outcome)}: ${escapeDiagnosticText(result.runId)}`;
-	return result.refusal
+	const base = result.refusal
 		? formatPreAppendRefusalHuman(line, result.refusal)
 		: line;
+	if (result.outcome === 'reconcile-completed' || !result.recovery) return base;
+	const unresolved = result.recovery.filter(isUnresolvedRecoveryOutcome);
+	return unresolved.length === 0
+		? base
+		: [
+				base,
+				...unresolved.map(
+					(report) =>
+						`${escapeDiagnosticText(report.address.name)}: ${escapeDiagnosticText(report.outcome)}${report.reason ? `: ${escapeDiagnosticText(report.reason)}` : ''}`,
+				),
+			].join('\n');
 }
 
 /**
@@ -296,6 +315,7 @@ export function executionIdsForRun(
 		)
 			executionIds.add(record.intent.executionId);
 	}
+	// Read-side compatibility for reservations persisted before attempt records.
 	if ('generator' in journal.plan)
 		executionIds.add(`dbsp.generator.execution.${journal.run.runId}`);
 	return [...executionIds];

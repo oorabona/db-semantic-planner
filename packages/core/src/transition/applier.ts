@@ -173,6 +173,7 @@ function durableRefusal(
 }
 
 function durableExecutionOutcome(result: ApplyResult): DurableApplyOutcome {
+	if (result.unresolvedOutcome) return result.unresolvedOutcome.kind;
 	if (result.assessment.lifecycle === 'completed') return 'completed';
 	if (result.assessment.lifecycle === 'partially-applied')
 		return 'partially-applied';
@@ -1532,6 +1533,37 @@ export function createApplier(
 									),
 									nonRollbackableExecutionTracker,
 								);
+						if (executionOutcome.kind === 'recovery-required') {
+							return resultWithJournalWriteWarnings({
+								assessment: assessment(
+									partiallyAppliedReason(
+										entry.step,
+										`claim ${executionOutcome.claimId} remains open and requires recovery: ${executionOutcome.detail}`,
+									),
+									'outcome-unknown',
+									'human-intervention-required',
+								),
+								journals,
+								observations,
+								unresolvedOutcome: executionOutcome,
+							});
+						}
+						if (executionOutcome.kind === 'transport-ambiguous') {
+							executionClient.markClientCompromised();
+							return resultWithJournalWriteWarnings({
+								assessment: assessment(
+									partiallyAppliedReason(
+										entry.step,
+										`managed outcome transport is ambiguous: ${executionOutcome.detail}`,
+									),
+									'outcome-unknown',
+									'human-intervention-required',
+								),
+								journals,
+								observations,
+								unresolvedOutcome: executionOutcome,
+							});
+						}
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
 								await rollbackAndPrepareObservedJournalWrite(

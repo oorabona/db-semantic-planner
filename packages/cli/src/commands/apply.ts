@@ -583,6 +583,11 @@ export const APPLY_OUTCOME_CONTRACT = [
 		64,
 		'an admitted non-transactional claim remains open; run recover with the reported claim reference',
 	],
+	[
+		'transport-ambiguous',
+		65,
+		'an admitted operation has an ambiguous transport outcome; reconcile the run before retrying',
+	],
 	['database-read-only', 34, 'target cannot accept managed writes'],
 	[
 		'destructive-authority-refused',
@@ -703,6 +708,21 @@ export function formatApplyHuman(result: {
 			`withheld authority: ${escapeDiagnosticText(result.refusal.withheldAuthority)}`,
 			`resolving command: ${escapeDiagnosticText(result.refusal.resolvingCommand)}`,
 		].join('\n');
+	}
+	if (result.result?.unresolvedOutcome) {
+		const unresolved = result.result.unresolvedOutcome;
+		return unresolved.kind === 'recovery-required'
+			? [
+					line,
+					`claim: ${escapeDiagnosticText(unresolved.claimId)}`,
+					`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+					`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+				].join('\n')
+			: [
+					line,
+					`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+					`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+				].join('\n');
 	}
 	if (result.outcome !== 'plan-digest-mismatch' || !result.result) return line;
 	const detail = result.result.assessment.reasons[0]?.detail;

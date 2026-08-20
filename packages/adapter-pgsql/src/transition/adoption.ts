@@ -27,7 +27,13 @@ export type PgAdoptionResult =
 	| { readonly outcome: 'completed' }
 	| { readonly outcome: 'no-op' }
 	| { readonly outcome: 'adoption-refused'; readonly detail: string }
-	| { readonly outcome: 'execution-failed'; readonly detail: string };
+	| { readonly outcome: 'execution-failed'; readonly detail: string }
+	| {
+			readonly outcome: 'recovery-required';
+			readonly claimId: string;
+			readonly detail: string;
+	  }
+	| { readonly outcome: 'transport-ambiguous'; readonly detail: string };
 
 export type PgAdoptionPreflightResult =
 	| { readonly outcome: 'ready' }
@@ -56,6 +62,8 @@ export interface PgPersistedDeclaredAdoptionInput
 	readonly manifest: ValidatedManagedStepManifest;
 	readonly recomputedPlanDigest: string;
 	readonly approval: ScopedApprovalSet;
+	/** Attempt namespace journaled before this lifecycle can open a claim. */
+	readonly executionId: string;
 	/** Exact digest-covered step; adoption never constructs a standalone plan. */
 	readonly step: NormalizedManagedStep;
 	/** Test-only admitted-path observation; absent from normal callers. */
@@ -157,7 +165,7 @@ export async function executePgDeclaredAdoption(
 		// runs only after every no-op-capable persisted material check above.
 		const preflight = await preflightPgDeclaredAdoption(input);
 		if (preflight.outcome !== 'ready') return preflight;
-		const executionId = `dbsp.generator.execution.${input.run.runId}`;
+		const executionId = input.executionId;
 		const claimId = outcomeClaimId(executionId, plannedClaimKey, input.address);
 		const outcomeRequest: PgOutcomeTransactionalRequest = {
 			plan: {
@@ -240,6 +248,14 @@ export async function executePgDeclaredAdoption(
 		}
 		if (result.kind === 'executed-outcome-claim')
 			return { outcome: 'completed' };
+		if (result.kind === 'outcome-recovery-required')
+			return {
+				outcome: 'recovery-required',
+				claimId: result.claimId,
+				detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
+			};
+		if (result.kind === 'outcome-transport-ambiguous')
+			return { outcome: 'transport-ambiguous', detail: result.reason };
 		if (!('reason' in result))
 			return {
 				outcome: 'execution-failed',

@@ -10,6 +10,7 @@ import {
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
 	exitCodeForApplyOutcome,
+	formatApplyHuman,
 	generatorRunHasPriorStepEvents,
 	hasReusableAuthorization,
 	outcomeForApplyResult,
@@ -100,6 +101,36 @@ describe('dbsp apply contract and policy', () => {
 		['context-mismatch', 'planned', 'context-mismatch'],
 	] as const)('mutation: remapping core %s loses its stable CLI outcome', (_name, lifecycle, code) => {
 		expect(outcomeForApplyResult(result(lifecycle, code))).toBe(code);
+	});
+
+	it.each([
+		[
+			{
+				kind: 'recovery-required',
+				claimId: 'open-claim',
+				detail: 'sender disconnected',
+			},
+			'recovery-required',
+			'claim: open-claim',
+		],
+		[
+			{ kind: 'transport-ambiguous', detail: 'commit acknowledgement lost' },
+			'transport-ambiguous',
+			'detail: commit acknowledgement lost',
+		],
+	] as const)('preserves core unresolved managed outcome %s', (unresolvedOutcome, outcome, text) => {
+		const applyResult = {
+			...result('outcome-unknown', 'unknown-step-result'),
+			durableOutcome: outcome,
+			unresolvedOutcome,
+		} as ApplyResult;
+		expect(outcomeForApplyResult(applyResult)).toBe(outcome);
+		expect(
+			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+		).toContain(text);
+		expect(
+			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+		).toContain('resolving command: dbsp reconcile --db <database> run-1');
 	});
 
 	it.each([

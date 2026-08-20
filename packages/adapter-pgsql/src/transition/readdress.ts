@@ -77,7 +77,8 @@ export type PgReaddressResult =
 			readonly outcome: 'recovery-required';
 			readonly claimId: string;
 			readonly detail: string;
-	  };
+	  }
+	| { readonly outcome: 'transport-ambiguous'; readonly detail: string };
 
 export interface PgPersistedReaddressInput {
 	readonly executor: TransitionJournalQueryable;
@@ -86,6 +87,8 @@ export interface PgPersistedReaddressInput {
 	readonly manifest: ValidatedManagedStepManifest;
 	readonly recomputedPlanDigest: string;
 	readonly approval: ScopedApprovalSet;
+	/** Attempt namespace journaled before this lifecycle can open a claim. */
+	readonly executionId: string;
 	/** Exact digest-covered normalized step; this is the only operation source. */
 	readonly step: NormalizedManagedStep;
 	readonly database: string;
@@ -477,7 +480,7 @@ export async function executePgPersistedTableReaddress(
 			outcome: 'readdress-refused',
 			detail: `persisted re-address step ${input.step.stepKey} has incomplete normalized material`,
 		};
-	const executionId = `dbsp.generator.execution.${input.run.runId}`;
+	const executionId = input.executionId;
 	const request = {
 		database: input.database,
 		targetSchema: input.targetSchema,
@@ -727,6 +730,8 @@ export async function executePgPersistedTableReaddress(
 			claimId: result.claimId,
 			detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
 		};
+	if (result.kind === 'outcome-transport-ambiguous')
+		return { outcome: 'transport-ambiguous', detail: result.reason };
 	return {
 		outcome: 'readdress-refused',
 		detail:

@@ -130,6 +130,7 @@ vi.mock('@dbsp/core', () => ({
 import {
 	classifyReconcileFailure,
 	executionIdsForRun,
+	formatReconcileHuman,
 	runReconcile,
 	unresolvedRecoveryDetail,
 } from './reconcile.js';
@@ -220,6 +221,42 @@ describe('reconcile durable outcome ordering', () => {
 			expect.objectContaining({
 				resolutionEventId: 'claim:generator:reconcile:run:generator',
 			}),
+		);
+	});
+
+	it.each([
+		'appended-outcome-resolution',
+		'already-appended-outcome-resolution',
+	] as const)('keeps an %s indeterminate resolution unresolved', async (appendKind) => {
+		resetFixture();
+		fixture.recovery.mockResolvedValue({
+			kind: 'outcome-recovery-appended',
+			classification: {
+				resolution: {
+					eventKind: 'indeterminate',
+					reason: 'live state remains unknown',
+				},
+			},
+			append: { kind: appendKind },
+		});
+		const result = await runReconcile(
+			'run:generator',
+			{ db: 'postgres://fixture' },
+			{} as never,
+		);
+		expect(result).toMatchObject({
+			outcome: 'reconcile-unresolved',
+			recovery: [
+				{
+					address: { name: 'interrupted_generator' },
+					outcome: 'indeterminate-appended',
+					reason: 'live state remains unknown',
+				},
+			],
+		});
+		expect(result.outcome === 'reconcile-completed' ? 0 : 1).toBe(1);
+		expect(formatReconcileHuman(result)).toContain(
+			'interrupted_generator: indeterminate-appended: live state remains unknown',
 		);
 	});
 
