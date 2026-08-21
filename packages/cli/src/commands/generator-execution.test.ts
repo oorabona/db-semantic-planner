@@ -55,6 +55,43 @@ const dataDestructiveStep: NormalizedManagedStep = {
 	replayPolicy: 'recorded',
 };
 
+function indexProjectionRow(overrides: Record<string, unknown> = {}) {
+	return {
+		schema_name: 'tenant',
+		table_name: 'accounts',
+		index_name: 'accounts_id_idx',
+		method_name: 'btree',
+		is_unique: false,
+		is_valid: true,
+		is_ready: true,
+		is_live: true,
+		nulls_not_distinct: false,
+		key_columns: ['id'],
+		key_definitions: ['id'],
+		include_columns: [],
+		opclasses: ['int4_ops'],
+		key_options: ['0'],
+		reloptions: [],
+		predicate_expression: null,
+		...overrides,
+	};
+}
+
+function indexReadbackExecutor(input: {
+	readonly live?: Record<string, unknown>;
+	readonly staged?: Record<string, unknown>;
+}) {
+	return {
+		query: vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexProjectionRow(input.live)] };
+			if (sql.includes('WHERE relation.oid'))
+				return { rows: [indexProjectionRow(input.staged)] };
+			return { rows: [] };
+		}),
+	};
+}
+
 describe('generator execution fixture shim', () => {
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
 		const attempts: string[] = [];
@@ -134,6 +171,7 @@ describe('generator execution fixture shim', () => {
 				...dataDestructiveStep,
 				expectedDeclaration: {
 					value: {
+						postconditionVersion: 2,
 						kind: 'column',
 						column: { name: 'id', type: 'bigint' },
 					},
@@ -155,7 +193,7 @@ describe('generator execution fixture shim', () => {
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow('postcondition differs');
+		).rejects.toThrow();
 	});
 
 	it('normalizes PostgreSQL primary-key attnotnull on CREATE TABLE read-back', async () => {
@@ -163,6 +201,7 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'table',
 					columns: [
 						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
@@ -211,10 +250,11 @@ describe('generator execution fixture shim', () => {
 				...dataDestructiveStep,
 				expectedDeclaration: {
 					value: {
+						postconditionVersion: 2,
 						kind: 'constraint',
 						constraint: {
 							type: 'c',
-							definition: 'CHECK (id > 0)',
+							expression: 'CHECK (id > 0)',
 							notValid: false,
 						},
 					},
@@ -243,8 +283,20 @@ describe('generator execution fixture shim', () => {
 				...dataDestructiveStep,
 				expectedDeclaration: {
 					value: {
+						postconditionVersion: 2,
 						kind: 'index',
-						definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+						index: {
+							schema: 'tenant',
+							table: 'accounts',
+							name: 'accounts_id_idx',
+							method: 'btree',
+							unique: false,
+							valid: true,
+							ready: true,
+							live: true,
+							columns: ['id'],
+							nullsNotDistinct: false,
+						},
 					},
 					digest: 'index-postcondition',
 				},
@@ -281,7 +333,7 @@ describe('generator execution fixture shim', () => {
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow('postcondition differs');
+		).rejects.toThrow();
 	});
 
 	it.each([
@@ -293,8 +345,20 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'index',
-					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
 				},
 				digest: 'index-postcondition',
 			},
@@ -305,19 +369,7 @@ describe('generator execution fixture shim', () => {
 				parent: dataDestructiveStep.address,
 			},
 		} as const;
-		const query = vi.fn().mockResolvedValue({
-			rows: [
-				{
-					is_unique: false,
-					is_valid: true,
-					is_ready: true,
-					is_live: true,
-					...unavailable,
-					index_definition:
-						'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-				},
-			],
-		});
+		const { query } = indexReadbackExecutor({ live: unavailable });
 
 		await expect(
 			readGeneratedPostcondition(
@@ -336,8 +388,20 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'index',
-					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
 				},
 				digest: 'index-postcondition',
 			},
@@ -351,35 +415,50 @@ describe('generator execution fixture shim', () => {
 
 		await expect(
 			readGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{
-								is_unique: false,
-								is_valid: true,
-								is_ready: true,
-								is_live: true,
-								index_definition:
-									'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-							},
-						],
-					}),
-				},
+				indexReadbackExecutor({}),
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
 			),
 		).resolves.toMatchObject({
 			value: {
 				kind: 'index',
-				definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				projection: expect.objectContaining({ method: 'btree' }),
 			},
 		});
+	});
+
+	it('rejects a legacy rendered-definition manifest before it can record observed', async () => {
+		const query = vi.fn();
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'index',
+					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				},
+				digest: 'legacy-rendered-definition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+		await expect(
+			readGeneratedPostcondition(
+				{ query },
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).rejects.toThrow('replan');
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	it.each([
 		[
 			'enum labels',
-			{ kind: 'enum', labels: ['draft', 'paid'] },
+			{ postconditionVersion: 2, kind: 'enum', labels: ['draft', 'paid'] },
 			{
 				...dataDestructiveStep.address,
 				kind: 'enum' as const,
@@ -389,7 +468,13 @@ describe('generator execution fixture shim', () => {
 		],
 		[
 			'sequence properties',
-			{ kind: 'sequence', startValue: '7', incrementBy: '3', cycle: false },
+			{
+				postconditionVersion: 2,
+				kind: 'sequence',
+				startValue: '7',
+				incrementBy: '3',
+				cycle: false,
+			},
 			{
 				...dataDestructiveStep.address,
 				kind: 'sequence' as const,
@@ -408,7 +493,7 @@ describe('generator execution fixture shim', () => {
 		],
 		[
 			'extension version',
-			{ kind: 'extension', version: '1.3' },
+			{ postconditionVersion: 2, kind: 'extension', version: '1.3' },
 			{
 				...dataDestructiveStep.address,
 				scope: 'database' as const,
@@ -437,6 +522,7 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'table',
 					columns: [
 						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },

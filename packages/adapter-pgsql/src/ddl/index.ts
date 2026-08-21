@@ -17,6 +17,12 @@ export {
 	refusesRecordedPlanRemoval,
 } from './destructive-classification.js';
 export {
+	type GeneratedPostconditionQueryable,
+	type GeneratedPostconditionTarget,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedIndexPostcondition,
+} from './generated-postcondition-verifier.js';
+export {
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
 	type IndexCapabilityContext,

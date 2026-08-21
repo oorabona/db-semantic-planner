@@ -32,6 +32,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			statements: ['ALTER TABLE "public"."users" RENAME TO "accounts"'],
 		});
 		expect(step.expectedDeclaration?.value).toEqual({
+			postconditionVersion: 2,
 			kind: 'table',
 			columns: [
 				{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
@@ -363,7 +364,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({ kind: 'enum', labels: [] });
+		).toEqual({ postconditionVersion: 2, kind: 'enum', labels: [] });
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -376,6 +377,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toEqual({
+			postconditionVersion: 2,
 			kind: 'constraint',
 			constraint: { type: 'p', columns: ['account_id'] },
 		});
@@ -471,6 +473,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		});
 
 		expect(step.expectedDeclaration?.value).toEqual({
+			postconditionVersion: 2,
 			kind: 'table',
 			columns: [
 				{
@@ -499,10 +502,11 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			}),
 		).toEqual({
+			postconditionVersion: 2,
 			kind: 'constraint',
 			constraint: {
 				type: 'c',
-				definition: 'CHECK ("Total" > 0)',
+				expression: 'CHECK ("Total" > 0)',
 				notValid: false,
 			},
 		});
@@ -520,8 +524,9 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			}),
 		).toMatchObject({
+			postconditionVersion: 2,
 			kind: 'index',
-			definition: expect.stringContaining('"account_id", "created_at"'),
+			index: { columns: ['account_id', 'created_at'], method: 'btree' },
 		});
 		expect(
 			expectation({
@@ -531,7 +536,11 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'enum',
 				meta: { enum: { name: 'order_state', values: ['draft', 'paid'] } },
 			}),
-		).toEqual({ kind: 'enum', labels: ['draft', 'paid'] });
+		).toEqual({
+			postconditionVersion: 2,
+			kind: 'enum',
+			labels: ['draft', 'paid'],
+		});
 		expect(
 			expectation({
 				kind: 'create_sequence',
@@ -548,6 +557,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			}),
 		).toEqual({
+			postconditionVersion: 2,
 			kind: 'sequence',
 			startValue: '7',
 			incrementBy: '3',
@@ -561,6 +571,10 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'versioned extension',
 				meta: { extension: 'pgcrypto', extensionVersion: '1.3' },
 			}),
-		).toEqual({ kind: 'extension', version: '1.3' });
+		).toEqual({
+			postconditionVersion: 2,
+			kind: 'extension',
+			version: '1.3',
+		});
 	});
 });

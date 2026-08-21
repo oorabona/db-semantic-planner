@@ -8,6 +8,7 @@ import {
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
+	type GeneratedPostcondition,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
 	preflightPgDeclaredAdoption,
@@ -15,6 +16,8 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedIndexPostcondition,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -266,74 +269,12 @@ function observed(address: LedgerAddress): LedgerPayload {
 	};
 }
 
-function normalizedDefinition(value: string): string {
-	return value
-		.replaceAll('"', '')
-		.replace(/\s+/gu, ' ')
-		.replace(/;$/u, '')
-		.trim()
-		.toLowerCase();
-}
-
 function generatedPayload(value: unknown): LedgerPayload {
 	return {
 		value: value as LedgerPayload['value'],
 		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
 	};
 }
-
-type GeneratedColumnPostcondition = {
-	readonly name: string;
-	readonly type?: string;
-	readonly nullable?: boolean;
-	readonly hasDefault?: boolean;
-	readonly default?: string;
-	readonly collation?: string | null;
-	readonly identity?: 'always' | 'byDefault' | null;
-};
-
-type GeneratedPostcondition =
-	| {
-			readonly kind: 'table';
-			readonly columns: readonly GeneratedColumnPostcondition[];
-	  }
-	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
-	| {
-			readonly kind: 'constraint';
-			readonly constraint:
-				| { readonly type: 'p' | 'u'; readonly columns: readonly string[] }
-				| {
-						readonly type: 'f';
-						readonly columns: readonly string[];
-						readonly references: {
-							readonly schema?: string;
-							readonly table: string;
-							readonly columns: readonly string[];
-						};
-						readonly onDelete: string;
-						readonly onUpdate: string;
-						readonly deferred: boolean;
-						readonly notValid: boolean;
-				  }
-				| {
-						readonly type: 'c';
-						readonly definition: string;
-						readonly notValid: boolean;
-				  };
-	  }
-	| { readonly kind: 'index'; readonly definition: string }
-	| { readonly kind: 'enum'; readonly labels: readonly string[] }
-	| {
-			readonly kind: 'sequence';
-			readonly startValue?: string;
-			readonly incrementBy?: string;
-			readonly minValue?: string;
-			readonly maxValue?: string;
-			readonly cycle?: boolean;
-	  }
-	| { readonly kind: 'extension'; readonly version?: string }
-	| { readonly kind: 'absent' }
-	| { readonly kind: 'exempt'; readonly reason: string };
 
 function textList(value: unknown): readonly string[] {
 	return Array.isArray(value) ? value.map((item) => String(item)) : [];
@@ -366,6 +307,10 @@ function generatedPostcondition(
 			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
 		);
 	const postcondition = value as GeneratedPostcondition;
+	if (postcondition.postconditionVersion !== 2)
+		throw new Error(
+			`generated ${address.kind} postcondition format is unsupported; replan to produce version 2 typed postconditions`,
+		);
 	return postcondition;
 }
 
@@ -461,6 +406,19 @@ export async function readGeneratedPostcondition(
 				`generated constraint ${address.name} has a non-constraint structural postcondition`,
 			);
 		const expected = postcondition.constraint;
+		if (expected.type === 'c') {
+			const verified = await verifyGeneratedCheckPostcondition({
+				executor,
+				postcondition,
+				target: { schema: address.schema, table: parent, name: address.name },
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				type: 'c',
+				expression: verified.projection.expression,
+				validated: verified.projection.validated,
+			});
+		}
 		const row = (
 			await executor.query(
 				`SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint_item.oid, true) AS constraint_definition, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_schema, referenced_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS referenced_columns, constraint_item.confdeltype AS on_delete, constraint_item.confupdtype AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
@@ -481,16 +439,6 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
 			);
-		if (expected.type === 'c') {
-			if (
-				normalizedDefinition(definition) !==
-					normalizedDefinition(expected.definition) ||
-				(row.is_validated === true) === expected.notValid
-			)
-				throw new Error(
-					`generated constraint ${address.name} postcondition differs`,
-				);
-		}
 		if (expected.type === 'f') {
 			if (
 				JSON.stringify(textList(row.key_columns)) !==
@@ -522,27 +470,14 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated index ${address.name} has a non-index structural postcondition`,
 			);
-		const row = (
-			await executor.query(
-				`SELECT index_relation.relname AS index_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, pg_catalog.pg_get_indexdef(index_meta.indexrelid, 0, true) AS index_definition FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
-				[address.schema, parent, address.name],
-			)
-		).rows[0];
-		if (!row) throw new Error(`generated index ${address.name} is absent`);
-		const definition = String(row.index_definition ?? '');
-		// PostgreSQL can use an index only when all three usability flags are true.
-		if (
-			row.is_valid !== true ||
-			row.is_ready !== true ||
-			row.is_live !== true ||
-			normalizedDefinition(definition) !==
-				normalizedDefinition(postcondition.definition)
-		)
-			throw new Error(`generated index ${address.name} postcondition differs`);
+		const verified = await verifyGeneratedIndexPostcondition({
+			executor,
+			postcondition,
+			target: { schema: address.schema, table: parent, name: address.name },
+		});
 		return generatedPayload({
-			kind: 'index',
-			unique: row.is_unique === true,
-			definition,
+			kind: verified.kind,
+			projection: verified.projection,
 		});
 	}
 	if (address.kind === 'table' && address.schema) {

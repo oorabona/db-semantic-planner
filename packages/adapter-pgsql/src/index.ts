@@ -52,6 +52,8 @@ export {
 	type GenerateDDLOptions,
 	type GeneratedMutationClassification,
 	type GeneratedPostcondition,
+	type GeneratedPostconditionQueryable,
+	type GeneratedPostconditionTarget,
 	generateCreateIndex,
 	generateDDL,
 	generateDownSQL,
@@ -73,6 +75,8 @@ export {
 	renderCreateIndex,
 	type SchemaChange,
 	type SchemaDiff,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedIndexPostcondition,
 } from './ddl/index.js';
 // EXPLAIN support
 export {

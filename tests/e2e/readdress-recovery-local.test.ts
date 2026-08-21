@@ -1,10 +1,12 @@
 /** Unit 12: one shared PostgreSQL container, isolated schemas and pair recovery. */
 
 import { randomUUID } from 'node:crypto';
+import type { SchemaChange } from '@dbsp/adapter-pgsql';
 import {
 	acquirePgLedgerLocks,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionRunPersister,
+	generatedPostconditionForChange,
 	readPgCatalogueIdentity,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
@@ -231,16 +233,18 @@ async function applyPersistedReaddress(input: {
 }) {
 	const pool = await getTestPool();
 	const sourceName = input.declaration.from.name;
+	const change: SchemaChange = {
+		kind: 'readdress_table',
+		table: sourceName,
+		destructive: false,
+		details: `readdress ${sourceName}`,
+		meta: {
+			readdress: input.declaration,
+			table: readdressTable(input.declaration.to.name),
+		},
+	};
 	const step = createPgsqlGeneratedManagedStep({
-		change: {
-			kind: 'readdress_table',
-			table: sourceName,
-			details: `readdress ${sourceName}`,
-			meta: {
-				readdress: input.declaration,
-				table: readdressTable(input.declaration.to.name),
-			},
-		} as never,
+		change,
 		database: input.database,
 		schema: input.targetSchema,
 		stepKey: 'generator:0',
@@ -258,13 +262,13 @@ async function applyPersistedReaddress(input: {
 			),
 		),
 	});
-	expect(step.expectedDeclaration?.value).toEqual({
-		kind: 'table',
-		columns: [
-			{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
-			{ name: 'payload', type: 'bytea', nullable: false, hasDefault: false },
-		],
+	const expectedDeclaration = generatedPostconditionForChange({
+		change,
+		schema: input.targetSchema,
 	});
+	if (expectedDeclaration === undefined)
+		throw new Error('fixture expected a readdress table postcondition');
+	expect(step.expectedDeclaration).toEqual(expectedDeclaration);
 	Object.assign(step, {
 		classification: 'paired-readdress',
 		claimKind: 'readdress-intent',

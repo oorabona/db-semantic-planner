@@ -5,13 +5,8 @@ import type {
 	NormalizedManagedStep,
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
-import {
-	renderCheckConstraintClause,
-	splitCheckConstraintState,
-} from '../check-expression.js';
+import { splitCheckConstraintState } from '../check-expression.js';
 import { renderColumnDbType } from '../db-type.js';
-import { identityNaming } from '../naming-plugin.js';
-import { generateCreateIndex } from './ddl-generator.js';
 import {
 	classifyGeneratedMutation,
 	type GeneratedMutationClassification,
@@ -52,12 +47,33 @@ export type GeneratedConstraintPostcondition =
 	  }
 	| {
 			readonly type: 'c';
-			readonly definition: string;
+			/** The ModelIR CHECK expression, never a rendered constraint definition. */
+			readonly expression: string;
 			readonly notValid: boolean;
 	  };
 
+export type GeneratedIndexPostcondition = {
+	/** The identity is persisted separately from the rendered CREATE INDEX SQL. */
+	readonly schema: string;
+	readonly table: string;
+	readonly name: string;
+	/** PostgreSQL exposes an omitted method as btree; make that expectation explicit. */
+	readonly method: string;
+	readonly unique: boolean;
+	readonly valid: true;
+	readonly ready: true;
+	readonly live: true;
+	readonly columns: readonly string[];
+	readonly expressions?: readonly string[];
+	readonly include?: readonly string[];
+	readonly nullsNotDistinct: boolean;
+	readonly opclass?: Readonly<Record<string, string>>;
+	readonly with?: Readonly<Record<string, string>>;
+	readonly where?: string;
+};
+
 /** ModelIR-derived, digest-covered catalogue projection for a generated step. */
-export type GeneratedPostcondition =
+export type GeneratedPostcondition = { readonly postconditionVersion: 2 } & (
 	| {
 			readonly kind: 'table';
 			readonly columns: readonly GeneratedColumnPostcondition[];
@@ -67,7 +83,7 @@ export type GeneratedPostcondition =
 			readonly kind: 'constraint';
 			readonly constraint: GeneratedConstraintPostcondition;
 	  }
-	| { readonly kind: 'index'; readonly definition: string }
+	| { readonly kind: 'index'; readonly index: GeneratedIndexPostcondition }
 	| { readonly kind: 'enum'; readonly labels: readonly string[] }
 	| {
 			readonly kind: 'sequence';
@@ -79,7 +95,8 @@ export type GeneratedPostcondition =
 	  }
 	| { readonly kind: 'extension'; readonly version?: string }
 	| { readonly kind: 'absent' }
-	| { readonly kind: 'exempt'; readonly reason: string };
+	| { readonly kind: 'exempt'; readonly reason: string }
+);
 
 function postconditionPayload(
 	value: GeneratedPostcondition,
@@ -253,10 +270,7 @@ function constraintPostcondition(
 		});
 		return {
 			type: 'c',
-			definition: renderCheckConstraintClause({
-				expression,
-				...(state.notValid ? { notValid: true } : {}),
-			}),
+			expression: state.expression,
 			notValid: state.notValid,
 		};
 	}
@@ -314,6 +328,7 @@ export function generatedPostconditionForChange(input: {
 					: shape.primaryKey,
 		);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'table',
 			columns: shape.columns.map((column) =>
 				columnPostcondition(column, schema, primaryKey.has(column.name)),
@@ -333,6 +348,7 @@ export function generatedPostconditionForChange(input: {
 	if (column) {
 		const structural = columnPostcondition(column, schema);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'column',
 			column: {
 				...structural,
@@ -351,6 +367,7 @@ export function generatedPostconditionForChange(input: {
 		// postcondition exemption because no trustworthy target type exists in
 		// the change material to compare against catalogue state.
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'exempt',
 			reason: 'legacy alter_column_type has no typed target column',
 		});
@@ -363,6 +380,7 @@ export function generatedPostconditionForChange(input: {
 				'generator planning refuses alter_column_nullable: missing typed nullable postcondition',
 			);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'column',
 			column: { name, nullable },
 		});
@@ -371,6 +389,7 @@ export function generatedPostconditionForChange(input: {
 		const name = text(change.column, change.kind);
 		const hasDefault = change.meta?.default !== undefined;
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'column',
 			column: {
 				name,
@@ -395,6 +414,7 @@ export function generatedPostconditionForChange(input: {
 		(change.kind === 'alter_column_unique' && change.destructive !== true)
 	)
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'constraint',
 			constraint: constraintPostcondition(change),
 		});
@@ -407,18 +427,33 @@ export function generatedPostconditionForChange(input: {
 				'generator planning refuses create_index: missing typed index postcondition',
 			);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'index',
-			definition: generateCreateIndex(
-				change.table,
-				index,
+			index: {
 				schema,
-				identityNaming,
-			),
+				table: change.table,
+				name: index.name ?? `idx_${change.table}_${index.columns.join('_')}`,
+				method: index.method ?? 'btree',
+				unique: index.unique === true,
+				valid: true,
+				ready: true,
+				live: true,
+				columns: index.columns,
+				...(index.expressions === undefined
+					? {}
+					: { expressions: index.expressions }),
+				...(index.include === undefined ? {} : { include: index.include }),
+				nullsNotDistinct: index.nullsNotDistinct === true,
+				...(index.opclass === undefined ? {} : { opclass: index.opclass }),
+				...(index.with === undefined ? {} : { with: index.with }),
+				...(index.where === undefined ? {} : { where: index.where }),
+			},
 		});
 	}
 	if (change.kind === 'create_enum' || change.kind === 'alter_enum_add_value') {
 		const enumDef = requiredRecord(change.meta?.enum, change.kind);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'enum',
 			labels: requiredList(enumDef.values, change.kind),
 		});
@@ -432,6 +467,7 @@ export function generatedPostconditionForChange(input: {
 		const minValue = numberProperty('minValue');
 		const maxValue = numberProperty('maxValue');
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'sequence',
 			...(startValue === undefined ? {} : { startValue }),
 			...(incrementBy === undefined ? {} : { incrementBy }),
@@ -447,6 +483,7 @@ export function generatedPostconditionForChange(input: {
 				'generator planning refuses create_extension: invalid typed extension version',
 			);
 		return postconditionPayload({
+			postconditionVersion: 2,
 			kind: 'extension',
 			...(typeof version === 'string' ? { version } : {}),
 		});
@@ -463,7 +500,7 @@ export function generatedPostconditionForChange(input: {
 		change.kind === 'drop_sequence' ||
 		(change.kind === 'alter_column_unique' && change.destructive === true)
 	)
-		return postconditionPayload({ kind: 'absent' });
+		return postconditionPayload({ postconditionVersion: 2, kind: 'absent' });
 	throw new Error(
 		`generator planning refuses ${change.kind}: no typed postcondition is available`,
 	);
