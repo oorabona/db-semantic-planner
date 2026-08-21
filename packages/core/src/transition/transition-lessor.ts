@@ -71,6 +71,23 @@ const planOperationQueries = new WeakMap<
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
 const compromisedTransitionSessions = new WeakSet<object>();
+const transitionSessionOrigins = new WeakMap<object, object>();
+
+function transitionSessionIsCompromised(
+	session: TransitionSessionClient,
+): boolean {
+	const sessionObject = session as object;
+	return (
+		compromisedTransitionSessions.has(sessionObject) ||
+		compromisedTransitionSessions.has(
+			transitionSessionOrigins.get(sessionObject) ?? sessionObject,
+		)
+	);
+}
+
+function compromisedTransitionSessionError(): Error {
+	return new Error('transition execution marked its leased client compromised');
+}
 
 /**
  * Outcome code may poison the current lease when a transport or protocol fault
@@ -80,7 +97,10 @@ const compromisedTransitionSessions = new WeakSet<object>();
 export function markTransitionClientCompromised(
 	session: TransitionSessionClient,
 ): void {
-	compromisedTransitionSessions.add(session as object);
+	const sessionObject = session as object;
+	compromisedTransitionSessions.add(sessionObject);
+	const origin = transitionSessionOrigins.get(sessionObject);
+	if (origin) compromisedTransitionSessions.add(origin);
 }
 
 /**
@@ -96,7 +116,12 @@ export function planOperationSession(
 	const query = planOperationQueries.get(session as object);
 	if (!query) return session;
 	return Object.freeze({
-		query: (sql: string, params?: unknown) => query(sql, params),
+		query: (sql: string, params?: unknown) => {
+			if (transitionSessionIsCompromised(session)) {
+				return Promise.reject(compromisedTransitionSessionError());
+			}
+			return query(sql, params);
+		},
 	}) as TransitionSessionClient;
 }
 
@@ -201,9 +226,13 @@ export async function acquireTransitionLease(
 					new Error('transition lease was already given back'),
 				);
 			}
+			if (transitionSessionIsCompromised(session)) {
+				return Promise.reject(compromisedTransitionSessionError());
+			}
 			return query.call(raw, sql, params);
 		},
 	}) as TransitionSessionClient;
+	transitionSessionOrigins.set(session as object, raw as object);
 	if (captured.queryPlanOperation) {
 		planOperationQueries.set(session as object, (sql, params) =>
 			Promise.resolve(
@@ -241,7 +270,7 @@ export async function acquireTransitionLease(
 		try {
 			const effectiveFailure =
 				failure ??
-				(compromisedTransitionSessions.has(session as object)
+				(transitionSessionIsCompromised(session)
 					? {
 							error: new Error(
 								'transition execution marked its leased client compromised',

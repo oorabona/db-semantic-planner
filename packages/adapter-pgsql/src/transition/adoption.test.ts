@@ -38,13 +38,19 @@ const executor = { query: vi.fn() };
 
 function persisted(): Pick<
 	PgPersistedDeclaredAdoptionInput,
-	'run' | 'manifest' | 'recomputedPlanDigest' | 'approval' | 'step'
+	| 'run'
+	| 'manifest'
+	| 'recomputedPlanDigest'
+	| 'approval'
+	| 'executionId'
+	| 'step'
 > {
 	return {
 		run: { runId: 'run-1', planDigest: 'digest' } as never,
 		manifest: {} as never,
 		recomputedPlanDigest: 'digest',
 		approval: { approvals: [] },
+		executionId: 'dbsp.generator.execution.attempt-1',
 		step: {
 			stepKey: 'adoption:accounts',
 			address,
@@ -97,7 +103,13 @@ describe('declared PostgreSQL adoption admission', () => {
 						plan: expect.objectContaining({
 							claimKind: 'adopt-intent',
 							declared: declaration,
+							executionId: 'dbsp.generator.execution.attempt-1',
 						}),
+						reservations: [
+							expect.objectContaining({
+								executionId: 'dbsp.generator.execution.attempt-1',
+							}),
+						],
 						recordCatalogueIdentity: true,
 					}),
 				}),
@@ -304,5 +316,42 @@ describe('declared PostgreSQL adoption admission', () => {
 			detail:
 				'claim token for another change is no longer valid because its claim is closed',
 		});
+	});
+
+	it.each([
+		[
+			{
+				kind: 'outcome-recovery-required',
+				claimId: 'open-claim',
+				reason: 'open',
+			},
+			{
+				outcome: 'recovery-required',
+				claimId: 'open-claim',
+				detail: 'claim open-claim remains open and requires recovery: open',
+			},
+		],
+		[
+			{ kind: 'outcome-transport-ambiguous', reason: 'commit unknown' },
+			{ outcome: 'transport-ambiguous', detail: 'commit unknown' },
+		],
+	] as const)('preserves admitted unresolved outcome %s', async (admitted, expected) => {
+		unmanaged();
+		mocks.readIdentity.mockResolvedValue({
+			...address,
+			catalogueIdentity: identity,
+		});
+		mocks.executeAdmitted.mockResolvedValue(admitted);
+		await expect(
+			executePgDeclaredAdoption({
+				executor,
+				...persisted(),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+				declaration,
+				expectedCatalogueIdentity: identity,
+				shapeMatches: async () => true,
+			}),
+		).resolves.toEqual(expected);
 	});
 });

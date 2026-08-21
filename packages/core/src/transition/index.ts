@@ -119,9 +119,29 @@ export interface DurableApplyInput {
 	) => Promise<void>;
 }
 
-export type DurableApplyResult = ApplyResult & {
-	readonly durableOutcome: DurableApplyOutcome;
-};
+export type DurableApplyResult =
+	| (ApplyResult & {
+			readonly unresolvedOutcome: {
+				readonly kind: 'recovery-required';
+				readonly claimId: string;
+				readonly detail: string;
+			};
+			readonly durableOutcome: 'recovery-required';
+	  })
+	| (ApplyResult & {
+			readonly unresolvedOutcome: {
+				readonly kind: 'transport-ambiguous';
+				readonly detail: string;
+			};
+			readonly durableOutcome: 'transport-ambiguous';
+	  })
+	| (Omit<ApplyResult, 'unresolvedOutcome' | 'durableOutcome'> & {
+			readonly unresolvedOutcome?: never;
+			readonly durableOutcome: Exclude<
+				DurableApplyOutcome,
+				'recovery-required' | 'transport-ambiguous'
+			>;
+	  });
 
 export type TransitionResumeJournalLoader = (
 	runId: string,

@@ -3237,6 +3237,116 @@ describe('createApplier', () => {
 		expect(release).toHaveBeenCalledWith(failure);
 	});
 
+	it('returns recovery-required without rollback after the runtime compromises the transaction client', async () => {
+		const rollback = vi.fn(async () => undefined);
+		const release = vi.fn();
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(async (client) => {
+					client.markClientCompromised();
+					return {
+						kind: 'recovery-required',
+						claimId: 'open-claim',
+						detail: 'runtime could not determine terminal state',
+					} as const;
+				}),
+			}),
+			rollback,
+		};
+		const result = await createApplier(durableRegistry(rt), persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+		);
+
+		expect(rollback).not.toHaveBeenCalled();
+		expect(result.unresolvedOutcome).toEqual({
+			kind: 'recovery-required',
+			claimId: 'open-claim',
+			detail: 'runtime could not determine terminal state',
+		});
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('returns transport-ambiguous without rollback after the runtime compromises the transaction client', async () => {
+		const rollback = vi.fn(async () => undefined);
+		const release = vi.fn();
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(async (client) => {
+					client.markClientCompromised();
+					return {
+						kind: 'transport-ambiguous',
+						detail: 'runtime lost the commit acknowledgement',
+					} as const;
+				}),
+			}),
+			rollback,
+		};
+		const result = await createApplier(durableRegistry(rt), persister).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+		);
+
+		expect(rollback).not.toHaveBeenCalled();
+		expect(result.unresolvedOutcome).toEqual({
+			kind: 'transport-ambiguous',
+			detail: 'runtime lost the commit acknowledgement',
+		});
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('evicts the durable preflight lease when a nested execution lease is transport-ambiguous', async () => {
+		const release = vi.fn();
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(async (client) => {
+					client.markClientCompromised();
+					return {
+						kind: 'transport-ambiguous',
+						detail: 'runtime lost the commit acknowledgement',
+					} as const;
+				}),
+			}),
+		};
+		const journal = durableJournal();
+		const target = createExclusiveTransitionTarget(
+			createTestTransitionLessor(async () => ({
+				query: async () => ({ rows: [] }),
+				release,
+			})),
+			() => true,
+		);
+
+		const result = await createApplier(
+			durableRegistry(rt),
+			persister,
+		).applyDurable({
+			runId: journal.run.runId,
+			expectedPlanDigest: transitionPlanDigest(journal.plan),
+			loadCurrent: vi.fn(async () => journal),
+			prepareExecutionSession: vi.fn(async () => ({
+				ok: true as const,
+				context,
+			})),
+			policy: acceptsOperationPolicy(),
+			target,
+			authorize: vi.fn(async () => undefined),
+		});
+
+		expect(result.unresolvedOutcome).toMatchObject({
+			kind: 'transport-ambiguous',
+		});
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('uses the operation pack issuer for apply-time observations', async () => {
 		const wrongExecute = vi.fn(async () => evidence());
 		const correctExecute = vi.fn(async () => evidence());
@@ -4556,7 +4666,7 @@ describe('createApplier', () => {
 		expect(rt.executeOperation).toHaveBeenCalledOnce();
 	});
 
-	it('mutation: allowing an attempted run to apply again must point operators to recover', async () => {
+	it('mutation: allowing an attempted run to apply again must point operators to reconcile', async () => {
 		const rt = runtime(() => undefined);
 		const planValue = durablePlanShape();
 		const run = createTransitionRunMetadata(mintInProcessPlan(planValue));
@@ -4595,7 +4705,7 @@ describe('createApplier', () => {
 			authorize: vi.fn(async () => undefined),
 		});
 		expect(result.durableOutcome).toBe('prior-step-events-refusal');
-		expect(result.assessment.reasons[0]?.detail).toContain('dbsp recover');
+		expect(result.assessment.reasons[0]?.detail).toContain('dbsp reconcile');
 		expect(rt.executeOperation).not.toHaveBeenCalled();
 	});
 

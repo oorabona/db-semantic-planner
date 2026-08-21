@@ -112,6 +112,7 @@ describe('re-address declaration bounds', () => {
 				manifest: {} as never,
 				recomputedPlanDigest: 'plan',
 				approval: { approvals: [] },
+				executionId: 'dbsp.generator.execution.attempt-1',
 				step: {
 					stepKey: 'move-orders',
 					address: source,

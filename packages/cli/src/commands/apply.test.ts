@@ -4,12 +4,14 @@ import { join } from 'node:path';
 import { semanticArtifactId } from '@dbsp/core';
 import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { serializeCliJson } from '../utils/output.js';
 import {
 	APPLY_OUTCOME_CONTRACT,
 	authorizationDigest,
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
 	exitCodeForApplyOutcome,
+	formatApplyHuman,
 	generatorRunHasPriorStepEvents,
 	hasReusableAuthorization,
 	outcomeForApplyResult,
@@ -91,6 +93,19 @@ describe('dbsp apply contract and policy', () => {
 		]);
 	});
 
+	it('names reconcile consistently for recovery-required and prior-step events', () => {
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'recovery-required',
+			64,
+			'an admitted claim remains open; run dbsp reconcile --db <database> <run-id>',
+		]);
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'prior-step-events-refusal',
+			19,
+			'attempted runs with prior generator step-attempt events must be classified by dbsp reconcile --db <database> <run-id>',
+		]);
+	});
+
 	it.each([
 		['operation-failed-not-applied', 'planned', 'operation-failed-not-applied'],
 		['partially-applied', 'partially-applied', 'partially-applied'],
@@ -100,6 +115,146 @@ describe('dbsp apply contract and policy', () => {
 		['context-mismatch', 'planned', 'context-mismatch'],
 	] as const)('mutation: remapping core %s loses its stable CLI outcome', (_name, lifecycle, code) => {
 		expect(outcomeForApplyResult(result(lifecycle, code))).toBe(code);
+	});
+
+	it.each([
+		[
+			{
+				kind: 'recovery-required',
+				claimId: 'open-claim',
+				detail: 'sender disconnected',
+			},
+			'recovery-required',
+			'claim: open-claim',
+		],
+		[
+			{ kind: 'transport-ambiguous', detail: 'commit acknowledgement lost' },
+			'transport-ambiguous',
+			'detail: commit acknowledgement lost',
+		],
+	] as const)('preserves core unresolved managed outcome %s', (unresolvedOutcome, outcome, text) => {
+		const applyResult = {
+			...result('outcome-unknown', 'unknown-step-result'),
+			durableOutcome: outcome,
+			unresolvedOutcome,
+		} as ApplyResult;
+		expect(outcomeForApplyResult(applyResult)).toBe(outcome);
+		expect(
+			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+		).toContain(text);
+		expect(
+			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+		).toContain('resolving command: dbsp reconcile --db <database> run-1');
+	});
+
+	it.each([
+		[
+			{
+				outcome: 'recovery-required',
+				claimId: 'generator-open-claim',
+				detail: 'generator sender disconnected',
+			},
+			'recovery-required',
+			['claim: generator-open-claim', 'detail: generator sender disconnected'],
+		],
+		[
+			{
+				outcome: 'transport-ambiguous',
+				detail: 'generator commit acknowledgement lost',
+			},
+			'transport-ambiguous',
+			['detail: generator commit acknowledgement lost'],
+		],
+	] as const)('renders generator-shaped unresolved %s for human apply output', (execution, outcome, lines) => {
+		const text = formatApplyHuman({
+			outcome,
+			runId: 'generator-run-1',
+			result: execution,
+		});
+		for (const line of lines) expect(text).toContain(line);
+		expect(text).toContain(
+			'resolving command: dbsp reconcile --db <database> generator-run-1',
+		);
+	});
+
+	it('escapes the human heading and plan-digest detail without adding diagnostic lines', () => {
+		const runId = 'run-1\n\u001b[31m';
+		const recoveryText = formatApplyHuman({
+			outcome: 'recovery-required',
+			runId,
+			result: {
+				outcome: 'recovery-required',
+				claimId: 'open-claim',
+				detail: 'sender disconnected',
+			},
+		});
+		expect(recoveryText.split('\n')[0]).toBe(
+			'recovery-required: run-1\\n\\u001b[31m',
+		);
+
+		const baseResult = result('planned', 'unknown-step-result');
+		const digestResult: ApplyResult = {
+			...baseResult,
+			assessment: {
+				...baseResult.assessment,
+				reasons: [
+					{
+						...baseResult.assessment.reasons[0]!,
+						detail: 'digest\n\u001b[31m',
+					},
+				],
+			},
+		};
+		expect(
+			formatApplyHuman({
+				outcome: 'plan-digest-mismatch',
+				runId,
+				result: digestResult,
+			}).split('\n'),
+		).toEqual([
+			'plan-digest-mismatch: run-1\\n\\u001b[31m',
+			'digest\\n\\u001b[31m',
+		]);
+	});
+
+	it.each([
+		{
+			outcome: 'recovery-required' as const,
+			claimId: 'generator-open-claim',
+			detail: 'generator sender disconnected',
+		},
+		{
+			outcome: 'transport-ambiguous' as const,
+			detail: 'generator commit acknowledgement lost',
+		},
+	] as const)('serializes generator unresolved output without core assessment fields', (execution) => {
+		const document = JSON.parse(
+			serializeCliJson({
+				outcome: execution.outcome,
+				runId: 'generator-run-1',
+				result: execution,
+			}),
+		) as { readonly result: Record<string, unknown> };
+		expect(document).toMatchObject({
+			outcome: execution.outcome,
+			runId: 'generator-run-1',
+			result: execution,
+		});
+		expect(document.result).not.toHaveProperty('assessment');
+		expect(document.result).not.toHaveProperty('unresolvedOutcome');
+	});
+
+	it('gives unresolvedOutcome precedence over an otherwise completed durable outcome', () => {
+		const applyResult = {
+			...result('completed', 'context-mismatch'),
+			durableOutcome: 'completed',
+			unresolvedOutcome: {
+				kind: 'recovery-required',
+				claimId: 'still-open',
+				detail: 'claim remains unresolved',
+			},
+		} as ApplyResult;
+		expect(outcomeForApplyResult(applyResult)).toBe('recovery-required');
 	});
 
 	it.each([

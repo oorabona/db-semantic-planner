@@ -23,10 +23,15 @@ describe('dbsp recover contract', () => {
 	it('mutation: treating a completed recovery as proven-applicable exits non-zero', () => {
 		const result = {
 			assessment: {
+				decision: 'applicable',
+				assurance: 'established',
 				lifecycle: 'completed',
-				reasons: [{ code: 'proven-applicable', scope: [] }],
+				continuation: 'none',
+				reasons: [],
 			},
-		} as unknown as ApplyResult;
+			journals: [],
+			observations: [],
+		} satisfies ApplyResult;
 		const outcome = outcomeForRecoveryResult(result);
 		expect(outcome).toBe('completed');
 		expect(exitCodeForRecoverOutcome(outcome)).toBe(0);

@@ -42,6 +42,12 @@ export interface ExternalEffectCoverage {
 export type OperationExecutionOutcome =
 	| { readonly kind: 'completed' }
 	| {
+			readonly kind: 'recovery-required';
+			readonly claimId: string;
+			readonly detail: string;
+	  }
+	| { readonly kind: 'transport-ambiguous'; readonly detail: string }
+	| {
 			readonly kind: 'guard-failed';
 			readonly guard: ApplyGuard;
 			readonly recovery: readonly RecoveryArtefact[];

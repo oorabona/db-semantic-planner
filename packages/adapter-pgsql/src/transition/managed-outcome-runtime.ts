@@ -206,9 +206,22 @@ export function withPgManagedOutcomeRuntime<T extends object>(
 					operation,
 				});
 			const result = await admitted(executor);
-			return result.kind === 'executed-outcome-claim'
-				? { kind: 'completed' }
-				: refused('reason' in result ? result.reason : result.kind);
+			if (result.kind === 'executed-outcome-claim')
+				return { kind: 'completed' };
+			if (result.kind === 'outcome-recovery-required') {
+				// Recovery is exceptional: reconnect even after session-safe errors because unsafe reuse is worse.
+				client.markClientCompromised();
+				return {
+					kind: 'recovery-required',
+					claimId: result.claimId,
+					detail: result.reason,
+				};
+			}
+			if (result.kind === 'outcome-transport-ambiguous') {
+				client.markClientCompromised();
+				return { kind: 'transport-ambiguous', detail: result.reason };
+			}
+			return refused('reason' in result ? result.reason : result.kind);
 		},
 	};
 }

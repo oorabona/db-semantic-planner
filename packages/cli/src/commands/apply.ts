@@ -10,6 +10,8 @@ import {
 	createPgTransitionPack,
 	escapeDiagnosticText,
 	preparePgExecutionSession,
+	readPgLedgerAddressChain,
+	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
 	TransitionRunIdentityMismatchError,
 	validatePgManagedLedgerCurrency,
@@ -32,6 +34,7 @@ import type {
 	ApplyResult,
 	AssumptionAcceptance,
 	LedgerAddress,
+	LedgerHome,
 	NormalizedManagedStep,
 	PhysicalOperation,
 	ResourceAddress,
@@ -40,11 +43,12 @@ import type {
 	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
-import { REFUSAL_VOCABULARY } from '@dbsp/types';
+import { ledgerAddressKey, REFUSAL_VOCABULARY } from '@dbsp/types';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
+import { executionIdsForRun } from './execution-ids.js';
 import {
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
@@ -101,6 +105,94 @@ export function generatorRunHasPriorStepEvents(
 			event.operationRef === 'dbsp.generator.attempt'
 		);
 	});
+}
+
+function ledgerHomeForGeneratorAddress(address: LedgerAddress): LedgerHome {
+	if (address.scope === 'database') return { scope: 'database' };
+	if (!address.schema)
+		throw new Error(
+			`schema-scoped generated address ${address.name} has no schema ledger`,
+		);
+	return { scope: 'schema', schema: address.schema };
+}
+
+/** Every generated address, including each closure member, bounds replay evidence reads. */
+function generatorPlanLedgerAddresses(
+	steps: readonly NormalizedManagedStep[],
+): readonly LedgerAddress[] {
+	const addresses = new Map<string, LedgerAddress>();
+	for (const step of steps) {
+		if (step.address !== undefined) {
+			addresses.set(ledgerAddressKey(step.address), step.address);
+			continue;
+		}
+		const closure = step.closure;
+		if (!closure)
+			throw new Error(`generated step ${step.stepKey} has no ledger address`);
+		const candidates = [
+			closure.root,
+			...closure.members.map((member) => member.address),
+		];
+		for (const address of candidates)
+			addresses.set(ledgerAddressKey(address), address);
+	}
+	return [...addresses.values()];
+}
+
+/**
+ * A recorded attempt remains retryable only until the ledger contains no trace
+ * of it. Reservations are queried by ledger home; chain reads stay at plan addresses.
+ */
+async function generatorRunHasLedgerEvidence(
+	session: Parameters<typeof readPgLedgerReservationsForExecution>[0],
+	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
+	steps: readonly NormalizedManagedStep[],
+): Promise<boolean> {
+	const executionIds = executionIdsForRun(journal);
+	const executionIdSet = new Set(executionIds);
+	const addresses = generatorPlanLedgerAddresses(steps);
+	const homes = new Map<string, LedgerHome>();
+	for (const address of addresses) {
+		const home = ledgerHomeForGeneratorAddress(address);
+		homes.set(`${home.scope}:${home.schema ?? ''}`, home);
+	}
+	for (const home of homes.values()) {
+		for (const executionId of executionIds) {
+			const reservations = await readPgLedgerReservationsForExecution(
+				session,
+				home,
+				executionId,
+			);
+			if (reservations.length > 0) return true;
+		}
+	}
+	for (const address of addresses) {
+		const chain = await readPgLedgerAddressChain(
+			session,
+			ledgerHomeForGeneratorAddress(address),
+			address,
+		);
+		if (
+			chain.events.some((event) => executionIdSet.has(event.executionId ?? ''))
+		)
+			return true;
+	}
+	return false;
+}
+
+/** The generator replay gate has one decision: journal steps or attributable ledger evidence. */
+async function generatorRunRequiresRecovery(
+	target: Parameters<typeof acquireExclusiveTransitionLease>[0],
+	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
+	steps: readonly NormalizedManagedStep[],
+): Promise<boolean> {
+	if (generatorRunHasPriorStepEvents(journal)) return true;
+	const lease = await acquireExclusiveTransitionLease(target);
+	try {
+		return await generatorRunHasLedgerEvidence(lease.session, journal, steps);
+	} finally {
+		await lease.release();
+	}
 }
 
 const GENERATOR_ATTEMPT_OPERATION: Omit<PhysicalOperation, 'payload'> = {
@@ -549,7 +641,7 @@ export const APPLY_OUTCOME_CONTRACT = [
 	[
 		'prior-step-events-refusal',
 		19,
-		'attempted runs must be classified by recover',
+		'attempted runs with prior generator step-attempt events must be classified by dbsp reconcile --db <database> <run-id>',
 	],
 	[
 		'compatibility-refusal',
@@ -581,7 +673,12 @@ export const APPLY_OUTCOME_CONTRACT = [
 	[
 		'recovery-required',
 		64,
-		'an admitted non-transactional claim remains open; run recover with the reported claim reference',
+		'an admitted claim remains open; run dbsp reconcile --db <database> <run-id>',
+	],
+	[
+		'transport-ambiguous',
+		65,
+		'an admitted operation has an ambiguous transport outcome; reconcile the run before retrying',
 	],
 	['database-read-only', 34, 'target cannot accept managed writes'],
 	[
@@ -658,6 +755,7 @@ export function exitCodeForApplyOutcome(outcome: ApplyOutcome): number {
 export function outcomeForApplyResult(
 	result: ApplyResult,
 ): ApplyExecutionOutcome {
+	if (result.unresolvedOutcome) return result.unresolvedOutcome.kind;
 	if (result.durableOutcome && isApplyExecutionOutcome(result.durableOutcome))
 		return result.durableOutcome;
 	// A committed earlier segment is the operator-facing fact.  Do not let the
@@ -686,13 +784,131 @@ export function outcomeForApplyResult(
 	return 'context-mismatch';
 }
 
-export function formatApplyHuman(result: {
-	readonly outcome: string;
+type CoreApplyCommandResult = {
+	readonly outcome: Exclude<
+		ApplyOutcome,
+		| 'run-busy'
+		| 'plan-digest-required'
+		| 'non-replayable-generator-run'
+		| 'policy-invalid'
+		| 'apply-failed'
+	>;
 	readonly runId: string;
-	readonly result?: ApplyResult;
-	readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
-}): string {
-	const line = `${result.outcome}: ${result.runId}`;
+	readonly result: ApplyResult;
+	readonly refusal?: PreAppendRefusal;
+};
+
+type GeneratorApplyCommandResult = {
+	readonly [Outcome in GeneratorExecutionResult['outcome']]: {
+		readonly outcome: Outcome;
+		readonly runId: string;
+		readonly result: Extract<
+			GeneratorExecutionResult,
+			{ readonly outcome: Outcome }
+		>;
+		readonly refusal?: PreAppendRefusal;
+	};
+}[GeneratorExecutionResult['outcome']];
+
+function generatorApplyCommandResult(
+	execution: GeneratorExecutionResult,
+	runId: string,
+	refusal: PreAppendRefusal | undefined,
+): GeneratorApplyCommandResult {
+	const fields = refusal === undefined ? {} : { refusal };
+	switch (execution.outcome) {
+		case 'completed':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'partially-applied':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'selection-incomplete':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'adoption-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'readdress-unsupported':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'readdress-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'destructive-authority-refused':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'prior-step-events-refusal':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'recovery-required':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'transport-ambiguous':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+		case 'execution-failed':
+			return {
+				outcome: execution.outcome,
+				runId,
+				result: execution,
+				...fields,
+			};
+	}
+}
+
+type ApplyHumanResult =
+	| (ApplyCommandResult & {
+			readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
+	  })
+	| {
+			readonly outcome: string;
+			readonly runId: string;
+			readonly refusal?: PreAppendRefusal | RecordedPlanRefusal;
+	  };
+
+export function formatApplyHuman(result: ApplyHumanResult): string {
+	const line = `${escapeDiagnosticText(result.outcome)}: ${escapeDiagnosticText(result.runId)}`;
 	if (result.refusal) {
 		if ('address' in result.refusal)
 			return formatPreAppendRefusalHuman(line, result.refusal);
@@ -704,9 +920,59 @@ export function formatApplyHuman(result: {
 			`resolving command: ${escapeDiagnosticText(result.refusal.resolvingCommand)}`,
 		].join('\n');
 	}
-	if (result.outcome !== 'plan-digest-mismatch' || !result.result) return line;
-	const detail = result.result.assessment.reasons[0]?.detail;
-	return detail ? `${line}\n${detail}` : line;
+	if (!('result' in result)) return line;
+	if ('assessment' in result.result) {
+		if (result.result.unresolvedOutcome) {
+			const unresolved = result.result.unresolvedOutcome;
+			return unresolved.kind === 'recovery-required'
+				? [
+						line,
+						`claim: ${escapeDiagnosticText(unresolved.claimId)}`,
+						`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+						`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+					].join('\n')
+				: [
+						line,
+						`detail: ${escapeDiagnosticText(unresolved.detail)}`,
+						`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+					].join('\n');
+		}
+		if (result.outcome !== 'plan-digest-mismatch') return line;
+		const detail = result.result.assessment.reasons[0]?.detail;
+		return detail ? `${line}\n${escapeDiagnosticText(detail)}` : line;
+	}
+	const execution = result.result;
+	switch (execution.outcome) {
+		case 'completed':
+			return line;
+		case 'recovery-required':
+			return [
+				line,
+				`claim: ${escapeDiagnosticText(execution.claimId)}`,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
+		case 'transport-ambiguous':
+			return [
+				line,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
+		case 'partially-applied':
+		case 'selection-incomplete':
+		case 'adoption-refused':
+		case 'readdress-unsupported':
+		case 'readdress-refused':
+		case 'destructive-authority-refused':
+		case 'execution-failed':
+			return `${line}\ndetail: ${escapeDiagnosticText(execution.detail)}`;
+		case 'prior-step-events-refusal':
+			return [
+				line,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
+	}
 }
 
 function acceptanceMatches(
@@ -746,19 +1012,8 @@ function recordedPlanRefusal(): RecordedPlanRefusal {
 }
 
 export type ApplyCommandResult = (
-	| {
-			readonly outcome: Exclude<
-				ApplyOutcome,
-				| 'run-busy'
-				| 'plan-digest-required'
-				| 'non-replayable-generator-run'
-				| 'policy-invalid'
-				| 'apply-failed'
-			>;
-			readonly runId: string;
-			readonly result: ApplyResult;
-			readonly refusal?: PreAppendRefusal;
-	  }
+	| CoreApplyCommandResult
+	| GeneratorApplyCommandResult
 	| {
 			readonly outcome: 'run-busy' | 'plan-digest-required';
 			readonly runId: string;
@@ -787,7 +1042,7 @@ export type NoArgumentApplyResult =
 			readonly plan: PlanResult;
 			readonly runId: string;
 			readonly planDigest: string;
-			readonly result: ApplyCommandResult | GeneratorExecutionResult;
+			readonly result: ApplyCommandResult;
 	  };
 
 function isGeneratorPlan(plan: unknown): plan is GeneratorDurablePlan {
@@ -1118,11 +1373,17 @@ async function runApplyInternal(
 						throw new RecordedPlanDigestMismatchError(
 							`persisted generator manifest is invalid: ${lifecycleError}`,
 						);
-					if (generatorRunHasPriorStepEvents(current))
+					if (
+						await generatorRunRequiresRecovery(
+							target,
+							current,
+							manifest.manifest.steps,
+						)
+					)
 						return {
 							outcome: 'prior-step-events-refusal' as const,
 							detail:
-								'run has prior generator step-attempt events; run dbsp recover instead',
+								'run has prior generator step-attempt events; run dbsp reconcile --db <database> <run-id>',
 						};
 					return executeGeneratorPlan({
 						pool: owned,
@@ -1183,14 +1444,11 @@ async function runApplyInternal(
 									withheldAuthority,
 								},
 							};
-				result = {
-					outcome: execution.outcome as ApplyOutcome,
+				result = generatorApplyCommandResult(
+					execution,
 					runId,
-					result: execution as unknown as ApplyResult,
-					...(preAppendRefusal === undefined
-						? {}
-						: { refusal: preAppendRefusal }),
-				} as ApplyCommandResult;
+					preAppendRefusal,
+				);
 			}
 		} else {
 			const locked = await withPgTransitionRunLock(
@@ -1408,13 +1666,7 @@ export const applyCommand = new Command('apply')
 				else if (result.outcome === 'not-executable') {
 					// The planner already rendered the concrete no-drift/blocked reason.
 				} else if (result.outcome !== 'dry-run' && 'result' in result)
-					console.log(
-						'runId' in result.result
-							? formatApplyHuman(result.result)
-							: `${result.result.outcome}${
-									'detail' in result.result ? `: ${result.result.detail}` : ''
-								}`,
-					);
+					console.log(formatApplyHuman(result.result));
 			}
 			process.exitCode = exitCode;
 			return;

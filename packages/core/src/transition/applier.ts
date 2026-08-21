@@ -172,7 +172,9 @@ function durableRefusal(
 	};
 }
 
-function durableExecutionOutcome(result: ApplyResult): DurableApplyOutcome {
+function durableResolvedExecutionOutcome(
+	result: Omit<ApplyResult, 'unresolvedOutcome'>,
+): Exclude<DurableApplyOutcome, 'recovery-required' | 'transport-ambiguous'> {
 	if (result.assessment.lifecycle === 'completed') return 'completed';
 	if (result.assessment.lifecycle === 'partially-applied')
 		return 'partially-applied';
@@ -190,6 +192,27 @@ function durableExecutionOutcome(result: ApplyResult): DurableApplyOutcome {
 				? 'outcome-unknown'
 				: 'context-mismatch';
 	}
+}
+
+function durableExecutionResult(result: ApplyResult): DurableApplyResult {
+	const unresolvedOutcome = result.unresolvedOutcome;
+	if (unresolvedOutcome?.kind === 'recovery-required')
+		return {
+			...result,
+			unresolvedOutcome,
+			durableOutcome: 'recovery-required',
+		};
+	if (unresolvedOutcome?.kind === 'transport-ambiguous')
+		return {
+			...result,
+			unresolvedOutcome,
+			durableOutcome: 'transport-ambiguous',
+		};
+	const { unresolvedOutcome: _unresolvedOutcome, ...resolvedResult } = result;
+	return {
+		...resolvedResult,
+		durableOutcome: durableResolvedExecutionOutcome(resolvedResult),
+	};
 }
 
 function recoveryOutcome(result: ApplyResult): RecoveryOutcome {
@@ -1532,6 +1555,36 @@ export function createApplier(
 									),
 									nonRollbackableExecutionTracker,
 								);
+						if (executionOutcome.kind === 'recovery-required') {
+							return resultWithJournalWriteWarnings({
+								assessment: assessment(
+									partiallyAppliedReason(
+										entry.step,
+										`claim ${executionOutcome.claimId} remains open and requires recovery: ${executionOutcome.detail}`,
+									),
+									'outcome-unknown',
+									'human-intervention-required',
+								),
+								journals,
+								observations,
+								unresolvedOutcome: executionOutcome,
+							});
+						}
+						if (executionOutcome.kind === 'transport-ambiguous') {
+							return resultWithJournalWriteWarnings({
+								assessment: assessment(
+									partiallyAppliedReason(
+										entry.step,
+										`managed outcome transport is ambiguous: ${executionOutcome.detail}`,
+									),
+									'outcome-unknown',
+									'human-intervention-required',
+								),
+								journals,
+								observations,
+								unresolvedOutcome: executionOutcome,
+							});
+						}
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
 								await rollbackAndPrepareObservedJournalWrite(
@@ -2336,7 +2389,7 @@ export function createApplier(
 			if (loaded.events.length > 0) {
 				return durableRefusal(
 					'prior-step-events-refusal',
-					'run has prior step-attempt events; run dbsp recover instead',
+					'run has prior step-attempt events; run dbsp reconcile --db <database> <run-id>',
 				);
 			}
 			const nonTransactionalAssumptions = plan.assumptions.filter(
@@ -2424,6 +2477,7 @@ export function createApplier(
 				}
 			}
 			let lease: TransitionLease | undefined;
+			let leaseReleaseFailure: TransitionLeaseFailure | undefined;
 			try {
 				lease = await acquireExclusiveTransitionLease(input.target);
 			} catch (error) {
@@ -2474,7 +2528,9 @@ export function createApplier(
 					// apply() owns logical segment leases, but this outer durable
 					// boundary owns the physical connection until apply() has settled:
 					// post-step observed-journal writes still use this session.
-					release: () => undefined,
+					release: (error?: unknown) => {
+						if (error) leaseReleaseFailure = { error };
+					},
 				}));
 				// Await before this try's finally returns the physical lease. A bare
 				// return would run finally while apply() still owns its logical leases
@@ -2495,7 +2551,7 @@ export function createApplier(
 						input.policy,
 						pinnedTarget,
 					);
-					return { ...result, durableOutcome: durableExecutionOutcome(result) };
+					return durableExecutionResult(result);
 				} catch (error) {
 					return durableRefusal(
 						isDatabaseReadOnlyError(error)
@@ -2505,7 +2561,7 @@ export function createApplier(
 					);
 				}
 			} finally {
-				if (lease) await lease.release();
+				if (lease) await lease.release(leaseReleaseFailure);
 			}
 		},
 		async resume(journal, readContext, policy, target, admitRecovery) {

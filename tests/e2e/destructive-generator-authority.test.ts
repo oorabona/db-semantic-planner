@@ -746,6 +746,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			schema,
 			run,
 			runId,
+			recordAttempt: async () => undefined,
 			accepts: [`destructive-plan-accepted:${planDigest}`],
 			observer: async (point) => {
 				if (point !== 'ddl-completed-before-read-back' || recreated) return;
@@ -866,6 +867,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 				schema,
 				run,
 				runId,
+				recordAttempt: async () => undefined,
 				accepts: [`destructive-plan-accepted:${planDigest}`],
 				observer: async (point) => {
 					if (point !== 'ddl-completed-before-read-back') return;
@@ -961,6 +963,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			schema,
 			run,
 			runId,
+			recordAttempt: async () => undefined,
 			accepts: [`destructive-plan-accepted:${planDigest}`],
 			observer: async (point) => {
 				checkpoints.push(point);
@@ -1019,6 +1022,7 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			schema,
 			run,
 			runId,
+			recordAttempt: async () => undefined,
 			accepts: [`destructive-plan-accepted:${planDigest}`],
 			observer: async (point) => {
 				if (point !== 'commit-acknowledged' || claimCommitted) return;
