@@ -4,6 +4,7 @@ import {
 	createTransitionLessor,
 	isTransitionLessor,
 	markTransitionClientCompromised,
+	planOperationSession,
 	type TransitionLease,
 } from './transition-lessor.js';
 
@@ -348,6 +349,42 @@ describe('transition lease release', () => {
 
 		expect(release).toHaveBeenCalledOnce();
 		expect(release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+	});
+
+	it('revokes ordinary and plan-operation queries across sibling leases immediately after compromise', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		const physicalLease = {
+			query,
+			queryPlanOperation: query,
+			release,
+		};
+		const lessor = createTransitionLessor(async () => physicalLease);
+		const compromisedLease = await acquireTransitionLease(lessor);
+		const siblingLease = await acquireTransitionLease(lessor);
+
+		markTransitionClientCompromised(compromisedLease.session);
+
+		await expect(
+			compromisedLease.session.query('SELECT same lease'),
+		).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		await expect(
+			siblingLease.session.query('SELECT sibling lease'),
+		).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		await expect(
+			planOperationSession(siblingLease.session).query('SELECT plan operation'),
+		).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		expect(query).not.toHaveBeenCalled();
+
+		await compromisedLease.release();
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+		await siblingLease.release();
 	});
 
 	it.each([

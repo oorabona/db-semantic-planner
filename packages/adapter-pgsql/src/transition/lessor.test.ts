@@ -311,7 +311,11 @@ describe('withPgTransitionRunLock cleanup', () => {
 				const compromisedLease = await acquireExclusiveTransitionLease(target);
 				const siblingLease = await acquireExclusiveTransitionLease(target);
 				markTransitionClientCompromised(compromisedLease.session);
-				await compromisedLease.release();
+				await expect(
+					compromisedLease.session.query('SELECT same lease after compromise'),
+				).rejects.toThrow(
+					'transition execution marked its leased client compromised',
+				);
 				await expect(
 					siblingLease.session.query('SELECT ordinary after compromise'),
 				).rejects.toThrow(
@@ -324,6 +328,7 @@ describe('withPgTransitionRunLock cleanup', () => {
 				).rejects.toThrow(
 					'transition execution marked its leased client compromised',
 				);
+				await compromisedLease.release();
 				await expect(acquireExclusiveTransitionLease(target)).rejects.toThrow(
 					'transition execution marked its leased client compromised',
 				);
@@ -331,6 +336,10 @@ describe('withPgTransitionRunLock cleanup', () => {
 			}),
 		).resolves.toEqual({ kind: 'acquired', value: undefined });
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+		expect(client.query).not.toHaveBeenCalledWith(
+			'SELECT same lease after compromise',
+			undefined,
+		);
 		expect(client.query).not.toHaveBeenCalledWith(
 			'SELECT ordinary after compromise',
 			undefined,
@@ -396,6 +405,50 @@ describe('withPgTransitionRunLock cleanup', () => {
 		expect(releaseFailure).toMatchObject({
 			message: 'transition lease reported a non-Error failure',
 			cause: hostile,
+		});
+	});
+
+	it('preserves a callback recovery result when the pool release throws', async () => {
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			}),
+			release: vi.fn(() => {
+				throw new Error('pool release failed');
+			}),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(pool, 'run:throwing-release', async () => ({
+				kind: 'recovery-required' as const,
+				claimId: 'open-claim',
+			})),
+		).resolves.toEqual({
+			kind: 'acquired',
+			value: { kind: 'recovery-required', claimId: 'open-claim' },
 		});
 	});
 
@@ -618,6 +671,55 @@ describe('withPgTransitionRunLock statement origin', () => {
 		);
 
 		expect(evaluation!).toEqual({ ok: true });
+	});
+
+	it('does not send an in-flight plan operation post-probe after a sibling lease failure', async () => {
+		const { client, pool } = lockedPool();
+		const originalQuery = client.query.getMockImplementation()!;
+		let invariantProbeCount = 0;
+		let operationStarted: () => void;
+		const started = new Promise<void>((resolve) => {
+			operationStarted = resolve;
+		});
+		let finishOperation: () => void;
+		const operationFinished = new Promise<{ rows: [] }>((resolve) => {
+			finishOperation = () => resolve({ rows: [] });
+		});
+		client.query.mockImplementation(async (sql: string) => {
+			if (sql.includes('FROM pg_catalog.pg_locks')) invariantProbeCount += 1;
+			if (sql === 'SELECT suspended plan operation') {
+				operationStarted();
+				return operationFinished;
+			}
+			return originalQuery(sql);
+		});
+
+		await withPgTransitionRunLock(
+			pool,
+			'run:in-flight-post-probe',
+			async (target) => {
+				const operationLease = await acquireExclusiveTransitionLease(target);
+				const siblingLease = await acquireExclusiveTransitionLease(target);
+				try {
+					const operation = planOperationSession(operationLease.session).query(
+						'SELECT suspended plan operation',
+					);
+					await started;
+					await siblingLease.release({
+						error: new Error('sibling lease failed'),
+					});
+					finishOperation();
+					await expect(operation).rejects.toThrow(
+						'PostgreSQL transition session is compromised after a lease release failure',
+					);
+				} finally {
+					await operationLease.release();
+				}
+				return undefined;
+			},
+		);
+
+		expect(invariantProbeCount).toBe(2);
 	});
 
 	it('mutation: a plan operation issuing pg_advisory_unlock_all is refused and its connection is destroyed', async () => {

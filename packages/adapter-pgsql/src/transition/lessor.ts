@@ -210,10 +210,12 @@ export async function withPgTransitionRunLock<T>(
 		);
 		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
 		locked = true;
-		const invariants = await captureDurablePlanOperationInvariants(client, key);
+		const invariants = await captureDurablePlanOperationInvariants(query, key);
+		let runLease: TransitionQueryClient | undefined;
 		const lessor = createTransitionLessor(async () => {
 			refuseAfterLeaseReleaseFailure();
-			return {
+			if (runLease) return runLease;
+			runLease = Object.freeze({
 				// This channel is adapter-owned infrastructure: execution-contract
 				// setup, authorization, journals, and lock cleanup are not plan SQL.
 				query: (sql: string, params?: unknown) => query(sql, params),
@@ -223,7 +225,7 @@ export async function withPgTransitionRunLock<T>(
 				queryPlanOperation: async (sql: string, params?: unknown) => {
 					refuseAfterLeaseReleaseFailure();
 					try {
-						await assertDurablePlanOperationInvariants(client, key, invariants);
+						await assertDurablePlanOperationInvariants(query, key, invariants);
 					} catch (error) {
 						// A failed check at either boundary makes this session unsafe to
 						// pool, even if the final unlock happens to succeed.
@@ -242,7 +244,7 @@ export async function withPgTransitionRunLock<T>(
 						queryFailure = error;
 					}
 					try {
-						await assertDurablePlanOperationInvariants(client, key, invariants);
+						await assertDurablePlanOperationInvariants(query, key, invariants);
 					} catch (error) {
 						planOperationViolatedInvariant = true;
 						throw error;
@@ -262,7 +264,8 @@ export async function withPgTransitionRunLock<T>(
 										cause: error,
 									});
 				},
-			} as TransitionQueryClient;
+			} as TransitionQueryClient);
+			return runLease;
 		});
 		callbackLive = true;
 		const target = createExclusiveTransitionTarget(lessor, () => callbackLive);
@@ -295,16 +298,21 @@ export async function withPgTransitionRunLock<T>(
 		// An unconfirmed unlock may leave a session advisory lock behind. pg-pool
 		// destroys a client when release receives a truthy error, which is the only
 		// safe cleanup because PostgreSQL releases session locks on disconnect.
-		client.release(
-			cleanupFailure ??
-				deadConnectionFailure ??
-				leaseReleaseFailure ??
-				(planOperationViolatedInvariant
-					? new Error(
-							'PostgreSQL transition plan operation violated the exclusive session invariants',
-						)
-					: undefined),
-		);
+		try {
+			const returned = client.release(
+				cleanupFailure ??
+					deadConnectionFailure ??
+					leaseReleaseFailure ??
+					(planOperationViolatedInvariant
+						? new Error(
+								'PostgreSQL transition plan operation violated the exclusive session invariants',
+							)
+						: undefined),
+			);
+			void Promise.resolve(returned).catch(() => undefined);
+		} catch {
+			// A pool cleanup failure must not mask the callback's primary result.
+		}
 	}
 	if (cleanupFailure && !bodyFailed) throw cleanupFailure;
 	return { kind: 'acquired', value: value as T };
@@ -371,7 +379,7 @@ async function configurePgUtf8(client: {
  * statements, and future PostgreSQL syntax all get the same answer.
  */
 async function captureDurablePlanOperationInvariants(
-	client: PoolClient,
+	client: PgQueryable,
 	key: bigint,
 ): Promise<DurablePlanOperationInvariantSnapshot> {
 	const row = await readDurablePlanOperationInvariants(client, key);
@@ -388,7 +396,7 @@ async function captureDurablePlanOperationInvariants(
 }
 
 async function assertDurablePlanOperationInvariants(
-	client: PoolClient,
+	client: PgQueryable,
 	key: bigint,
 	expected: DurablePlanOperationInvariantSnapshot,
 ): Promise<void> {
@@ -408,7 +416,7 @@ async function assertDurablePlanOperationInvariants(
 }
 
 async function readDurablePlanOperationInvariants(
-	client: PoolClient,
+	client: PgQueryable,
 	key: bigint,
 ): Promise<{
 	readonly runLockHeld: boolean;
@@ -421,7 +429,7 @@ async function readDurablePlanOperationInvariants(
 		({ setting, column }) => `current_setting('${setting}') AS ${column}`,
 	).join(',\n\t\t\t\t');
 	const row = (
-		await client.query(
+		await client(
 			`SELECT
 				EXISTS (
 					SELECT 1
@@ -452,6 +460,11 @@ async function readDurablePlanOperationInvariants(
 		settings,
 	};
 }
+
+type PgQueryable = (
+	sql: string,
+	params?: unknown,
+) => Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
 
 function readDurablePlanOperationInvariantString(
 	row: Record<string, unknown> | undefined,
