@@ -2,11 +2,16 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	decodeGeneratedPostcondition,
+	GeneratedPostconditionProofInFlightError,
 	type GeneratedPostconditionSession,
+	GeneratedPostconditionSessionDeactivatedError,
+	GeneratedPostconditionWorkInFlightError,
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionSession,
+	withPinnedGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 
 const indexTarget = {
@@ -124,6 +129,492 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('generated postcondition verifier', () => {
+	it('deactivates a retained capability after the public checkout bracket', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		let retained: GeneratedPostconditionSession | undefined;
+		await withGeneratedPostconditionSession(
+			{
+				connect: async () => ({ query, release }),
+			},
+			async (session) => {
+				retained = session;
+				return 'completed';
+			},
+		);
+		if (!retained) throw new Error('expected a retained capability');
+		await expect(retained.query('SELECT 1')).rejects.toBeInstanceOf(
+			GeneratedPostconditionSessionDeactivatedError,
+		);
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('deactivates a retained capability after a pinned protocol-style bracket', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		let retained: GeneratedPostconditionSession | undefined;
+		await withPinnedGeneratedPostconditionSession(
+			{ query },
+			async (session) => {
+				retained = session;
+				return 'completed';
+			},
+		);
+		if (!retained) throw new Error('expected a retained capability');
+		await expect(retained.query('SELECT 1')).rejects.toBeInstanceOf(
+			GeneratedPostconditionSessionDeactivatedError,
+		);
+	});
+
+	it('refuses an overlapping proof while the first proof completes', async () => {
+		let openFirstQuery: (() => void) | undefined;
+		let releaseFirstQuery: (() => void) | undefined;
+		const firstQueryOpened = new Promise<void>((resolve) => {
+			openFirstQuery = resolve;
+		});
+		const firstQueryReleased = new Promise<void>((resolve) => {
+			releaseFirstQuery = resolve;
+		});
+		let queryCount = 0;
+		const query = vi.fn(async () => {
+			queryCount += 1;
+			if (queryCount === 1) {
+				openFirstQuery?.();
+				await firstQueryReleased;
+			}
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		await withPinnedGeneratedPostconditionSession(
+			{ query },
+			async (session) => {
+				const first = verifyGeneratedTablePostcondition({
+					session,
+					postcondition: tablePostcondition,
+					target: tableTarget,
+				});
+				await firstQueryOpened;
+				await expect(
+					verifyGeneratedTablePostcondition({
+						session,
+						postcondition: tablePostcondition,
+						target: tableTarget,
+					}),
+				).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
+				releaseFirstQuery?.();
+				await expect(first).resolves.toMatchObject({ kind: 'table' });
+			},
+		);
+	});
+
+	it('rejects a successful public checkout callback with proof work in flight', async () => {
+		let resolveQueryStarted: (() => void) | undefined;
+		let releaseQuery: (() => void) | undefined;
+		const queryStarted = new Promise<void>((resolve) => {
+			resolveQueryStarted = resolve;
+		});
+		const queryMayFinish = new Promise<void>((resolve) => {
+			releaseQuery = resolve;
+		});
+		const query = vi.fn(async () => {
+			resolveQueryStarted?.();
+			await queryMayFinish;
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		const release = vi.fn();
+		let proof: Promise<unknown> | undefined;
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release }) },
+				async (session) => {
+					proof = verifyGeneratedTablePostcondition({
+						session,
+						postcondition: tablePostcondition,
+						target: tableTarget,
+					});
+					await queryStarted;
+					return 'completed';
+				},
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionWorkInFlightError);
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+		releaseQuery?.();
+		if (!proof) throw new Error('expected a proof');
+		await expect(proof).resolves.toMatchObject({ kind: 'table' });
+	});
+
+	it('rejects a successful pinned callback with proof work in flight', async () => {
+		let resolveQueryStarted: (() => void) | undefined;
+		let releaseQuery: (() => void) | undefined;
+		const queryStarted = new Promise<void>((resolve) => {
+			resolveQueryStarted = resolve;
+		});
+		const queryMayFinish = new Promise<void>((resolve) => {
+			releaseQuery = resolve;
+		});
+		const query = vi.fn(async () => {
+			resolveQueryStarted?.();
+			await queryMayFinish;
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		let proof: Promise<unknown> | undefined;
+		await expect(
+			withPinnedGeneratedPostconditionSession({ query }, async (session) => {
+				proof = verifyGeneratedTablePostcondition({
+					session,
+					postcondition: tablePostcondition,
+					target: tableTarget,
+				});
+				await queryStarted;
+				return 'completed';
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionWorkInFlightError);
+		releaseQuery?.();
+		if (!proof) throw new Error('expected a proof');
+		await expect(proof).resolves.toMatchObject({ kind: 'table' });
+	});
+
+	it('evicts a replan when the caller queried before proof', async () => {
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release }) },
+				async (session) => {
+					await session.query('BEGIN');
+					return verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: {
+							...indexPostcondition,
+							index: {
+								...indexPostcondition.index,
+								ordering: 'DESC',
+							},
+						},
+						target: indexTarget,
+					});
+				},
+			),
+		).rejects.toThrow('replan');
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('evicts a scratch mismatch when the caller set session state before proof', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexRow()] };
+			if (sql.includes('WHERE relation.oid'))
+				return { rows: [indexRow({ key_columns: ['other'] })] };
+			return { rows: [] };
+		});
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release }) },
+				async (session) => {
+					await session.query('SET ROLE verifier_test');
+					return verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						target: indexTarget,
+					});
+				},
+			),
+		).rejects.toThrow('postcondition differs');
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('evicts a falsy callback failure with a truthy release error', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		const client = { query, release };
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => client },
+				async (session) => {
+					await session.query('BEGIN');
+					throw undefined;
+				},
+			),
+		).rejects.toBeUndefined();
+		const [releaseArgument] = release.mock.calls[0] ?? [];
+		expect(releaseArgument).toBeInstanceOf(Error);
+		expect(releaseArgument).toBeTruthy();
+		expect(releaseArgument).toHaveProperty('cause', undefined);
+	});
+
+	it('evicts a safe-marked failure after the callback opens a transaction', async () => {
+		const release = vi.fn();
+		let failure: unknown;
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({ query: vi.fn(), release }),
+				},
+				async (session) => {
+					try {
+						await verifyGeneratedIndexPostcondition({
+							session,
+							postcondition: {
+								...indexPostcondition,
+								index: {
+									...indexPostcondition.index,
+									ordering: 'DESC',
+								},
+							},
+							target: indexTarget,
+						});
+					} catch (error) {
+						failure = error;
+						await session.query('BEGIN');
+						throw error;
+					}
+				},
+			),
+		).rejects.toThrow('replan');
+		if (!failure) throw new Error('expected a safe-marked failure');
+		expect(release).toHaveBeenCalledWith(failure);
+	});
+
+	it('evicts a safe-marked failure from a previous checkout', async () => {
+		let marked: unknown;
+		const firstRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: firstRelease }) },
+				async (session) => {
+					try {
+						await verifyGeneratedIndexPostcondition({
+							session,
+							postcondition: {
+								...indexPostcondition,
+								index: {
+									...indexPostcondition.index,
+									ordering: 'DESC',
+								},
+							},
+							target: indexTarget,
+						});
+					} catch (error) {
+						marked = error;
+						throw error;
+					}
+				},
+			),
+		).rejects.toThrow('replan');
+		expect(firstRelease).toHaveBeenCalledWith();
+		if (!marked) throw new Error('expected a marked failure');
+
+		const secondRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: secondRelease }) },
+				async () => {
+					throw marked;
+				},
+			),
+		).rejects.toBe(marked);
+		expect(secondRelease).toHaveBeenCalledWith(marked);
+	});
+
+	it('keeps an unchanged-session replan and a clean scratch mismatch reusable', async () => {
+		const replanRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(),
+						release: replanRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: {
+							...indexPostcondition,
+							index: { ...indexPostcondition.index, ordering: 'DESC' },
+						},
+						target: indexTarget,
+					}),
+			),
+		).rejects.toThrow('replan');
+		expect(replanRelease).toHaveBeenCalledWith();
+
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexRow()] };
+			if (sql.includes('WHERE relation.oid'))
+				return { rows: [indexRow({ key_columns: ['other'] })] };
+			return { rows: [] };
+		});
+		const mismatchRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release: mismatchRelease }) },
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						target: indexTarget,
+					}),
+			),
+		).rejects.toThrow('postcondition differs');
+		expect(mismatchRelease).toHaveBeenCalledWith();
+	});
+
+	it('evicts cleanup and unknown failures, and preserves proof failures from release errors', async () => {
+		const cleanupFailure = new Error('rollback failed');
+		const cleanupQuery = vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexRow()] };
+			if (sql.includes('WHERE relation.oid'))
+				return { rows: [indexRow({ key_columns: ['other'] })] };
+			if (sql.startsWith('ROLLBACK TO SAVEPOINT')) throw cleanupFailure;
+			return { rows: [] };
+		});
+		const cleanupRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: cleanupQuery,
+						release: cleanupRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						target: indexTarget,
+					}),
+			),
+		).rejects.toThrow('scratch cleanup failed');
+		expect(cleanupRelease.mock.calls[0]).toHaveLength(1);
+
+		const unknown = new Error('unknown failure');
+		const unknownRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(),
+						release: unknownRelease,
+					}),
+				},
+				async () => {
+					throw unknown;
+				},
+			),
+		).rejects.toBe(unknown);
+		expect(unknownRelease).toHaveBeenCalledWith(unknown);
+
+		const proofFailure = new Error('proof failure');
+		const releaseFailure = new Error('release failure');
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(),
+						release: async () => {
+							throw releaseFailure;
+						},
+					}),
+				},
+				async () => {
+					throw proofFailure;
+				},
+			),
+		).rejects.toSatisfy(
+			(error: unknown) =>
+				error instanceof AggregateError &&
+				error.errors.includes(proofFailure) &&
+				error.errors.includes(releaseFailure) &&
+				error.cause === proofFailure,
+		);
+	});
+
+	it('sets the shared scratch lock bound for standalone checkouts', async () => {
+		for (const [lockTimeoutMs, expected] of [
+			[undefined, "SET LOCAL lock_timeout = '5000ms'"],
+			[37, "SET LOCAL lock_timeout = '37ms'"],
+		] as const) {
+			const query = vi.fn(async (sql: string) => {
+				if (sql.includes('WHERE namespace.nspname'))
+					return { rows: [indexRow()] };
+				if (sql.includes('WHERE relation.oid')) return { rows: [indexRow()] };
+				return { rows: [] };
+			});
+			await withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release: vi.fn() }) },
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						target: indexTarget,
+					}),
+				lockTimeoutMs,
+			);
+			expect(query.mock.calls.map(([sql]) => sql)).toContain(expected);
+		}
+	});
+
+	it('preserves an enclosing explicit lock bound when the pinned bracket omits one', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexRow()] };
+			if (sql.includes('WHERE relation.oid')) return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		await query('BEGIN');
+		await query("SET LOCAL lock_timeout = '37ms'");
+		await withPinnedGeneratedPostconditionSession({ query }, (session) =>
+			verifyGeneratedIndexPostcondition({
+				session,
+				postcondition: indexPostcondition,
+				target: indexTarget,
+			}),
+		);
+		const queries = query.mock.calls.map(([sql]) => sql);
+		expect(queries).toContain("SET LOCAL lock_timeout = '37ms'");
+		expect(queries).not.toContain("SET LOCAL lock_timeout = '5000ms'");
+		expect(
+			queries.filter((sql) => sql === "SET LOCAL lock_timeout = '37ms'"),
+		).toHaveLength(1);
+	});
+
 	it('accepts the catalogue-faithful default btree projection', async () => {
 		const executor = indexExecutor({});
 		await expect(

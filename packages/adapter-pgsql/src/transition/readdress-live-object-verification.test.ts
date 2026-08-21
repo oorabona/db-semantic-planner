@@ -42,7 +42,10 @@ vi.mock('../ddl/generated-postcondition-verifier.js', () => ({
 			throw new Error('generated postcondition format is unsupported; replan');
 		return value;
 	},
-	mintGeneratedPostconditionSession: (session: unknown) => session,
+	withPinnedGeneratedPostconditionSession: async (
+		session: unknown,
+		work: (capability: unknown) => Promise<unknown>,
+	) => work(session),
 	verifyGeneratedTablePostcondition: mocks.verifyTable,
 	verifyGeneratedIndexPostcondition: mocks.verifyIndex,
 	verifyGeneratedCheckPostcondition: mocks.verifyCheck,
