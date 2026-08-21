@@ -8,12 +8,15 @@ import type {
 } from '@dbsp/types';
 
 const TRANSITION_LESSOR_BRAND = Symbol.for('dbsp.transition.lessor');
-const TRANSITION_LESSOR_PROTOCOL_VERSION = 1;
+const TRANSITION_LESSOR_PROTOCOL_VERSION = 2;
 export const TRANSITION_LESSOR_REJECTION =
 	'transition target must be a core-minted lessor';
+const TRANSITION_LESSOR_REJECTION_DETAIL =
+	'The supplied transition target was refused because it is not a core-minted protocol-v2 lessor carrying a revocation capability.';
 
 type LessorBrand = {
 	readonly protocolVersion: number;
+	readonly revocation: TransitionSessionRevocationPropagation;
 };
 
 /**
@@ -37,10 +40,18 @@ type CapturedLease = {
 	readonly release: (...args: readonly unknown[]) => unknown;
 };
 
+/** A lessor declared by a caller did not uphold the lease contract. */
+class TransitionLessorContractRejection extends Error {
+	constructor(detail: string) {
+		super(detail);
+		this.name = 'TransitionLessorContractRejection';
+	}
+}
+
 async function captureLease(value: unknown): Promise<CapturedLease> {
 	const { query, queryPlanOperation, release } = leaseMembers(value);
 	if (typeof query !== 'function' || typeof release !== 'function') {
-		const rejection = new Error(
+		const rejection = new TransitionLessorContractRejection(
 			'A transition lessor must acquire a lease exposing query() and release(). ' +
 				'This acquisition returned an unusable member pair.',
 		);
@@ -60,6 +71,19 @@ async function captureLease(value: unknown): Promise<CapturedLease> {
 	};
 }
 
+/** Return the safe operator-facing detail for a rejected lease contract. */
+export function transitionLessorRejectionDetail(
+	error: unknown,
+): string | undefined {
+	try {
+		return error instanceof TransitionLessorContractRejection
+			? error.message
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** A core-owned lease: packs receive its session, while core retains release. */
 export type TransitionLease = {
 	readonly session: TransitionSessionClient;
@@ -70,18 +94,165 @@ const planOperationQueries = new WeakMap<
 	object,
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
-const compromisedTransitionSessions = new WeakSet<object>();
-const transitionSessionOrigins = new WeakMap<object, object>();
+/**
+ * A brand transports this narrow peer hook across compatible core instances.
+ * It is not this instance's authority: it is always invoked with the raw
+ * physical client as its receiver, after this core has set its own latch.
+ */
+type TransitionSessionRevocationPropagation = Readonly<{
+	compromise(): void;
+	isCompromised(): boolean;
+}>;
+
+type TransitionSessionRevocationLatch = {
+	compromised: boolean;
+};
+
+type TransitionSessionRevocationCapability = Readonly<{
+	compromise(): void;
+	isCompromised(): boolean;
+}>;
+
+const transitionSessionRevocations = new WeakMap<
+	object,
+	TransitionSessionRevocationCapability
+>();
+const transitionSessionLatches = new WeakMap<
+	object,
+	TransitionSessionRevocationLatch
+>();
+const physicalSessionRevocationLatches = new WeakMap<
+	object,
+	TransitionSessionRevocationLatch
+>();
+const remintedLessorLatches = new WeakMap<
+	object,
+	TransitionSessionRevocationLatch
+>();
+
+function mintTransitionSessionRevocationLatch(): TransitionSessionRevocationLatch {
+	return { compromised: false };
+}
+
+/** Mint or resolve this core's one authoritative latch for a raw client. */
+function resolvePhysicalSessionRevocationLatch(
+	physicalSession: object,
+): TransitionSessionRevocationLatch {
+	const existing = physicalSessionRevocationLatches.get(physicalSession);
+	if (existing) return existing;
+	const latch = mintTransitionSessionRevocationLatch();
+	physicalSessionRevocationLatches.set(physicalSession, latch);
+	return latch;
+}
+
+/**
+ * Build the cross-instance side of a brand. Its receiver is intentionally the
+ * physical session, so a lessor never has one broad revocation bit for all of
+ * its pool clients.
+ */
+function mintTransitionSessionRevocationPropagation(): TransitionSessionRevocationPropagation {
+	return Object.freeze({
+		compromise(this: unknown): void {
+			if (!isObject(this)) return;
+			resolvePhysicalSessionRevocationLatch(this).compromised = true;
+		},
+		isCompromised(this: unknown): boolean {
+			return (
+				isObject(this) &&
+				resolvePhysicalSessionRevocationLatch(this).compromised
+			);
+		},
+	});
+}
+
+/**
+ * Wrap a core-local latch with optional cross-instance propagation. The local
+ * state is authoritative and changes before any peer code can run.
+ */
+function mintTransitionSessionRevocation(
+	latch: TransitionSessionRevocationLatch,
+	physicalSession: object,
+	propagation: TransitionSessionRevocationPropagation,
+): TransitionSessionRevocationCapability {
+	return Object.freeze({
+		compromise(): void {
+			latch.compromised = true;
+			try {
+				propagation.compromise.call(physicalSession);
+			} catch {
+				// A foreign brand can add compromise, but it can never block this mark.
+			}
+		},
+		isCompromised(): boolean {
+			if (latch.compromised) return true;
+			try {
+				return propagation.isCompromised.call(physicalSession) === true;
+			} catch {
+				// A throwing peer is not evidence that this core's clean latch is dirty.
+				return false;
+			}
+		},
+	});
+}
+
+function revocationForTransitionSession(
+	session: TransitionSessionClient,
+): TransitionSessionRevocationCapability {
+	const revocation = transitionSessionRevocations.get(session as object);
+	if (!revocation)
+		throw new Error(
+			'transition session was not minted by the transition lessor',
+		);
+	return revocation;
+}
+
+function latchForTransitionSession(
+	session: TransitionSessionClient,
+): TransitionSessionRevocationLatch {
+	const latch = transitionSessionLatches.get(session as object);
+	if (!latch)
+		throw new Error(
+			'transition session was not minted by the transition lessor',
+		);
+	return latch;
+}
+
+function mintTransitionSession(
+	revocation: TransitionSessionRevocationCapability,
+	latch: TransitionSessionRevocationLatch,
+	query: (
+		session: TransitionSessionClient,
+		sql: string,
+		params?: unknown,
+	) => unknown,
+): TransitionSessionClient {
+	const session = Object.freeze({
+		query: (sql: string, params?: unknown) => query(session, sql, params),
+	}) as TransitionSessionClient;
+	transitionSessionRevocations.set(session as object, revocation);
+	transitionSessionLatches.set(session as object, latch);
+	return session;
+}
 
 function transitionSessionIsCompromised(
 	session: TransitionSessionClient,
 ): boolean {
-	const sessionObject = session as object;
+	return revocationForTransitionSession(session).isCompromised();
+}
+
+/**
+ * Read the revocation bit carried by a physical lease source.
+ *
+ * This is deliberately a boolean-only adapter seam: adapters retain the
+ * physical lease through its final release, while core retains the token and
+ * every logical wrapper that shares it. An unwrapped source has not been
+ * leased, so it cannot have been marked compromised.
+ */
+export function transitionPhysicalSessionIsCompromised(
+	physicalSession: object,
+): boolean {
 	return (
-		compromisedTransitionSessions.has(sessionObject) ||
-		compromisedTransitionSessions.has(
-			transitionSessionOrigins.get(sessionObject) ?? sessionObject,
-		)
+		physicalSessionRevocationLatches.get(physicalSession)?.compromised === true
 	);
 }
 
@@ -97,10 +268,7 @@ function compromisedTransitionSessionError(): Error {
 export function markTransitionClientCompromised(
 	session: TransitionSessionClient,
 ): void {
-	const sessionObject = session as object;
-	compromisedTransitionSessions.add(sessionObject);
-	const origin = transitionSessionOrigins.get(sessionObject);
-	if (origin) compromisedTransitionSessions.add(origin);
+	revocationForTransitionSession(session).compromise();
 }
 
 /**
@@ -115,14 +283,18 @@ export function planOperationSession(
 ): TransitionSessionClient {
 	const query = planOperationQueries.get(session as object);
 	if (!query) return session;
-	return Object.freeze({
-		query: (sql: string, params?: unknown) => {
-			if (transitionSessionIsCompromised(session)) {
+	const revocation = revocationForTransitionSession(session);
+	const latch = latchForTransitionSession(session);
+	return mintTransitionSession(
+		revocation,
+		latch,
+		(planSession, sql, params) => {
+			if (transitionSessionIsCompromised(planSession)) {
 				return Promise.reject(compromisedTransitionSessionError());
 			}
 			return query(sql, params);
 		},
-	}) as TransitionSessionClient;
+	);
 }
 
 type ExclusiveTargetState = {
@@ -208,16 +380,33 @@ export function acquireTransitionTargetLease(
 export async function acquireTransitionLease(
 	target: TransitionLessor,
 ): Promise<TransitionLease> {
+	if (!isTransitionLessor(target)) {
+		throw new Error(TRANSITION_LESSOR_REJECTION);
+	}
 	const captured = await captureLease(await target.acquire());
 	const { raw, query, release } = captured;
+	const physicalSession = raw as object;
+	const remintedLatch = remintedLessorLatches.get(target as object);
+	const latch =
+		remintedLatch ?? resolvePhysicalSessionRevocationLatch(physicalSession);
+	if (remintedLatch) {
+		physicalSessionRevocationLatches.set(physicalSession, remintedLatch);
+	}
+	const revocation = mintTransitionSessionRevocation(
+		latch,
+		physicalSession,
+		lessorBrand(target).revocation,
+	);
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
 	 * one to — observes this state rather than the state before it.
 	 */
 	let closed = false;
-	const session = Object.freeze({
-		query: (sql: string, params?: unknown) => {
+	const session = mintTransitionSession(
+		revocation,
+		latch,
+		(leasedSession, sql, params) => {
 			// The connection may already belong to another borrower, so this must
 			// not reach the driver. Rejecting rather than throwing keeps the
 			// contract a promise for a caller who only attaches a handler.
@@ -226,13 +415,12 @@ export async function acquireTransitionLease(
 					new Error('transition lease was already given back'),
 				);
 			}
-			if (transitionSessionIsCompromised(session)) {
+			if (transitionSessionIsCompromised(leasedSession)) {
 				return Promise.reject(compromisedTransitionSessionError());
 			}
 			return query.call(raw, sql, params);
 		},
-	}) as TransitionSessionClient;
-	transitionSessionOrigins.set(session as object, raw as object);
+	);
 	if (captured.queryPlanOperation) {
 		planOperationQueries.set(session as object, (sql, params) =>
 			Promise.resolve(
@@ -378,15 +566,41 @@ function releaseMalformedAcquisition(
 export function createTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
 ): TransitionLessor {
+	return mintTransitionLessor(acquire);
+}
+
+/**
+ * Remint a lessor that can only ever borrow a session core already minted.
+ *
+ * This intentionally is not re-exported through either core barrel: durable
+ * execution needs it to pin a preflight lease, while callers must never retain
+ * or supply the revocation capability themselves.
+ */
+export function remintTransitionLessorFromSession(
+	session: TransitionSessionClient,
+	acquire: () => Promise<TransitionQueryClient>,
+): TransitionLessor {
+	return mintTransitionLessor(acquire, latchForTransitionSession(session));
+}
+
+function mintTransitionLessor(
+	acquire: () => Promise<TransitionQueryClient>,
+	remintedLatch?: TransitionSessionRevocationLatch,
+): TransitionLessor {
 	const lessor = { acquire };
 	Object.defineProperty(lessor, TRANSITION_LESSOR_BRAND, {
 		value: Object.freeze({
 			protocolVersion: TRANSITION_LESSOR_PROTOCOL_VERSION,
+			revocation: mintTransitionSessionRevocationPropagation(),
 		}),
 		writable: false,
 		configurable: false,
 	});
-	return Object.freeze(lessor) as TransitionLessor;
+	const frozenLessor = Object.freeze(lessor) as TransitionLessor;
+	if (remintedLatch) {
+		remintedLessorLatches.set(frozenLessor as object, remintedLatch);
+	}
+	return frozenLessor;
 }
 
 /**
@@ -409,11 +623,42 @@ export function isTransitionLessor(value: unknown): value is TransitionLessor {
 			typeof brand === 'object' &&
 			(brand as LessorBrand).protocolVersion ===
 				TRANSITION_LESSOR_PROTOCOL_VERSION &&
+			isTransitionSessionRevocationCapability(
+				(brand as LessorBrand).revocation,
+			) &&
 			typeof (value as { readonly acquire?: unknown }).acquire === 'function'
 		);
 	} catch {
 		return false;
 	}
+}
+
+function lessorBrand(target: TransitionLessor): LessorBrand {
+	const brand = (target as unknown as Record<symbol, LessorBrand | undefined>)[
+		TRANSITION_LESSOR_BRAND
+	];
+	if (!brand) throw new Error(TRANSITION_LESSOR_REJECTION);
+	return brand;
+}
+
+function isTransitionSessionRevocationCapability(
+	value: unknown,
+): value is TransitionSessionRevocationPropagation {
+	return (
+		value != null &&
+		typeof value === 'object' &&
+		Object.isFrozen(value) &&
+		typeof (value as TransitionSessionRevocationPropagation).compromise ===
+			'function' &&
+		typeof (value as TransitionSessionRevocationPropagation).isCompromised ===
+			'function'
+	);
+}
+
+function isObject(value: unknown): value is object {
+	return (
+		value != null && (typeof value === 'object' || typeof value === 'function')
+	);
 }
 
 /**
@@ -449,6 +694,7 @@ function releaseArgument(failure: TransitionLeaseFailure): unknown {
 export function transitionLessorRejectionAssessment(
 	artifact: SemanticArtifactRef,
 	lifecycle: PlanAssessment['lifecycle'] = 'planned',
+	detail = TRANSITION_LESSOR_REJECTION_DETAIL,
 ): PlanAssessment {
 	return {
 		decision: 'blocked',
@@ -463,6 +709,7 @@ export function transitionLessorRejectionAssessment(
 					key: 'transition-lessor',
 					value: TRANSITION_LESSOR_REJECTION,
 				},
+				detail,
 				scope: [],
 			},
 		],

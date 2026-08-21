@@ -53,13 +53,14 @@ import { createTransitionRunMetadata } from './run-metadata.js';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
-	createTransitionLessor,
 	isTransitionLessor,
 	markTransitionClientCompromised,
 	planOperationSession,
+	remintTransitionLessorFromSession,
 	type TransitionLease,
 	type TransitionLeaseFailure,
 	transitionLessorRejectionAssessment,
+	transitionLessorRejectionDetail,
 } from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
@@ -260,9 +261,13 @@ function completedAssessment(
 	};
 }
 
-function transitionLessorRejectionResult(): ApplyResult {
+function transitionLessorRejectionResult(detail?: string): ApplyResult {
 	return {
-		assessment: transitionLessorRejectionAssessment(APPLIER_ARTIFACT),
+		assessment: transitionLessorRejectionAssessment(
+			APPLIER_ARTIFACT,
+			'planned',
+			detail,
+		),
 		journals: [],
 		observations: [],
 	};
@@ -1556,6 +1561,7 @@ export function createApplier(
 									nonRollbackableExecutionTracker,
 								);
 						if (executionOutcome.kind === 'recovery-required') {
+							executionClient.markClientCompromised();
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
@@ -1571,6 +1577,7 @@ export function createApplier(
 							});
 						}
 						if (executionOutcome.kind === 'transport-ambiguous') {
+							executionClient.markClientCompromised();
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
@@ -1995,6 +2002,12 @@ export function createApplier(
 						journals.push(journal);
 					}
 				} catch (error) {
+					const lessorRejectionDetail = transitionLessorRejectionDetail(error);
+					if (lessorRejectionDetail) {
+						return resultWithCommittedJournals(
+							transitionLessorRejectionResult(lessorRejectionDetail),
+						);
+					}
 					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
 						// COMMIT may have reached PostgreSQL even though its acknowledgement
@@ -2518,20 +2531,23 @@ export function createApplier(
 						`authorization could not be committed: ${errorDetail(error)}`,
 					);
 				}
-				const pinnedTarget = createTransitionLessor(async () => ({
-					query: (sql: string, params?: unknown) =>
-						preflightLease.session.query(sql, params),
-					// Re-minting the logical lease must retain the operation origin.
-					// The ordinary channel remains available to durable infrastructure.
-					queryPlanOperation: (sql: string, params?: unknown) =>
-						planOperationSession(preflightLease.session).query(sql, params),
-					// apply() owns logical segment leases, but this outer durable
-					// boundary owns the physical connection until apply() has settled:
-					// post-step observed-journal writes still use this session.
-					release: (error?: unknown) => {
-						if (error) leaseReleaseFailure = { error };
-					},
-				}));
+				const pinnedTarget = remintTransitionLessorFromSession(
+					preflightLease.session,
+					async () => ({
+						query: (sql: string, params?: unknown) =>
+							preflightLease.session.query(sql, params),
+						// Re-minting the logical lease retains the preflight revocation capability.
+						// The ordinary channel remains available to durable infrastructure.
+						queryPlanOperation: (sql: string, params?: unknown) =>
+							planOperationSession(preflightLease.session).query(sql, params),
+						// apply() owns logical segment leases, but this outer durable
+						// boundary owns the physical connection until apply() has settled:
+						// post-step observed-journal writes still use this session.
+						release: (error?: unknown) => {
+							if (error) leaseReleaseFailure ??= { error };
+						},
+					}),
+				);
 				// Await before this try's finally returns the physical lease. A bare
 				// return would run finally while apply() still owns its logical leases
 				// and can still owe an observed-journal write.

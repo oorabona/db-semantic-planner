@@ -33,6 +33,7 @@ import type {
 import { createPackRegistry } from './registry.js';
 import { createTransitionRunMetadata } from './run-metadata.js';
 import {
+	acquireTransitionLease,
 	createExclusiveTransitionTarget,
 	TRANSITION_LESSOR_REJECTION,
 } from './transition-lessor.js';
@@ -1138,7 +1139,13 @@ describe('createApplier', () => {
 			acquire: vi.fn(async () => ({ query: vi.fn() })),
 		};
 		Object.defineProperty(target, Symbol.for('dbsp.transition.lessor'), {
-			value: { protocolVersion: 1 },
+			value: Object.freeze({
+				protocolVersion: 2,
+				revocation: Object.freeze({
+					compromise: () => undefined,
+					isCompromised: () => false,
+				}),
+			}),
 		});
 
 		const result = await createApplier(registry, persister).apply(
@@ -3237,13 +3244,12 @@ describe('createApplier', () => {
 		expect(release).toHaveBeenCalledWith(failure);
 	});
 
-	it('returns recovery-required without rollback after the runtime compromises the transaction client', async () => {
+	it('returns recovery-required without rollback and evicts the client when the runtime does not mark it', async () => {
 		const rollback = vi.fn(async () => undefined);
 		const release = vi.fn();
 		const rt: OperationRuntime = {
 			...runtime(() => undefined, {
-				executeOperation: vi.fn(async (client) => {
-					client.markClientCompromised();
+				executeOperation: vi.fn(async () => {
 					return {
 						kind: 'recovery-required',
 						claimId: 'open-claim',
@@ -3305,10 +3311,25 @@ describe('createApplier', () => {
 
 	it('evicts the durable preflight lease when a nested execution lease is transport-ambiguous', async () => {
 		const release = vi.fn();
+		const physicalLease = {
+			query: vi.fn(async () => ({ rows: [] })),
+			release,
+		};
+		const lessor = createTestTransitionLessor(async () => physicalLease);
+		let siblingOfOuterLease:
+			| Awaited<ReturnType<typeof acquireTransitionLease>>
+			| undefined;
 		const rt: OperationRuntime = {
 			...runtime(() => undefined, {
 				executeOperation: vi.fn(async (client) => {
+					siblingOfOuterLease = await acquireTransitionLease(lessor);
 					client.markClientCompromised();
+					await expect(
+						siblingOfOuterLease.session.query('SELECT outer sibling'),
+					).rejects.toThrow(
+						'transition execution marked its leased client compromised',
+					);
+					await siblingOfOuterLease.release();
 					return {
 						kind: 'transport-ambiguous',
 						detail: 'runtime lost the commit acknowledgement',
@@ -3317,13 +3338,7 @@ describe('createApplier', () => {
 			}),
 		};
 		const journal = durableJournal();
-		const target = createExclusiveTransitionTarget(
-			createTestTransitionLessor(async () => ({
-				query: async () => ({ rows: [] }),
-				release,
-			})),
-			() => true,
-		);
+		const target = createExclusiveTransitionTarget(lessor, () => true);
 
 		const result = await createApplier(
 			durableRegistry(rt),
@@ -3344,6 +3359,7 @@ describe('createApplier', () => {
 		expect(result.unresolvedOutcome).toMatchObject({
 			kind: 'transport-ambiguous',
 		});
+		expect(siblingOfOuterLease).toBeDefined();
 		expect(release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
