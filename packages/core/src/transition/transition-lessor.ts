@@ -133,6 +133,20 @@ function transitionSessionIsCompromised(
 	return transitionSessionRevocationToken(session).compromised;
 }
 
+/**
+ * Read the revocation bit carried by a physical lease source.
+ *
+ * This is deliberately a boolean-only adapter seam: adapters retain the
+ * physical lease through its final release, while core retains the token and
+ * every logical wrapper that shares it. An unwrapped source has not been
+ * leased, so it cannot have been marked compromised.
+ */
+export function transitionPhysicalSessionIsCompromised(
+	physicalSession: object,
+): boolean {
+	return physicalSessionTokens.get(physicalSession)?.compromised === true;
+}
+
 function compromisedTransitionSessionError(): Error {
 	return new Error('transition execution marked its leased client compromised');
 }

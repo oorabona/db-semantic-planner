@@ -3,6 +3,7 @@ import {
 	createExclusiveTransitionTarget,
 	createTransitionLessor,
 } from '@dbsp/core';
+import { transitionPhysicalSessionIsCompromised } from '@dbsp/core/internal';
 import type {
 	ExclusiveTransitionTarget,
 	TransitionLessor,
@@ -183,10 +184,11 @@ export async function withPgTransitionRunLock<T>(
 	let callbackLive = false;
 	let planOperationViolatedInvariant = false;
 	let leaseReleaseFailure: Error | undefined;
+	let runLease: TransitionQueryClient | undefined;
 	const refuseAfterLeaseReleaseFailure = () => {
 		if (!leaseReleaseFailure) return;
 		throw new Error(
-			`PostgreSQL transition session is compromised after a lease release failure: ${leaseReleaseFailure.message}`,
+			'PostgreSQL transition session is compromised after a lease release failure',
 			{ cause: leaseReleaseFailure },
 		);
 	};
@@ -211,7 +213,6 @@ export async function withPgTransitionRunLock<T>(
 		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
 		locked = true;
 		const invariants = await captureDurablePlanOperationInvariants(query, key);
-		let runLease: TransitionQueryClient | undefined;
 		const lessor = createTransitionLessor(async () => {
 			refuseAfterLeaseReleaseFailure();
 			if (runLease) return runLease;
@@ -256,13 +257,21 @@ export async function withPgTransitionRunLock<T>(
 				},
 				// Segment cleanup must not give back the session that owns the run lock.
 				release: (error?: unknown) => {
-					if (error)
-						leaseReleaseFailure ??=
-							error instanceof Error
-								? error
-								: new Error('transition lease reported a non-Error failure', {
-										cause: error,
-									});
+					if (error && !leaseReleaseFailure) {
+						try {
+							leaseReleaseFailure =
+								error instanceof Error
+									? error
+									: new Error('transition lease reported a non-Error failure', {
+											cause: error,
+										});
+						} catch {
+							leaseReleaseFailure = new Error(
+								'transition lease reported a non-Error failure',
+								{ cause: error },
+							);
+						}
+					}
 				},
 			} as TransitionQueryClient);
 			return runLease;
@@ -275,10 +284,17 @@ export async function withPgTransitionRunLock<T>(
 		throw error;
 	} finally {
 		callbackLive = false;
+		const physicalSessionCompromised =
+			runLease != null && transitionPhysicalSessionIsCompromised(runLease);
 		// A dead backend has already released its session advisory locks, and a
 		// compromised lease receives no more queries. Asking either client to unlock
 		// would only mask the callback's primary outcome.
-		if (locked && !deadConnectionFailure && !leaseReleaseFailure) {
+		if (
+			locked &&
+			!deadConnectionFailure &&
+			!leaseReleaseFailure &&
+			!physicalSessionCompromised
+		) {
 			try {
 				const unlock = await query(
 					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
@@ -303,6 +319,11 @@ export async function withPgTransitionRunLock<T>(
 				cleanupFailure ??
 					deadConnectionFailure ??
 					leaseReleaseFailure ??
+					(physicalSessionCompromised
+						? new Error(
+								'transition execution marked its leased client compromised',
+							)
+						: undefined) ??
 					(planOperationViolatedInvariant
 						? new Error(
 								'PostgreSQL transition plan operation violated the exclusive session invariants',
