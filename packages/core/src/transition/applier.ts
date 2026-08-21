@@ -53,14 +53,14 @@ import { createTransitionRunMetadata } from './run-metadata.js';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
-	createTransitionLessor,
 	isTransitionLessor,
 	markTransitionClientCompromised,
 	planOperationSession,
+	remintTransitionLessorFromSession,
 	type TransitionLease,
 	type TransitionLeaseFailure,
 	transitionLessorRejectionAssessment,
-	transitionSessionRevocationToken,
+	transitionLessorRejectionDetail,
 } from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
@@ -261,9 +261,13 @@ function completedAssessment(
 	};
 }
 
-function transitionLessorRejectionResult(): ApplyResult {
+function transitionLessorRejectionResult(detail?: string): ApplyResult {
 	return {
-		assessment: transitionLessorRejectionAssessment(APPLIER_ARTIFACT),
+		assessment: transitionLessorRejectionAssessment(
+			APPLIER_ARTIFACT,
+			'planned',
+			detail,
+		),
 		journals: [],
 		observations: [],
 	};
@@ -1998,6 +2002,12 @@ export function createApplier(
 						journals.push(journal);
 					}
 				} catch (error) {
+					const lessorRejectionDetail = transitionLessorRejectionDetail(error);
+					if (lessorRejectionDetail) {
+						return resultWithCommittedJournals(
+							transitionLessorRejectionResult(lessorRejectionDetail),
+						);
+					}
 					releaseFailure = { error };
 					if (error instanceof CommitOutcomeUncertainError) {
 						// COMMIT may have reached PostgreSQL even though its acknowledgement
@@ -2521,11 +2531,12 @@ export function createApplier(
 						`authorization could not be committed: ${errorDetail(error)}`,
 					);
 				}
-				const pinnedTarget = createTransitionLessor(
+				const pinnedTarget = remintTransitionLessorFromSession(
+					preflightLease.session,
 					async () => ({
 						query: (sql: string, params?: unknown) =>
 							preflightLease.session.query(sql, params),
-						// Re-minting the logical lease must retain the preflight revocation token.
+						// Re-minting the logical lease retains the preflight revocation capability.
 						// The ordinary channel remains available to durable infrastructure.
 						queryPlanOperation: (sql: string, params?: unknown) =>
 							planOperationSession(preflightLease.session).query(sql, params),
@@ -2536,7 +2547,6 @@ export function createApplier(
 							if (error) leaseReleaseFailure ??= { error };
 						},
 					}),
-					transitionSessionRevocationToken(preflightLease.session),
 				);
 				// Await before this try's finally returns the physical lease. A bare
 				// return would run finally while apply() still owns its logical leases

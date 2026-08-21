@@ -470,6 +470,124 @@ describe('withPgTransitionRunLock cleanup', () => {
 		expect(client.release).toHaveBeenCalledWith(firstFailure);
 	});
 
+	it('keeps a lease failure at physical release when a later query records a dead connection', async () => {
+		const firstFailure = new Error('first lease failure');
+		const dead = Object.assign(new Error('backend died later'), {
+			code: '57P01',
+		});
+		let rejectDeadQuery: ((reason: unknown) => void) | undefined;
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql === 'SELECT dead after lease failure')
+					return new Promise<never>((_resolve, reject) => {
+						rejectDeadQuery = reject;
+					});
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(
+				pool,
+				'run:first-failure-wins-dead',
+				async (target) => {
+					const lease = await acquireExclusiveTransitionLease(target);
+					const deadQuery = lease.session.query(
+						'SELECT dead after lease failure',
+					);
+					await lease.release({ error: firstFailure });
+					rejectDeadQuery?.(dead);
+					await expect(deadQuery).rejects.toBe(dead);
+				},
+			),
+		).resolves.toEqual({ kind: 'acquired', value: undefined });
+
+		expect(client.release).toHaveBeenCalledWith(firstFailure);
+	});
+
+	it('evicts the physical client when a wrapper is marked while lock cleanup is pending', async () => {
+		let resolveUnlock:
+			| ((value: { rows: readonly Record<string, unknown>[] }) => void)
+			| undefined;
+		let unlockStarted: (() => void) | undefined;
+		const unlockPending = new Promise<void>((resolve) => {
+			unlockStarted = resolve;
+		});
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql.includes('pg_advisory_unlock')) {
+					unlockStarted?.();
+					return new Promise((resolve) => {
+						resolveUnlock = resolve;
+					});
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+		let lease:
+			| Awaited<ReturnType<typeof acquireExclusiveTransitionLease>>
+			| undefined;
+
+		const run = withPgTransitionRunLock(
+			pool,
+			'run:mark-during-unlock',
+			async (target) => {
+				lease = await acquireExclusiveTransitionLease(target);
+			},
+		);
+		await unlockPending;
+		if (!lease) throw new Error('exclusive lease was not acquired');
+		markTransitionClientCompromised(lease.session);
+		resolveUnlock?.({ rows: [{ unlocked: true }] });
+
+		await expect(run).resolves.toEqual({ kind: 'acquired', value: undefined });
+		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('wraps a hostile lease failure without coercing it before evicting the client', async () => {
 		const hostile = new Proxy(
 			{},

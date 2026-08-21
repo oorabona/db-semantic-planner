@@ -8,12 +8,15 @@ import type {
 } from '@dbsp/types';
 
 const TRANSITION_LESSOR_BRAND = Symbol.for('dbsp.transition.lessor');
-const TRANSITION_LESSOR_PROTOCOL_VERSION = 1;
+const TRANSITION_LESSOR_PROTOCOL_VERSION = 2;
 export const TRANSITION_LESSOR_REJECTION =
 	'transition target must be a core-minted lessor';
+const TRANSITION_LESSOR_REJECTION_DETAIL =
+	'The supplied transition target was refused because it is not a core-minted protocol-v2 lessor carrying a revocation capability.';
 
 type LessorBrand = {
 	readonly protocolVersion: number;
+	readonly revocation: TransitionSessionRevocationCapability;
 };
 
 /**
@@ -37,10 +40,18 @@ type CapturedLease = {
 	readonly release: (...args: readonly unknown[]) => unknown;
 };
 
+/** A lessor declared by a caller did not uphold the lease contract. */
+class TransitionLessorContractRejection extends Error {
+	constructor(detail: string) {
+		super(detail);
+		this.name = 'TransitionLessorContractRejection';
+	}
+}
+
 async function captureLease(value: unknown): Promise<CapturedLease> {
 	const { query, queryPlanOperation, release } = leaseMembers(value);
 	if (typeof query !== 'function' || typeof release !== 'function') {
-		const rejection = new Error(
+		const rejection = new TransitionLessorContractRejection(
 			'A transition lessor must acquire a lease exposing query() and release(). ' +
 				'This acquisition returned an unusable member pair.',
 		);
@@ -60,6 +71,19 @@ async function captureLease(value: unknown): Promise<CapturedLease> {
 	};
 }
 
+/** Return the safe operator-facing detail for a rejected lease contract. */
+export function transitionLessorRejectionDetail(
+	error: unknown,
+): string | undefined {
+	try {
+		return error instanceof TransitionLessorContractRejection
+			? error.message
+			: undefined;
+	} catch {
+		return undefined;
+	}
+}
+
 /** A core-owned lease: packs receive its session, while core retains release. */
 export type TransitionLease = {
 	readonly session: TransitionSessionClient;
@@ -70,50 +94,43 @@ const planOperationQueries = new WeakMap<
 	object,
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
-export type TransitionSessionRevocationToken = {
-	compromised: boolean;
-};
+type TransitionSessionRevocationCapability = Readonly<{
+	compromise(): void;
+	isCompromised(): boolean;
+}>;
 
-const transitionSessionTokens = new WeakMap<
+const transitionSessionRevocations = new WeakMap<
 	object,
-	TransitionSessionRevocationToken
+	TransitionSessionRevocationCapability
 >();
-const physicalSessionTokens = new WeakMap<
+const physicalSessionRevocations = new WeakMap<
 	object,
-	TransitionSessionRevocationToken
->();
-const transitionLessorTokens = new WeakMap<
-	object,
-	TransitionSessionRevocationToken
+	TransitionSessionRevocationCapability
 >();
 
-function mintTransitionSessionRevocationToken(): TransitionSessionRevocationToken {
-	return { compromised: false };
+function mintTransitionSessionRevocationCapability(): TransitionSessionRevocationCapability {
+	let compromised = false;
+	return Object.freeze({
+		compromise: () => {
+			compromised = true;
+		},
+		isCompromised: () => compromised,
+	});
 }
 
-function tokenForPhysicalSession(
-	physicalSession: object,
-): TransitionSessionRevocationToken {
-	const existing = physicalSessionTokens.get(physicalSession);
-	if (existing) return existing;
-	const token = mintTransitionSessionRevocationToken();
-	physicalSessionTokens.set(physicalSession, token);
-	return token;
-}
-
-export function transitionSessionRevocationToken(
+function revocationForTransitionSession(
 	session: TransitionSessionClient,
-): TransitionSessionRevocationToken {
-	const token = transitionSessionTokens.get(session as object);
-	if (!token)
+): TransitionSessionRevocationCapability {
+	const revocation = transitionSessionRevocations.get(session as object);
+	if (!revocation)
 		throw new Error(
 			'transition session was not minted by the transition lessor',
 		);
-	return token;
+	return revocation;
 }
 
 function mintTransitionSession(
-	token: TransitionSessionRevocationToken,
+	revocation: TransitionSessionRevocationCapability,
 	query: (
 		session: TransitionSessionClient,
 		sql: string,
@@ -123,14 +140,14 @@ function mintTransitionSession(
 	const session = Object.freeze({
 		query: (sql: string, params?: unknown) => query(session, sql, params),
 	}) as TransitionSessionClient;
-	transitionSessionTokens.set(session as object, token);
+	transitionSessionRevocations.set(session as object, revocation);
 	return session;
 }
 
 function transitionSessionIsCompromised(
 	session: TransitionSessionClient,
 ): boolean {
-	return transitionSessionRevocationToken(session).compromised;
+	return revocationForTransitionSession(session).isCompromised();
 }
 
 /**
@@ -144,7 +161,9 @@ function transitionSessionIsCompromised(
 export function transitionPhysicalSessionIsCompromised(
 	physicalSession: object,
 ): boolean {
-	return physicalSessionTokens.get(physicalSession)?.compromised === true;
+	return (
+		physicalSessionRevocations.get(physicalSession)?.isCompromised() === true
+	);
 }
 
 function compromisedTransitionSessionError(): Error {
@@ -159,7 +178,7 @@ function compromisedTransitionSessionError(): Error {
 export function markTransitionClientCompromised(
 	session: TransitionSessionClient,
 ): void {
-	transitionSessionRevocationToken(session).compromised = true;
+	revocationForTransitionSession(session).compromise();
 }
 
 /**
@@ -174,8 +193,8 @@ export function planOperationSession(
 ): TransitionSessionClient {
 	const query = planOperationQueries.get(session as object);
 	if (!query) return session;
-	const token = transitionSessionRevocationToken(session);
-	return mintTransitionSession(token, (planSession, sql, params) => {
+	const revocation = revocationForTransitionSession(session);
+	return mintTransitionSession(revocation, (planSession, sql, params) => {
 		if (transitionSessionIsCompromised(planSession)) {
 			return Promise.reject(compromisedTransitionSessionError());
 		}
@@ -266,31 +285,38 @@ export function acquireTransitionTargetLease(
 export async function acquireTransitionLease(
 	target: TransitionLessor,
 ): Promise<TransitionLease> {
+	if (!isTransitionLessor(target)) {
+		throw new Error(TRANSITION_LESSOR_REJECTION);
+	}
 	const captured = await captureLease(await target.acquire());
 	const { raw, query, release } = captured;
-	const token =
-		transitionLessorTokens.get(target as object) ??
-		tokenForPhysicalSession(raw as object);
+	const revocation =
+		physicalSessionRevocations.get(raw as object) ??
+		lessorBrand(target).revocation;
+	physicalSessionRevocations.set(raw as object, revocation);
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
 	 * one to — observes this state rather than the state before it.
 	 */
 	let closed = false;
-	const session = mintTransitionSession(token, (leasedSession, sql, params) => {
-		// The connection may already belong to another borrower, so this must
-		// not reach the driver. Rejecting rather than throwing keeps the
-		// contract a promise for a caller who only attaches a handler.
-		if (closed) {
-			return Promise.reject(
-				new Error('transition lease was already given back'),
-			);
-		}
-		if (transitionSessionIsCompromised(leasedSession)) {
-			return Promise.reject(compromisedTransitionSessionError());
-		}
-		return query.call(raw, sql, params);
-	});
+	const session = mintTransitionSession(
+		revocation,
+		(leasedSession, sql, params) => {
+			// The connection may already belong to another borrower, so this must
+			// not reach the driver. Rejecting rather than throwing keeps the
+			// contract a promise for a caller who only attaches a handler.
+			if (closed) {
+				return Promise.reject(
+					new Error('transition lease was already given back'),
+				);
+			}
+			if (transitionSessionIsCompromised(leasedSession)) {
+				return Promise.reject(compromisedTransitionSessionError());
+			}
+			return query.call(raw, sql, params);
+		},
+	);
 	if (captured.queryPlanOperation) {
 		planOperationQueries.set(session as object, (sql, params) =>
 			Promise.resolve(
@@ -435,19 +461,41 @@ function releaseMalformedAcquisition(
  */
 export function createTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
-	token?: TransitionSessionRevocationToken,
+): TransitionLessor {
+	return mintTransitionLessor(
+		acquire,
+		mintTransitionSessionRevocationCapability(),
+	);
+}
+
+/**
+ * Remint a lessor that can only ever borrow a session core already minted.
+ *
+ * This intentionally is not re-exported through either core barrel: durable
+ * execution needs it to pin a preflight lease, while callers must never retain
+ * or supply the revocation capability themselves.
+ */
+export function remintTransitionLessorFromSession(
+	session: TransitionSessionClient,
+	acquire: () => Promise<TransitionQueryClient>,
+): TransitionLessor {
+	return mintTransitionLessor(acquire, revocationForTransitionSession(session));
+}
+
+function mintTransitionLessor(
+	acquire: () => Promise<TransitionQueryClient>,
+	revocation: TransitionSessionRevocationCapability,
 ): TransitionLessor {
 	const lessor = { acquire };
 	Object.defineProperty(lessor, TRANSITION_LESSOR_BRAND, {
 		value: Object.freeze({
 			protocolVersion: TRANSITION_LESSOR_PROTOCOL_VERSION,
+			revocation,
 		}),
 		writable: false,
 		configurable: false,
 	});
-	const frozenLessor = Object.freeze(lessor) as TransitionLessor;
-	if (token) transitionLessorTokens.set(frozenLessor as object, token);
-	return frozenLessor;
+	return Object.freeze(lessor) as TransitionLessor;
 }
 
 /**
@@ -470,11 +518,36 @@ export function isTransitionLessor(value: unknown): value is TransitionLessor {
 			typeof brand === 'object' &&
 			(brand as LessorBrand).protocolVersion ===
 				TRANSITION_LESSOR_PROTOCOL_VERSION &&
+			isTransitionSessionRevocationCapability(
+				(brand as LessorBrand).revocation,
+			) &&
 			typeof (value as { readonly acquire?: unknown }).acquire === 'function'
 		);
 	} catch {
 		return false;
 	}
+}
+
+function lessorBrand(target: TransitionLessor): LessorBrand {
+	const brand = (target as unknown as Record<symbol, LessorBrand | undefined>)[
+		TRANSITION_LESSOR_BRAND
+	];
+	if (!brand) throw new Error(TRANSITION_LESSOR_REJECTION);
+	return brand;
+}
+
+function isTransitionSessionRevocationCapability(
+	value: unknown,
+): value is TransitionSessionRevocationCapability {
+	return (
+		value != null &&
+		typeof value === 'object' &&
+		Object.isFrozen(value) &&
+		typeof (value as TransitionSessionRevocationCapability).compromise ===
+			'function' &&
+		typeof (value as TransitionSessionRevocationCapability).isCompromised ===
+			'function'
+	);
 }
 
 /**
@@ -510,6 +583,7 @@ function releaseArgument(failure: TransitionLeaseFailure): unknown {
 export function transitionLessorRejectionAssessment(
 	artifact: SemanticArtifactRef,
 	lifecycle: PlanAssessment['lifecycle'] = 'planned',
+	detail = TRANSITION_LESSOR_REJECTION_DETAIL,
 ): PlanAssessment {
 	return {
 		decision: 'blocked',
@@ -524,6 +598,7 @@ export function transitionLessorRejectionAssessment(
 					key: 'transition-lessor',
 					value: TRANSITION_LESSOR_REJECTION,
 				},
+				detail,
 				scope: [],
 			},
 		],

@@ -284,7 +284,7 @@ export async function withPgTransitionRunLock<T>(
 		throw error;
 	} finally {
 		callbackLive = false;
-		const physicalSessionCompromised =
+		const physicalSessionCompromisedBeforeCleanup =
 			runLease != null && transitionPhysicalSessionIsCompromised(runLease);
 		// A dead backend has already released its session advisory locks, and a
 		// compromised lease receives no more queries. Asking either client to unlock
@@ -293,7 +293,7 @@ export async function withPgTransitionRunLock<T>(
 			locked &&
 			!deadConnectionFailure &&
 			!leaseReleaseFailure &&
-			!physicalSessionCompromised
+			!physicalSessionCompromisedBeforeCleanup
 		) {
 			try {
 				const unlock = await query(
@@ -311,14 +311,18 @@ export async function withPgTransitionRunLock<T>(
 					);
 			}
 		}
+		// A wrapper may be marked while the awaited unlock is pending, so this must
+		// be read after the final cleanup await and immediately before release.
+		const physicalSessionCompromised =
+			runLease != null && transitionPhysicalSessionIsCompromised(runLease);
 		// An unconfirmed unlock may leave a session advisory lock behind. pg-pool
 		// destroys a client when release receives a truthy error, which is the only
 		// safe cleanup because PostgreSQL releases session locks on disconnect.
 		try {
 			const returned = client.release(
-				cleanupFailure ??
+				leaseReleaseFailure ??
+					cleanupFailure ??
 					deadConnectionFailure ??
-					leaseReleaseFailure ??
 					(physicalSessionCompromised
 						? new Error(
 								'transition execution marked its leased client compromised',

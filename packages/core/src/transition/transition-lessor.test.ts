@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
 	acquireTransitionLease,
 	createTransitionLessor,
 	isTransitionLessor,
 	markTransitionClientCompromised,
 	planOperationSession,
+	remintTransitionLessorFromSession,
 	type TransitionLease,
 } from './transition-lessor.js';
 
@@ -22,13 +23,22 @@ describe('transition lessors', () => {
 		expect(acquire).toHaveBeenCalledOnce();
 	});
 
-	it('rejects a foreign protocol version even when it carries the global brand', () => {
+	it('accepts no caller-supplied revocation capability', () => {
+		expectTypeOf(createTransitionLessor).parameters.toEqualTypeOf<
+			[acquire: () => Promise<import('@dbsp/types').TransitionQueryClient>]
+		>();
+	});
+
+	it('rejects a v1 lessor without a revocation capability at acceptance', async () => {
 		const foreign = { acquire: vi.fn() };
 		Object.defineProperty(foreign, Symbol.for('dbsp.transition.lessor'), {
-			value: { protocolVersion: 2 },
+			value: { protocolVersion: 1 },
 		});
 
 		expect(isTransitionLessor(foreign)).toBe(false);
+		await expect(acquireTransitionLease(foreign as never)).rejects.toThrow(
+			'transition target must be a core-minted lessor',
+		);
 	});
 
 	it('checks every acquisition from a forged declared lessor and hides release', async () => {
@@ -36,7 +46,13 @@ describe('transition lessors', () => {
 			acquire: vi.fn(async () => ({ query: vi.fn() })),
 		};
 		Object.defineProperty(forged, Symbol.for('dbsp.transition.lessor'), {
-			value: { protocolVersion: 1 },
+			value: Object.freeze({
+				protocolVersion: 2,
+				revocation: Object.freeze({
+					compromise: () => undefined,
+					isCompromised: () => false,
+				}),
+			}),
 		});
 
 		await expect(acquireTransitionLease(forged as never)).rejects.toThrow(
@@ -387,6 +403,32 @@ describe('transition lease release', () => {
 		await compromisedLease.release();
 		expect(release).toHaveBeenCalledWith(expect.any(Error));
 		await siblingLease.release();
+	});
+
+	it('shares the source session revocation when core remints a pinned lessor', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		const source = await acquireTransitionLease(
+			createTransitionLessor(async () => ({ query, release })),
+		);
+		const pinned = remintTransitionLessorFromSession(
+			source.session,
+			async () => ({ query, release }),
+		);
+		const reminted = await acquireTransitionLease(pinned);
+
+		expect(() =>
+			markTransitionClientCompromised(reminted.session),
+		).not.toThrow();
+		expect(() =>
+			markTransitionClientCompromised(reminted.session),
+		).not.toThrow();
+		await expect(source.session.query('SELECT source')).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		await expect(reminted.session.query('SELECT reminted')).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
 	});
 
 	it.each([
