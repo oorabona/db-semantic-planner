@@ -92,7 +92,8 @@ vi.mock('@dbsp/adapter-pgsql/internal', () => ({
 	recoverPgOutcomeClaim: fixture.recovery,
 }));
 
-vi.mock('@dbsp/core', () => ({
+vi.mock('@dbsp/core', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core')>()),
 	acquireExclusiveTransitionLease: vi.fn(async () => ({
 		session: fixture.lockSession,
 		release: vi.fn(),

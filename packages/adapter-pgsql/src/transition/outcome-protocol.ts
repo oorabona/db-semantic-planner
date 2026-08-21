@@ -36,6 +36,10 @@ import type {
 	ScopedApprovalSet,
 } from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
+import {
+	type GeneratedPostconditionSession,
+	mintGeneratedPostconditionSession,
+} from '../ddl/generated-postcondition-verifier.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { classifyPgWrite } from './database-writability.js';
@@ -875,7 +879,7 @@ export interface PgOutcomeTransactionalRequest extends PgOutcomeClaimRequest {
 	 * before its terminal ledger fact commits.
 	 */
 	readonly readBack?: (
-		executor: TransitionJournalQueryable,
+		executor: GeneratedPostconditionSession,
 	) => Promise<LedgerPayload>;
 	/** Required for creations; the reader runs after the claim and before SQL. */
 	readonly vacancy?: (
@@ -900,7 +904,7 @@ export interface PgOutcomeNonTransactionalRequest
 
 /** Builds the canonical read-back payload once catalogue presence is proven. */
 export type PgOutcomeReadBackFactory = (
-	executor: TransitionJournalQueryable,
+	executor: GeneratedPostconditionSession,
 	address: LedgerAddress,
 	catalogueIdentity: NonNullable<
 		Awaited<ReturnType<typeof readPgCatalogueIdentity>>
@@ -1500,7 +1504,7 @@ async function observedResolutionMember(
 	claim: AdmittedOutcomeClaim,
 	resolution: PgOutcomeResolution,
 	predecessor: string,
-	readBack: (executor: TransitionJournalQueryable) => Promise<LedgerPayload>,
+	readBack: (executor: GeneratedPostconditionSession) => Promise<LedgerPayload>,
 	recordCatalogueIdentity: boolean | undefined,
 ): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
 	const live = recordCatalogueIdentity
@@ -1511,7 +1515,7 @@ async function observedResolutionMember(
 		...(live?.catalogueIdentity
 			? { catalogueIdentity: live.catalogueIdentity }
 			: {}),
-		observed: await readBack(executor),
+		observed: await readBack(mintGeneratedPostconditionSession(executor)),
 	};
 }
 
@@ -1637,7 +1641,11 @@ export async function readPgOutcomeRecoveryReadBack(
 		catalogueIdentity: resource.catalogueIdentity,
 		observed:
 			operation?.observed ??
-			(await readBack(executor, address, resource.catalogueIdentity)),
+			(await readBack(
+				mintGeneratedPostconditionSession(executor),
+				address,
+				resource.catalogueIdentity,
+			)),
 		...(operation === undefined ? {} : { effect: operation.effect }),
 	};
 }

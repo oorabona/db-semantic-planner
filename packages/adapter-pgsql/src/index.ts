@@ -36,6 +36,7 @@ export {
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
 	assertDeclarableChangeKind,
+	assertGeneratedPostconditionSession,
 	assertNoRepeatedExpressionSurfaceDrift,
 	type ChangeKind,
 	CheckConstraintNewEnumValueError,
@@ -52,6 +53,8 @@ export {
 	type GenerateDDLOptions,
 	type GeneratedMutationClassification,
 	type GeneratedPostcondition,
+	type GeneratedPostconditionSession,
+	type GeneratedPostconditionTarget,
 	generateCreateIndex,
 	generateDDL,
 	generateDownSQL,
@@ -73,6 +76,9 @@ export {
 	renderCreateIndex,
 	type SchemaChange,
 	type SchemaDiff,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedIndexPostcondition,
+	withGeneratedPostconditionSession,
 } from './ddl/index.js';
 // EXPLAIN support
 export {

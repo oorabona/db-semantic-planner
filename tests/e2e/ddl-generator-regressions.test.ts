@@ -6,6 +6,7 @@ import {
 	createPgsqlGeneratedManagedStep,
 	derivePostgresqlCapabilitiesForVersion,
 	generateDDL,
+	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -92,7 +93,9 @@ describe('PostgreSQL DDL generator restored guarantees', () => {
 			const pool = await getTestPool();
 			await executeDdl(step.statementBundle.statements.map((item) => item.sql));
 			await expect(
-				readGeneratedPostcondition(pool, step, step.address!),
+				withGeneratedPostconditionSession(pool, (session) =>
+					readGeneratedPostcondition(session, step, step.address!),
+				),
 			).resolves.toMatchObject({ value: { kind: 'table' } });
 			await expect(
 				pool.query(

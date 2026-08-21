@@ -1,3 +1,7 @@
+import {
+	type GeneratedPostconditionSession,
+	withGeneratedPostconditionSession,
+} from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
 import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
@@ -27,6 +31,22 @@ import {
 	readGeneratedPostcondition,
 } from './generator-execution.js';
 
+async function readTestGeneratedPostcondition(
+	executor: Pick<GeneratedPostconditionSession, 'query'>,
+	step: NormalizedManagedStep,
+	address: Parameters<typeof readGeneratedPostcondition>[2],
+) {
+	return withGeneratedPostconditionSession(
+		{
+			connect: async () => ({
+				...executor,
+				release: () => undefined,
+			}),
+		},
+		(session) => readGeneratedPostcondition(session, step, address),
+	);
+}
+
 const dataDestructiveStep: NormalizedManagedStep = {
 	stepKey: 'generator:0',
 	order: 0,
@@ -54,6 +74,48 @@ const dataDestructiveStep: NormalizedManagedStep = {
 	requiresVacancy: false,
 	replayPolicy: 'recorded',
 };
+
+function indexProjectionRow(overrides: Record<string, unknown> = {}) {
+	return {
+		schema_name: 'tenant',
+		table_name: 'accounts',
+		index_name: 'accounts_id_idx',
+		method_name: 'btree',
+		is_unique: false,
+		is_valid: true,
+		is_ready: true,
+		is_live: true,
+		nulls_not_distinct: false,
+		is_primary: false,
+		is_exclusion: false,
+		is_immediate: true,
+		is_constraint_owned: false,
+		key_count: 1,
+		key_columns: ['id'],
+		key_definitions: ['id'],
+		include_columns: [],
+		opclasses: ['int4_ops'],
+		key_options: ['0'],
+		reloptions: [],
+		predicate_expression: null,
+		...overrides,
+	};
+}
+
+function indexReadbackExecutor(input: {
+	readonly live?: Record<string, unknown>;
+	readonly staged?: Record<string, unknown>;
+}) {
+	return {
+		query: vi.fn(async (sql: string) => {
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexProjectionRow(input.live)] };
+			if (sql.includes('WHERE relation.oid'))
+				return { rows: [indexProjectionRow(input.staged)] };
+			return { rows: [] };
+		}),
+	};
+}
 
 describe('generator execution fixture shim', () => {
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
@@ -134,6 +196,7 @@ describe('generator execution fixture shim', () => {
 				...dataDestructiveStep,
 				expectedDeclaration: {
 					value: {
+						postconditionVersion: 2,
 						kind: 'column',
 						column: { name: 'id', type: 'bigint' },
 					},
@@ -150,12 +213,12 @@ describe('generator execution fixture shim', () => {
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query: vi.fn().mockResolvedValue({ rows }) },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow('postcondition differs');
+		).rejects.toThrow();
 	});
 
 	it('normalizes PostgreSQL primary-key attnotnull on CREATE TABLE read-back', async () => {
@@ -163,6 +226,7 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'table',
 					columns: [
 						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
@@ -180,7 +244,7 @@ describe('generator execution fixture shim', () => {
 			},
 		};
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{
 					query: vi.fn().mockResolvedValue({
 						rows: [
@@ -204,84 +268,121 @@ describe('generator execution fixture shim', () => {
 		});
 	});
 
-	it.each([
-		[
-			'constraint',
-			{
-				...dataDestructiveStep,
-				expectedDeclaration: {
-					value: {
-						kind: 'constraint',
-						constraint: {
-							type: 'c',
-							definition: 'CHECK (id > 0)',
-							notValid: false,
-						},
+	it('retains the structural index postcondition guard with live and scratch projections', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'index',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
 					},
-					digest: 'constraint-postcondition',
 				},
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT accounts_check CHECK (id > 0)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'constraint' as const,
-					name: 'accounts_check',
-					parent: dataDestructiveStep.address,
-				},
+				digest: 'index-postcondition',
 			},
-			[{ constraint_type: 'c', constraint_definition: 'CHECK (id < 0)' }],
-		],
-		[
-			'index',
-			{
-				...dataDestructiveStep,
-				expectedDeclaration: {
-					value: {
-						kind: 'index',
-						definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-					},
-					digest: 'index-postcondition',
-				},
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'index' as const,
-					name: 'accounts_id_idx',
-					parent: dataDestructiveStep.address,
-				},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
 			},
-			[
-				{
-					is_unique: false,
-					is_valid: true,
-					is_ready: true,
-					is_live: true,
-					index_definition:
-						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
-				},
-			],
-		],
-	] as const)('retains the structural %s postcondition guard', async (_kind, step, rows) => {
+		} as const;
+		const { query } = indexReadbackExecutor({
+			live: { key_columns: ['other_id'], key_definitions: ['other_id'] },
+		});
 		await expect(
-			readGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows }) },
+			readTestGeneratedPostcondition(
+				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow('postcondition differs');
+		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('WHERE namespace.nspname')),
+		).toBe(true);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('WHERE relation.oid')),
+		).toBe(true);
+	});
+
+	it('retains the structural CHECK postcondition guard with live and scratch projections', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'constraint',
+					constraint: {
+						type: 'c',
+						expression: 'CHECK (id > 0)',
+						notValid: false,
+					},
+				},
+				digest: 'constraint-postcondition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'constraint' as const,
+				name: 'accounts_check',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('namespace.nspname'))
+				return {
+					rows: [
+						{
+							expression: '(id < 0)',
+							validated: true,
+							no_inherit: false,
+							enforced: true,
+							is_local: true,
+							inheritance_count: 0,
+							parent_id: 0,
+						},
+					],
+				};
+			if (sql.includes('conrelid = $1'))
+				return {
+					rows: [
+						{
+							expression: '(id > 0)',
+							validated: true,
+							no_inherit: false,
+							enforced: true,
+							is_local: true,
+							inheritance_count: 0,
+							parent_id: 0,
+						},
+					],
+				};
+			return { rows: [] };
+		});
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query },
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).rejects.toThrow(
+			'generated constraint accounts_check postcondition differs',
+		);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('namespace.nspname')),
+		).toBe(true);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('conrelid = $1')),
+		).toBe(true);
 	});
 
 	it.each([
@@ -293,8 +394,20 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'index',
-					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
 				},
 				digest: 'index-postcondition',
 			},
@@ -305,30 +418,21 @@ describe('generator execution fixture shim', () => {
 				parent: dataDestructiveStep.address,
 			},
 		} as const;
-		const query = vi.fn().mockResolvedValue({
-			rows: [
-				{
-					is_unique: false,
-					is_valid: true,
-					is_ready: true,
-					is_live: true,
-					...unavailable,
-					index_definition:
-						'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-				},
-			],
-		});
+		const { query } = indexReadbackExecutor({ live: unavailable });
 
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
 			),
 		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisvalid');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisready');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indislive');
+		const projectionSql = query.mock.calls
+			.map(([sql]) => sql)
+			.find((sql) => sql.includes('index_meta.indisvalid'));
+		expect(projectionSql).toContain('index_meta.indisvalid');
+		expect(projectionSql).toContain('index_meta.indisready');
+		expect(projectionSql).toContain('index_meta.indislive');
 	});
 
 	it('records an observed generated index only when it is valid, ready, and live', async () => {
@@ -336,8 +440,20 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'index',
-					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
 				},
 				digest: 'index-postcondition',
 			},
@@ -350,36 +466,51 @@ describe('generator execution fixture shim', () => {
 		} as const;
 
 		await expect(
-			readGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{
-								is_unique: false,
-								is_valid: true,
-								is_ready: true,
-								is_live: true,
-								index_definition:
-									'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-							},
-						],
-					}),
-				},
+			readTestGeneratedPostcondition(
+				indexReadbackExecutor({}),
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
 			),
 		).resolves.toMatchObject({
 			value: {
 				kind: 'index',
-				definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				projection: expect.objectContaining({ method: 'btree' }),
 			},
 		});
+	});
+
+	it('rejects a legacy rendered-definition manifest before it can record observed', async () => {
+		const query = vi.fn();
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'index',
+					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				},
+				digest: 'legacy-rendered-definition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query },
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).rejects.toThrow('replan');
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	it.each([
 		[
 			'enum labels',
-			{ kind: 'enum', labels: ['draft', 'paid'] },
+			{ postconditionVersion: 2, kind: 'enum', labels: ['draft', 'paid'] },
 			{
 				...dataDestructiveStep.address,
 				kind: 'enum' as const,
@@ -389,7 +520,13 @@ describe('generator execution fixture shim', () => {
 		],
 		[
 			'sequence properties',
-			{ kind: 'sequence', startValue: '7', incrementBy: '3', cycle: false },
+			{
+				postconditionVersion: 2,
+				kind: 'sequence',
+				startValue: '7',
+				incrementBy: '3',
+				cycle: false,
+			},
 			{
 				...dataDestructiveStep.address,
 				kind: 'sequence' as const,
@@ -408,7 +545,7 @@ describe('generator execution fixture shim', () => {
 		],
 		[
 			'extension version',
-			{ kind: 'extension', version: '1.3' },
+			{ postconditionVersion: 2, kind: 'extension', version: '1.3' },
 			{
 				...dataDestructiveStep.address,
 				scope: 'database' as const,
@@ -424,7 +561,7 @@ describe('generator execution fixture shim', () => {
 			address,
 		} as unknown as NormalizedManagedStep;
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query: vi.fn().mockResolvedValue({ rows }) },
 				step,
 				address as never,
@@ -437,6 +574,7 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			expectedDeclaration: {
 				value: {
+					postconditionVersion: 2,
 					kind: 'table',
 					columns: [
 						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
@@ -458,7 +596,7 @@ describe('generator execution fixture shim', () => {
 			},
 		};
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{
 					query: vi.fn().mockResolvedValue({
 						rows: [

@@ -36,6 +36,7 @@ const DDL_TRIPWIRE_ALLOWLIST: Readonly<Record<string, string>> = {
 	'transition/operations/manual-sql.ts': 'token-gated managed DDL',
 	'../../cli/src/commands/generator-execution.ts': 'token-gated managed DDL',
 	'../../cli/src/ddl-executor.ts': 'explicitly unmanaged test fixture API',
+	'ddl/generated-postcondition-verifier.ts': 'rollback-only managed DDL proof',
 	'pgsql-adapter.ts': 'explicitly unmanaged API',
 	'transition/ledger.ts': 'ledger bootstrap and explicitly managed storage API',
 	'transition/observation-issuer.ts': 'token-gated managed DDL',
@@ -218,7 +219,7 @@ describe('SC-65 DDL execution syntactic tripwire', () => {
 		expect(discovered).toEqual(Object.keys(DDL_TRIPWIRE_ALLOWLIST).sort());
 		for (const sink of discovered)
 			expect(DDL_TRIPWIRE_ALLOWLIST[sink]).toMatch(
-				/token-gated managed DDL|explicitly unmanaged(?: API| test fixture API)|ledger bootstrap and explicitly managed storage API|separately privileged ledger cutover/u,
+				/token-gated managed DDL|rollback-only managed DDL proof|explicitly unmanaged(?: API| test fixture API)|ledger bootstrap and explicitly managed storage API|separately privileged ledger cutover/u,
 			);
 	}, 20_000);
 });
