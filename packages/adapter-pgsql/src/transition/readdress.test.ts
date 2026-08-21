@@ -4,6 +4,7 @@ import {
 	classifyPgReaddressSupport,
 	executePgPersistedTableReaddress,
 	isPgReaddressSelfOccupancy,
+	rekeyDeclaration,
 	renderPgTableReaddressStatements,
 	selectPgReaddressClosureRoot,
 } from './readdress.js';
@@ -16,6 +17,35 @@ const source = {
 	kind: 'table' as const,
 	name: 'source_table',
 };
+
+describe('re-address declaration re-keying', () => {
+	it('keeps a typed v2 table postcondition byte-identical', () => {
+		const declaration = {
+			value: {
+				postconditionVersion: 2 as const,
+				kind: 'table' as const,
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+				],
+			},
+			digest: 'covered-digest',
+		};
+		expect(
+			rekeyDeclaration(declaration, { ...source, name: 'target_table' }),
+		).toBe(declaration);
+	});
+
+	it('adds the target name to a legacy declaration as before', () => {
+		expect(
+			rekeyDeclaration(
+				{ value: { kind: 'table', columns: ['id'] }, digest: 'legacy' },
+				{ ...source, name: 'target_table' },
+			),
+		).toMatchObject({
+			value: { kind: 'table', columns: ['id'], name: 'target_table' },
+		});
+	});
+});
 
 describe('re-address pair recovery', () => {
 	it('refuses only a complete readable source closure', () => {

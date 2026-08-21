@@ -243,6 +243,16 @@ export async function withPgTransitionTransaction<T>(
 	});
 }
 
+/** Apply the admitted-outcome lock-wait bound to work in an open transition transaction. */
+export async function setPgTransitionLockTimeout(
+	executor: TransitionJournalQueryable,
+	timeout?: number,
+): Promise<void> {
+	await executor.query(
+		`SET LOCAL lock_timeout = '${boundedLockTimeout(timeout)}ms'`,
+	);
+}
+
 /** A COMMIT write may have reached PostgreSQL even when its acknowledgement did not. */
 export class PgCommitAcknowledgementAmbiguousError extends Error {
 	constructor(cause: unknown) {
@@ -391,6 +401,14 @@ export interface PgPairedReaddressOperation {
 			readonly sourceDeclared?: LedgerPayload;
 			readonly targetDeclared: LedgerPayload;
 			readonly targetObserved: LedgerPayload;
+			/**
+			 * Optional structural proof for a typed table declaration. The paired
+			 * protocol invokes it after DDL on its pinned transaction session, so
+			 * the observed ledger fact is the catalogue projection it just read.
+			 */
+			readonly postDdlReadBack?: (
+				executor: GeneratedPostconditionSession,
+			) => Promise<LedgerPayload>;
 		}[];
 		readonly reservations: readonly LedgerReservationRow[];
 		readonly statements: readonly ClaimBundleStatement[];
@@ -405,6 +423,19 @@ export interface PgPairedReaddressOperation {
 		/** Optional E2E observer; absent in normal execution. */
 		readonly observer?: PgOutcomeCheckpointObserver;
 	};
+}
+
+/** Select the observed evidence only after the paired DDL read-back succeeds. */
+export async function readPgPairedReaddressObserved(
+	executor: GeneratedPostconditionSession,
+	member: Pick<
+		PgPairedReaddressOperation['request']['members'][number],
+		'targetObserved' | 'postDdlReadBack'
+	>,
+): Promise<LedgerPayload> {
+	return member.postDdlReadBack
+		? member.postDdlReadBack(executor)
+		: member.targetObserved;
 }
 
 export interface PgDestructiveAdmittedOperation {
@@ -1386,9 +1417,7 @@ async function begin(
 	timeout: number | undefined,
 ) {
 	await executor.query('BEGIN');
-	await executor.query(
-		`SET LOCAL lock_timeout = '${boundedLockTimeout(timeout)}ms'`,
-	);
+	await setPgTransitionLockTimeout(executor, timeout);
 }
 
 async function rollback(executor: TransitionJournalQueryable): Promise<void> {
@@ -2354,6 +2383,13 @@ async function runPgPairedReaddressOperation(
 				begun = false;
 				return refusal(`re-address pair ${request.pairId} lost a reservation`);
 			}
+			// Readdress chooses each member's callback before claims: decodable v2
+			// tables prove structure; declared undecodable payloads refuse; and only
+			// never-declared or #576-unprovable v2 kinds retain identity read-back.
+			const targetObserved = await readPgPairedReaddressObserved(
+				mintGeneratedPostconditionSession(executor),
+				member,
+			);
 			await appendPgLedgerResolution(
 				executor,
 				targetForAddress(member.source),
@@ -2382,7 +2418,7 @@ async function runPgPairedReaddressOperation(
 					pairId: request.pairId,
 					catalogueIdentity: liveTarget.catalogueIdentity,
 					declared: member.targetDeclared,
-					observed: member.targetObserved,
+					observed: targetObserved,
 				},
 				member.targetClaimId,
 				[targetReservation],
