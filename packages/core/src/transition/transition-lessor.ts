@@ -16,7 +16,7 @@ const TRANSITION_LESSOR_REJECTION_DETAIL =
 
 type LessorBrand = {
 	readonly protocolVersion: number;
-	readonly revocation: TransitionSessionRevocationCapability;
+	readonly revocation: TransitionSessionRevocationPropagation;
 };
 
 /**
@@ -94,6 +94,20 @@ const planOperationQueries = new WeakMap<
 	object,
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
+/**
+ * A brand transports this narrow peer hook across compatible core instances.
+ * It is not this instance's authority: it is always invoked with the raw
+ * physical client as its receiver, after this core has set its own latch.
+ */
+type TransitionSessionRevocationPropagation = Readonly<{
+	compromise(): void;
+	isCompromised(): boolean;
+}>;
+
+type TransitionSessionRevocationLatch = {
+	compromised: boolean;
+};
+
 type TransitionSessionRevocationCapability = Readonly<{
 	compromise(): void;
 	isCompromised(): boolean;
@@ -103,18 +117,81 @@ const transitionSessionRevocations = new WeakMap<
 	object,
 	TransitionSessionRevocationCapability
 >();
-const physicalSessionRevocations = new WeakMap<
+const transitionSessionLatches = new WeakMap<
 	object,
-	TransitionSessionRevocationCapability
+	TransitionSessionRevocationLatch
+>();
+const physicalSessionRevocationLatches = new WeakMap<
+	object,
+	TransitionSessionRevocationLatch
+>();
+const remintedLessorLatches = new WeakMap<
+	object,
+	TransitionSessionRevocationLatch
 >();
 
-function mintTransitionSessionRevocationCapability(): TransitionSessionRevocationCapability {
-	let compromised = false;
+function mintTransitionSessionRevocationLatch(): TransitionSessionRevocationLatch {
+	return { compromised: false };
+}
+
+/** Mint or resolve this core's one authoritative latch for a raw client. */
+function resolvePhysicalSessionRevocationLatch(
+	physicalSession: object,
+): TransitionSessionRevocationLatch {
+	const existing = physicalSessionRevocationLatches.get(physicalSession);
+	if (existing) return existing;
+	const latch = mintTransitionSessionRevocationLatch();
+	physicalSessionRevocationLatches.set(physicalSession, latch);
+	return latch;
+}
+
+/**
+ * Build the cross-instance side of a brand. Its receiver is intentionally the
+ * physical session, so a lessor never has one broad revocation bit for all of
+ * its pool clients.
+ */
+function mintTransitionSessionRevocationPropagation(): TransitionSessionRevocationPropagation {
 	return Object.freeze({
-		compromise: () => {
-			compromised = true;
+		compromise(this: unknown): void {
+			if (!isObject(this)) return;
+			resolvePhysicalSessionRevocationLatch(this).compromised = true;
 		},
-		isCompromised: () => compromised,
+		isCompromised(this: unknown): boolean {
+			return (
+				isObject(this) &&
+				resolvePhysicalSessionRevocationLatch(this).compromised
+			);
+		},
+	});
+}
+
+/**
+ * Wrap a core-local latch with optional cross-instance propagation. The local
+ * state is authoritative and changes before any peer code can run.
+ */
+function mintTransitionSessionRevocation(
+	latch: TransitionSessionRevocationLatch,
+	physicalSession: object,
+	propagation: TransitionSessionRevocationPropagation,
+): TransitionSessionRevocationCapability {
+	return Object.freeze({
+		compromise(): void {
+			latch.compromised = true;
+			try {
+				propagation.compromise.call(physicalSession);
+			} catch {
+				// A foreign brand can add compromise, but it can never block this mark.
+			}
+		},
+		isCompromised(): boolean {
+			if (latch.compromised) return true;
+			try {
+				return propagation.isCompromised.call(physicalSession) === true;
+			} catch {
+				// A throwing peer is not evidence that this core's clean latch is dirty.
+				return false;
+			}
+		},
 	});
 }
 
@@ -129,8 +206,20 @@ function revocationForTransitionSession(
 	return revocation;
 }
 
+function latchForTransitionSession(
+	session: TransitionSessionClient,
+): TransitionSessionRevocationLatch {
+	const latch = transitionSessionLatches.get(session as object);
+	if (!latch)
+		throw new Error(
+			'transition session was not minted by the transition lessor',
+		);
+	return latch;
+}
+
 function mintTransitionSession(
 	revocation: TransitionSessionRevocationCapability,
+	latch: TransitionSessionRevocationLatch,
 	query: (
 		session: TransitionSessionClient,
 		sql: string,
@@ -141,6 +230,7 @@ function mintTransitionSession(
 		query: (sql: string, params?: unknown) => query(session, sql, params),
 	}) as TransitionSessionClient;
 	transitionSessionRevocations.set(session as object, revocation);
+	transitionSessionLatches.set(session as object, latch);
 	return session;
 }
 
@@ -162,7 +252,7 @@ export function transitionPhysicalSessionIsCompromised(
 	physicalSession: object,
 ): boolean {
 	return (
-		physicalSessionRevocations.get(physicalSession)?.isCompromised() === true
+		physicalSessionRevocationLatches.get(physicalSession)?.compromised === true
 	);
 }
 
@@ -194,12 +284,17 @@ export function planOperationSession(
 	const query = planOperationQueries.get(session as object);
 	if (!query) return session;
 	const revocation = revocationForTransitionSession(session);
-	return mintTransitionSession(revocation, (planSession, sql, params) => {
-		if (transitionSessionIsCompromised(planSession)) {
-			return Promise.reject(compromisedTransitionSessionError());
-		}
-		return query(sql, params);
-	});
+	const latch = latchForTransitionSession(session);
+	return mintTransitionSession(
+		revocation,
+		latch,
+		(planSession, sql, params) => {
+			if (transitionSessionIsCompromised(planSession)) {
+				return Promise.reject(compromisedTransitionSessionError());
+			}
+			return query(sql, params);
+		},
+	);
 }
 
 type ExclusiveTargetState = {
@@ -290,10 +385,18 @@ export async function acquireTransitionLease(
 	}
 	const captured = await captureLease(await target.acquire());
 	const { raw, query, release } = captured;
-	const revocation =
-		physicalSessionRevocations.get(raw as object) ??
-		lessorBrand(target).revocation;
-	physicalSessionRevocations.set(raw as object, revocation);
+	const physicalSession = raw as object;
+	const remintedLatch = remintedLessorLatches.get(target as object);
+	const latch =
+		remintedLatch ?? resolvePhysicalSessionRevocationLatch(physicalSession);
+	if (remintedLatch) {
+		physicalSessionRevocationLatches.set(physicalSession, remintedLatch);
+	}
+	const revocation = mintTransitionSessionRevocation(
+		latch,
+		physicalSession,
+		lessorBrand(target).revocation,
+	);
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
@@ -302,6 +405,7 @@ export async function acquireTransitionLease(
 	let closed = false;
 	const session = mintTransitionSession(
 		revocation,
+		latch,
 		(leasedSession, sql, params) => {
 			// The connection may already belong to another borrower, so this must
 			// not reach the driver. Rejecting rather than throwing keeps the
@@ -462,10 +566,7 @@ function releaseMalformedAcquisition(
 export function createTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
 ): TransitionLessor {
-	return mintTransitionLessor(
-		acquire,
-		mintTransitionSessionRevocationCapability(),
-	);
+	return mintTransitionLessor(acquire);
 }
 
 /**
@@ -479,23 +580,27 @@ export function remintTransitionLessorFromSession(
 	session: TransitionSessionClient,
 	acquire: () => Promise<TransitionQueryClient>,
 ): TransitionLessor {
-	return mintTransitionLessor(acquire, revocationForTransitionSession(session));
+	return mintTransitionLessor(acquire, latchForTransitionSession(session));
 }
 
 function mintTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
-	revocation: TransitionSessionRevocationCapability,
+	remintedLatch?: TransitionSessionRevocationLatch,
 ): TransitionLessor {
 	const lessor = { acquire };
 	Object.defineProperty(lessor, TRANSITION_LESSOR_BRAND, {
 		value: Object.freeze({
 			protocolVersion: TRANSITION_LESSOR_PROTOCOL_VERSION,
-			revocation,
+			revocation: mintTransitionSessionRevocationPropagation(),
 		}),
 		writable: false,
 		configurable: false,
 	});
-	return Object.freeze(lessor) as TransitionLessor;
+	const frozenLessor = Object.freeze(lessor) as TransitionLessor;
+	if (remintedLatch) {
+		remintedLessorLatches.set(frozenLessor as object, remintedLatch);
+	}
+	return frozenLessor;
 }
 
 /**
@@ -538,15 +643,21 @@ function lessorBrand(target: TransitionLessor): LessorBrand {
 
 function isTransitionSessionRevocationCapability(
 	value: unknown,
-): value is TransitionSessionRevocationCapability {
+): value is TransitionSessionRevocationPropagation {
 	return (
 		value != null &&
 		typeof value === 'object' &&
 		Object.isFrozen(value) &&
-		typeof (value as TransitionSessionRevocationCapability).compromise ===
+		typeof (value as TransitionSessionRevocationPropagation).compromise ===
 			'function' &&
-		typeof (value as TransitionSessionRevocationCapability).isCompromised ===
+		typeof (value as TransitionSessionRevocationPropagation).isCompromised ===
 			'function'
+	);
+}
+
+function isObject(value: unknown): value is object {
+	return (
+		value != null && (typeof value === 'object' || typeof value === 'function')
 	);
 }
 

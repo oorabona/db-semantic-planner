@@ -367,7 +367,66 @@ describe('transition lease release', () => {
 		expect(release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
 	});
 
-	it('revokes parent and sibling leases when the plan-operation wrapper is compromised', async () => {
+	it('keeps distinct pool clients independent when one is compromised', async () => {
+		const compromisedQuery = vi.fn(async () => ({ rows: [] }));
+		const healthyQuery = vi.fn(async () => ({ rows: [] }));
+		const compromisedRelease = vi.fn();
+		const healthyRelease = vi.fn();
+		const compromisedRaw = {
+			query: compromisedQuery,
+			queryPlanOperation: compromisedQuery,
+			release: compromisedRelease,
+		};
+		const healthyRaw = {
+			query: healthyQuery,
+			queryPlanOperation: healthyQuery,
+			release: healthyRelease,
+		};
+		const laterRaw = {
+			query: vi.fn(async () => ({ rows: [] })),
+			release: vi.fn(),
+		};
+		const rawClients = [compromisedRaw, healthyRaw, laterRaw];
+		const lessor = createTransitionLessor(async () => {
+			const raw = rawClients.shift();
+			if (!raw) throw new Error('pool unexpectedly exhausted');
+			return raw;
+		});
+		const compromisedLease = await acquireTransitionLease(lessor);
+		const healthyLease = await acquireTransitionLease(lessor);
+
+		markTransitionClientCompromised(
+			planOperationSession(compromisedLease.session),
+		);
+
+		await expect(
+			compromisedLease.session.query('SELECT same lease'),
+		).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		await expect(
+			healthyLease.session.query('SELECT healthy lease'),
+		).resolves.toEqual({ rows: [] });
+		await expect(
+			planOperationSession(healthyLease.session).query('SELECT healthy plan'),
+		).resolves.toEqual({ rows: [] });
+		expect(compromisedQuery).not.toHaveBeenCalled();
+		expect(healthyQuery).toHaveBeenCalledTimes(2);
+
+		await compromisedLease.release();
+		expect(compromisedRelease).toHaveBeenCalledWith(expect.any(Error));
+		await healthyLease.release();
+		expect(healthyRelease).toHaveBeenCalledWith();
+
+		const laterLease = await acquireTransitionLease(lessor);
+		await expect(
+			laterLease.session.query('SELECT later pool client'),
+		).resolves.toEqual({ rows: [] });
+		await laterLease.release();
+		expect(laterRaw.release).toHaveBeenCalledWith();
+	});
+
+	it('revokes every sibling wrapper of the same raw client', async () => {
 		const query = vi.fn(async () => ({ rows: [] }));
 		const release = vi.fn();
 		const physicalLease = {
@@ -384,17 +443,7 @@ describe('transition lease release', () => {
 		);
 
 		await expect(
-			compromisedLease.session.query('SELECT same lease'),
-		).rejects.toThrow(
-			'transition execution marked its leased client compromised',
-		);
-		await expect(
-			siblingLease.session.query('SELECT sibling lease'),
-		).rejects.toThrow(
-			'transition execution marked its leased client compromised',
-		);
-		await expect(
-			planOperationSession(siblingLease.session).query('SELECT plan operation'),
+			siblingLease.session.query('SELECT same raw sibling'),
 		).rejects.toThrow(
 			'transition execution marked its leased client compromised',
 		);
@@ -403,6 +452,74 @@ describe('transition lease release', () => {
 		await compromisedLease.release();
 		expect(release).toHaveBeenCalledWith(expect.any(Error));
 		await siblingLease.release();
+	});
+
+	it.each([
+		[
+			'no-op',
+			Object.freeze({
+				compromise: () => undefined,
+				isCompromised: () => false,
+			}),
+		],
+		[
+			'throwing',
+			Object.freeze({
+				compromise: () => {
+					throw new Error('forged compromise');
+				},
+				isCompromised: () => {
+					throw new Error('forged inspection');
+				},
+			}),
+		],
+	])('keeps its local revocation latch authoritative over a forged %s capability', async (_label, revocation) => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		const forged = {
+			acquire: vi.fn(async () => ({ query, release })),
+		};
+		Object.defineProperty(forged, Symbol.for('dbsp.transition.lessor'), {
+			value: Object.freeze({ protocolVersion: 2, revocation }),
+		});
+
+		const lease = await acquireTransitionLease(forged as never);
+		expect(() => markTransitionClientCompromised(lease.session)).not.toThrow();
+		await expect(lease.session.query('SELECT forged brand')).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+		await lease.release();
+
+		expect(query).not.toHaveBeenCalled();
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('does not let a throwing forged peer block a clean query or release', async () => {
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		const forged = {
+			acquire: vi.fn(async () => ({ query, release })),
+		};
+		Object.defineProperty(forged, Symbol.for('dbsp.transition.lessor'), {
+			value: Object.freeze({
+				protocolVersion: 2,
+				revocation: Object.freeze({
+					compromise: () => undefined,
+					isCompromised: () => {
+						throw new Error('forged inspection');
+					},
+				}),
+			}),
+		});
+
+		const lease = await acquireTransitionLease(forged as never);
+		await expect(
+			lease.session.query('SELECT clean forged brand'),
+		).resolves.toEqual({ rows: [] });
+		await lease.release();
+
+		expect(query).toHaveBeenCalledOnce();
+		expect(release).toHaveBeenCalledWith();
 	});
 
 	it('shares the source session revocation when core remints a pinned lessor', async () => {
