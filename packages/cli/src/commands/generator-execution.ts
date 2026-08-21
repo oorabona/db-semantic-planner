@@ -408,7 +408,7 @@ export async function readGeneratedPostcondition(
 		const expected = postcondition.constraint;
 		if (expected.type === 'c') {
 			const verified = await verifyGeneratedCheckPostcondition({
-				executor,
+				withSession: async (work) => work(executor),
 				postcondition,
 				target: { schema: address.schema, table: parent, name: address.name },
 			});
@@ -471,7 +471,7 @@ export async function readGeneratedPostcondition(
 				`generated index ${address.name} has a non-index structural postcondition`,
 			);
 		const verified = await verifyGeneratedIndexPostcondition({
-			executor,
+			withSession: async (work) => work(executor),
 			postcondition,
 			target: { schema: address.schema, table: parent, name: address.name },
 		});

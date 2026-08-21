@@ -322,6 +322,64 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toMatchObject({ kind: 'table' });
 	});
 
+	it('preserves explicit notValid false over a textual NOT VALID suffix', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_check_constraint',
+					table: 'orders',
+					destructive: false,
+					details: 'explicitly valid check',
+					meta: {
+						check: {
+							expression: 'CHECK (total > 0) NOT VALID',
+							notValid: false,
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toMatchObject({
+			kind: 'constraint',
+			constraint: {
+				type: 'c',
+				expression: 'CHECK (total > 0)',
+				notValid: false,
+			},
+		});
+	});
+
+	it('refuses non-boolean CHECK notValid and unused index opclass keys', () => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_check_constraint',
+					table: 'orders',
+					destructive: false,
+					details: 'bad check',
+					meta: {
+						check: { expression: 'CHECK (total > 0)', notValid: 'false' },
+					},
+				},
+				schema: 'public',
+			}),
+		).toThrow('invalid typed CHECK notValid state');
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_index',
+					table: 'orders',
+					destructive: false,
+					details: 'bad opclass',
+					meta: {
+						index: { columns: ['account_id'], opclass: { unused: 'int4_ops' } },
+					},
+				},
+				schema: 'public',
+			}),
+		).toThrow('opclass keys must name emitted columns');
+	});
+
 	it('refuses a null CHECK before it can derive a foreign-key address', () => {
 		const change = {
 			kind: 'validate_constraint' as const,

@@ -17,7 +17,8 @@ export {
 	refusesRecordedPlanRemoval,
 } from './destructive-classification.js';
 export {
-	type GeneratedPostconditionQueryable,
+	type GeneratedPostconditionSession,
+	type GeneratedPostconditionSessionCallback,
 	type GeneratedPostconditionTarget,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,

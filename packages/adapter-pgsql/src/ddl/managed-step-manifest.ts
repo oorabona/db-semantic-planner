@@ -264,9 +264,13 @@ function constraintPostcondition(
 	if (check !== undefined) {
 		const value = requiredRecord(check, change.kind);
 		const expression = text(value.expression, change.kind);
+		if (value.notValid !== undefined && typeof value.notValid !== 'boolean')
+			throw new Error(
+				`generator planning refuses ${change.kind}: invalid typed CHECK notValid state`,
+			);
 		const state = splitCheckConstraintState({
 			expression,
-			...(value.notValid === true ? { notValid: true } : {}),
+			...(value.notValid === undefined ? {} : { notValid: value.notValid }),
 		});
 		return {
 			type: 'c',
@@ -425,6 +429,15 @@ export function generatedPostconditionForChange(input: {
 		if (!index)
 			throw new Error(
 				'generator planning refuses create_index: missing typed index postcondition',
+			);
+		if (
+			index.opclass !== undefined &&
+			Object.keys(index.opclass).some(
+				(column) => !index.columns.includes(column),
+			)
+		)
+			throw new Error(
+				'generator planning refuses create_index: opclass keys must name emitted columns',
 			);
 		return postconditionPayload({
 			postconditionVersion: 2,

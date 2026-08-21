@@ -243,97 +243,115 @@ describe('generator execution fixture shim', () => {
 		});
 	});
 
-	it.each([
-		[
-			'constraint',
-			{
-				...dataDestructiveStep,
-				expectedDeclaration: {
-					value: {
-						postconditionVersion: 2,
-						kind: 'constraint',
-						constraint: {
-							type: 'c',
-							expression: 'CHECK (id > 0)',
-							notValid: false,
-						},
+	it('retains the structural index postcondition guard with live and scratch projections', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'index',
+					index: {
+						schema: 'tenant',
+						table: 'accounts',
+						name: 'accounts_id_idx',
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
 					},
-					digest: 'constraint-postcondition',
 				},
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'ALTER TABLE tenant.accounts ADD CONSTRAINT accounts_check CHECK (id > 0)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'constraint' as const,
-					name: 'accounts_check',
-					parent: dataDestructiveStep.address,
-				},
+				digest: 'index-postcondition',
 			},
-			[{ constraint_type: 'c', constraint_definition: 'CHECK (id < 0)' }],
-		],
-		[
-			'index',
-			{
-				...dataDestructiveStep,
-				expectedDeclaration: {
-					value: {
-						postconditionVersion: 2,
-						kind: 'index',
-						index: {
-							schema: 'tenant',
-							table: 'accounts',
-							name: 'accounts_id_idx',
-							method: 'btree',
-							unique: false,
-							valid: true,
-							ready: true,
-							live: true,
-							columns: ['id'],
-							nullsNotDistinct: false,
-						},
-					},
-					digest: 'index-postcondition',
-				},
-				statementBundle: {
-					statements: [
-						{
-							ordinal: 0,
-							sql: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
-						},
-					],
-				},
-				address: {
-					...dataDestructiveStep.address,
-					kind: 'index' as const,
-					name: 'accounts_id_idx',
-					parent: dataDestructiveStep.address,
-				},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
 			},
-			[
-				{
-					is_unique: false,
-					is_valid: true,
-					is_ready: true,
-					is_live: true,
-					index_definition:
-						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
-				},
-			],
-		],
-	] as const)('retains the structural %s postcondition guard', async (_kind, step, rows) => {
+		} as const;
+		const { query } = indexReadbackExecutor({
+			live: { key_columns: ['other_id'], key_definitions: ['other_id'] },
+		});
 		await expect(
 			readGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows }) },
+				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow();
+		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('WHERE namespace.nspname')),
+		).toBe(true);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('WHERE relation.oid')),
+		).toBe(true);
+	});
+
+	it('retains the structural CHECK postcondition guard with live and scratch projections', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'constraint',
+					constraint: {
+						type: 'c',
+						expression: 'CHECK (id > 0)',
+						notValid: false,
+					},
+				},
+				digest: 'constraint-postcondition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'constraint' as const,
+				name: 'accounts_check',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('namespace.nspname'))
+				return {
+					rows: [
+						{
+							expression: '(id < 0)',
+							validated: true,
+							no_inherit: false,
+							enforced: true,
+						},
+					],
+				};
+			if (sql.includes('conrelid = $1'))
+				return {
+					rows: [
+						{
+							expression: '(id > 0)',
+							validated: true,
+							no_inherit: false,
+							enforced: true,
+						},
+					],
+				};
+			return { rows: [] };
+		});
+		await expect(
+			readGeneratedPostcondition(
+				{ query },
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).rejects.toThrow(
+			'generated constraint accounts_check postcondition differs',
+		);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('namespace.nspname')),
+		).toBe(true);
+		expect(
+			query.mock.calls.some(([sql]) => sql.includes('conrelid = $1')),
+		).toBe(true);
 	});
 
 	it.each([
