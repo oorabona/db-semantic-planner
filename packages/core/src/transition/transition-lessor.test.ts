@@ -351,7 +351,7 @@ describe('transition lease release', () => {
 		expect(release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
 	});
 
-	it('revokes ordinary and plan-operation queries across sibling leases immediately after compromise', async () => {
+	it('revokes parent and sibling leases when the plan-operation wrapper is compromised', async () => {
 		const query = vi.fn(async () => ({ rows: [] }));
 		const release = vi.fn();
 		const physicalLease = {
@@ -363,7 +363,9 @@ describe('transition lease release', () => {
 		const compromisedLease = await acquireTransitionLease(lessor);
 		const siblingLease = await acquireTransitionLease(lessor);
 
-		markTransitionClientCompromised(compromisedLease.session);
+		markTransitionClientCompromised(
+			planOperationSession(compromisedLease.session),
+		);
 
 		await expect(
 			compromisedLease.session.query('SELECT same lease'),

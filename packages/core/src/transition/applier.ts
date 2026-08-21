@@ -60,6 +60,7 @@ import {
 	type TransitionLease,
 	type TransitionLeaseFailure,
 	transitionLessorRejectionAssessment,
+	transitionSessionRevocationToken,
 } from './transition-lessor.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
@@ -1556,6 +1557,7 @@ export function createApplier(
 									nonRollbackableExecutionTracker,
 								);
 						if (executionOutcome.kind === 'recovery-required') {
+							executionClient.markClientCompromised();
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
@@ -1571,6 +1573,7 @@ export function createApplier(
 							});
 						}
 						if (executionOutcome.kind === 'transport-ambiguous') {
+							executionClient.markClientCompromised();
 							return resultWithJournalWriteWarnings({
 								assessment: assessment(
 									partiallyAppliedReason(
@@ -2518,20 +2521,23 @@ export function createApplier(
 						`authorization could not be committed: ${errorDetail(error)}`,
 					);
 				}
-				const pinnedTarget = createTransitionLessor(async () => ({
-					query: (sql: string, params?: unknown) =>
-						preflightLease.session.query(sql, params),
-					// Re-minting the logical lease must retain the operation origin.
-					// The ordinary channel remains available to durable infrastructure.
-					queryPlanOperation: (sql: string, params?: unknown) =>
-						planOperationSession(preflightLease.session).query(sql, params),
-					// apply() owns logical segment leases, but this outer durable
-					// boundary owns the physical connection until apply() has settled:
-					// post-step observed-journal writes still use this session.
-					release: (error?: unknown) => {
-						if (error) leaseReleaseFailure = { error };
-					},
-				}));
+				const pinnedTarget = createTransitionLessor(
+					async () => ({
+						query: (sql: string, params?: unknown) =>
+							preflightLease.session.query(sql, params),
+						// Re-minting the logical lease must retain the preflight revocation token.
+						// The ordinary channel remains available to durable infrastructure.
+						queryPlanOperation: (sql: string, params?: unknown) =>
+							planOperationSession(preflightLease.session).query(sql, params),
+						// apply() owns logical segment leases, but this outer durable
+						// boundary owns the physical connection until apply() has settled:
+						// post-step observed-journal writes still use this session.
+						release: (error?: unknown) => {
+							if (error) leaseReleaseFailure ??= { error };
+						},
+					}),
+					transitionSessionRevocationToken(preflightLease.session),
+				);
 				// Await before this try's finally returns the physical lease. A bare
 				// return would run finally while apply() still owns its logical leases
 				// and can still owe an observed-journal write.

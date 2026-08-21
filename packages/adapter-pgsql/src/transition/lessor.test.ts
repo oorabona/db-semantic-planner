@@ -355,6 +355,61 @@ describe('withPgTransitionRunLock cleanup', () => {
 		).toBe(false);
 	});
 
+	it('keeps the first lease failure at gateways and physical release', async () => {
+		const firstFailure = new Error('first lease failure');
+		const secondFailure = new Error('second lease failure');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(
+				pool,
+				'run:first-lease-failure',
+				async (target) => {
+					const firstLease = await acquireExclusiveTransitionLease(target);
+					const secondLease = await acquireExclusiveTransitionLease(target);
+					const gatewayLease = await acquireExclusiveTransitionLease(target);
+					await firstLease.release({ error: firstFailure });
+					await expect(
+						secondLease.session.query('SELECT blocked'),
+					).rejects.toThrow('first lease failure');
+					await secondLease.release({ error: secondFailure });
+					await expect(
+						gatewayLease.session.query('SELECT still blocked'),
+					).rejects.toThrow('first lease failure');
+					await gatewayLease.release();
+				},
+			),
+		).resolves.toEqual({ kind: 'acquired', value: undefined });
+
+		expect(client.release).toHaveBeenCalledWith(firstFailure);
+	});
+
 	it('wraps a hostile lease failure without coercing it before evicting the client', async () => {
 		const hostile = {
 			toString() {

@@ -70,19 +70,67 @@ const planOperationQueries = new WeakMap<
 	object,
 	(sql: string, params?: unknown) => Promise<unknown>
 >();
-const compromisedTransitionSessions = new WeakSet<object>();
-const transitionSessionOrigins = new WeakMap<object, object>();
+export type TransitionSessionRevocationToken = {
+	compromised: boolean;
+};
+
+const transitionSessionTokens = new WeakMap<
+	object,
+	TransitionSessionRevocationToken
+>();
+const physicalSessionTokens = new WeakMap<
+	object,
+	TransitionSessionRevocationToken
+>();
+const transitionLessorTokens = new WeakMap<
+	object,
+	TransitionSessionRevocationToken
+>();
+
+function mintTransitionSessionRevocationToken(): TransitionSessionRevocationToken {
+	return { compromised: false };
+}
+
+function tokenForPhysicalSession(
+	physicalSession: object,
+): TransitionSessionRevocationToken {
+	const existing = physicalSessionTokens.get(physicalSession);
+	if (existing) return existing;
+	const token = mintTransitionSessionRevocationToken();
+	physicalSessionTokens.set(physicalSession, token);
+	return token;
+}
+
+export function transitionSessionRevocationToken(
+	session: TransitionSessionClient,
+): TransitionSessionRevocationToken {
+	const token = transitionSessionTokens.get(session as object);
+	if (!token)
+		throw new Error(
+			'transition session was not minted by the transition lessor',
+		);
+	return token;
+}
+
+function mintTransitionSession(
+	token: TransitionSessionRevocationToken,
+	query: (
+		session: TransitionSessionClient,
+		sql: string,
+		params?: unknown,
+	) => unknown,
+): TransitionSessionClient {
+	const session = Object.freeze({
+		query: (sql: string, params?: unknown) => query(session, sql, params),
+	}) as TransitionSessionClient;
+	transitionSessionTokens.set(session as object, token);
+	return session;
+}
 
 function transitionSessionIsCompromised(
 	session: TransitionSessionClient,
 ): boolean {
-	const sessionObject = session as object;
-	return (
-		compromisedTransitionSessions.has(sessionObject) ||
-		compromisedTransitionSessions.has(
-			transitionSessionOrigins.get(sessionObject) ?? sessionObject,
-		)
-	);
+	return transitionSessionRevocationToken(session).compromised;
 }
 
 function compromisedTransitionSessionError(): Error {
@@ -97,10 +145,7 @@ function compromisedTransitionSessionError(): Error {
 export function markTransitionClientCompromised(
 	session: TransitionSessionClient,
 ): void {
-	const sessionObject = session as object;
-	compromisedTransitionSessions.add(sessionObject);
-	const origin = transitionSessionOrigins.get(sessionObject);
-	if (origin) compromisedTransitionSessions.add(origin);
+	transitionSessionRevocationToken(session).compromised = true;
 }
 
 /**
@@ -115,14 +160,13 @@ export function planOperationSession(
 ): TransitionSessionClient {
 	const query = planOperationQueries.get(session as object);
 	if (!query) return session;
-	return Object.freeze({
-		query: (sql: string, params?: unknown) => {
-			if (transitionSessionIsCompromised(session)) {
-				return Promise.reject(compromisedTransitionSessionError());
-			}
-			return query(sql, params);
-		},
-	}) as TransitionSessionClient;
+	const token = transitionSessionRevocationToken(session);
+	return mintTransitionSession(token, (planSession, sql, params) => {
+		if (transitionSessionIsCompromised(planSession)) {
+			return Promise.reject(compromisedTransitionSessionError());
+		}
+		return query(sql, params);
+	});
 }
 
 type ExclusiveTargetState = {
@@ -210,29 +254,29 @@ export async function acquireTransitionLease(
 ): Promise<TransitionLease> {
 	const captured = await captureLease(await target.acquire());
 	const { raw, query, release } = captured;
+	const token =
+		transitionLessorTokens.get(target as object) ??
+		tokenForPhysicalSession(raw as object);
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
 	 * one to — observes this state rather than the state before it.
 	 */
 	let closed = false;
-	const session = Object.freeze({
-		query: (sql: string, params?: unknown) => {
-			// The connection may already belong to another borrower, so this must
-			// not reach the driver. Rejecting rather than throwing keeps the
-			// contract a promise for a caller who only attaches a handler.
-			if (closed) {
-				return Promise.reject(
-					new Error('transition lease was already given back'),
-				);
-			}
-			if (transitionSessionIsCompromised(session)) {
-				return Promise.reject(compromisedTransitionSessionError());
-			}
-			return query.call(raw, sql, params);
-		},
-	}) as TransitionSessionClient;
-	transitionSessionOrigins.set(session as object, raw as object);
+	const session = mintTransitionSession(token, (leasedSession, sql, params) => {
+		// The connection may already belong to another borrower, so this must
+		// not reach the driver. Rejecting rather than throwing keeps the
+		// contract a promise for a caller who only attaches a handler.
+		if (closed) {
+			return Promise.reject(
+				new Error('transition lease was already given back'),
+			);
+		}
+		if (transitionSessionIsCompromised(leasedSession)) {
+			return Promise.reject(compromisedTransitionSessionError());
+		}
+		return query.call(raw, sql, params);
+	});
 	if (captured.queryPlanOperation) {
 		planOperationQueries.set(session as object, (sql, params) =>
 			Promise.resolve(
@@ -377,6 +421,7 @@ function releaseMalformedAcquisition(
  */
 export function createTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
+	token?: TransitionSessionRevocationToken,
 ): TransitionLessor {
 	const lessor = { acquire };
 	Object.defineProperty(lessor, TRANSITION_LESSOR_BRAND, {
@@ -386,7 +431,9 @@ export function createTransitionLessor(
 		writable: false,
 		configurable: false,
 	});
-	return Object.freeze(lessor) as TransitionLessor;
+	const frozenLessor = Object.freeze(lessor) as TransitionLessor;
+	if (token) transitionLessorTokens.set(frozenLessor as object, token);
+	return frozenLessor;
 }
 
 /**

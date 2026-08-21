@@ -257,7 +257,7 @@ export async function withPgTransitionRunLock<T>(
 				// Segment cleanup must not give back the session that owns the run lock.
 				release: (error?: unknown) => {
 					if (error)
-						leaseReleaseFailure =
+						leaseReleaseFailure ??=
 							error instanceof Error
 								? error
 								: new Error('transition lease reported a non-Error failure', {
