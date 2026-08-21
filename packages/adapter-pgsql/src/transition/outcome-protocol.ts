@@ -38,8 +38,9 @@ import type {
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import {
 	type GeneratedPostconditionSession,
-	mintGeneratedPostconditionSession,
+	withPinnedGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
+import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from '../ddl/lock-timeout.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { classifyPgWrite } from './database-writability.js';
@@ -65,8 +66,6 @@ import {
 	type PostLockAdmissionEvidence,
 } from './post-lock-admission-evidence.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
-
-const DEFAULT_LOCK_TIMEOUT_MS = 5000;
 
 declare const admittedPermitBrand: unique symbol;
 interface AdmittedPermit {
@@ -1266,10 +1265,10 @@ function homesForGroup(request: PgOutcomeClaimGroupRequest) {
 }
 
 function boundedLockTimeout(value: number | undefined): number {
-	if (!Number.isFinite(value)) return DEFAULT_LOCK_TIMEOUT_MS;
+	if (!Number.isFinite(value)) return DEFAULT_DDL_LOCK_TIMEOUT_MS;
 	return Math.max(
 		1,
-		Math.min(86_400_000, Math.trunc(value ?? DEFAULT_LOCK_TIMEOUT_MS)),
+		Math.min(86_400_000, Math.trunc(value ?? DEFAULT_DDL_LOCK_TIMEOUT_MS)),
 	);
 }
 
@@ -1535,6 +1534,7 @@ async function observedResolutionMember(
 	predecessor: string,
 	readBack: (executor: GeneratedPostconditionSession) => Promise<LedgerPayload>,
 	recordCatalogueIdentity: boolean | undefined,
+	lockTimeoutMs: number | undefined,
 ): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
 	const live = recordCatalogueIdentity
 		? await readPgCatalogueIdentity(executor, claim.plan.address)
@@ -1544,7 +1544,11 @@ async function observedResolutionMember(
 		...(live?.catalogueIdentity
 			? { catalogueIdentity: live.catalogueIdentity }
 			: {}),
-		observed: await readBack(mintGeneratedPostconditionSession(executor)),
+		observed: await withPinnedGeneratedPostconditionSession(
+			executor,
+			readBack,
+			lockTimeoutMs,
+		),
 	};
 }
 
@@ -1563,6 +1567,7 @@ async function terminalResolutionMember(
 		predecessor,
 		request.readBack,
 		request.recordCatalogueIdentity,
+		request.lockTimeoutMs,
 	);
 }
 
@@ -1655,6 +1660,7 @@ export async function readPgOutcomeRecoveryReadBack(
 	address: LedgerAddress,
 	readBack: PgOutcomeReadBackFactory,
 	operationReadBack?: PgOutcomeOperationReadBackFactory,
+	lockTimeoutMs?: number,
 ): Promise<OutcomeRecoveryReadBack> {
 	const resource = await readPgCatalogueIdentity(executor, address);
 	const operation = operationReadBack
@@ -1670,10 +1676,10 @@ export async function readPgOutcomeRecoveryReadBack(
 		catalogueIdentity: resource.catalogueIdentity,
 		observed:
 			operation?.observed ??
-			(await readBack(
-				mintGeneratedPostconditionSession(executor),
-				address,
-				resource.catalogueIdentity,
+			(await withPinnedGeneratedPostconditionSession(
+				executor,
+				(session) => readBack(session, address, resource.catalogueIdentity),
+				lockTimeoutMs,
 			)),
 		...(operation === undefined ? {} : { effect: operation.effect }),
 	};
@@ -2386,9 +2392,9 @@ async function runPgPairedReaddressOperation(
 			// Readdress chooses each member's callback before claims: decodable v2
 			// tables prove structure; declared undecodable payloads refuse; and only
 			// never-declared or #576-unprovable v2 kinds retain identity read-back.
-			const targetObserved = await readPgPairedReaddressObserved(
-				mintGeneratedPostconditionSession(executor),
-				member,
+			const targetObserved = await withPinnedGeneratedPostconditionSession(
+				executor,
+				(session) => readPgPairedReaddressObserved(session, member),
 			);
 			await appendPgLedgerResolution(
 				executor,
@@ -3002,6 +3008,7 @@ async function recoverPgOutcomeClaimOnSession(
 						address,
 						request.readBack,
 						request.operationReadBack,
+						request.lockTimeoutMs,
 					);
 				} catch (error) {
 					return { kind: 'catalogue-unavailable', reason: detail(error) };

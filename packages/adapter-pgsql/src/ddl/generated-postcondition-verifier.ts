@@ -3,6 +3,7 @@ import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
+import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
 	GeneratedConstraintPostcondition,
 	GeneratedIndexPostcondition,
@@ -20,12 +21,64 @@ type GeneratedPostconditionQuery = {
 const generatedPostconditionSessionBrand = Symbol(
 	'generatedPostconditionSessionBrand',
 );
-const mintedSessions = new WeakSet<object>();
+type GeneratedPostconditionSessionState = {
+	active: boolean;
+	proofInFlight: boolean;
+	queriesInFlight: number;
+	queriesOutsideProof: number;
+};
+
+type GeneratedPostconditionSafeFailure = {
+	readonly capability: object;
+	readonly queryCountAtMark: number;
+};
+
+const generatedPostconditionSessionStates = new WeakMap<
+	object,
+	GeneratedPostconditionSessionState
+>();
+const generatedPostconditionQueryCounts = new WeakMap<object, number>();
+const preQueryFailures = new WeakMap<
+	object,
+	GeneratedPostconditionSafeFailure
+>();
+const cleanScratchFailures = new WeakMap<
+	object,
+	GeneratedPostconditionSafeFailure
+>();
+const structuralMismatchFailures = new WeakSet<object>();
+const generatedPostconditionSessionLockTimeouts = new WeakMap<object, number>();
 
 /** An adapter-minted, exclusive PostgreSQL session for rollback-only proof. */
 export type GeneratedPostconditionSession = GeneratedPostconditionQuery & {
 	readonly [generatedPostconditionSessionBrand]: true;
 };
+
+/** A retained session capability was used after its owning bracket ended. */
+export class GeneratedPostconditionSessionDeactivatedError extends Error {
+	constructor() {
+		super('generated postcondition session capability is no longer active');
+		this.name = 'GeneratedPostconditionSessionDeactivatedError';
+	}
+}
+
+/** A caller attempted to overlap rollback-only proofs on one capability. */
+export class GeneratedPostconditionProofInFlightError extends Error {
+	constructor() {
+		super('generated postcondition session already has a proof in flight');
+		this.name = 'GeneratedPostconditionProofInFlightError';
+	}
+}
+
+/** A session bracket completed while rollback-only proof work was still running. */
+export class GeneratedPostconditionWorkInFlightError extends Error {
+	constructor() {
+		super(
+			'generated postcondition session bracket completed with work in flight',
+		);
+		this.name = 'GeneratedPostconditionWorkInFlightError';
+	}
+}
 
 /**
  * This mint is intentionally not re-exported from the adapter public surface.
@@ -35,32 +88,121 @@ export type GeneratedPostconditionSession = GeneratedPostconditionQuery & {
 export function mintGeneratedPostconditionSession(
 	session: GeneratedPostconditionQuery,
 ): GeneratedPostconditionSession {
+	const state: GeneratedPostconditionSessionState = {
+		active: true,
+		proofInFlight: false,
+		queriesInFlight: 0,
+		queriesOutsideProof: 0,
+	};
 	const capability = Object.freeze({
-		query: session.query.bind(session),
+		async query(sql: string, params?: readonly unknown[]) {
+			if (!state.active)
+				throw new GeneratedPostconditionSessionDeactivatedError();
+			if (!state.proofInFlight) state.queriesOutsideProof += 1;
+			generatedPostconditionQueryCounts.set(
+				capability,
+				(generatedPostconditionQueryCounts.get(capability) ?? 0) + 1,
+			);
+			state.queriesInFlight += 1;
+			try {
+				return await session.query(sql, params);
+			} finally {
+				state.queriesInFlight -= 1;
+			}
+		},
 		[generatedPostconditionSessionBrand]: true as const,
 	});
-	mintedSessions.add(capability);
+	generatedPostconditionSessionStates.set(capability, state);
 	return capability;
+}
+
+function boundedGeneratedPostconditionLockTimeout(value: number | undefined) {
+	if (!Number.isFinite(value)) return DEFAULT_DDL_LOCK_TIMEOUT_MS;
+	return Math.max(
+		1,
+		Math.min(86_400_000, Math.trunc(value ?? DEFAULT_DDL_LOCK_TIMEOUT_MS)),
+	);
+}
+
+/**
+ * Internal capability bracket for callers that already own an exclusive
+ * PostgreSQL session.  The wrapper cannot outlive the work that borrowed it.
+ */
+export async function withPinnedGeneratedPostconditionSession<T>(
+	session: GeneratedPostconditionQuery,
+	work: (session: GeneratedPostconditionSession) => Promise<T>,
+	lockTimeoutMs?: number,
+): Promise<T> {
+	const capability = mintGeneratedPostconditionSession(session);
+	if (lockTimeoutMs !== undefined)
+		generatedPostconditionSessionLockTimeouts.set(
+			capability,
+			boundedGeneratedPostconditionLockTimeout(lockTimeoutMs),
+		);
+	try {
+		const result = await work(capability);
+		const state = generatedPostconditionSessionStates.get(capability);
+		if (state?.proofInFlight || state?.queriesInFlight)
+			throw new GeneratedPostconditionWorkInFlightError();
+		return result;
+	} finally {
+		const state = generatedPostconditionSessionStates.get(capability);
+		if (state) state.active = false;
+	}
 }
 
 export async function withGeneratedPostconditionSession<T>(
 	executor: {
 		connect(): Promise<
-			GeneratedPostconditionQuery & { release(error?: unknown): void }
+			GeneratedPostconditionQuery & {
+				release(error?: unknown): void | Promise<void>;
+			}
 		>;
 	},
 	work: (session: GeneratedPostconditionSession) => Promise<T>,
+	lockTimeoutMs?: number,
 ): Promise<T> {
 	const client = await executor.connect();
+	let result!: T;
+	let failed = false;
 	let failure: unknown;
+	let capability: GeneratedPostconditionSession | undefined;
 	try {
-		return await work(mintGeneratedPostconditionSession(client));
+		result = await withPinnedGeneratedPostconditionSession(
+			client,
+			async (session) => {
+				capability = session;
+				return work(session);
+			},
+			boundedGeneratedPostconditionLockTimeout(lockTimeoutMs),
+		);
 	} catch (error) {
+		failed = true;
 		failure = error;
-		throw error;
-	} finally {
-		client.release(failure);
 	}
+	const shouldEvict =
+		failed && !isSafeGeneratedPostconditionFailure(failure, capability);
+	try {
+		if (shouldEvict)
+			await client.release(
+				failure instanceof Error
+					? failure
+					: new Error('generated postcondition verification failed', {
+							cause: failure,
+						}),
+			);
+		else await client.release();
+	} catch (releaseError) {
+		if (failed)
+			throw new AggregateError(
+				[failure, releaseError],
+				'generated postcondition verification failed and session release failed',
+				{ cause: failure },
+			);
+		throw releaseError;
+	}
+	if (failed) throw failure;
+	return result;
 }
 
 export type GeneratedPostconditionTarget = {
@@ -847,6 +989,12 @@ async function scratchScope<T>(
 			await session.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
 			savepointActive = true;
 		}
+		const lockTimeoutMs =
+			generatedPostconditionSessionLockTimeouts.get(session);
+		if (lockTimeoutMs !== undefined || transactionStarted)
+			await session.query(
+				`SET LOCAL lock_timeout = '${lockTimeoutMs ?? DEFAULT_DDL_LOCK_TIMEOUT_MS}ms'`,
+			);
 		result = await work();
 	} catch (error) {
 		workFailed = true;
@@ -870,7 +1018,11 @@ async function scratchScope<T>(
 			[workError, ...cleanupErrors],
 			'generated postcondition verification failed and scratch cleanup failed',
 		);
-	if (workFailed) throw workError;
+	if (workFailed) {
+		if (isStructuralMismatchFailure(workError))
+			markCleanScratchFailure(workError, session);
+		throw workError;
+	}
 	if (cleanupErrors.length > 0)
 		throw new AggregateError(
 			cleanupErrors,
@@ -931,11 +1083,109 @@ function indexSource(expected: GeneratedIndexPostcondition, name: string) {
 function requireGeneratedPostconditionSession(
 	value: unknown,
 ): GeneratedPostconditionSession {
-	if (!value || typeof value !== 'object' || !mintedSessions.has(value))
+	if (!value || typeof value !== 'object')
 		throw new Error(
 			'generated postcondition verifier requires an adapter-minted exclusive session capability',
 		);
+	const state = generatedPostconditionSessionStates.get(value);
+	if (!state)
+		throw new Error(
+			'generated postcondition verifier requires an adapter-minted exclusive session capability',
+		);
+	if (!state.active) throw new GeneratedPostconditionSessionDeactivatedError();
 	return value as GeneratedPostconditionSession;
+}
+
+function markCleanScratchFailure(
+	error: unknown,
+	capability: GeneratedPostconditionSession,
+): void {
+	if (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function')
+	)
+		cleanScratchFailures.set(error, safeFailure(capability));
+}
+
+function safeFailure(
+	capability: GeneratedPostconditionSession,
+): GeneratedPostconditionSafeFailure {
+	return {
+		capability,
+		queryCountAtMark: generatedPostconditionQueryCounts.get(capability) ?? 0,
+	};
+}
+
+function isSafeGeneratedPostconditionFailure(
+	error: unknown,
+	capability: GeneratedPostconditionSession | undefined,
+): boolean {
+	if (
+		error === null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return false;
+	const watermark =
+		cleanScratchFailures.get(error) ?? preQueryFailures.get(error);
+	if (!watermark || watermark.capability !== capability) return false;
+	const state = generatedPostconditionSessionStates.get(watermark.capability);
+	return (
+		!state?.proofInFlight &&
+		state?.queriesInFlight === 0 &&
+		state.queriesOutsideProof === 0 &&
+		(generatedPostconditionQueryCounts.get(watermark.capability) ?? 0) ===
+			watermark.queryCountAtMark
+	);
+}
+
+function structuralMismatch(message: string): Error {
+	const error = new Error(message);
+	structuralMismatchFailures.add(error);
+	return error;
+}
+
+function isStructuralMismatchFailure(error: unknown): boolean {
+	return (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function') &&
+		structuralMismatchFailures.has(error)
+	);
+}
+
+async function withGeneratedPostconditionProof<T>(
+	input: GeneratedPostconditionSession,
+	work: (session: GeneratedPostconditionSession) => Promise<T>,
+): Promise<T> {
+	const session = requireGeneratedPostconditionSession(input);
+	const state = generatedPostconditionSessionStates.get(session);
+	if (!state)
+		throw new Error('generated postcondition session state is absent');
+	if (state.proofInFlight) throw new GeneratedPostconditionProofInFlightError();
+	state.proofInFlight = true;
+	const queryCount = generatedPostconditionQueryCounts.get(session) ?? 0;
+	try {
+		return await work(session);
+	} catch (error) {
+		if (
+			isStructuralMismatchFailure(error) ||
+			(generatedPostconditionQueryCounts.get(session) ?? 0) === queryCount
+		)
+			markSafePreQueryFailure(error, session);
+		throw error;
+	} finally {
+		state.proofInFlight = false;
+	}
+}
+
+function markSafePreQueryFailure(
+	error: unknown,
+	capability: GeneratedPostconditionSession,
+): void {
+	if (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function')
+	)
+		preQueryFailures.set(error, safeFailure(capability));
 }
 
 /** Refuse structural lookalikes before any proof or catalogue read. */
@@ -988,60 +1238,61 @@ export async function verifyGeneratedTablePostcondition(input: {
 	readonly postcondition: unknown;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
-	const postcondition = decodeGeneratedPostcondition(input.postcondition);
-	if (postcondition.kind !== 'table')
-		throw replan('generated table postcondition is unsupported');
-	const session = requireGeneratedPostconditionSession(input.session);
-	const rows = (
-		await session.query(
-			`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
-			[input.target.schema, input.target.table],
-		)
-	).rows;
-	const expected = postcondition.columns;
-	if (rows.length === 0)
-		throw new Error(`generated table ${input.target.name} is absent`);
-	const relationKind = rows[0]?.relation_kind;
-	if (typeof relationKind !== 'string')
-		throw new Error(
-			'generated table verifier could not read a complete projection',
-		);
-	if (relationKind !== 'r' && relationKind !== 'p')
-		throw new Error(`generated table ${input.target.name} is not a table`);
-	if (rows.some((row) => row.relation_kind !== relationKind))
-		throw new Error(
-			'generated table verifier could not read a complete projection',
-		);
-	const columnRows = rows.filter((row) => row.column_name !== null);
-	if (columnRows.length !== expected.length)
-		throw new Error(
-			`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
-		);
-	const live = columnRows.map(tableColumnProjection);
-	for (const [ordinal, specification] of expected.entries()) {
-		const actual = live[ordinal];
-		if (
-			!actual ||
-			actual.name !== specification.name ||
-			(specification.type !== undefined &&
-				!dbTypesEqual(actual.type, specification.type)) ||
-			(specification.nullable !== undefined &&
-				actual.nullable !== specification.nullable) ||
-			(specification.hasDefault === true &&
-				(actual.default === undefined ||
-					specification.default === undefined ||
-					actual.default !== specification.default)) ||
-			(specification.hasDefault === false && actual.default !== undefined) ||
-			(specification.collation !== undefined &&
-				actual.collation !== specification.collation) ||
-			(specification.identity !== undefined &&
-				actual.identity !== specification.identity)
-		)
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeGeneratedPostcondition(input.postcondition);
+		if (postcondition.kind !== 'table')
+			throw replan('generated table postcondition is unsupported');
+		const rows = (
+			await session.query(
+				`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
+				[input.target.schema, input.target.table],
+			)
+		).rows;
+		const expected = postcondition.columns;
+		if (rows.length === 0)
+			throw new Error(`generated table ${input.target.name} is absent`);
+		const relationKind = rows[0]?.relation_kind;
+		if (typeof relationKind !== 'string')
 			throw new Error(
-				`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+				'generated table verifier could not read a complete projection',
 			);
-	}
-	return { kind: 'table', projection: { columns: live } };
+		if (relationKind !== 'r' && relationKind !== 'p')
+			throw new Error(`generated table ${input.target.name} is not a table`);
+		if (rows.some((row) => row.relation_kind !== relationKind))
+			throw new Error(
+				'generated table verifier could not read a complete projection',
+			);
+		const columnRows = rows.filter((row) => row.column_name !== null);
+		if (columnRows.length !== expected.length)
+			throw structuralMismatch(
+				`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
+			);
+		const live = columnRows.map(tableColumnProjection);
+		for (const [ordinal, specification] of expected.entries()) {
+			const actual = live[ordinal];
+			if (
+				!actual ||
+				actual.name !== specification.name ||
+				(specification.type !== undefined &&
+					!dbTypesEqual(actual.type, specification.type)) ||
+				(specification.nullable !== undefined &&
+					actual.nullable !== specification.nullable) ||
+				(specification.hasDefault === true &&
+					(actual.default === undefined ||
+						specification.default === undefined ||
+						actual.default !== specification.default)) ||
+				(specification.hasDefault === false && actual.default !== undefined) ||
+				(specification.collation !== undefined &&
+					actual.collation !== specification.collation) ||
+				(specification.identity !== undefined &&
+					actual.identity !== specification.identity)
+			)
+				throw structuralMismatch(
+					`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+				);
+		}
+		return { kind: 'table', projection: { columns: live } };
+	});
 }
 
 export async function verifyGeneratedIndexPostcondition(input: {
@@ -1049,46 +1300,47 @@ export async function verifyGeneratedIndexPostcondition(input: {
 	readonly postcondition: unknown;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
-	const expected = decodeIndexExpectation(input.postcondition, input.target);
-	const session = requireGeneratedPostconditionSession(input.session);
-	const scratchTable = nextScratchName('table');
-	const scratchIndex = nextScratchName('index');
-	// Render before acquiring/using the capability: malformed index material must
-	// refuse before any live catalogue query.
-	const scratchSql = generateCreateIndex(
-		scratchTable,
-		indexSource(expected, scratchIndex),
-		undefined,
-		identityNaming,
-	);
-	return scratchScope(session, async () => {
-		await session.query(
-			`LOCK TABLE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const expected = decodeIndexExpectation(input.postcondition, input.target);
+		const scratchTable = nextScratchName('table');
+		const scratchIndex = nextScratchName('index');
+		// Render before acquiring/using the capability: malformed index material must
+		// refuse before any live catalogue query.
+		const scratchSql = generateCreateIndex(
+			scratchTable,
+			indexSource(expected, scratchIndex),
+			undefined,
+			identityNaming,
 		);
-		const live = await readLiveIndexProjection(session, input.target);
-		if (
-			live.schema !== expected.schema ||
-			live.table !== expected.table ||
-			live.name !== expected.name ||
-			live.valid !== expected.valid ||
-			live.ready !== expected.ready ||
-			live.live !== expected.live
-		)
-			throw new Error(
-				`generated index ${input.target.name} postcondition differs`,
-			);
-		const staged = await (async () => {
+		return scratchScope(session, async () => {
 			await session.query(
-				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
+				`LOCK TABLE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
 			);
-			await session.query(scratchSql);
-			return readScratchIndexProjection(session, scratchTable, scratchIndex);
-		})();
-		if (!sameIndexStructure(live, staged))
-			throw new Error(
-				`generated index ${input.target.name} postcondition differs`,
-			);
-		return { kind: 'index', projection: live };
+			const live = await readLiveIndexProjection(session, input.target);
+			if (
+				live.schema !== expected.schema ||
+				live.table !== expected.table ||
+				live.name !== expected.name ||
+				live.valid !== expected.valid ||
+				live.ready !== expected.ready ||
+				live.live !== expected.live
+			)
+				throw structuralMismatch(
+					`generated index ${input.target.name} postcondition differs`,
+				);
+			const staged = await (async () => {
+				await session.query(
+					`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
+				);
+				await session.query(scratchSql);
+				return readScratchIndexProjection(session, scratchTable, scratchIndex);
+			})();
+			if (!sameIndexStructure(live, staged))
+				throw structuralMismatch(
+					`generated index ${input.target.name} postcondition differs`,
+				);
+			return { kind: 'index', projection: live };
+		});
 	});
 }
 
@@ -1167,49 +1419,50 @@ export async function verifyGeneratedCheckPostcondition(input: {
 	readonly kind: 'constraint';
 	readonly projection: CheckProjection;
 }> {
-	const expected = decodeCheckExpectation(input.postcondition);
-	const session = requireGeneratedPostconditionSession(input.session);
-	const clause = renderCheckConstraintClause({
-		expression: expected.expression,
-		notValid: expected.notValid,
-	});
-	validateCheckExpression(clause, 'generated CHECK postcondition');
-	return scratchScope(session, async () => {
-		await session.query(
-			`LOCK TABLE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
-		);
-		const live = await readLiveCheckProjection(session, input.target);
-		if (live.validated !== !expected.notValid)
-			throw new Error(
-				`generated constraint ${input.target.name} postcondition differs`,
-			);
-		const scratchTable = nextScratchName('table');
-		const scratchConstraint = nextScratchName('constraint');
-		const staged = await (async () => {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const expected = decodeCheckExpectation(input.postcondition);
+		const clause = renderCheckConstraintClause({
+			expression: expected.expression,
+			notValid: expected.notValid,
+		});
+		validateCheckExpression(clause, 'generated CHECK postcondition');
+		return scratchScope(session, async () => {
 			await session.query(
-				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
+				`LOCK TABLE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
 			);
-			await session.query(
-				`ALTER TABLE ${quoteIdent(scratchTable, 'table')} ADD CONSTRAINT ${quoteIdent(scratchConstraint, 'alias')} ${clause}`,
-			);
-			return readScratchCheckProjection(
-				session,
-				scratchTable,
-				scratchConstraint,
-			);
-		})();
-		if (
-			live.expression !== staged.expression ||
-			live.validated !== staged.validated ||
-			live.noInherit !== staged.noInherit ||
-			live.enforced !== staged.enforced ||
-			live.isLocal !== staged.isLocal ||
-			live.inheritanceCount !== staged.inheritanceCount ||
-			live.parentId !== staged.parentId
-		)
-			throw new Error(
-				`generated constraint ${input.target.name} postcondition differs`,
-			);
-		return { kind: 'constraint', projection: live };
+			const live = await readLiveCheckProjection(session, input.target);
+			if (live.validated !== !expected.notValid)
+				throw structuralMismatch(
+					`generated constraint ${input.target.name} postcondition differs`,
+				);
+			const scratchTable = nextScratchName('table');
+			const scratchConstraint = nextScratchName('constraint');
+			const staged = await (async () => {
+				await session.query(
+					`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
+				);
+				await session.query(
+					`ALTER TABLE ${quoteIdent(scratchTable, 'table')} ADD CONSTRAINT ${quoteIdent(scratchConstraint, 'alias')} ${clause}`,
+				);
+				return readScratchCheckProjection(
+					session,
+					scratchTable,
+					scratchConstraint,
+				);
+			})();
+			if (
+				live.expression !== staged.expression ||
+				live.validated !== staged.validated ||
+				live.noInherit !== staged.noInherit ||
+				live.enforced !== staged.enforced ||
+				live.isLocal !== staged.isLocal ||
+				live.inheritanceCount !== staged.inheritanceCount ||
+				live.parentId !== staged.parentId
+			)
+				throw structuralMismatch(
+					`generated constraint ${input.target.name} postcondition differs`,
+				);
+			return { kind: 'constraint', projection: live };
+		});
 	});
 }

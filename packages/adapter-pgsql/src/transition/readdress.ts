@@ -20,10 +20,10 @@ import {
 	decodeGeneratedPostcondition,
 	type GeneratedPostconditionSession,
 	type GeneratedPostconditionTarget,
-	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	withPinnedGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
 import { validateIdentifier } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -545,7 +545,7 @@ async function verifyPgTargetOnlyReaddressNoOp(
 						throw new Error(
 							`generated ${proof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
 						);
-					await proof.prove(mintGeneratedPostconditionSession(session));
+					await withPinnedGeneratedPostconditionSession(session, proof.prove);
 					return { outcome: 'no-op' };
 				} catch (error) {
 					return {
@@ -956,8 +956,9 @@ export async function executePgPersistedTableReaddress(
 							throw new Error(
 								`generated ${rootAdmissionProof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
 							);
-						await rootAdmissionProof.prove(
-							mintGeneratedPostconditionSession(session),
+						await withPinnedGeneratedPostconditionSession(
+							session,
+							rootAdmissionProof.prove,
 						);
 					} catch (error) {
 						return {

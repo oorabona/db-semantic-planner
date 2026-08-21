@@ -2,15 +2,15 @@ import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { DialectCapabilities, IndexIR } from '@dbsp/types';
 import { isEngineCanonicalIndex } from '../expression-provenance.js';
 import {
-	INDEX_INCLUDE_CAPABILITY,
-	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
-} from '../transition/index-feature-capabilities.js';
-import {
 	formatStorageParameterValue,
 	validateCheckExpression,
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
+import {
+	INDEX_INCLUDE_CAPABILITY,
+	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+} from './index-feature-capabilities.js';
 import { quoteIdent, validateIndexMethod } from './phases/utils.js';
 import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 
