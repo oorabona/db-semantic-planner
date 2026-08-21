@@ -1,6 +1,7 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	addressForChange,
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
 	generatedPostconditionForChange,
@@ -280,6 +281,74 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				}),
 			).toThrow('missing typed columns');
 		}
+	});
+
+	it.each(
+		keyListValidationCases,
+	)('E03 refuses an unusable $keyList from the exported postcondition constructor', ({
+		change,
+	}) => {
+		for (const columns of [[], ['   ']] as const) {
+			expect(() =>
+				generatedPostconditionForChange({
+					change: change(columns),
+					schema: 'public',
+				}),
+			).toThrow('missing typed columns');
+		}
+	});
+
+	it('keeps scalar primary keys as valid normalized key material', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_table',
+					table: 'orders',
+					destructive: false,
+					details: 'create table with scalar primary key',
+					meta: {
+						table: {
+							name: 'orders',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toMatchObject({ kind: 'table' });
+	});
+
+	it('refuses a null CHECK before it can derive a foreign-key address', () => {
+		const change = {
+			kind: 'validate_constraint' as const,
+			table: 'orders',
+			destructive: false,
+			details: 'validate malformed check',
+			meta: {
+				check: null,
+				fk: {
+					columns: ['account_id'],
+					references: { table: 'accounts', columns: [] },
+				},
+			},
+		};
+		expect(() =>
+			addressForChange({
+				change,
+				database: 'app',
+				schema: 'public',
+			}),
+		).toThrow(
+			'generator planning refuses validate_constraint: missing typed declaration',
+		);
+		expect(() =>
+			generatedPostconditionForChange({ change, schema: 'public' }),
+		).toThrow(
+			'generator planning refuses validate_constraint: missing typed declaration',
+		);
 	});
 
 	it('preserves enum labels and valid key column lists', () => {

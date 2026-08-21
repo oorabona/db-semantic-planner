@@ -11,7 +11,7 @@ vi.mock('./ledger.js', async (importOriginal) => ({
 
 import { runPgReinitializePreflight } from './reinitialize-preflight.js';
 
-function currentMismatchQuery() {
+function currentMismatchQuery(owner = 'deployer') {
 	return vi.fn(async (sql: string) => {
 		if (sql.includes('pg_is_in_recovery')) {
 			return {
@@ -61,11 +61,11 @@ function currentMismatchQuery() {
 					'dbsp_ledger_identity',
 					'dbsp_ledger_marker',
 					'dbsp_ledger_reservation',
-				].map((relname) => ({ relname, owner: 'deployer', widened: false })),
+				].map((relname) => ({ relname, owner, widened: false })),
 			};
 		}
 		if (sql.includes('pg_catalog.pg_get_userbyid(n.nspowner)'))
-			return { rows: [{ owner: 'deployer', widened: false }] };
+			return { rows: [{ owner, widened: false }] };
 		if (sql.includes('FROM pg_catalog.pg_index index_definition'))
 			return { rows: [] };
 		if (sql.includes('FROM pg_catalog.pg_class relation CROSS JOIN LATERAL'))
@@ -124,6 +124,32 @@ describe('reinitialize-preflight mismatched current ledger', () => {
 		);
 	});
 
+	it('refuses a mismatched current ledger owned by another role before it can archive it', async () => {
+		ledger.validatePgLedgerPhysicalShape.mockResolvedValueOnce(undefined);
+		const query = currentMismatchQuery('other_role');
+		const { pool } = currentMismatchPool(query);
+
+		const report = await runPgReinitializePreflight({
+			pool,
+			schemas: [],
+			declarations: { version: 1, digest: 'empty', declarations: [] },
+			writeAdoptionFile: async () => {},
+		});
+
+		expect(query.mock.calls.map(([sql]) => sql)).not.toContainEqual(
+			expect.stringContaining('ALTER TABLE'),
+		);
+		expect(report.scopes).toEqual([
+			expect.objectContaining({
+				outcome: 'failed',
+				reason: {
+					step: 'ownership-grants',
+					message: expect.stringContaining('owned by other_role'),
+				},
+			}),
+		]);
+	});
+
 	it('archives a validated, owned mismatched current ledger only after both validations', async () => {
 		ledger.validatePgLedgerPhysicalShape.mockResolvedValueOnce(undefined);
 		const query = currentMismatchQuery();
@@ -142,7 +168,11 @@ describe('reinitialize-preflight mismatched current ledger', () => {
 		const firstRename = query.mock.calls.find(([sql]) =>
 			sql.startsWith('ALTER TABLE'),
 		);
+		const ownershipQueryIndex = query.mock.calls.findIndex(([sql]) =>
+			sql.includes('pg_catalog.pg_get_userbyid(c.relowner)'),
+		);
 		expect(firstRename).toBeDefined();
+		expect(ownershipQueryIndex).toBeGreaterThanOrEqual(0);
 		expect(ledger.validatePgLedgerPhysicalShape).toHaveBeenCalledTimes(1);
 		const validationOrder =
 			ledger.validatePgLedgerPhysicalShape.mock.invocationCallOrder[0];
@@ -153,5 +183,11 @@ describe('reinitialize-preflight mismatched current ledger', () => {
 		if (validationOrder === undefined || renameOrder === undefined)
 			throw new Error('expected validation and archive rename calls');
 		expect(validationOrder).toBeLessThan(renameOrder);
+		const ownershipOrder = query.mock.invocationCallOrder[ownershipQueryIndex];
+		if (ownershipOrder === undefined)
+			throw new Error(
+				'expected ownership validation query before archive rename',
+			);
+		expect(ownershipOrder).toBeLessThan(renameOrder);
 	});
 });

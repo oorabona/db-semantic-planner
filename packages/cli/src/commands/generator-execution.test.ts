@@ -266,6 +266,9 @@ describe('generator execution fixture shim', () => {
 			[
 				{
 					is_unique: false,
+					is_valid: true,
+					is_ready: true,
+					is_live: true,
 					index_definition:
 						'CREATE INDEX accounts_id_idx ON tenant.accounts (other_id)',
 				},
