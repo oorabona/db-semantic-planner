@@ -282,6 +282,94 @@ describe('generator execution fixture shim', () => {
 	});
 
 	it.each([
+		['invalid', { is_valid: false }],
+		['not ready', { is_ready: false }],
+	] as const)('refuses a present but unusable generated index when it is %s', async (_state, unavailable) => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'index',
+					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				},
+				digest: 'index-postcondition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+		const query = vi.fn().mockResolvedValue({
+			rows: [
+				{
+					is_unique: false,
+					is_valid: true,
+					is_ready: true,
+					...unavailable,
+					index_definition:
+						'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				},
+			],
+		});
+
+		await expect(
+			readGeneratedPostcondition(
+				{ query },
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
+		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisvalid');
+		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisready');
+	});
+
+	it('records an observed generated index only when it is valid and ready', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					kind: 'index',
+					definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+				},
+				digest: 'index-postcondition',
+			},
+			address: {
+				...dataDestructiveStep.address,
+				kind: 'index' as const,
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+		} as const;
+
+		await expect(
+			readGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								is_unique: false,
+								is_valid: true,
+								is_ready: true,
+								index_definition:
+									'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+							},
+						],
+					}),
+				},
+				step as unknown as NormalizedManagedStep,
+				step.address as never,
+			),
+		).resolves.toMatchObject({
+			value: {
+				kind: 'index',
+				definition: 'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
+			},
+		});
+	});
+
+	it.each([
 		[
 			'enum labels',
 			{ kind: 'enum', labels: ['draft', 'paid'] },

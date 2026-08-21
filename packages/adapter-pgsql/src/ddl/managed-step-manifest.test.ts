@@ -150,6 +150,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	it.each([
 		{ columns: [] },
 		{ columns: [''] },
+		{ columns: ['   '] },
 	])('E01 refuses an empty generated column list: %j', ({ columns }) => {
 		expect(() =>
 			createPgsqlGeneratedManagedStep({
@@ -167,6 +168,120 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				statements: ['CREATE INDEX ignored ON orders (id)'],
 			}),
 		).toThrow('generator planning refuses create_index: missing typed columns');
+	});
+
+	it.each([
+		{ columns: [] as readonly string[] },
+		{ columns: ['   '] as readonly string[] },
+	])('refuses an unusable primary-key column list: %j', ({ columns }) => {
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'add_primary_key',
+					table: 'orders',
+					destructive: false,
+					details: 'add primary key',
+					meta: { columns },
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:primary-key-columns',
+				order: 0,
+				statements: ['ALTER TABLE orders ADD PRIMARY KEY (id)'],
+			}),
+		).toThrow(
+			'generator planning refuses add_primary_key columns: missing typed columns',
+		);
+	});
+
+	it.each([
+		{ columns: [] as readonly string[] },
+		{ columns: ['   '] as readonly string[] },
+	])('refuses an unusable foreign-key local column list: %j', ({ columns }) => {
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'add_foreign_key',
+					table: 'orders',
+					destructive: false,
+					details: 'add foreign key',
+					meta: {
+						fk: {
+							columns,
+							references: { table: 'accounts', columns: ['id'] },
+						},
+					},
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:foreign-key-columns',
+				order: 0,
+				statements: ['ALTER TABLE orders ADD FOREIGN KEY (account_id)'],
+			}),
+		).toThrow(
+			'generator planning refuses add_foreign_key columns: missing typed columns',
+		);
+	});
+
+	it.each([
+		{ columns: [] as readonly string[] },
+		{ columns: ['   '] as readonly string[] },
+	])('refuses an unusable foreign-key referenced column list: %j', ({
+		columns,
+	}) => {
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'add_foreign_key',
+					table: 'orders',
+					destructive: false,
+					details: 'add foreign key',
+					meta: {
+						fk: {
+							columns: ['account_id'],
+							references: { table: 'accounts', columns },
+						},
+					},
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:foreign-key-references',
+				order: 0,
+				statements: ['ALTER TABLE orders ADD FOREIGN KEY (account_id)'],
+			}),
+		).toThrow(
+			'generator planning refuses add_foreign_key references.columns: missing typed columns',
+		);
+	});
+
+	it('preserves enum labels and valid key column lists', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: 'empty enum labels remain a typed list',
+					meta: { enum: { name: 'order_state', values: [] } },
+				},
+				schema: 'public',
+			})?.value,
+		).toEqual({ kind: 'enum', labels: [] });
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_primary_key',
+					table: 'orders',
+					destructive: false,
+					details: 'valid key list',
+					meta: { columns: ['account_id'] },
+				},
+				schema: 'public',
+			})?.value,
+		).toEqual({
+			kind: 'constraint',
+			constraint: { type: 'p', columns: ['account_id'] },
+		});
 	});
 
 	it.each([

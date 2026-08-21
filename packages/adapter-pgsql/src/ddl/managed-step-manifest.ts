@@ -142,12 +142,27 @@ function requiredList(value: unknown, label: string): readonly string[] {
 	return value as readonly string[];
 }
 
+function requiredColumnList(value: unknown, label: string): readonly string[] {
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
+	)
+		throw new Error(
+			`generator planning refuses ${label}: missing typed columns`,
+		);
+	return value as readonly string[];
+}
+
 function constraintPostcondition(
 	change: SchemaChange,
 ): GeneratedConstraintPostcondition {
 	const meta = change.meta;
 	if (change.kind === 'add_primary_key')
-		return { type: 'p', columns: requiredList(meta?.columns, change.kind) };
+		return {
+			type: 'p',
+			columns: requiredColumnList(meta?.columns, `${change.kind} columns`),
+		};
 	if (change.kind === 'alter_column_unique')
 		return { type: 'u', columns: [text(change.column, change.kind)] };
 	const check = meta?.check;
@@ -171,13 +186,16 @@ function constraintPostcondition(
 	const references = requiredRecord(fk.references, change.kind);
 	return {
 		type: 'f',
-		columns: requiredList(fk.columns, change.kind),
+		columns: requiredColumnList(fk.columns, `${change.kind} columns`),
 		references: {
 			...(typeof references.schema === 'string'
 				? { schema: references.schema }
 				: {}),
 			table: text(references.table, change.kind),
-			columns: requiredList(references.columns, change.kind),
+			columns: requiredColumnList(
+				references.columns,
+				`${change.kind} references.columns`,
+			),
 		},
 		onDelete: typeof fk.onDelete === 'string' ? fk.onDelete : 'NO ACTION',
 		onUpdate: typeof fk.onUpdate === 'string' ? fk.onUpdate : 'NO ACTION',
@@ -435,7 +453,7 @@ function stringList(value: unknown, label: string): readonly string[] {
 	if (
 		!Array.isArray(value) ||
 		value.length === 0 ||
-		value.some((item) => typeof item !== 'string' || item.length === 0)
+		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
 	)
 		throw new Error(
 			`generator planning refuses ${label}: missing typed columns`,
@@ -516,7 +534,7 @@ function addressForChange(input: {
 			throw new Error(
 				`generator planning refuses ${change.kind}: missing typed foreign key`,
 			);
-		return `fk_${change.table}_${stringList((fk as Record<string, unknown>).columns, change.kind).join('_')}`;
+		return `fk_${change.table}_${stringList((fk as Record<string, unknown>).columns, `${change.kind} columns`).join('_')}`;
 	};
 	switch (change.kind) {
 		case 'create_table':
