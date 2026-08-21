@@ -284,6 +284,7 @@ describe('generator execution fixture shim', () => {
 	it.each([
 		['invalid', { is_valid: false }],
 		['not ready', { is_ready: false }],
+		['not live', { is_live: false }],
 	] as const)('refuses a present but unusable generated index when it is %s', async (_state, unavailable) => {
 		const step = {
 			...dataDestructiveStep,
@@ -307,6 +308,7 @@ describe('generator execution fixture shim', () => {
 					is_unique: false,
 					is_valid: true,
 					is_ready: true,
+					is_live: true,
 					...unavailable,
 					index_definition:
 						'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
@@ -323,9 +325,10 @@ describe('generator execution fixture shim', () => {
 		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
 		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisvalid');
 		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisready');
+		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indislive');
 	});
 
-	it('records an observed generated index only when it is valid and ready', async () => {
+	it('records an observed generated index only when it is valid, ready, and live', async () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
@@ -352,6 +355,7 @@ describe('generator execution fixture shim', () => {
 								is_unique: false,
 								is_valid: true,
 								is_ready: true,
+								is_live: true,
 								index_definition:
 									'CREATE INDEX accounts_id_idx ON tenant.accounts (id)',
 							},

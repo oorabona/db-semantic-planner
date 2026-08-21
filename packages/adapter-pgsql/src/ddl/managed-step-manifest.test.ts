@@ -170,88 +170,116 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toThrow('generator planning refuses create_index: missing typed columns');
 	});
 
-	it.each([
-		{ columns: [] as readonly string[] },
-		{ columns: ['   '] as readonly string[] },
-	])('refuses an unusable primary-key column list: %j', ({ columns }) => {
-		expect(() =>
-			createPgsqlGeneratedManagedStep({
-				change: {
-					kind: 'add_primary_key',
-					table: 'orders',
-					destructive: false,
-					details: 'add primary key',
-					meta: { columns },
+	const keyListValidationCases = [
+		{
+			kind: 'create_table',
+			keyList: 'current primary key',
+			change: (columns: readonly string[]) => ({
+				kind: 'create_table' as const,
+				table: 'orders',
+				destructive: false,
+				details: 'create table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: columns,
+						foreignKeys: [],
+						indexes: [],
+					},
 				},
-				database: 'app',
-				schema: 'public',
-				stepKey: 'generator:primary-key-columns',
-				order: 0,
-				statements: ['ALTER TABLE orders ADD PRIMARY KEY (id)'],
 			}),
-		).toThrow(
-			'generator planning refuses add_primary_key columns: missing typed columns',
-		);
-	});
-
-	it.each([
-		{ columns: [] as readonly string[] },
-		{ columns: ['   '] as readonly string[] },
-	])('refuses an unusable foreign-key local column list: %j', ({ columns }) => {
-		expect(() =>
-			createPgsqlGeneratedManagedStep({
-				change: {
-					kind: 'add_foreign_key',
+		},
+		{
+			kind: 'readdress_table',
+			keyList: 'current primary key',
+			change: (columns: readonly string[]) => ({
+				kind: 'readdress_table' as const,
+				table: 'orders',
+				destructive: false,
+				details: 'readdress table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: columns,
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			}),
+		},
+		...(['add_primary_key', 'drop_primary_key'] as const).map((kind) => ({
+			kind,
+			keyList: 'primary key',
+			change: (columns: readonly string[]) => ({
+				kind,
+				table: 'orders',
+				destructive: kind === 'drop_primary_key',
+				details: `${kind} primary key`,
+				meta: { columns },
+			}),
+		})),
+		...(
+			[
+				'add_foreign_key',
+				'drop_foreign_key',
+				'alter_foreign_key',
+				'validate_constraint',
+			] as const
+		).flatMap((kind) => [
+			{
+				kind,
+				keyList: 'foreign-key local columns',
+				change: (columns: readonly string[]) => ({
+					kind,
 					table: 'orders',
-					destructive: false,
-					details: 'add foreign key',
+					destructive: kind === 'drop_foreign_key',
+					details: `${kind} foreign key`,
 					meta: {
 						fk: {
 							columns,
 							references: { table: 'accounts', columns: ['id'] },
 						},
 					},
-				},
-				database: 'app',
-				schema: 'public',
-				stepKey: 'generator:foreign-key-columns',
-				order: 0,
-				statements: ['ALTER TABLE orders ADD FOREIGN KEY (account_id)'],
-			}),
-		).toThrow(
-			'generator planning refuses add_foreign_key columns: missing typed columns',
-		);
-	});
-
-	it.each([
-		{ columns: [] as readonly string[] },
-		{ columns: ['   '] as readonly string[] },
-	])('refuses an unusable foreign-key referenced column list: %j', ({
-		columns,
-	}) => {
-		expect(() =>
-			createPgsqlGeneratedManagedStep({
-				change: {
-					kind: 'add_foreign_key',
+				}),
+			},
+			{
+				kind,
+				keyList: 'foreign-key referenced columns',
+				change: (columns: readonly string[]) => ({
+					kind,
 					table: 'orders',
-					destructive: false,
-					details: 'add foreign key',
+					destructive: kind === 'drop_foreign_key',
+					details: `${kind} foreign key`,
 					meta: {
 						fk: {
 							columns: ['account_id'],
 							references: { table: 'accounts', columns },
 						},
 					},
-				},
-				database: 'app',
-				schema: 'public',
-				stepKey: 'generator:foreign-key-references',
-				order: 0,
-				statements: ['ALTER TABLE orders ADD FOREIGN KEY (account_id)'],
-			}),
-		).toThrow(
-			'generator planning refuses add_foreign_key references.columns: missing typed columns',
-		);
+				}),
+			},
+		]),
+	] as const;
+
+	it.each(
+		keyListValidationCases,
+	)('E02 refuses an unusable $keyList for $kind at the builder boundary', ({
+		change,
+	}) => {
+		for (const columns of [[], ['   ']] as const) {
+			expect(() =>
+				createPgsqlGeneratedManagedStep({
+					change: change(columns),
+					database: 'app',
+					schema: 'public',
+					stepKey: 'generator:key-list-validation',
+					order: 0,
+					statements: ['SELECT 1'],
+				}),
+			).toThrow('missing typed columns');
+		}
 	});
 
 	it('preserves enum labels and valid key column lists', () => {

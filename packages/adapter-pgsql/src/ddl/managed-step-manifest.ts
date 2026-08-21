@@ -154,6 +154,48 @@ function requiredColumnList(value: unknown, label: string): readonly string[] {
 	return value as readonly string[];
 }
 
+/**
+ * Reject malformed key-column lists before any change-specific consumer can
+ * derive an address, name, or postcondition from them.
+ */
+function validateChangeKeyLists(change: SchemaChange): void {
+	const meta = change.meta;
+	const foreignKey = () => {
+		const fk = requiredRecord(meta?.fk, change.kind);
+		const references = requiredRecord(fk.references, change.kind);
+		requiredColumnList(fk.columns, `${change.kind} columns`);
+		requiredColumnList(references.columns, `${change.kind} references.columns`);
+	};
+	switch (change.kind) {
+		case 'create_table':
+		case 'readdress_table': {
+			const table = meta?.table;
+			if (!table || typeof table !== 'object' || Array.isArray(table)) return;
+			const primaryKey = (table as Record<string, unknown>).primaryKey;
+			if (primaryKey === undefined) return;
+			requiredColumnList(
+				typeof primaryKey === 'string' ? [primaryKey] : primaryKey,
+				`${change.kind} table.primaryKey`,
+			);
+			return;
+		}
+		case 'add_primary_key':
+		case 'drop_primary_key':
+			requiredColumnList(meta?.columns, `${change.kind} columns`);
+			return;
+		case 'add_foreign_key':
+		case 'drop_foreign_key':
+		case 'alter_foreign_key':
+			foreignKey();
+			return;
+		case 'validate_constraint':
+			if (meta?.check === undefined) foreignKey();
+			return;
+		default:
+			return;
+	}
+}
+
 function constraintPostcondition(
 	change: SchemaChange,
 ): GeneratedConstraintPostcondition {
@@ -662,6 +704,7 @@ export function createPgsqlGeneratedManagedStep(input: {
 	readonly dependencyOrder?: readonly string[];
 	readonly statements: readonly string[];
 }): NormalizedManagedStep {
+	validateChangeKeyLists(input.change);
 	assertDeclarableChangeKind(input.change.kind);
 	const address = addressForChange(input);
 	if (input.statements.length === 0 && input.change.kind !== 'readdress_table')
