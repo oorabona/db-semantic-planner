@@ -265,9 +265,10 @@ export async function withPgTransitionRunLock<T>(
 		throw error;
 	} finally {
 		callbackLive = false;
-		// A dead backend has already released its session advisory locks.  Asking
-		// that client to unlock would only mask the callback's primary outcome.
-		if (locked && !deadConnectionFailure) {
+		// A dead backend has already released its session advisory locks, and a
+		// compromised lease receives no more queries. Asking either client to unlock
+		// would only mask the callback's primary outcome.
+		if (locked && !deadConnectionFailure && !leaseReleaseFailure) {
 			try {
 				const unlock = await query(
 					'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',

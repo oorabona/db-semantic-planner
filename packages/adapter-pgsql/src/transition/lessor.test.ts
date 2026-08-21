@@ -314,6 +314,11 @@ describe('withPgTransitionRunLock cleanup', () => {
 			}),
 		).resolves.toEqual({ kind: 'acquired', value: undefined });
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+		expect(
+			client.query.mock.calls.some(([sql]) =>
+				String(sql).includes('pg_advisory_unlock'),
+			),
+		).toBe(false);
 	});
 
 	it('preserves the primary result and skips unlock after the locked backend dies', async () => {

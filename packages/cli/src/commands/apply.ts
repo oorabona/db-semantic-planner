@@ -10,6 +10,8 @@ import {
 	createPgTransitionPack,
 	escapeDiagnosticText,
 	preparePgExecutionSession,
+	readPgLedgerAddressChain,
+	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
 	TransitionRunIdentityMismatchError,
 	validatePgManagedLedgerCurrency,
@@ -32,6 +34,7 @@ import type {
 	ApplyResult,
 	AssumptionAcceptance,
 	LedgerAddress,
+	LedgerHome,
 	NormalizedManagedStep,
 	PhysicalOperation,
 	ResourceAddress,
@@ -40,11 +43,12 @@ import type {
 	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
-import { REFUSAL_VOCABULARY } from '@dbsp/types';
+import { ledgerAddressKey, REFUSAL_VOCABULARY } from '@dbsp/types';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
+import { executionIdsForRun } from './execution-ids.js';
 import {
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
@@ -101,6 +105,94 @@ export function generatorRunHasPriorStepEvents(
 			event.operationRef === 'dbsp.generator.attempt'
 		);
 	});
+}
+
+function ledgerHomeForGeneratorAddress(address: LedgerAddress): LedgerHome {
+	if (address.scope === 'database') return { scope: 'database' };
+	if (!address.schema)
+		throw new Error(
+			`schema-scoped generated address ${address.name} has no schema ledger`,
+		);
+	return { scope: 'schema', schema: address.schema };
+}
+
+/** Every generated address, including each closure member, bounds replay evidence reads. */
+function generatorPlanLedgerAddresses(
+	steps: readonly NormalizedManagedStep[],
+): readonly LedgerAddress[] {
+	const addresses = new Map<string, LedgerAddress>();
+	for (const step of steps) {
+		if (step.address !== undefined) {
+			addresses.set(ledgerAddressKey(step.address), step.address);
+			continue;
+		}
+		const closure = step.closure;
+		if (!closure)
+			throw new Error(`generated step ${step.stepKey} has no ledger address`);
+		const candidates = [
+			closure.root,
+			...closure.members.map((member) => member.address),
+		];
+		for (const address of candidates)
+			addresses.set(ledgerAddressKey(address), address);
+	}
+	return [...addresses.values()];
+}
+
+/**
+ * A recorded attempt remains retryable only until the ledger contains no trace
+ * of it. Reservations are queried by ledger home; chain reads stay at plan addresses.
+ */
+async function generatorRunHasLedgerEvidence(
+	session: Parameters<typeof readPgLedgerReservationsForExecution>[0],
+	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
+	steps: readonly NormalizedManagedStep[],
+): Promise<boolean> {
+	const executionIds = executionIdsForRun(journal);
+	const executionIdSet = new Set(executionIds);
+	const addresses = generatorPlanLedgerAddresses(steps);
+	const homes = new Map<string, LedgerHome>();
+	for (const address of addresses) {
+		const home = ledgerHomeForGeneratorAddress(address);
+		homes.set(`${home.scope}:${home.schema ?? ''}`, home);
+	}
+	for (const home of homes.values()) {
+		for (const executionId of executionIds) {
+			const reservations = await readPgLedgerReservationsForExecution(
+				session,
+				home,
+				executionId,
+			);
+			if (reservations.length > 0) return true;
+		}
+	}
+	for (const address of addresses) {
+		const chain = await readPgLedgerAddressChain(
+			session,
+			ledgerHomeForGeneratorAddress(address),
+			address,
+		);
+		if (
+			chain.events.some((event) => executionIdSet.has(event.executionId ?? ''))
+		)
+			return true;
+	}
+	return false;
+}
+
+/** The generator replay gate has one decision: journal steps or attributable ledger evidence. */
+async function generatorRunRequiresRecovery(
+	target: Parameters<typeof acquireExclusiveTransitionLease>[0],
+	journal: Awaited<ReturnType<typeof readTransitionJournal>>,
+	steps: readonly NormalizedManagedStep[],
+): Promise<boolean> {
+	if (generatorRunHasPriorStepEvents(journal)) return true;
+	const lease = await acquireExclusiveTransitionLease(target);
+	try {
+		return await generatorRunHasLedgerEvidence(lease.session, journal, steps);
+	} finally {
+		await lease.release();
+	}
 }
 
 const GENERATOR_ATTEMPT_OPERATION: Omit<PhysicalOperation, 'payload'> = {
@@ -872,9 +964,14 @@ export function formatApplyHuman(result: ApplyHumanResult): string {
 		case 'readdress-unsupported':
 		case 'readdress-refused':
 		case 'destructive-authority-refused':
-		case 'prior-step-events-refusal':
 		case 'execution-failed':
 			return `${line}\ndetail: ${escapeDiagnosticText(execution.detail)}`;
+		case 'prior-step-events-refusal':
+			return [
+				line,
+				`detail: ${escapeDiagnosticText(execution.detail)}`,
+				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
+			].join('\n');
 	}
 }
 
@@ -1276,7 +1373,13 @@ async function runApplyInternal(
 						throw new RecordedPlanDigestMismatchError(
 							`persisted generator manifest is invalid: ${lifecycleError}`,
 						);
-					if (generatorRunHasPriorStepEvents(current))
+					if (
+						await generatorRunRequiresRecovery(
+							target,
+							current,
+							manifest.manifest.steps,
+						)
+					)
 						return {
 							outcome: 'prior-step-events-refusal' as const,
 							detail:
