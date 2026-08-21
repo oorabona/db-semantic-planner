@@ -1,10 +1,12 @@
 import { renderCheckConstraintClause } from '../check-expression.js';
+import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
-import { validateCheckExpression } from '../validate.js';
+import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import type {
 	GeneratedConstraintPostcondition,
 	GeneratedIndexPostcondition,
+	GeneratedPostcondition,
 } from './managed-step-manifest.js';
 import { quoteIdent } from './phases/utils.js';
 
@@ -100,6 +102,19 @@ type CheckProjection = {
 	readonly parentId: number;
 };
 
+type TableColumnProjection = {
+	readonly name: string;
+	readonly type: string;
+	readonly nullable: boolean;
+	readonly default: string | undefined;
+	readonly collation: string | null;
+	readonly identity: 'always' | 'byDefault' | null;
+};
+
+type TableProjection = {
+	readonly columns: readonly TableColumnProjection[];
+};
+
 let scratchSequence = 0;
 
 function nextScratchName(kind: string): string {
@@ -126,24 +141,441 @@ function exactKeys(
 }
 
 function stringList(value: unknown, message: string): readonly string[] {
-	if (
-		!Array.isArray(value) ||
-		Array.from(value).some((item) => typeof item !== 'string')
-	)
-		throw replan(message);
-	return Array.from(value) as readonly string[];
+	if (!Array.isArray(value)) throw replan(message);
+	const snapshot = Array.from(value);
+	const result: string[] = [];
+	for (const item of snapshot) {
+		if (typeof item !== 'string') throw replan(message);
+		result.push(item);
+	}
+	return result;
 }
 
 function stringRecord(
 	value: unknown,
 	message: string,
 ): Readonly<Record<string, string>> {
+	if (!isRecord(value)) throw replan(message);
+	const entries = Object.entries(value);
+	for (const [_key, item] of entries) {
+		if (typeof item !== 'string') throw replan(message);
+	}
+	return Object.fromEntries(entries) as Record<string, string>;
+}
+
+function strictString(value: unknown, message: string): string {
+	if (typeof value !== 'string') throw replan(message);
+	return value;
+}
+
+function strictBoolean(value: unknown, message: string): boolean {
+	if (typeof value !== 'boolean') throw replan(message);
+	return value;
+}
+
+function strictUnknownArray(
+	value: unknown,
+	message: string,
+): readonly unknown[] {
+	if (!Array.isArray(value)) throw replan(message);
+	return Array.from(value);
+}
+
+function checkedIdentifier(
+	value: unknown,
+	type: 'table' | 'column' | 'schema' | 'alias',
+	message: string,
+): string {
+	const identifier = strictString(value, message);
+	try {
+		validateIdentifier(identifier, type);
+	} catch {
+		throw replan(message);
+	}
+	return identifier;
+}
+
+/** Decode and snapshot the complete supported COLUMN projection of a v2 postcondition. */
+export function decodeColumnPostcondition(
+	value: unknown,
+): Extract<GeneratedPostcondition, { readonly kind: 'column' }>['column'] {
+	const unsupported = 'generated column postcondition is unsupported';
 	if (
 		!isRecord(value) ||
-		Object.values(value).some((item) => typeof item !== 'string')
+		!exactKeys(value, [
+			'name',
+			'type',
+			'nullable',
+			'hasDefault',
+			'default',
+			'collation',
+			'identity',
+		])
 	)
-		throw replan(message);
-	return value as Record<string, string>;
+		throw replan(unsupported);
+	const name = checkedIdentifier(value.name, 'column', unsupported);
+	const type = value.type;
+	const nullable = value.nullable;
+	const hasDefault = value.hasDefault;
+	const defaultValue = value.default;
+	const collation = value.collation;
+	const identity = value.identity;
+	const decodedType =
+		type === undefined ? undefined : strictString(type, unsupported);
+	const decodedNullable =
+		nullable === undefined ? undefined : strictBoolean(nullable, unsupported);
+	const decodedHasDefault =
+		hasDefault === undefined
+			? undefined
+			: strictBoolean(hasDefault, unsupported);
+	let decodedDefault: string | undefined;
+	if (decodedHasDefault === true) {
+		if (defaultValue === undefined) throw replan(unsupported);
+		decodedDefault = strictString(defaultValue, unsupported);
+	} else if (defaultValue !== undefined) {
+		throw replan(unsupported);
+	}
+	const decodedCollation =
+		collation === undefined || collation === null
+			? collation
+			: strictString(collation, unsupported);
+	let decodedIdentity: 'always' | 'byDefault' | null | undefined;
+	if (identity === undefined || identity === null) decodedIdentity = identity;
+	else if (identity === 'always' || identity === 'byDefault')
+		decodedIdentity = identity;
+	else throw replan(unsupported);
+	return {
+		name,
+		...(decodedType === undefined ? {} : { type: decodedType }),
+		...(decodedNullable === undefined ? {} : { nullable: decodedNullable }),
+		...(decodedHasDefault === undefined
+			? {}
+			: { hasDefault: decodedHasDefault }),
+		...(decodedDefault === undefined ? {} : { default: decodedDefault }),
+		...(decodedCollation === undefined ? {} : { collation: decodedCollation }),
+		...(decodedIdentity === undefined ? {} : { identity: decodedIdentity }),
+	};
+}
+
+/**
+ * Decode a v2 generated postcondition before a reader treats it as evidence.
+ * Unsupported fields and relationships refuse into the existing replan path.
+ */
+export function decodeGeneratedPostcondition(
+	value: unknown,
+): GeneratedPostcondition {
+	if (!isRecord(value))
+		throw replan('generated postcondition format is unsupported');
+	const postconditionVersion = value.postconditionVersion;
+	const kind = value.kind;
+	if (postconditionVersion !== 2 || typeof kind !== 'string')
+		throw replan('generated postcondition format is unsupported');
+	const unsupported = 'generated postcondition is unsupported';
+	switch (kind) {
+		case 'table': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'columns']))
+				throw replan(unsupported);
+			const columns = strictUnknownArray(value.columns, unsupported).map(
+				(column) => decodeColumnPostcondition(column),
+			);
+			const names = new Set<string>();
+			for (const column of columns) {
+				if (names.has(column.name)) throw replan(unsupported);
+				names.add(column.name);
+			}
+			return { postconditionVersion, kind, columns };
+		}
+		case 'column': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'column']))
+				throw replan(unsupported);
+			const column = decodeColumnPostcondition(value.column);
+			return { postconditionVersion, kind, column };
+		}
+		case 'constraint': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'constraint']))
+				throw replan(unsupported);
+			const constraint = value.constraint;
+			if (!isRecord(constraint)) throw replan(unsupported);
+			const type = constraint.type;
+			if (type === 'c') {
+				if (!exactKeys(constraint, ['type', 'expression', 'notValid']))
+					throw replan(unsupported);
+				const expression = strictString(constraint.expression, unsupported);
+				const notValid = strictBoolean(constraint.notValid, unsupported);
+				return {
+					postconditionVersion,
+					kind,
+					constraint: { type: 'c', expression, notValid },
+				};
+			} else if (type === 'p' || type === 'u') {
+				if (
+					!exactKeys(constraint, [
+						'type',
+						'columns',
+						'deferrable',
+						'initiallyDeferred',
+						'enforced',
+					])
+				)
+					throw replan(unsupported);
+				const columns = stringList(constraint.columns, unsupported);
+				for (const name of columns)
+					checkedIdentifier(name, 'column', unsupported);
+				const deferrable = strictBoolean(constraint.deferrable, unsupported);
+				const initiallyDeferred = strictBoolean(
+					constraint.initiallyDeferred,
+					unsupported,
+				);
+				const enforced = strictBoolean(constraint.enforced, unsupported);
+				return {
+					postconditionVersion,
+					kind,
+					constraint: {
+						type,
+						columns,
+						deferrable,
+						initiallyDeferred,
+						enforced,
+					},
+				};
+			} else if (type === 'f') {
+				if (
+					!exactKeys(constraint, [
+						'type',
+						'columns',
+						'references',
+						'onDelete',
+						'onUpdate',
+						'deferrable',
+						'initiallyDeferred',
+						'enforced',
+						'notValid',
+					])
+				)
+					throw replan(unsupported);
+				const columns = stringList(constraint.columns, unsupported);
+				for (const name of columns)
+					checkedIdentifier(name, 'column', unsupported);
+				const references = constraint.references;
+				if (!isRecord(references)) throw replan(unsupported);
+				if (!exactKeys(references, ['schema', 'table', 'columns']))
+					throw replan(unsupported);
+				const schema = checkedIdentifier(
+					references.schema,
+					'schema',
+					unsupported,
+				);
+				const table = checkedIdentifier(references.table, 'table', unsupported);
+				const referenceColumns = stringList(references.columns, unsupported);
+				for (const name of referenceColumns)
+					checkedIdentifier(name, 'column', unsupported);
+				const onDelete = strictString(constraint.onDelete, unsupported);
+				const onUpdate = strictString(constraint.onUpdate, unsupported);
+				const deferrable = strictBoolean(constraint.deferrable, unsupported);
+				const initiallyDeferred = strictBoolean(
+					constraint.initiallyDeferred,
+					unsupported,
+				);
+				const enforced = strictBoolean(constraint.enforced, unsupported);
+				const notValid = strictBoolean(constraint.notValid, unsupported);
+				return {
+					postconditionVersion,
+					kind,
+					constraint: {
+						type: 'f',
+						columns,
+						references: { schema, table, columns: referenceColumns },
+						onDelete,
+						onUpdate,
+						deferrable,
+						initiallyDeferred,
+						enforced,
+						notValid,
+					},
+				};
+			} else throw replan(unsupported);
+		}
+		case 'index': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'index']))
+				throw replan(unsupported);
+			const index = value.index;
+			if (!isRecord(index)) throw replan(unsupported);
+			if (
+				!exactKeys(index, [
+					'schema',
+					'table',
+					'name',
+					'method',
+					'unique',
+					'valid',
+					'ready',
+					'live',
+					'columns',
+					'expressions',
+					'include',
+					'nullsNotDistinct',
+					'opclass',
+					'with',
+					'where',
+				])
+			)
+				throw replan(unsupported);
+			const schema = checkedIdentifier(index.schema, 'schema', unsupported);
+			const table = checkedIdentifier(index.table, 'table', unsupported);
+			const name = checkedIdentifier(index.name, 'alias', unsupported);
+			const method = strictString(index.method, unsupported);
+			if (
+				![
+					'btree',
+					'hash',
+					'gist',
+					'gin',
+					'brin',
+					'spgist',
+					'hnsw',
+					'ivfflat',
+					'bm25',
+					'bloom',
+				].includes(method)
+			)
+				throw replan(unsupported);
+			const unique = strictBoolean(index.unique, unsupported);
+			if (index.valid !== true || index.ready !== true || index.live !== true)
+				throw replan(unsupported);
+			const nullsNotDistinct = strictBoolean(
+				index.nullsNotDistinct,
+				unsupported,
+			);
+			const columns = stringList(index.columns, unsupported);
+			for (const column of columns)
+				checkedIdentifier(column, 'column', unsupported);
+			const expressionsValue = index.expressions;
+			const includeValue = index.include;
+			const opclassValue = index.opclass;
+			const withValue = index.with;
+			const expressions =
+				expressionsValue === undefined
+					? undefined
+					: stringList(expressionsValue, unsupported);
+			const include =
+				includeValue === undefined
+					? undefined
+					: stringList(includeValue, unsupported);
+			const opclass =
+				opclassValue === undefined
+					? undefined
+					: stringRecord(opclassValue, unsupported);
+			const withOptions =
+				withValue === undefined
+					? undefined
+					: stringRecord(withValue, unsupported);
+			const whereValue = index.where;
+			const where =
+				whereValue === undefined
+					? undefined
+					: strictString(whereValue, unsupported);
+			const decodedIndex: GeneratedIndexPostcondition = {
+				schema,
+				table,
+				name,
+				method,
+				unique,
+				valid: true,
+				ready: true,
+				live: true,
+				columns,
+				...(expressions === undefined ? {} : { expressions }),
+				...(include === undefined ? {} : { include }),
+				nullsNotDistinct,
+				...(opclass === undefined ? {} : { opclass }),
+				...(withOptions === undefined ? {} : { with: withOptions }),
+				...(where === undefined ? {} : { where }),
+			};
+			return { postconditionVersion, kind, index: decodedIndex };
+		}
+		case 'enum': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'labels']))
+				throw replan(unsupported);
+			const labels = stringList(value.labels, unsupported);
+			return { postconditionVersion, kind, labels };
+		}
+		case 'sequence': {
+			if (
+				!exactKeys(value, [
+					'postconditionVersion',
+					'kind',
+					'startValue',
+					'incrementBy',
+					'minValue',
+					'maxValue',
+					'cycle',
+				])
+			)
+				throw replan(unsupported);
+			const startValue = value.startValue;
+			const incrementBy = value.incrementBy;
+			const minValue = value.minValue;
+			const maxValue = value.maxValue;
+			const cycle = value.cycle;
+			const decodedStartValue =
+				startValue === undefined
+					? undefined
+					: strictString(startValue, unsupported);
+			const decodedIncrementBy =
+				incrementBy === undefined
+					? undefined
+					: strictString(incrementBy, unsupported);
+			const decodedMinValue =
+				minValue === undefined
+					? undefined
+					: strictString(minValue, unsupported);
+			const decodedMaxValue =
+				maxValue === undefined
+					? undefined
+					: strictString(maxValue, unsupported);
+			const decodedCycle =
+				cycle === undefined ? undefined : strictBoolean(cycle, unsupported);
+			return {
+				postconditionVersion,
+				kind,
+				...(decodedStartValue === undefined
+					? {}
+					: { startValue: decodedStartValue }),
+				...(decodedIncrementBy === undefined
+					? {}
+					: { incrementBy: decodedIncrementBy }),
+				...(decodedMinValue === undefined ? {} : { minValue: decodedMinValue }),
+				...(decodedMaxValue === undefined ? {} : { maxValue: decodedMaxValue }),
+				...(decodedCycle === undefined ? {} : { cycle: decodedCycle }),
+			};
+		}
+		case 'extension': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'version']))
+				throw replan(unsupported);
+			const versionValue = value.version;
+			const version =
+				versionValue === undefined
+					? undefined
+					: strictString(versionValue, unsupported);
+			return {
+				postconditionVersion,
+				kind,
+				...(version === undefined ? {} : { version }),
+			};
+		}
+		case 'absent':
+			if (!exactKeys(value, ['postconditionVersion', 'kind']))
+				throw replan(unsupported);
+			return { postconditionVersion, kind };
+		case 'exempt': {
+			if (!exactKeys(value, ['postconditionVersion', 'kind', 'reason']))
+				throw replan(unsupported);
+			const reason = strictString(value.reason, unsupported);
+			return { postconditionVersion, kind, reason };
+		}
+		default:
+			throw replan(unsupported);
+	}
 }
 
 function decodeIndexExpectation(
@@ -356,7 +788,7 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 		includeColumns: projectionStringList(row.include_columns),
 		opclasses: projectionStringList(row.opclasses),
 		keyOptions: projectionStringList(row.key_options),
-		reloptions: projectionStringList(row.reloptions),
+		reloptions: [...projectionStringList(row.reloptions)].sort(),
 		predicate: row.predicate_expression,
 	};
 }
@@ -511,6 +943,105 @@ export function assertGeneratedPostconditionSession(
 	value: unknown,
 ): GeneratedPostconditionSession {
 	return requireGeneratedPostconditionSession(value);
+}
+
+function tableColumnProjection(
+	row: Record<string, unknown>,
+): TableColumnProjection {
+	if (
+		typeof row.column_name !== 'string' ||
+		typeof row.column_type !== 'string' ||
+		typeof row.is_not_null !== 'boolean' ||
+		(typeof row.column_default !== 'string' && row.column_default !== null) ||
+		(typeof row.collation_name !== 'string' && row.collation_name !== null) ||
+		(row.identity_kind !== '' &&
+			row.identity_kind !== 'a' &&
+			row.identity_kind !== 'd')
+	)
+		throw new Error(
+			'generated table verifier could not read a complete projection',
+		);
+	return {
+		name: row.column_name,
+		type: row.column_type,
+		nullable: !row.is_not_null,
+		default: row.column_default === null ? undefined : row.column_default,
+		// PostgreSQL names the built-in collation `default`; DBSP represents no
+		// explicit collation as null.
+		collation: row.collation_name === 'default' ? null : row.collation_name,
+		identity:
+			row.identity_kind === 'a'
+				? 'always'
+				: row.identity_kind === 'd'
+					? 'byDefault'
+					: null,
+	};
+}
+
+/**
+ * Proves the supported COLUMN projection of a table, not every table property.
+ * Inline primary keys, indexes, and constraints are proved by their own
+ * postconditions and are never implied by this proof.
+ */
+export async function verifyGeneratedTablePostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
+	const postcondition = decodeGeneratedPostcondition(input.postcondition);
+	if (postcondition.kind !== 'table')
+		throw replan('generated table postcondition is unsupported');
+	const session = requireGeneratedPostconditionSession(input.session);
+	const rows = (
+		await session.query(
+			`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
+			[input.target.schema, input.target.table],
+		)
+	).rows;
+	const expected = postcondition.columns;
+	if (rows.length === 0)
+		throw new Error(`generated table ${input.target.name} is absent`);
+	const relationKind = rows[0]?.relation_kind;
+	if (typeof relationKind !== 'string')
+		throw new Error(
+			'generated table verifier could not read a complete projection',
+		);
+	if (relationKind !== 'r' && relationKind !== 'p')
+		throw new Error(`generated table ${input.target.name} is not a table`);
+	if (rows.some((row) => row.relation_kind !== relationKind))
+		throw new Error(
+			'generated table verifier could not read a complete projection',
+		);
+	const columnRows = rows.filter((row) => row.column_name !== null);
+	if (columnRows.length !== expected.length)
+		throw new Error(
+			`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
+		);
+	const live = columnRows.map(tableColumnProjection);
+	for (const [ordinal, specification] of expected.entries()) {
+		const actual = live[ordinal];
+		if (
+			!actual ||
+			actual.name !== specification.name ||
+			(specification.type !== undefined &&
+				!dbTypesEqual(actual.type, specification.type)) ||
+			(specification.nullable !== undefined &&
+				actual.nullable !== specification.nullable) ||
+			(specification.hasDefault === true &&
+				(actual.default === undefined ||
+					specification.default === undefined ||
+					actual.default !== specification.default)) ||
+			(specification.hasDefault === false && actual.default !== undefined) ||
+			(specification.collation !== undefined &&
+				actual.collation !== specification.collation) ||
+			(specification.identity !== undefined &&
+				actual.identity !== specification.identity)
+		)
+			throw new Error(
+				`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+			);
+	}
+	return { kind: 'table', projection: { columns: live } };
 }
 
 export async function verifyGeneratedIndexPostcondition(input: {

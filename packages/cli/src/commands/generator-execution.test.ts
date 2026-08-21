@@ -3,7 +3,7 @@ import {
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
-import type { NormalizedManagedStep } from '@dbsp/types';
+import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
@@ -221,6 +221,102 @@ describe('generator execution fixture shim', () => {
 		).rejects.toThrow();
 	});
 
+	it.each([
+		['string nullability', { is_not_null: 't' }],
+		['unknown identity', { identity_kind: 'x' }],
+	])('refuses an incomplete generated column projection with %s', async (_label, override) => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'column' as const,
+			name: 'id',
+			parent: dataDestructiveStep.address!,
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: {
+						name: 'id',
+						type: 'integer',
+						nullable: false,
+						identity: null,
+					},
+				},
+				digest: 'column-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								column_name: 'id',
+								column_type: 'integer',
+								is_not_null: true,
+								column_default: null,
+								collation_name: null,
+								identity_kind: '',
+								...override,
+							},
+						],
+					}),
+				},
+				step,
+				address,
+			),
+		).rejects.toThrow('generated column id has an incomplete projection');
+	});
+
+	it('canonicalizes PostgreSQL default collation for generated column read-back', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'column' as const,
+			name: 'body',
+			parent: dataDestructiveStep.address!,
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: {
+						name: 'body',
+						type: 'text',
+						nullable: true,
+						collation: null,
+					},
+				},
+				digest: 'column-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								column_name: 'body',
+								column_type: 'text',
+								is_not_null: false,
+								column_default: null,
+								collation_name: 'default',
+								identity_kind: '',
+							},
+						],
+					}),
+				},
+				step,
+				address,
+			),
+		).resolves.toMatchObject({ value: { collation: null } });
+	});
+
 	it('normalizes PostgreSQL primary-key attnotnull on CREATE TABLE read-back', async () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
@@ -249,10 +345,13 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,
 								column_default: null,
+								collation_name: null,
+								identity_kind: '',
 							},
 						],
 					}),
@@ -266,6 +365,90 @@ describe('generator execution fixture shim', () => {
 				columns: [expect.objectContaining({ name: 'id', nullable: false })],
 			},
 		});
+	});
+
+	it('records table and column collation and identity in observed payload digests', async () => {
+		const baseAddress = dataDestructiveStep.address!;
+		const tableStep: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+				},
+				digest: 'table-postcondition',
+			},
+		};
+		const tableRead = (collation_name: string) =>
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								relation_kind: 'r',
+								column_name: 'id',
+								column_type: 'integer',
+								is_not_null: true,
+								column_default: null,
+								collation_name,
+								identity_kind: 'a',
+							},
+						],
+					}),
+				},
+				tableStep,
+				tableStep.address!,
+			);
+		const columnStep: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: { name: 'id', type: 'integer', nullable: false },
+				},
+				digest: 'column-postcondition',
+			},
+			address: {
+				...baseAddress,
+				kind: 'column',
+				name: 'id',
+				parent: baseAddress,
+			},
+		};
+		const columnRead = (collation_name: string) =>
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{
+								column_name: 'id',
+								column_type: 'integer',
+								is_not_null: true,
+								column_default: null,
+								collation_name,
+								identity_kind: 'a',
+							},
+						],
+					}),
+				},
+				columnStep,
+				columnStep.address!,
+			);
+		const firstTable = await tableRead('C');
+		const secondTable = await tableRead('POSIX');
+		expect(firstTable.value).toMatchObject({
+			columns: [{ collation: 'C', identity: 'always' }],
+		});
+		expect(firstTable.digest).not.toBe(secondTable.digest);
+		const firstColumn = await columnRead('C');
+		const secondColumn = await columnRead('POSIX');
+		expect(firstColumn.value).toMatchObject({
+			collation: 'C',
+			identity: 'always',
+		});
+		expect(firstColumn.digest).not.toBe(secondColumn.digest);
 	});
 
 	it('retains the structural index postcondition guard with live and scratch projections', async () => {
@@ -601,10 +784,13 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,
 								column_default: null,
+								collation_name: null,
+								identity_kind: '',
 							},
 						],
 					}),
