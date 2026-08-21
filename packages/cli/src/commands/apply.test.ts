@@ -93,6 +93,19 @@ describe('dbsp apply contract and policy', () => {
 		]);
 	});
 
+	it('names reconcile consistently for recovery-required and prior-step events', () => {
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'recovery-required',
+			64,
+			'an admitted claim remains open; run dbsp reconcile --db <database> <run-id>',
+		]);
+		expect(APPLY_OUTCOME_CONTRACT).toContainEqual([
+			'prior-step-events-refusal',
+			19,
+			'attempted runs with prior generator step-attempt events must be classified by dbsp reconcile --db <database> <run-id>',
+		]);
+	});
+
 	it.each([
 		['operation-failed-not-applied', 'planned', 'operation-failed-not-applied'],
 		['partially-applied', 'partially-applied', 'partially-applied'],
@@ -162,6 +175,46 @@ describe('dbsp apply contract and policy', () => {
 		expect(text).toContain(
 			'resolving command: dbsp reconcile --db <database> generator-run-1',
 		);
+	});
+
+	it('escapes the human heading and plan-digest detail without adding diagnostic lines', () => {
+		const runId = 'run-1\n\u001b[31m';
+		const recoveryText = formatApplyHuman({
+			outcome: 'recovery-required',
+			runId,
+			result: {
+				outcome: 'recovery-required',
+				claimId: 'open-claim',
+				detail: 'sender disconnected',
+			},
+		});
+		expect(recoveryText.split('\n')[0]).toBe(
+			'recovery-required: run-1\\n\\u001b[31m',
+		);
+
+		const baseResult = result('planned', 'unknown-step-result');
+		const digestResult: ApplyResult = {
+			...baseResult,
+			assessment: {
+				...baseResult.assessment,
+				reasons: [
+					{
+						...baseResult.assessment.reasons[0]!,
+						detail: 'digest\n\u001b[31m',
+					},
+				],
+			},
+		};
+		expect(
+			formatApplyHuman({
+				outcome: 'plan-digest-mismatch',
+				runId,
+				result: digestResult,
+			}).split('\n'),
+		).toEqual([
+			'plan-digest-mismatch: run-1\\n\\u001b[31m',
+			'digest\\n\\u001b[31m',
+		]);
 	});
 
 	it.each([

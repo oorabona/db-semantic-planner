@@ -308,17 +308,95 @@ describe('withPgTransitionRunLock cleanup', () => {
 
 		await expect(
 			withPgTransitionRunLock(pool, 'run:compromised-lease', async (target) => {
-				const lease = await acquireExclusiveTransitionLease(target);
-				markTransitionClientCompromised(lease.session);
-				await lease.release();
+				const compromisedLease = await acquireExclusiveTransitionLease(target);
+				const siblingLease = await acquireExclusiveTransitionLease(target);
+				markTransitionClientCompromised(compromisedLease.session);
+				await compromisedLease.release();
+				await expect(
+					siblingLease.session.query('SELECT ordinary after compromise'),
+				).rejects.toThrow(
+					'transition execution marked its leased client compromised',
+				);
+				await expect(
+					planOperationSession(siblingLease.session).query(
+						'SELECT plan operation after compromise',
+					),
+				).rejects.toThrow(
+					'transition execution marked its leased client compromised',
+				);
+				await expect(acquireExclusiveTransitionLease(target)).rejects.toThrow(
+					'transition execution marked its leased client compromised',
+				);
+				await siblingLease.release();
 			}),
 		).resolves.toEqual({ kind: 'acquired', value: undefined });
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+		expect(client.query).not.toHaveBeenCalledWith(
+			'SELECT ordinary after compromise',
+			undefined,
+		);
+		expect(client.query).not.toHaveBeenCalledWith(
+			'SELECT plan operation after compromise',
+			undefined,
+		);
 		expect(
 			client.query.mock.calls.some(([sql]) =>
 				String(sql).includes('pg_advisory_unlock'),
 			),
 		).toBe(false);
+	});
+
+	it('wraps a hostile lease failure without coercing it before evicting the client', async () => {
+		const hostile = {
+			toString() {
+				throw new Error('hostile string conversion');
+			},
+		};
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(
+				pool,
+				'run:hostile-lease-failure',
+				async (target) => {
+					const lease = await acquireExclusiveTransitionLease(target);
+					await lease.release({ error: hostile });
+				},
+			),
+		).resolves.toEqual({ kind: 'acquired', value: undefined });
+
+		const [releaseFailure] = client.release.mock.calls[0] ?? [];
+		expect(releaseFailure).toBeInstanceOf(Error);
+		expect(releaseFailure).toMatchObject({
+			message: 'transition lease reported a non-Error failure',
+			cause: hostile,
+		});
 	});
 
 	it('preserves the primary result and skips unlock after the locked backend dies', async () => {

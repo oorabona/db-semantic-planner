@@ -1556,8 +1556,9 @@ export function createApplier(
 										journals,
 										observations,
 										unresolvedOutcome: {
-											kind: 'transport-ambiguous',
-											detail: `rollback failed after recovery-required: ${errorDetail(cleanupError)}`,
+											kind: 'recovery-required',
+											claimId: executionOutcome.claimId,
+											detail: `${executionOutcome.detail}; rollback failed after recovery-required: ${errorDetail(cleanupError)}`,
 										},
 									});
 								}

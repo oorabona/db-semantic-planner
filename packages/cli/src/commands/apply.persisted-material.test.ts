@@ -158,7 +158,7 @@ describe('apply persisted generator material', () => {
 				result: {
 					outcome: 'prior-step-events-refusal',
 					detail:
-						'run has prior generator step-attempt events; run dbsp recover instead',
+						'run has prior generator step-attempt events; run dbsp reconcile --db <database> <run-id>',
 				},
 			});
 			expect(formatApplyHuman(result)).toContain(

@@ -641,7 +641,7 @@ export const APPLY_OUTCOME_CONTRACT = [
 	[
 		'prior-step-events-refusal',
 		19,
-		'attempted runs must be classified by recover',
+		'attempted runs with prior generator step-attempt events must be classified by dbsp reconcile --db <database> <run-id>',
 	],
 	[
 		'compatibility-refusal',
@@ -673,7 +673,7 @@ export const APPLY_OUTCOME_CONTRACT = [
 	[
 		'recovery-required',
 		64,
-		'an admitted non-transactional claim remains open; run recover with the reported claim reference',
+		'an admitted claim remains open; run dbsp reconcile --db <database> <run-id>',
 	],
 	[
 		'transport-ambiguous',
@@ -908,7 +908,7 @@ type ApplyHumanResult =
 	  };
 
 export function formatApplyHuman(result: ApplyHumanResult): string {
-	const line = `${result.outcome}: ${result.runId}`;
+	const line = `${escapeDiagnosticText(result.outcome)}: ${escapeDiagnosticText(result.runId)}`;
 	if (result.refusal) {
 		if ('address' in result.refusal)
 			return formatPreAppendRefusalHuman(line, result.refusal);
@@ -939,7 +939,7 @@ export function formatApplyHuman(result: ApplyHumanResult): string {
 		}
 		if (result.outcome !== 'plan-digest-mismatch') return line;
 		const detail = result.result.assessment.reasons[0]?.detail;
-		return detail ? `${line}\n${detail}` : line;
+		return detail ? `${line}\n${escapeDiagnosticText(detail)}` : line;
 	}
 	const execution = result.result;
 	switch (execution.outcome) {
@@ -1383,7 +1383,7 @@ async function runApplyInternal(
 						return {
 							outcome: 'prior-step-events-refusal' as const,
 							detail:
-								'run has prior generator step-attempt events; run dbsp recover instead',
+								'run has prior generator step-attempt events; run dbsp reconcile --db <database> <run-id>',
 						};
 					return executeGeneratorPlan({
 						pool: owned,

@@ -3337,7 +3337,7 @@ describe('createApplier', () => {
 		expect(release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
-	it('reports transport ambiguity and compromises the client when recovery rollback fails', async () => {
+	it('keeps the recovery claim and compromises the client when recovery rollback fails', async () => {
 		const release = vi.fn();
 		const rt: OperationRuntime = {
 			...runtime(() => undefined, {
@@ -3364,9 +3364,10 @@ describe('createApplier', () => {
 		);
 
 		expect(result.unresolvedOutcome).toEqual({
-			kind: 'transport-ambiguous',
+			kind: 'recovery-required',
+			claimId: 'open-claim',
 			detail:
-				'rollback failed after recovery-required: rollback connection lost',
+				'runtime could not determine terminal state; rollback failed after recovery-required: rollback connection lost',
 		});
 		expect(release).toHaveBeenCalledWith(expect.any(Error));
 	});

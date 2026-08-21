@@ -183,7 +183,15 @@ export async function withPgTransitionRunLock<T>(
 	let callbackLive = false;
 	let planOperationViolatedInvariant = false;
 	let leaseReleaseFailure: Error | undefined;
+	const refuseAfterLeaseReleaseFailure = () => {
+		if (!leaseReleaseFailure) return;
+		throw new Error(
+			`PostgreSQL transition session is compromised after a lease release failure: ${leaseReleaseFailure.message}`,
+			{ cause: leaseReleaseFailure },
+		);
+	};
 	const query = async (sql: string, params?: unknown) => {
+		refuseAfterLeaseReleaseFailure();
 		try {
 			return (await client.query(sql, params as never)) as {
 				readonly rows: readonly Record<string, unknown>[];
@@ -203,60 +211,59 @@ export async function withPgTransitionRunLock<T>(
 		if (result.rows[0]?.locked !== true) return { kind: 'busy' };
 		locked = true;
 		const invariants = await captureDurablePlanOperationInvariants(client, key);
-		const lessor = createTransitionLessor(
-			async () =>
-				({
-					// This channel is adapter-owned infrastructure: execution-contract
-					// setup, authorization, journals, and lock cleanup are not plan SQL.
-					query: (sql: string, params?: unknown) => query(sql, params),
-					// Core only selects this channel for executeOperation().  Guarding
-					// the origin rather than parsing SQL means every spelling reaches the
-					// same invariant check, while our own SET/SHOW contract clauses do not.
-					queryPlanOperation: async (sql: string, params?: unknown) => {
-						try {
-							await assertDurablePlanOperationInvariants(
-								client,
-								key,
-								invariants,
-							);
-						} catch (error) {
-							// A failed check at either boundary makes this session unsafe to
-							// pool, even if the final unlock happens to succeed.
-							planOperationViolatedInvariant = true;
-							throw error;
-						}
-						let result:
-							| {
-									readonly rows: readonly Record<string, unknown>[];
-							  }
-							| undefined;
-						let queryFailure: unknown;
-						try {
-							result = await classifyPgWrite(() => query(sql, params));
-						} catch (error) {
-							queryFailure = error;
-						}
-						try {
-							await assertDurablePlanOperationInvariants(
-								client,
-								key,
-								invariants,
-							);
-						} catch (error) {
-							planOperationViolatedInvariant = true;
-							throw error;
-						}
-						if (queryFailure) throw queryFailure;
-						return result as {
-							readonly rows: readonly Record<string, unknown>[];
-						};
-					},
-					// Segment cleanup must not give back the session that owns the run lock.
-					release: (error?: unknown) => {
-						if (error) leaseReleaseFailure = asError(error);
-					},
-				}) as TransitionQueryClient,
-		);
+		const lessor = createTransitionLessor(async () => {
+			refuseAfterLeaseReleaseFailure();
+			return {
+				// This channel is adapter-owned infrastructure: execution-contract
+				// setup, authorization, journals, and lock cleanup are not plan SQL.
+				query: (sql: string, params?: unknown) => query(sql, params),
+				// Core only selects this channel for executeOperation().  Guarding
+				// the origin rather than parsing SQL means every spelling reaches the
+				// same invariant check, while our own SET/SHOW contract clauses do not.
+				queryPlanOperation: async (sql: string, params?: unknown) => {
+					refuseAfterLeaseReleaseFailure();
+					try {
+						await assertDurablePlanOperationInvariants(client, key, invariants);
+					} catch (error) {
+						// A failed check at either boundary makes this session unsafe to
+						// pool, even if the final unlock happens to succeed.
+						planOperationViolatedInvariant = true;
+						throw error;
+					}
+					let result:
+						| {
+								readonly rows: readonly Record<string, unknown>[];
+						  }
+						| undefined;
+					let queryFailure: unknown;
+					try {
+						result = await classifyPgWrite(() => query(sql, params));
+					} catch (error) {
+						queryFailure = error;
+					}
+					try {
+						await assertDurablePlanOperationInvariants(client, key, invariants);
+					} catch (error) {
+						planOperationViolatedInvariant = true;
+						throw error;
+					}
+					if (queryFailure) throw queryFailure;
+					return result as {
+						readonly rows: readonly Record<string, unknown>[];
+					};
+				},
+				// Segment cleanup must not give back the session that owns the run lock.
+				release: (error?: unknown) => {
+					if (error)
+						leaseReleaseFailure =
+							error instanceof Error
+								? error
+								: new Error('transition lease reported a non-Error failure', {
+										cause: error,
+									});
+				},
+			} as TransitionQueryClient;
+		});
 		callbackLive = true;
 		const target = createExclusiveTransitionTarget(lessor, () => callbackLive);
 		value = await callback(target);
