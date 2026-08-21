@@ -18,10 +18,13 @@ export {
 } from './destructive-classification.js';
 export {
 	assertGeneratedPostconditionSession,
+	decodeColumnPostcondition,
+	decodeGeneratedPostcondition,
 	type GeneratedPostconditionSession,
 	type GeneratedPostconditionTarget,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 export {

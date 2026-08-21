@@ -48,6 +48,8 @@ export {
 	compareSchemata,
 	createPgsqlGeneratedManagedStep,
 	type DiffSummary,
+	decodeColumnPostcondition,
+	decodeGeneratedPostcondition,
 	ExpressionCanonicalizationUnavailableError,
 	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
 	type GenerateDDLOptions,
@@ -78,6 +80,7 @@ export {
 	type SchemaDiff,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from './ddl/index.js';
 // EXPLAIN support
