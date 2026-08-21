@@ -15,5 +15,20 @@ export default defineConfig({
 	test: {
 		include: ['src/**/*.test.ts'],
 		globals: true,
+		projects: [
+			{
+				extends: true,
+				test: {
+					include: ['src/repl/**/*.test.ts'],
+					testTimeout: 30_000,
+				},
+			},
+			{
+				extends: true,
+				test: {
+					exclude: ['src/repl/**/*.test.ts'],
+				},
+			},
+		],
 	},
 });

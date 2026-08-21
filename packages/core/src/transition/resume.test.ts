@@ -685,7 +685,13 @@ describe('resumeTransitionRun', () => {
 			acquire: vi.fn(async () => ({ query: vi.fn() })),
 		};
 		Object.defineProperty(target, Symbol.for('dbsp.transition.lessor'), {
-			value: { protocolVersion: 1 },
+			value: Object.freeze({
+				protocolVersion: 2,
+				revocation: Object.freeze({
+					compromise: () => undefined,
+					isCompromised: () => false,
+				}),
+			}),
 		});
 
 		const result = await resumeWith(
