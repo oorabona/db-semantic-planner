@@ -645,10 +645,13 @@ async function processScope(
 					marker: current.marker,
 				};
 			}
-			// A lineage mismatch is not a malformed current ledger.  Preserve the
-			// old structures before applying current-ledger admission checks to the
-			// fresh structures; those checks would otherwise route the mismatch to a
-			// refusal before it can take the mandated archive path.
+			// A lineage mismatch remains a current ledger only after the same
+			// physical-shape and ownership admission checks as the unchanged path.
+			// Otherwise a counterfeit would be renamed into the archive.
+			failureStep = 'create';
+			await validatePgLedgerPhysicalShape(client, current.home);
+			failureStep = 'ownership-grants';
+			await validateOwnershipAndGrants(client, current.home);
 			failureStep = 'archive';
 			await archiveMismatchedLedger(client, current.home);
 			await checkpoint(observer, 'archive', current.home);

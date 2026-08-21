@@ -524,15 +524,19 @@ export async function readGeneratedPostcondition(
 			);
 		const row = (
 			await executor.query(
-				`SELECT index_relation.relname AS index_name, index_meta.indisunique AS is_unique, pg_catalog.pg_get_indexdef(index_meta.indexrelid, 0, true) AS index_definition FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
+				`SELECT index_relation.relname AS index_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, pg_catalog.pg_get_indexdef(index_meta.indexrelid, 0, true) AS index_definition FROM pg_catalog.pg_index index_meta JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
 				[address.schema, parent, address.name],
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated index ${address.name} is absent`);
 		const definition = String(row.index_definition ?? '');
+		// PostgreSQL can use an index only when all three usability flags are true.
 		if (
+			row.is_valid !== true ||
+			row.is_ready !== true ||
+			row.is_live !== true ||
 			normalizedDefinition(definition) !==
-			normalizedDefinition(postcondition.definition)
+				normalizedDefinition(postcondition.definition)
 		)
 			throw new Error(`generated index ${address.name} postcondition differs`);
 		return generatedPayload({

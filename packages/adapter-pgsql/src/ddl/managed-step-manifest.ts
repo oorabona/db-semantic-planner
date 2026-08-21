@@ -142,15 +142,108 @@ function requiredList(value: unknown, label: string): readonly string[] {
 	return value as readonly string[];
 }
 
+function requiredColumnList(value: unknown, label: string): readonly string[] {
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
+	)
+		throw new Error(
+			`generator planning refuses ${label}: missing typed columns`,
+		);
+	return value as readonly string[];
+}
+
+type ValidateConstraintTarget =
+	| {
+			readonly kind: 'check';
+			readonly check: Readonly<Record<string, unknown>>;
+	  }
+	| {
+			readonly kind: 'foreign-key';
+			readonly fk: Readonly<Record<string, unknown>>;
+			readonly references: Readonly<Record<string, unknown>>;
+	  };
+
+/**
+ * `validate_constraint` has exactly one branch discriminator. A defined
+ * `check` is always a check declaration (and must therefore be a record);
+ * only an absent `check` selects the foreign-key declaration and its keys.
+ */
+function validateConstraintTarget(
+	change: SchemaChange,
+): ValidateConstraintTarget {
+	const meta = change.meta;
+	if (meta?.check !== undefined)
+		return {
+			kind: 'check',
+			check: requiredRecord(meta.check, change.kind),
+		};
+	const fk = requiredRecord(meta?.fk, change.kind);
+	const references = requiredRecord(fk.references, change.kind);
+	requiredColumnList(fk.columns, `${change.kind} columns`);
+	requiredColumnList(references.columns, `${change.kind} references.columns`);
+	return { kind: 'foreign-key', fk, references };
+}
+
+/**
+ * Reject malformed key-column lists before any change-specific consumer can
+ * derive an address, name, or postcondition from them.
+ */
+function validateChangeKeyLists(change: SchemaChange): void {
+	const meta = change.meta;
+	const foreignKey = () => {
+		const fk = requiredRecord(meta?.fk, change.kind);
+		const references = requiredRecord(fk.references, change.kind);
+		requiredColumnList(fk.columns, `${change.kind} columns`);
+		requiredColumnList(references.columns, `${change.kind} references.columns`);
+	};
+	switch (change.kind) {
+		case 'create_table':
+		case 'readdress_table': {
+			const table = meta?.table;
+			if (!table || typeof table !== 'object' || Array.isArray(table)) return;
+			const primaryKey = (table as Record<string, unknown>).primaryKey;
+			if (primaryKey === undefined) return;
+			requiredColumnList(
+				typeof primaryKey === 'string' ? [primaryKey] : primaryKey,
+				`${change.kind} table.primaryKey`,
+			);
+			return;
+		}
+		case 'add_primary_key':
+		case 'drop_primary_key':
+			requiredColumnList(meta?.columns, `${change.kind} columns`);
+			return;
+		case 'add_foreign_key':
+		case 'drop_foreign_key':
+		case 'alter_foreign_key':
+			foreignKey();
+			return;
+		case 'validate_constraint':
+			validateConstraintTarget(change);
+			return;
+		default:
+			return;
+	}
+}
+
 function constraintPostcondition(
 	change: SchemaChange,
 ): GeneratedConstraintPostcondition {
 	const meta = change.meta;
 	if (change.kind === 'add_primary_key')
-		return { type: 'p', columns: requiredList(meta?.columns, change.kind) };
+		return {
+			type: 'p',
+			columns: requiredColumnList(meta?.columns, `${change.kind} columns`),
+		};
 	if (change.kind === 'alter_column_unique')
 		return { type: 'u', columns: [text(change.column, change.kind)] };
-	const check = meta?.check;
+	const target =
+		change.kind === 'validate_constraint'
+			? validateConstraintTarget(change)
+			: undefined;
+	const check = target?.kind === 'check' ? target.check : meta?.check;
 	if (check !== undefined) {
 		const value = requiredRecord(check, change.kind);
 		const expression = text(value.expression, change.kind);
@@ -167,17 +260,26 @@ function constraintPostcondition(
 			notValid: state.notValid,
 		};
 	}
-	const fk = requiredRecord(meta?.fk, change.kind);
-	const references = requiredRecord(fk.references, change.kind);
+	const fk =
+		target?.kind === 'foreign-key'
+			? target.fk
+			: requiredRecord(meta?.fk, change.kind);
+	const references =
+		target?.kind === 'foreign-key'
+			? target.references
+			: requiredRecord(fk.references, change.kind);
 	return {
 		type: 'f',
-		columns: requiredList(fk.columns, change.kind),
+		columns: requiredColumnList(fk.columns, `${change.kind} columns`),
 		references: {
 			...(typeof references.schema === 'string'
 				? { schema: references.schema }
 				: {}),
 			table: text(references.table, change.kind),
-			columns: requiredList(references.columns, change.kind),
+			columns: requiredColumnList(
+				references.columns,
+				`${change.kind} references.columns`,
+			),
 		},
 		onDelete: typeof fk.onDelete === 'string' ? fk.onDelete : 'NO ACTION',
 		onUpdate: typeof fk.onUpdate === 'string' ? fk.onUpdate : 'NO ACTION',
@@ -196,6 +298,7 @@ export function generatedPostconditionForChange(input: {
 	readonly schema: string;
 }): import('@dbsp/types').LedgerPayload | undefined {
 	const { change, schema } = input;
+	validateChangeKeyLists(change);
 	if (change.kind === 'create_table' || change.kind === 'readdress_table') {
 		const table = change.meta?.table;
 		if (!table || typeof table !== 'object' || Array.isArray(table))
@@ -435,7 +538,7 @@ function stringList(value: unknown, label: string): readonly string[] {
 	if (
 		!Array.isArray(value) ||
 		value.length === 0 ||
-		value.some((item) => typeof item !== 'string' || item.length === 0)
+		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
 	)
 		throw new Error(
 			`generator planning refuses ${label}: missing typed columns`,
@@ -493,7 +596,7 @@ function childAddress(
 	};
 }
 
-function addressForChange(input: {
+export function addressForChange(input: {
 	readonly change: SchemaChange;
 	readonly database: string;
 	readonly schema: string;
@@ -510,13 +613,8 @@ function addressForChange(input: {
 		);
 	const constraint = (name: string) =>
 		childAddress(database, schema, 'constraint', name, change.table);
-	const fkName = () => {
-		const fk = meta?.fk;
-		if (!fk || typeof fk !== 'object' || Array.isArray(fk))
-			throw new Error(
-				`generator planning refuses ${change.kind}: missing typed foreign key`,
-			);
-		return `fk_${change.table}_${stringList((fk as Record<string, unknown>).columns, change.kind).join('_')}`;
+	const fkName = (fk: Readonly<Record<string, unknown>>) => {
+		return `fk_${change.table}_${stringList(fk.columns, `${change.kind} columns`).join('_')}`;
 	};
 	switch (change.kind) {
 		case 'create_table':
@@ -547,10 +645,15 @@ function addressForChange(input: {
 		case 'add_foreign_key':
 		case 'drop_foreign_key':
 		case 'alter_foreign_key':
-		case 'validate_constraint':
+			return constraint(fkName(requiredRecord(meta?.fk, change.kind)));
+		case 'validate_constraint': {
+			const target = validateConstraintTarget(change);
 			return constraint(
-				meta?.check ? nestedName(meta, 'check', change.kind) : fkName(),
+				target.kind === 'check'
+					? text(target.check.name, change.kind)
+					: fkName(target.fk),
 			);
+		}
 		case 'create_index':
 		case 'drop_index': {
 			const index = meta?.index;
@@ -644,6 +747,7 @@ export function createPgsqlGeneratedManagedStep(input: {
 	readonly dependencyOrder?: readonly string[];
 	readonly statements: readonly string[];
 }): NormalizedManagedStep {
+	validateChangeKeyLists(input.change);
 	assertDeclarableChangeKind(input.change.kind);
 	const address = addressForChange(input);
 	if (input.statements.length === 0 && input.change.kind !== 'readdress_table')

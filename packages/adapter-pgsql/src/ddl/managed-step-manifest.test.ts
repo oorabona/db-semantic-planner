@@ -1,6 +1,7 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	addressForChange,
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
 	generatedPostconditionForChange,
@@ -150,6 +151,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	it.each([
 		{ columns: [] },
 		{ columns: [''] },
+		{ columns: ['   '] },
 	])('E01 refuses an empty generated column list: %j', ({ columns }) => {
 		expect(() =>
 			createPgsqlGeneratedManagedStep({
@@ -167,6 +169,216 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				statements: ['CREATE INDEX ignored ON orders (id)'],
 			}),
 		).toThrow('generator planning refuses create_index: missing typed columns');
+	});
+
+	const keyListValidationCases = [
+		{
+			kind: 'create_table',
+			keyList: 'current primary key',
+			change: (columns: readonly string[]) => ({
+				kind: 'create_table' as const,
+				table: 'orders',
+				destructive: false,
+				details: 'create table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: columns,
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			}),
+		},
+		{
+			kind: 'readdress_table',
+			keyList: 'current primary key',
+			change: (columns: readonly string[]) => ({
+				kind: 'readdress_table' as const,
+				table: 'orders',
+				destructive: false,
+				details: 'readdress table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: columns,
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			}),
+		},
+		...(['add_primary_key', 'drop_primary_key'] as const).map((kind) => ({
+			kind,
+			keyList: 'primary key',
+			change: (columns: readonly string[]) => ({
+				kind,
+				table: 'orders',
+				destructive: kind === 'drop_primary_key',
+				details: `${kind} primary key`,
+				meta: { columns },
+			}),
+		})),
+		...(
+			[
+				'add_foreign_key',
+				'drop_foreign_key',
+				'alter_foreign_key',
+				'validate_constraint',
+			] as const
+		).flatMap((kind) => [
+			{
+				kind,
+				keyList: 'foreign-key local columns',
+				change: (columns: readonly string[]) => ({
+					kind,
+					table: 'orders',
+					destructive: kind === 'drop_foreign_key',
+					details: `${kind} foreign key`,
+					meta: {
+						fk: {
+							columns,
+							references: { table: 'accounts', columns: ['id'] },
+						},
+					},
+				}),
+			},
+			{
+				kind,
+				keyList: 'foreign-key referenced columns',
+				change: (columns: readonly string[]) => ({
+					kind,
+					table: 'orders',
+					destructive: kind === 'drop_foreign_key',
+					details: `${kind} foreign key`,
+					meta: {
+						fk: {
+							columns: ['account_id'],
+							references: { table: 'accounts', columns },
+						},
+					},
+				}),
+			},
+		]),
+	] as const;
+
+	it.each(
+		keyListValidationCases,
+	)('E02 refuses an unusable $keyList for $kind at the builder boundary', ({
+		change,
+	}) => {
+		for (const columns of [[], ['   ']] as const) {
+			expect(() =>
+				createPgsqlGeneratedManagedStep({
+					change: change(columns),
+					database: 'app',
+					schema: 'public',
+					stepKey: 'generator:key-list-validation',
+					order: 0,
+					statements: ['SELECT 1'],
+				}),
+			).toThrow('missing typed columns');
+		}
+	});
+
+	it.each(
+		keyListValidationCases,
+	)('E03 refuses an unusable $keyList from the exported postcondition constructor', ({
+		change,
+	}) => {
+		for (const columns of [[], ['   ']] as const) {
+			expect(() =>
+				generatedPostconditionForChange({
+					change: change(columns),
+					schema: 'public',
+				}),
+			).toThrow('missing typed columns');
+		}
+	});
+
+	it('keeps scalar primary keys as valid normalized key material', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_table',
+					table: 'orders',
+					destructive: false,
+					details: 'create table with scalar primary key',
+					meta: {
+						table: {
+							name: 'orders',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toMatchObject({ kind: 'table' });
+	});
+
+	it('refuses a null CHECK before it can derive a foreign-key address', () => {
+		const change = {
+			kind: 'validate_constraint' as const,
+			table: 'orders',
+			destructive: false,
+			details: 'validate malformed check',
+			meta: {
+				check: null,
+				fk: {
+					columns: ['account_id'],
+					references: { table: 'accounts', columns: [] },
+				},
+			},
+		};
+		expect(() =>
+			addressForChange({
+				change,
+				database: 'app',
+				schema: 'public',
+			}),
+		).toThrow(
+			'generator planning refuses validate_constraint: missing typed declaration',
+		);
+		expect(() =>
+			generatedPostconditionForChange({ change, schema: 'public' }),
+		).toThrow(
+			'generator planning refuses validate_constraint: missing typed declaration',
+		);
+	});
+
+	it('preserves enum labels and valid key column lists', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: 'empty enum labels remain a typed list',
+					meta: { enum: { name: 'order_state', values: [] } },
+				},
+				schema: 'public',
+			})?.value,
+		).toEqual({ kind: 'enum', labels: [] });
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_primary_key',
+					table: 'orders',
+					destructive: false,
+					details: 'valid key list',
+					meta: { columns: ['account_id'] },
+				},
+				schema: 'public',
+			})?.value,
+		).toEqual({
+			kind: 'constraint',
+			constraint: { type: 'p', columns: ['account_id'] },
+		});
 	});
 
 	it.each([
