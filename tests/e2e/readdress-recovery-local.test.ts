@@ -734,7 +734,7 @@ describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
 			}),
 		).toEqual({
 			outcome: 'readdress-refused',
-			detail: 'source chainless_source has no re-address chain',
+			detail: 'source chainless_source has no complete re-address chain',
 		});
 		const retiredMembers = await createManagedTable(
 			schema,

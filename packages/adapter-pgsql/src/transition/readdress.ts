@@ -16,15 +16,29 @@ import type {
 	TableReaddressDeclaration,
 } from '@dbsp/types';
 import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
+import {
+	decodeGeneratedPostcondition,
+	type GeneratedPostconditionSession,
+	type GeneratedPostconditionTarget,
+	mintGeneratedPostconditionSession,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
+} from '../ddl/generated-postcondition-verifier.js';
 import { validateIdentifier } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
+import { acquirePgLedgerLocks } from './ledger.js';
+import { renderPgLockIdentifier } from './lock-identifier.js';
 import {
 	executePgAdmittedOperation,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
+	type PgPairedReaddressOperation,
 	recoverPgAdmittedReaddressPair,
+	setPgTransitionLockTimeout,
+	withPgTransitionTransaction,
 } from './outcome-protocol.js';
 
 export type ReaddressRecoveryAnswer =
@@ -184,11 +198,25 @@ function digest(value: LedgerPayload['value']): string {
 	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function rekeyDeclaration(
+function isVersion2Postcondition(value: unknown): boolean {
+	return (
+		value !== null &&
+		typeof value === 'object' &&
+		!Array.isArray(value) &&
+		(value as { readonly postconditionVersion?: unknown })
+			.postconditionVersion === 2
+	);
+}
+
+export function rekeyDeclaration(
 	declaration: LedgerPayload | undefined,
 	target: LedgerAddress,
 ): LedgerPayload {
 	const previous = declaration?.value;
+	// Version-2 postconditions describe a catalogue shape, not its address.
+	// Preserve the covered value and digest literally: the strict decoder rejects
+	// an address field and later readdress proof consumes this exact payload.
+	if (declaration && isVersion2Postcondition(previous)) return declaration;
 	const value =
 		previous && typeof previous === 'object' && !Array.isArray(previous)
 			? { ...previous, name: target.name }
@@ -199,6 +227,113 @@ function rekeyDeclaration(
 function observed(address: LedgerAddress): LedgerPayload {
 	const value = { kind: address.kind, name: address.name };
 	return { value, digest: digest(value) };
+}
+
+type GeneratedProof = {
+	readonly kind: string;
+	readonly prove: (
+		session: GeneratedPostconditionSession,
+	) => Promise<LedgerPayload>;
+};
+
+function generatedProofTarget(
+	address: LedgerAddress,
+): GeneratedPostconditionTarget {
+	if (!address.schema)
+		throw new Error(
+			`generated postcondition for ${address.kind} ${address.name} has no schema`,
+		);
+	const table = address.kind === 'table' ? address.name : address.parent?.name;
+	if (!table)
+		throw new Error(
+			`generated postcondition for ${address.kind} ${address.name} has no table parent`,
+		);
+	return { schema: address.schema, table, name: address.name };
+}
+
+/** The decode-and-dispatch definition for root admission, no-op and table proofs. */
+function generatedPostconditionProof(
+	declaration: LedgerPayload | undefined,
+	address: LedgerAddress,
+): GeneratedProof {
+	if (!declaration)
+		throw new Error(
+			`generated postcondition is absent; replan to produce version 2 typed postconditions`,
+		);
+	const postcondition = decodeGeneratedPostcondition(declaration.value);
+	const target = generatedProofTarget(address);
+	const observe = (projection: unknown): LedgerPayload => {
+		// Verifier projections may represent absent catalogue fields as undefined;
+		// ledger JSON uses their canonical serialized form.
+		const value = JSON.parse(
+			JSON.stringify(projection),
+		) as LedgerPayload['value'];
+		return { value, digest: digest(value) };
+	};
+	switch (postcondition.kind) {
+		case 'table':
+			return {
+				kind: postcondition.kind,
+				prove: async (session) =>
+					observe(
+						(
+							await verifyGeneratedTablePostcondition({
+								session,
+								postcondition,
+								target,
+							})
+						).projection,
+					),
+			};
+		case 'index':
+			return {
+				kind: postcondition.kind,
+				prove: async (session) =>
+					observe(
+						(
+							await verifyGeneratedIndexPostcondition({
+								session,
+								postcondition,
+								target,
+							})
+						).projection,
+					),
+			};
+		case 'constraint':
+			return {
+				kind: postcondition.kind,
+				prove: async (session) =>
+					observe(
+						(
+							await verifyGeneratedCheckPostcondition({
+								session,
+								postcondition,
+								target,
+							})
+						).projection,
+					),
+			};
+		default:
+			throw new Error(
+				`generated ${postcondition.kind} postcondition is unsupported; replan to produce version 2 typed postconditions`,
+			);
+	}
+}
+
+/**
+ * The one three-way member rule: decodable v2 tables prove structure; a
+ * declared undecodable payload refuses with replan wording; no declaration,
+ * or a decodable-but-unprovable v2 kind (the #576 address-bearing format),
+ * retains identity read-back with its declared payload.
+ */
+function readdressMemberReadBack(
+	declaration: LedgerPayload | undefined,
+	address: LedgerAddress,
+): GeneratedProof | undefined {
+	if (!declaration) return undefined;
+	const postcondition = decodeGeneratedPostcondition(declaration.value);
+	if (postcondition.kind !== 'table') return undefined;
+	return generatedPostconditionProof(declaration, address);
 }
 
 function endpointAddress(
@@ -330,6 +465,102 @@ export function classifyPgReaddressSupport(request: {
 			detail: `unsupported-kind ${kind}`,
 		};
 	return undefined;
+}
+
+/**
+ * The target-only outcome is still an admission decision. Its early live read
+ * only selects this slower path; every fact that permits the no-op is re-read
+ * while both ledger homes and the target relation are held on one session.
+ */
+async function verifyPgTargetOnlyReaddressNoOp(
+	input: PgPersistedReaddressInput,
+	source: LedgerAddress,
+	target: LedgerAddress,
+): Promise<PgReaddressResult> {
+	try {
+		return await withPgTransitionTransaction(
+			input.executor,
+			async (session) => {
+				await setPgTransitionLockTimeout(session);
+				const lock = await acquirePgLedgerLocks(session, [
+					home(source),
+					home(target),
+				]);
+				if (lock.kind !== 'acquired')
+					return {
+						outcome: 'readdress-refused',
+						detail: `re-address ledger home is unavailable for ${target.name}`,
+					};
+				const sourceChain = await readPgLedgerAddressChain(
+					session,
+					home(source),
+					source,
+				);
+				const targetChain = await readPgLedgerAddressChain(
+					session,
+					home(target),
+					target,
+				);
+				const sourceProjection = projectLedgerChain(sourceChain);
+				const targetProjection = projectLedgerChain(targetChain);
+				const sourceTerminal = sourceChain.terminalMember;
+				const targetTerminal = targetChain.terminalMember;
+				if (
+					sourceProjection.kind !== 'projected-ledger-chain' ||
+					sourceProjection.stableState !== 'unknown' ||
+					sourceProjection.openClaim !== undefined ||
+					sourceTerminal?.eventKind !== 'readdressed-to' ||
+					targetProjection.kind !== 'projected-ledger-chain' ||
+					targetProjection.stableState !== 'managed' ||
+					targetProjection.openClaim !== undefined ||
+					targetTerminal?.eventKind !== 'readdressed-from' ||
+					sourceTerminal.pairId !== targetTerminal.pairId
+				)
+					return {
+						outcome: 'readdress-refused',
+						detail: `source ${source.name} has no complete re-address chain`,
+					};
+				await session.query(
+					`LOCK TABLE ${renderPgLockIdentifier(target.schema)}.${renderPgLockIdentifier(target.name)} IN SHARE UPDATE EXCLUSIVE MODE`,
+				);
+				const targetLive = await readPgCatalogueIdentity(session, target);
+				if (
+					!targetLive?.catalogueIdentity ||
+					!targetTerminal.catalogueIdentity ||
+					!sameIdentity(
+						targetLive.catalogueIdentity,
+						targetTerminal.catalogueIdentity,
+					)
+				)
+					return {
+						outcome: 'readdress-refused',
+						detail: `target identity mismatch for ${target.kind} ${target.name}`,
+					};
+				try {
+					const proof = generatedPostconditionProof(
+						input.step.expectedDeclaration,
+						target,
+					);
+					if (proof.kind !== 'table')
+						throw new Error(
+							`generated ${proof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
+						);
+					await proof.prove(mintGeneratedPostconditionSession(session));
+					return { outcome: 'no-op' };
+				} catch (error) {
+					return {
+						outcome: 'readdress-refused',
+						detail: `target ${target.name} structural proof failed: ${error instanceof Error ? error.message : String(error)}`,
+					};
+				}
+			},
+		);
+	} catch (error) {
+		return {
+			outcome: 'readdress-refused',
+			detail: `target ${target.name} no-op verification failed: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
 }
 
 /**
@@ -508,31 +739,8 @@ export async function executePgPersistedTableReaddress(
 		return { outcome: 'no-op' };
 	const targetLive = await readPgCatalogueIdentity(input.executor, target);
 	const sourceLive = await readPgCatalogueIdentity(input.executor, source);
-	if (!sourceLive && targetLive) {
-		const sourceChain = await readPgLedgerAddressChain(
-			input.executor,
-			home(source),
-			source,
-		);
-		const chain = await readPgLedgerAddressChain(
-			input.executor,
-			home(target),
-			target,
-		);
-		const projection = projectLedgerChain(chain);
-		if (
-			projection.kind === 'projected-ledger-chain' &&
-			projection.stableState === 'managed' &&
-			chain.terminalMember?.eventKind === 'readdressed-from' &&
-			sourceChain.terminalMember?.eventKind === 'readdressed-to' &&
-			sourceChain.terminalMember.pairId === chain.terminalMember.pairId
-		)
-			return { outcome: 'no-op' };
-		return {
-			outcome: 'readdress-refused',
-			detail: `source ${source.name} has no re-address chain`,
-		};
-	}
+	if (!sourceLive && targetLive)
+		return verifyPgTargetOnlyReaddressNoOp(input, source, target);
 	if (!sourceLive)
 		return {
 			outcome: 'readdress-refused',
@@ -561,30 +769,43 @@ export async function executePgPersistedTableReaddress(
 	const pairId = outcomeClaimId(executionId, plannedClaimKey, source);
 	const closureKey = (member: ClosureMember) =>
 		JSON.stringify([member.source, member.target]);
-	const operationMembers = members.map((member) => {
-		const sourceClaimId = sameLedgerAddress(member.source, source)
-			? pairId
-			: claimId(pairId, 'source', member.source);
-		const targetClaimId = claimId(pairId, 'target', member.target);
-		const sourceProjection = projectLedgerChain(member.sourceChain);
-		return {
-			source: member.source,
-			target: member.target,
-			sourceClaimId,
-			targetClaimId,
-			...(sourceProjection.kind === 'projected-ledger-chain' &&
-			sourceProjection.declaration
-				? { sourceDeclared: sourceProjection.declaration }
-				: {}),
-			targetDeclared: rekeyDeclaration(
+	let operationMembers: PgPairedReaddressOperation['request']['members'];
+	try {
+		operationMembers = members.map((member) => {
+			const sourceClaimId = sameLedgerAddress(member.source, source)
+				? pairId
+				: claimId(pairId, 'source', member.source);
+			const targetClaimId = claimId(pairId, 'target', member.target);
+			const sourceProjection = projectLedgerChain(member.sourceChain);
+			const sourceDeclared =
 				sourceProjection.kind === 'projected-ledger-chain'
 					? sourceProjection.declaration
-					: undefined,
+					: undefined;
+			const targetDeclared = rekeyDeclaration(sourceDeclared, member.target);
+			const sourceIsRoot = sameLedgerAddress(member.source, source);
+			const postDdlProof = readdressMemberReadBack(
+				sourceIsRoot ? input.step.expectedDeclaration : sourceDeclared,
 				member.target,
-			),
-			targetObserved: observed(member.target),
+			);
+			return {
+				source: member.source,
+				target: member.target,
+				sourceClaimId,
+				targetClaimId,
+				...(sourceDeclared ? { sourceDeclared } : {}),
+				targetDeclared,
+				targetObserved: observed(member.target),
+				...(postDdlProof === undefined
+					? {}
+					: { postDdlReadBack: postDdlProof.prove }),
+			};
+		});
+	} catch (error) {
+		return {
+			outcome: 'readdress-refused',
+			detail: error instanceof Error ? error.message : String(error),
 		};
-	});
+	}
 	const root = selectPgReaddressClosureRoot(operationMembers, source);
 	if (!root)
 		return {
@@ -715,6 +936,34 @@ export async function executePgPersistedTableReaddress(
 								kind: 'outcome-protocol-refused',
 								reason: `target ${member.target.kind} ${member.target.name} is occupied`,
 							};
+					}
+					if (
+						root.sourceDeclared &&
+						isVersion2Postcondition(root.sourceDeclared.value) &&
+						input.step.expectedDeclaration &&
+						root.sourceDeclared.digest !== input.step.expectedDeclaration.digest
+					)
+						return {
+							kind: 'outcome-protocol-refused',
+							reason: `recorded declaration does not match reviewed step for ${source.name}`,
+						};
+					try {
+						const rootAdmissionProof = generatedPostconditionProof(
+							input.step.expectedDeclaration,
+							source,
+						);
+						if (rootAdmissionProof.kind !== 'table')
+							throw new Error(
+								`generated ${rootAdmissionProof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
+							);
+						await rootAdmissionProof.prove(
+							mintGeneratedPostconditionSession(session),
+						);
+					} catch (error) {
+						return {
+							kind: 'outcome-protocol-refused',
+							reason: `source ${source.name} structural proof failed: ${error instanceof Error ? error.message : String(error)}`,
+						};
 					}
 					return undefined;
 				},

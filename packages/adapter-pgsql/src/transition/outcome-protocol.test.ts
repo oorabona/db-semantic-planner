@@ -18,6 +18,7 @@ import {
 	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
 	PgCommitDeterministicFailureError,
+	readPgPairedReaddressObserved,
 	recoverPgOutcomeClaim,
 	withPgOutcomeSession,
 	withPgTransitionTransaction,
@@ -38,6 +39,24 @@ const address = {
 	kind: 'table',
 	name: 'accounts',
 };
+
+describe('paired re-address observed evidence', () => {
+	it('persists the structural verifier projection instead of address-only observed data', async () => {
+		const projection = {
+			value: { columns: [{ name: 'id', type: 'integer', nullable: false }] },
+			digest: 'projection-digest',
+		};
+		await expect(
+			readPgPairedReaddressObserved({} as never, {
+				targetObserved: {
+					value: { kind: 'table', name: 'orders_archive' },
+					digest: 'address-only-digest',
+				},
+				postDdlReadBack: vi.fn(async () => projection),
+			}),
+		).resolves.toEqual(projection);
+	});
+});
 
 function request(claimId: string): {
 	readonly plan: OutcomeClaimPlan;

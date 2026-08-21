@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 	physicalIntegrity: vi.fn(),
 	postLockEvidence: vi.fn(),
 	project: vi.fn(),
+	readIdentity: vi.fn(),
 }));
 
 vi.mock('@dbsp/core', async (importOriginal) => ({
@@ -32,6 +33,9 @@ vi.mock('./reinitialize-preflight.js', () => ({
 vi.mock('./chain-reader.js', () => ({
 	readPgLedgerAddressChain: mocks.readChain,
 	readPgLedgerControllerOid: mocks.readControllerOid,
+}));
+vi.mock('./catalogue-identity.js', () => ({
+	readPgCatalogueIdentity: mocks.readIdentity,
 }));
 
 import { releasePgManagedAddress } from './release.js';
@@ -70,11 +74,32 @@ function executor(currentUser = 'owner', currentUserOid = '10') {
 	};
 }
 
-function currentManaged(controller = 'owner', controllerOid = '10') {
+function currentManaged(
+	controller = 'owner',
+	controllerOid = '10',
+	managedAddress = address,
+) {
 	mocks.locks.mockResolvedValue({ kind: 'acquired' });
 	mocks.currency.mockResolvedValue({ kind: 'current' });
 	mocks.readChain.mockResolvedValue({
-		terminalMember: { eventId: 'observed', address, controller },
+		terminalMember: {
+			eventId: 'observed',
+			address: managedAddress,
+			controller,
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '42' },
+			},
+		},
+	});
+	mocks.readIdentity.mockResolvedValue({
+		...managedAddress,
+		catalogueIdentity: {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '42' },
+		},
 	});
 	mocks.readControllerOid.mockResolvedValue(controllerOid);
 	mocks.project.mockReturnValue({
@@ -85,7 +110,7 @@ function currentManaged(controller = 'owner', controllerOid = '10') {
 
 describe('PostgreSQL release admission', () => {
 	beforeEach(() => {
-		vi.clearAllMocks();
+		vi.resetAllMocks();
 		mocks.postLockEvidence.mockResolvedValue({});
 	});
 
@@ -171,7 +196,9 @@ describe('PostgreSQL release admission', () => {
 	});
 
 	it('refuses post-lock physical-shape evidence failure before reading or appending', async () => {
-		mocks.locks.mockResolvedValue({ kind: 'acquired', proof: {} });
+		currentManaged();
+		const proof = {};
+		mocks.locks.mockResolvedValue({ kind: 'acquired', proof });
 		mocks.postLockEvidence.mockRejectedValue(new Error('counterfeit ledger'));
 		await expect(
 			releasePgManagedAddress({
@@ -183,7 +210,11 @@ describe('PostgreSQL release admission', () => {
 			outcome: 'release-refused',
 			refusal: expect.objectContaining({ code: 'ERR-06' }),
 		});
-		expect(mocks.readChain).not.toHaveBeenCalled();
+		expect(mocks.postLockEvidence).toHaveBeenCalledWith(
+			expect.anything(),
+			proof,
+		);
+		expect(mocks.readChain).toHaveBeenCalledTimes(1);
 		expect(mocks.appendRelease).not.toHaveBeenCalled();
 	});
 
@@ -220,16 +251,8 @@ describe('PostgreSQL release admission', () => {
 
 	it('appends exactly the released terminal shape atomically on success', async () => {
 		const proof = {};
+		currentManaged();
 		mocks.locks.mockResolvedValue({ kind: 'acquired', proof });
-		mocks.currency.mockResolvedValue({ kind: 'current' });
-		mocks.readChain.mockResolvedValue({
-			terminalMember: { eventId: 'observed', address, controller: 'owner' },
-		});
-		mocks.readControllerOid.mockResolvedValue('10');
-		mocks.project.mockReturnValue({
-			kind: 'projected-ledger-chain',
-			stableState: 'managed',
-		});
 		const client = executor();
 		await expect(
 			releasePgManagedAddress({
@@ -248,12 +271,183 @@ describe('PostgreSQL release admission', () => {
 				predecessor: 'observed',
 			}),
 		);
-		expect(client.query.mock.calls.map(([sql]) => sql)).toEqual([
-			"SELECT pg_catalog.pg_is_in_recovery() AS in_recovery, current_setting('default_transaction_read_only') AS default_transaction_read_only, current_setting('transaction_read_only') AS transaction_read_only",
-			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
-			'BEGIN',
-			'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid',
-			'COMMIT',
-		]);
+		expect(client.query).toHaveBeenCalledWith(
+			'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		expect(client.query).toHaveBeenCalledWith(
+			"SET LOCAL lock_timeout = '5000ms'",
+		);
+	});
+
+	it.each([
+		['Unicode', 'café', '"café"'],
+		['spaces', 'order items', '"order items"'],
+		['embedded double quotes', 'order"items', '"order""items"'],
+		['hyphens', 'order-items', '"order-items"'],
+	] as const)('locks an adopted relation name with %s', async (_label, name, rendered) => {
+		const adopted = { ...address, name };
+		currentManaged('owner', '10', adopted);
+		const client = executor();
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address: adopted,
+			}),
+		).resolves.toEqual({ outcome: 'released' });
+		expect(client.query).toHaveBeenCalledWith(
+			`LOCK TABLE "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
+		);
+	});
+
+	it('refuses a NUL-bearing adopted relation name before its lock query', async () => {
+		const adopted = { ...address, name: 'order\0items' };
+		currentManaged('owner', '10', adopted);
+		const client = executor();
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address: adopted,
+			}),
+		).resolves.toEqual({
+			outcome: 'release-unavailable',
+			address: adopted,
+			detail: 'PostgreSQL lock identifier must not contain NUL',
+		});
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+		expect(client.query).not.toHaveBeenCalledWith(
+			expect.stringContaining('LOCK TABLE'),
+		);
+	});
+
+	it.each([
+		'permission denied for relation accounts',
+		'canceling statement due to lock timeout',
+	])('surfaces a relation lock failure truthfully: %s', async (message) => {
+		currentManaged();
+		const client = executor();
+		client.query.mockImplementation(async (sql: string) => {
+			if (sql.startsWith('SELECT pg_catalog.pg_is_in_recovery()'))
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'off',
+							transaction_read_only: 'off',
+						},
+					],
+				};
+			if (
+				sql ===
+				'SELECT current_user AS current_user, current_user::regrole::oid::text AS current_user_oid'
+			)
+				return { rows: [{ current_user: 'owner', current_user_oid: '10' }] };
+			if (sql.startsWith('LOCK TABLE')) throw new Error(message);
+			return { rows: [] };
+		});
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toEqual({
+			outcome: 'release-unavailable',
+			address,
+			detail: message,
+		});
+		expect(client.query).toHaveBeenCalledWith(
+			"SET LOCAL lock_timeout = '5000ms'",
+		);
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		'column',
+		'policy',
+	] as const)('locks the parent table for a %s release using the child schema', async (kind) => {
+		const child = {
+			...address,
+			kind,
+			name: kind === 'column' ? 'status' : 'accounts_policy',
+			parent: { ...address, schema: 'stale_parent_schema' },
+		};
+		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		currentManaged('owner', '10', child as never);
+		const client = executor();
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address: child as never,
+			}),
+		).resolves.toEqual({ outcome: 'released' });
+		expect(client.query).toHaveBeenCalledWith(
+			'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		const relationLockOrder = client.query.mock.invocationCallOrder.find(
+			(_order, index) =>
+				client.query.mock.calls[index]?.[0] ===
+				'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		expect(mocks.readIdentity.mock.invocationCallOrder[0]).toBeLessThan(
+			relationLockOrder!,
+		);
+		expect(relationLockOrder).toBeLessThan(
+			mocks.readIdentity.mock.invocationCallOrder[1]!,
+		);
+		expect(warning).toHaveBeenCalledWith(
+			expect.stringContaining('ignores mismatched parent schema'),
+		);
+		warning.mockRestore();
+	});
+
+	it.each([
+		['absent', undefined, 'ERR-05'],
+		[
+			'identity mismatch',
+			{
+				...address,
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '99' },
+				},
+			},
+			'ERR-05',
+		],
+	] as const)('refuses a live %s before appending release', async (_label, live, code) => {
+		currentManaged();
+		mocks.readIdentity.mockResolvedValue(live);
+		await expect(
+			releasePgManagedAddress({
+				executor: executor(),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			refusal: expect.objectContaining({ code, state: 'managed' }),
+		});
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+	});
+
+	it('refuses a managed terminal without a recorded identity', async () => {
+		currentManaged();
+		mocks.readChain.mockResolvedValue({
+			terminalMember: { eventId: 'observed', address, controller: 'owner' },
+		});
+		await expect(
+			releasePgManagedAddress({
+				executor: executor(),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			refusal: expect.objectContaining({ code: 'ERR-05', state: 'managed' }),
+		});
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
 	});
 });
