@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
+	assertGeneratedPostconditionSession,
 	compareSchemata,
 	createPgsqlAdapter,
 	dbTypesEqual,
@@ -9,6 +10,7 @@ import {
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
 	type GeneratedPostcondition,
+	type GeneratedPostconditionSession,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
 	preflightPgDeclaredAdoption,
@@ -16,6 +18,7 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
+	validateIdentifier,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
 } from '@dbsp/adapter-pgsql';
@@ -297,6 +300,331 @@ function foreignKeyAction(code: unknown): string | undefined {
 	}
 }
 
+function strictBoolean(value: unknown, label: string): boolean {
+	if (typeof value !== 'boolean')
+		throw new Error(
+			`generated constraint ${label} has an incomplete projection`,
+		);
+	return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasExactKeys(
+	value: Record<string, unknown>,
+	keys: readonly string[],
+): boolean {
+	const expected = new Set(keys);
+	return Object.keys(value).every((key) => expected.has(key));
+}
+
+function replanPostcondition(message: string): never {
+	throw new Error(
+		`${message}; replan to produce version 2 typed postconditions`,
+	);
+}
+
+function strictString(value: unknown, message: string): string {
+	if (typeof value !== 'string') replanPostcondition(message);
+	return value;
+}
+
+function strictBooleanValue(value: unknown, message: string): boolean {
+	if (typeof value !== 'boolean') replanPostcondition(message);
+	return value;
+}
+
+function strictStringArray(value: unknown, message: string): readonly string[] {
+	if (!Array.isArray(value)) replanPostcondition(message);
+	const result = Array.from(value);
+	if (result.some((item) => typeof item !== 'string'))
+		replanPostcondition(message);
+	return result as readonly string[];
+}
+
+function strictArray(value: unknown, message: string): readonly unknown[] {
+	if (!Array.isArray(value)) replanPostcondition(message);
+	return Array.from(value);
+}
+
+function strictStringMap(
+	value: unknown,
+	message: string,
+): Readonly<Record<string, string>> {
+	if (
+		!isPlainRecord(value) ||
+		Object.values(value).some((item) => typeof item !== 'string')
+	)
+		replanPostcondition(message);
+	return value as Readonly<Record<string, string>>;
+}
+
+function checkedIdentifier(
+	value: unknown,
+	type: 'table' | 'column' | 'schema' | 'alias',
+	message: string,
+): string {
+	const identifier = strictString(value, message);
+	try {
+		validateIdentifier(identifier, type);
+	} catch {
+		replanPostcondition(message);
+	}
+	return identifier;
+}
+
+function decodeColumnPostcondition(value: unknown): void {
+	if (
+		!isPlainRecord(value) ||
+		!hasExactKeys(value, [
+			'name',
+			'type',
+			'nullable',
+			'hasDefault',
+			'default',
+			'collation',
+			'identity',
+		])
+	)
+		replanPostcondition('generated column postcondition is unsupported');
+	checkedIdentifier(
+		value.name,
+		'column',
+		'generated column postcondition is unsupported',
+	);
+	if (value.type !== undefined)
+		strictString(value.type, 'generated column postcondition is unsupported');
+	if (value.nullable !== undefined)
+		strictBooleanValue(
+			value.nullable,
+			'generated column postcondition is unsupported',
+		);
+	if (value.hasDefault !== undefined)
+		strictBooleanValue(
+			value.hasDefault,
+			'generated column postcondition is unsupported',
+		);
+	if (value.default !== undefined)
+		strictString(
+			value.default,
+			'generated column postcondition is unsupported',
+		);
+	if (value.collation !== undefined && value.collation !== null)
+		strictString(
+			value.collation,
+			'generated column postcondition is unsupported',
+		);
+	if (
+		value.identity !== undefined &&
+		value.identity !== null &&
+		value.identity !== 'always' &&
+		value.identity !== 'byDefault'
+	)
+		replanPostcondition('generated column postcondition is unsupported');
+}
+
+/**
+ * The mock catalogue rows below are shape coverage only. The real PostgreSQL
+ * 10/11/14/18 matrix is owned by the orchestrator, not these unit-test names.
+ */
+function decodeGeneratedPostcondition(value: unknown): GeneratedPostcondition {
+	if (
+		!isPlainRecord(value) ||
+		value.postconditionVersion !== 2 ||
+		typeof value.kind !== 'string'
+	)
+		replanPostcondition('generated postcondition format is unsupported');
+	const unsupported = 'generated postcondition is unsupported';
+	switch (value.kind) {
+		case 'table':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind', 'columns']))
+				replanPostcondition(unsupported);
+			for (const column of strictArray(value.columns, unsupported))
+				decodeColumnPostcondition(column);
+			return value as GeneratedPostcondition;
+		case 'column':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind', 'column']))
+				replanPostcondition(unsupported);
+			decodeColumnPostcondition(value.column);
+			return value as GeneratedPostcondition;
+		case 'constraint': {
+			if (
+				!hasExactKeys(value, ['postconditionVersion', 'kind', 'constraint']) ||
+				!isPlainRecord(value.constraint)
+			)
+				replanPostcondition(unsupported);
+			const constraint = value.constraint;
+			if (constraint.type === 'c') {
+				if (!hasExactKeys(constraint, ['type', 'expression', 'notValid']))
+					replanPostcondition(unsupported);
+				strictString(constraint.expression, unsupported);
+				strictBooleanValue(constraint.notValid, unsupported);
+			} else if (constraint.type === 'p' || constraint.type === 'u') {
+				if (
+					!hasExactKeys(constraint, [
+						'type',
+						'columns',
+						'deferrable',
+						'initiallyDeferred',
+						'enforced',
+					])
+				)
+					replanPostcondition(unsupported);
+				for (const name of strictStringArray(constraint.columns, unsupported))
+					checkedIdentifier(name, 'column', unsupported);
+				strictBooleanValue(constraint.deferrable, unsupported);
+				strictBooleanValue(constraint.initiallyDeferred, unsupported);
+				strictBooleanValue(constraint.enforced, unsupported);
+			} else if (constraint.type === 'f') {
+				if (
+					!hasExactKeys(constraint, [
+						'type',
+						'columns',
+						'references',
+						'onDelete',
+						'onUpdate',
+						'deferrable',
+						'initiallyDeferred',
+						'enforced',
+						'notValid',
+					]) ||
+					!isPlainRecord(constraint.references)
+				)
+					replanPostcondition(unsupported);
+				for (const name of strictStringArray(constraint.columns, unsupported))
+					checkedIdentifier(name, 'column', unsupported);
+				const references = constraint.references;
+				if (!hasExactKeys(references, ['schema', 'table', 'columns']))
+					replanPostcondition(unsupported);
+				checkedIdentifier(references.schema, 'schema', unsupported);
+				checkedIdentifier(references.table, 'table', unsupported);
+				for (const name of strictStringArray(references.columns, unsupported))
+					checkedIdentifier(name, 'column', unsupported);
+				for (const key of ['onDelete', 'onUpdate'] as const)
+					strictString(constraint[key], unsupported);
+				for (const key of [
+					'deferrable',
+					'initiallyDeferred',
+					'enforced',
+					'notValid',
+				] as const)
+					strictBooleanValue(constraint[key], unsupported);
+			} else replanPostcondition(unsupported);
+			return value as GeneratedPostcondition;
+		}
+		case 'index': {
+			if (
+				!hasExactKeys(value, ['postconditionVersion', 'kind', 'index']) ||
+				!isPlainRecord(value.index)
+			)
+				replanPostcondition(unsupported);
+			const index = value.index;
+			if (
+				!hasExactKeys(index, [
+					'schema',
+					'table',
+					'name',
+					'method',
+					'unique',
+					'valid',
+					'ready',
+					'live',
+					'columns',
+					'expressions',
+					'include',
+					'nullsNotDistinct',
+					'opclass',
+					'with',
+					'where',
+				])
+			)
+				replanPostcondition(unsupported);
+			checkedIdentifier(index.schema, 'schema', unsupported);
+			checkedIdentifier(index.table, 'table', unsupported);
+			checkedIdentifier(index.name, 'alias', unsupported);
+			const method = strictString(index.method, unsupported);
+			if (
+				![
+					'btree',
+					'hash',
+					'gist',
+					'gin',
+					'brin',
+					'spgist',
+					'hnsw',
+					'ivfflat',
+					'bm25',
+					'bloom',
+				].includes(method)
+			)
+				replanPostcondition(unsupported);
+			for (const key of [
+				'unique',
+				'valid',
+				'ready',
+				'live',
+				'nullsNotDistinct',
+			] as const)
+				strictBooleanValue(index[key], unsupported);
+			for (const name of strictStringArray(index.columns, unsupported))
+				checkedIdentifier(name, 'column', unsupported);
+			for (const key of ['expressions', 'include'] as const)
+				if (index[key] !== undefined)
+					strictStringArray(index[key], unsupported);
+			for (const key of ['opclass', 'with'] as const)
+				if (index[key] !== undefined) strictStringMap(index[key], unsupported);
+			if (index.where !== undefined) strictString(index.where, unsupported);
+			return value as GeneratedPostcondition;
+		}
+		case 'enum':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind', 'labels']))
+				replanPostcondition(unsupported);
+			strictStringArray(value.labels, unsupported);
+			return value as GeneratedPostcondition;
+		case 'sequence':
+			if (
+				!hasExactKeys(value, [
+					'postconditionVersion',
+					'kind',
+					'startValue',
+					'incrementBy',
+					'minValue',
+					'maxValue',
+					'cycle',
+				])
+			)
+				replanPostcondition(unsupported);
+			for (const key of [
+				'startValue',
+				'incrementBy',
+				'minValue',
+				'maxValue',
+			] as const)
+				if (value[key] !== undefined) strictString(value[key], unsupported);
+			if (value.cycle !== undefined)
+				strictBooleanValue(value.cycle, unsupported);
+			return value as GeneratedPostcondition;
+		case 'extension':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind', 'version']))
+				replanPostcondition(unsupported);
+			if (value.version !== undefined) strictString(value.version, unsupported);
+			return value as GeneratedPostcondition;
+		case 'absent':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind']))
+				replanPostcondition(unsupported);
+			return value as GeneratedPostcondition;
+		case 'exempt':
+			if (!hasExactKeys(value, ['postconditionVersion', 'kind', 'reason']))
+				replanPostcondition(unsupported);
+			strictString(value.reason, unsupported);
+			return value as GeneratedPostcondition;
+		default:
+			return replanPostcondition(unsupported);
+	}
+}
+
 function generatedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
@@ -306,12 +634,7 @@ function generatedPostcondition(
 		throw new Error(
 			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
 		);
-	const postcondition = value as GeneratedPostcondition;
-	if (postcondition.postconditionVersion !== 2)
-		throw new Error(
-			`generated ${address.kind} postcondition format is unsupported; replan to produce version 2 typed postconditions`,
-		);
-	return postcondition;
+	return decodeGeneratedPostcondition(value);
 }
 
 /**
@@ -320,10 +643,11 @@ function generatedPostcondition(
  * write an `observed` terminal.
  */
 export async function readGeneratedPostcondition(
-	executor: LedgerQueryable,
+	executor: GeneratedPostconditionSession,
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
+	executor = assertGeneratedPostconditionSession(executor);
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
 		const postcondition = generatedPostcondition(step, address);
@@ -408,7 +732,7 @@ export async function readGeneratedPostcondition(
 		const expected = postcondition.constraint;
 		if (expected.type === 'c') {
 			const verified = await verifyGeneratedCheckPostcondition({
-				withSession: async (work) => work(executor),
+				session: executor,
 				postcondition,
 				target: { schema: address.schema, table: parent, name: address.name },
 			});
@@ -417,11 +741,16 @@ export async function readGeneratedPostcondition(
 				type: 'c',
 				expression: verified.projection.expression,
 				validated: verified.projection.validated,
+				noInherit: verified.projection.noInherit,
+				enforced: verified.projection.enforced,
+				isLocal: verified.projection.isLocal,
+				inheritanceCount: verified.projection.inheritanceCount,
+				parentId: verified.projection.parentId,
 			});
 		}
 		const row = (
 			await executor.query(
-				`SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint_item.oid, true) AS constraint_definition, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_schema, referenced_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS referenced_columns, constraint_item.confdeltype AS on_delete, constraint_item.confupdtype AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
+				`SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint_item.oid, true) AS constraint_definition, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_schema, referenced_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS referenced_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = referenced_column.attnum ORDER BY referenced_column.position) AS referenced_columns, constraint_item.confdeltype AS on_delete, constraint_item.confupdtype AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated, CASE WHEN constraint_item_json.value ? 'conenforced' THEN (constraint_item_json.value ->> 'conenforced')::boolean ELSE true END AS is_enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
 				[address.schema, parent, address.name],
 			)
 		).rows[0];
@@ -431,10 +760,17 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
 			);
+		const deferrable = strictBoolean(row.is_deferrable, address.name);
+		const initiallyDeferred = strictBoolean(row.is_deferred, address.name);
+		const validated = strictBoolean(row.is_validated, address.name);
+		const enforced = strictBoolean(row.is_enforced, address.name);
 		if (
 			(expected.type === 'p' || expected.type === 'u') &&
-			JSON.stringify(textList(row.key_columns)) !==
-				JSON.stringify(expected.columns)
+			(JSON.stringify(textList(row.key_columns)) !==
+				JSON.stringify(expected.columns) ||
+				deferrable !== expected.deferrable ||
+				initiallyDeferred !== expected.initiallyDeferred ||
+				enforced !== expected.enforced)
 		)
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
@@ -444,15 +780,15 @@ export async function readGeneratedPostcondition(
 				JSON.stringify(textList(row.key_columns)) !==
 					JSON.stringify(expected.columns) ||
 				String(row.referenced_table ?? '') !== expected.references.table ||
-				(expected.references.schema !== undefined &&
-					String(row.referenced_schema ?? '') !== expected.references.schema) ||
+				String(row.referenced_schema ?? '') !== expected.references.schema ||
 				JSON.stringify(textList(row.referenced_columns)) !==
 					JSON.stringify(expected.references.columns) ||
 				foreignKeyAction(row.on_delete) !== expected.onDelete ||
 				foreignKeyAction(row.on_update) !== expected.onUpdate ||
-				(row.is_deferrable === true && row.is_deferred === true) !==
-					expected.deferred ||
-				(row.is_validated === true) === expected.notValid
+				deferrable !== expected.deferrable ||
+				initiallyDeferred !== expected.initiallyDeferred ||
+				enforced !== expected.enforced ||
+				validated === expected.notValid
 			)
 				throw new Error(
 					`generated constraint ${address.name} postcondition differs`,
@@ -462,6 +798,9 @@ export async function readGeneratedPostcondition(
 			kind: 'constraint',
 			type: String(row.constraint_type ?? ''),
 			definition,
+			deferrable,
+			initiallyDeferred,
+			enforced,
 		});
 	}
 	if (address.kind === 'index' && parent && address.schema) {
@@ -471,7 +810,7 @@ export async function readGeneratedPostcondition(
 				`generated index ${address.name} has a non-index structural postcondition`,
 			);
 		const verified = await verifyGeneratedIndexPostcondition({
-			withSession: async (work) => work(executor),
+			session: executor,
 			postcondition,
 			target: { schema: address.schema, table: parent, name: address.name },
 		});

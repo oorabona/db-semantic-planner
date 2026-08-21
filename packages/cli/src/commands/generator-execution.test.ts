@@ -1,3 +1,7 @@
+import {
+	type GeneratedPostconditionSession,
+	withGeneratedPostconditionSession,
+} from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
 import type { NormalizedManagedStep } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
@@ -26,6 +30,22 @@ import {
 	executeGeneratorPlan,
 	readGeneratedPostcondition,
 } from './generator-execution.js';
+
+async function readTestGeneratedPostcondition(
+	executor: Pick<GeneratedPostconditionSession, 'query'>,
+	step: NormalizedManagedStep,
+	address: Parameters<typeof readGeneratedPostcondition>[2],
+) {
+	return withGeneratedPostconditionSession(
+		{
+			connect: async () => ({
+				...executor,
+				release: () => undefined,
+			}),
+		},
+		(session) => readGeneratedPostcondition(session, step, address),
+	);
+}
 
 const dataDestructiveStep: NormalizedManagedStep = {
 	stepKey: 'generator:0',
@@ -66,6 +86,11 @@ function indexProjectionRow(overrides: Record<string, unknown> = {}) {
 		is_ready: true,
 		is_live: true,
 		nulls_not_distinct: false,
+		is_primary: false,
+		is_exclusion: false,
+		is_immediate: true,
+		is_constraint_owned: false,
+		key_count: 1,
 		key_columns: ['id'],
 		key_definitions: ['id'],
 		include_columns: [],
@@ -188,7 +213,7 @@ describe('generator execution fixture shim', () => {
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query: vi.fn().mockResolvedValue({ rows }) },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
@@ -219,7 +244,7 @@ describe('generator execution fixture shim', () => {
 			},
 		};
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{
 					query: vi.fn().mockResolvedValue({
 						rows: [
@@ -276,7 +301,7 @@ describe('generator execution fixture shim', () => {
 			live: { key_columns: ['other_id'], key_definitions: ['other_id'] },
 		});
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
@@ -321,6 +346,9 @@ describe('generator execution fixture shim', () => {
 							validated: true,
 							no_inherit: false,
 							enforced: true,
+							is_local: true,
+							inheritance_count: 0,
+							parent_id: 0,
 						},
 					],
 				};
@@ -332,13 +360,16 @@ describe('generator execution fixture shim', () => {
 							validated: true,
 							no_inherit: false,
 							enforced: true,
+							is_local: true,
+							inheritance_count: 0,
+							parent_id: 0,
 						},
 					],
 				};
 			return { rows: [] };
 		});
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
@@ -390,15 +421,18 @@ describe('generator execution fixture shim', () => {
 		const { query } = indexReadbackExecutor({ live: unavailable });
 
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
 			),
 		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisvalid');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indisready');
-		expect(query.mock.calls[0]?.[0]).toContain('index_meta.indislive');
+		const projectionSql = query.mock.calls
+			.map(([sql]) => sql)
+			.find((sql) => sql.includes('index_meta.indisvalid'));
+		expect(projectionSql).toContain('index_meta.indisvalid');
+		expect(projectionSql).toContain('index_meta.indisready');
+		expect(projectionSql).toContain('index_meta.indislive');
 	});
 
 	it('records an observed generated index only when it is valid, ready, and live', async () => {
@@ -432,7 +466,7 @@ describe('generator execution fixture shim', () => {
 		} as const;
 
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				indexReadbackExecutor({}),
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
@@ -464,7 +498,7 @@ describe('generator execution fixture shim', () => {
 			},
 		} as const;
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query },
 				step as unknown as NormalizedManagedStep,
 				step.address as never,
@@ -527,7 +561,7 @@ describe('generator execution fixture shim', () => {
 			address,
 		} as unknown as NormalizedManagedStep;
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{ query: vi.fn().mockResolvedValue({ rows }) },
 				step,
 				address as never,
@@ -562,7 +596,7 @@ describe('generator execution fixture shim', () => {
 			},
 		};
 		await expect(
-			readGeneratedPostcondition(
+			readTestGeneratedPostcondition(
 				{
 					query: vi.fn().mockResolvedValue({
 						rows: [

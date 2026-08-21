@@ -31,18 +31,26 @@ type GeneratedColumnPostcondition = {
 };
 
 export type GeneratedConstraintPostcondition =
-	| { readonly type: 'p' | 'u'; readonly columns: readonly string[] }
+	| {
+			readonly type: 'p' | 'u';
+			readonly columns: readonly string[];
+			readonly deferrable: boolean;
+			readonly initiallyDeferred: boolean;
+			readonly enforced: boolean;
+	  }
 	| {
 			readonly type: 'f';
 			readonly columns: readonly string[];
 			readonly references: {
-				readonly schema?: string;
+				readonly schema: string;
 				readonly table: string;
 				readonly columns: readonly string[];
 			};
 			readonly onDelete: string;
 			readonly onUpdate: string;
-			readonly deferred: boolean;
+			readonly deferrable: boolean;
+			readonly initiallyDeferred: boolean;
+			readonly enforced: boolean;
 			readonly notValid: boolean;
 	  }
 	| {
@@ -247,15 +255,25 @@ function validateChangeKeyLists(change: SchemaChange): void {
 
 function constraintPostcondition(
 	change: SchemaChange,
+	schema: string,
 ): GeneratedConstraintPostcondition {
 	const meta = change.meta;
 	if (change.kind === 'add_primary_key')
 		return {
 			type: 'p',
 			columns: requiredColumnList(meta?.columns, `${change.kind} columns`),
+			deferrable: false,
+			initiallyDeferred: false,
+			enforced: true,
 		};
 	if (change.kind === 'alter_column_unique')
-		return { type: 'u', columns: [text(change.column, change.kind)] };
+		return {
+			type: 'u',
+			columns: [text(change.column, change.kind)],
+			deferrable: false,
+			initiallyDeferred: false,
+			enforced: true,
+		};
 	const target =
 		change.kind === 'validate_constraint'
 			? validateConstraintTarget(change)
@@ -290,9 +308,8 @@ function constraintPostcondition(
 		type: 'f',
 		columns: requiredColumnList(fk.columns, `${change.kind} columns`),
 		references: {
-			...(typeof references.schema === 'string'
-				? { schema: references.schema }
-				: {}),
+			schema:
+				typeof references.schema === 'string' ? references.schema : schema,
 			table: text(references.table, change.kind),
 			columns: requiredColumnList(
 				references.columns,
@@ -301,7 +318,9 @@ function constraintPostcondition(
 		},
 		onDelete: typeof fk.onDelete === 'string' ? fk.onDelete : 'NO ACTION',
 		onUpdate: typeof fk.onUpdate === 'string' ? fk.onUpdate : 'NO ACTION',
-		deferred: fk.deferred === true,
+		deferrable: fk.deferred === true,
+		initiallyDeferred: fk.deferred === true,
+		enforced: true,
 		notValid: fk.notValid === true,
 	};
 }
@@ -420,7 +439,7 @@ export function generatedPostconditionForChange(input: {
 		return postconditionPayload({
 			postconditionVersion: 2,
 			kind: 'constraint',
-			constraint: constraintPostcondition(change),
+			constraint: constraintPostcondition(change, schema),
 		});
 	if (change.kind === 'create_index') {
 		const index = change.meta?.index as

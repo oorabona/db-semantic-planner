@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
 	project: vi.fn(),
 }));
 
-vi.mock('@dbsp/core', () => ({ projectLedgerChain: mocks.project }));
+vi.mock('@dbsp/core', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/core')>()),
+	projectLedgerChain: mocks.project,
+}));
 vi.mock('./ledger.js', () => ({
 	acquirePgLedgerLocks: mocks.locks,
 	appendPgLedgerRelease: mocks.appendRelease,

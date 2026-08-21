@@ -437,7 +437,13 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toEqual({
 			postconditionVersion: 2,
 			kind: 'constraint',
-			constraint: { type: 'p', columns: ['account_id'] },
+			constraint: {
+				type: 'p',
+				columns: ['account_id'],
+				deferrable: false,
+				initiallyDeferred: false,
+				enforced: true,
+			},
 		});
 	});
 

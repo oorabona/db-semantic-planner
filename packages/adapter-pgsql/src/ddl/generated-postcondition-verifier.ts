@@ -8,20 +8,58 @@ import type {
 } from './managed-step-manifest.js';
 import { quoteIdent } from './phases/utils.js';
 
-export type GeneratedPostconditionSession = {
+type GeneratedPostconditionQuery = {
 	query(
 		sql: string,
 		params?: readonly unknown[],
 	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
 };
 
+const generatedPostconditionSessionBrand = Symbol(
+	'generatedPostconditionSessionBrand',
+);
+const mintedSessions = new WeakSet<object>();
+
+/** An adapter-minted, exclusive PostgreSQL session for rollback-only proof. */
+export type GeneratedPostconditionSession = GeneratedPostconditionQuery & {
+	readonly [generatedPostconditionSessionBrand]: true;
+};
+
 /**
- * The caller supplies one adapter-owned, already pinned session.  The callback
- * keeps the live read, scratch DDL, staged read, and cleanup on that session.
+ * This mint is intentionally not re-exported from the adapter public surface.
+ * Transition admission uses it for its already-pinned client; external callers
+ * use withGeneratedPostconditionSession(), which checks out and releases one.
  */
-export type GeneratedPostconditionSessionCallback = <T>(
+export function mintGeneratedPostconditionSession(
+	session: GeneratedPostconditionQuery,
+): GeneratedPostconditionSession {
+	const capability = Object.freeze({
+		query: session.query.bind(session),
+		[generatedPostconditionSessionBrand]: true as const,
+	});
+	mintedSessions.add(capability);
+	return capability;
+}
+
+export async function withGeneratedPostconditionSession<T>(
+	executor: {
+		connect(): Promise<
+			GeneratedPostconditionQuery & { release(error?: unknown): void }
+		>;
+	},
 	work: (session: GeneratedPostconditionSession) => Promise<T>,
-) => Promise<T>;
+): Promise<T> {
+	const client = await executor.connect();
+	let failure: unknown;
+	try {
+		return await work(mintGeneratedPostconditionSession(client));
+	} catch (error) {
+		failure = error;
+		throw error;
+	} finally {
+		client.release(failure);
+	}
+}
 
 export type GeneratedPostconditionTarget = {
 	readonly schema: string;
@@ -39,6 +77,10 @@ type IndexProjection = {
 	readonly ready: boolean;
 	readonly live: boolean;
 	readonly nullsNotDistinct: boolean;
+	readonly primary: boolean;
+	readonly exclusion: boolean;
+	readonly immediate: boolean;
+	readonly constraintOwned: boolean;
 	readonly keyColumns: readonly (string | null)[];
 	readonly keyDefinitions: readonly string[];
 	readonly includeColumns: readonly string[];
@@ -53,6 +95,9 @@ type CheckProjection = {
 	readonly validated: boolean;
 	readonly noInherit: boolean;
 	readonly enforced: boolean;
+	readonly isLocal: boolean;
+	readonly inheritanceCount: number;
+	readonly parentId: number;
 };
 
 let scratchSequence = 0;
@@ -81,9 +126,12 @@ function exactKeys(
 }
 
 function stringList(value: unknown, message: string): readonly string[] {
-	if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+	if (
+		!Array.isArray(value) ||
+		Array.from(value).some((item) => typeof item !== 'string')
+	)
 		throw replan(message);
-	return value;
+	return Array.from(value) as readonly string[];
 }
 
 function stringRecord(
@@ -144,10 +192,25 @@ function decodeIndexExpectation(
 		(index.where !== undefined && typeof index.where !== 'string')
 	)
 		throw replan('generated index postcondition is unsupported');
+	try {
+		quoteIdent(index.schema, 'schema');
+		quoteIdent(index.table, 'table');
+		quoteIdent(index.name, 'alias');
+		quoteIdent(index.method, 'alias');
+	} catch {
+		throw replan('generated index postcondition is unsupported');
+	}
 	const columns = stringList(
 		index.columns,
 		'generated index postcondition is unsupported',
 	);
+	if (columns.length === 0)
+		throw replan('generated index postcondition is unsupported');
+	try {
+		for (const column of columns) quoteIdent(column, 'column');
+	} catch {
+		throw replan('generated index postcondition is unsupported');
+	}
 	const expressions =
 		index.expressions === undefined
 			? undefined
@@ -263,6 +326,11 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 		typeof row.is_ready !== 'boolean' ||
 		typeof row.is_live !== 'boolean' ||
 		typeof row.nulls_not_distinct !== 'boolean' ||
+		typeof row.is_primary !== 'boolean' ||
+		typeof row.is_exclusion !== 'boolean' ||
+		typeof row.is_immediate !== 'boolean' ||
+		typeof row.is_constraint_owned !== 'boolean' ||
+		!Number.isInteger(row.key_count) ||
 		(typeof row.predicate_expression !== 'string' &&
 			row.predicate_expression !== null)
 	)
@@ -279,6 +347,10 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 		ready: row.is_ready,
 		live: row.is_live,
 		nullsNotDistinct: row.nulls_not_distinct,
+		primary: row.is_primary,
+		exclusion: row.is_exclusion,
+		immediate: row.is_immediate,
+		constraintOwned: row.is_constraint_owned,
 		keyColumns: nullableStringList(row.key_columns),
 		keyDefinitions: projectionStringList(row.key_definitions),
 		includeColumns: projectionStringList(row.include_columns),
@@ -290,7 +362,7 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 }
 
 const INDEX_PROJECTION_SELECT =
-	"SELECT namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, COALESCE((index_meta_json.value ->> 'indnullsnotdistinct')::boolean, false) AS nulls_not_distinct, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= COALESCE((index_meta_json.value ->> 'indnkeyatts')::integer, index_meta.indnatts) ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, COALESCE((index_meta_json.value ->> 'indnkeyatts')::integer, index_meta.indnatts)) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > COALESCE((index_meta_json.value ->> 'indnkeyatts')::integer, index_meta.indnatts) ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= COALESCE((index_meta_json.value ->> 'indnkeyatts')::integer, index_meta.indnatts) ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= COALESCE((index_meta_json.value ->> 'indnkeyatts')::integer, index_meta.indnatts) ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam";
+	"SELECT namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, index_meta.indisprimary AS is_primary, index_meta.indisexclusion AS is_exclusion, index_meta.indimmediate AS is_immediate, constraint_item.oid IS NOT NULL AS is_constraint_owned, CASE WHEN index_meta_json.value ? 'indnullsnotdistinct' THEN (index_meta_json.value ->> 'indnullsnotdistinct')::boolean ELSE false END AS nulls_not_distinct, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END AS key_count, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_meta.indexrelid";
 
 async function readLiveIndexProjection(
 	session: GeneratedPostconditionSession,
@@ -331,6 +403,7 @@ async function scratchScope<T>(
 	let transactionStarted = false;
 	let result: T | undefined;
 	let workError: unknown;
+	let workFailed = false;
 	try {
 		try {
 			await session.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
@@ -344,6 +417,7 @@ async function scratchScope<T>(
 		}
 		result = await work();
 	} catch (error) {
+		workFailed = true;
 		workError = error;
 	}
 	const cleanupErrors: unknown[] = [];
@@ -359,12 +433,12 @@ async function scratchScope<T>(
 		await cleanup(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
 	}
 	if (transactionStarted) await cleanup('ROLLBACK');
-	if (workError !== undefined && cleanupErrors.length > 0)
+	if (workFailed && cleanupErrors.length > 0)
 		throw new AggregateError(
 			[workError, ...cleanupErrors],
 			'generated postcondition verification failed and scratch cleanup failed',
 		);
-	if (workError !== undefined) throw workError;
+	if (workFailed) throw workError;
 	if (cleanupErrors.length > 0)
 		throw new AggregateError(
 			cleanupErrors,
@@ -388,6 +462,10 @@ function sameIndexStructure(
 		left.ready === right.ready &&
 		left.live === right.live &&
 		left.nullsNotDistinct === right.nullsNotDistinct &&
+		left.primary === right.primary &&
+		left.exclusion === right.exclusion &&
+		left.immediate === right.immediate &&
+		left.constraintOwned === right.constraintOwned &&
 		JSON.stringify(left.keyColumns) === JSON.stringify(right.keyColumns) &&
 		JSON.stringify(left.keyDefinitions) ===
 			JSON.stringify(right.keyDefinitions) &&
@@ -418,24 +496,44 @@ function indexSource(expected: GeneratedIndexPostcondition, name: string) {
 	};
 }
 
-function requireSessionCallback(
+function requireGeneratedPostconditionSession(
 	value: unknown,
-): GeneratedPostconditionSessionCallback {
-	if (typeof value !== 'function')
+): GeneratedPostconditionSession {
+	if (!value || typeof value !== 'object' || !mintedSessions.has(value))
 		throw new Error(
-			'generated postcondition verifier requires a pinned session callback',
+			'generated postcondition verifier requires an adapter-minted exclusive session capability',
 		);
-	return value as GeneratedPostconditionSessionCallback;
+	return value as GeneratedPostconditionSession;
+}
+
+/** Refuse structural lookalikes before any proof or catalogue read. */
+export function assertGeneratedPostconditionSession(
+	value: unknown,
+): GeneratedPostconditionSession {
+	return requireGeneratedPostconditionSession(value);
 }
 
 export async function verifyGeneratedIndexPostcondition(input: {
-	readonly withSession: GeneratedPostconditionSessionCallback;
+	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
 	const expected = decodeIndexExpectation(input.postcondition, input.target);
-	const withSession = requireSessionCallback(input.withSession);
-	return withSession(async (session) => {
+	const session = requireGeneratedPostconditionSession(input.session);
+	const scratchTable = nextScratchName('table');
+	const scratchIndex = nextScratchName('index');
+	// Render before acquiring/using the capability: malformed index material must
+	// refuse before any live catalogue query.
+	const scratchSql = generateCreateIndex(
+		scratchTable,
+		indexSource(expected, scratchIndex),
+		undefined,
+		identityNaming,
+	);
+	return scratchScope(session, async () => {
+		await session.query(
+			`LOCK TABLE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
+		);
 		const live = await readLiveIndexProjection(session, input.target);
 		if (
 			live.schema !== expected.schema ||
@@ -448,22 +546,13 @@ export async function verifyGeneratedIndexPostcondition(input: {
 			throw new Error(
 				`generated index ${input.target.name} postcondition differs`,
 			);
-		const scratchTable = nextScratchName('table');
-		const scratchIndex = nextScratchName('index');
-		const staged = await scratchScope(session, async () => {
+		const staged = await (async () => {
 			await session.query(
-				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)`,
+				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
 			);
-			await session.query(
-				generateCreateIndex(
-					scratchTable,
-					indexSource(expected, scratchIndex),
-					undefined,
-					identityNaming,
-				),
-			);
+			await session.query(scratchSql);
 			return readScratchIndexProjection(session, scratchTable, scratchIndex);
-		});
+		})();
 		if (!sameIndexStructure(live, staged))
 			throw new Error(
 				`generated index ${input.target.name} postcondition differs`,
@@ -473,7 +562,7 @@ export async function verifyGeneratedIndexPostcondition(input: {
 }
 
 const CHECK_PROJECTION_SELECT =
-	"SELECT pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid, false) AS expression, constraint_item.convalidated AS validated, constraint_item.connoinherit AS no_inherit, COALESCE((constraint_item_json.value ->> 'conenforced')::boolean, true) AS enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json";
+	"SELECT pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid, false) AS expression, constraint_item.convalidated AS validated, constraint_item.connoinherit AS no_inherit, constraint_item.conislocal AS is_local, constraint_item.coninhcount AS inheritance_count, CASE WHEN constraint_item_json.value ? 'conparentid' THEN (constraint_item_json.value ->> 'conparentid')::oid ELSE 0::oid END AS parent_id, CASE WHEN constraint_item_json.value ? 'conenforced' THEN (constraint_item_json.value ->> 'conenforced')::boolean ELSE true END AS enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json";
 
 function checkProjection(
 	row: Record<string, unknown>,
@@ -483,7 +572,12 @@ function checkProjection(
 	if (
 		typeof row.validated !== 'boolean' ||
 		typeof row.no_inherit !== 'boolean' ||
-		typeof row.enforced !== 'boolean'
+		typeof row.enforced !== 'boolean' ||
+		typeof row.is_local !== 'boolean' ||
+		typeof row.inheritance_count !== 'number' ||
+		!Number.isInteger(row.inheritance_count) ||
+		typeof row.parent_id !== 'number' ||
+		!Number.isInteger(row.parent_id)
 	)
 		throw new Error(
 			'generated CHECK verifier could not read a complete projection',
@@ -493,6 +587,9 @@ function checkProjection(
 		validated: row.validated,
 		noInherit: row.no_inherit,
 		enforced: row.enforced,
+		isLocal: row.is_local,
+		inheritanceCount: row.inheritance_count,
+		parentId: row.parent_id,
 	};
 }
 
@@ -532,7 +629,7 @@ async function readScratchCheckProjection(
 }
 
 export async function verifyGeneratedCheckPostcondition(input: {
-	readonly withSession: GeneratedPostconditionSessionCallback;
+	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
@@ -540,13 +637,16 @@ export async function verifyGeneratedCheckPostcondition(input: {
 	readonly projection: CheckProjection;
 }> {
 	const expected = decodeCheckExpectation(input.postcondition);
-	const withSession = requireSessionCallback(input.withSession);
+	const session = requireGeneratedPostconditionSession(input.session);
 	const clause = renderCheckConstraintClause({
 		expression: expected.expression,
 		notValid: expected.notValid,
 	});
 	validateCheckExpression(clause, 'generated CHECK postcondition');
-	return withSession(async (session) => {
+	return scratchScope(session, async () => {
+		await session.query(
+			`LOCK TABLE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
+		);
 		const live = await readLiveCheckProjection(session, input.target);
 		if (live.validated !== !expected.notValid)
 			throw new Error(
@@ -554,9 +654,9 @@ export async function verifyGeneratedCheckPostcondition(input: {
 			);
 		const scratchTable = nextScratchName('table');
 		const scratchConstraint = nextScratchName('constraint');
-		const staged = await scratchScope(session, async () => {
+		const staged = await (async () => {
 			await session.query(
-				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)`,
+				`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
 			);
 			await session.query(
 				`ALTER TABLE ${quoteIdent(scratchTable, 'table')} ADD CONSTRAINT ${quoteIdent(scratchConstraint, 'alias')} ${clause}`,
@@ -566,12 +666,15 @@ export async function verifyGeneratedCheckPostcondition(input: {
 				scratchTable,
 				scratchConstraint,
 			);
-		});
+		})();
 		if (
 			live.expression !== staged.expression ||
 			live.validated !== staged.validated ||
 			live.noInherit !== staged.noInherit ||
-			live.enforced !== staged.enforced
+			live.enforced !== staged.enforced ||
+			live.isLocal !== staged.isLocal ||
+			live.inheritanceCount !== staged.inheritanceCount ||
+			live.parentId !== staged.parentId
 		)
 			throw new Error(
 				`generated constraint ${input.target.name} postcondition differs`,

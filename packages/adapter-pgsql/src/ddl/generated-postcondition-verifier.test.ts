@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
 	type GeneratedPostconditionSession,
-	type GeneratedPostconditionSessionCallback,
+	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
 } from './generated-postcondition-verifier.js';
@@ -40,6 +40,11 @@ function indexRow(overrides: Record<string, unknown> = {}) {
 		is_ready: true,
 		is_live: true,
 		nulls_not_distinct: false,
+		is_primary: false,
+		is_exclusion: false,
+		is_immediate: true,
+		is_constraint_owned: false,
+		key_count: 1,
 		key_columns: ['UserID'],
 		key_definitions: ['"UserID"'],
 		include_columns: [],
@@ -64,18 +69,14 @@ function indexExecutor(input: {
 	});
 	return {
 		query,
-		withSession: withPinnedSession(
-			query as unknown as GeneratedPostconditionSession['query'],
-		),
+		session: mintGeneratedPostconditionSession({ query }),
 	};
 }
 
-function withPinnedSession(
+function testSession(
 	query: GeneratedPostconditionSession['query'],
-): GeneratedPostconditionSessionCallback {
-	return async <T>(
-		work: (session: GeneratedPostconditionSession) => Promise<T>,
-	) => work({ query });
+): GeneratedPostconditionSession {
+	return mintGeneratedPostconditionSession({ query });
 }
 
 function checkRow(overrides: Record<string, unknown> = {}) {
@@ -84,6 +85,9 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 		validated: true,
 		no_inherit: false,
 		enforced: true,
+		is_local: true,
+		inheritance_count: 0,
+		parent_id: 0,
 		...overrides,
 	};
 }
@@ -93,7 +97,7 @@ describe('generated postcondition verifier', () => {
 		const executor = indexExecutor({});
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: executor.withSession,
+				session: executor.session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
@@ -104,14 +108,17 @@ describe('generated postcondition verifier', () => {
 		expect(executor.query.mock.calls.map(([sql]) => sql)).toContainEqual(
 			expect.stringContaining('USING btree'),
 		);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContainEqual(
+			expect.stringContaining('INCLUDING GENERATED'),
+		);
 	});
 
 	it('refuses a quoted identifier that differs by case', async () => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({
+				session: indexExecutor({
 					staged: { key_columns: ['userid'], key_definitions: ['userid'] },
-				}).withSession,
+				}).session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
@@ -121,7 +128,7 @@ describe('generated postcondition verifier', () => {
 	it('refuses an expectation carrying an unmodeled index feature', async () => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({}).withSession,
+				session: indexExecutor({}).session,
 				postcondition: {
 					...indexPostcondition,
 					index: { ...indexPostcondition.index, ordering: 'DESC' },
@@ -137,10 +144,10 @@ describe('generated postcondition verifier', () => {
 	])('refuses a differing %s after server deparse', async (_side, live, staged) => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({
+				session: indexExecutor({
 					live: { predicate_expression: live },
 					staged: { predicate_expression: staged },
-				}).withSession,
+				}).session,
 				postcondition: {
 					...indexPostcondition,
 					index: { ...indexPostcondition.index, where: '"UserID" > 0' },
@@ -158,7 +165,7 @@ describe('generated postcondition verifier', () => {
 		});
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: executor.withSession,
+				session: executor.session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
@@ -181,7 +188,7 @@ describe('generated postcondition verifier', () => {
 		};
 		await expect(
 			verifyGeneratedCheckPostcondition({
-				withSession: withPinnedSession(executor.query as never),
+				session: testSession(executor.query as never),
 				postcondition: {
 					postconditionVersion: 2,
 					kind: 'constraint',
@@ -225,7 +232,7 @@ describe('generated postcondition verifier', () => {
 		};
 		await expect(
 			verifyGeneratedCheckPostcondition({
-				withSession: withPinnedSession(executor.query as never),
+				session: testSession(executor.query as never),
 				postcondition,
 				target: {
 					schema: 'tenant',
@@ -243,7 +250,7 @@ describe('generated postcondition verifier', () => {
 		});
 		await expect(
 			verifyGeneratedCheckPostcondition({
-				withSession: withPinnedSession(executor.query as never),
+				session: testSession(executor.query as never),
 				postcondition,
 				target: {
 					schema: 'tenant',
@@ -257,7 +264,7 @@ describe('generated postcondition verifier', () => {
 	it('rejects legacy rendered definitions with a replan direction', async () => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({}).withSession,
+				session: indexExecutor({}).session,
 				postcondition: {
 					kind: 'index',
 					definition:
@@ -269,49 +276,118 @@ describe('generated postcondition verifier', () => {
 	});
 
 	it.each([
-		'PG 10-style',
-		'PG 14-style',
-		'PG 15+-style',
-	])('reads a %s index row through dynamic optional catalogue fields', async () => {
-		const executor = indexExecutor({});
+		[
+			'catalogue without optional keys',
+			{ nulls_not_distinct: false, key_count: 1 },
+		],
+		[
+			'catalogue with optional keys',
+			{ nulls_not_distinct: false, key_count: 1 },
+		],
+		[
+			'catalogue with all current keys',
+			{ nulls_not_distinct: false, key_count: 1 },
+		],
+	])('reads a %s index row through dynamic optional catalogue fields', async (_shape, live) => {
+		const executor = indexExecutor({ live });
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: executor.withSession,
+				session: executor.session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
 		).resolves.toMatchObject({ kind: 'index' });
-		const select = executor.query.mock.calls[0]?.[0] as string;
+		const select = executor.query.mock.calls
+			.map(([sql]) => sql)
+			.find((sql) => sql.includes('pg_catalog.to_jsonb(index_meta)')) as string;
 		expect(select).toContain('pg_catalog.to_jsonb(index_meta)');
-		expect(select).not.toContain('index_meta.indnkeyatts');
-		expect(select).not.toContain('index_meta.indnullsnotdistinct');
+		expect(select).toContain("CASE WHEN index_meta_json.value ? 'indnkeyatts'");
+		expect(select).toContain(
+			"CASE WHEN index_meta_json.value ? 'indnullsnotdistinct'",
+		);
 	});
 
 	it('accepts reversed reloptions and refuses incomplete index booleans', async () => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({
+				session: indexExecutor({
 					live: { reloptions: ['fillfactor=90', 'deduplicate_items=off'] },
 					staged: { reloptions: ['deduplicate_items=off', 'fillfactor=90'] },
-				}).withSession,
+				}).session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
 		).resolves.toMatchObject({ kind: 'index' });
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: indexExecutor({ live: { is_valid: 't' } }).withSession,
+				session: indexExecutor({ live: { is_valid: 't' } }).session,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
 		).rejects.toThrow('complete projection');
 	});
 
+	it('defaults absent optional catalogue fields but refuses a present NULL', async () => {
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexExecutor({}).session,
+				postcondition: indexPostcondition,
+				target: indexTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'index' });
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexExecutor({ live: { nulls_not_distinct: null } }).session,
+				postcondition: indexPostcondition,
+				target: indexTarget,
+			}),
+		).rejects.toThrow('complete projection');
+	});
+
+	it('refuses a constraint-owned index and an inherited CHECK with matching text', async () => {
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexExecutor({ live: { is_constraint_owned: true } }).session,
+				postcondition: indexPostcondition,
+				target: indexTarget,
+			}),
+		).rejects.toThrow('postcondition differs');
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('namespace.nspname'))
+				return {
+					rows: [
+						checkRow({ is_local: false, inheritance_count: 1, parent_id: 42 }),
+					],
+				};
+			if (sql.includes('conrelid = $1')) return { rows: [checkRow()] };
+			return { rows: [] };
+		});
+		await expect(
+			verifyGeneratedCheckPostcondition({
+				session: testSession(query as never),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'constraint',
+					constraint: {
+						type: 'c',
+						expression: "CHECK (status = 'Active')",
+						notValid: false,
+					},
+				},
+				target: {
+					schema: 'tenant',
+					table: 'accounts',
+					name: 'accounts_status_check',
+				},
+			}),
+		).rejects.toThrow('postcondition differs');
+	});
+
 	it('refuses unsafe CHECK staging before it issues any query', async () => {
 		const query = vi.fn();
 		await expect(
 			verifyGeneratedCheckPostcondition({
-				withSession: withPinnedSession(query as never),
+				session: testSession(query as never),
 				postcondition: {
 					postconditionVersion: 2,
 					kind: 'constraint',
@@ -341,7 +417,7 @@ describe('generated postcondition verifier', () => {
 			});
 			await expect(
 				verifyGeneratedCheckPostcondition({
-					withSession: withPinnedSession(query as never),
+					session: testSession(query as never),
 					postcondition: {
 						postconditionVersion: 2,
 						kind: 'constraint',
@@ -373,7 +449,7 @@ describe('generated postcondition verifier', () => {
 		});
 		await expect(
 			verifyGeneratedCheckPostcondition({
-				withSession: withPinnedSession(query as never),
+				session: testSession(query as never),
 				postcondition: {
 					postconditionVersion: 2,
 					kind: 'constraint',
@@ -420,12 +496,12 @@ describe('generated postcondition verifier', () => {
 		const verify =
 			postcondition.kind === 'constraint'
 				? verifyGeneratedCheckPostcondition({
-						withSession: withPinnedSession(query as never),
+						session: testSession(query as never),
 						postcondition,
 						target: { schema: 'tenant', table: 'accounts', name: 'check' },
 					})
 				: verifyGeneratedIndexPostcondition({
-						withSession: withPinnedSession(query as never),
+						session: testSession(query as never),
 						postcondition,
 						target: indexTarget,
 					});
@@ -437,11 +513,22 @@ describe('generated postcondition verifier', () => {
 		const pool = { query: vi.fn() };
 		await expect(
 			verifyGeneratedIndexPostcondition({
-				withSession: pool as never,
+				session: pool as never,
 				postcondition: indexPostcondition,
 				target: indexTarget,
 			}),
-		).rejects.toThrow('pinned session callback');
+		).rejects.toThrow('adapter-minted exclusive session capability');
 		expect(pool.query).not.toHaveBeenCalled();
+	});
+
+	it('refuses a hand-built callback as a session capability', async () => {
+		const callback = async () => ({ query: vi.fn() });
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: callback as never,
+				postcondition: indexPostcondition,
+				target: indexTarget,
+			}),
+		).rejects.toThrow('adapter-minted exclusive session capability');
 	});
 });
