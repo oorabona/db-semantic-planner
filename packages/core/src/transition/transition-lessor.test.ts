@@ -7,6 +7,7 @@ import {
 	planOperationSession,
 	remintTransitionLessorFromSession,
 	type TransitionLease,
+	transitionPhysicalSessionIsCompromised,
 } from './transition-lessor.js';
 
 describe('transition lessors', () => {
@@ -544,6 +545,48 @@ describe('transition lease release', () => {
 			'transition execution marked its leased client compromised',
 		);
 		await expect(reminted.session.query('SELECT reminted')).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+	});
+
+	it('propagates reminted revocation in both directions across core module instances', async () => {
+		// A consumer can have two compatible copies of core. The physical lessor
+		// below is minted by this instance; the second instance acquires from it,
+		// then remints the session it owns for the durable nested lease.
+		vi.resetModules();
+		const secondCore = await import('./transition-lessor.js');
+
+		const createCrossInstanceLeases = async () => {
+			const raw = {
+				query: vi.fn(async () => ({ rows: [] })),
+				release: vi.fn(),
+			};
+			const physicalLessor = createTransitionLessor(async () => raw);
+			const firstLease = await acquireTransitionLease(physicalLessor);
+			const secondSourceLease =
+				await secondCore.acquireTransitionLease(physicalLessor);
+			const reminted = secondCore.remintTransitionLessorFromSession(
+				secondSourceLease.session,
+				async () => raw,
+			);
+			const nestedLease = await secondCore.acquireTransitionLease(reminted);
+			return { raw, firstLease, nestedLease };
+		};
+
+		const lateMark = await createCrossInstanceLeases();
+		secondCore.markTransitionClientCompromised(lateMark.nestedLease.session);
+		expect(transitionPhysicalSessionIsCompromised(lateMark.raw)).toBe(true);
+		await expect(
+			lateMark.firstLease.session.query('SELECT first'),
+		).rejects.toThrow(
+			'transition execution marked its leased client compromised',
+		);
+
+		const sourceMark = await createCrossInstanceLeases();
+		markTransitionClientCompromised(sourceMark.firstLease.session);
+		await expect(
+			sourceMark.nestedLease.session.query('SELECT nested'),
+		).rejects.toThrow(
 			'transition execution marked its leased client compromised',
 		);
 	});

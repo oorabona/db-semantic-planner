@@ -588,6 +588,63 @@ describe('withPgTransitionRunLock cleanup', () => {
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
+	it('evicts the client when its release getter marks the lease', async () => {
+		let lease:
+			| Awaited<ReturnType<typeof acquireExclusiveTransitionLease>>
+			| undefined;
+		const release = vi.fn();
+		let releaseReads = 0;
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('FROM pg_catalog.pg_locks')) {
+					return {
+						rows: [
+							{
+								run_lock_held: true,
+								session_user: 'dbsp',
+								current_user: 'dbsp',
+								standard_conforming_strings: 'on',
+								search_path: 'public',
+								client_encoding: 'UTF8',
+								time_zone: 'Etc/UTC',
+							},
+						],
+					};
+				}
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			}),
+		};
+		Object.defineProperty(client, 'release', {
+			get: () => {
+				releaseReads += 1;
+				if (releaseReads === 1 && lease)
+					markTransitionClientCompromised(lease.session);
+				return release;
+			},
+		});
+		const pool = { connect: vi.fn(async () => client) } as unknown as Pool;
+
+		await expect(
+			withPgTransitionRunLock(
+				pool,
+				'run:release-getter-mark',
+				async (target) => {
+					lease = await acquireExclusiveTransitionLease(target);
+				},
+			),
+		).resolves.toEqual({ kind: 'acquired', value: undefined });
+
+		expect(releaseReads).toBe(1);
+		expect(release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('wraps a hostile lease failure without coercing it before evicting the client', async () => {
 		const hostile = new Proxy(
 			{},
