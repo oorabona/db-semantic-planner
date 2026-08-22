@@ -69,9 +69,9 @@ export class PreparedStatementRegistry {
 
 	/**
 	 * Reserves a name only from the second sighting onward. Call confirm to commit
-	 * executor-scoped admission after a successful named execution or a
-	 * caller-classified positionless protocol-shaped failure. Call abort for a
-	 * local, position-bearing, collision, or verified infrastructure failure.
+	 * the caller's chosen admission outcome. Call abort to release a still-pending
+	 * attempt. `shouldAbortPreparedStatementReservation` in pgsql-adapter.ts is
+	 * the single policy home for failure classification.
 	 */
 	admit(sql: string): PreparedStatementAdmission | undefined {
 		const fingerprint = derivePreparedStatementFingerprint(sql);
@@ -115,7 +115,7 @@ export class PreparedStatementRegistry {
 		return reservation;
 	}
 
-	/** Commits executor-scoped admission after a successful named execution or a caller-classified server-reported failure. */
+	/** Commits the caller's chosen admission outcome. */
 	confirm(reservation: PreparedStatementReservation): void {
 		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
 		if (
@@ -128,7 +128,7 @@ export class PreparedStatementRegistry {
 		this.namesByFingerprint.set(reservation.fingerprint, reservation.name);
 	}
 
-	/** Aborts only this still-pending attempt after a caller-classified failure that never reached server acceptance, never a later confirmation. */
+	/** Releases only this still-pending attempt, never a later confirmation. */
 	abort(reservation: PreparedStatementReservation): void {
 		const pending = this.pendingByFingerprint.get(reservation.fingerprint);
 		if (

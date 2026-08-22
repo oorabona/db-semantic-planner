@@ -165,11 +165,14 @@ the same name cleanly on its next eligible execution. There is no pool-wide
 failure state or downgrade.
 
 For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
-client only after PostgreSQL identifies a prepared-statement infrastructure failure:
-`0A000` from `RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or
-node-postgres's exact local duplicate-name error affect that SQL only. A verified
-`26000` from `FetchPreparedStatement` means all server-side prepared state on that
-client was lost, so every later eligible SQL runs unnamed on it. An absent or
+client only after dbsp verifies prepared-statement infrastructure evidence:
+PostgreSQL's verified `code`/`routine` pairs (`0A000` from
+`RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or `26000` from
+`FetchPreparedStatement`) and node-postgres's exact local duplicate-name
+collision. The local collision is raised before any query is sent; `0A000`,
+`42P05`, and that collision affect that SQL only. A verified `26000` means all
+server-side prepared state on that client was lost, so every later eligible SQL
+runs unnamed on it. An absent or
 unexpected PostgreSQL `routine` never creates persistent client quarantine, so
 application-raised errors cannot cause the fallback — but an unconfirmed
 position-bearing failure during initial admission can still lose its
