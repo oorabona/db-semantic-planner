@@ -125,10 +125,12 @@ const physicalSessionRevocationLatches = new WeakMap<
 	object,
 	TransitionSessionRevocationLatch
 >();
-const remintedLessorLatches = new WeakMap<
-	object,
-	TransitionSessionRevocationLatch
->();
+type RemintedLessorState = {
+	readonly latch: TransitionSessionRevocationLatch;
+	readonly revocation: TransitionSessionRevocationCapability;
+};
+
+const remintedLessorStates = new WeakMap<object, RemintedLessorState>();
 
 function mintTransitionSessionRevocationLatch(): TransitionSessionRevocationLatch {
 	return { compromised: false };
@@ -386,17 +388,19 @@ export async function acquireTransitionLease(
 	const captured = await captureLease(await target.acquire());
 	const { raw, query, release } = captured;
 	const physicalSession = raw as object;
-	const remintedLatch = remintedLessorLatches.get(target as object);
+	const reminted = remintedLessorStates.get(target as object);
 	const latch =
-		remintedLatch ?? resolvePhysicalSessionRevocationLatch(physicalSession);
-	if (remintedLatch) {
-		physicalSessionRevocationLatches.set(physicalSession, remintedLatch);
+		reminted?.latch ?? resolvePhysicalSessionRevocationLatch(physicalSession);
+	if (reminted) {
+		physicalSessionRevocationLatches.set(physicalSession, reminted.latch);
 	}
-	const revocation = mintTransitionSessionRevocation(
-		latch,
-		physicalSession,
-		lessorBrand(target).revocation,
-	);
+	const revocation =
+		reminted?.revocation ??
+		mintTransitionSessionRevocation(
+			latch,
+			physicalSession,
+			lessorBrand(target).revocation,
+		);
 	/**
 	 * One bit, set before any driver code runs. The driver's `release()` is
 	 * called synchronously, so a driver that re-enters — or a consumer who wires
@@ -580,25 +584,29 @@ export function remintTransitionLessorFromSession(
 	session: TransitionSessionClient,
 	acquire: () => Promise<TransitionQueryClient>,
 ): TransitionLessor {
-	return mintTransitionLessor(acquire, latchForTransitionSession(session));
+	return mintTransitionLessor(acquire, {
+		latch: latchForTransitionSession(session),
+		revocation: revocationForTransitionSession(session),
+	});
 }
 
 function mintTransitionLessor(
 	acquire: () => Promise<TransitionQueryClient>,
-	remintedLatch?: TransitionSessionRevocationLatch,
+	reminted?: RemintedLessorState,
 ): TransitionLessor {
 	const lessor = { acquire };
 	Object.defineProperty(lessor, TRANSITION_LESSOR_BRAND, {
 		value: Object.freeze({
 			protocolVersion: TRANSITION_LESSOR_PROTOCOL_VERSION,
-			revocation: mintTransitionSessionRevocationPropagation(),
+			revocation:
+				reminted?.revocation ?? mintTransitionSessionRevocationPropagation(),
 		}),
 		writable: false,
 		configurable: false,
 	});
 	const frozenLessor = Object.freeze(lessor) as TransitionLessor;
-	if (remintedLatch) {
-		remintedLessorLatches.set(frozenLessor as object, remintedLatch);
+	if (reminted) {
+		remintedLessorStates.set(frozenLessor as object, reminted);
 	}
 	return frozenLessor;
 }
