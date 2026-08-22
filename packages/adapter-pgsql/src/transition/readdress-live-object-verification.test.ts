@@ -199,11 +199,13 @@ function setupAdmission() {
 				},
 	);
 	mocks.execute.mockImplementation(async (executor, input) => {
-		const refusal = await input.operation.request.verifyLiveAdmission(
+		const admission = await input.operation.request.verifyLiveAdmission(
 			executor,
 			{ name: 'owner', oid: '10' },
 		);
-		return refusal ?? { kind: 'executed-paired-readdress' };
+		return Array.isArray(admission)
+			? { kind: 'executed-paired-readdress' }
+			: admission;
 	});
 }
 
@@ -237,6 +239,107 @@ describe('re-address live-object verification', () => {
 			detail: expect.stringContaining('source orders structural proof failed'),
 		});
 		expect(mocks.verifyTable).toHaveBeenCalledTimes(1);
+	});
+
+	it('drives the real verifyLiveAdmission callback before closure, identity, and structural proof', async () => {
+		setupAdmission();
+		mocks.verifyTable.mockResolvedValue({
+			kind: 'table',
+			projection: expected.value,
+		});
+		mocks.execute.mockResolvedValue({ kind: 'executed-paired-readdress' });
+		const client = executor();
+		const result = await executePgPersistedTableReaddress({
+			executor: client,
+			run: {} as never,
+			manifest: {} as never,
+			recomputedPlanDigest: 'plan',
+			approval: { approvals: [] },
+			executionId: 'attempt',
+			step: step(),
+			database: source.database,
+			targetSchema: source.schema,
+		});
+		expect(result).toEqual({
+			outcome: 'completed',
+			pairId: expect.any(String),
+		});
+		const admitted = mocks.execute.mock.calls[0]?.[1];
+		await expect(
+			admitted.operation.request.verifyLiveAdmission(client, {
+				name: 'owner',
+				oid: '10',
+			}),
+		).resolves.toEqual([{ source, target, catalogueIdentity: identity }]);
+		const relationLock = client.query.mock.invocationCallOrder.find(
+			(_order, index) =>
+				client.query.mock.calls[index]?.[0] ===
+				'LOCK TABLE ONLY "tenant"."orders" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		expect(relationLock).toBeDefined();
+		expect(relationLock!).toBeLessThan(
+			mocks.readChain.mock.invocationCallOrder.at(-1)!,
+		);
+		expect(relationLock!).toBeLessThan(
+			mocks.readIdentity.mock.invocationCallOrder.at(-1)!,
+		);
+		expect(relationLock!).toBeLessThan(
+			mocks.verifyTable.mock.invocationCallOrder[0]!,
+		);
+	});
+
+	it('refuses a replacement between source read and append, even after taking the source lock', async () => {
+		setupAdmission();
+		let sourceLocked = false;
+		let sourceReads = 0;
+		let replacementReadUnderLock = false;
+		const client = executor();
+		client.query.mockImplementation(async (sql: string) => {
+			if (
+				sql ===
+				'LOCK TABLE ONLY "tenant"."orders" IN SHARE UPDATE EXCLUSIVE MODE'
+			) {
+				sourceLocked = true;
+				return { rows: [] };
+			}
+			if (sql.startsWith('LOCK TABLE')) return { rows: [] };
+			if (sql.includes('dependent.contype')) return { rows: [] };
+			if (sql.includes("SELECT 'table'::text AS kind"))
+				return { rows: [{ kind: 'table', name: source.name }] };
+			throw new Error(`unexpected SQL: ${sql}`);
+		});
+		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
+			address.name === source.name
+				? (() => {
+						sourceReads += 1;
+						if (sourceReads > 1) replacementReadUnderLock = sourceLocked;
+						return {
+							...source,
+							catalogueIdentity:
+								sourceReads === 1
+									? identity
+									: { ...identity, value: { oid: 'replaced' } },
+						};
+					})()
+				: undefined,
+		);
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: client,
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				executionId: 'attempt',
+				step: step(),
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-refused',
+			detail: expect.stringContaining('source identity mismatch'),
+		});
+		expect(replacementReadUnderLock).toBe(true);
 	});
 
 	it('refuses an absent or legacy reviewed shape with replan wording', async () => {
@@ -348,6 +451,13 @@ describe('re-address live-object verification', () => {
 			targetObserved: { value: { kind: 'sequence', name: 'orders_id_seq' } },
 		});
 		expect(member).not.toHaveProperty('postDdlReadBack');
+		expect(member).toHaveProperty('postDdlVerify');
+		const verify = member?.postDdlVerify as (executor: {
+			query(sql: string, params?: readonly unknown[]): Promise<unknown>;
+		}) => Promise<void>;
+		await expect(
+			verify({ query: vi.fn(async () => ({ rows: [] })) }),
+		).rejects.toThrow('is not dependent on target table orders_archive');
 	});
 
 	it('keeps a decodable v2 index member on identity read-back (#576)', async () => {
@@ -574,7 +684,7 @@ describe('re-address live-object verification', () => {
 			{ scope: 'schema', schema: target.schema },
 		]);
 		expect(checkedOutClient.query).toHaveBeenCalledWith(
-			'LOCK TABLE "tenant"."orders_archive" IN SHARE UPDATE EXCLUSIVE MODE',
+			'LOCK TABLE ONLY "tenant"."orders_archive" IN SHARE UPDATE EXCLUSIVE MODE',
 		);
 		expect(mocks.locks.mock.invocationCallOrder[0]).toBeLessThan(
 			mocks.readChain.mock.invocationCallOrder[0]!,
@@ -641,7 +751,7 @@ describe('re-address live-object verification', () => {
 			}),
 		).resolves.toEqual({ outcome: 'no-op' });
 		expect(client.query).toHaveBeenCalledWith(
-			`LOCK TABLE "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
+			`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
 		);
 	});
 
