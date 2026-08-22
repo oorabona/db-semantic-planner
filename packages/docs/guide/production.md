@@ -170,9 +170,11 @@ client only after PostgreSQL identifies a prepared-statement infrastructure fail
 node-postgres's exact local duplicate-name error affect that SQL only. A verified
 `26000` from `FetchPreparedStatement` means all server-side prepared state on that
 client was lost, so every later eligible SQL runs unnamed on it. An absent or
-unexpected PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE
-matches, so application-raised errors cannot cause the fallback. Every adapter call
-still executes at most once.
+unexpected PostgreSQL `routine` never creates persistent client quarantine, so
+application-raised errors cannot cause the fallback — but an unconfirmed
+position-bearing failure during initial admission can still lose its
+reservation, so that SQL runs unnamed until it is sighted again. Every adapter
+call still executes at most once.
 
 The caller still owns a borrowed client: if it returns that client to a pool after
 one of these propagated errors, it must call `client.release(error)` so the pool
