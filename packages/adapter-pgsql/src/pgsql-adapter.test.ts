@@ -552,6 +552,7 @@ describe('PgsqlAdapter', () => {
 
 			const serverError = {
 				code: '26000',
+				severity: 'ERROR',
 				routine: 'FetchPreparedStatement',
 			};
 			const serverPool = createMockPool();
@@ -579,6 +580,10 @@ describe('PgsqlAdapter', () => {
 					code: 'ECONNREFUSED',
 				}),
 			},
+			...['EPIPE', 'EPERM'].map((code) => ({
+				label: `${code}-shaped local Node error`,
+				error: Object.assign(new Error(`write ${code}`), { code }),
+			})),
 			{
 				label: 'wrong-name driver-local collision',
 				error: new Error(
@@ -610,7 +615,7 @@ describe('PgsqlAdapter', () => {
 					typeof statement === 'string' &&
 					statement.startsWith('SAVEPOINT ')
 				) {
-					return Promise.reject({ code: '25P01' });
+					return Promise.reject({ code: '25P01', severity: 'ERROR' });
 				}
 				if (typeof statement === 'object' && statement.text === sqlA)
 					return Promise.reject(error);
@@ -635,7 +640,7 @@ describe('PgsqlAdapter', () => {
 			});
 		});
 
-		it('retains a borrowed-client admission after a SQLSTATE-shaped positionless error', async () => {
+		it('retains a borrowed-client admission after a protocol-evidenced SQLSTATE-shaped positionless error', async () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
 			}) as unknown as PoolClient;
@@ -643,13 +648,13 @@ describe('PgsqlAdapter', () => {
 			const sqlB = 'SELECT id FROM client_admission_b WHERE id = $1';
 			const queryA = testQuery(sqlA, [7]);
 			const queryB = testQuery(sqlB, [8]);
-			const error = { code: '23505' };
+			const error = { code: '23505', severity: 'ERROR' };
 			vi.mocked(client.query).mockImplementation((statement: any) => {
 				if (
 					typeof statement === 'string' &&
 					statement.startsWith('SAVEPOINT ')
 				) {
-					return Promise.reject({ code: '25P01' });
+					return Promise.reject({ code: '25P01', severity: 'ERROR' });
 				}
 				if (typeof statement === 'object' && statement.text === sqlA)
 					return Promise.reject(error);
@@ -668,6 +673,37 @@ describe('PgsqlAdapter', () => {
 			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
 
 			expect(client.query).toHaveBeenNthCalledWith(8, sqlB, [8]);
+		});
+
+		it.each([
+			'EPIPE',
+			'EPERM',
+		])('aborts a pool admission after a local %s-shaped Node error', async (code) => {
+			const sqlA = 'SELECT id FROM pool_local_admission_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM pool_local_admission_b WHERE id = $1';
+			const queryA = testQuery(sqlA, [7]);
+			const queryB = testQuery(sqlB, [8]);
+			const error = Object.assign(new Error(`write ${code}`), { code });
+			const pool = createMockPool();
+			vi.mocked(pool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await expect(adapter.execute(queryA)).resolves.toEqual([{ id: 7 }]);
+			await expect(adapter.execute(queryA)).rejects.toBe(error);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+			await expect(adapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
+
+			expect(pool.query).toHaveBeenNthCalledWith(4, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
 		});
 
 		it('does not manually acquire or release a pooled client while a query is pending', async () => {
@@ -703,8 +739,8 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it.each([
-			{ code: '0A000', routine: 'RevalidateCachedQuery' },
-			{ code: '42P05', routine: 'StorePreparedStatement' },
+			{ code: '0A000', severity: 'ERROR', routine: 'RevalidateCachedQuery' },
+			{ code: '42P05', severity: 'ERROR', routine: 'StorePreparedStatement' },
 		])('quarantines a verified $code named-statement failure before rejection is observable', async (error) => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
@@ -759,7 +795,11 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 				_txStatus: 'I',
 			}) as unknown as PoolClient;
-			const error = { code: '26000', routine: 'FetchPreparedStatement' };
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+			};
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
@@ -790,7 +830,11 @@ describe('PgsqlAdapter', () => {
 
 		it('does not quarantine a pool query after a verified failure', async () => {
 			const pool = createMockPool();
-			const error = { code: '26000', routine: 'FetchPreparedStatement' };
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+			};
 			vi.mocked(pool.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
@@ -814,10 +858,17 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it.each([
-			{ label: 'missing routine', error: { code: '0A000' } },
+			{
+				label: 'missing routine',
+				error: { code: '0A000', severity: 'ERROR' },
+			},
 			{
 				label: 'wrong routine',
-				error: { code: '26000', routine: 'RevalidateCachedQuery' },
+				error: {
+					code: '26000',
+					severity: 'ERROR',
+					routine: 'RevalidateCachedQuery',
+				},
 			},
 		])('keeps naming after a fabricated $label', async ({ error }) => {
 			const client = Object.assign(createMockPool(), {
@@ -850,7 +901,11 @@ describe('PgsqlAdapter', () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
 			}) as unknown as PoolClient;
-			const error = { code: '42P05', routine: 'StorePreparedStatement' };
+			const error = {
+				code: '42P05',
+				severity: 'ERROR',
+				routine: 'StorePreparedStatement',
+			};
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
@@ -904,7 +959,7 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 			}) as unknown as PoolClient;
 			const sql = 'SELECT id FROM users WHERE id = $1';
-			const error = { code };
+			const error = { code, severity: 'ERROR' };
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error)
