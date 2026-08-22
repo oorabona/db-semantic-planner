@@ -610,9 +610,9 @@ function isVerifiedPreparedStatementInfrastructureError(
 }
 
 /**
- * A SQLSTATE-shaped, positionless failure is conservatively treated as
- * server-reported for reservation accounting. Its shape does not prove which
- * protocol phase was reached.
+ * A protocol-evidenced SQLSTATE-shaped, positionless failure is conservatively
+ * treated as server-reported for reservation accounting. Its shape does not
+ * prove which protocol phase was reached.
  */
 function didNamedExecutionReachExecution(error: unknown): boolean {
 	return (
@@ -624,10 +624,15 @@ function didNamedExecutionReachExecution(error: unknown): boolean {
 
 function hasPostgresSqlStateCode(error: unknown): boolean {
 	if (typeof error !== 'object' || error === null) return false;
-	const { code } = error as {
+	const { code, severity } = error as {
 		readonly code?: unknown;
+		readonly severity?: unknown;
 	};
-	return typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code);
+	return (
+		typeof severity === 'string' &&
+		typeof code === 'string' &&
+		/^[0-9A-Z]{5}$/.test(code)
+	);
 }
 
 function shouldAbortPreparedStatementReservation(
