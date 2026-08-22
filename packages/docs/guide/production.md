@@ -174,6 +174,14 @@ unexpected PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE
 matches, so application-raised errors cannot cause the fallback. Every adapter call
 still executes at most once.
 
+The client-wide scope after a verified `26000` is a deliberate, accepted cost:
+the SQLSTATE alone cannot distinguish a full connection reset (where every
+statement is gone) from a single targeted `DEALLOCATE <name>` (where only one
+is), so dbsp takes the conservative reading. If something deallocates one
+adapter-managed statement by name, every statement on that physical client
+runs unnamed from then on — correctness is preserved and only that client's
+statement caching is lost. A replacement client starts clean.
+
 The caller still owns a borrowed client: if it returns that client to a pool after
 one of these propagated errors, it must call `client.release(error)` so the pool
 destroys it. dbsp-owned pinned, transaction, and scratch scopes do this themselves;
