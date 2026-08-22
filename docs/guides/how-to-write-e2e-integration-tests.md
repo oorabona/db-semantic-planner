@@ -23,7 +23,7 @@ pnpm --filter @dbsp/adapter-pgsql... build
 MATRIX_DATABASE_URL=postgres://dbsp:dbsp@127.0.0.1:5432/dbsp pnpm vitest run --config tests/matrix/vitest.config.ts
 ```
 
-Each run creates a schema with an unpredictable identifier-safe suffix and removes only the schema it successfully created. Do not point it at a shared database: the role needs schema DDL privileges and the database should be disposable. Without a non-blank `MATRIX_DATABASE_URL`, it collects as a loudly skipped suite locally; CI refuses collection unless `MATRIX_ALLOW_SKIP=1` explicitly allows the skip.
+Each run creates a schema with an unpredictable identifier-safe suffix and makes a best-effort cleanup only after it has confirmed ownership. A disconnect after PostgreSQL commits `CREATE SCHEMA` but before the client receives success can leave that random schema in the disposable database. Do not point it at a shared database: the role needs schema DDL privileges and the database should be disposable. Without a non-blank `MATRIX_DATABASE_URL`, it collects as a loudly skipped suite locally; CI refuses collection unless `MATRIX_ALLOW_SKIP=1` explicitly allows the skip.
 
 ## The testkit (`tests/e2e/testkit/`)
 

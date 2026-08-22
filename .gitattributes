@@ -20,4 +20,3 @@
 *.woff binary
 *.woff2 binary
 
-pnpm-lock.yaml -diff

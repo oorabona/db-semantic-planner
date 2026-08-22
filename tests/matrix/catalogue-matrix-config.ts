@@ -18,6 +18,11 @@ export function normalizeMatrixDatabaseUrl(
 	return normalized === '' || normalized === undefined ? undefined : normalized;
 }
 
+/** Only CI's documented truthy spellings make a missing matrix URL fatal. */
+export function isMatrixCi(value: string | undefined): boolean {
+	return value === '1' || value?.toLowerCase() === 'true';
+}
+
 export function matrixDatabaseConfig(
 	environment: MatrixEnvironment,
 ): MatrixDatabaseConfig {
@@ -25,7 +30,7 @@ export function matrixDatabaseConfig(
 		environment.MATRIX_DATABASE_URL,
 	);
 	const requiresDatabaseUrl =
-		Boolean(environment.CI) && environment.MATRIX_ALLOW_SKIP !== '1';
+		isMatrixCi(environment.CI) && environment.MATRIX_ALLOW_SKIP !== '1';
 	return {
 		databaseUrl,
 		requiresDatabaseUrl,

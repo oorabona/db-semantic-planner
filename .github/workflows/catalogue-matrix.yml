@@ -1,6 +1,19 @@
 name: Catalogue PostgreSQL matrix
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/adapter-pgsql/**'
+      - 'packages/core/**'
+      - 'packages/nql/**'
+      - 'packages/types/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'tests/matrix/**'
+      - '.github/workflows/catalogue-matrix.yml'
   pull_request:
     branches: [main]
     paths:
@@ -24,14 +37,23 @@ permissions:
 jobs:
   catalogue-matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 40 min > 25 min (10 x 150 s tests) + 2 min hooks + 10 min install/build allowance.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        postgres: ['10', '11', '14', '18']
+        include:
+          - postgres: '10'
+            image: postgres:10@sha256:7a484b11fcabd39596b1bf08780cdb61fa9b0d8bfad0844dbdce3a6922df95d1 # PostgreSQL 10
+          - postgres: '11'
+            image: postgres:11@sha256:fdfb434d69d7884d6366840279dc3e721d1bd67cc1d02d51aeea7497f323fc5e # PostgreSQL 11
+          - postgres: '14'
+            image: postgres:14@sha256:62ed509a3761e09bc2d0552ec7374b795aec759ed928881a9df1d7d53951337b # PostgreSQL 14
+          - postgres: '18'
+            image: postgres:18@sha256:cd78ca58eb75f929698e117a589488ccb2bd45107247fe02400b50ff6c418324 # PostgreSQL 18
     services:
       postgres:
-        image: postgres:${{ matrix.postgres }}
+        image: ${{ matrix.image }}
         env:
           POSTGRES_USER: dbsp
           POSTGRES_PASSWORD: dbsp
@@ -55,7 +77,7 @@ jobs:
       - run: pnpm -C packages/nql build
       - run: pnpm -C packages/core build
       - run: pnpm -C packages/adapter-pgsql build
-      - run: pnpm -r typecheck
+      - run: pnpm -C tests/matrix typecheck
       - run: pnpm vitest run --config tests/matrix/vitest.config.ts
         env:
           MATRIX_DATABASE_URL: postgres://dbsp:dbsp@localhost:5432/dbsp

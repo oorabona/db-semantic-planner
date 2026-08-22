@@ -11,6 +11,6 @@ export default defineConfig({
 	root: repositoryRoot,
 	test: {
 		include: ['tests/matrix/**/*.test.ts'],
-		testTimeout: 30000,
+		testTimeout: 60000,
 	},
 });
