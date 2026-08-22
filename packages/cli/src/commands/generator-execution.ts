@@ -280,10 +280,6 @@ function generatedPayload(value: unknown): LedgerPayload {
 	};
 }
 
-function textList(value: unknown): readonly string[] {
-	return Array.isArray(value) ? value.map((item) => String(item)) : [];
-}
-
 function foreignKeyAction(code: unknown): string | undefined {
 	switch (code) {
 		case 'a':
@@ -301,11 +297,45 @@ function foreignKeyAction(code: unknown): string | undefined {
 	}
 }
 
-function strictBoolean(value: unknown, label: string): boolean {
-	if (typeof value !== 'boolean')
-		throw new Error(
-			`generated constraint ${label} has an incomplete projection`,
-		);
+function incompleteGeneratedProjection(kind: string, name: string): never {
+	throw new Error(`generated ${kind} ${name} has an incomplete projection`);
+}
+
+function strictGeneratedString(
+	value: unknown,
+	kind: string,
+	name: string,
+): string {
+	if (typeof value !== 'string') incompleteGeneratedProjection(kind, name);
+	return value;
+}
+
+function strictGeneratedBoolean(
+	value: unknown,
+	kind: string,
+	name: string,
+): boolean {
+	if (typeof value !== 'boolean') incompleteGeneratedProjection(kind, name);
+	return value;
+}
+
+function strictGeneratedStringArray(
+	value: unknown,
+	kind: string,
+	name: string,
+): readonly string[] {
+	if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
+		incompleteGeneratedProjection(kind, name);
+	return value;
+}
+
+function strictGeneratedStringOrNull(
+	value: unknown,
+	kind: string,
+	name: string,
+): string | null {
+	if (typeof value !== 'string' && value !== null)
+		incompleteGeneratedProjection(kind, name);
 	return value;
 }
 
@@ -320,8 +350,15 @@ function generatedColumnProjection(
 	readonly collation: string | null;
 	readonly identity: 'always' | 'byDefault' | null;
 } {
+	if (typeof row.relation_kind !== 'string')
+		throw new Error(`generated column ${name} has an incomplete projection`);
+	if (row.relation_kind !== 'r' && row.relation_kind !== 'p')
+		throw new Error(`generated column ${name} is not a table`);
+	if (typeof row.column_name !== 'string')
+		throw new Error(`generated column ${name} has an incomplete projection`);
+	if (row.column_name !== name)
+		throw new Error(`generated column ${name} projection names another column`);
 	if (
-		typeof row.column_name !== 'string' ||
 		typeof row.column_type !== 'string' ||
 		typeof row.is_not_null !== 'boolean' ||
 		(typeof row.column_default !== 'string' && row.column_default !== null) ||
@@ -344,6 +381,80 @@ function generatedColumnProjection(
 				: row.identity_kind === 'd'
 					? 'byDefault'
 					: null,
+	};
+}
+
+function generatedConstraintProjection(
+	row: Record<string, unknown>,
+	name: string,
+): {
+	readonly type: string;
+	readonly definition: string;
+	readonly columns: readonly string[];
+	readonly referencedSchema: string | null;
+	readonly referencedTable: string | null;
+	readonly referencedColumns: readonly string[];
+	readonly onDelete: string;
+	readonly onUpdate: string;
+	readonly deferrable: boolean;
+	readonly initiallyDeferred: boolean;
+	readonly validated: boolean;
+	readonly enforced: boolean;
+} {
+	return {
+		type: strictGeneratedString(row.constraint_type, 'constraint', name),
+		definition: strictGeneratedString(
+			row.constraint_definition,
+			'constraint',
+			name,
+		),
+		columns: strictGeneratedStringArray(row.key_columns, 'constraint', name),
+		referencedSchema: strictGeneratedStringOrNull(
+			row.referenced_schema,
+			'constraint',
+			name,
+		),
+		referencedTable: strictGeneratedStringOrNull(
+			row.referenced_table,
+			'constraint',
+			name,
+		),
+		referencedColumns: strictGeneratedStringArray(
+			row.referenced_columns,
+			'constraint',
+			name,
+		),
+		onDelete: strictGeneratedString(row.on_delete, 'constraint', name),
+		onUpdate: strictGeneratedString(row.on_update, 'constraint', name),
+		deferrable: strictGeneratedBoolean(row.is_deferrable, 'constraint', name),
+		initiallyDeferred: strictGeneratedBoolean(
+			row.is_deferred,
+			'constraint',
+			name,
+		),
+		validated: strictGeneratedBoolean(row.is_validated, 'constraint', name),
+		enforced: strictGeneratedBoolean(row.is_enforced, 'constraint', name),
+	};
+}
+
+function generatedSequenceProjection(
+	row: Record<string, unknown>,
+	name: string,
+): {
+	readonly start_value: string;
+	readonly increment_by: string;
+	readonly min_value: string;
+	readonly max_value: string;
+	readonly cache_size: string;
+	readonly cycle: boolean;
+} {
+	return {
+		start_value: strictGeneratedString(row.start_value, 'sequence', name),
+		increment_by: strictGeneratedString(row.increment_by, 'sequence', name),
+		min_value: strictGeneratedString(row.min_value, 'sequence', name),
+		max_value: strictGeneratedString(row.max_value, 'sequence', name),
+		cache_size: strictGeneratedString(row.cache_size, 'sequence', name),
+		cycle: strictGeneratedBoolean(row.cycle, 'sequence', name),
 	};
 }
 
@@ -384,7 +495,7 @@ export async function readGeneratedPostcondition(
 			);
 		const row = (
 			await executor.query(
-				`SELECT attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
+				`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
 				[address.schema, parent, address.name],
 			)
 		).rows[0];
@@ -468,40 +579,36 @@ export async function readGeneratedPostcondition(
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated constraint ${address.name} is absent`);
-		const definition = String(row.constraint_definition ?? '');
-		if (String(row.constraint_type) !== expected.type)
+		const projection = generatedConstraintProjection(row, address.name);
+		if (projection.type !== expected.type)
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
 			);
-		const deferrable = strictBoolean(row.is_deferrable, address.name);
-		const initiallyDeferred = strictBoolean(row.is_deferred, address.name);
-		const validated = strictBoolean(row.is_validated, address.name);
-		const enforced = strictBoolean(row.is_enforced, address.name);
 		if (
 			(expected.type === 'p' || expected.type === 'u') &&
-			(JSON.stringify(textList(row.key_columns)) !==
+			(JSON.stringify(projection.columns) !==
 				JSON.stringify(expected.columns) ||
-				deferrable !== expected.deferrable ||
-				initiallyDeferred !== expected.initiallyDeferred ||
-				enforced !== expected.enforced)
+				projection.deferrable !== expected.deferrable ||
+				projection.initiallyDeferred !== expected.initiallyDeferred ||
+				projection.enforced !== expected.enforced)
 		)
 			throw new Error(
 				`generated constraint ${address.name} postcondition differs`,
 			);
 		if (expected.type === 'f') {
 			if (
-				JSON.stringify(textList(row.key_columns)) !==
+				JSON.stringify(projection.columns) !==
 					JSON.stringify(expected.columns) ||
-				String(row.referenced_table ?? '') !== expected.references.table ||
-				String(row.referenced_schema ?? '') !== expected.references.schema ||
-				JSON.stringify(textList(row.referenced_columns)) !==
+				projection.referencedTable !== expected.references.table ||
+				projection.referencedSchema !== expected.references.schema ||
+				JSON.stringify(projection.referencedColumns) !==
 					JSON.stringify(expected.references.columns) ||
-				foreignKeyAction(row.on_delete) !== expected.onDelete ||
-				foreignKeyAction(row.on_update) !== expected.onUpdate ||
-				deferrable !== expected.deferrable ||
-				initiallyDeferred !== expected.initiallyDeferred ||
-				enforced !== expected.enforced ||
-				validated === expected.notValid
+				foreignKeyAction(projection.onDelete) !== expected.onDelete ||
+				foreignKeyAction(projection.onUpdate) !== expected.onUpdate ||
+				projection.deferrable !== expected.deferrable ||
+				projection.initiallyDeferred !== expected.initiallyDeferred ||
+				projection.enforced !== expected.enforced ||
+				projection.validated === expected.notValid
 			)
 				throw new Error(
 					`generated constraint ${address.name} postcondition differs`,
@@ -509,11 +616,11 @@ export async function readGeneratedPostcondition(
 		}
 		return generatedPayload({
 			kind: 'constraint',
-			type: String(row.constraint_type ?? ''),
-			definition,
-			deferrable,
-			initiallyDeferred,
-			enforced,
+			type: projection.type,
+			definition: projection.definition,
+			deferrable: projection.deferrable,
+			initiallyDeferred: projection.initiallyDeferred,
+			enforced: projection.enforced,
 		});
 	}
 	if (address.kind === 'index' && parent && address.schema) {
@@ -567,11 +674,31 @@ export async function readGeneratedPostcondition(
 			);
 		const rows = (
 			await executor.query(
-				`SELECT enum_label.enumlabel AS label FROM pg_catalog.pg_type type JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace JOIN pg_catalog.pg_enum enum_label ON enum_label.enumtypid = type.oid WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum_label.enumsortorder`,
+				`SELECT type.typtype AS type_kind, enum_label.enumlabel::text AS enum_label FROM pg_catalog.pg_type type JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace LEFT JOIN pg_catalog.pg_enum enum_label ON enum_label.enumtypid = type.oid WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum_label.enumsortorder`,
 				[address.schema, address.name],
 			)
 		).rows;
-		const labels = rows.map((row) => String(row.label));
+		if (rows.length === 0)
+			throw new Error(`generated enum ${address.name} is absent`);
+		const row = rows[0];
+		if (!row) incompleteGeneratedProjection('enum', address.name);
+		if (typeof row.type_kind !== 'string')
+			incompleteGeneratedProjection('enum', address.name);
+		if (row.type_kind !== 'e')
+			throw new Error(`generated enum ${address.name} is not an enum`);
+		const labels =
+			rows.length === 1 && row.enum_label === null
+				? []
+				: rows.map((enumRow) => {
+						if (
+							!enumRow ||
+							typeof enumRow.type_kind !== 'string' ||
+							enumRow.type_kind !== 'e' ||
+							typeof enumRow.enum_label !== 'string'
+						)
+							incompleteGeneratedProjection('enum', address.name);
+						return enumRow.enum_label;
+					});
 		if (JSON.stringify(labels) !== JSON.stringify(postcondition.labels))
 			throw new Error(`generated enum ${address.name} postcondition differs`);
 		return generatedPayload({ kind: 'enum', labels });
@@ -589,12 +716,13 @@ export async function readGeneratedPostcondition(
 			)
 		).rows[0];
 		if (!row) throw new Error(`generated sequence ${address.name} is absent`);
+		const projection = generatedSequenceProjection(row, address.name);
 		const actual = {
-			startValue: String(row.start_value),
-			incrementBy: String(row.increment_by),
-			minValue: String(row.min_value),
-			maxValue: String(row.max_value),
-			cycle: row.cycle === true,
+			startValue: projection.start_value,
+			incrementBy: projection.increment_by,
+			minValue: projection.min_value,
+			maxValue: projection.max_value,
+			cycle: projection.cycle,
 		};
 		for (const key of [
 			'startValue',
@@ -610,7 +738,7 @@ export async function readGeneratedPostcondition(
 				throw new Error(
 					`generated sequence ${address.name} postcondition differs`,
 				);
-		return generatedPayload({ kind: 'sequence', ...row });
+		return generatedPayload({ kind: 'sequence', ...projection });
 	}
 	if (address.kind === 'extension') {
 		const postcondition = generatedPostcondition(step, address);
@@ -628,16 +756,21 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated extension ${address.name} version postcondition differs`,
 			);
+		const version = strictGeneratedString(
+			row.version,
+			'extension',
+			address.name,
+		);
 		if (
 			postcondition.version !== undefined &&
-			String(row.version) !== postcondition.version
+			version !== postcondition.version
 		)
 			throw new Error(
 				`generated extension ${address.name} version postcondition differs`,
 			);
 		return generatedPayload({
 			kind: 'extension',
-			version: String(row.version),
+			version,
 		});
 	}
 	throw new Error(`generated ${address.kind} has no declarable read-back`);
