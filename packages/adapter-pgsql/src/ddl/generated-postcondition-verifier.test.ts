@@ -8,6 +8,7 @@ import {
 	GeneratedPostconditionWorkInFlightError,
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
@@ -83,6 +84,8 @@ function indexExecutor(input: {
 	readonly staged?: Record<string, unknown>;
 }) {
 	const query = vi.fn(async (sql: string) => {
+		if (sql.includes('has_database_privilege'))
+			return { rows: [{ has_temp_privilege: true }] };
 		if (sql.includes('WHERE namespace.nspname'))
 			return { rows: [indexRow(input.live)] };
 		if (sql.includes('WHERE relation.oid'))
@@ -101,17 +104,80 @@ function testSession(
 	return mintGeneratedPostconditionSession({ query });
 }
 
-function tableSession(rows: readonly Record<string, unknown>[]) {
+function tableSession(
+	rows: readonly Record<string, unknown>[],
+	stagedDefaults: Readonly<Record<string, string>> = {},
+	sequenceEvidence?: readonly Record<string, unknown>[],
+) {
 	return testSession(
-		vi.fn(async () => ({
-			rows: rows.map((row) => ({
-				relation_kind: 'r',
-				column_default: null,
-				collation_name: null,
-				identity_kind: '',
-				...row,
-			})),
-		})),
+		vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('attribute.attname = ANY($2::text[])')) {
+				const names = params?.[1] as readonly string[];
+				return {
+					rows: names.flatMap((name) =>
+						stagedDefaults[name] === undefined
+							? []
+							: [{ column_name: name, column_default: stagedDefaults[name] }],
+					),
+				};
+			}
+			return {
+				rows: rows.map((row) => ({
+					relation_kind: 'r',
+					column_default: null,
+					generated_sequence_default:
+						sequenceEvidence?.some(
+							(evidence) => evidence.generated_sequence_default === true,
+						) ?? String(row.column_default).startsWith("nextval('"),
+					collation_name: null,
+					identity_kind: '',
+					...row,
+				})),
+			};
+		}),
+	);
+}
+
+function columnSession(
+	live: Record<string, unknown>,
+	stagedDefaults: Readonly<Record<string, string>> = {},
+	sequenceEvidence?: readonly Record<string, unknown>[],
+) {
+	return testSession(
+		vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('attribute.attname = ANY($2::text[])')) {
+				const names = params?.[1] as readonly string[];
+				return {
+					rows: names.flatMap((name) =>
+						stagedDefaults[name] === undefined
+							? []
+							: [{ column_name: name, column_default: stagedDefaults[name] }],
+					),
+				};
+			}
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						generated_sequence_default:
+							sequenceEvidence?.some(
+								(evidence) => evidence.generated_sequence_default === true,
+							) ?? String(live.column_default).startsWith("nextval('"),
+						collation_name: null,
+						identity_kind: '',
+						...live,
+					},
+				],
+			};
+		}),
 	);
 }
 
@@ -899,6 +965,496 @@ describe('generated postcondition verifier', () => {
 				],
 			}),
 		).not.toThrow();
+	});
+
+	it('keeps persisted v2 column defaults without defaultKind decodable', () => {
+		expect(
+			decodeGeneratedPostcondition({
+				postconditionVersion: 2,
+				kind: 'column',
+				column: { name: 'status', hasDefault: true, default: "'pending'" },
+			}),
+		).toEqual({
+			postconditionVersion: 2,
+			kind: 'column',
+			column: { name: 'status', hasDefault: true, default: "'pending'" },
+		});
+	});
+
+	it('refuses a persisted setting-dependent backslash default and stages E literals', async () => {
+		expect(() =>
+			decodeGeneratedPostcondition({
+				postconditionVersion: 2,
+				kind: 'column',
+				column: {
+					name: 'path',
+					hasDefault: true,
+					default: String.raw`'C:\\Users'`,
+				},
+			}),
+		).toThrow('replan');
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'path',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: String.raw`'C:\\Users'::text`,
+						},
+					],
+					{ path: String.raw`'C:\\Users'::text` },
+				),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [
+						{
+							name: 'path',
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: String.raw`E'C:\\Users'`,
+						},
+					],
+				},
+				target: tableTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+	});
+
+	it('compares authored text defaults through paired server deparses', async () => {
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'status',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: "'pending'::text",
+						},
+					],
+					{ status: "'pending'::text" },
+				),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [
+						{
+							name: 'status',
+							type: 'text',
+							nullable: true,
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: "'pending'",
+						},
+					],
+				},
+				target: tableTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'status',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: "'pending'::text",
+						},
+					],
+					{ status: "'draft'::text" },
+				),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [
+						{
+							name: 'status',
+							type: 'text',
+							nullable: true,
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: "'draft'",
+						},
+					],
+				},
+				target: tableTarget,
+			}),
+		).rejects.toThrow('column postcondition differs');
+	});
+
+	it('stages every authored default with one ALTER and one catalogue projection', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('attribute.attname = ANY($2::text[])'))
+				return {
+					rows: [
+						{ column_name: 'status', column_default: "'pending'::text" },
+						{ column_name: 'path', column_default: "'C:\\\\Users'::text" },
+					],
+				};
+			if (sql.includes('WHERE namespace.nspname'))
+				return {
+					rows: [
+						{
+							relation_kind: 'r',
+							column_name: 'status',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: "'pending'::text",
+							generated_sequence_default: false,
+							collation_name: null,
+							identity_kind: '',
+						},
+						{
+							relation_kind: 'r',
+							column_name: 'path',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: "'C:\\\\Users'::text",
+							generated_sequence_default: false,
+							collation_name: null,
+							identity_kind: '',
+						},
+					],
+				};
+			return { rows: [] };
+		});
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: testSession(query),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [
+						{
+							name: 'status',
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: "'pending'",
+						},
+						{
+							name: 'path',
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: String.raw`E'C:\\Users'`,
+						},
+					],
+				},
+				target: tableTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		const statements = query.mock.calls.map(([sql]) => sql);
+		const alterations = statements.filter((sql) =>
+			sql.startsWith('ALTER TABLE'),
+		);
+		expect(alterations).toHaveLength(1);
+		expect(alterations[0]).toContain(', ALTER COLUMN "path" SET DEFAULT');
+		expect(
+			statements.filter((sql) =>
+				sql.includes('attribute.attname = ANY($2::text[])'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('translates a vanished authored-default target at either ACCESS SHARE lock and releases cleanly', async () => {
+		const cases: readonly {
+			readonly absent: string;
+			readonly verify: (
+				session: GeneratedPostconditionSession,
+			) => Promise<unknown>;
+		}[] = [
+			{
+				absent: 'generated table accounts is absent',
+				verify: (session: GeneratedPostconditionSession) =>
+					verifyGeneratedTablePostcondition({
+						session,
+						postcondition: {
+							postconditionVersion: 2,
+							kind: 'table',
+							columns: [
+								{
+									name: 'id',
+									hasDefault: true,
+									defaultKind: 'authored',
+									default: '1',
+								},
+							],
+						},
+						target: tableTarget,
+					}),
+			},
+			{
+				absent: 'generated column id is absent',
+				verify: (session: GeneratedPostconditionSession) =>
+					verifyGeneratedColumnPostcondition({
+						session,
+						postcondition: {
+							postconditionVersion: 2,
+							kind: 'column',
+							column: {
+								name: 'id',
+								hasDefault: true,
+								defaultKind: 'authored',
+								default: '1',
+							},
+						},
+						target: { ...tableTarget, name: 'id' },
+					}),
+			},
+		] as const;
+		for (const testCase of cases) {
+			const query = vi.fn(async (sql: string) => {
+				if (sql.startsWith('LOCK TABLE')) {
+					const error = new Error('relation does not exist') as Error & {
+						code: string;
+					};
+					error.code = '42P01';
+					throw error;
+				}
+				return { rows: [] };
+			});
+			const release = vi.fn();
+			await expect(
+				withGeneratedPostconditionSession(
+					{ connect: async () => ({ query, release }) },
+					testCase.verify,
+				),
+			).rejects.toThrow(testCase.absent);
+			expect(release).toHaveBeenCalledWith();
+			expect(query.mock.calls.map(([sql]) => sql)).toContain(
+				`LOCK TABLE "tenant"."accounts" IN ACCESS SHARE MODE`,
+			);
+		}
+	});
+
+	it('requires generated sequence defaults by relation kind and ownership OIDs', async () => {
+		const serialPostcondition = {
+			postconditionVersion: 2 as const,
+			kind: 'column' as const,
+			column: {
+				name: 'id',
+				type: 'integer',
+				nullable: false,
+				hasDefault: true,
+				defaultKind: 'generated-sequence' as const,
+			},
+		};
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession({
+					column_default: "nextval('renamed_id_seq'::regclass)",
+				}),
+				postcondition: serialPostcondition,
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).resolves.toMatchObject({ kind: 'column' });
+		for (const evidence of [
+			[
+				{
+					invokes_nextval: false,
+					sequence_relation_kind: 'r',
+					owned_by_column: false,
+				},
+			],
+			[
+				{
+					invokes_nextval: false,
+					sequence_relation_kind: 'S',
+					owned_by_column: false,
+				},
+			],
+		] as const)
+			await expect(
+				verifyGeneratedColumnPostcondition({
+					session: columnSession(
+						{ column_default: "nextval('renamed_id_seq'::regclass)" },
+						{},
+						evidence,
+					),
+					postcondition: serialPostcondition,
+					target: { ...tableTarget, name: 'id' },
+				}),
+			).rejects.toThrow('default postcondition differs');
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession({ column_default: '5' }),
+				postcondition: serialPostcondition,
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).rejects.toThrow('default postcondition differs');
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession(
+					{
+						column_default: "nextval('accounts_id_seq'::regclass)",
+					},
+					{ id: '5' },
+				),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: {
+						name: 'id',
+						hasDefault: true,
+						defaultKind: 'authored',
+						default: '5',
+					},
+				},
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).rejects.toThrow('default postcondition differs');
+	});
+
+	it.each([
+		"currval('accounts_id_seq'::regclass)",
+		"nextval('accounts_id_seq'::regclass) + 1",
+		"'accounts_id_seq'::regclass::oid",
+	])('refuses an owned sequence default without the SERIAL nextval shape: %s', async (column_default) => {
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession({ column_default }, {}, [
+					{ generated_sequence_default: false },
+				]),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: {
+						name: 'id',
+						hasDefault: true,
+						defaultKind: 'generated-sequence',
+					},
+				},
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).rejects.toThrow('default postcondition differs');
+	});
+
+	it('refuses a view column and releases successful catalogue absence cleanly', async () => {
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession({ relation_kind: 'v' }),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: { name: 'id', hasDefault: false },
+				},
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).rejects.toThrow('parent is not a table');
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release }) },
+				(session) =>
+					verifyGeneratedColumnPostcondition({
+						session,
+						postcondition: {
+							postconditionVersion: 2,
+							kind: 'column',
+							column: { name: 'id', hasDefault: false },
+						},
+						target: { ...tableTarget, name: 'id' },
+					}),
+			),
+		).rejects.toThrow('generated column id is absent');
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('routes table generated-sequence defaults through the dependency proof', async () => {
+		const serialPostcondition = {
+			postconditionVersion: 2 as const,
+			kind: 'table' as const,
+			columns: [
+				{
+					name: 'id',
+					type: 'INTEGER',
+					nullable: false,
+					hasDefault: true,
+					defaultKind: 'generated-sequence' as const,
+				},
+			],
+		};
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: "nextval('accounts_id_seq'::regclass)",
+					},
+				]),
+				postcondition: serialPostcondition,
+				target: tableTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: '42',
+					},
+				]),
+				postcondition: serialPostcondition,
+				target: tableTarget,
+			}),
+		).rejects.toThrow('column postcondition differs');
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'id',
+							column_type: 'integer',
+							is_not_null: true,
+							column_default: '42',
+						},
+					],
+					{ id: '42' },
+				),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'table',
+					columns: [
+						{
+							name: 'id',
+							hasDefault: true,
+							defaultKind: 'authored',
+							default: '42',
+						},
+					],
+				},
+				target: tableTarget,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+	});
+
+	it('names the standalone field whose postcondition differs', async () => {
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: columnSession({ column_type: 'text' }),
+				postcondition: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: {
+						name: 'id',
+						type: 'integer',
+						nullable: false,
+						hasDefault: false,
+					},
+				},
+				target: { ...tableTarget, name: 'id' },
+			}),
+		).rejects.toThrow('generated column id type postcondition differs');
 	});
 
 	it('refuses duplicate expected table-column names before reading the catalogue', async () => {

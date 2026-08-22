@@ -26,6 +26,7 @@ export {
 	type GeneratedPostconditionTarget,
 	GeneratedPostconditionWorkInFlightError,
 	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,

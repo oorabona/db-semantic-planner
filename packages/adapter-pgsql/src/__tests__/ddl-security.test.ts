@@ -1540,6 +1540,12 @@ describe('formatSqlDefault — bare function-call path injection (M-5)', () => {
 		expect(formatSqlDefault('uuid_generate_v4()')).toBe('uuid_generate_v4()');
 	});
 
+	it('emits scalar backslash defaults as setting-independent escape strings', () => {
+		expect(formatSqlDefault(String.raw`C:\Users`)).toBe(
+			String.raw`E'C:\\Users'`,
+		);
+	});
+
 	it('rejects punctuation inside an authored raw default literal', () => {
 		expect(() => formatSqlDefault({ sql: "'a;b'::text" })).toThrow(
 			/forbidden characters/,

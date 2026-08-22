@@ -240,7 +240,18 @@ describe('generator execution fixture shim', () => {
 					parent: dataDestructiveStep.address,
 				},
 			},
-			[columnProjectionRow()],
+			[
+				{
+					relation_kind: 'r',
+					column_name: 'id',
+					column_type: 'integer',
+					is_not_null: true,
+					column_default: null,
+					generated_sequence_default: false,
+					collation_name: null,
+					identity_kind: '',
+				},
+			],
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
@@ -307,7 +318,7 @@ describe('generator execution fixture shim', () => {
 		[
 			'a view relation',
 			columnProjectionRow({ relation_kind: 'v' }),
-			'generated column id is not a table',
+			'generated column id parent is not a table',
 		],
 		[
 			'another projected column',

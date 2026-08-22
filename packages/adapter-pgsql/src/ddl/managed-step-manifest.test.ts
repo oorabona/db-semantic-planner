@@ -545,9 +545,116 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					type: 'numeric(10,2)',
 					nullable: false,
 					hasDefault: true,
+					defaultKind: 'authored',
 					default: 'round(random() * 10, 2)',
 				},
 			],
+		});
+	});
+
+	it('records SERIAL defaults as generated-sequence expectations', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_column',
+					table: 'ledger',
+					destructive: false,
+					details: 'add serial id',
+					meta: {
+						column: {
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							autoIncrement: true,
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toEqual({
+			postconditionVersion: 2,
+			kind: 'column',
+			column: {
+				name: 'id',
+				type: 'INTEGER',
+				nullable: false,
+				hasDefault: true,
+				defaultKind: 'generated-sequence',
+			},
+		});
+	});
+
+	it('shares the autoIncrement emission decision with the mapper', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_column',
+					table: 'ledger',
+					destructive: false,
+					details: 'add serial id from original type',
+					meta: {
+						column: {
+							name: 'id',
+							type: 'integer',
+							originalDbType: 'integer',
+							nullable: false,
+							autoIncrement: true,
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toMatchObject({
+			kind: 'column',
+			column: { hasDefault: true, defaultKind: 'generated-sequence' },
+		});
+
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_column',
+					table: 'ledger',
+					destructive: false,
+					details: 'reject serial text',
+					meta: {
+						column: {
+							name: 'code',
+							type: 'string',
+							nullable: false,
+							autoIncrement: true,
+						},
+					},
+				},
+				schema: 'public',
+			}),
+		).toThrow('generator planning refuses autoIncrement');
+
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'add_column',
+					table: 'ledger',
+					destructive: false,
+					details: 'preserve authored default',
+					meta: {
+						column: {
+							name: 'legacy_id',
+							type: 'integer',
+							nullable: false,
+							autoIncrement: true,
+							default: 42,
+						},
+					},
+				},
+				schema: 'public',
+			})?.value,
+		).toMatchObject({
+			kind: 'column',
+			column: {
+				hasDefault: true,
+				defaultKind: 'authored',
+				default: '42',
+			},
 		});
 	});
 

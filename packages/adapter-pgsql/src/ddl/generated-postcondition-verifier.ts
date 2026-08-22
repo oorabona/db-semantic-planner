@@ -47,6 +47,7 @@ const cleanScratchFailures = new WeakMap<
 	GeneratedPostconditionSafeFailure
 >();
 const structuralMismatchFailures = new WeakSet<object>();
+const scratchRollbackSafeFailures = new WeakSet<object>();
 const generatedPostconditionSessionLockTimeouts = new WeakMap<object, number>();
 
 /** An adapter-minted, exclusive PostgreSQL session for rollback-only proof. */
@@ -151,6 +152,11 @@ export async function withPinnedGeneratedPostconditionSession<T>(
 	}
 }
 
+/**
+ * Public verifier checkout bracket.  Scratch-backed proofs require the active
+ * role to hold database TEMP privilege; callers must preflight that capability
+ * before applying managed DDL whose postcondition needs scratch staging.
+ */
 export async function withGeneratedPostconditionSession<T>(
 	executor: {
 		connect(): Promise<
@@ -249,6 +255,8 @@ type TableColumnProjection = {
 	readonly type: string;
 	readonly nullable: boolean;
 	readonly default: string | undefined;
+	/** Ownership and canonical nextval shape read in the same catalogue snapshot. */
+	readonly generatedSequenceDefault: boolean;
 	readonly collation: string | null;
 	readonly identity: 'always' | 'byDefault' | null;
 };
@@ -256,6 +264,8 @@ type TableColumnProjection = {
 type TableProjection = {
 	readonly columns: readonly TableColumnProjection[];
 };
+
+type GeneratedColumnProjection = Omit<TableColumnProjection, 'name'>;
 
 let scratchSequence = 0;
 
@@ -349,6 +359,7 @@ export function decodeColumnPostcondition(
 			'type',
 			'nullable',
 			'hasDefault',
+			'defaultKind',
 			'default',
 			'collation',
 			'identity',
@@ -359,6 +370,7 @@ export function decodeColumnPostcondition(
 	const type = value.type;
 	const nullable = value.nullable;
 	const hasDefault = value.hasDefault;
+	const defaultKind = value.defaultKind;
 	const defaultValue = value.default;
 	const collation = value.collation;
 	const identity = value.identity;
@@ -370,13 +382,30 @@ export function decodeColumnPostcondition(
 		hasDefault === undefined
 			? undefined
 			: strictBoolean(hasDefault, unsupported);
+	let decodedDefaultKind: 'authored' | 'generated-sequence' | undefined;
+	if (defaultKind === undefined) decodedDefaultKind = undefined;
+	else if (defaultKind === 'authored' || defaultKind === 'generated-sequence')
+		decodedDefaultKind = defaultKind;
+	else throw replan(unsupported);
 	let decodedDefault: string | undefined;
-	if (decodedHasDefault === true) {
+	if (
+		decodedHasDefault === true &&
+		decodedDefaultKind !== 'generated-sequence'
+	) {
 		if (defaultValue === undefined) throw replan(unsupported);
 		decodedDefault = strictString(defaultValue, unsupported);
+		try {
+			validateCheckExpression(decodedDefault, 'generated column default');
+		} catch {
+			throw replan(
+				'generated column default is not a setting-independent expression',
+			);
+		}
 	} else if (defaultValue !== undefined) {
 		throw replan(unsupported);
 	}
+	if (decodedDefaultKind !== undefined && decodedHasDefault !== true)
+		throw replan(unsupported);
 	const decodedCollation =
 		collation === undefined || collation === null
 			? collation
@@ -393,6 +422,9 @@ export function decodeColumnPostcondition(
 		...(decodedHasDefault === undefined
 			? {}
 			: { hasDefault: decodedHasDefault }),
+		...(decodedDefaultKind === undefined
+			? {}
+			: { defaultKind: decodedDefaultKind }),
 		...(decodedDefault === undefined ? {} : { default: decodedDefault }),
 		...(decodedCollation === undefined ? {} : { collation: decodedCollation }),
 		...(decodedIdentity === undefined ? {} : { identity: decodedIdentity }),
@@ -1019,7 +1051,10 @@ async function scratchScope<T>(
 			'generated postcondition verification failed and scratch cleanup failed',
 		);
 	if (workFailed) {
-		if (isStructuralMismatchFailure(workError))
+		if (
+			isStructuralMismatchFailure(workError) ||
+			isScratchRollbackSafeFailure(workError)
+		)
 			markCleanScratchFailure(workError, session);
 		throw workError;
 	}
@@ -1152,6 +1187,14 @@ function isStructuralMismatchFailure(error: unknown): boolean {
 	);
 }
 
+function isScratchRollbackSafeFailure(error: unknown): boolean {
+	return (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function') &&
+		scratchRollbackSafeFailures.has(error)
+	);
+}
+
 async function withGeneratedPostconditionProof<T>(
 	input: GeneratedPostconditionSession,
 	work: (session: GeneratedPostconditionSession) => Promise<T>,
@@ -1216,6 +1259,7 @@ function tableColumnProjection(
 		type: row.column_type,
 		nullable: !row.is_not_null,
 		default: row.column_default === null ? undefined : row.column_default,
+		generatedSequenceDefault: row.generated_sequence_default === true,
 		// PostgreSQL names the built-in collation `default`; DBSP represents no
 		// explicit collation as null.
 		collation: row.collation_name === 'default' ? null : row.collation_name,
@@ -1226,6 +1270,209 @@ function tableColumnProjection(
 					? 'byDefault'
 					: null,
 	};
+}
+
+function generatedColumnProjection(
+	row: Record<string, unknown>,
+	name: string,
+): GeneratedColumnProjection {
+	const projection = tableColumnProjection({ ...row, column_name: name });
+	return {
+		type: projection.type,
+		nullable: projection.nullable,
+		default: projection.default,
+		generatedSequenceDefault: projection.generatedSequenceDefault,
+		collation: projection.collation,
+		identity: projection.identity,
+	};
+}
+
+// The deparse is PostgreSQL's canonical form.  The sequence name is deliberately
+// not compared, but the entire expression must be the top-level SERIAL nextval
+// shape and the referenced sequence must be owned by this exact column.
+const GENERATED_SEQUENCE_EVIDENCE_SQL =
+	"(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid, false) ~ $dbsp_serial$^nextval\\('([^']|'')*'::regclass\\)$dbsp_serial$ AND EXISTS (SELECT 1 FROM pg_catalog.pg_depend default_sequence JOIN pg_catalog.pg_class sequence_relation ON sequence_relation.oid = default_sequence.refobjid WHERE default_sequence.classid = 'pg_catalog.pg_attrdef'::pg_catalog.regclass AND default_sequence.objid = default_value.oid AND default_sequence.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass AND default_sequence.deptype = 'n' AND sequence_relation.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_catalog.pg_depend ownership WHERE ownership.classid = 'pg_catalog.pg_class'::pg_catalog.regclass AND ownership.objid = sequence_relation.oid AND ownership.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass AND ownership.refobjid = relation.oid AND ownership.refobjsubid = attribute.attnum AND ownership.deptype = 'a'))) AS generated_sequence_default";
+
+const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
+
+function isGeneratedSequenceDefault(
+	specification: Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'],
+): boolean {
+	return specification.defaultKind === 'generated-sequence';
+}
+
+function requiresStagedDefault(
+	specification: Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'],
+): boolean {
+	return (
+		specification.hasDefault === true &&
+		!isGeneratedSequenceDefault(specification)
+	);
+}
+
+function requiresStableColumnProof(
+	specification: Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'],
+): boolean {
+	return (
+		requiresStagedDefault(specification) ||
+		isGeneratedSequenceDefault(specification)
+	);
+}
+
+function scratchRollbackSafe(error: Error): Error {
+	scratchRollbackSafeFailures.add(error);
+	return error;
+}
+
+async function assertTemporaryTablePrivilege(
+	session: GeneratedPostconditionSession,
+): Promise<void> {
+	const row = (
+		await session.query(
+			"SELECT pg_catalog.has_database_privilege(pg_catalog.current_database(), 'TEMP') AS has_temp_privilege",
+		)
+	).rows[0];
+	if (row?.has_temp_privilege === false)
+		throw scratchRollbackSafe(
+			new Error(
+				'generated postcondition verification requires database TEMP privilege before scratch-table DDL; grant TEMP and re-plan before applying managed DDL',
+			),
+		);
+}
+
+async function lockAuthoredDefaultTarget(
+	session: GeneratedPostconditionSession,
+	target: GeneratedPostconditionTarget,
+	absent: string,
+): Promise<void> {
+	try {
+		// ACCESS SHARE excludes only concurrent ACCESS EXCLUSIVE DDL that can
+		// change this projection; weaker maintenance and ordinary DML are admitted.
+		await session.query(
+			`LOCK TABLE ${quoteIdent(target.schema, 'schema')}.${quoteIdent(target.table, 'table')} IN ACCESS SHARE MODE`,
+		);
+	} catch (error) {
+		if (isRecord(error) && error.code === '42P01')
+			throw scratchRollbackSafe(new Error(absent));
+		throw error;
+	}
+}
+
+async function stageAuthoredDefaults(
+	session: GeneratedPostconditionSession,
+	target: GeneratedPostconditionTarget,
+	columns: readonly Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'][],
+): Promise<ReadonlyMap<string, string>> {
+	const expected = columns.filter(requiresStagedDefault);
+	if (expected.length === 0) return new Map();
+	const scratchTable = nextScratchName('table');
+	await assertTemporaryTablePrivilege(session);
+	await session.query(
+		`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(target.schema, 'schema')}.${quoteIdent(target.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
+	);
+	const staged = new Map<string, string>();
+	for (const column of expected) {
+		if (column.default === undefined)
+			throw replan('generated column postcondition is unsupported');
+		validateCheckExpression(column.default, 'generated column default');
+	}
+	await session.query(
+		`ALTER TABLE ${quoteIdent(scratchTable, 'table')} ${expected
+			.map(
+				(column) =>
+					`ALTER COLUMN ${quoteIdent(column.name, 'column')} SET DEFAULT ${column.default}`,
+			)
+			.join(', ')}`,
+	);
+	const stagedRows = (
+		await session.query(
+			'SELECT attribute.attname AS column_name, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default FROM pg_catalog.pg_attrdef default_value JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = default_value.adrelid AND attribute.attnum = default_value.adnum WHERE default_value.adrelid = $1::pg_catalog.regclass AND attribute.attname = ANY($2::text[])',
+			[scratchTable, expected.map((column) => column.name)],
+		)
+	).rows;
+	for (const row of stagedRows) {
+		if (
+			typeof row.column_name !== 'string' ||
+			typeof row.column_default !== 'string'
+		)
+			throw new Error(
+				'generated column verifier could not read staged default',
+			);
+		staged.set(row.column_name, row.column_default);
+	}
+	if (staged.size !== expected.length)
+		throw new Error('generated column verifier could not read staged default');
+	return staged;
+}
+
+type ColumnPostconditionMismatch =
+	| 'type'
+	| 'nullability'
+	| 'default'
+	| 'collation'
+	| 'identity';
+
+async function defaultPostconditionMatches(
+	actual: GeneratedColumnProjection,
+	specification: Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'],
+	stagedDefaults: ReadonlyMap<string, string>,
+): Promise<boolean> {
+	if (specification.hasDefault === false) return actual.default === undefined;
+	if (specification.hasDefault !== true) return true;
+	if (actual.default === undefined) return false;
+	if (isGeneratedSequenceDefault(specification))
+		return actual.generatedSequenceDefault;
+	return stagedDefaults.get(specification.name) === actual.default;
+}
+
+async function columnPostconditionMatches(
+	actual: GeneratedColumnProjection,
+	specification: Extract<
+		GeneratedPostcondition,
+		{ readonly kind: 'column' }
+	>['column'],
+	stagedDefaults: ReadonlyMap<string, string>,
+): Promise<ColumnPostconditionMismatch | undefined> {
+	if (
+		specification.type !== undefined &&
+		!dbTypesEqual(actual.type, specification.type)
+	)
+		return 'type';
+	if (
+		specification.nullable !== undefined &&
+		actual.nullable !== specification.nullable
+	)
+		return 'nullability';
+	if (
+		!(await defaultPostconditionMatches(actual, specification, stagedDefaults))
+	)
+		return 'default';
+	if (
+		specification.collation !== undefined &&
+		actual.collation !== specification.collation
+	)
+		return 'collation';
+	if (
+		specification.identity !== undefined &&
+		actual.identity !== specification.identity
+	)
+		return 'identity';
+	return undefined;
 }
 
 /**
@@ -1242,56 +1489,138 @@ export async function verifyGeneratedTablePostcondition(input: {
 		const postcondition = decodeGeneratedPostcondition(input.postcondition);
 		if (postcondition.kind !== 'table')
 			throw replan('generated table postcondition is unsupported');
-		const rows = (
-			await session.query(
-				`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
-				[input.target.schema, input.target.table],
-			)
-		).rows;
-		const expected = postcondition.columns;
-		if (rows.length === 0)
-			throw new Error(`generated table ${input.target.name} is absent`);
-		const relationKind = rows[0]?.relation_kind;
-		if (typeof relationKind !== 'string')
-			throw new Error(
-				'generated table verifier could not read a complete projection',
-			);
-		if (relationKind !== 'r' && relationKind !== 'p')
-			throw new Error(`generated table ${input.target.name} is not a table`);
-		if (rows.some((row) => row.relation_kind !== relationKind))
-			throw new Error(
-				'generated table verifier could not read a complete projection',
-			);
-		const columnRows = rows.filter((row) => row.column_name !== null);
-		if (columnRows.length !== expected.length)
-			throw structuralMismatch(
-				`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
-			);
-		const live = columnRows.map(tableColumnProjection);
-		for (const [ordinal, specification] of expected.entries()) {
-			const actual = live[ordinal];
-			if (
-				!actual ||
-				actual.name !== specification.name ||
-				(specification.type !== undefined &&
-					!dbTypesEqual(actual.type, specification.type)) ||
-				(specification.nullable !== undefined &&
-					actual.nullable !== specification.nullable) ||
-				(specification.hasDefault === true &&
-					(actual.default === undefined ||
-						specification.default === undefined ||
-						actual.default !== specification.default)) ||
-				(specification.hasDefault === false && actual.default !== undefined) ||
-				(specification.collation !== undefined &&
-					actual.collation !== specification.collation) ||
-				(specification.identity !== undefined &&
-					actual.identity !== specification.identity)
-			)
+		const verify = async () => {
+			const rows = (
+				await session.query(
+					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
+					[input.target.schema, input.target.table],
+				)
+			).rows;
+			const expected = postcondition.columns;
+			if (rows.length === 0)
 				throw structuralMismatch(
-					`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+					`generated table ${input.target.name} is absent`,
 				);
-		}
-		return { kind: 'table', projection: { columns: live } };
+			const relationKind = rows[0]?.relation_kind;
+			if (typeof relationKind !== 'string')
+				throw new Error(
+					'generated table verifier could not read a complete projection',
+				);
+			if (relationKind !== 'r' && relationKind !== 'p')
+				throw new Error(`generated table ${input.target.name} is not a table`);
+			if (rows.some((row) => row.relation_kind !== relationKind))
+				throw new Error(
+					'generated table verifier could not read a complete projection',
+				);
+			const columnRows = rows.filter((row) => row.column_name !== null);
+			if (columnRows.length !== expected.length)
+				throw structuralMismatch(
+					`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
+				);
+			const live = columnRows.map(tableColumnProjection);
+			const stagedDefaults = await stageAuthoredDefaults(
+				session,
+				input.target,
+				expected,
+			);
+			for (const [ordinal, specification] of expected.entries()) {
+				const actual = live[ordinal];
+				if (
+					!actual ||
+					actual.name !== specification.name ||
+					(await columnPostconditionMatches(
+						actual,
+						specification,
+						stagedDefaults,
+					)) !== undefined
+				)
+					throw structuralMismatch(
+						`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+					);
+			}
+			return { kind: 'table' as const, projection: { columns: live } };
+		};
+		if (!postcondition.columns.some(requiresStableColumnProof)) return verify();
+		return scratchScope(session, async () => {
+			await lockAuthoredDefaultTarget(
+				session,
+				input.target,
+				`generated table ${input.target.name} is absent`,
+			);
+			return verify();
+		});
+	});
+}
+
+export async function verifyGeneratedColumnPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{
+	readonly kind: 'column';
+	readonly projection: GeneratedColumnProjection;
+}> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeGeneratedPostcondition(input.postcondition);
+		if (postcondition.kind !== 'column')
+			throw replan('generated column postcondition is unsupported');
+		const expected = postcondition.column;
+		if (expected.name !== input.target.name)
+			throw new Error(
+				`generated column ${input.target.name} structural postcondition names another column`,
+			);
+		const verify = async () => {
+			const row = (
+				await session.query(
+					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3`,
+					[input.target.schema, input.target.table, input.target.name],
+				)
+			).rows[0];
+			if (!row)
+				throw structuralMismatch(
+					`generated column ${input.target.name} is absent`,
+				);
+			if (row.relation_kind !== 'r' && row.relation_kind !== 'p')
+				throw structuralMismatch(
+					`generated column ${input.target.name} parent is not a table`,
+				);
+			if (row.column_name !== input.target.name)
+				throw structuralMismatch(
+					`generated column ${input.target.name} projection names another column`,
+				);
+			let projection: GeneratedColumnProjection;
+			try {
+				projection = generatedColumnProjection(row, input.target.name);
+			} catch {
+				throw new Error(
+					`generated column ${input.target.name} has an incomplete projection`,
+				);
+			}
+			const stagedDefaults = await stageAuthoredDefaults(
+				session,
+				input.target,
+				[expected],
+			);
+			const mismatch = await columnPostconditionMatches(
+				projection,
+				expected,
+				stagedDefaults,
+			);
+			if (mismatch !== undefined)
+				throw structuralMismatch(
+					`generated column ${input.target.name} ${mismatch} postcondition differs`,
+				);
+			return { kind: 'column' as const, projection };
+		};
+		if (!requiresStableColumnProof(expected)) return verify();
+		return scratchScope(session, async () => {
+			await lockAuthoredDefaultTarget(
+				session,
+				input.target,
+				`generated column ${input.target.name} is absent`,
+			);
+			return verify();
+		});
 	});
 }
 
@@ -1329,6 +1658,7 @@ export async function verifyGeneratedIndexPostcondition(input: {
 					`generated index ${input.target.name} postcondition differs`,
 				);
 			const staged = await (async () => {
+				await assertTemporaryTablePrivilege(session);
 				await session.query(
 					`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
 				);
@@ -1438,6 +1768,7 @@ export async function verifyGeneratedCheckPostcondition(input: {
 			const scratchTable = nextScratchName('table');
 			const scratchConstraint = nextScratchName('constraint');
 			const staged = await (async () => {
+				await assertTemporaryTablePrivilege(session);
 				await session.query(
 					`CREATE TEMP TABLE ${quoteIdent(scratchTable, 'table')} (LIKE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} INCLUDING DEFAULTS INCLUDING IDENTITY)`,
 				);

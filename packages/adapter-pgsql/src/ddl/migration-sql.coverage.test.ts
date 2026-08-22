@@ -372,6 +372,45 @@ describe('migration-sql coverage', () => {
 			expect(sql[0]).toContain('SERIAL');
 		});
 
+		it('keeps an authored autoIncrement default plain and non-null for create and add', () => {
+			const column = {
+				name: 'legacy_id',
+				type: 'integer' as const,
+				nullable: false,
+				autoIncrement: true,
+				default: 42,
+			};
+			const table: TableIR = {
+				name: 't',
+				columns: [column],
+				primaryKey: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_table',
+						table: 't',
+						destructive: false,
+						details: 'create',
+						meta: { table },
+					},
+					{
+						kind: 'add_column',
+						table: 'other',
+						destructive: false,
+						details: 'add',
+						meta: { column },
+					},
+				]),
+			);
+			for (const statement of sql) {
+				expect(statement).toContain('INTEGER NOT NULL DEFAULT 42');
+				expect(statement).not.toContain('SERIAL');
+			}
+		});
+
 		it('creates table with schema qualification', () => {
 			const table: TableIR = {
 				name: 't',

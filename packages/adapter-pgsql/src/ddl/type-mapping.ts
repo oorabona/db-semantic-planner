@@ -10,6 +10,7 @@
 import type { ColumnIR } from '@dbsp/types';
 import { isPgBuiltInTypeName, renderColumnDbType } from '../db-type.js';
 import { validateDbTypeName } from '../validate.js';
+import { decideColumnEmission } from './column-emission-decision.js';
 
 /**
  * Map ColumnType to PostgreSQL data type string.
@@ -21,18 +22,9 @@ import { validateDbTypeName } from '../validate.js';
  * @returns PostgreSQL type string (e.g., 'VARCHAR(255)', 'SERIAL', 'JSONB')
  */
 export function mapColumnType(col: ColumnIR, targetSchema?: string): string {
-	// Prefer original DB type if available (preserves precision/scale).
-	if (col.originalDbType?.trim()) {
-		const dbType = validateDbTypeName(renderColumnDbType(col, targetSchema));
-		return isPgBuiltInTypeName(dbType)
-			? uppercaseOutsideQuotedIdentifiers(dbType)
-			: dbType;
-	}
-
-	// Auto-increment columns use SERIAL/BIGSERIAL
-	if (col.autoIncrement) {
-		return col.type === 'bigint' ? 'BIGSERIAL' : 'SERIAL';
-	}
+	const decision = decideColumnEmission(col, targetSchema);
+	if (decision.type === 'serial') return 'SERIAL';
+	if (decision.type === 'bigserial') return 'BIGSERIAL';
 
 	const dbType = validateDbTypeName(renderColumnDbType(col, targetSchema));
 	return isPgBuiltInTypeName(dbType)
