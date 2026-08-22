@@ -102,6 +102,37 @@ function indexProjectionRow(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function columnProjectionRow(overrides: Record<string, unknown> = {}) {
+	return {
+		relation_kind: 'r',
+		column_name: 'id',
+		column_type: 'integer',
+		is_not_null: true,
+		column_default: null,
+		collation_name: null,
+		identity_kind: '',
+		...overrides,
+	};
+}
+
+function constraintProjectionRow(overrides: Record<string, unknown> = {}) {
+	return {
+		constraint_type: 'p',
+		constraint_definition: 'PRIMARY KEY (id)',
+		key_columns: ['id'],
+		referenced_schema: null,
+		referenced_table: null,
+		referenced_columns: [],
+		on_delete: 'a',
+		on_update: 'a',
+		is_deferrable: false,
+		is_deferred: false,
+		is_validated: true,
+		is_enforced: true,
+		...overrides,
+	};
+}
+
 function indexReadbackExecutor(input: {
 	readonly live?: Record<string, unknown>;
 	readonly staged?: Record<string, unknown>;
@@ -209,7 +240,7 @@ describe('generator execution fixture shim', () => {
 					parent: dataDestructiveStep.address,
 				},
 			},
-			[{ column_type: 'integer', is_not_null: true, column_default: null }],
+			[columnProjectionRow()],
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
@@ -218,7 +249,7 @@ describe('generator execution fixture shim', () => {
 				step as unknown as NormalizedManagedStep,
 				step.address! as never,
 			),
-		).rejects.toThrow();
+		).rejects.toThrow('generated column id type postcondition differs');
 	});
 
 	it.each([
@@ -254,6 +285,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,
@@ -269,6 +301,61 @@ describe('generator execution fixture shim', () => {
 				address,
 			),
 		).rejects.toThrow('generated column id has an incomplete projection');
+	});
+
+	it.each([
+		[
+			'a view relation',
+			columnProjectionRow({ relation_kind: 'v' }),
+			'generated column id is not a table',
+		],
+		[
+			'another projected column',
+			columnProjectionRow({ column_name: 'other_id' }),
+			'generated column id projection names another column',
+		],
+		['no projected column', undefined, 'generated column id is absent'],
+	] as const)('refuses generated column proof for %s', async (_case, row, message) => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'column' as const,
+			name: 'id',
+			parent: dataDestructiveStep.address!,
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'column',
+					column: { name: 'id', type: 'integer', nullable: false },
+				},
+				digest: 'column-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		const query = vi.fn(async (sql: string) => ({
+			rows:
+				row === undefined
+					? []
+					: [
+							sql.includes('relation.relkind AS relation_kind') ||
+							row.relation_kind !== 'v'
+								? row
+								: Object.fromEntries(
+										Object.entries(row).filter(
+											([key]) => key !== 'relation_kind',
+										),
+									),
+						],
+		}));
+		await expect(
+			readTestGeneratedPostcondition({ query }, step, address),
+		).rejects.toThrow(message);
+		if (row?.relation_kind === 'v')
+			expect(query.mock.calls[0]?.[0]).toContain(
+				'relation.relkind AS relation_kind',
+			);
 	});
 
 	it('canonicalizes PostgreSQL default collation for generated column read-back', async () => {
@@ -301,6 +388,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'body',
 								column_type: 'text',
 								is_not_null: false,
@@ -423,6 +511,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,
@@ -699,7 +788,7 @@ describe('generator execution fixture shim', () => {
 				kind: 'enum' as const,
 				name: 'order_state',
 			},
-			[{ label: 'draft' }],
+			[{ type_kind: 'e', enum_label: 'draft' }],
 		],
 		[
 			'sequence properties',
@@ -750,6 +839,269 @@ describe('generator execution fixture shim', () => {
 				address as never,
 			),
 		).rejects.toThrow('postcondition differs');
+	});
+
+	it('strictly decodes non-CHECK constraint read-back before recording observed', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'constraint' as const,
+			name: 'accounts_pkey',
+			parent: dataDestructiveStep.address!,
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'constraint',
+					constraint: {
+						type: 'p',
+						columns: ['id'],
+						deferrable: false,
+						initiallyDeferred: false,
+						enforced: true,
+					},
+				},
+				digest: 'constraint-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi
+						.fn()
+						.mockResolvedValue({ rows: [constraintProjectionRow()] }),
+				},
+				step,
+				address,
+			),
+		).resolves.toMatchObject({
+			value: { kind: 'constraint', definition: 'PRIMARY KEY (id)' },
+		});
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [constraintProjectionRow({ constraint_definition: null })],
+					}),
+				},
+				step,
+				address,
+			),
+		).rejects.toThrow(
+			'generated constraint accounts_pkey has an incomplete projection',
+		);
+	});
+
+	it('decodes an empty enum from its NULL label row', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'enum' as const,
+			name: 'order_state',
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
+				digest: 'enum-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [{ type_kind: 'e', enum_label: null }],
+					}),
+				},
+				step,
+				address,
+			),
+		).resolves.toMatchObject({ value: { kind: 'enum', labels: [] } });
+	});
+
+	it('decodes enum labels in query order', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'enum' as const,
+			name: 'order_state',
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'enum',
+					labels: ['draft', 'paid'],
+				},
+				digest: 'enum-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{ type_kind: 'e', enum_label: 'draft' },
+							{ type_kind: 'e', enum_label: 'paid' },
+						],
+					}),
+				},
+				step,
+				address,
+			),
+		).resolves.toMatchObject({
+			value: { kind: 'enum', labels: ['draft', 'paid'] },
+		});
+	});
+
+	it('refuses an absent enum type even when its expected labels are empty', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'enum' as const,
+			name: 'order_state',
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
+				digest: 'enum-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows: [] }) },
+				step,
+				address,
+			),
+		).rejects.toThrow('generated enum order_state is absent');
+	});
+
+	it('refuses a same-named non-enum type and malformed enum labels', async () => {
+		const address = {
+			...dataDestructiveStep.address,
+			kind: 'enum' as const,
+			name: 'order_state',
+		} as LedgerAddress;
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
+				digest: 'enum-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [{ type_kind: 'd', enum_label: null }],
+					}),
+				},
+				step,
+				address,
+			),
+		).rejects.toThrow('generated enum order_state is not an enum');
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [
+							{ type_kind: 'e', enum_label: 'draft' },
+							{ type_kind: 'e', enum_label: 1 },
+						],
+					}),
+				},
+				step,
+				address,
+			),
+		).rejects.toThrow(
+			'generated enum order_state has an incomplete projection',
+		);
+	});
+
+	it('strictly decodes sequence and extension read-back before recording observed', async () => {
+		const sequenceAddress = {
+			...dataDestructiveStep.address,
+			kind: 'sequence' as const,
+			name: 'order_number',
+		} as LedgerAddress;
+		const sequenceStep = {
+			...dataDestructiveStep,
+			address: sequenceAddress,
+			expectedDeclaration: {
+				value: {
+					postconditionVersion: 2,
+					kind: 'sequence',
+					startValue: '7',
+					incrementBy: '3',
+					cycle: false,
+				},
+				digest: 'sequence-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		const sequenceRow = {
+			start_value: '7',
+			increment_by: '3',
+			min_value: '1',
+			max_value: '100',
+			cache_size: '1',
+			cycle: false,
+		};
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows: [sequenceRow] }) },
+				sequenceStep,
+				sequenceAddress,
+			),
+		).resolves.toMatchObject({ value: { kind: 'sequence', cycle: false } });
+		await expect(
+			readTestGeneratedPostcondition(
+				{
+					query: vi.fn().mockResolvedValue({
+						rows: [{ ...sequenceRow, cycle: 'false' }],
+					}),
+				},
+				sequenceStep,
+				sequenceAddress,
+			),
+		).rejects.toThrow(
+			'generated sequence order_number has an incomplete projection',
+		);
+
+		const extensionAddress = {
+			...dataDestructiveStep.address,
+			scope: 'database' as const,
+			kind: 'extension' as const,
+			name: 'pgcrypto',
+		} as LedgerAddress;
+		const extensionStep = {
+			...dataDestructiveStep,
+			address: extensionAddress,
+			expectedDeclaration: {
+				value: { postconditionVersion: 2, kind: 'extension' },
+				digest: 'extension-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows: [{ version: '1.3' }] }) },
+				extensionStep,
+				extensionAddress,
+			),
+		).resolves.toMatchObject({ value: { kind: 'extension', version: '1.3' } });
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query: vi.fn().mockResolvedValue({ rows: [{}] }) },
+				extensionStep,
+				extensionAddress,
+			),
+		).rejects.toThrow(
+			'generated extension pgcrypto has an incomplete projection',
+		);
 	});
 
 	it('reads CREATE TABLE columns when a separately-rendered constraint follows it', async () => {
