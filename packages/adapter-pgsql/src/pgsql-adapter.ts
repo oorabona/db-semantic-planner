@@ -6312,9 +6312,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								admission.name,
 							))
 					) {
-						// The failed call is never retried. A verified 26000 means this
-						// physical client lost all server-side prepared state; the other
-						// verified failures remain text-scoped.
+						// The failed call is never retried. A verified 26000 is treated as
+						// possible client-wide loss because SQLSTATE cannot distinguish a full
+						// reset from targeted deallocation; the other verified failures remain
+						// text-scoped.
 						quarantinePreparedStatement(
 							executor,
 							sql,
