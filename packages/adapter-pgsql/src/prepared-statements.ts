@@ -14,7 +14,10 @@ export interface PreparedStatementReservation {
 
 export interface PreparedStatementAdmission {
 	readonly name: string;
-	/** Present only until a named execution has demonstrated the name is usable. */
+	/**
+	 * Present only until the caller settles the initial named attempt according
+	 * to executor-specific policy; settlement does not prove the name is usable.
+	 */
 	readonly reservation?: PreparedStatementReservation;
 }
 
