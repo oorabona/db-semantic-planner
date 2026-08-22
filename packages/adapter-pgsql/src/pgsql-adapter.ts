@@ -544,9 +544,9 @@ export class PgsqlTransactionTimeoutError extends Error {
 
 /**
  * A `pg.PoolClient` is a `pg.Pool` plus `release()`, and that structural shape
- * identifies the physical executor form. Reservation confirmation and prepared
- * statement quarantine behavior key on that form; the caller's declaration still
- * determines ownership and lifecycle.
+ * identifies the physical executor form. The validated structural form selects
+ * executor-specific prepared-statement behavior; the caller's declaration controls
+ * ownership and lifecycle.
  *
  * It must not throw: the type says `Pool | PoolClient`, but a JavaScript caller
  * reaches this with whatever they like, and a shape check that raises a TypeError
@@ -597,6 +597,7 @@ function isDriverLocalPreparedStatementNameCollision(
 function isVerifiedPreparedStatementInfrastructureError(
 	error: unknown,
 ): boolean {
+	if (!hasPostgresSqlStateCode(error)) return false;
 	if (typeof error !== 'object' || error === null) return false;
 	const { code, routine } = error as {
 		readonly code?: unknown;
@@ -610,11 +611,11 @@ function isVerifiedPreparedStatementInfrastructureError(
 }
 
 /**
- * A protocol-evidenced SQLSTATE-shaped, positionless failure is conservatively
- * treated as server-reported for reservation accounting. Its shape does not
- * prove which protocol phase was reached.
+ * A protocol-shaped, positionless failure is conservatively treated as
+ * server-reported for reservation accounting. Its shape does not prove which
+ * protocol phase was reached.
  */
-function didNamedExecutionReachExecution(error: unknown): boolean {
+function isPositionlessProtocolShapedFailure(error: unknown): boolean {
 	return (
 		hasPostgresSqlStateCode(error) &&
 		(error as { readonly position?: unknown }).position === undefined &&
@@ -652,11 +653,12 @@ function shouldAbortPreparedStatementReservation(
 	// A pool may have accepted this name on a different physical client before a
 	// later client reports missing state; retain the executor-scoped name there.
 	if (!isPoolClientLike(executor)) return !hasPostgresSqlStateCode(error);
-	if (didNamedExecutionReachExecution(error)) return false;
+	if (isPositionlessProtocolShapedFailure(error)) return false;
 	return true;
 }
 
 function isVerifiedClientWidePreparedStatementLoss(error: unknown): boolean {
+	if (!hasPostgresSqlStateCode(error)) return false;
 	if (typeof error !== 'object' || error === null) return false;
 	const { code, routine } = error as {
 		readonly code?: unknown;
@@ -2472,8 +2474,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const declaredBorrowed = hasBorrowedClientOption(options);
 
 		if (pool != null) {
-			// The shape is only ever used to *reject* a mismatch. It never decides how
-			// the connection is treated — the declaration does.
+			// The validated structural form selects executor-specific prepared-statement
+			// behavior. The declaration controls ownership and lifecycle.
 			if (isPoolClientLike(pool)) {
 				if (!declaredBorrowed) {
 					throw new Error(
@@ -6279,29 +6281,47 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				return result;
 			} catch (error) {
 				if (admission.reservation !== undefined) {
-					if (
-						shouldAbortPreparedStatementReservation(
-							error,
-							executor,
-							admission.name,
-						)
-					) {
-						this.preparedStatementRegistry.abort(admission.reservation);
-					} else this.preparedStatementRegistry.confirm(admission.reservation);
+					try {
+						if (
+							shouldAbortPreparedStatementReservation(
+								error,
+								executor,
+								admission.name,
+							)
+						) {
+							this.preparedStatementRegistry.abort(admission.reservation);
+						} else
+							this.preparedStatementRegistry.confirm(admission.reservation);
+					} catch {
+						// Classifier failure cannot replace the query error or retain a
+						// reservation whose outcome we could not establish.
+						try {
+							this.preparedStatementRegistry.abort(admission.reservation);
+						} catch {
+							// The original query error remains the observable failure.
+						}
+					}
 				}
-				if (
-					isPoolClientLike(executor) &&
-					(isVerifiedPreparedStatementInfrastructureError(error) ||
-						isDriverLocalPreparedStatementNameCollision(error, admission.name))
-				) {
-					// The failed call is never retried. A verified 26000 means this
-					// physical client lost all server-side prepared state; the other
-					// verified failures remain text-scoped.
-					quarantinePreparedStatement(
-						executor,
-						sql,
-						isVerifiedClientWidePreparedStatementLoss(error),
-					);
+				try {
+					if (
+						isPoolClientLike(executor) &&
+						(isVerifiedPreparedStatementInfrastructureError(error) ||
+							isDriverLocalPreparedStatementNameCollision(
+								error,
+								admission.name,
+							))
+					) {
+						// The failed call is never retried. A verified 26000 means this
+						// physical client lost all server-side prepared state; the other
+						// verified failures remain text-scoped.
+						quarantinePreparedStatement(
+							executor,
+							sql,
+							isVerifiedClientWidePreparedStatementLoss(error),
+						);
+					}
+				} catch {
+					// Quarantine classification cannot replace the query error.
 				}
 				throw error;
 			}

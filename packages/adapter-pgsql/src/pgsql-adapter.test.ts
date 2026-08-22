@@ -573,6 +573,73 @@ describe('PgsqlAdapter', () => {
 			expect(serverPool.query).toHaveBeenNthCalledWith(4, sqlB, [8]);
 		});
 
+		it('aborts a pool admission and rethrows the query error when classification reads a throwing getter', async () => {
+			const sqlA = 'SELECT id FROM pool_throwing_getter_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM pool_throwing_getter_b WHERE id = $1';
+			const error = Object.defineProperty({ code: '23505' }, 'severity', {
+				get() {
+					throw new Error('severity getter must not escape classification');
+				},
+			});
+			const pool = createMockPool();
+			vi.mocked(pool.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await (adapter as any).issueConnectionQuery(pool, sqlA, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(pool, sqlA, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(pool, sqlB, [8], true);
+			await (adapter as any).issueConnectionQuery(pool, sqlB, [8], true);
+
+			expect(pool.query).toHaveBeenNthCalledWith(4, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
+		});
+
+		it('aborts a borrowed-client admission and rethrows the query error when classification reads a throwing getter', async () => {
+			const sqlA = 'SELECT id FROM client_throwing_getter_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM client_throwing_getter_b WHERE id = $1';
+			const error = Object.defineProperty({ code: '23505' }, 'severity', {
+				get() {
+					throw new Error('severity getter must not escape classification');
+				},
+			});
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 8 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sqlA, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sqlA, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sqlB, [8], true);
+			await (adapter as any).issueConnectionQuery(client, sqlB, [8], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(4, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
+		});
+
 		it.each([
 			{
 				label: 'ECONNREFUSED-shaped error',
@@ -891,6 +958,39 @@ describe('PgsqlAdapter', () => {
 			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
 
 			expect(client.query).toHaveBeenNthCalledWith(3, {
+				name: derivePreparedStatementName(sql),
+				text: sql,
+				values: [7],
+			});
+		});
+
+		it.each([
+			{ code: '0A000', routine: 'RevalidateCachedQuery' },
+			{ code: '26000', routine: 'FetchPreparedStatement' },
+			{ code: '42P05', routine: 'StorePreparedStatement' },
+		])('does not quarantine or downgrade a severity-free $code/$routine object', async (error) => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true);
+
+			expect(client.query).toHaveBeenNthCalledWith(4, {
 				name: derivePreparedStatementName(sql),
 				text: sql,
 				values: [7],
