@@ -1,0 +1,16 @@
+{
+	"name": "@dbsp/catalogue-matrix",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@dbsp/adapter-pgsql": "workspace:*",
+		"@types/node": "catalog:",
+		"@types/pg": "catalog:",
+		"pg": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
+}

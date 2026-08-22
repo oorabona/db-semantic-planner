@@ -1,0 +1,83 @@
+name: Catalogue PostgreSQL matrix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/adapter-pgsql/**'
+      - 'packages/core/**'
+      - 'packages/nql/**'
+      - 'packages/types/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'tests/matrix/**'
+      - '.github/workflows/catalogue-matrix.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'packages/adapter-pgsql/**'
+      - 'packages/core/**'
+      - 'packages/nql/**'
+      - 'packages/types/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'tests/matrix/**'
+      - '.github/workflows/catalogue-matrix.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  catalogue-matrix:
+    runs-on: ubuntu-latest
+    # 40 min > 25 min (10 x 150 s tests) + 2 min hooks + 10 min install/build allowance.
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: '10'
+            image: postgres:10@sha256:7a484b11fcabd39596b1bf08780cdb61fa9b0d8bfad0844dbdce3a6922df95d1 # PostgreSQL 10
+          - postgres: '11'
+            image: postgres:11@sha256:fdfb434d69d7884d6366840279dc3e721d1bd67cc1d02d51aeea7497f323fc5e # PostgreSQL 11
+          - postgres: '14'
+            image: postgres:14@sha256:62ed509a3761e09bc2d0552ec7374b795aec759ed928881a9df1d7d53951337b # PostgreSQL 14
+          - postgres: '18'
+            image: postgres:18@sha256:cd78ca58eb75f929698e117a589488ccb2bd45107247fe02400b50ff6c418324 # PostgreSQL 18
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_USER: dbsp
+          POSTGRES_PASSWORD: dbsp
+          POSTGRES_DB: dbsp
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dbsp -d dbsp"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C packages/types build
+      - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
+      - run: pnpm -C packages/adapter-pgsql build
+      - run: pnpm -C tests/matrix typecheck
+      - run: pnpm vitest run --config tests/matrix/vitest.config.ts
+        env:
+          MATRIX_DATABASE_URL: postgres://dbsp:dbsp@localhost:5432/dbsp

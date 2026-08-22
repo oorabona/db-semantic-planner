@@ -1,6 +1,7 @@
 packages:
   - "packages/*"
   - "tests/e2e"
+  - "tests/matrix"
 # strict: `pnpm add` refuses a version outside the catalog instead of writing a
 # literal range into the manifest. It governs that path only — a hand-edited
 # manifest still needs scripts/check-catalog.mjs, which CI runs.
