@@ -165,14 +165,22 @@ the same name cleanly on its next eligible execution. There is no pool-wide
 failure state or downgrade.
 
 For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
-client after PostgreSQL identifies a prepared-statement infrastructure failure:
-`0A000` from `RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or
-node-postgres's exact local duplicate-name error affect that SQL only. A verified
-`26000` from `FetchPreparedStatement` means all server-side prepared state on that
-client was lost, so every later eligible SQL runs unnamed on it. An absent or
-unexpected PostgreSQL `routine` leaves naming unchanged, even when the SQLSTATE
-matches, so application-raised errors cannot cause the fallback. Every adapter call
-still executes at most once.
+client using node-postgres-shaped protocol heuristics as prepared-statement
+infrastructure evidence: PostgreSQL errors with a string `severity` together with
+the exact `code`/`routine` pairs (`0A000` from `RevalidateCachedQuery`, `42P05`
+from `StorePreparedStatement`, or `26000` from `FetchPreparedStatement`) and
+node-postgres's exact local duplicate-name collision. The local collision is raised
+before any query is sent; `0A000`, `42P05`, and that collision affect that SQL only.
+A verified `26000` is treated as possible client-wide loss because the SQLSTATE
+alone cannot distinguish a full connection reset from a targeted `DEALLOCATE <name>`;
+every later eligible SQL runs unnamed on that client. An absent or unexpected
+PostgreSQL `routine` on a SQLSTATE-bearing protocol error never creates persistent
+client quarantine, except for the routine-less driver-local duplicate-name collision,
+which installs SQL-scoped persistent quarantine. A locally thrown lookalike carrying
+the same shape can affect admission or quarantine for its SQL or client. An
+unconfirmed position-bearing failure during initial admission can still lose its
+reservation, so that SQL runs unnamed until it is sighted again. Every adapter
+call still executes at most once.
 
 The client-wide scope after a verified `26000` is a deliberate, accepted cost:
 the SQLSTATE alone cannot distinguish a full connection reset (where every
