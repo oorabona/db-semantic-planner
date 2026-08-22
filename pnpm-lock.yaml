@@ -684,6 +684,27 @@ importers:
         specifier: 'catalog:'
         version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
 
+  tests/matrix:
+    devDependencies:
+      '@dbsp/adapter-pgsql':
+        specifier: workspace:*
+        version: link:../../packages/adapter-pgsql
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.1.0
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.20.0
+      pg:
+        specifier: 'catalog:'
+        version: 8.22.0
+      typescript:
+        specifier: 'catalog:'
+        version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.9(@types/node@26.1.0)(@vitest/coverage-v8@4.1.9)(happy-dom@20.10.6)(jsdom@29.1.1)(vite@8.1.3(@types/node@26.1.0)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.5)(yaml@2.9.0))
+
 packages:
 
   '@alcalzone/ansi-tokenize@0.1.3':

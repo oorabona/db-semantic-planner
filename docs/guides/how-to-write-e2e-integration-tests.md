@@ -12,6 +12,19 @@ When a change must be validated against a **real PostgreSQL** — verifying the 
 - **Image:** default `ghcr.io/oorabona/postgres:18-alpine-full`, overridable via `POSTGRES_IMAGE`.
 - **WSL2/Podman:** export `TESTCONTAINERS_RYUK_DISABLED=true` (CI sets it in `ci.yml` e2e job).
 
+## Catalogue PostgreSQL version matrix
+
+The `Catalogue PostgreSQL matrix` workflow (`.github/workflows/catalogue-matrix.yml`) runs `tests/matrix/catalogue-matrix.test.ts` against PostgreSQL 10, 11, 14, and 18. It is intentionally separate from `pnpm test:unit` and the Testcontainers E2E suite: the test proves real `pg_catalog` shapes that a mock cannot represent.
+
+Build the matrix dependency closure, then run it only against a disposable PostgreSQL database whose role can create and drop schemas:
+
+```sh
+pnpm --filter @dbsp/adapter-pgsql... build
+MATRIX_DATABASE_URL=postgres://dbsp:dbsp@127.0.0.1:5432/dbsp pnpm vitest run --config tests/matrix/vitest.config.ts
+```
+
+Each run creates a schema with an unpredictable identifier-safe suffix and removes only the schema it successfully created. Do not point it at a shared database: the role needs schema DDL privileges and the database should be disposable. Without a non-blank `MATRIX_DATABASE_URL`, it collects as a loudly skipped suite locally; CI refuses collection unless `MATRIX_ALLOW_SKIP=1` explicitly allows the skip.
+
 ## The testkit (`tests/e2e/testkit/`)
 
 | Helper | Use |
