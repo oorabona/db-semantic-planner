@@ -82,6 +82,7 @@ export {
 	type SchemaChange,
 	type SchemaDiff,
 	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,

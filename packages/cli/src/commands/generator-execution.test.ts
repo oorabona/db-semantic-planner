@@ -209,7 +209,14 @@ describe('generator execution fixture shim', () => {
 					parent: dataDestructiveStep.address,
 				},
 			},
-			[{ column_type: 'integer', is_not_null: true, column_default: null }],
+			[
+				{
+					relation_kind: 'r',
+					column_type: 'integer',
+					is_not_null: true,
+					column_default: null,
+				},
+			],
 		],
 	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
 		await expect(
@@ -254,6 +261,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,
@@ -301,6 +309,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'body',
 								column_type: 'text',
 								is_not_null: false,
@@ -423,6 +432,7 @@ describe('generator execution fixture shim', () => {
 					query: vi.fn().mockResolvedValue({
 						rows: [
 							{
+								relation_kind: 'r',
 								column_name: 'id',
 								column_type: 'integer',
 								is_not_null: true,

@@ -276,12 +276,20 @@ export function formatSqlDefault(
 			validateSqlExpression(value, context);
 			return value;
 		}
-		return `'${value.replace(/'/g, "''")}'`;
+		return formatSqlStringLiteral(value);
 	}
 
 	if (typeof value === 'number') return String(value);
 	if (typeof value === 'boolean') return value ? 'true' : 'false';
 
 	// Fallback: single-quoted string representation
-	return `'${String(value).replace(/'/g, "''")}'`;
+	return formatSqlStringLiteral(String(value));
+}
+
+/** A scalar backslash must not inherit standard_conforming_strings semantics. */
+function formatSqlStringLiteral(value: string): string {
+	const escaped = value.replace(/'/g, "''");
+	return value.includes('\\')
+		? `E'${escaped.replace(/\\/g, '\\\\')}'`
+		: `'${escaped}'`;
 }

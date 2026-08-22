@@ -713,7 +713,10 @@ function upAddColumn(
 	const col = change.meta?.column as ColumnIR | undefined;
 	if (!col) return undefined;
 	const typeName = mapColumnType(col, schemaName);
-	const notNull = !col.nullable && !col.autoIncrement ? ' NOT NULL' : '';
+	const notNull =
+		!col.nullable && typeName !== 'SERIAL' && typeName !== 'BIGSERIAL'
+			? ' NOT NULL'
+			: '';
 	const def =
 		col.default !== undefined ? ` DEFAULT ${formatDefault(col.default)}` : '';
 	const unique = col.unique ? ' UNIQUE' : '';
@@ -1799,11 +1802,10 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 
 	// Columns
 	for (const col of table.columns) {
-		const parts: string[] = [
-			quoteIdent(col.name, 'alias'),
-			mapColumnType(col, schemaName),
-		];
-		if (!col.nullable && !col.autoIncrement) parts.push('NOT NULL');
+		const typeName = mapColumnType(col, schemaName);
+		const parts: string[] = [quoteIdent(col.name, 'alias'), typeName];
+		if (!col.nullable && typeName !== 'SERIAL' && typeName !== 'BIGSERIAL')
+			parts.push('NOT NULL');
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');

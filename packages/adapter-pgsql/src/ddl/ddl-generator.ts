@@ -362,10 +362,11 @@ export function generateColumnDef(
 
 	// Column name and type
 	parts.push(quoteIdentifier(naming.toDatabase(col.name)));
-	parts.push(mapColumnType(col, targetSchema));
+	const type = mapColumnType(col, targetSchema);
+	parts.push(type);
 
 	// NOT NULL constraint (SERIAL/BIGSERIAL imply NOT NULL)
-	if (!col.nullable && !col.autoIncrement) {
+	if (!col.nullable && type !== 'SERIAL' && type !== 'BIGSERIAL') {
 		parts.push('NOT NULL');
 	}
 

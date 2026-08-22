@@ -347,6 +347,40 @@ export function dbTypesEqual(a: string, b: string): boolean {
 }
 
 /**
+ * Classify a rendered physical built-in type for emission decisions.  Unlike
+ * dbTypesEqual(), this recognizes only the spellings PostgreSQL resolves to
+ * the physical integer-family built-ins. Keyword aliases apply only to bare,
+ * unquoted names; qualified and quoted names must be physical catalog names.
+ */
+export function pgBuiltInTypeFamily(
+	type: string,
+): 'integer' | 'bigint' | undefined {
+	const physicalBuiltInFamily = (
+		name: string,
+	): 'integer' | 'bigint' | undefined =>
+		name === 'int4' ? 'integer' : name === 'int8' ? 'bigint' : undefined;
+	const split = splitDbType(type);
+	if (split.modifier !== undefined || split.isArray) return undefined;
+	const qualified = splitQualifiedIdentifier(split.base);
+	if (qualified !== null) {
+		if (normalizeIdentifierForComparison(qualified.schema) !== 'pg_catalog')
+			return undefined;
+		return physicalBuiltInFamily(
+			normalizeIdentifierForComparison(qualified.name),
+		);
+	}
+	const base = normalizeBase(split.base);
+	const name = normalizeIdentifierForComparison(base);
+	// Quoted identifiers retain their case and are catalog names, not grammar
+	// keywords. Only a bare unquoted spelling reaches PostgreSQL's alias rewrite.
+	if (base.includes('"')) return physicalBuiltInFamily(name);
+	const canonical = TYPE_ALIASES.get(name) ?? name;
+	return canonical === 'integer' || canonical === 'bigint'
+		? canonical
+		: undefined;
+}
+
+/**
  * True when a database type string is a recognized built-in PostgreSQL type
  * spelling rather than a custom/UDT identifier.
  */

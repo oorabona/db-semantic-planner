@@ -378,7 +378,12 @@ export function validatePgExecutionContractDerivation(
 		};
 	}
 	const actual = contract.requirements.filter(
-		(requirement) => requirement.kind !== 'postgresql.physical-target',
+		(requirement) =>
+			requirement.kind !== 'postgresql.physical-target' &&
+			!(
+				requirement.kind === 'postgresql.session-setting' &&
+				requirement.mode === 'provenance'
+			),
 	);
 	if (stableJson(actual) !== stableJson(expected))
 		return {
@@ -393,7 +398,7 @@ export function validatePgExecutionContractDerivation(
 export function createPgExecutionContract(
 	plan: ProvenPlanShape,
 	identity: PostgreSqlObservationTargetIdentity,
-	_sessionProvenance: Readonly<
+	sessionProvenance: Readonly<
 		Record<'search_path' | 'client_encoding' | 'TimeZone', string>
 	>,
 ): ExecutionContract {
@@ -414,10 +419,18 @@ export function createPgExecutionContract(
 	];
 	for (const requirement of staticRequirements(plan))
 		requirements.push(requirement);
-	// Every supported renderer qualifies identifiers from its payload, so
-	// search_path cannot redirect a target. They also generate no temporal
-	// literals, so TimeZone cannot alter rendered SQL or its fingerprints. They
-	// are intentionally not contract clauses. Encoding is different: pg writes
+	// Search-path-sensitive expression canonicalisation is tracked separately in
+	// #599.  Preserve the planning setting now so the immutable execution
+	// artifact has the field that later canonicalisation will bind to; it is
+	// provenance, not a target-routing or set-and-verify requirement.
+	requirements.push({
+		kind: 'postgresql.session-setting',
+		mode: 'provenance',
+		setting: 'search_path',
+		value: sessionProvenance.search_path,
+	});
+	// Renderers qualify managed identifiers and generate no temporal literals,
+	// so TimeZone remains outside this contract. Encoding is different: pg writes
 	// UTF-8 bytes, therefore it is an execution requirement, not provenance.
 	return createExecutionContract(requirements);
 }

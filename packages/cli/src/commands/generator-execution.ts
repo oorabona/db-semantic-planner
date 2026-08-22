@@ -5,7 +5,6 @@ import {
 	assertGeneratedPostconditionSession,
 	compareSchemata,
 	createPgsqlAdapter,
-	dbTypesEqual,
 	decodeGeneratedPostcondition,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
@@ -20,6 +19,7 @@ import {
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
 	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 } from '@dbsp/adapter-pgsql';
@@ -309,44 +309,6 @@ function strictBoolean(value: unknown, label: string): boolean {
 	return value;
 }
 
-/** Strictly decode the catalogue fields used to prove a generated column. */
-function generatedColumnProjection(
-	row: Record<string, unknown>,
-	name: string,
-): {
-	readonly type: string;
-	readonly nullable: boolean;
-	readonly default: string | undefined;
-	readonly collation: string | null;
-	readonly identity: 'always' | 'byDefault' | null;
-} {
-	if (
-		typeof row.column_name !== 'string' ||
-		typeof row.column_type !== 'string' ||
-		typeof row.is_not_null !== 'boolean' ||
-		(typeof row.column_default !== 'string' && row.column_default !== null) ||
-		(typeof row.collation_name !== 'string' && row.collation_name !== null) ||
-		(row.identity_kind !== '' &&
-			row.identity_kind !== 'a' &&
-			row.identity_kind !== 'd')
-	)
-		throw new Error(`generated column ${name} has an incomplete projection`);
-	return {
-		type: row.column_type,
-		nullable: !row.is_not_null,
-		default: row.column_default === null ? undefined : row.column_default,
-		// PostgreSQL names the built-in collation `default`; DBSP represents no
-		// explicit collation as null.
-		collation: row.collation_name === 'default' ? null : row.collation_name,
-		identity:
-			row.identity_kind === 'a'
-				? 'always'
-				: row.identity_kind === 'd'
-					? 'byDefault'
-					: null,
-	};
-}
-
 function generatedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
@@ -377,63 +339,18 @@ export async function readGeneratedPostcondition(
 			throw new Error(
 				`generated column ${address.name} has a non-column structural postcondition`,
 			);
-		const expected = postcondition.column;
-		if (expected.name !== address.name)
-			throw new Error(
-				`generated column ${address.name} structural postcondition names another column`,
-			);
-		const row = (
-			await executor.query(
-				`SELECT attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped`,
-				[address.schema, parent, address.name],
-			)
-		).rows[0];
-		if (!row) throw new Error(`generated column ${address.name} is absent`);
-		const projection = generatedColumnProjection(row, address.name);
-		const type = projection.type;
-		const nullable = projection.nullable;
-		const actualDefault = projection.default;
-		const actualCollation = projection.collation;
-		const actualIdentity = projection.identity;
-		if (expected.type !== undefined && !dbTypesEqual(type, expected.type))
-			throw new Error(
-				`generated column ${address.name} type postcondition differs`,
-			);
-		if (expected.nullable !== undefined && nullable !== expected.nullable)
-			throw new Error(
-				`generated column ${address.name} nullability postcondition differs`,
-			);
-		if (
-			expected.hasDefault === true &&
-			(actualDefault === undefined ||
-				expected.default === undefined ||
-				actualDefault !== expected.default)
-		)
-			throw new Error(
-				`generated column ${address.name} default postcondition differs`,
-			);
-		if (expected.hasDefault === false && actualDefault !== undefined)
-			throw new Error(
-				`generated column ${address.name} default postcondition differs`,
-			);
-		if (
-			expected.collation !== undefined &&
-			actualCollation !== expected.collation
-		)
-			throw new Error(
-				`generated column ${address.name} collation postcondition differs`,
-			);
-		if (expected.identity !== undefined && actualIdentity !== expected.identity)
-			throw new Error(
-				`generated column ${address.name} identity postcondition differs`,
-			);
+		const verified = await verifyGeneratedColumnPostcondition({
+			session: executor,
+			postcondition,
+			target: { schema: address.schema, table: parent, name: address.name },
+		});
 		return generatedPayload({
 			kind: 'column',
-			type,
-			nullable,
-			default: actualDefault,
-			collation: actualCollation,
-			identity: actualIdentity,
+			type: verified.projection.type,
+			nullable: verified.projection.nullable,
+			default: verified.projection.default,
+			collation: verified.projection.collation,
+			identity: verified.projection.identity,
 		});
 	}
 	if (address.kind === 'constraint' && parent && address.schema) {

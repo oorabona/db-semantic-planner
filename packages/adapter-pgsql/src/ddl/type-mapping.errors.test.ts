@@ -8,6 +8,10 @@
 
 import type { ColumnIR, ColumnType } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import {
+	AutoIncrementColumnTypeError,
+	AutoIncrementNullableColumnError,
+} from './column-emission-decision.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ---------------------------------------------------------------------------
@@ -71,6 +75,63 @@ describe('mapColumnType', () => {
 	// --- autoIncrement ---------------------------------------------------
 
 	describe('autoIncrement', () => {
+		it('uses SERIAL when originalDbType establishes an integer physical type', () => {
+			expect(
+				mapColumnType(
+					col({
+						type: 'integer',
+						originalDbType: 'integer',
+						autoIncrement: true,
+					}),
+				),
+			).toBe('SERIAL');
+		});
+
+		it.each([
+			['integer', 'SERIAL'],
+			['bigint', 'BIGSERIAL'],
+			['pg_catalog.int4', 'SERIAL'],
+			['pg_catalog.int8', 'BIGSERIAL'],
+			['PG_CATALOG.int4', 'SERIAL'],
+			['Pg_Catalog.int8', 'BIGSERIAL'],
+			['"pg_catalog"."int4"', 'SERIAL'],
+		])('recognizes the PostgreSQL integer-family spelling %s', (originalDbType, sql) => {
+			expect(
+				mapColumnType(
+					col({ type: 'integer', originalDbType, autoIncrement: true }),
+				),
+			).toBe(sql);
+		});
+
+		it.each([
+			'"PG_CATALOG".int4',
+			'pg_catalog.integer',
+			'"integer"',
+		])('refuses the non-physical integer-family spelling %s', (originalDbType) => {
+			expect(() =>
+				mapColumnType(
+					col({ type: 'integer', originalDbType, autoIncrement: true }),
+				),
+			).toThrow(AutoIncrementColumnTypeError);
+		});
+
+		it('keeps a tenant integer custom and refuses nullable SERIAL candidates', () => {
+			expect(() =>
+				mapColumnType(
+					col({
+						type: 'integer',
+						originalDbType: 'tenant.integer',
+						autoIncrement: true,
+					}),
+				),
+			).toThrow(AutoIncrementColumnTypeError);
+			expect(() =>
+				mapColumnType(
+					col({ type: 'integer', nullable: true, autoIncrement: true }),
+				),
+			).toThrow(AutoIncrementNullableColumnError);
+		});
+
 		it('returns SERIAL for integer with autoIncrement', () => {
 			expect(mapColumnType(col({ type: 'integer', autoIncrement: true }))).toBe(
 				'SERIAL',
@@ -83,10 +144,24 @@ describe('mapColumnType', () => {
 			);
 		});
 
-		it('returns SERIAL for non-bigint types with autoIncrement', () => {
+		it('returns SERIAL when number renders to the compatible integer type', () => {
 			expect(mapColumnType(col({ type: 'number', autoIncrement: true }))).toBe(
 				'SERIAL',
 			);
+		});
+
+		it('refuses autoIncrement when the physical type cannot emit a sequence', () => {
+			expect(() =>
+				mapColumnType(col({ type: 'string', autoIncrement: true })),
+			).toThrow(AutoIncrementColumnTypeError);
+		});
+
+		it('preserves an authored default instead of emitting a generated sequence', () => {
+			expect(
+				mapColumnType(
+					col({ type: 'integer', autoIncrement: true, default: 42 }),
+				),
+			).toBe('INTEGER');
 		});
 	});
 
