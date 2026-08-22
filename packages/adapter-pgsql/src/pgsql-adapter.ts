@@ -580,6 +580,7 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 }
 
 /**
+ * These classifiers are node-postgres-shaped protocol heuristics, so a locally thrown lookalike can affect admission or quarantine for its SQL or client.
  * node-postgres throws this before sending a query when its client-local parsed
  * statement map already associates our exact name with other SQL. It has no
  * SQLSTATE, so recognize only its canonical message for the attempted name.
