@@ -5,7 +5,7 @@ import { projectLedgerChain } from '@dbsp/core';
 import type { LedgerAddress, LedgerHome, LedgerRefusal } from '@dbsp/types';
 import * as transitionTypes from '@dbsp/types';
 import { refusalFor } from '@dbsp/types';
-import { readPgCatalogueIdentity } from './catalogue-identity.js';
+import type { readPgCatalogueIdentity } from './catalogue-identity.js';
 import {
 	readPgLedgerAddressChain,
 	readPgLedgerControllerOid,
@@ -20,7 +20,11 @@ import {
 	appendPgLedgerRelease,
 	type PgLedgerTarget,
 } from './ledger.js';
-import { renderPgLockIdentifier } from './lock-identifier.js';
+import {
+	formatPgTransitionUnknownError,
+	PgResolvableRelationIdentityReadError,
+	readPgCatalogueIdentityWithResolvableRelationLock,
+} from './lock-relation.js';
 import {
 	setPgTransitionLockTimeout,
 	withPgTransitionTransaction,
@@ -76,32 +80,6 @@ function releaseRefusal(
 		address,
 		refusal,
 	};
-}
-
-/** The relation lock closes DROP/ALTER races from the proof through release. */
-function releaseLockRelation(
-	address: LedgerAddress,
-): { readonly schema: string; readonly table: string } | undefined {
-	if (address.kind === 'table' && address.schema)
-		return { schema: address.schema, table: address.name };
-	if (
-		(address.kind === 'index' ||
-			address.kind === 'constraint' ||
-			address.kind === 'column' ||
-			address.kind === 'policy') &&
-		address.parent?.kind === 'table' &&
-		address.schema
-	) {
-		if (
-			address.parent.schema !== undefined &&
-			address.parent.schema !== address.schema
-		)
-			console.warn(
-				`release lock ignores mismatched parent schema ${address.parent.schema} for ${address.kind} ${address.name}; catalogue identity resolves ${address.schema}`,
-			);
-		return { schema: address.schema, table: address.parent.name };
-	}
-	return undefined;
 }
 
 function target(home: LedgerHome): PgLedgerTarget {
@@ -256,34 +234,16 @@ export async function releasePgManagedAddress(input: {
 						projection.stableState,
 					);
 				}
-				const relation = releaseLockRelation(input.address);
-				if (relation) {
-					// Establish that the lock target still exists. This is not the
-					// release proof: the final identity read below happens after lock.
-					let lockTarget: Awaited<ReturnType<typeof readPgCatalogueIdentity>>;
-					try {
-						lockTarget = await readPgCatalogueIdentity(executor, input.address);
-					} catch {
-						return releaseRefusal(
-							input.address,
-							'ERR-09',
-							projection.stableState,
-						);
-					}
-					if (!lockTarget?.catalogueIdentity)
-						return releaseRefusal(
-							input.address,
-							'ERR-05',
-							projection.stableState,
-						);
-					await executor.query(
-						`LOCK TABLE ${renderPgLockIdentifier(relation.schema)}.${renderPgLockIdentifier(relation.table)} IN SHARE UPDATE EXCLUSIVE MODE`,
-					);
-				}
 				let live: Awaited<ReturnType<typeof readPgCatalogueIdentity>>;
 				try {
-					live = await readPgCatalogueIdentity(executor, input.address);
-				} catch {
+					live = await readPgCatalogueIdentityWithResolvableRelationLock(
+						executor,
+						input.address,
+						'release',
+					);
+				} catch (error) {
+					if (!(error instanceof PgResolvableRelationIdentityReadError))
+						throw error;
 					return releaseRefusal(
 						input.address,
 						'ERR-09',
@@ -319,7 +279,7 @@ export async function releasePgManagedAddress(input: {
 		return {
 			outcome: 'release-unavailable',
 			address: input.address,
-			detail: error instanceof Error ? error.message : String(error),
+			detail: formatPgTransitionUnknownError(error),
 		};
 	}
 }

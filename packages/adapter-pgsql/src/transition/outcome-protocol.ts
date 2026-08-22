@@ -61,6 +61,11 @@ import {
 } from './ledger.js';
 import { isDeadPgConnectionError } from './lessor.js';
 import {
+	formatPgTransitionUnknownError,
+	pgLockRelationForAddress,
+	readPgCatalogueIdentityWithResolvableRelationLock,
+} from './lock-relation.js';
+import {
 	createPostLockAdmissionEvidence,
 	isPostLockAdmissionEvidence,
 	type PostLockAdmissionEvidence,
@@ -179,7 +184,9 @@ export async function withPgOutcomeSession<T>(
 const compromisedPgOutcomeSessions = new WeakMap<object, Error>();
 
 function asPgSessionReleaseError(error: unknown): Error {
-	return error instanceof Error ? error : new Error(String(error));
+	return error instanceof Error
+		? error
+		: new Error(formatPgTransitionUnknownError(error));
 }
 
 function pgSqlState(error: unknown): string | undefined {
@@ -242,7 +249,7 @@ export async function withPgTransitionTransaction<T>(
 	});
 }
 
-/** Apply the admitted-outcome lock-wait bound to work in an open transition transaction. */
+/** Apply the admitted-outcome lock bound in an open transition transaction. */
 export async function setPgTransitionLockTimeout(
 	executor: TransitionJournalQueryable,
 	timeout?: number,
@@ -408,6 +415,10 @@ export interface PgPairedReaddressOperation {
 			readonly postDdlReadBack?: (
 				executor: GeneratedPostconditionSession,
 			) => Promise<LedgerPayload>;
+			/** Verifies a physical relationship that identity alone cannot prove. */
+			readonly postDdlVerify?: (
+				executor: TransitionJournalQueryable,
+			) => Promise<void>;
 		}[];
 		readonly reservations: readonly LedgerReservationRow[];
 		readonly statements: readonly ClaimBundleStatement[];
@@ -417,7 +428,18 @@ export interface PgPairedReaddressOperation {
 		readonly verifyLiveAdmission: (
 			executor: TransitionJournalQueryable,
 			currentController: ControllerIdentity,
-		) => Promise<OutcomeProtocolRefusal | undefined>;
+		) => Promise<
+			| OutcomeProtocolRefusal
+			| readonly {
+					readonly source: LedgerAddress;
+					readonly target: LedgerAddress;
+					readonly catalogueIdentity: NonNullable<
+						NonNullable<
+							Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+						>['catalogueIdentity']
+					>;
+			  }[]
+		>;
 		readonly lockTimeoutMs?: number;
 		/** Optional E2E observer; absent in normal execution. */
 		readonly observer?: PgOutcomeCheckpointObserver;
@@ -435,6 +457,34 @@ export async function readPgPairedReaddressObserved(
 	return member.postDdlReadBack
 		? member.postDdlReadBack(executor)
 		: member.targetObserved;
+}
+
+/** Refuse paired terminals unless their final target still is the admitted source. */
+export function assertPgPairedReaddressTargetWitness(
+	witnesses: readonly {
+		readonly source: LedgerAddress;
+		readonly target: LedgerAddress;
+		readonly catalogueIdentity: unknown;
+	}[],
+	member: Pick<
+		PgPairedReaddressOperation['request']['members'][number],
+		'source' | 'target'
+	>,
+	liveTarget: Pick<LedgerAddress, 'catalogueIdentity' | 'kind' | 'name'>,
+): void {
+	const witness = witnesses.find(
+		(candidate) =>
+			sameLedgerAddress(candidate.source, member.source) &&
+			sameLedgerAddress(candidate.target, member.target),
+	);
+	if (
+		!witness ||
+		canonicalJson(witness.catalogueIdentity) !==
+			canonicalJson(liveTarget.catalogueIdentity)
+	)
+		throw new Error(
+			`re-address target identity changed for ${member.target.kind} ${member.target.name}`,
+		);
 }
 
 export interface PgDestructiveAdmittedOperation {
@@ -1228,7 +1278,7 @@ function refusal(reason: string): OutcomeProtocolRefusal {
 }
 
 function detail(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+	return formatPgTransitionUnknownError(error);
 }
 
 function targetForPlan(plan: OutcomeClaimPlan): PgLedgerTarget {
@@ -1527,6 +1577,20 @@ function canonicalJson(value: unknown): string {
 		.join(',')}}`;
 }
 
+/**
+ * The last check before a terminal append proves catalogue state only.  It
+ * deliberately never runs an operation-owned read-back: that callback can
+ * both cost materially and carry effects, so its single invocation belongs to
+ * the operation observation rather than this state check.
+ */
+async function readPgFinalCatalogueIdentity(
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+): Promise<Awaited<ReturnType<typeof readPgCatalogueIdentity>>> {
+	// Admission already holds the relation lock through this terminal append.
+	return readPgCatalogueIdentity(executor, address);
+}
+
 async function observedResolutionMember(
 	executor: TransitionJournalQueryable,
 	claim: AdmittedOutcomeClaim,
@@ -1537,18 +1601,43 @@ async function observedResolutionMember(
 	lockTimeoutMs: number | undefined,
 ): Promise<Omit<LedgerChainMember, 'controller' | 'recordedAt'>> {
 	const live = recordCatalogueIdentity
-		? await readPgCatalogueIdentity(executor, claim.plan.address)
+		? await readPgCatalogueIdentityWithResolvableRelationLock(
+				executor,
+				claim.plan.address,
+				'observed outcome',
+			)
 		: undefined;
+	if (recordCatalogueIdentity && !live?.catalogueIdentity)
+		throw new Error(
+			`observed outcome ${claim.plan.address.kind} ${claim.plan.address.name} refuses an absent catalogue identity`,
+		);
+	const observed = await withPinnedGeneratedPostconditionSession(
+		executor,
+		readBack,
+		lockTimeoutMs,
+	);
+	const finalLive = recordCatalogueIdentity
+		? await readPgFinalCatalogueIdentity(executor, claim.plan.address)
+		: undefined;
+	if (recordCatalogueIdentity && !finalLive?.catalogueIdentity)
+		throw new Error(
+			`observed outcome ${claim.plan.address.kind} ${claim.plan.address.name} became absent before its terminal append`,
+		);
+	if (
+		live?.catalogueIdentity &&
+		finalLive?.catalogueIdentity &&
+		canonicalJson(live.catalogueIdentity) !==
+			canonicalJson(finalLive.catalogueIdentity)
+	)
+		throw new Error(
+			`observed outcome ${claim.plan.address.kind} ${claim.plan.address.name} identity changed before its terminal append`,
+		);
 	return {
 		...resolutionMember(claim, resolution, predecessor),
-		...(live?.catalogueIdentity
-			? { catalogueIdentity: live.catalogueIdentity }
+		...(finalLive?.catalogueIdentity
+			? { catalogueIdentity: finalLive.catalogueIdentity }
 			: {}),
-		observed: await withPinnedGeneratedPostconditionSession(
-			executor,
-			readBack,
-			lockTimeoutMs,
-		),
+		observed,
 	};
 }
 
@@ -1654,7 +1743,52 @@ async function appendOutcomeTerminal(
 	);
 }
 
-/** PostgreSQL catalogue read used by recovery before any ledger append. */
+interface PgOutcomeRecoveryObservation {
+	readonly readBack: OutcomeRecoveryReadBack;
+	readonly operation?: Awaited<ReturnType<PgOutcomeOperationReadBackFactory>>;
+}
+
+async function readPgOutcomeRecoveryReadBackWithResource(
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	readBack: PgOutcomeReadBackFactory,
+	operationReadBack: PgOutcomeOperationReadBackFactory | undefined,
+	lockTimeoutMs: number | undefined,
+	resource: Awaited<ReturnType<typeof readPgCatalogueIdentity>>,
+): Promise<PgOutcomeRecoveryObservation> {
+	const operation = operationReadBack
+		? await operationReadBack(executor, address, resource?.catalogueIdentity)
+		: undefined;
+	if (!resource?.catalogueIdentity)
+		return {
+			readBack: {
+				kind: 'absent',
+				...(operation === undefined ? {} : { effect: operation.effect }),
+			},
+			...(operation === undefined ? {} : { operation }),
+		};
+	return {
+		readBack: {
+			kind: 'present',
+			catalogueIdentity: resource.catalogueIdentity,
+			observed:
+				operation?.observed ??
+				(await withPinnedGeneratedPostconditionSession(
+					executor,
+					(session) => readBack(session, address, resource.catalogueIdentity),
+					lockTimeoutMs,
+				)),
+			...(operation === undefined ? {} : { effect: operation.effect }),
+		},
+		...(operation === undefined ? {} : { operation }),
+	};
+}
+
+/**
+ * Standalone PostgreSQL catalogue read-back. This intentionally does not
+ * issue LOCK TABLE: callers may supply a Pool, and protocol atomicity belongs
+ * to the transaction-bound recovery and observed-resolution paths.
+ */
 export async function readPgOutcomeRecoveryReadBack(
 	executor: TransitionJournalQueryable,
 	address: LedgerAddress,
@@ -1662,27 +1796,110 @@ export async function readPgOutcomeRecoveryReadBack(
 	operationReadBack?: PgOutcomeOperationReadBackFactory,
 	lockTimeoutMs?: number,
 ): Promise<OutcomeRecoveryReadBack> {
-	const resource = await readPgCatalogueIdentity(executor, address);
-	const operation = operationReadBack
-		? await operationReadBack(executor, address, resource?.catalogueIdentity)
-		: undefined;
-	if (!resource?.catalogueIdentity)
+	return (
+		await readPgOutcomeRecoveryReadBackWithResource(
+			executor,
+			address,
+			readBack,
+			operationReadBack,
+			lockTimeoutMs,
+			await readPgCatalogueIdentity(executor, address),
+		)
+	).readBack;
+}
+
+async function readLockedPgOutcomeRecoveryReadBack(
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	readBack: PgOutcomeReadBackFactory,
+	operationReadBack: PgOutcomeOperationReadBackFactory | undefined,
+	lockTimeoutMs: number | undefined,
+): Promise<PgOutcomeRecoveryObservation> {
+	return readPgOutcomeRecoveryReadBackWithResource(
+		executor,
+		address,
+		readBack,
+		operationReadBack,
+		lockTimeoutMs,
+		await readPgCatalogueIdentityWithResolvableRelationLock(
+			executor,
+			address,
+			'outcome recovery',
+		),
+	);
+}
+
+async function readFinalPgOutcomeRecoveryReadBack(
+	executor: TransitionJournalQueryable,
+	address: LedgerAddress,
+	observation: PgOutcomeRecoveryObservation,
+): Promise<OutcomeRecoveryReadBack> {
+	const resource = await readPgFinalCatalogueIdentity(executor, address);
+	const finalIdentity = resource?.catalogueIdentity;
+	if (observation.readBack.kind === 'absent' && finalIdentity)
+		throw new Error(
+			`final catalogue identity for ${address.kind} ${address.name} became present after evidence was read`,
+		);
+	if (observation.readBack.kind === 'present' && !finalIdentity)
+		throw new Error(
+			`final catalogue identity for ${address.kind} ${address.name} became absent after evidence was read`,
+		);
+	if (
+		observation.readBack.kind === 'present' &&
+		finalIdentity &&
+		canonicalJson(observation.readBack.catalogueIdentity) !==
+			canonicalJson(finalIdentity)
+	)
+		throw new Error(
+			`final catalogue identity for ${address.kind} ${address.name} changed after evidence was read`,
+		);
+	if (!finalIdentity)
 		return {
 			kind: 'absent',
-			...(operation === undefined ? {} : { effect: operation.effect }),
+			...(observation.operation === undefined
+				? {}
+				: { effect: observation.operation.effect }),
 		};
-	return {
-		kind: 'present',
-		catalogueIdentity: resource.catalogueIdentity,
-		observed:
-			operation?.observed ??
-			(await withPinnedGeneratedPostconditionSession(
-				executor,
-				(session) => readBack(session, address, resource.catalogueIdentity),
-				lockTimeoutMs,
-			)),
-		...(operation === undefined ? {} : { effect: operation.effect }),
-	};
+	return observation.readBack;
+}
+
+/**
+ * Absence and kinds without a lockable relation (including indexes) retain a
+ * final catalogue read immediately before their terminal append. Creation
+ * between that read and COMMIT is not excluded by the relation lock; accepted
+ * claim-bound external-DDL exclusion closes that residual window without
+ * changing this control flow.
+ */
+function requiresFinalRecoveryTerminalRead(
+	address: LedgerAddress,
+	classification: OutcomeRecoveryClassification,
+): classification is Extract<
+	OutcomeRecoveryClassification,
+	{ readonly kind: 'outcome-recovery-append' }
+> {
+	return (
+		classification.kind === 'outcome-recovery-append' &&
+		(classification.resolution.readBack.kind === 'absent' ||
+			!pgLockRelationForAddress(address))
+	);
+}
+
+async function commitRecoveryNonAppend(
+	executor: TransitionJournalQueryable,
+	classification: Exclude<
+		OutcomeRecoveryClassification,
+		{ readonly kind: 'outcome-recovery-append' }
+	>,
+	observer: PgOutcomeCheckpointObserver | undefined,
+): Promise<void> {
+	try {
+		await commitPgOutcome(executor, observer);
+	} catch (error) {
+		// A lost catalogue session cannot append anyway. Preserve the
+		// classifier's pending result rather than replacing it with a
+		// transaction-cleanup failure after the read has failed.
+		if (classification.kind !== 'outcome-recovery-pending') throw error;
+	}
 }
 
 /** Opens a claim under its closure locks and commits it with its reservations. */
@@ -2304,17 +2521,32 @@ async function runPgPairedReaddressOperation(
 			begun = false;
 			return controller;
 		}
-		const live = await request.verifyLiveAdmission(executor, controller);
-		if (live) {
+		const witnesses = await request.verifyLiveAdmission(executor, controller);
+		if ('kind' in witnesses) {
 			await executor.query('ROLLBACK');
 			begun = false;
-			return live;
+			return witnesses;
 		}
 		if (request.members.length === 0) {
 			await executor.query('ROLLBACK');
 			begun = false;
 			return refusal('re-address has no closure members');
 		}
+		const terminalMembers: {
+			readonly member: PgPairedReaddressOperation['request']['members'][number];
+			readonly liveTarget: NonNullable<
+				Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+			> & {
+				readonly catalogueIdentity: NonNullable<
+					NonNullable<
+						Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+					>['catalogueIdentity']
+				>;
+			};
+			readonly sourceReservation: LedgerReservationRow;
+			readonly targetReservation: LedgerReservationRow;
+			readonly targetObserved: LedgerPayload;
+		}[] = [];
 		for (const member of request.members) {
 			for (const [address, eventId] of [
 				[member.source, member.sourceClaimId],
@@ -2369,11 +2601,16 @@ async function runPgPairedReaddressOperation(
 		if (sent) throw new Error(sent.reason);
 		await checkpoint(request.observer, 'ddl-completed-before-read-back');
 		for (const member of request.members) {
+			// The root table lock carries table, column, constraint, and policy
+			// members through this append. An index has no SQL LOCK TABLE form
+			// (ALTER INDEX RENAME locks the index itself), so its identity below is
+			// the final-read window of this single admitted DDL transaction.
 			const liveTarget = await readPgCatalogueIdentity(executor, member.target);
 			if (!liveTarget?.catalogueIdentity)
 				throw new Error(
 					`re-address target read-back is absent for ${member.target.name}`,
 				);
+			assertPgPairedReaddressTargetWitness(witnesses, member, liveTarget);
 			const sourceReservation = request.reservations.find(
 				(candidate) =>
 					sameLedgerAddress(candidate.address, member.source) &&
@@ -2396,6 +2633,25 @@ async function runPgPairedReaddressOperation(
 				executor,
 				(session) => readPgPairedReaddressObserved(session, member),
 			);
+			await member.postDdlVerify?.(executor);
+			terminalMembers.push({
+				member,
+				liveTarget: {
+					...liveTarget,
+					catalogueIdentity: liveTarget.catalogueIdentity,
+				},
+				sourceReservation,
+				targetReservation,
+				targetObserved,
+			});
+		}
+		for (const {
+			member,
+			liveTarget,
+			sourceReservation,
+			targetReservation,
+			targetObserved,
+		} of terminalMembers) {
 			await appendPgLedgerResolution(
 				executor,
 				targetForAddress(member.source),
@@ -2992,7 +3248,8 @@ async function recoverPgOutcomeClaimOnSession(
 			target,
 			request.address,
 		);
-		const classification = await classifyOutcomeRecovery({
+		let recoveryObservation: PgOutcomeRecoveryObservation | undefined;
+		let classification = await classifyOutcomeRecovery({
 			projection: projectLedgerChain(chain),
 			acceptedExternalDdlExclusion: request.acceptedExternalDdlExclusion,
 			...(request.resolveIndeterminate === undefined
@@ -3003,29 +3260,22 @@ async function recoverPgOutcomeClaimOnSession(
 				: { indeterminateEvidence: request.indeterminateEvidence }),
 			catalogue: async (address) => {
 				try {
-					return await readPgOutcomeRecoveryReadBack(
+					recoveryObservation = await readLockedPgOutcomeRecoveryReadBack(
 						executor,
 						address,
 						request.readBack,
 						request.operationReadBack,
 						request.lockTimeoutMs,
 					);
+					return recoveryObservation.readBack;
 				} catch (error) {
 					return { kind: 'catalogue-unavailable', reason: detail(error) };
 				}
 			},
 		});
 		if (classification.kind !== 'outcome-recovery-append') {
-			try {
-				await commitPgOutcome(executor, request.observer);
-				begun = false;
-			} catch (error) {
-				// A lost catalogue session cannot append anyway. Preserve the
-				// classifier's pending result rather than replacing it with a
-				// transaction-cleanup failure after the read has failed.
-				if (classification.kind !== 'outcome-recovery-pending') throw error;
-				begun = false;
-			}
+			await commitRecoveryNonAppend(executor, classification, request.observer);
+			begun = false;
 			return classification;
 		}
 		// Recovery is also an admitted resolution: bind the append to the live
@@ -3046,6 +3296,43 @@ async function recoverPgOutcomeClaimOnSession(
 			return refusal(
 				'outcome recovery reservation subset is not the live open claim',
 			);
+		}
+		if (requiresFinalRecoveryTerminalRead(request.address, classification)) {
+			if (!recoveryObservation)
+				throw new Error(
+					`recovery ${request.address.name} has no operation observation to verify before append`,
+				);
+			const initialRecoveryObservation = recoveryObservation;
+			classification = await classifyOutcomeRecovery({
+				projection,
+				acceptedExternalDdlExclusion: request.acceptedExternalDdlExclusion,
+				...(request.resolveIndeterminate === undefined
+					? {}
+					: { resolveIndeterminate: request.resolveIndeterminate }),
+				...(request.indeterminateEvidence === undefined
+					? {}
+					: { indeterminateEvidence: request.indeterminateEvidence }),
+				catalogue: async (address) => {
+					try {
+						return await readFinalPgOutcomeRecoveryReadBack(
+							executor,
+							address,
+							initialRecoveryObservation,
+						);
+					} catch (error) {
+						return { kind: 'catalogue-unavailable', reason: detail(error) };
+					}
+				},
+			});
+			if (classification.kind !== 'outcome-recovery-append') {
+				await commitRecoveryNonAppend(
+					executor,
+					classification,
+					request.observer,
+				);
+				begun = false;
+				return classification;
+			}
 		}
 		const append = await appendPgOutcomeResolution(
 			executor,

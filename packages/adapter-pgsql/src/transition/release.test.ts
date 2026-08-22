@@ -146,6 +146,27 @@ describe('PostgreSQL release admission', () => {
 		expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
 	});
 
+	it('classifies a null-prototype relation-lock rejection without rethrowing it', async () => {
+		currentManaged();
+		const client = executor();
+		const query = client.query.getMockImplementation()!;
+		client.query.mockImplementation(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE')) throw Object.create(null);
+			return query(sql);
+		});
+		await expect(
+			releasePgManagedAddress({
+				executor: client,
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toEqual({
+			outcome: 'release-unavailable',
+			address,
+			detail: 'relation lock failed while establishing a relation lock',
+		});
+	});
+
 	it('refuses a different controller', async () => {
 		currentManaged('other-owner');
 		await expect(
@@ -272,7 +293,7 @@ describe('PostgreSQL release admission', () => {
 			}),
 		);
 		expect(client.query).toHaveBeenCalledWith(
-			'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
 		);
 		expect(client.query).toHaveBeenCalledWith(
 			"SET LOCAL lock_timeout = '5000ms'",
@@ -296,7 +317,7 @@ describe('PostgreSQL release admission', () => {
 			}),
 		).resolves.toEqual({ outcome: 'released' });
 		expect(client.query).toHaveBeenCalledWith(
-			`LOCK TABLE "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
+			`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
 		);
 	});
 
@@ -355,11 +376,27 @@ describe('PostgreSQL release admission', () => {
 		).resolves.toEqual({
 			outcome: 'release-unavailable',
 			address,
-			detail: message,
+			detail: 'relation lock failed while establishing a relation lock',
 		});
 		expect(client.query).toHaveBeenCalledWith(
 			"SET LOCAL lock_timeout = '5000ms'",
 		);
+		expect(mocks.appendRelease).not.toHaveBeenCalled();
+	});
+
+	it('classifies a null-prototype catalogue rejection instead of throwing from its error wrapper', async () => {
+		currentManaged();
+		mocks.readIdentity.mockRejectedValue(Object.create(null));
+		await expect(
+			releasePgManagedAddress({
+				executor: executor(),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'release-refused',
+			refusal: { code: 'ERR-09', state: 'managed' },
+		});
 		expect(mocks.appendRelease).not.toHaveBeenCalled();
 	});
 
@@ -384,12 +421,12 @@ describe('PostgreSQL release admission', () => {
 			}),
 		).resolves.toEqual({ outcome: 'released' });
 		expect(client.query).toHaveBeenCalledWith(
-			'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
 		);
 		const relationLockOrder = client.query.mock.invocationCallOrder.find(
 			(_order, index) =>
 				client.query.mock.calls[index]?.[0] ===
-				'LOCK TABLE "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
 		);
 		expect(mocks.readIdentity.mock.invocationCallOrder[0]).toBeLessThan(
 			relationLockOrder!,

@@ -1,15 +1,24 @@
 import { validateNormalizedManagedStepManifest } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
+	LedgerAddress,
 	LedgerChainMember,
 	LedgerReservationRow,
 	OutcomeClaimPlan,
 } from '@dbsp/types';
 import { refusalFor, sameLedgerAddress } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('./ledger.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./ledger.js')>()),
+	classifyPgLedgerPhysicalShape: vi.fn(async () => ({ kind: 'verified' })),
+	validatePgLedgerPhysicalShape: vi.fn(async () => undefined),
+}));
+
 import type { PgLockedRun } from './outcome-protocol.js';
 import {
 	appendPgOutcomeResolution,
+	assertPgPairedReaddressTargetWitness,
 	checkApprovalScope,
 	checkLiveAdmission,
 	checkValidatedManifest,
@@ -18,6 +27,7 @@ import {
 	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
 	PgCommitDeterministicFailureError,
+	readPgOutcomeRecoveryReadBack,
 	readPgPairedReaddressObserved,
 	recoverPgOutcomeClaim,
 	withPgOutcomeSession,
@@ -55,6 +65,34 @@ describe('paired re-address observed evidence', () => {
 				postDdlReadBack: vi.fn(async () => projection),
 			}),
 		).resolves.toEqual(projection);
+	});
+
+	it('refuses paired appends when a final target identity differs from its witness', () => {
+		const target = { ...address, name: 'orders_archive' };
+		expect(() =>
+			assertPgPairedReaddressTargetWitness(
+				[
+					{
+						source: address,
+						target,
+						catalogueIdentity: {
+							engine: 'postgresql',
+							format: 1,
+							value: { oid: '42' },
+						},
+					},
+				],
+				{ source: address, target },
+				{
+					...target,
+					catalogueIdentity: {
+						engine: 'postgresql',
+						format: 1,
+						value: { oid: '99' },
+					},
+				},
+			),
+		).toThrow('re-address target identity changed');
 	});
 });
 
@@ -131,13 +169,20 @@ async function runAdmitted(
 	});
 }
 
-function recorder(failSql?: string, initialClaimId?: string) {
+function recorder(
+	failSql?: string,
+	initialClaimId?: string,
+	executing = false,
+	chainAddress: LedgerAddress = address,
+) {
 	const sql: string[] = [];
 	let claimId: string | undefined = initialClaimId;
 	return {
 		sql,
 		query: vi.fn(async (statement: string, params?: readonly unknown[]) => {
 			sql.push(statement);
+			if (statement.includes('FROM pg_catalog.pg_class relation'))
+				return { rows: [{ oid: '42' }] };
 			if (statement.startsWith('SELECT to_regclass'))
 				return { rows: [{ relation: 'tenant.dbsp_ledger_marker' }] };
 			if (
@@ -174,30 +219,40 @@ function recorder(failSql?: string, initialClaimId?: string) {
 			if (statement.includes('pg_backend_pid()::text AS backend_id'))
 				return { rows: [{ backend_id: '42', transaction_id: '7' }] };
 			if (statement.startsWith('SELECT event_id')) {
+				const row = (
+					eventId: string,
+					eventKind: string,
+					predecessor: string | null,
+				) => ({
+					event_id: eventId,
+					address_engine: chainAddress.engine,
+					address_database: chainAddress.database,
+					address_schema: chainAddress.schema,
+					address_parent: chainAddress.parent
+						? JSON.stringify(chainAddress.parent)
+						: null,
+					address_kind: chainAddress.kind,
+					address_name: chainAddress.name,
+					catalogue_identity: null,
+					event_kind: eventKind,
+					predecessor,
+					pair_id: null,
+					declared: null,
+					declared_digest: null,
+					observed: null,
+					observed_digest: null,
+					controller: 'deployment',
+					recorded_at: null,
+				});
 				return {
 					rows:
 						claimId === undefined
 							? []
 							: [
-									{
-										event_id: claimId,
-										address_engine: 'postgresql',
-										address_database: 'app',
-										address_schema: 'tenant',
-										address_parent: null,
-										address_kind: 'table',
-										address_name: 'accounts',
-										catalogue_identity: null,
-										event_kind: 'intent',
-										predecessor: null,
-										pair_id: null,
-										declared: null,
-										declared_digest: null,
-										observed: null,
-										observed_digest: null,
-										controller: 'deployment',
-										recorded_at: null,
-									},
+									row(claimId, 'intent', null),
+									...(executing
+										? [row('executing', 'executing', claimId)]
+										: []),
 								],
 				};
 			}
@@ -260,6 +315,325 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			kind: 'outcome-protocol-refused',
 			reason: 'outcome recovery reservation subset is not the live open claim',
 		});
+	});
+
+	it('appends an absence terminal only after its final catalogue re-read', async () => {
+		const executor = recorder(undefined, 'absence-claim', true);
+		const query = executor.query.getMockImplementation()!;
+		const sequence: string[] = [];
+		const operationReadBack = vi.fn(async () => ({
+			observed: { value: { table: 'accounts' }, digest: 'accounts-v1' },
+			effect: 'no-effect' as const,
+		}));
+		executor.query.mockImplementation(async (statement, params) => {
+			if (statement.includes('FROM pg_catalog.pg_class relation')) {
+				sequence.push('catalogue');
+				return { rows: [] };
+			}
+			if (statement.includes('WITH appended AS')) sequence.push('append');
+			return query(statement, params);
+		});
+		await expect(
+			recoverPgOutcomeClaim(executor as never, {
+				address,
+				reservations: request('absence-claim').reservations,
+				resolutionEventId: 'absence-refused',
+				acceptedExternalDdlExclusion: false,
+				readBack: async () => ({ value: {}, digest: 'unreachable' }),
+				operationReadBack,
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-appended',
+			classification: { resolution: { eventKind: 'refused' } },
+		});
+		expect(sequence).toEqual(['catalogue', 'catalogue', 'append']);
+		expect(operationReadBack).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps absence evidence unbound when the final catalogue read becomes present', async () => {
+		const executor = recorder(undefined, 'absence-became-present');
+		const query = executor.query.getMockImplementation()!;
+		const operationReadBack = vi.fn(async () => ({
+			observed: { value: { table: 'accounts' }, digest: 'accounts-v1' },
+			effect: 'no-effect' as const,
+		}));
+		let catalogueReads = 0;
+		executor.query.mockImplementation(async (statement, params) => {
+			if (statement.includes('FROM pg_catalog.pg_class relation')) {
+				catalogueReads += 1;
+				return catalogueReads === 1 ? { rows: [] } : { rows: [{ oid: '42' }] };
+			}
+			return query(statement, params);
+		});
+		await expect(
+			recoverPgOutcomeClaim(executor as never, {
+				address,
+				reservations: request('absence-became-present').reservations,
+				resolutionEventId: 'absence-became-present-refused',
+				acceptedExternalDdlExclusion: false,
+				readBack: async () => ({
+					value: { table: 'accounts' },
+					digest: 'accounts-v1',
+				}),
+				operationReadBack,
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-pending',
+			reason: expect.stringContaining('became present after evidence was read'),
+		});
+		expect(catalogueReads).toBe(2);
+		expect(operationReadBack).toHaveBeenCalledTimes(1);
+		expect(operationReadBack).toHaveBeenCalledWith(
+			expect.anything(),
+			address,
+			undefined,
+		);
+	});
+
+	it('keeps present evidence bound to its original identity when the final read changes', async () => {
+		const indexAddress: LedgerAddress = {
+			...address,
+			kind: 'index',
+			name: 'accounts_by_id',
+			parent: address,
+		};
+		const initial = request('identity-changed-final-read');
+		const executor = recorder(
+			undefined,
+			'identity-changed-final-read',
+			false,
+			indexAddress,
+		);
+		const query = executor.query.getMockImplementation()!;
+		let catalogueReads = 0;
+		const readBack = vi.fn(async () => ({
+			value: { table: 'accounts' },
+			digest: 'accounts-v1',
+		}));
+		executor.query.mockImplementation(async (statement, params) => {
+			if (statement.includes('FROM pg_catalog.pg_class index_relation')) {
+				catalogueReads += 1;
+				return { rows: [{ oid: catalogueReads < 2 ? '42' : '99' }] };
+			}
+			return query(statement, params);
+		});
+		await expect(
+			recoverPgOutcomeClaim(executor as never, {
+				address: indexAddress,
+				reservations: initial.reservations.map((reservation) => ({
+					...reservation,
+					address: indexAddress,
+				})),
+				resolutionEventId: 'identity-changed-final-read-refused',
+				acceptedExternalDdlExclusion: false,
+				readBack,
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-pending',
+			reason: expect.stringContaining('changed after evidence was read'),
+		});
+		expect(readBack).toHaveBeenCalledWith(
+			expect.anything(),
+			indexAddress,
+			expect.objectContaining({ value: { oid: '42' } }),
+		);
+		expect(catalogueReads).toBe(2);
+	});
+
+	it('concludes an index terminal without claim-bound external DDL exclusion', async () => {
+		const indexAddress: LedgerAddress = {
+			...address,
+			kind: 'index',
+			name: 'accounts_by_id',
+			parent: address,
+		};
+		const reservation = {
+			...request('index-claim').reservations[0]!,
+			address: indexAddress,
+			rootClaimId: 'index-claim',
+		};
+		const executor = recorder(undefined, 'index-claim', true, indexAddress);
+		const query = executor.query.getMockImplementation()!;
+		executor.query.mockImplementation(async (statement, params) => {
+			if (statement.includes('FROM pg_catalog.pg_class index_relation'))
+				return { rows: [{ oid: '84' }] };
+			return query(statement, params);
+		});
+		await expect(
+			recoverPgOutcomeClaim(executor as never, {
+				address: indexAddress,
+				reservations: [reservation],
+				resolutionEventId: 'index-indeterminate',
+				acceptedExternalDdlExclusion: false,
+				readBack: async () => ({ value: {}, digest: 'index-v1' }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-recovery-appended',
+			classification: { resolution: { eventKind: 'indeterminate' } },
+		});
+	});
+
+	it('refuses an identity-less observed terminal when catalogue identity is required', async () => {
+		const source = recorder();
+		const executor = {
+			...source,
+			query: vi.fn(async (statement: string, params?: readonly unknown[]) => {
+				if (statement.includes('FROM pg_catalog.pg_class relation')) {
+					source.sql.push(statement);
+					return { rows: [] };
+				}
+				return source.query(statement, params);
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('observed-identity-absent'),
+				resolution: {
+					eventId: 'observed-identity-absent-terminal',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+				recordCatalogueIdentity: true,
+				readBack: async () => ({
+					value: { table: 'accounts' },
+					digest: 'accounts-v1',
+				}),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: expect.stringContaining('refuses an absent catalogue identity'),
+		});
+		expect(
+			source.sql.some((statement) => statement.startsWith('LOCK TABLE')),
+		).toBe(false);
+		expect(source.sql).not.toContain('observed-identity-absent-terminal');
+	});
+
+	it('keeps the relation lock through the terminal append and clears it at COMMIT', async () => {
+		const source = recorder();
+		let lockHeld = false;
+		let relationLockSeen = false;
+		let terminalAppendWhileLocked = false;
+		const executor = {
+			...source,
+			query: vi.fn(async (statement: string, params?: readonly unknown[]) => {
+				if (statement.startsWith('LOCK TABLE')) {
+					lockHeld = true;
+					relationLockSeen = true;
+				}
+				if (statement.includes('WITH appended AS') && relationLockSeen) {
+					expect(lockHeld).toBe(true);
+					terminalAppendWhileLocked = true;
+				}
+				if (statement === 'COMMIT' || statement === 'ROLLBACK')
+					lockHeld = false;
+				return source.query(statement, params);
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('stateful-lock-lifetime'),
+				resolution: {
+					eventId: 'stateful-lock-lifetime-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+				recordCatalogueIdentity: true,
+				readBack: async () => ({
+					value: { table: 'accounts' },
+					digest: 'accounts-v1',
+				}),
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+		expect(terminalAppendWhileLocked).toBe(true);
+		expect(lockHeld).toBe(false);
+		expect(source.sql).not.toContain("SET LOCAL statement_timeout = '5000ms'");
+	});
+
+	it('keeps the public recovery read-back usable with a Pool by never issuing LOCK TABLE', async () => {
+		const sql: string[] = [];
+		const session = {
+			query: vi.fn(async (statement: string) => {
+				sql.push(statement);
+				if (statement.includes('FROM pg_catalog.pg_class relation'))
+					return { rows: [{ oid: '42' }] };
+				return { rows: [] };
+			}),
+		};
+		const pool = {
+			query: vi.fn(async (statement: string) => {
+				if (statement.startsWith('LOCK TABLE'))
+					throw new Error('LOCK TABLE can only be used in transaction blocks');
+				return session.query(statement);
+			}),
+			connect: vi.fn(async () => session),
+		};
+		const result = await readPgOutcomeRecoveryReadBack(
+			pool as never,
+			address,
+			async () => {
+				return { value: { table: 'accounts' }, digest: 'accounts-v1' };
+			},
+		);
+		expect(result).toMatchObject({ kind: 'present' });
+		expect(pool.query).toHaveBeenCalled();
+		expect(pool.connect).not.toHaveBeenCalled();
+		expect(sql.some((statement) => statement.startsWith('LOCK TABLE'))).toBe(
+			false,
+		);
+	});
+
+	it('classifies an absent recovery relation without attempting its lock', async () => {
+		const sql: string[] = [];
+		const readBack = vi.fn(async () => ({
+			value: { table: 'unreachable' },
+			digest: 'unreachable',
+		}));
+		await expect(
+			readPgOutcomeRecoveryReadBack(
+				{
+					query: vi.fn(async (statement: string) => {
+						sql.push(statement);
+						if (statement.includes('FROM pg_catalog.pg_class relation'))
+							return { rows: [] };
+						return { rows: [] };
+					}),
+				} as never,
+				address,
+				readBack,
+			),
+		).resolves.toEqual({ kind: 'absent' });
+		expect(readBack).not.toHaveBeenCalled();
+		expect(sql.some((statement) => statement.startsWith('LOCK TABLE'))).toBe(
+			false,
+		);
+		expect(
+			sql.filter((statement) =>
+				statement.includes('FROM pg_catalog.pg_class relation'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('keeps the standalone read-back available for non-lockable kinds', async () => {
+		const sql: string[] = [];
+		const enumAddress = { ...address, kind: 'enum' as const, name: 'status' };
+		const result = await readPgOutcomeRecoveryReadBack(
+			{
+				query: vi.fn(async (statement: string) => {
+					sql.push(statement);
+					if (statement.includes('FROM pg_catalog.pg_type type'))
+						return { rows: [{ oid: '84' }] };
+					return { rows: [] };
+				}),
+			} as never,
+			enumAddress,
+			async () => ({ value: { enum: 'status' }, digest: 'status-v1' }),
+		);
+		expect(result).toMatchObject({ kind: 'present' });
+		expect(sql).not.toContain(
+			'LOCK TABLE "tenant"."status" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		expect(sql[0]).toContain('FROM pg_catalog.pg_type type');
 	});
 
 	it.each([
@@ -1033,6 +1407,84 @@ describe('PostgreSQL outcome protocol compositions', () => {
 	});
 
 	}); */
+
+	it('locks a present observed relation after resolvability and before proof and its terminal append', async () => {
+		const executor = recorder();
+		const input = request('observed-identity-lock');
+		await expect(
+			runAdmitted(executor as never, {
+				...input,
+				resolution: {
+					eventId: 'observed-identity-lock-terminal',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+				recordCatalogueIdentity: true,
+				readBack: async () => ({
+					value: { table: 'accounts' },
+					digest: 'accounts-v1',
+				}),
+			}),
+		).resolves.toMatchObject({ kind: 'executed-outcome-claim' });
+		const relationLock = executor.sql.indexOf(
+			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		const identityReads = executor.sql
+			.map((statement, index) =>
+				statement.includes('FROM pg_catalog.pg_class relation') ? index : -1,
+			)
+			.filter((index) => index !== -1);
+		const terminalAppend = executor.sql.reduce(
+			(index, statement, candidate) =>
+				statement.includes('WITH appended AS') ? candidate : index,
+			-1,
+		);
+		expect(relationLock).toBeGreaterThan(-1);
+		expect(identityReads).toHaveLength(3);
+		expect(identityReads[0]).toBeLessThan(relationLock);
+		expect(relationLock).toBeLessThan(identityReads[1]!);
+		expect(identityReads[1]).toBeLessThan(identityReads[2]!);
+		expect(identityReads[2]).toBeLessThan(terminalAppend);
+		expect(executor.sql).not.toContain(
+			"SET LOCAL statement_timeout = '5000ms'",
+		);
+	});
+
+	it('maps an observed relation-lock failure to the protocol refusal before its final identity proof', async () => {
+		const source = recorder();
+		const executor = {
+			...source,
+			query: vi.fn(async (statement: string, params?: readonly unknown[]) => {
+				if (statement.startsWith('LOCK TABLE'))
+					throw new Error('canceling statement due to lock timeout');
+				return source.query(statement, params);
+			}),
+		};
+		const input = request('observed-identity-lock-failure');
+		await expect(
+			runAdmitted(executor as never, {
+				...input,
+				resolution: {
+					eventId: 'observed-identity-lock-failure-terminal',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+				recordCatalogueIdentity: true,
+				readBack: async () => ({
+					value: { table: 'accounts' },
+					digest: 'accounts-v1',
+				}),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'relation lock failed while establishing a relation lock',
+		});
+		expect(
+			source.sql.filter((statement) =>
+				statement.includes('FROM pg_catalog.pg_class relation'),
+			),
+		).toHaveLength(1);
+	});
 	it('treats an equal resolving payload as a retry success and a different child as malformed (SC-36)', async () => {
 		const input = request('resolution-retry');
 		const member: Omit<LedgerChainMember, 'controller' | 'recordedAt'> = {

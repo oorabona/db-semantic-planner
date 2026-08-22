@@ -31,6 +31,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import { acquirePgLedgerLocks } from './ledger.js';
 import { renderPgLockIdentifier } from './lock-identifier.js';
+import { lockPgRelation, pgLockRelationForAddress } from './lock-relation.js';
 import {
 	executePgAdmittedOperation,
 	type PgLockedRun,
@@ -227,6 +228,25 @@ export function rekeyDeclaration(
 function observed(address: LedgerAddress): LedgerPayload {
 	const value = { kind: address.kind, name: address.name };
 	return { value, digest: digest(value) };
+}
+
+async function verifyPgOwnedSequenceTarget(
+	executor: TransitionJournalQueryable,
+	sequence: LedgerAddress,
+): Promise<void> {
+	const table = sequence.parent;
+	if (table?.kind !== 'table' || !sequence.schema || !table.schema)
+		throw new Error(
+			`owned sequence ${sequence.name} has no target table relationship`,
+		);
+	const result = await executor.query(
+		`SELECT 1 FROM pg_catalog.pg_class sequence_relation JOIN pg_catalog.pg_namespace sequence_namespace ON sequence_namespace.oid = sequence_relation.relnamespace JOIN pg_catalog.pg_depend dependency ON dependency.objid = sequence_relation.oid JOIN pg_catalog.pg_class table_relation ON table_relation.oid = dependency.refobjid JOIN pg_catalog.pg_namespace table_namespace ON table_namespace.oid = table_relation.relnamespace WHERE sequence_relation.relkind = 'S' AND sequence_namespace.nspname = $1 AND sequence_relation.relname = $2 AND table_namespace.nspname = $3 AND table_relation.relname = $4 AND table_relation.relkind IN ('r', 'p', 'f') AND dependency.deptype IN ('a', 'i', 'n') LIMIT 1`,
+		[sequence.schema, sequence.name, table.schema, table.name],
+	);
+	if (result.rows.length !== 1)
+		throw new Error(
+			`owned sequence ${sequence.name} is not dependent on target table ${table.name}`,
+		);
 }
 
 type GeneratedProof = {
@@ -521,7 +541,7 @@ async function verifyPgTargetOnlyReaddressNoOp(
 						detail: `source ${source.name} has no complete re-address chain`,
 					};
 				await session.query(
-					`LOCK TABLE ${renderPgLockIdentifier(target.schema)}.${renderPgLockIdentifier(target.name)} IN SHARE UPDATE EXCLUSIVE MODE`,
+					`LOCK TABLE ONLY ${renderPgLockIdentifier(target.schema)}.${renderPgLockIdentifier(target.name)} IN SHARE UPDATE EXCLUSIVE MODE`,
 				);
 				const targetLive = await readPgCatalogueIdentity(session, target);
 				if (
@@ -798,6 +818,12 @@ export async function executePgPersistedTableReaddress(
 				...(postDdlProof === undefined
 					? {}
 					: { postDdlReadBack: postDdlProof.prove }),
+				...(member.target.kind === 'sequence'
+					? {
+							postDdlVerify: (session: TransitionJournalQueryable) =>
+								verifyPgOwnedSequenceTarget(session, member.target),
+						}
+					: {}),
 			};
 		});
 	} catch (error) {
@@ -853,6 +879,13 @@ export async function executePgPersistedTableReaddress(
 				statements,
 				manifestPlan,
 				verifyLiveAdmission: async (session, currentController) => {
+					const sourceRelation = pgLockRelationForAddress(source);
+					if (!sourceRelation)
+						return {
+							kind: 'outcome-protocol-refused',
+							reason: `source ${source.kind} ${source.name} has no lockable relation`,
+						};
+					await lockPgRelation(session, sourceRelation);
 					const lockedMembers = await readClosure(session, source, target);
 					if (
 						lockedMembers.length !== members.length ||
@@ -866,6 +899,15 @@ export async function executePgPersistedTableReaddress(
 							reason:
 								'source closure changed while member ledger homes were locked',
 						};
+					const witnesses: {
+						readonly source: LedgerAddress;
+						readonly target: LedgerAddress;
+						readonly catalogueIdentity: NonNullable<
+							NonNullable<
+								Awaited<ReturnType<typeof readPgCatalogueIdentity>>
+							>['catalogueIdentity']
+						>;
+					}[] = [];
 					for (const member of lockedMembers) {
 						const sourceProjection = projectLedgerChain(member.sourceChain);
 						const targetProjection = projectLedgerChain(member.targetChain);
@@ -936,6 +978,11 @@ export async function executePgPersistedTableReaddress(
 								kind: 'outcome-protocol-refused',
 								reason: `target ${member.target.kind} ${member.target.name} is occupied`,
 							};
+						witnesses.push({
+							source: member.source,
+							target: member.target,
+							catalogueIdentity: live.catalogueIdentity,
+						});
 					}
 					if (
 						root.sourceDeclared &&
@@ -966,7 +1013,7 @@ export async function executePgPersistedTableReaddress(
 							reason: `source ${source.name} structural proof failed: ${error instanceof Error ? error.message : String(error)}`,
 						};
 					}
-					return undefined;
+					return witnesses;
 				},
 				...(input.observer === undefined ? {} : { observer: input.observer }),
 			},
