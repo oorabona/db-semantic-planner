@@ -66,9 +66,9 @@ export class PreparedStatementRegistry {
 
 	/**
 	 * Reserves a name only from the second sighting onward. Call confirm to commit
-	 * executor-scoped admission after a successful named execution or a failure the
-	 * caller classified as server-reported. Call abort for a failure the caller
-	 * classified as never having reached server acceptance.
+	 * executor-scoped admission after a successful named execution or a
+	 * caller-classified positionless protocol-shaped failure. Call abort for a
+	 * local, position-bearing, collision, or verified infrastructure failure.
 	 */
 	admit(sql: string): PreparedStatementAdmission | undefined {
 		const fingerprint = derivePreparedStatementFingerprint(sql);

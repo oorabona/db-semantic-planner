@@ -165,7 +165,7 @@ the same name cleanly on its next eligible execution. There is no pool-wide
 failure state or downgrade.
 
 For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
-client after PostgreSQL identifies a prepared-statement infrastructure failure:
+client only after PostgreSQL identifies a prepared-statement infrastructure failure:
 `0A000` from `RevalidateCachedQuery`, `42P05` from `StorePreparedStatement`, or
 node-postgres's exact local duplicate-name error affect that SQL only. A verified
 `26000` from `FetchPreparedStatement` means all server-side prepared state on that
