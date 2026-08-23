@@ -1,11 +1,23 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { decodeGeneratedPostcondition } from './generated-postcondition-verifier.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
+
+function v3(declaration: Record<string, unknown>) {
+	return {
+		postconditionVersion: 3,
+		targetBinding: {
+			bindingVersion: 1,
+			bindingKind: 'managed-step-address',
+		},
+		declaration: { canonicalFormVersion: 1, ...declaration },
+	};
+}
 
 describe('PostgreSQL generated managed-step manifest', () => {
 	it('carries a typed target table postcondition for a re-address step', () => {
@@ -31,13 +43,20 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			order: 0,
 			statements: ['ALTER TABLE "public"."users" RENAME TO "accounts"'],
 		});
-		expect(step.expectedDeclaration?.value).toEqual({
-			postconditionVersion: 2,
-			kind: 'table',
-			columns: [
-				{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
-			],
-		});
+		expect(step.expectedDeclaration?.value).toEqual(
+			v3({
+				kind: 'table',
+				columns: [
+					{
+						name: 'id',
+						type: 'BIGINT',
+						nullable: false,
+						authoredCollation: null,
+						default: { defaultKind: 'none', hasDefault: false, identity: null },
+					},
+				],
+			}),
+		);
 	});
 
 	it('refuses a re-address step without its typed target table postcondition', () => {
@@ -319,7 +338,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toMatchObject({ kind: 'table' });
+		).toMatchObject({ declaration: { kind: 'table' } });
 	});
 
 	it('preserves explicit notValid false over a textual NOT VALID suffix', () => {
@@ -340,11 +359,12 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'constraint',
-			constraint: {
-				type: 'c',
-				expression: 'CHECK (total > 0)',
-				notValid: false,
+			declaration: {
+				kind: 'check',
+				check: {
+					expression: { canonicalFormVersion: 1, sql: 'CHECK (total > 0)' },
+					notValid: false,
+				},
 			},
 		});
 	});
@@ -422,7 +442,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({ postconditionVersion: 2, kind: 'enum', labels: [] });
+		).toEqual(v3({ kind: 'enum', labels: [] }));
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -434,17 +454,18 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: {
-				type: 'p',
-				columns: ['account_id'],
-				deferrable: false,
-				initiallyDeferred: false,
-				enforced: true,
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'constraint',
+				constraint: {
+					type: 'p',
+					columns: ['account_id'],
+					deferrable: false,
+					initiallyDeferred: false,
+					enforced: true,
+				},
+			}),
+		);
 	});
 
 	it.each([
@@ -536,20 +557,28 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			],
 		});
 
-		expect(step.expectedDeclaration?.value).toEqual({
-			postconditionVersion: 2,
-			kind: 'table',
-			columns: [
-				{
-					name: 'Amount',
-					type: 'numeric(10,2)',
-					nullable: false,
-					hasDefault: true,
-					defaultKind: 'authored',
-					default: 'round(random() * 10, 2)',
-				},
-			],
-		});
+		expect(step.expectedDeclaration?.value).toEqual(
+			v3({
+				kind: 'table',
+				columns: [
+					{
+						name: 'Amount',
+						type: 'numeric(10,2)',
+						nullable: false,
+						authoredCollation: null,
+						default: {
+							defaultKind: 'authored',
+							hasDefault: true,
+							identity: null,
+							defaultExpression: {
+								canonicalFormVersion: 1,
+								sql: 'round(random() * 10, 2)',
+							},
+						},
+					},
+				],
+			}),
+		);
 	});
 
 	it('records SERIAL defaults as generated-sequence expectations', () => {
@@ -571,17 +600,21 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'column',
-			column: {
-				name: 'id',
-				type: 'INTEGER',
-				nullable: false,
-				hasDefault: true,
-				defaultKind: 'generated-sequence',
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'column',
+				column: {
+					type: 'INTEGER',
+					nullable: false,
+					authoredCollation: null,
+					default: {
+						defaultKind: 'generated-sequence',
+						hasDefault: true,
+						identity: null,
+					},
+				},
+			}),
+		);
 	});
 
 	it('shares the autoIncrement emission decision with the mapper', () => {
@@ -605,8 +638,12 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'column',
-			column: { hasDefault: true, defaultKind: 'generated-sequence' },
+			declaration: {
+				kind: 'column',
+				column: {
+					default: { hasDefault: true, defaultKind: 'generated-sequence' },
+				},
+			},
 		});
 
 		expect(() =>
@@ -649,11 +686,15 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'column',
-			column: {
-				hasDefault: true,
-				defaultKind: 'authored',
-				default: '42',
+			declaration: {
+				kind: 'column',
+				column: {
+					default: {
+						hasDefault: true,
+						defaultKind: 'authored',
+						defaultExpression: { sql: '42' },
+					},
+				},
 			},
 		});
 	});
@@ -672,15 +713,18 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					check: { name: 'Order Check', expression: 'CHECK ("Total" > 0)' },
 				},
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: {
-				type: 'c',
-				expression: 'CHECK ("Total" > 0)',
-				notValid: false,
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'check',
+				check: {
+					expression: {
+						canonicalFormVersion: 1,
+						sql: 'CHECK ("Total" > 0)',
+					},
+					notValid: false,
+				},
+			}),
+		);
 		expect(
 			expectation({
 				kind: 'create_index',
@@ -695,9 +739,11 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			}),
 		).toMatchObject({
-			postconditionVersion: 2,
-			kind: 'index',
-			index: { columns: ['account_id', 'created_at'], method: 'btree' },
+			postconditionVersion: 3,
+			declaration: {
+				kind: 'index',
+				index: { columns: ['account_id', 'created_at'], method: 'btree' },
+			},
 		});
 		expect(
 			expectation({
@@ -707,11 +753,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'enum',
 				meta: { enum: { name: 'order_state', values: ['draft', 'paid'] } },
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'enum',
-			labels: ['draft', 'paid'],
-		});
+		).toEqual(v3({ kind: 'enum', labels: ['draft', 'paid'] }));
 		expect(
 			expectation({
 				kind: 'create_sequence',
@@ -727,13 +769,14 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					},
 				},
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'sequence',
-			startValue: '7',
-			incrementBy: '3',
-			cycle: false,
-		});
+		).toEqual(
+			v3({
+				kind: 'sequence',
+				startValue: '7',
+				incrementBy: '3',
+				cycle: false,
+			}),
+		);
 		expect(
 			expectation({
 				kind: 'create_extension',
@@ -742,10 +785,186 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'versioned extension',
 				meta: { extension: 'pgcrypto', extensionVersion: '1.3' },
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'extension',
-			version: '1.3',
+		).toEqual(v3({ kind: 'extension', version: '1.3' }));
+	});
+
+	it('round-trips every v3 declaration kind through the single strict decoder', () => {
+		const produce = (
+			change: Parameters<typeof generatedPostconditionForChange>[0]['change'],
+		) => {
+			const payload = generatedPostconditionForChange({
+				change,
+				schema: 'tenant',
+			});
+			if (!payload) throw new Error(`missing postcondition for ${change.kind}`);
+			return payload.value;
+		};
+		const postconditions = [
+			produce({
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: 'table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			}),
+			produce({
+				kind: 'add_column',
+				table: 'orders',
+				destructive: false,
+				details: 'column',
+				meta: {
+					column: {
+						name: 'state',
+						type: 'string',
+						nullable: false,
+						default: 'new',
+						collation: 'C',
+					},
+				},
+			}),
+			produce({
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'index',
+				meta: { index: { columns: ['state'] } },
+			}),
+			produce({
+				kind: 'add_check_constraint',
+				table: 'orders',
+				destructive: false,
+				details: 'check',
+				meta: { check: { expression: 'CHECK (id > 0)' } },
+			}),
+			produce({
+				kind: 'add_primary_key',
+				table: 'orders',
+				destructive: false,
+				details: 'constraint',
+				meta: { columns: ['id'] },
+			}),
+			produce({
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'enum',
+				meta: { enum: { name: 'state', values: ['new'] } },
+			}),
+			produce({
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: 'sequence',
+				meta: { sequence: { name: 'orders_id_seq', startWith: 1 } },
+			}),
+			produce({
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: 'extension',
+				meta: { extension: 'pgcrypto' },
+			}),
+			produce({
+				kind: 'drop_table',
+				table: 'orders',
+				destructive: true,
+				details: 'absent',
+			}),
+			produce({
+				kind: 'alter_column_type',
+				table: 'orders',
+				column: 'state',
+				destructive: false,
+				details: 'exempt',
+			}),
+		];
+		for (const postcondition of postconditions)
+			expect(decodeGeneratedPostcondition(postcondition)).toEqual(
+				postcondition,
+			);
+	});
+
+	it('records authored identity and its address binding through JSON serialization', () => {
+		const payload = generatedPostconditionForChange({
+			change: {
+				kind: 'add_column',
+				table: 'orders',
+				destructive: false,
+				details: 'identity column',
+				meta: {
+					column: {
+						name: 'id',
+						type: 'integer',
+						nullable: false,
+						identity: 'always',
+					},
+				},
+			},
+			schema: 'tenant',
 		});
+		if (!payload) throw new Error('missing identity postcondition');
+		const serialized = JSON.parse(JSON.stringify(payload.value));
+		expect(decodeGeneratedPostcondition(serialized)).toEqual(payload.value);
+		expect(serialized).toMatchObject({
+			targetBinding: {
+				bindingVersion: 1,
+				bindingKind: 'managed-step-address',
+			},
+			declaration: {
+				kind: 'column',
+				column: { default: { defaultKind: 'identity', identity: 'always' } },
+			},
+		});
+	});
+
+	it('strictly rejects leaked v3 target fields and contradictory default states', () => {
+		const declaration = {
+			canonicalFormVersion: 1 as const,
+			kind: 'column',
+			column: {
+				type: 'INTEGER',
+				default: { defaultKind: 'none', hasDefault: false, identity: null },
+			},
+		};
+		const column = {
+			postconditionVersion: 3,
+			targetBinding: {
+				bindingVersion: 1,
+				bindingKind: 'managed-step-address',
+			},
+			declaration,
+		};
+		expect(() =>
+			decodeGeneratedPostcondition({
+				...column,
+				declaration: {
+					...declaration,
+					column: { ...declaration.column, name: 'id' },
+				},
+			}),
+		).toThrow('replan');
+		expect(() =>
+			decodeGeneratedPostcondition({
+				...column,
+				declaration: {
+					...declaration,
+					column: {
+						...declaration.column,
+						default: {
+							defaultKind: 'identity',
+							hasDefault: true,
+							identity: 'always',
+						},
+					},
+				},
+			}),
+		).toThrow('replan');
 	});
 });
