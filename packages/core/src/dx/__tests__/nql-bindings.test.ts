@@ -233,6 +233,7 @@ function createMutationBindingTag(
 	transaction?: Adapter['transaction'],
 	hookStore?: HookStore,
 	options: { readonly dbCasing?: Adapter['dbCasing'] } = {},
+	inTransaction?: boolean,
 ) {
 	const db = schema({
 		users: {
@@ -266,7 +267,15 @@ function createMutationBindingTag(
 	return {
 		adapter,
 		compile,
-		nql: createNqlTag(db.definition, db.model, adapter, undefined, hookStore),
+		nql: createNqlTag(
+			db.definition,
+			db.model,
+			adapter,
+			undefined,
+			hookStore,
+			undefined,
+			inTransaction,
+		),
 	};
 }
 
@@ -2348,6 +2357,28 @@ update users set active = ${true} where id in (new_user) | select id`.all();
 			'before:update:true',
 			'after:update:true:1',
 		]);
+	});
+
+	it('keeps inTransaction at its pre-branch seventh argument position', async () => {
+		const transactionStates: (boolean | undefined)[] = [];
+		const hooks = getHookStore(
+			createHookManager().beforeMutation((ctx) => {
+				transactionStates.push(ctx.inTransaction);
+				return ctx;
+			}),
+		);
+		const execute = vi.fn().mockResolvedValueOnce([{ id: 15 }]);
+		const { nql } = createMutationBindingTag(
+			execute,
+			undefined,
+			hooks,
+			{},
+			true,
+		);
+
+		await nql`insert into users set name = ${'Alice'} | select id`.all();
+
+		expect(transactionStates).toEqual([true]);
 	});
 
 	it('fails loud for mutation bind without RETURNING', () => {

@@ -127,12 +127,12 @@ export function executeCompiledQuery<T>(
 /**
  * Metadata-returning branch of the compiled-query execution funnel.
  */
-export function executeCompiledQueryWithMeta<T>(
+export function executeCompiledQueryWithMeta(
 	adapter: Adapter,
-	query: CompiledQuery<T>,
+	query: CompiledQuery,
 	operation: string,
 ): Promise<{
-	readonly rows: T[];
+	readonly rows: readonly unknown[];
 	readonly rowCount: number;
 	readonly command?: string;
 }> {

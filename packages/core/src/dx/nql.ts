@@ -59,7 +59,11 @@ import type { ModelIR, RelationIR } from '../model-ir.js';
 import type { PlanDecision, PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { ExecutionError } from './errors.js';
-import type { HookErrorHandler, HookStore } from './hooks.js';
+import type {
+	HookErrorHandler,
+	HookStore,
+	ObserverErrorHandler,
+} from './hooks.js';
 import {
 	hydrateJsonAggIncludes,
 	planForJsonAggHydration,
@@ -1336,6 +1340,10 @@ function filterOptionalMapByNames<T>(
  * @param model - ModelIR for plan execution
  * @param adapter - Optional adapter for query execution
  * @param schemaName - Optional schema name for multi-tenant queries
+ * @param hookStore - Optional hook storage for query and mutation hooks
+ * @param onHookError - Optional control-flow handler for hook failures
+ * @param inTransaction - Whether execution is already within a transaction
+ * @param onObserverError - Optional non-fatal diagnostic sink for observer failures
  * @returns NQL template tag function
  */
 export function createNqlTag(
@@ -1346,6 +1354,7 @@ export function createNqlTag(
 	hookStore?: HookStore,
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
+	onObserverError?: ObserverErrorHandler,
 ): NqlTag {
 	return function nql<T>(
 		strings: TemplateStringsArray,
@@ -1363,6 +1372,7 @@ export function createNqlTag(
 			schemaName,
 			hookStore,
 			onHookError,
+			onObserverError,
 			inTransaction,
 		);
 	};
@@ -1383,6 +1393,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private readonly adapter: Adapter<unknown> | undefined;
 	private readonly hookStore: HookStore | undefined;
 	private readonly onHookError: HookErrorHandler | undefined;
+	private readonly onObserverError: ObserverErrorHandler | undefined;
 	private readonly inTransaction: boolean | undefined;
 
 	constructor(
@@ -1395,6 +1406,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		schemaName: string | undefined,
 		hookStore: HookStore | undefined,
 		onHookError: HookErrorHandler | undefined,
+		onObserverError: ObserverErrorHandler | undefined,
 		inTransaction: boolean | undefined,
 	) {
 		this.query = query;
@@ -1406,6 +1418,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		this._schemaName = schemaName;
 		this.hookStore = hookStore;
 		this.onHookError = onHookError;
+		this.onObserverError = onObserverError;
 		this.inTransaction = inTransaction;
 	}
 
@@ -1683,6 +1696,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			intent,
 			hookStore: this.hookStore,
 			onHookError: this.onHookError,
+			onObserverError: this.onObserverError,
 			schemaName: this._schemaName,
 			inTransaction,
 			prepare: () => {

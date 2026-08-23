@@ -558,8 +558,8 @@ describe('NQL mutation hook lifecycle', () => {
 				const compiled = base.compile<T>(plan, options);
 				return withParameters<T>(compiled, ['compiled-param']);
 			},
-			executeWithMeta: async <T>(_query: CompiledQuery<T>) => ({
-				rows: [{ id: 1 }] as T[],
+			executeWithMeta: async (_query: CompiledQuery) => ({
+				rows: [{ id: 1 }],
 				rowCount: 1,
 			}),
 		};

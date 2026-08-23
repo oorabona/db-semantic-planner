@@ -21,6 +21,7 @@ import { ExecutionError } from './errors.js';
 import type { QueryHookContext } from './hooks.js';
 import {
 	hasHooks,
+	normalizeHookError,
 	runBeforeQueryHooks,
 	runOnErrorHooks,
 	withReentrancyGuard,
@@ -173,7 +174,7 @@ export function stream<TResult>(
 							throw await runOnErrorHooks(hookStore.onError, {
 								table,
 								operation: 'select',
-								error: error as Error,
+								error: normalizeHookError(error),
 								intent: rawIntent,
 								phase: 'beforeQuery',
 							});

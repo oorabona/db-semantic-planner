@@ -38,12 +38,7 @@ import type {
 // ============================================================================
 
 /** Query execution result types for afterQuery generics */
-export type QueryResultType =
-	| 'all'
-	| 'first'
-	| 'count'
-	| 'exists'
-	| 'aggregate';
+export type QueryResultType = 'all' | 'first' | 'exists';
 
 /**
  * Context passed to query hooks (beforeQuery/afterQuery).
@@ -136,7 +131,13 @@ export type BeforeQueryHook = (
 	ctx: QueryHookContext,
 ) => QueryHookContext | Promise<QueryHookContext> | undefined;
 
-/** Hook invoked after query execution. Can transform results via return. */
+/** Observer invoked after query execution. Its return value is ignored. */
+export type AfterQueryObserver = (
+	ctx: QueryHookContext,
+	result: unknown,
+) => void | Promise<void>;
+
+/** Hook invoked after query execution. Can transform results without changing their shape. */
 export type AfterQueryHook = <R>(
 	ctx: QueryHookContext,
 	result: R,
@@ -147,7 +148,18 @@ export type BeforeMutationHook = <T>(
 	ctx: MutationHookContext<T>,
 ) => MutationHookContext<T> | Promise<MutationHookContext<T>> | undefined;
 
-/** Hook invoked after mutation execution. Can transform RETURNING results. */
+/** Observer invoked after mutation execution. Its return value is ignored. */
+export type AfterMutationObserver = (
+	ctx: MutationHookContext,
+	result: unknown,
+) => void | Promise<void>;
+
+type ObserverRegistration<
+	T extends (...args: never[]) => unknown,
+	TObserver extends (...args: never[]) => unknown,
+> = ReturnType<T> extends ReturnType<TObserver> ? unknown : never;
+
+/** Hook invoked after mutation execution. Can transform RETURNING results without changing their shape. */
 export type AfterMutationHook = <T>(
 	ctx: MutationHookContext<T>,
 	result: T[],
@@ -169,6 +181,72 @@ export type HookErrorHandler = (
 	phase: string,
 ) => 'continue' | 'abort';
 
+/**
+ * Diagnostic sink for observer failures and snapshot skips.
+ *
+ * Unlike {@link HookErrorHandler}, this handler has no control-flow return:
+ * observer diagnostics always go to a void sink and can never abort work that
+ * has already executed.
+ */
+export type ObserverErrorHandler = (
+	error: Error,
+	observerName: string,
+	phase: 'afterQuery' | 'afterMutation',
+) => void | Promise<void>;
+
+/** @internal Normalize unknown thrown values without allowing coercion to throw. */
+export function normalizeHookError(error: unknown): Error {
+	if (error instanceof Error) return error;
+	try {
+		return new Error(String(error), { cause: error });
+	} catch {
+		return new Error('Unknown hook error', { cause: error });
+	}
+}
+
+type ObserverSnapshot<T> = { readonly value: T } | { readonly error: unknown };
+
+function snapshotForObserver<T>(value: T): ObserverSnapshot<T> {
+	try {
+		return { value: structuredClone(value) };
+	} catch (error) {
+		return { error };
+	}
+}
+
+function reportObserverDiagnostic(...args: readonly unknown[]): void {
+	try {
+		console.error(...args);
+	} catch {
+		// Diagnostics are a void sink: a replaced console must not affect callers.
+	}
+}
+
+async function reportObserverFailure(
+	error: unknown,
+	hookName: string,
+	phase: 'afterQuery' | 'afterMutation',
+	onObserverError?: ObserverErrorHandler,
+): Promise<void> {
+	const normalized = normalizeHookError(error);
+	if (onObserverError) {
+		try {
+			await onObserverError(normalized, hookName, phase);
+			return;
+		} catch (sinkError) {
+			reportObserverDiagnostic(
+				`[dbsp] ${phase} observer error sink failed:`,
+				normalizeHookError(sinkError),
+			);
+			return;
+		}
+	}
+	reportObserverDiagnostic(
+		`[dbsp] ${phase} observer failed (${hookName}):`,
+		normalized,
+	);
+}
+
 // ============================================================================
 // Hook Manager Interface
 // ============================================================================
@@ -176,8 +254,14 @@ export type HookErrorHandler = (
 /** Immutable builder interface for registering hooks */
 export interface HookManager {
 	beforeQuery(hook: BeforeQueryHook): HookManager;
+	observeAfterQuery<T extends AfterQueryObserver>(
+		observer: T & ObserverRegistration<T, AfterQueryObserver>,
+	): HookManager;
 	afterQuery(hook: AfterQueryHook): HookManager;
 	beforeMutation(hook: BeforeMutationHook): HookManager;
+	observeAfterMutation<T extends AfterMutationObserver>(
+		observer: T & ObserverRegistration<T, AfterMutationObserver>,
+	): HookManager;
 	afterMutation(hook: AfterMutationHook): HookManager;
 	onError(hook: OnErrorHook): HookManager;
 	freeze(): HookManager;
@@ -190,8 +274,10 @@ export interface HookManager {
 /** @internal Hook storage — exposed for runner access */
 export type HookStore = {
 	readonly beforeQuery: readonly BeforeQueryHook[];
+	readonly afterQueryObservers: readonly AfterQueryObserver[];
 	readonly afterQuery: readonly AfterQueryHook[];
 	readonly beforeMutation: readonly BeforeMutationHook[];
+	readonly afterMutationObservers: readonly AfterMutationObserver[];
 	readonly afterMutation: readonly AfterMutationHook[];
 	readonly onError: readonly OnErrorHook[];
 	readonly frozen: boolean;
@@ -207,8 +293,10 @@ class HookManagerImpl implements HookManager {
 	constructor(store?: HookStore) {
 		this.store = store ?? {
 			beforeQuery: [],
+			afterQueryObservers: [],
 			afterQuery: [],
 			beforeMutation: [],
+			afterMutationObservers: [],
 			afterMutation: [],
 			onError: [],
 			frozen: false,
@@ -220,6 +308,16 @@ class HookManagerImpl implements HookManager {
 		return new HookManagerImpl({
 			...this.store,
 			beforeQuery: [...this.store.beforeQuery, hook],
+		});
+	}
+
+	observeAfterQuery<T extends AfterQueryObserver>(
+		observer: T & ObserverRegistration<T, AfterQueryObserver>,
+	): HookManager {
+		this.assertNotFrozen();
+		return new HookManagerImpl({
+			...this.store,
+			afterQueryObservers: [...this.store.afterQueryObservers, observer],
 		});
 	}
 
@@ -236,6 +334,16 @@ class HookManagerImpl implements HookManager {
 		return new HookManagerImpl({
 			...this.store,
 			beforeMutation: [...this.store.beforeMutation, hook],
+		});
+	}
+
+	observeAfterMutation<T extends AfterMutationObserver>(
+		observer: T & ObserverRegistration<T, AfterMutationObserver>,
+	): HookManager {
+		this.assertNotFrozen();
+		return new HookManagerImpl({
+			...this.store,
+			afterMutationObservers: [...this.store.afterMutationObservers, observer],
 		});
 	}
 
@@ -340,11 +448,79 @@ export function hasHooks(store: HookStore): boolean {
 
 	return (
 		store.beforeQuery.length > 0 ||
+		store.afterQueryObservers.length > 0 ||
 		store.afterQuery.length > 0 ||
 		store.beforeMutation.length > 0 ||
+		store.afterMutationObservers.length > 0 ||
 		store.afterMutation.length > 0 ||
 		store.onError.length > 0
 	);
+}
+
+type SnapshotObserver<TContext> = (
+	ctx: TContext,
+	result: unknown,
+) => void | Promise<void>;
+
+async function runObservers<TContext>(
+	observers: readonly SnapshotObserver<TContext>[],
+	ctx: TContext,
+	result: unknown,
+	phase: 'afterQuery' | 'afterMutation',
+	onObserverError?: ObserverErrorHandler,
+): Promise<void> {
+	for (let i = observers.length - 1; i >= 0; i--) {
+		const observer = observers[i];
+		if (!observer) continue;
+		const hookName = observer.name || 'anonymous';
+		const contextSnapshot = snapshotForObserver(ctx);
+		const resultSnapshot = snapshotForObserver(result);
+		if ('error' in contextSnapshot) {
+			await reportObserverFailure(
+				new Error('Observer skipped because its snapshot could not be cloned', {
+					cause: contextSnapshot.error,
+				}),
+				hookName,
+				phase,
+				onObserverError,
+			);
+			continue;
+		}
+		if ('error' in resultSnapshot) {
+			await reportObserverFailure(
+				new Error('Observer skipped because its snapshot could not be cloned', {
+					cause: resultSnapshot.error,
+				}),
+				hookName,
+				phase,
+				onObserverError,
+			);
+			continue;
+		}
+		try {
+			await observer(
+				Object.freeze(contextSnapshot.value),
+				resultSnapshot.value,
+			);
+		} catch (error) {
+			await reportObserverFailure(error, hookName, phase, onObserverError);
+		}
+	}
+}
+
+/**
+ * @internal
+ * Runs afterQuery observers in reverse registration order (LIFO).
+ * Observer return values are intentionally ignored.
+ */
+export async function runAfterQueryObservers(
+	observers: readonly AfterQueryObserver[],
+	ctx: QueryHookContext,
+	result: unknown,
+	onObserverError?: ObserverErrorHandler,
+): Promise<void> {
+	if (observers.length === 0) return;
+	return runObservers(observers, ctx, result, 'afterQuery', onObserverError);
 }
 
 /**
@@ -369,7 +545,7 @@ export async function runBeforeQueryHooks(
 		} catch (error) {
 			if (onHookError) {
 				const action = onHookError(
-					error as Error,
+					normalizeHookError(error),
 					hook.name || 'anonymous',
 					frozen,
 					'beforeQuery',
@@ -380,6 +556,21 @@ export async function runBeforeQueryHooks(
 		}
 	}
 	return current;
+}
+
+/**
+ * @internal
+ * Runs afterMutation observers in reverse registration order (LIFO).
+ * Observer return values are intentionally ignored.
+ */
+export async function runAfterMutationObservers(
+	observers: readonly AfterMutationObserver[],
+	ctx: MutationHookContext,
+	result: unknown,
+	onObserverError?: ObserverErrorHandler,
+): Promise<void> {
+	if (observers.length === 0) return;
+	return runObservers(observers, ctx, result, 'afterMutation', onObserverError);
 }
 
 /**
@@ -407,7 +598,7 @@ export async function runAfterQueryHooks<R>(
 		} catch (error) {
 			if (onHookError) {
 				const action = onHookError(
-					error as Error,
+					normalizeHookError(error),
 					hook.name || 'anonymous',
 					frozen,
 					'afterQuery',
@@ -440,7 +631,7 @@ export async function runBeforeMutationHooks<T>(
 		} catch (error) {
 			if (onHookError) {
 				const action = onHookError(
-					error as Error,
+					normalizeHookError(error),
 					hook.name || 'anonymous',
 					frozen,
 					'beforeMutation',
@@ -476,7 +667,7 @@ export async function runAfterMutationHooks<T>(
 		} catch (error) {
 			if (onHookError) {
 				const action = onHookError(
-					error as Error,
+					normalizeHookError(error),
 					hook.name || 'anonymous',
 					frozen,
 					'afterMutation',

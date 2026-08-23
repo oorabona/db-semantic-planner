@@ -73,10 +73,10 @@ const testSchema = schema({
 
 function attachExecuteWithMeta(adapter: Adapter): void {
 	const execute = adapter.execute.bind(adapter);
-	const executeWithMeta: NonNullable<Adapter['executeWithMeta']> = async <T>(
-		query: CompiledQuery<T>,
+	const executeWithMeta: NonNullable<Adapter['executeWithMeta']> = async (
+		query: CompiledQuery,
 	) => {
-		const rows = await execute<T>(query);
+		const rows = await execute(query);
 		return { rows, rowCount: rows.length };
 	};
 	adapter.executeWithMeta = executeWithMeta;

@@ -3,6 +3,7 @@ import type {
 	CompileOnlyAdapter,
 	CompilingAdapter,
 	DDLGeneratingAdapter,
+	ExecutingAdapter,
 	TableDDLGeneratorAdapter,
 } from './adapter.js';
 
@@ -33,7 +34,16 @@ const compileOnlyFromFullAdapter: CompileOnlyAdapter = fullAdapter;
 const compileOnlyFromReducedThirdParty: CompileOnlyAdapter =
 	reducedThirdPartyAdapter;
 
+const metadataAdapterWithDriverRows: Pick<ExecutingAdapter, 'executeWithMeta'> =
+	{
+		executeWithMeta: async () => ({
+			rows: [{ arbitraryDriverField: true }],
+			rowCount: 1,
+		}),
+	};
+
 void compileOnlyWithoutCreateIndex;
 void compileOnlyFromFullAdapter;
 void compileOnlyFromReducedThirdParty;
+void metadataAdapterWithDriverRows;
 void tableDDLWithoutCreateIndex;

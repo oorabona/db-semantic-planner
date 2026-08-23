@@ -1,7 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import type { QueryIntent } from '../intent-ast.js';
 import {
+	type AfterMutationObserver,
 	type AfterQueryHook,
+	type AfterQueryObserver,
 	type BeforeMutationHook,
 	type BeforeQueryHook,
 	createHookManager,
@@ -9,12 +11,51 @@ import {
 	hasHooks,
 	type MutationHookContext,
 	type QueryHookContext,
+	type QueryResultType,
 	runAfterMutationHooks,
+	runAfterMutationObservers,
 	runAfterQueryHooks,
+	runAfterQueryObservers,
 	runBeforeMutationHooks,
 	runBeforeQueryHooks,
 	runOnErrorHooks,
 } from './hooks.js';
+
+const loggingQueryObserver: AfterQueryObserver = (_ctx, result) => {
+	void result;
+};
+
+const appendToArrayTransformer: AfterQueryHook = <R>(
+	_ctx: QueryHookContext,
+	result: R,
+) => {
+	if (Array.isArray(result)) result.push('hook-appended');
+	return result;
+};
+
+// @ts-expect-error Global transformers must preserve the result's shape.
+const unrelatedShapeTransformer: AfterQueryHook = <R>(
+	_ctx: QueryHookContext,
+	result: R,
+) => {
+	return { replacement: result };
+};
+
+// @ts-expect-error Observers cannot return replacement data.
+createHookManager().observeAfterQuery(() => ['replacement']);
+// @ts-expect-error Mutation observers cannot return replacement data.
+createHookManager().observeAfterMutation(() => ['replacement']);
+
+void loggingQueryObserver;
+void appendToArrayTransformer;
+void unrelatedShapeTransformer;
+
+// @ts-expect-error count is materialized through all(), not a hook result type.
+const unreachableCountResultType: QueryResultType = 'count';
+// @ts-expect-error aggregate is a builder modifier, not a hook result type.
+const unreachableAggregateResultType: QueryResultType = 'aggregate';
+void unreachableCountResultType;
+void unreachableAggregateResultType;
 
 // ============================================================================
 // Test Helpers
@@ -75,6 +116,14 @@ describe('HookManager', () => {
 			expect(store.afterQuery).toHaveLength(1);
 		});
 
+		it('should register after-query observers separately from transformers', () => {
+			const manager = createHookManager().observeAfterQuery(() => undefined);
+			const store = getHookStore(manager);
+
+			expect(store.afterQueryObservers).toHaveLength(1);
+			expect(store.afterQuery).toHaveLength(0);
+		});
+
 		it('should register beforeMutation and afterMutation hooks', () => {
 			// Arrange & Act
 			const manager = createHookManager()
@@ -85,6 +134,14 @@ describe('HookManager', () => {
 			// Assert
 			expect(store.beforeMutation).toHaveLength(1);
 			expect(store.afterMutation).toHaveLength(1);
+		});
+
+		it('should register after-mutation observers separately from transformers', () => {
+			const manager = createHookManager().observeAfterMutation(() => undefined);
+			const store = getHookStore(manager);
+
+			expect(store.afterMutationObservers).toHaveLength(1);
+			expect(store.afterMutation).toHaveLength(0);
 		});
 
 		it('should register onError hook', () => {
@@ -364,6 +421,150 @@ describe('runAfterQueryHooks', () => {
 });
 
 // ============================================================================
+// runAfterQueryObservers — LIFO execution, ignored return values
+// ============================================================================
+
+describe('runAfterQueryObservers', () => {
+	it('ignores observer return values without changing the result', async () => {
+		const original = [{ id: 1 }];
+		const replacementReturningObserver = (() => [
+			{ id: 999 },
+		]) as unknown as AfterQueryObserver;
+
+		await runAfterQueryObservers(
+			[replacementReturningObserver],
+			makeQueryContext(),
+			original,
+		);
+
+		expect(original).toEqual([{ id: 1 }]);
+	});
+
+	it('gives observers a detached result snapshot', async () => {
+		const original = [{ id: 1, profile: { name: 'Alice' } }];
+		const observer: AfterQueryObserver = (_ctx, result) => {
+			const rows = result as Array<{
+				id: number;
+				profile: { name: string };
+			}>;
+			rows[0]!.profile.name = 'Changed by observer';
+			rows.splice(0, 1);
+		};
+
+		await runAfterQueryObservers([observer], makeQueryContext(), original);
+
+		expect(original).toEqual([{ id: 1, profile: { name: 'Alice' } }]);
+	});
+
+	it('reports a normalized observer error through the observer void sink', async () => {
+		const onObserverError = vi.fn();
+		const observer: AfterQueryObserver = () => {
+			throw 'string observer failure';
+		};
+
+		await expect(
+			runAfterQueryObservers(
+				[observer],
+				makeQueryContext(),
+				[{ id: 1 }],
+				onObserverError,
+			),
+		).resolves.toBeUndefined();
+
+		const [error, _hookName, phase] = onObserverError.mock.calls[0]! as [
+			Error,
+			string,
+			string,
+		];
+		expect(error).toBeInstanceOf(Error);
+		expect(error.cause).toBe('string observer failure');
+		expect(phase).toBe('afterQuery');
+	});
+
+	it('skips an observer when its result cannot be cloned', async () => {
+		const result = [{ id: 1, callback: () => undefined }];
+		let observerCalled = false;
+		function uncloneableObserver(): void {
+			observerCalled = true;
+		}
+		const onObserverError = vi.fn();
+
+		await runAfterQueryObservers(
+			[uncloneableObserver],
+			makeQueryContext(),
+			result,
+			onObserverError,
+		);
+
+		expect(observerCalled).toBe(false);
+		expect(result).toEqual([{ id: 1, callback: result[0]!.callback }]);
+		const [error, observerName, phase] = onObserverError.mock.calls[0]! as [
+			Error,
+			string,
+			string,
+		];
+		expect(error.message).toBe(
+			'Observer skipped because its snapshot could not be cloned',
+		);
+		expect(error.cause).toBeDefined();
+		expect(observerName).toBe('uncloneableObserver');
+		expect(phase).toBe('afterQuery');
+	});
+
+	it('gives each observer a separate result and context snapshot', async () => {
+		const observedByFirst: unknown[] = [];
+		const first: AfterQueryObserver = (ctx, result) => {
+			observedByFirst.push((result as Array<Record<string, unknown>>)[0]?.tag);
+			expect((ctx.intent as QueryIntent).from).toBe('users');
+			expect(ctx.parameters).toEqual(['original']);
+		};
+		const second: AfterQueryObserver = (ctx, result) => {
+			(result as Array<Record<string, unknown>>)[0]!.tag = 'second';
+			const mutableContext = ctx as unknown as {
+				intent: { from: string };
+				parameters?: unknown[];
+			};
+			mutableContext.intent.from = 'changed';
+			mutableContext.parameters?.push('changed');
+		};
+		const context = makeQueryContext({ parameters: ['original'] });
+		const result = [{ id: 1 }];
+
+		await runAfterQueryObservers([first, second], context, result);
+
+		expect(observedByFirst).toEqual([undefined]);
+		expect((context.intent as QueryIntent).from).toBe('users');
+		expect(context.parameters).toEqual(['original']);
+		expect(result).toEqual([{ id: 1 }]);
+	});
+
+	it('settles normally when error coercion and the diagnostic sink throw', async () => {
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {
+			throw new Error('diagnostic sink failed');
+		});
+		try {
+			await expect(
+				runAfterQueryObservers(
+					[
+						() => {
+							throw {
+								[Symbol.toPrimitive]() {
+									throw new Error('coercion failed');
+								},
+							};
+						},
+					],
+					makeQueryContext(),
+					[{ id: 1 }],
+				),
+			).resolves.toBeUndefined();
+		} finally {
+			consoleError.mockRestore();
+		}
+	});
+});
+
+// ============================================================================
 // runBeforeMutationHooks
 // ============================================================================
 
@@ -441,6 +642,63 @@ describe('runAfterMutationHooks', () => {
 
 		// Assert
 		expect(result).toEqual([{ id: 1, fromHook1: true, fromHook0: true }]);
+	});
+});
+
+describe('runAfterMutationObservers', () => {
+	it('runs observers in LIFO order and ignores their return values', async () => {
+		const order: string[] = [];
+		const observers: AfterMutationObserver[] = [
+			() => {
+				order.push('first');
+			},
+			(() => {
+				order.push('second');
+				return ['replacement'];
+			}) as unknown as AfterMutationObserver,
+		];
+		const rows = [{ id: 1 }];
+
+		await runAfterMutationObservers(observers, makeMutationContext(), rows);
+
+		expect(order).toEqual(['second', 'first']);
+		expect(rows).toEqual([{ id: 1 }]);
+	});
+
+	it('gives mutation observers a detached result snapshot', async () => {
+		const rows = [{ id: 1, profile: { name: 'Alice' } }];
+		const observer: AfterMutationObserver = (_ctx, result) => {
+			const observedRows = result as Array<{
+				id: number;
+				profile: { name: string };
+			}>;
+			observedRows[0]!.profile.name = 'Changed by observer';
+			observedRows.splice(0, 1);
+		};
+
+		await runAfterMutationObservers([observer], makeMutationContext(), rows);
+
+		expect(rows).toEqual([{ id: 1, profile: { name: 'Alice' } }]);
+	});
+
+	it('gives mutation observers an isolated data context snapshot', async () => {
+		const context = makeMutationContext({
+			data: { name: 'Alice' },
+			parameters: ['Alice'],
+		});
+		const observer: AfterMutationObserver = (ctx) => {
+			const mutableContext = ctx as unknown as {
+				data?: { name: string };
+				parameters?: unknown[];
+			};
+			mutableContext.data!.name = 'Changed by observer';
+			mutableContext.parameters?.push('changed');
+		};
+
+		await runAfterMutationObservers([observer], context, [{ id: 1 }]);
+
+		expect(context.data).toEqual({ name: 'Alice' });
+		expect(context.parameters).toEqual(['Alice']);
 	});
 });
 
@@ -669,6 +927,75 @@ describe('Query Hook Integration (SC-01 to SC-06)', () => {
 		});
 	});
 
+	describe('after-query observers', () => {
+		it('does not route observer failures through onHookError', async () => {
+			const adapter = createSpyAdapterForHooks([{ id: 1 }]);
+			const onHookError = vi.fn(() => 'abort' as const);
+			const onObserverError = vi.fn();
+			const observerHooks = createHookManager().observeAfterQuery(() => {
+				throw new Error('observer failed');
+			});
+			const observerOrm = createOrm({
+				schema: testSchema,
+				adapter,
+				hooks: observerHooks,
+				onHookError,
+				onObserverError,
+			});
+
+			await expect(observerOrm.select('users').all()).resolves.toEqual([
+				{ id: 1 },
+			]);
+			expect(onHookError).not.toHaveBeenCalled();
+			expect(onObserverError).toHaveBeenCalledOnce();
+
+			const transformerHooks = createHookManager().afterQuery(() => {
+				throw new Error('transformer failed');
+			});
+			const transformerOrm = createOrm({
+				schema: testSchema,
+				adapter: createSpyAdapterForHooks([{ id: 1 }]),
+				hooks: transformerHooks,
+				onHookError,
+			});
+
+			await expect(transformerOrm.select('users').all()).rejects.toThrow(
+				'transformer failed',
+			);
+			expect(onHookError).toHaveBeenCalledOnce();
+		});
+
+		it('logs a result but ignores a replacement returned at runtime', async () => {
+			const rows = [{ id: 1, name: 'Alice' }];
+			const adapter = createSpyAdapterForHooks(rows);
+			const observer = vi.fn((() => [
+				{ id: 999, name: 'replacement' },
+			]) as unknown as AfterQueryObserver);
+			const hooks = createHookManager().observeAfterQuery(observer);
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			const result = await orm.select('users').all();
+
+			expect(observer).toHaveBeenCalledOnce();
+			expect(result).toEqual(rows);
+		});
+
+		it('cannot mutate the rows returned by all()', async () => {
+			const rows = [{ id: 1, name: 'Alice' }];
+			const adapter = createSpyAdapterForHooks(rows);
+			const hooks = createHookManager().observeAfterQuery((_ctx, result) => {
+				const observedRows = result as Array<{ id: number; name: string }>;
+				observedRows[0]!.name = 'Changed by observer';
+				observedRows.splice(0, 1);
+			});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			await expect(orm.select('users').all()).resolves.toEqual([
+				{ id: 1, name: 'Alice' },
+			]);
+		});
+	});
+
 	describe('SC-05: multiple hooks execute in order', () => {
 		it('should execute before hooks FIFO, after hooks LIFO', async () => {
 			// Arrange
@@ -781,6 +1108,26 @@ function createSpyAdapterForMutations(
 	};
 	return adapter;
 }
+
+describe('executeWithMeta row boundary', () => {
+	it('keeps the mutation builder’s declared row type while the port exposes unknown rows', async () => {
+		type DeclaredReturningRow = {
+			readonly id: string;
+			readonly name: string;
+		};
+		const adapter = createSpyAdapterForMutations([{ id: '42', name: 'Alice' }]);
+		const orm = createOrm({ schema: testSchema, adapter });
+		const builder = orm
+			.into(orm.tables.users)
+			.values({ name: 'Alice', email: 'alice@example.com' })
+			.returning<DeclaredReturningRow>(['id', 'name']);
+
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<
+			Promise<DeclaredReturningRow[]>
+		>();
+		expect(await builder.execute()).toEqual([{ id: '42', name: 'Alice' }]);
+	});
+});
 
 describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 	describe('SC-07: beforeMutation receives data', () => {
@@ -904,6 +1251,54 @@ describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 
 			// Assert
 			expect(result).toEqual([{ id: 42, name: 'Alice', transformed: true }]);
+		});
+
+		it('cannot mutate RETURNING rows visible to the caller', async () => {
+			const returnedRows = [{ id: 42, name: 'Alice' }];
+			const adapter = createSpyAdapterForMutations(returnedRows);
+			const hooks = createHookManager().observeAfterMutation((_ctx, result) => {
+				const observedRows = result as Array<{ id: number; name: string }>;
+				observedRows[0]!.name = 'Changed by observer';
+				observedRows.splice(0, 1);
+			});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			await expect(
+				(orm as unknown as OrmInstanceInternal)
+					.insert('users')
+					.values({ name: 'Alice' })
+					.returning(['id', 'name'])
+					.execute(),
+			).resolves.toEqual([{ id: 42, name: 'Alice' }]);
+		});
+
+		it('resolves a committed mutation when an observer rejects', async () => {
+			const returnedRows = [{ id: 42, name: 'Alice' }];
+			const adapter = createSpyAdapterForMutations(returnedRows);
+			const consoleError = vi
+				.spyOn(console, 'error')
+				.mockImplementation(() => undefined);
+			const hooks = createHookManager().observeAfterMutation(() => {
+				throw new Error('telemetry unavailable');
+			});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			try {
+				await expect(
+					(orm as unknown as OrmInstanceInternal)
+						.insert('users')
+						.values({ name: 'Alice' })
+						.returning(['id', 'name'])
+						.execute(),
+				).resolves.toEqual(returnedRows);
+				expect(adapter._spies.executeWithMeta).toHaveBeenCalledOnce();
+				expect(consoleError).toHaveBeenCalledWith(
+					' [dbsp] afterMutation observer failed (anonymous):'.trim(),
+					expect.any(Error),
+				);
+			} finally {
+				consoleError.mockRestore();
+			}
 		});
 
 		it('should populate affectedRows for mutations without RETURNING', async () => {
@@ -1320,6 +1715,57 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 		});
 	});
 
+	describe('exists() after-query context', () => {
+		it('uses authoritative execution state after a forged beforeQuery context', async () => {
+			const adapter = createSpyAdapterForHooks([{ exists: true }]);
+			const afterContexts: QueryHookContext[] = [];
+			const hooks = createHookManager()
+				.beforeQuery((ctx) => ({
+					...ctx,
+					table: 'forged',
+					inTransaction: true,
+				}))
+				.observeAfterQuery((ctx) => {
+					afterContexts.push(ctx);
+				})
+				.afterQuery((ctx, result) => {
+					afterContexts.push(ctx);
+					return result;
+				});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			await expect(orm.select('users').exists()).resolves.toBe(true);
+
+			for (const ctx of afterContexts) {
+				expect(ctx.table).toBe('users');
+				expect(ctx.inTransaction).toBeUndefined();
+			}
+		});
+
+		it('carries correlationId from beforeQuery into observers and transformers', async () => {
+			const adapter = createSpyAdapterForHooks([{ exists: true }]);
+			let observerCtx: QueryHookContext | undefined;
+			let transformerCtx: QueryHookContext | undefined;
+			const hooks = createHookManager()
+				.beforeQuery((ctx) => ({ ...ctx, correlationId: 'exists-123' }))
+				.observeAfterQuery((ctx) => {
+					observerCtx = ctx;
+				})
+				.afterQuery((ctx, result) => {
+					transformerCtx = ctx;
+					return result;
+				});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			await expect(orm.select('users').exists()).resolves.toBe(true);
+
+			for (const ctx of [observerCtx, transformerCtx]) {
+				expect(ctx?.resultType).toBe('exists');
+				expect(ctx?.correlationId).toBe('exists-123');
+			}
+		});
+	});
+
 	describe('SC-21: void return from hook preserves original', () => {
 		it('should preserve original results when hook returns undefined', async () => {
 			// Arrange
@@ -1391,6 +1837,35 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 			expect(receivedCtx).toBeDefined();
 			expect(receivedCtx!.inTransaction).toBe(true);
 			expect(receivedCtx!.table).toBe('users');
+		});
+
+		it('carries before-query correlation and transaction context into observers and transformers', async () => {
+			const adapter = createSpyAdapterForHooks([{ id: 1, name: 'Alice' }]);
+			(adapter as unknown as Record<string, unknown>).transaction = vi.fn(
+				async (fn: (txAdapter: unknown) => Promise<unknown>) => fn(adapter),
+			);
+			declareAdapterCapabilities(adapter, { supportsTransactions: true });
+			let observerCtx: QueryHookContext | undefined;
+			let transformerCtx: QueryHookContext | undefined;
+			const hooks = createHookManager()
+				.beforeQuery((ctx) => ({ ...ctx, correlationId: 'request-123' }))
+				.observeAfterQuery((ctx) => {
+					observerCtx = ctx;
+				})
+				.afterQuery((ctx, result) => {
+					transformerCtx = ctx;
+					return result;
+				});
+			const orm = createOrm({ schema: testSchema, adapter, hooks });
+
+			await orm.transaction(async (tx) => {
+				await tx.select('users').all();
+			});
+
+			for (const ctx of [observerCtx, transformerCtx]) {
+				expect(ctx?.inTransaction).toBe(true);
+				expect(ctx?.correlationId).toBe('request-123');
+			}
 		});
 
 		it('should set inTransaction=true in beforeMutation context inside transaction()', async () => {

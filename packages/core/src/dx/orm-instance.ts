@@ -24,7 +24,11 @@ import {
 	extractRecursiveField,
 	findSelfRefRelation,
 } from './hierarchy-helpers.js';
-import type { HookErrorHandler, HookStore } from './hooks.js';
+import type {
+	HookErrorHandler,
+	HookStore,
+	ObserverErrorHandler,
+} from './hooks.js';
 import {
 	DeleteBuilder,
 	InsertBuilder,
@@ -476,6 +480,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
 	tablesProxy?: object,
+	onObserverError?: ObserverErrorHandler,
 ): OrmInstanceInternal<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
@@ -487,6 +492,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		hookStore,
 		onHookError,
 		inTransaction,
+		onObserverError,
 	);
 
 	// Helper: build a MutationBuilder options object (shared across mutation methods)
@@ -496,6 +502,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		schemaName,
 		hookStore,
 		onHookError,
+		onObserverError,
 		inTransaction,
 	} as const;
 
@@ -512,6 +519,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		...(defaultFilters !== undefined ? { defaultFilters } : {}),
 		...(hookStore !== undefined ? { hookStore } : {}),
 		...(onHookError !== undefined ? { onHookError } : {}),
+		...(onObserverError !== undefined ? { onObserverError } : {}),
 		...(inTransaction !== undefined ? { inTransaction } : {}),
 	};
 
@@ -612,6 +620,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				onHookError,
 				inTransaction,
 				tablesProxy,
+				onObserverError,
 			);
 		},
 
@@ -941,6 +950,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						onHookError,
 						true, // inTransaction
 						tablesProxy,
+						onObserverError,
 					);
 					return fn(txOrm);
 				}, options);
@@ -988,6 +998,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						onHookError,
 						pinnedAdapter.inTransaction,
 						tablesProxy,
+						onObserverError,
 					);
 					return fn(pinnedOrm);
 				}, options);

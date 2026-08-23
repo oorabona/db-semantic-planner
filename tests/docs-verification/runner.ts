@@ -98,6 +98,7 @@ import {
 \tfn,
 \tboolFn,
 \tunsafeAsPredicate,
+\tcreateHookManager,
 \tcast,
 \tparam,
 \tliteral,

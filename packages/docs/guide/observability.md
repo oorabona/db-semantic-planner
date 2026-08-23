@@ -123,9 +123,9 @@ This is the recommended pattern for integration with migration tools, schema dif
 
 ---
 
-## Correlation IDs for Distributed Tracing
+## Correlation IDs in dumps and hooks
 
-Attach a correlation ID to a query to propagate request context through your logs:
+Attach a correlation ID to a dump to annotate that compile-only result:
 
 ```typescript
 import { schema, createOrm, eq } from '@dbsp/core';
@@ -145,13 +145,22 @@ console.log(dump.meta?.correlationId); // 'req-123'
 console.log(dump.meta?.queryName);     // 'fetch-user'
 ```
 
-The correlation ID appears in `dump.meta.correlationId` and is not sent to PostgreSQL — it is purely a client-side metadata field for log correlation.
+The correlation ID appears in `dump.meta.correlationId` and is not sent to PostgreSQL. `.dump()` does not mutate the builder, so this value is not propagated to a later `.all()` call or its hook context. To add a correlation ID to an executing query's hook context, return it from `beforeQuery`:
+
+```typescript
+import { createHookManager } from '@dbsp/core';
+
+const hooks = createHookManager().beforeQuery((ctx) => ({
+  ...ctx,
+  correlationId: 'req-123',
+}));
+```
 
 ---
 
 ## Query Hooks
 
-`@dbsp/core` provides lifecycle hooks at the ORM instance via `createHookManager()`. Use `beforeQuery` / `afterQuery` for cross-cutting concerns such as logging, metrics, and slow-query detection:
+`@dbsp/core` provides lifecycle hooks at the ORM instance via `createHookManager()`. Use `beforeQuery` / `observeAfterQuery` for cross-cutting concerns such as logging, metrics, and slow-query detection:
 
 ```typescript
 // doctest: skip — requires real PostgreSQL pool
@@ -162,15 +171,14 @@ const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 
 const hooks = createHookManager()
   .beforeQuery((ctx) => {
-    logger.debug({ intent: ctx.intent }, 'query start'); // ctx.intent is the QueryIntent AST; SQL is only available in afterQuery
+    logger.debug({ table: ctx.table, operation: ctx.operation, correlationId: ctx.correlationId }, 'query start');
     return ctx;
   })
-  .afterQuery((ctx, results) => {
+  .observeAfterQuery((ctx, results) => {
     if (ctx.duration && ctx.duration > 1000) {
       logger.warn({ durationMs: ctx.duration }, 'slow query');
     }
     metrics.histogram('db.query.duration', ctx.duration ?? 0);
-    return results;
   });
 
 const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
@@ -179,10 +187,39 @@ const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 | Hook | Type | When called |
 |------|------|-------------|
 | `beforeQuery` | `BeforeQueryHook` | Before the query executes |
+| `observeAfterQuery` | `AfterQueryObserver` | After successful query execution only; cannot replace results |
 | `afterQuery` | `AfterQueryHook` | After successful query execution only |
 | `onError` | `OnErrorHook` | When the query throws (errors bypass `afterQuery`) |
 
 `PgsqlAdapterOptions` (the second argument to `createPgsqlAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
+
+### Observer diagnostics
+
+Observer failures and snapshot skips are sent to the optional ORM-level
+`onObserverError` sink. It is always non-fatal: its return value is ignored,
+and an exception from the sink is contained. `onHookError` remains the
+control-flow handler for before-hooks and result transformers only; returning
+`'abort'` there never changes the outcome of an observer.
+
+```typescript
+import { createHookManager, createOrm, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ users: { id: 'integer', name: 'string' } } as const);
+const hooks = createHookManager();
+const telemetry = {
+  captureException(_error: unknown, _context: unknown) {},
+};
+
+const orm = createOrm({
+  schema: db,
+  adapter: createPgsqlCompileOnlyAdapter(),
+  hooks,
+  onObserverError(error, observerName, phase) {
+    telemetry.captureException(error, { observerName, phase });
+  },
+});
+```
 
 ---
 
@@ -206,29 +243,32 @@ const hooks = createHookManager()
     console.log(`[${ctx.table}] ${ctx.operation} starting`);
     return ctx; // return ctx (or undefined) to continue; the returned value becomes the new ctx
   })
-  .afterQuery((ctx, results) => {
+  .observeAfterQuery((ctx, results) => {
     console.log(`[${ctx.table}] returned ${Array.isArray(results) ? results.length : 1} row(s) in ${ctx.duration}ms`);
-    return results; // return results (or undefined) to pass them through unchanged
   });
 
 const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 ```
 
-Source: `packages/core/src/dx/hooks.ts:523` — `createHookManager()` returns a `HookManager`.
+Source: `packages/core/src/dx/hooks.ts` — `createHookManager()` returns a `HookManager`.
 
-### Hook types
+### Observer and transformer hook types
 
-Five hook types are available. All are defined in `packages/core/src/dx/hooks.ts`.
+Observers receive an `unknown` result and cannot replace it; their return values are ignored. The existing parametric `after*` hooks are result-preserving transformers. All are defined in `packages/core/src/dx/hooks.ts`.
 
 | Hook | Type | Context | Can transform |
 |------|------|---------|---------------|
 | `beforeQuery` | `BeforeQueryHook` | `QueryHookContext` | Yes — return modified ctx |
-| `afterQuery` | `AfterQueryHook` | `QueryHookContext` | Yes — return modified results |
+| `observeAfterQuery` | `AfterQueryObserver` | `QueryHookContext` | No |
+| `afterQuery` | `AfterQueryHook` | `QueryHookContext` | Yes — preserve result shape |
 | `beforeMutation` | `BeforeMutationHook` | `MutationHookContext<T>` | Yes — return modified ctx |
-| `afterMutation` | `AfterMutationHook` | `MutationHookContext<T>` | Yes — return modified results array |
+| `observeAfterMutation` | `AfterMutationObserver` | `MutationHookContext` | No |
+| `afterMutation` | `AfterMutationHook` | `MutationHookContext<T>` | Yes — preserve result shape |
 | `onError` | `OnErrorHook` | Error + context | No |
 
-Each hook receives a **frozen** context object (`Object.freeze` is applied at construction time). To modify the context, return a new object from the hook. Returning `undefined` passes the original context unchanged.
+Each hook receives a **frozen** context object (`Object.freeze` is applied at construction time). Before-hooks can modify the context by returning a new one; transformers can return the same result shape; observer return values are ignored. Each observer receives its own `structuredClone` snapshots of both the result and the context, including mutable `intent`, `data`, and `parameters` members, so it cannot affect callers, transformers, or another observer. If either snapshot cannot be cloned, that observer is skipped and `onObserverError` receives the observer name and the cloning error. It never receives a live fallback value.
+
+Shared-memory buffers are outside this observer snapshot contract because `structuredClone` preserves their shared backing store. PostgreSQL driver results on supported paths are plain data and do not use them.
 
 ### Hook context fields
 
@@ -241,11 +281,21 @@ Each hook receives a **frozen** context object (`Object.freeze` is applied at co
 | `intent` | both | Full `QueryIntent` AST |
 | `schemaName` | both | Schema if `withSchema()` was used |
 | `inTransaction` | both | Whether inside `orm.transaction()` |
-| `correlationId` | both | Correlation ID from `.dump()` options |
-| `resultType` | both | `'all'`, `'first'`, `'count'`, etc. |
+| `correlationId` | both | Optional value returned by a `beforeQuery` hook |
+| `resultType` | both | `'all'`, `'first'`, or `'exists'` |
 | `sql` | afterQuery only | Compiled SQL string |
 | `parameters` | afterQuery only | Bound parameters (may contain PII) |
 | `duration` | afterQuery only | Execution time in ms |
+
+`resultType` has only three reachable values:
+
+| Terminal execution | `resultType` |
+|---|---|
+| `all()` — including a builder modified by `count()` or another aggregate method | `'all'` |
+| `first()` | `'first'` |
+| `exists()` | `'exists'` |
+
+Aggregate methods, including `count()`, modify the builder. They are materialized by a terminal such as `all()`; they are not separate terminal result types. This is a breaking type-surface change shipped in the same major version.
 
 **`MutationHookContext<T>`** (beforeMutation / afterMutation) adds:
 
@@ -320,13 +370,16 @@ if (
 
 ### Lifecycle order
 
-For a SELECT query, hooks fire in this order:
+For materializing SELECT terminals (`all()`, `first()`, and `exists()`), hooks fire in this order. Aggregate methods, including `count()`, are builder modifiers materialized by one of those terminals:
 
 1. ORM `beforeQuery` hooks (in registration order — FIFO)
 2. PostgreSQL executes the query
-3. ORM `afterQuery` hooks (in reverse registration order — LIFO, middleware semantics)
+3. ORM `observeAfterQuery` observers (in reverse registration order — LIFO; return values ignored)
+4. ORM `afterQuery` transformers (in reverse registration order — LIFO, middleware semantics)
 
-For mutations, replace `beforeQuery`/`afterQuery` with `beforeMutation`/`afterMutation` — the same ordering applies: before-hooks FIFO, after-hooks LIFO.
+For mutations, replace `beforeQuery`/`afterQuery` with `beforeMutation`/`afterMutation`; `observeAfterMutation` likewise runs before the transformers. Before-hooks are FIFO and each after phase is LIFO.
+
+`stream()` does not materialize a result and never runs observers or transformers.
 
 ### Pattern: soft-delete default WHERE filter
 
@@ -370,16 +423,16 @@ const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 > );
 > ```
 
-### Pattern: audit log on mutations
+### Pattern: best-effort mutation telemetry
 
-Use `afterMutation` to record every write to a separate audit table:
+Use `observeAfterMutation` for best-effort mutation telemetry:
 
 ```typescript
 // doctest: skip — requires real PostgreSQL connection
 import { createHookManager } from '@dbsp/core';
 
 const hooks = createHookManager()
-  .afterMutation(async (ctx, results) => {
+  .observeAfterMutation(async (ctx, _results) => {
     if (ctx.operation === 'update' || ctx.operation === 'delete') {
       // Fire-and-forget — don't await to avoid slowing the main path
       auditLogger.log({
@@ -389,13 +442,14 @@ const hooks = createHookManager()
         at: new Date(),
       }).catch(console.error);
     }
-    return results;
-  });
+});
 ```
+
+> **Warning:** this is not an audit log. Observers run after statement execution but before a surrounding transaction commits, and the fire-and-forget call can fail or be lost. There is no commit notification hook. For an audit trail, use a database trigger or transactional outbox.
 
 ### Composability and ordering
 
-`before*` hooks run in **registration order (FIFO)**; `after*` hooks run in **reverse registration order (LIFO)** — this mirrors standard middleware stacking where the last-registered wrapper is the outermost layer. Each hook in the chain receives the output of the previous hook:
+`before*` hooks run in **registration order (FIFO)**. `observeAfter*` observers and `after*` transformers each run in **reverse registration order (LIFO)**; observers run before transformers and their return values are ignored. Observer failures are reported to `onObserverError` when configured (or to `console.error` otherwise) and never change the operation outcome. Each transformer in its chain receives the output of the previous transformer:
 
 ```typescript
 // doctest: skip — illustrative chaining; hookA/hookB/hookC are user-defined functions
