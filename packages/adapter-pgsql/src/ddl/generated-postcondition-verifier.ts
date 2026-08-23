@@ -1839,57 +1839,6 @@ async function verifyCheckStructure(input: {
 	});
 }
 
-/** Compatibility exports are terminal replan refusals; they do not decode a legacy shape. */
-export async function verifyGeneratedTablePostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly target: GeneratedPostconditionTarget;
-}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
-	void input.session;
-	void input.target;
-	decodeGeneratedPostcondition(input.postcondition);
-	throw new Error('unreachable');
-}
-
-export async function verifyGeneratedColumnPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly target: GeneratedPostconditionTarget;
-}): Promise<{
-	readonly kind: 'column';
-	readonly projection: GeneratedColumnProjection;
-}> {
-	void input.session;
-	void input.target;
-	decodeGeneratedPostcondition(input.postcondition);
-	throw new Error('unreachable');
-}
-
-export async function verifyGeneratedIndexPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly target: GeneratedPostconditionTarget;
-}): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
-	void input.session;
-	void input.target;
-	decodeGeneratedPostcondition(input.postcondition);
-	throw new Error('unreachable');
-}
-
-export async function verifyGeneratedCheckPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly target: GeneratedPostconditionTarget;
-}): Promise<{
-	readonly kind: 'constraint';
-	readonly projection: CheckProjection;
-}> {
-	void input.session;
-	void input.target;
-	decodeGeneratedPostcondition(input.postcondition);
-	throw new Error('unreachable');
-}
-
 function v3ColumnPostcondition(
 	declaration: Extract<
 		GeneratedPostconditionDeclarationV3,
@@ -1959,7 +1908,7 @@ function decodeV3PostconditionKind<
 }
 
 /** Resolves the v3 table binding, then delegates its shared structural proof. */
-export async function verifyGeneratedV3TablePostcondition(input: {
+export async function verifyGeneratedTablePostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;
@@ -1981,7 +1930,7 @@ export async function verifyGeneratedV3TablePostcondition(input: {
 }
 
 /** Resolves the v3 column binding, then delegates its shared structural proof. */
-export async function verifyGeneratedV3ColumnPostcondition(input: {
+export async function verifyGeneratedColumnPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;
@@ -2010,7 +1959,7 @@ export async function verifyGeneratedV3ColumnPostcondition(input: {
 }
 
 /** Resolves the v3 index binding, then delegates its shared structural proof. */
-export async function verifyGeneratedV3IndexPostcondition(input: {
+export async function verifyGeneratedIndexPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;
@@ -2043,7 +1992,7 @@ export async function verifyGeneratedV3IndexPostcondition(input: {
 }
 
 /** Resolves the v3 CHECK binding, then delegates its shared structural proof. */
-export async function verifyGeneratedV3CheckPostcondition(input: {
+export async function verifyGeneratedCheckPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;

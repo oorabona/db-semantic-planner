@@ -231,13 +231,63 @@ export type GeneratedPostconditionV3 = {
 /** Only v3 is a decodable generated postcondition. Older values replan. */
 export type GeneratedPostcondition = GeneratedPostconditionV3;
 
+/**
+ * JSON-compatible serialization whose object-member order survives PostgreSQL
+ * jsonb normalization. Arrays intentionally retain their supplied order.
+ */
+function canonicalGeneratedPostconditionJson(value: unknown): string {
+	if (value === null) return 'null';
+	if (value === undefined)
+		throw new TypeError(
+			'generated postcondition digest cannot serialize undefined values',
+		);
+	if (Array.isArray(value)) {
+		const entries: string[] = [];
+		for (let index = 0; index < value.length; index += 1) {
+			if (!Object.hasOwn(value, index))
+				throw new TypeError(
+					'generated postcondition digest cannot serialize undefined array members',
+				);
+			entries.push(canonicalGeneratedPostconditionJson(value[index]));
+		}
+		return `[${entries.join(',')}]`;
+	}
+	if (typeof value === 'object') {
+		const record = value as Record<string, unknown>;
+		return `{${Object.keys(record)
+			.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+			.map((key) => {
+				const member = record[key];
+				if (member === undefined)
+					throw new TypeError(
+						'generated postcondition digest cannot serialize undefined object members',
+					);
+				return `${JSON.stringify(key)}:${canonicalGeneratedPostconditionJson(member)}`;
+			})
+			.join(',')}}`;
+	}
+	if (typeof value === 'number' && !Number.isFinite(value))
+		throw new TypeError(
+			'generated postcondition digest can only serialize finite numbers',
+		);
+	if (
+		typeof value !== 'string' &&
+		typeof value !== 'boolean' &&
+		typeof value !== 'number'
+	)
+		throw new TypeError(
+			'generated postcondition digest can only serialize JSON values',
+		);
+	return JSON.stringify(value);
+}
+
 /** The version tag is part of the digest domain, never an implicit convention. */
 export function generatedPostconditionDigest(value: {
 	readonly postconditionVersion: number;
 }): string {
 	return createHash('sha256')
 		.update(`generated-postcondition:v${value.postconditionVersion}\u0000`)
-		.update(JSON.stringify(value))
+		.update(canonicalGeneratedPostconditionJson(value))
 		.digest('hex');
 }
 

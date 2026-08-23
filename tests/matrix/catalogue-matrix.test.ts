@@ -37,6 +37,27 @@ const statementTimeoutMillis = 10_000;
 const hookTimeoutMillis = 60_000;
 const testTimeoutMillis = 150_000;
 
+const tableAddress = {
+	scope: 'schema' as const,
+	engine: 'postgresql' as const,
+	database: 'matrix',
+	schema,
+	kind: 'table' as const,
+	name: table,
+};
+const indexAddress = {
+	...tableAddress,
+	kind: 'index' as const,
+	name: index,
+	parent: tableAddress,
+};
+const checkAddress = {
+	...tableAddress,
+	kind: 'constraint' as const,
+	name: check,
+	parent: tableAddress,
+};
+
 // The longest proof has 13 bounded statements (feature probe + 12 scratch
 // statements) and two 5 s checkouts: 13 * 10 s + 2 * 5 s = 140 s < 150 s.
 // beforeAll has 4 statements and 3 checkouts: 4 * 10 s + 3 * 5 s = 55 s < 60 s.
@@ -308,7 +329,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedTablePostcondition({
 						session,
 						postcondition: tablePostcondition,
-						target: { schema, table, name: table },
+						address: tableAddress,
 					}),
 			);
 
@@ -325,7 +346,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedIndexPostcondition({
 						session,
 						postcondition: indexPostcondition,
-						target: { schema, table, name: index },
+						address: indexAddress,
 					}),
 			);
 			expect(verified.kind).toBe('index');
@@ -341,7 +362,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedCheckPostcondition({
 						session,
 						postcondition: checkPostcondition,
-						target: { schema, table, name: check },
+						address: checkAddress,
 					}),
 			);
 			expect(verified.kind).toBe('constraint');
@@ -358,7 +379,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedTablePostcondition({
 							session,
 							postcondition: driftedTablePostcondition,
-							target: { schema, table, name: table },
+							address: tableAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -375,7 +396,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedIndexPostcondition({
 							session,
 							postcondition: driftedIndexPostcondition,
-							target: { schema, table, name: index },
+							address: indexAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -392,7 +413,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedCheckPostcondition({
 							session,
 							postcondition: driftedCheckPostcondition,
-							target: { schema, table, name: check },
+							address: checkAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -423,7 +444,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedIndexPostcondition({
 							session,
 							postcondition: indexPostcondition,
-							target: { schema, table, name: index },
+							address: indexAddress,
 						}),
 				),
 			).rejects.toThrow('could not read a complete projection');
@@ -454,7 +475,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedIndexPostcondition({
 							session,
 							postcondition: indexPostcondition,
-							target: { schema, table, name: index },
+							address: indexAddress,
 						}),
 				),
 			).rejects.toThrow('could not read a complete projection');
@@ -485,7 +506,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedCheckPostcondition({
 							session,
 							postcondition: checkPostcondition,
-							target: { schema, table, name: check },
+							address: checkAddress,
 						}),
 				),
 			).rejects.toThrow('could not read a complete projection');

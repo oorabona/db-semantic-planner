@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { decodeGeneratedPostconditionPayload } from '../ddl/generated-postcondition-verifier.js';
+import { generatedPostconditionDigest } from '../ddl/managed-step-manifest.js';
 import {
 	classifyPgReaddressRecovery,
 	classifyPgReaddressSupport,
@@ -19,21 +21,55 @@ const source = {
 };
 
 describe('re-address declaration re-keying', () => {
-	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
-	it('keeps a typed v2 table postcondition byte-identical', () => {
-		const declaration = {
-			value: {
-				postconditionVersion: 2 as const,
-				kind: 'table' as const,
-				columns: [
-					{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
-				],
+	it('records a paired, decodable v3 declaration for the re-address target', () => {
+		const value = {
+			postconditionVersion: 3 as const,
+			targetBinding: {
+				bindingVersion: 1 as const,
+				bindingKind: 'managed-step-address' as const,
 			},
-			digest: 'covered-digest',
+			declaration: {
+				canonicalFormVersion: 1 as const,
+				kind: 'table' as const,
+				columns: [],
+			},
 		};
+		const declaration = {
+			value,
+			digest: generatedPostconditionDigest(value),
+		};
+		const recorded = rekeyDeclaration(declaration, {
+			...source,
+			name: 'target_table',
+		});
+
+		expect(recorded).toBe(declaration);
 		expect(
-			rekeyDeclaration(declaration, { ...source, name: 'target_table' }),
-		).toBe(declaration);
+			decodeGeneratedPostconditionPayload(
+				recorded,
+				'readdress:table:target_table',
+			),
+		).toEqual(value);
+	});
+
+	it('refuses a v3 declaration whose digest is not paired with its value', () => {
+		const value = {
+			postconditionVersion: 3 as const,
+			targetBinding: {
+				bindingVersion: 1 as const,
+				bindingKind: 'managed-step-address' as const,
+			},
+			declaration: {
+				canonicalFormVersion: 1 as const,
+				kind: 'absent' as const,
+			},
+		};
+		expect(() =>
+			rekeyDeclaration(
+				{ value, digest: 'legacy-postcondition-digest' },
+				{ ...source, name: 'target_table' },
+			),
+		).toThrow('digest is not paired');
 	});
 
 	it('adds the target name to a legacy declaration as before', () => {

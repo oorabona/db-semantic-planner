@@ -18,10 +18,10 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	verifyGeneratedV3CheckPostcondition,
-	verifyGeneratedV3ColumnPostcondition,
-	verifyGeneratedV3IndexPostcondition,
-	verifyGeneratedV3TablePostcondition,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -311,7 +311,7 @@ async function readGeneratedV3Postcondition(
 ): Promise<LedgerPayload> {
 	switch (postcondition.declaration.kind) {
 		case 'column': {
-			const verified = await verifyGeneratedV3ColumnPostcondition({
+			const verified = await verifyGeneratedColumnPostcondition({
 				session: executor,
 				postcondition,
 				address,
@@ -326,7 +326,7 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'check': {
-			const verified = await verifyGeneratedV3CheckPostcondition({
+			const verified = await verifyGeneratedCheckPostcondition({
 				session: executor,
 				postcondition,
 				address,
@@ -344,7 +344,7 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'index': {
-			const verified = await verifyGeneratedV3IndexPostcondition({
+			const verified = await verifyGeneratedIndexPostcondition({
 				session: executor,
 				postcondition,
 				address,
@@ -355,7 +355,7 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'table': {
-			const verified = await verifyGeneratedV3TablePostcondition({
+			const verified = await verifyGeneratedTablePostcondition({
 				session: executor,
 				postcondition,
 				address,

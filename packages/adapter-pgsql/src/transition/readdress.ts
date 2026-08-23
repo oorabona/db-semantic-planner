@@ -17,9 +17,8 @@ import type {
 } from '@dbsp/types';
 import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
 import {
-	decodeGeneratedPostcondition,
+	decodeGeneratedPostconditionPayload,
 	type GeneratedPostconditionSession,
-	type GeneratedPostconditionTarget,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
@@ -199,7 +198,7 @@ function digest(value: LedgerPayload['value']): string {
 	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function isAddressFreePostcondition(value: unknown): boolean {
+function isV3GeneratedPostcondition(value: unknown): boolean {
 	return (
 		value !== null &&
 		typeof value === 'object' &&
@@ -207,7 +206,7 @@ function isAddressFreePostcondition(value: unknown): boolean {
 		typeof (value as { readonly postconditionVersion?: unknown })
 			.postconditionVersion === 'number' &&
 		(value as { readonly postconditionVersion: number })
-			.postconditionVersion !== 3
+			.postconditionVersion === 3
 	);
 }
 
@@ -216,8 +215,15 @@ export function rekeyDeclaration(
 	target: LedgerAddress,
 ): LedgerPayload {
 	const previous = declaration?.value;
-	// Only address-free declarations retain their covered payload on a re-key.
-	if (declaration && isAddressFreePostcondition(previous)) return declaration;
+	// A v3 declaration has no target address. Preserve its exact O10-covered
+	// payload when it is recorded for the re-address target.
+	if (declaration && isV3GeneratedPostcondition(previous)) {
+		decodeGeneratedPostconditionPayload(
+			declaration,
+			`readdress:${target.kind}:${target.name}`,
+		);
+		return declaration;
+	}
 	const value =
 		previous && typeof previous === 'object' && !Array.isArray(previous)
 			? { ...previous, name: target.name }
@@ -256,21 +262,6 @@ type GeneratedProof = {
 	) => Promise<LedgerPayload>;
 };
 
-function generatedProofTarget(
-	address: LedgerAddress,
-): GeneratedPostconditionTarget {
-	if (!address.schema)
-		throw new Error(
-			`generated postcondition for ${address.kind} ${address.name} has no schema`,
-		);
-	const table = address.kind === 'table' ? address.name : address.parent?.name;
-	if (!table)
-		throw new Error(
-			`generated postcondition for ${address.kind} ${address.name} has no table parent`,
-		);
-	return { schema: address.schema, table, name: address.name };
-}
-
 /** The decode-and-dispatch definition for root admission, no-op and table proofs. */
 function generatedPostconditionProof(
 	declaration: LedgerPayload | undefined,
@@ -280,10 +271,10 @@ function generatedPostconditionProof(
 		throw new Error(
 			`generated postcondition is absent; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 		);
-	const postcondition = decodeGeneratedPostcondition(
-		declaration.value,
-	) as unknown as { readonly kind: 'table' | 'index' | 'constraint' };
-	const target = generatedProofTarget(address);
+	const postcondition = decodeGeneratedPostconditionPayload(
+		declaration,
+		`readdress:${address.kind}:${address.name}`,
+	);
 	const observe = (projection: unknown): LedgerPayload => {
 		// Verifier projections may represent absent catalogue fields as undefined;
 		// ledger JSON uses their canonical serialized form.
@@ -292,52 +283,52 @@ function generatedPostconditionProof(
 		) as LedgerPayload['value'];
 		return { value, digest: digest(value) };
 	};
-	switch (postcondition.kind) {
+	switch (postcondition.declaration.kind) {
 		case 'table':
 			return {
-				kind: postcondition.kind,
+				kind: 'table',
 				prove: async (session) =>
 					observe(
 						(
 							await verifyGeneratedTablePostcondition({
 								session,
 								postcondition,
-								target,
+								address,
 							})
 						).projection,
 					),
 			};
 		case 'index':
 			return {
-				kind: postcondition.kind,
+				kind: 'index',
 				prove: async (session) =>
 					observe(
 						(
 							await verifyGeneratedIndexPostcondition({
 								session,
 								postcondition,
-								target,
+								address,
 							})
 						).projection,
 					),
 			};
-		case 'constraint':
+		case 'check':
 			return {
-				kind: postcondition.kind,
+				kind: 'constraint',
 				prove: async (session) =>
 					observe(
 						(
 							await verifyGeneratedCheckPostcondition({
 								session,
 								postcondition,
-								target,
+								address,
 							})
 						).projection,
 					),
 			};
 		default:
 			throw new Error(
-				`generated ${postcondition.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
+				`generated ${postcondition.declaration.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 			);
 	}
 }
@@ -351,10 +342,11 @@ function readdressMemberReadBack(
 	address: LedgerAddress,
 ): GeneratedProof | undefined {
 	if (!declaration) return undefined;
-	const postcondition = decodeGeneratedPostcondition(
-		declaration.value,
-	) as unknown as { readonly kind: string };
-	if (postcondition.kind !== 'table') return undefined;
+	const postcondition = decodeGeneratedPostconditionPayload(
+		declaration,
+		`readdress:${address.kind}:${address.name}`,
+	);
+	if (postcondition.declaration.kind !== 'table') return undefined;
 	return generatedPostconditionProof(declaration, address);
 }
 
@@ -988,7 +980,7 @@ export async function executePgPersistedTableReaddress(
 					}
 					if (
 						root.sourceDeclared &&
-						isAddressFreePostcondition(root.sourceDeclared.value) &&
+						isV3GeneratedPostcondition(root.sourceDeclared.value) &&
 						input.step.expectedDeclaration &&
 						root.sourceDeclared.digest !== input.step.expectedDeclaration.digest
 					)

@@ -24,6 +24,60 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('digests canonical postconditions independently of object key order', () => {
+		const value = v3({
+			kind: 'table',
+			columns: [
+				{
+					name: 'id',
+					type: 'BIGINT',
+					default: {
+						defaultKind: 'none',
+						hasDefault: false,
+						identity: null,
+					},
+				},
+			],
+		});
+		const reordered = {
+			declaration: {
+				columns: [
+					{
+						default: {
+							identity: null,
+							hasDefault: false,
+							defaultKind: 'none',
+						},
+						type: 'BIGINT',
+						name: 'id',
+					},
+				],
+				kind: 'table',
+				canonicalFormVersion: 1,
+			},
+			targetBinding: {
+				bindingKind: 'managed-step-address',
+				bindingVersion: 1,
+			},
+			postconditionVersion: 3,
+		};
+		const semanticallyDifferent = {
+			...reordered,
+			declaration: { ...reordered.declaration, kind: 'absent' },
+		};
+		const differentVersion = { ...reordered, postconditionVersion: 2 };
+
+		expect(generatedPostconditionDigest(reordered)).toBe(
+			generatedPostconditionDigest(value),
+		);
+		expect(generatedPostconditionDigest(semanticallyDifferent)).not.toBe(
+			generatedPostconditionDigest(value),
+		);
+		expect(generatedPostconditionDigest(differentVersion)).not.toBe(
+			generatedPostconditionDigest(value),
+		);
+	});
+
 	it('O10 rejects both crossed digest/version pairings', () => {
 		const current = v3({ kind: 'absent' });
 		const legacy = { ...current, postconditionVersion: 2 };

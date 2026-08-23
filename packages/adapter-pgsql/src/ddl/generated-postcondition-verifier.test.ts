@@ -5,10 +5,10 @@ import {
 	GeneratedPostconditionReplanRequiredError,
 	type GeneratedPostconditionSession,
 	mintGeneratedPostconditionSession,
-	verifyGeneratedV3CheckPostcondition,
-	verifyGeneratedV3ColumnPostcondition,
-	verifyGeneratedV3IndexPostcondition,
-	verifyGeneratedV3TablePostcondition,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 } from './generated-postcondition-verifier.js';
 
 const v3Binding = {
@@ -162,7 +162,7 @@ describe('generated postcondition verifier', () => {
 			};
 		});
 		await expect(
-			verifyGeneratedV3TablePostcondition({
+			verifyGeneratedTablePostcondition({
 				session: testSession(tableQuery as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -212,7 +212,7 @@ describe('generated postcondition verifier', () => {
 			};
 		});
 		await expect(
-			verifyGeneratedV3ColumnPostcondition({
+			verifyGeneratedColumnPostcondition({
 				session: testSession(columnQuery as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -239,7 +239,7 @@ describe('generated postcondition verifier', () => {
 			return { rows: [] };
 		});
 		await expect(
-			verifyGeneratedV3IndexPostcondition({
+			verifyGeneratedIndexPostcondition({
 				session: testSession(indexQuery as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -284,7 +284,7 @@ describe('generated postcondition verifier', () => {
 			return { rows: [] };
 		});
 		await expect(
-			verifyGeneratedV3CheckPostcondition({
+			verifyGeneratedCheckPostcondition({
 				session: testSession(checkQuery as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -313,7 +313,7 @@ describe('generated postcondition verifier', () => {
 	it('raises the named v3 binding failure before issuing structural queries', async () => {
 		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
-			verifyGeneratedV3ColumnPostcondition({
+			verifyGeneratedColumnPostcondition({
 				session: testSession(query as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -363,7 +363,7 @@ describe('generated postcondition verifier', () => {
 			};
 		});
 		await expect(
-			verifyGeneratedV3ColumnPostcondition({
+			verifyGeneratedColumnPostcondition({
 				session: testSession(query as never),
 				postcondition: {
 					postconditionVersion: 3,
@@ -385,7 +385,7 @@ describe('generated postcondition verifier', () => {
 			rows: [{ relation_kind: 'i', table_name: 'audit_accounts' }],
 		}));
 		await expect(
-			verifyGeneratedV3IndexPostcondition({
+			verifyGeneratedIndexPostcondition({
 				session: testSession(query as never),
 				postcondition: {
 					postconditionVersion: 3,

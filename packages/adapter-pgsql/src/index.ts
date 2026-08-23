@@ -86,10 +86,10 @@ export {
 	resolveGeneratedPostconditionBinding,
 	type SchemaChange,
 	type SchemaDiff,
-	verifyGeneratedV3CheckPostcondition,
-	verifyGeneratedV3ColumnPostcondition,
-	verifyGeneratedV3IndexPostcondition,
-	verifyGeneratedV3TablePostcondition,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from './ddl/index.js';
 // EXPLAIN support

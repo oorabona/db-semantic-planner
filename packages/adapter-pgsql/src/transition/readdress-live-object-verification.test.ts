@@ -33,11 +33,12 @@ vi.mock('./outcome-protocol.js', () => ({
 	withPgTransitionTransaction: mocks.transaction,
 }));
 vi.mock('../ddl/generated-postcondition-verifier.js', () => ({
-	decodeGeneratedPostcondition: (value: unknown) => {
+	decodeGeneratedPostconditionPayload: (payload: unknown) => {
+		const value = (payload as { readonly value?: unknown }).value;
 		if (
 			!value ||
 			typeof value !== 'object' ||
-			(value as { postconditionVersion?: unknown }).postconditionVersion !== 2
+			(value as { postconditionVersion?: unknown }).postconditionVersion !== 3
 		)
 			throw new Error('generated postcondition format is unsupported; replan');
 		return value;
@@ -67,14 +68,18 @@ const identity = {
 	format: 1,
 	value: { oid: '42' },
 };
-// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
 const expected = {
 	value: {
-		postconditionVersion: 2 as const,
-		kind: 'table' as const,
-		columns: [
-			{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
-		],
+		postconditionVersion: 3 as const,
+		targetBinding: {
+			bindingVersion: 1 as const,
+			bindingKind: 'managed-step-address' as const,
+		},
+		declaration: {
+			canonicalFormVersion: 1 as const,
+			kind: 'table' as const,
+			columns: [],
+		},
 	},
 	digest: 'reviewed',
 };
@@ -461,8 +466,7 @@ describe('re-address live-object verification', () => {
 		).rejects.toThrow('is not dependent on target table orders_archive');
 	});
 
-	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
-	it('keeps a decodable v2 index member on identity read-back (#576)', async () => {
+	it('refuses a pre-flip v2 index member before it can append a claim', async () => {
 		setupAdmission();
 		const priorReadChain = mocks.readChain.getMockImplementation()!;
 		const priorProject = mocks.project.getMockImplementation()!;
@@ -507,26 +511,29 @@ describe('re-address live-object verification', () => {
 			);
 			return { kind: 'executed-paired-readdress' };
 		});
-		await executePgPersistedTableReaddress({
-			executor: executor([
-				{ kind: 'table', name: source.name },
-				{ kind: 'index', name: 'orders_idx' },
-			]),
-			run: {} as never,
-			manifest: {} as never,
-			recomputedPlanDigest: 'plan',
-			approval: { approvals: [] },
-			executionId: 'attempt',
-			step: step(),
-			database: source.database,
-			targetSchema: source.schema,
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: executor([
+					{ kind: 'table', name: source.name },
+					{ kind: 'index', name: 'orders_idx' },
+				]),
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				executionId: 'attempt',
+				step: step(),
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-refused',
+			detail: expect.stringContaining('replan'),
 		});
-		expect(member).toMatchObject({ targetDeclared: indexDeclaration });
-		expect(member).not.toHaveProperty('postDdlReadBack');
+		expect(member).toBeUndefined();
 	});
 
-	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
-	it('refuses a v2 recorded root declaration that differs from the reviewed step', async () => {
+	it('refuses a v3 recorded root declaration that differs from the reviewed step', async () => {
 		setupAdmission();
 		mocks.project.mockImplementation((chain) =>
 			chain.marker === 'source'

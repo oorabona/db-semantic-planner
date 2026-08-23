@@ -29,10 +29,10 @@ export {
 	type GeneratedPostconditionTarget,
 	GeneratedPostconditionWorkInFlightError,
 	resolveGeneratedPostconditionBinding,
-	verifyGeneratedV3CheckPostcondition,
-	verifyGeneratedV3ColumnPostcondition,
-	verifyGeneratedV3IndexPostcondition,
-	verifyGeneratedV3TablePostcondition,
+	verifyGeneratedCheckPostcondition,
+	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIndexPostcondition,
+	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 export {

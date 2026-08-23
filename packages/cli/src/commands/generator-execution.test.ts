@@ -1,10 +1,10 @@
 import {
 	type GeneratedPostconditionSession,
 	generatedPostconditionDigest,
-	type verifyGeneratedV3CheckPostcondition as VerifyGeneratedV3CheckPostcondition,
-	type verifyGeneratedV3ColumnPostcondition as VerifyGeneratedV3ColumnPostcondition,
-	type verifyGeneratedV3IndexPostcondition as VerifyGeneratedV3IndexPostcondition,
-	type verifyGeneratedV3TablePostcondition as VerifyGeneratedV3TablePostcondition,
+	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
+	type verifyGeneratedColumnPostcondition as VerifyGeneratedColumnPostcondition,
+	type verifyGeneratedIndexPostcondition as VerifyGeneratedIndexPostcondition,
+	type verifyGeneratedTablePostcondition as VerifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
@@ -15,23 +15,23 @@ const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgPersistedTableReaddress = vi.hoisted(() => vi.fn());
-const verifyGeneratedV3TablePostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedV3ColumnPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedV3IndexPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedV3CheckPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedTablePostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedColumnPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedIndexPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedCheckPostcondition = vi.hoisted(() => vi.fn());
 const v3VerifierDelegates = vi.hoisted(() => ({
-	table: undefined as unknown as typeof VerifyGeneratedV3TablePostcondition,
-	column: undefined as unknown as typeof VerifyGeneratedV3ColumnPostcondition,
-	index: undefined as unknown as typeof VerifyGeneratedV3IndexPostcondition,
-	check: undefined as unknown as typeof VerifyGeneratedV3CheckPostcondition,
+	table: undefined as unknown as typeof VerifyGeneratedTablePostcondition,
+	column: undefined as unknown as typeof VerifyGeneratedColumnPostcondition,
+	index: undefined as unknown as typeof VerifyGeneratedIndexPostcondition,
+	check: undefined as unknown as typeof VerifyGeneratedCheckPostcondition,
 }));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
-	v3VerifierDelegates.table = actual.verifyGeneratedV3TablePostcondition;
-	v3VerifierDelegates.column = actual.verifyGeneratedV3ColumnPostcondition;
-	v3VerifierDelegates.index = actual.verifyGeneratedV3IndexPostcondition;
-	v3VerifierDelegates.check = actual.verifyGeneratedV3CheckPostcondition;
+	v3VerifierDelegates.table = actual.verifyGeneratedTablePostcondition;
+	v3VerifierDelegates.column = actual.verifyGeneratedColumnPostcondition;
+	v3VerifierDelegates.index = actual.verifyGeneratedIndexPostcondition;
+	v3VerifierDelegates.check = actual.verifyGeneratedCheckPostcondition;
 	return {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
@@ -42,32 +42,32 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			executePgDeclaredAdoption(...args),
 		executePgPersistedTableReaddress: (...args: unknown[]) =>
 			executePgPersistedTableReaddress(...args),
-		verifyGeneratedV3TablePostcondition: (...args: unknown[]) =>
-			verifyGeneratedV3TablePostcondition(...args),
-		verifyGeneratedV3ColumnPostcondition: (...args: unknown[]) =>
-			verifyGeneratedV3ColumnPostcondition(...args),
-		verifyGeneratedV3IndexPostcondition: (...args: unknown[]) =>
-			verifyGeneratedV3IndexPostcondition(...args),
-		verifyGeneratedV3CheckPostcondition: (...args: unknown[]) =>
-			verifyGeneratedV3CheckPostcondition(...args),
+		verifyGeneratedTablePostcondition: (...args: unknown[]) =>
+			verifyGeneratedTablePostcondition(...args),
+		verifyGeneratedColumnPostcondition: (...args: unknown[]) =>
+			verifyGeneratedColumnPostcondition(...args),
+		verifyGeneratedIndexPostcondition: (...args: unknown[]) =>
+			verifyGeneratedIndexPostcondition(...args),
+		verifyGeneratedCheckPostcondition: (...args: unknown[]) =>
+			verifyGeneratedCheckPostcondition(...args),
 	};
 });
 
 beforeEach(() => {
-	verifyGeneratedV3TablePostcondition.mockReset();
-	verifyGeneratedV3ColumnPostcondition.mockReset();
-	verifyGeneratedV3IndexPostcondition.mockReset();
-	verifyGeneratedV3CheckPostcondition.mockReset();
-	verifyGeneratedV3TablePostcondition.mockImplementation(
+	verifyGeneratedTablePostcondition.mockReset();
+	verifyGeneratedColumnPostcondition.mockReset();
+	verifyGeneratedIndexPostcondition.mockReset();
+	verifyGeneratedCheckPostcondition.mockReset();
+	verifyGeneratedTablePostcondition.mockImplementation(
 		v3VerifierDelegates.table,
 	);
-	verifyGeneratedV3ColumnPostcondition.mockImplementation(
+	verifyGeneratedColumnPostcondition.mockImplementation(
 		v3VerifierDelegates.column,
 	);
-	verifyGeneratedV3IndexPostcondition.mockImplementation(
+	verifyGeneratedIndexPostcondition.mockImplementation(
 		v3VerifierDelegates.index,
 	);
-	verifyGeneratedV3CheckPostcondition.mockImplementation(
+	verifyGeneratedCheckPostcondition.mockImplementation(
 		v3VerifierDelegates.check,
 	);
 });
@@ -244,7 +244,7 @@ describe('generator execution fixture shim', () => {
 				},
 			},
 			dataDestructiveStep.address,
-			verifyGeneratedV3TablePostcondition,
+			verifyGeneratedTablePostcondition,
 			{
 				kind: 'table',
 				projection: {
@@ -281,7 +281,7 @@ describe('generator execution fixture shim', () => {
 				name: 'id',
 				parent: dataDestructiveStep.address,
 			},
-			verifyGeneratedV3ColumnPostcondition,
+			verifyGeneratedColumnPostcondition,
 			{
 				kind: 'column',
 				projection: {
@@ -321,7 +321,7 @@ describe('generator execution fixture shim', () => {
 				name: 'accounts_id_idx',
 				parent: dataDestructiveStep.address,
 			},
-			verifyGeneratedV3IndexPostcondition,
+			verifyGeneratedIndexPostcondition,
 			{ kind: 'index', projection: { method: 'btree' } },
 		],
 		[
@@ -350,7 +350,7 @@ describe('generator execution fixture shim', () => {
 				name: 'accounts_id_check',
 				parent: dataDestructiveStep.address,
 			},
-			verifyGeneratedV3CheckPostcondition,
+			verifyGeneratedCheckPostcondition,
 			{
 				kind: 'constraint',
 				projection: {
