@@ -580,7 +580,6 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 }
 
 /**
- * These classifiers are node-postgres-shaped protocol heuristics, so a locally thrown lookalike can affect admission or quarantine for its SQL or client.
  * node-postgres throws this before sending a query when its client-local parsed
  * statement map already associates our exact name with other SQL. It has no
  * SQLSTATE, so recognize only its canonical message for the attempted name.
@@ -609,6 +608,50 @@ function isVerifiedPreparedStatementInfrastructureError(
 		(code === '26000' && routine === 'FetchPreparedStatement') ||
 		(code === '42P05' && routine === 'StorePreparedStatement')
 	);
+}
+
+/**
+ * Read the statement identity PostgreSQL reports for server-side prepared
+ * statement errors. The same extractor serves missing- and duplicate-name
+ * errors: either can arise from a prepared-statement operation nested inside
+ * the outer named statement, so the code/routine pair alone cannot authorize
+ * replaying that outer statement.
+ */
+function reportedPreparedStatementName(error: unknown): string | undefined {
+	if (typeof error !== 'object' || error === null) return undefined;
+	const fields = error as Record<string, unknown>;
+	for (const field of [
+		fields.message,
+		fields.detail,
+		fields.hint,
+		fields.where,
+		fields.internalQuery,
+	]) {
+		if (typeof field !== 'string') continue;
+		const match = /prepared statement ["']([^"']+)["']/i.exec(field);
+		if (match?.[1] !== undefined) return match[1];
+	}
+	return undefined;
+}
+
+function canReplayPreparedStatementInfrastructureError(
+	error: unknown,
+	attemptedName: string,
+	replayInvalidatedPlans: boolean,
+): boolean {
+	if (!isVerifiedPreparedStatementInfrastructureError(error)) return false;
+	const { code, routine } = error as {
+		readonly code?: unknown;
+		readonly routine?: unknown;
+	};
+	if (code === '0A000' && routine === 'RevalidateCachedQuery')
+		return replayInvalidatedPlans;
+	if (
+		(code === '26000' && routine === 'FetchPreparedStatement') ||
+		(code === '42P05' && routine === 'StorePreparedStatement')
+	)
+		return reportedPreparedStatementName(error) === attemptedName;
+	return false;
 }
 
 /**
@@ -2169,6 +2212,12 @@ export interface PgsqlPreparedStatementsOptions {
 }
 
 export interface PgsqlAdapterOptions {
+	/**
+	 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
+	 * you assert that your statements do not invoke functions performing
+	 * effectful work before nested prepared-statement operations.
+	 */
+	readonly replayInvalidatedPlans?: boolean;
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
 	/**
@@ -2444,6 +2493,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly naming: NamingPlugin;
 	private readonly model: ModelIR | undefined;
 	private readonly logger: AdapterLogger | undefined;
+	private readonly replayInvalidatedPlans: boolean;
 	private readonly preparedStatements: NormalizedPreparedStatementsConfig;
 	private readonly preparedStatementRegistry:
 		| PreparedStatementRegistry
@@ -2523,6 +2573,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
+		this.replayInvalidatedPlans = options?.replayInvalidatedPlans === true;
 		this.preparedStatements = normalizePreparedStatements(
 			options?.preparedStatements,
 		);
@@ -2604,6 +2655,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
 			...(this.model !== undefined && { model: this.model }),
 			...(this.logger !== undefined && { logger: this.logger }),
+			...(this.replayInvalidatedPlans && { replayInvalidatedPlans: true }),
 			...(this.preparedStatements !== false && {
 				preparedStatements: clonePreparedStatements(this.preparedStatements),
 			}),
@@ -5983,6 +6035,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		);
 	}
 
+	/**
+	 * An idle ReadyForQuery status says nothing about commands another owner has
+	 * already queued on a PoolClient. Only a dbsp-created pinned scope both owns
+	 * the checked-out physical client and holds its statement lock across the
+	 * failed named execution and any unnamed replay.
+	 */
+	private ownsSerializedClientForPreparedStatementReplay(
+		executor: Pool | PoolClient,
+	): boolean {
+		return (
+			isPoolClientLike(executor) &&
+			this.adapterManagedPinnedConnection &&
+			this.adapterManagedScopeIsLive()
+		);
+	}
+
 	private async executeQueryProtectingOpenTransaction<
 		T extends QueryResultRow = QueryResultRow,
 	>(
@@ -6085,6 +6153,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				sql,
 				parameters,
 				options.prepareEligible ?? false,
+				this.ownsSerializedClientForPreparedStatementReplay(executor),
 			);
 			if (options.inspectTransactionControl !== false) {
 				await this.assertNoTransactionControlCommand(
@@ -6248,6 +6317,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters: readonly unknown[] | undefined,
 		prepareEligible: boolean,
+		ownsSerializedClientForPreparedStatementReplay = false,
 	): Promise<MaybeMultipleQueryResults<T>> {
 		if (
 			this.preparedStatementRegistry !== undefined &&
@@ -6269,11 +6339,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					MaybeMultipleQueryResults<T>
 				>;
 			}
+			// This snapshot belongs to this named attempt. A caller can mutate its
+			// parameter array while the first submission is in flight; the bounded
+			// unnamed replay must retain the same bindings.
+			const parameterSnapshot = [...parameters];
 			try {
 				const result = (await executor.query<T>({
 					name: admission.name,
 					text: sql,
-					values: [...parameters],
+					values: parameterSnapshot,
 				})) as MaybeMultipleQueryResults<T>;
 				if (admission.reservation !== undefined)
 					this.preparedStatementRegistry.confirm(admission.reservation);
@@ -6301,6 +6375,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						}
 					}
 				}
+				let retryUnnamed = false;
 				try {
 					if (
 						isPoolClientLike(executor) &&
@@ -6310,18 +6385,38 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								admission.name,
 							))
 					) {
-						// The failed call is never retried. A verified 26000 is treated as
-						// possible client-wide loss because SQLSTATE cannot distinguish a full
-						// reset from targeted deallocation; the other verified failures remain
-						// text-scoped.
+						// A verified 26000 is treated as possible client-wide loss because
+						// SQLSTATE cannot distinguish a full reset from targeted deallocation;
+						// the other verified failures remain text-scoped.
 						quarantinePreparedStatement(
 							executor,
 							sql,
 							isVerifiedClientWidePreparedStatementLoss(error),
 						);
+						// A matching 26000/42P05 reports this named statement itself. 0A000
+						// has no statement identity, so its replay requires the caller's
+						// explicit effect-safety assertion. An aborted or open transaction
+						// cannot safely absorb a replay, and an unknown status is treated
+						// conservatively as open. The status check is only safe while dbsp
+						// owns and serializes this physical client's command queue.
+						retryUnnamed =
+							canReplayPreparedStatementInfrastructureError(
+								error,
+								admission.name,
+								this.replayInvalidatedPlans,
+							) &&
+							ownsSerializedClientForPreparedStatementReplay &&
+							poolClientTransactionOpen(executor) === false;
 					}
 				} catch {
 					// Quarantine classification cannot replace the query error.
+				}
+				if (retryUnnamed) {
+					// node-postgres treats its input as owned today; copy again so a send
+					// path that mutates it cannot affect this bounded retry.
+					return executor.query<T>(sql, [...parameterSnapshot]) as Promise<
+						MaybeMultipleQueryResults<T>
+					>;
 				}
 				throw error;
 			}
