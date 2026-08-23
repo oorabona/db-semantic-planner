@@ -1111,19 +1111,15 @@ function createSpyAdapterForMutations(
 
 describe('executeWithMeta row boundary', () => {
 	it('keeps the mutation builder’s declared row type while the port exposes unknown rows', async () => {
-		type DeclaredReturningRow = {
-			readonly id: string;
-			readonly name: string;
-		};
 		const adapter = createSpyAdapterForMutations([{ id: '42', name: 'Alice' }]);
 		const orm = createOrm({ schema: testSchema, adapter });
 		const builder = orm
 			.into(orm.tables.users)
 			.values({ name: 'Alice', email: 'alice@example.com' })
-			.returning<DeclaredReturningRow>(['id', 'name']);
+			.returning(['id', 'name']);
 
 		expectTypeOf(builder.execute).returns.toEqualTypeOf<
-			Promise<DeclaredReturningRow[]>
+			Promise<{ id: string; name: string }[]>
 		>();
 		expect(await builder.execute()).toEqual([{ id: '42', name: 'Alice' }]);
 	});

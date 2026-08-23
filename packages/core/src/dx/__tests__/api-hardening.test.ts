@@ -3,7 +3,7 @@
  *
  * Proof tests for type-safety fixes applied in this commit:
  * - FIND-031: into/modify/removeFrom/upsertInto return typed builders
- * - FIND-032: .returning() columns tied to R generic
+ * - FIND-032: .returning() infers Pick<TRow, K>[] from selected columns
  * - FIND-033: execute() returns Promise<void> without returning(), Promise<R[]> with
  * - FIND-035: OrmInstanceInternal not publicly exported from dx/index barrel
  * - FIND-036: SetOperationBuilderImpl not publicly exported from dx/index barrel
@@ -87,80 +87,82 @@ describe('FIND-031: typed mutation entry points', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('FIND-032+033: .returning() and execute() types', () => {
-	it('InsertBuilder without returning(): execute() is Promise<UserRow> (typed entry preserves row type)', () => {
-		// With FIND-031: orm.into(table) returns InsertBuilder<UserRow>, so execute() → Promise<UserRow>.
-		// The Promise<void> contract only holds for the untyped string-based insert('table') path.
+	it('InsertBuilder without returning(): execute() is Promise<void>', () => {
 		const builder = orm
 			.into(orm.tables.users)
 			.values({ name: 'Alice', email: 'a@b.com', active: true });
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<UserRow>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<void>>();
 	});
 
-	it('InsertBuilder with returning<R>(): execute() is Promise<R[]>', () => {
-		type Inserted = { id: number };
+	it('InsertBuilder with returning(): execute() is the selected row shape', () => {
 		const builder = orm
 			.into(orm.tables.users)
 			.values({ name: 'Alice', email: 'a@b.com', active: true })
-			.returning<Inserted>(['id']);
+			.returning(['id']);
 		expect(builder).toBeInstanceOf(InsertBuilder);
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<Inserted[]>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<
+			Promise<{ id: number }[]>
+		>();
 	});
 
-	it('UpdateBuilder without returning(): execute() is Promise<UserRow> (typed entry preserves row type)', () => {
+	it('UpdateBuilder without returning(): execute() is Promise<void>', () => {
 		const builder = orm
 			.modify(orm.tables.users)
 			.set({ active: false })
 			.where(eq(orm.tables.users.id, 1));
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<UserRow>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<void>>();
 	});
 
-	it('UpdateBuilder with returning<R>(): execute() is Promise<R[]>', () => {
-		type Updated = { id: number; active: boolean };
+	it('UpdateBuilder with returning(): execute() is the selected row shape', () => {
 		const builder = orm
 			.modify(orm.tables.users)
 			.set({ active: false })
 			.where(eq(orm.tables.users.id, 1))
-			.returning<Updated>(['id', 'active']);
+			.returning(['id', 'active']);
 		expect(builder).toBeInstanceOf(UpdateBuilder);
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<Updated[]>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<
+			Promise<{ id: number; active: boolean }[]>
+		>();
 	});
 
-	it('DeleteBuilder without returning(): execute() is Promise<UserRow> (typed entry preserves row type)', () => {
+	it('DeleteBuilder without returning(): execute() is Promise<void>', () => {
 		const builder = orm
 			.removeFrom(orm.tables.users)
 			.where(eq(orm.tables.users.id, 1));
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<UserRow>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<void>>();
 	});
 
-	it('DeleteBuilder with returning<R>(): execute() is Promise<R[]>', () => {
-		type Deleted = { id: number };
+	it('DeleteBuilder with returning(): execute() is the selected row shape', () => {
 		const builder = orm
 			.removeFrom(orm.tables.users)
 			.where(eq(orm.tables.users.id, 1))
-			.returning<Deleted>(['id']);
+			.returning(['id']);
 		expect(builder).toBeInstanceOf(DeleteBuilder);
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<Deleted[]>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<
+			Promise<{ id: number }[]>
+		>();
 	});
 
-	it('UpsertBuilder without returning(): execute() is Promise<UserRow> (typed entry preserves row type)', () => {
+	it('UpsertBuilder without returning(): execute() is Promise<void>', () => {
 		const builder = orm
 			.upsertInto(orm.tables.users)
 			.values({ name: 'Alice', email: 'a@b.com', active: true })
 			.onConflict(['email'])
 			.doUpdate({ name: 'Alice' });
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<UserRow>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<void>>();
 	});
 
-	it('UpsertBuilder with returning<R>(): execute() is Promise<R[]>', () => {
-		type Upserted = { id: number; name: string };
+	it('UpsertBuilder with returning(): execute() is the selected row shape', () => {
 		const builder = orm
 			.upsertInto(orm.tables.users)
 			.values({ name: 'Alice', email: 'a@b.com', active: true })
 			.onConflict(['email'])
 			.doUpdate({ name: 'Alice' })
-			.returning<Upserted>(['id', 'name']);
+			.returning(['id', 'name']);
 		expect(builder).toBeInstanceOf(UpsertBuilder);
-		expectTypeOf(builder.execute).returns.toEqualTypeOf<Promise<Upserted[]>>();
+		expectTypeOf(builder.execute).returns.toEqualTypeOf<
+			Promise<{ id: number; name: string }[]>
+		>();
 	});
 
 	it('mutation builders expose affectedRows(): Promise<number>', () => {

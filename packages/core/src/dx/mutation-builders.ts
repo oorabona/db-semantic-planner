@@ -30,6 +30,13 @@ import {
 	InvalidOperationError,
 	UnsafeOperationError,
 } from './errors.js';
+import {
+	hasPredicateRefDiscriminator,
+	isPredicateRef,
+	type PredicateRef,
+	predicateWhereIntent,
+} from './expressions.js';
+import type { SqlRawExpression } from './filters.js';
 import type {
 	HookErrorHandler,
 	HookStore,
@@ -50,6 +57,124 @@ import {
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * A row shape accepted by INSERT and UPSERT values().
+ *
+ * The public ORM type carries row types, but not the per-column default or
+ * serial metadata needed to make only generated columns optional. Until that
+ * schema metadata is threaded through the mutation builders (#449), every row
+ * column is optional here. Keys and value types remain constrained to the row
+ * type; the database enforces required columns.
+ */
+export type Insertable<T> = T extends object
+	? Partial<T>
+	: Record<string, unknown>;
+
+/** A partial row shape accepted by UPDATE and UPSERT update operations. */
+export type Updateable<T> = T extends object
+	? { [K in keyof T]?: T[K] | SqlRawExpression }
+	: Record<string, unknown>;
+
+/** A scalar-only partial row shape accepted by batchSet(). */
+type BatchUpdateable<T> = T extends object
+	? Partial<T>
+	: Record<string, unknown>;
+
+/**
+ * Reject keys outside a mutation payload's row shape, including when callers
+ * pass an object through a variable rather than an object literal.
+ */
+type ExactMutationPayload<TInput, TShape> = TInput &
+	Record<Exclude<keyof TInput, keyof TShape>, never>;
+
+type ExactMutationRows<TInput extends readonly unknown[], TShape> = TInput & {
+	readonly [K in keyof TInput]: ExactMutationPayload<TInput[K], TShape>;
+};
+
+/**
+ * Column names accepted by a mutation on a row shape.
+ *
+ * The tuple prevents conditional-type distribution: a mutation whose table is
+ * a union may only name columns shared by every possible target table.
+ */
+type MutationKey<T> = [T] extends [object] ? Extract<keyof T, string> : string;
+
+type MutationReturningRow<T, K extends MutationKey<T>> = T extends object
+	? Pick<T, Extract<K, keyof T>>
+	: Record<string, unknown>;
+
+type MutationWhereCondition = WhereIntent | PredicateRef;
+
+function toWhereIntent(condition: MutationWhereCondition): WhereIntent {
+	if (isPredicateRef(condition)) return predicateWhereIntent(condition);
+	if (hasPredicateRefDiscriminator(condition)) {
+		throw new InvalidOperationError(
+			'where',
+			"predicate belongs to another @dbsp/core copy; reconstruct it with this copy's predicate factories",
+		);
+	}
+	return condition;
+}
+
+function assertNonEmptyMutationRows(
+	operation: 'insert' | 'upsert',
+	values: readonly unknown[],
+): asserts values is readonly Record<string, unknown>[] {
+	for (const value of values) {
+		if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+			throw new InvalidOperationError(
+				operation,
+				`${operation} values() requires every row to be a non-null, non-array object`,
+			);
+		}
+		if (Object.keys(value).length === 0) {
+			throw new InvalidOperationError(
+				operation,
+				`${operation} values() requires every row to contain at least one column`,
+			);
+		}
+	}
+}
+
+function assertMutationPayloadColumns(
+	operation: 'insert' | 'update' | 'upsert',
+	model: ModelIR,
+	table: string,
+	payload: Record<string, unknown>,
+): void {
+	const tableIR = model.getTable(table);
+	// Mutation compilation renders the payload columns when no model table is
+	// available. Match that lookup boundary here: only validate when ModelIR
+	// resolved the target table, otherwise leave enforcement to the database.
+	if (!tableIR) return;
+	const allowedColumns = new Set(tableIR.columns.map((column) => column.name));
+	const offendingKeys = Object.keys(payload).filter(
+		(key) => !allowedColumns.has(key),
+	);
+	if (offendingKeys.length > 0) {
+		throw new InvalidOperationError(
+			operation,
+			`${operation} payload contains columns not present in model for table '${table}': ${offendingKeys.join(', ')}`,
+		);
+	}
+}
+
+function assertMutationObjectPayload(
+	operation: 'update' | 'upsert',
+	payload: unknown,
+): asserts payload is Record<string, unknown> {
+	if (
+		payload === null ||
+		typeof payload !== 'object' ||
+		Array.isArray(payload)
+	) {
+		throw new InvalidOperationError(
+			operation,
+			`${operation} payload must be a non-null, non-array object`,
+		);
+	}
+}
 
 /**
  * Dump output for mutations.
@@ -553,10 +678,10 @@ abstract class MutationBuilderBase<
  * Builder for INSERT operations.
  * Immutable - each method returns a new builder instance.
  */
-export class InsertBuilder<T = void> extends MutationBuilderBase<
-	T,
-	InsertIntent
-> {
+export class InsertBuilder<
+	TRow = unknown,
+	TResult = void,
+> extends MutationBuilderBase<TResult, InsertIntent> {
 	private readonly valuesData: readonly Record<string, unknown>[];
 
 	protected readonly operationName = 'insert';
@@ -575,13 +700,23 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk insert.
 	 */
+	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
+		data: TInput &
+			(TInput extends readonly Insertable<TRow>[]
+				? ExactMutationRows<TInput, Insertable<TRow>>
+				: ExactMutationPayload<TInput, Insertable<TRow>>),
+	): InsertBuilder<TRow, TResult>;
 	values(
-		data: Record<string, unknown> | readonly Record<string, unknown>[],
-	): InsertBuilder<T> {
+		data: Insertable<TRow> | readonly Insertable<TRow>[],
+	): InsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		return new InsertBuilder({
+		assertNonEmptyMutationRows('insert', valueArray);
+		for (const value of valueArray) {
+			assertMutationPayloadColumns('insert', this.model, this.table, value);
+		}
+		return new InsertBuilder<TRow, TResult>({
 			...this.baseOpts,
-			values: valueArray,
+			values: valueArray as readonly Record<string, unknown>[],
 			returning: this.returningColumns,
 		});
 	}
@@ -599,10 +734,10 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
 	 * // inserted = [{ id: 1, created_at: '2024-01-01T00:00:00Z' }]
 	 * ```
 	 */
-	returning<R = Record<string, unknown>>(
-		columns: readonly (keyof R & string)[],
-	): InsertBuilder<R[]> {
-		return new InsertBuilder<R[]>({
+	returning<K extends MutationKey<TRow>>(
+		columns: readonly K[],
+	): InsertBuilder<TRow, MutationReturningRow<TRow, K>[]> {
+		return new InsertBuilder<TRow, MutationReturningRow<TRow, K>[]>({
 			...this.baseOpts,
 			values: this.valuesData,
 			returning: columns,
@@ -647,10 +782,10 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
  * Builder for UPDATE operations.
  * Immutable - each method returns a new builder instance.
  */
-export class UpdateBuilder<T = void> extends MutationBuilderBase<
-	T,
-	UpdateIntent | BatchUpdateIntent
-> {
+export class UpdateBuilder<
+	TRow = unknown,
+	TResult = void,
+> extends MutationBuilderBase<TResult, UpdateIntent | BatchUpdateIntent> {
 	private readonly setData: Record<string, unknown>;
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
@@ -682,8 +817,12 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	 * Multiple calls merge fields (last value wins).
 	 * When combined with batchSet(), these become scalar SET assignments applied to all rows.
 	 */
-	set(data: Record<string, unknown>): UpdateBuilder<T> {
-		return new UpdateBuilder({
+	set<TInput extends Updateable<TRow>>(
+		data: ExactMutationPayload<TInput, Updateable<TRow>>,
+	): UpdateBuilder<TRow, TResult> {
+		assertMutationObjectPayload('update', data);
+		assertMutationPayloadColumns('update', this.model, this.table, data);
+		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: { ...this.setData, ...data },
 			where: this.whereIntent,
@@ -697,11 +836,11 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	/**
 	 * Add WHERE condition.
 	 */
-	where(condition: WhereIntent): UpdateBuilder<T> {
-		return new UpdateBuilder({
+	where(condition: MutationWhereCondition): UpdateBuilder<TRow, TResult> {
+		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: this.setData,
-			where: condition,
+			where: toWhereIntent(condition),
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
 			batchMatchColumns: this.batchMatchColumns,
@@ -722,10 +861,10 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	 *   .execute();
 	 * ```
 	 */
-	returning<R = Record<string, unknown>>(
-		columns: readonly (keyof R & string)[],
-	): UpdateBuilder<R[]> {
-		return new UpdateBuilder<R[]>({
+	returning<K extends MutationKey<TRow>>(
+		columns: readonly K[],
+	): UpdateBuilder<TRow, MutationReturningRow<TRow, K>[]> {
+		return new UpdateBuilder<TRow, MutationReturningRow<TRow, K>[]>({
 			...this.baseOpts,
 			set: this.setData,
 			where: this.whereIntent,
@@ -756,21 +895,25 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	 *   .execute();
 	 * ```
 	 */
-	batchSet(
-		matchColumn: string | string[],
-		data: Record<string, unknown>[],
-	): UpdateBuilder<T> {
+	batchSet<TInput extends BatchUpdateable<TRow>>(
+		matchColumn: MutationKey<TRow> | MutationKey<TRow>[],
+		data: readonly ExactMutationPayload<TInput, BatchUpdateable<TRow>>[],
+	): UpdateBuilder<TRow, TResult> {
 		const matchColumns = Array.isArray(matchColumn)
 			? matchColumn
 			: [matchColumn];
-		return new UpdateBuilder({
+		for (const row of data) {
+			assertMutationObjectPayload('update', row);
+			assertMutationPayloadColumns('update', this.model, this.table, row);
+		}
+		return new UpdateBuilder<TRow, TResult>({
 			...this.baseOpts,
 			set: this.setData,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
 			returning: this.returningColumns,
-			batchMatchColumns: matchColumns,
-			batchData: data,
+			batchMatchColumns: matchColumns as string[],
+			batchData: data as readonly Record<string, unknown>[],
 		});
 	}
 
@@ -852,10 +995,10 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
  * Builder for DELETE operations.
  * Immutable - each method returns a new builder instance.
  */
-export class DeleteBuilder<T = void> extends MutationBuilderBase<
-	T,
-	DeleteIntent
-> {
+export class DeleteBuilder<
+	TRow = unknown,
+	TResult = void,
+> extends MutationBuilderBase<TResult, DeleteIntent> {
 	private readonly whereIntent: WhereIntent | undefined;
 	private readonly allowAllFlag: boolean;
 	private readonly cascadeRelations: boolean | readonly string[] | undefined;
@@ -879,10 +1022,10 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
 	/**
 	 * Add WHERE condition.
 	 */
-	where(condition: WhereIntent): DeleteBuilder<T> {
-		return new DeleteBuilder({
+	where(condition: MutationWhereCondition): DeleteBuilder<TRow, TResult> {
+		return new DeleteBuilder<TRow, TResult>({
 			...this.baseOpts,
-			where: condition,
+			where: toWhereIntent(condition),
 			allowAll: this.allowAllFlag,
 			cascade: this.cascadeRelations,
 			returning: this.returningColumns,
@@ -894,8 +1037,8 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
 	 * Without arguments: deletes ALL related records.
 	 * With array: deletes only specified relations.
 	 */
-	cascade(relations?: readonly string[]): DeleteBuilder<T> {
-		return new DeleteBuilder({
+	cascade(relations?: readonly string[]): DeleteBuilder<TRow, TResult> {
+		return new DeleteBuilder<TRow, TResult>({
 			...this.baseOpts,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
@@ -916,10 +1059,10 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
 	 *   .execute();
 	 * ```
 	 */
-	returning<R = Record<string, unknown>>(
-		columns: readonly (keyof R & string)[],
-	): DeleteBuilder<R[]> {
-		return new DeleteBuilder<R[]>({
+	returning<K extends MutationKey<TRow>>(
+		columns: readonly K[],
+	): DeleteBuilder<TRow, MutationReturningRow<TRow, K>[]> {
+		return new DeleteBuilder<TRow, MutationReturningRow<TRow, K>[]>({
 			...this.baseOpts,
 			where: this.whereIntent,
 			allowAll: this.allowAllFlag,
@@ -999,10 +1142,10 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
  *   .execute();
  * ```
  */
-export class UpsertBuilder<T = void> extends MutationBuilderBase<
-	T,
-	UpsertIntent
-> {
+export class UpsertBuilder<
+	TRow = unknown,
+	TResult = void,
+> extends MutationBuilderBase<TResult, UpsertIntent> {
 	private readonly valuesData: readonly Record<string, unknown>[];
 	private readonly conflictTarget: UpsertConflictTarget | undefined;
 	private readonly conflictAction: UpsertConflictAction | undefined;
@@ -1027,13 +1170,23 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * Set values to insert.
 	 * Accepts a single object or an array for bulk upsert.
 	 */
+	values<TInput extends Insertable<TRow> | readonly Insertable<TRow>[]>(
+		data: TInput &
+			(TInput extends readonly Insertable<TRow>[]
+				? ExactMutationRows<TInput, Insertable<TRow>>
+				: ExactMutationPayload<TInput, Insertable<TRow>>),
+	): UpsertBuilder<TRow, TResult>;
 	values(
-		data: Record<string, unknown> | readonly Record<string, unknown>[],
-	): UpsertBuilder<T> {
+		data: Insertable<TRow> | readonly Insertable<TRow>[],
+	): UpsertBuilder<TRow, TResult> {
 		const valueArray = Array.isArray(data) ? data : [data];
-		return new UpsertBuilder({
+		assertNonEmptyMutationRows('upsert', valueArray);
+		for (const value of valueArray) {
+			assertMutationPayloadColumns('upsert', this.model, this.table, value);
+		}
+		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
-			values: valueArray,
+			values: valueArray as readonly Record<string, unknown>[],
 			onConflict: this.conflictTarget,
 			action: this.conflictAction,
 			returning: this.returningColumns,
@@ -1044,11 +1197,13 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * Specify conflict target by column names.
 	 * These columns determine conflict detection.
 	 */
-	onConflict(columns: readonly string[]): UpsertBuilder<T> {
-		return new UpsertBuilder({
+	onConflict(
+		columns: readonly MutationKey<TRow>[],
+	): UpsertBuilder<TRow, TResult> {
+		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: this.valuesData,
-			onConflict: { columns },
+			onConflict: { columns: columns as readonly string[] },
 			action: this.conflictAction,
 			returning: this.returningColumns,
 		});
@@ -1058,8 +1213,8 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * Specify conflict target by constraint name.
 	 * Alternative to onConflict() for named constraints.
 	 */
-	onConflictConstraint(constraintName: string): UpsertBuilder<T> {
-		return new UpsertBuilder({
+	onConflictConstraint(constraintName: string): UpsertBuilder<TRow, TResult> {
+		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: { constraint: constraintName },
@@ -1075,16 +1230,20 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * @param set - Optional fields to update on conflict
 	 * @param where - Optional condition for the update
 	 */
-	doUpdate(
-		set?: Record<string, unknown>,
-		where?: WhereIntent,
-	): UpsertBuilder<T> {
+	doUpdate<TInput extends Updateable<TRow>>(
+		set?: ExactMutationPayload<TInput, Updateable<TRow>>,
+		where?: MutationWhereCondition,
+	): UpsertBuilder<TRow, TResult> {
+		if (set !== undefined) {
+			assertMutationObjectPayload('upsert', set);
+			assertMutationPayloadColumns('upsert', this.model, this.table, set);
+		}
 		const action: UpsertConflictAction = {
 			type: 'doUpdate',
-			...(set && { set }),
-			...(where && { where }),
+			...(set !== undefined && { set: set as Record<string, unknown> }),
+			...(where && { where: toWhereIntent(where) }),
 		};
-		return new UpsertBuilder({
+		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,
@@ -1096,8 +1255,8 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	/**
 	 * On conflict, do nothing (skip the insert).
 	 */
-	doNothing(): UpsertBuilder<T> {
-		return new UpsertBuilder({
+	doNothing(): UpsertBuilder<TRow, TResult> {
+		return new UpsertBuilder<TRow, TResult>({
 			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,
@@ -1110,10 +1269,10 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * Specify columns to return after upsert (DX-026).
 	 * Requires adapter support for RETURNING clause.
 	 */
-	returning<R = Record<string, unknown>>(
-		columns: readonly (keyof R & string)[],
-	): UpsertBuilder<R[]> {
-		return new UpsertBuilder<R[]>({
+	returning<K extends MutationKey<TRow>>(
+		columns: readonly K[],
+	): UpsertBuilder<TRow, MutationReturningRow<TRow, K>[]> {
+		return new UpsertBuilder<TRow, MutationReturningRow<TRow, K>[]>({
 			...this.baseOpts,
 			values: this.valuesData,
 			onConflict: this.conflictTarget,

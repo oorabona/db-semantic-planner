@@ -10,6 +10,11 @@ title: Mutations
 
 ## Insert
 
+`values()` checks column keys and value types, but it cannot yet derive which
+columns are database-generated or have defaults. Required-column enforcement
+therefore remains with the database; an empty row is rejected before SQL is
+compiled.
+
 ```typescript
 // Insert a single row
 orm.insert('users')
@@ -213,28 +218,25 @@ orm.upsert('users')
 // DO UPDATE SET "name" = $4
 ```
 
-Source: `packages/core/src/dx/mutation-builders.ts:870` — `onConflictConstraint(constraintName: string)`.
+Source: `onConflictConstraint(constraintName: string)` in `packages/core/src/dx/mutation-builders.ts`.
 
 #### Partial-index conflict targets with a WHERE clause
 
-PostgreSQL partial indexes restrict conflict detection to rows that satisfy a condition. When your `UNIQUE` index has a `WHERE` clause (a partial index), pass a matching condition to `.onConflict()` via the `where` option:
+PostgreSQL partial indexes restrict conflict detection to rows that satisfy a condition. The fluent `.onConflict()` API accepts only a column array and cannot express the partial-index predicate, so do not use it to target a partial unique index. Use a non-partial unique constraint with the fluent builder, or an explicit SQL escape hatch when you must target a partial index.
 
 ```typescript
-// doctest: skip — partial-index conflict; index must exist in the DB
-import { eq } from '@dbsp/core';
-
-// Partial unique index: CREATE UNIQUE INDEX ON "products" ("sku") WHERE "active" = true
+// A non-partial unique index: CREATE UNIQUE INDEX ON "products" ("sku")
 orm.upsert('products')
   .values({ sku: 'ABC', price: 99.99, active: true })
-  .onConflict({ columns: ['sku'], where: [eq('active', true)] })
+  .onConflict(['sku'])
   .doUpdate({ price: 99.99 })
   .dump();
 // SQL: INSERT INTO "products" ("sku", "price", "active") VALUES ($1, $2, $3)
-// ON CONFLICT ("sku") WHERE "active" = $4
-// DO UPDATE SET "price" = $5
+// ON CONFLICT ("sku")
+// DO UPDATE SET "price" = $4
 ```
 
-> **Note:** The `WHERE` here is on the **conflict target** (the partial index predicate), not on the UPDATE action. It tells PostgreSQL which index to use for conflict detection.
+> **Note:** The `WHERE` passed as the second argument to `.doUpdate()` applies to the UPDATE action, not to conflict-target inference.
 
 #### Conditional DO UPDATE predicates
 
@@ -291,6 +293,7 @@ orm.upsert('user_roles')
 | `orm.delete()` | Requires `.where()` — throws `UnsafeOperationError` without it |
 | `orm.updateAll()` | No WHERE required — explicit opt-in for full-table update |
 | `orm.deleteAll()` | No WHERE required — explicit opt-in for full-table delete |
+| `values()` / `doUpdate()` / `set()` | Column keys and value types are checked; INSERT requiredness remains database-enforced until default/serial metadata is modeled |
 
 These rules prevent silent data loss from forgotten filter conditions.
 

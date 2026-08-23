@@ -225,8 +225,10 @@ export {
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,
+	type Insertable,
 	InsertBuilder,
 	type MutationDump,
+	type Updateable,
 	UpdateBuilder,
 	// DX-026: Upsert support
 	UpsertBuilder,
