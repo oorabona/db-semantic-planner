@@ -72,7 +72,7 @@ orm.tables.users.indexes.exists(name)  // name: string → Promise<boolean>
 |-------|------|----------|-------------|
 | `name` | `string` | yes | Index name |
 | `columns` | `IndexColumnDef[]` | yes | Columns to index |
-| `method` | `IndexMethod` | no | Access method: `btree` (default), `hash`, `gist`, `gin`, `brin`, `hnsw`, `ivfflat`, `bm25` |
+| `method` | `IndexMethod` | no | Access method: `btree` (default), `hash`, `gist`, `gin`, `brin`, `spgist`, `bloom`, `hnsw`, `ivfflat`, `bm25` |
 | `opclass` | `Record<string, string>` | no | Per-column operator class (e.g. `{ vector: 'vector_cosine_ops' }`) |
 | `include` | `string[]` | no | Covering index columns (INCLUDE) |
 | `with` | `Record<string, unknown>` | no | Storage parameters (e.g. `{ m: 16, ef_construction: 64 }`) |

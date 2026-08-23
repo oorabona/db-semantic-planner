@@ -1,11 +1,8 @@
 /**
  * Test-only compatibility boundary for #443.
  *
- * InferTableRow currently collapses a schema-produced TableRef to never when
- * it crosses createOrm(). That boundary also leaves invalid column access and
- * mutation values too broad. The canaries below retain the exact assertions
- * until the typed TableRef boundary is repaired.
- * Remove this module when the typed TableRef boundary is repaired.
+ * The row-inference regression is repaired here, while the independent broad
+ * table-reference and mutation-value canaries remain for their later fixes.
  */
 import { createOrm } from '../orm.js';
 import { schema } from '../schema.js';
@@ -53,7 +50,6 @@ declare const intendedUserRows: Promise<IntendedUserRow[]>;
 declare const noNonexistentColumn: false;
 declare const rejectedIncorrectActiveValue: false;
 export function verifyCompatibilityCanary(): void {
-	// @ts-expect-error #443: typed .all() infers never[] from a schema TableRef; remove when it returns the schema row.
 	const _canary: ReturnType<typeof compatibilityAll> = intendedUserRows;
 	// This is the restored `orm.tables.users.nonexistent` negative assertion.
 	void compatibilityUsers.nonexistent;

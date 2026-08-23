@@ -634,10 +634,19 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 			generateCreateIndexSQL('users', 'public', {
 				name: 'idx_test',
 				columns: ['id'],
-				// @ts-expect-error: runtime allowlist accepts SP-GiST, but IndexMethod omits it
 				method: 'spgist',
 			}),
 		).not.toThrow();
+	});
+
+	it('renders bloom (PostgreSQL extension access method)', () => {
+		expect(
+			generateCreateIndexSQL('users', 'public', {
+				name: 'idx_test',
+				columns: ['id'],
+				method: 'bloom',
+			}),
+		).toContain('USING bloom');
 	});
 
 	it('allows hnsw and bm25 (extension methods)', () => {
