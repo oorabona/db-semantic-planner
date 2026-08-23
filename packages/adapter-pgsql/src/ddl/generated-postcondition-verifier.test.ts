@@ -32,6 +32,8 @@ const tableTarget = {
 	name: 'accounts',
 };
 
+// Stage four destiny: every v2 compatibility fixture in this suite asserts
+// REPLAN_REQUIRED once the retained decoder arm is removed.
 const tablePostcondition = {
 	postconditionVersion: 2 as const,
 	kind: 'table' as const,

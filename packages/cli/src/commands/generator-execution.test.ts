@@ -1,10 +1,14 @@
 import {
 	type GeneratedPostconditionSession,
+	type verifyGeneratedV3CheckPostcondition as VerifyGeneratedV3CheckPostcondition,
+	type verifyGeneratedV3ColumnPostcondition as VerifyGeneratedV3ColumnPostcondition,
+	type verifyGeneratedV3IndexPostcondition as VerifyGeneratedV3IndexPostcondition,
+	type verifyGeneratedV3TablePostcondition as VerifyGeneratedV3TablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
@@ -14,9 +18,19 @@ const verifyGeneratedV3TablePostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedV3ColumnPostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedV3IndexPostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedV3CheckPostcondition = vi.hoisted(() => vi.fn());
+const v3VerifierDelegates = vi.hoisted(() => ({
+	table: undefined as unknown as typeof VerifyGeneratedV3TablePostcondition,
+	column: undefined as unknown as typeof VerifyGeneratedV3ColumnPostcondition,
+	index: undefined as unknown as typeof VerifyGeneratedV3IndexPostcondition,
+	check: undefined as unknown as typeof VerifyGeneratedV3CheckPostcondition,
+}));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	v3VerifierDelegates.table = actual.verifyGeneratedV3TablePostcondition;
+	v3VerifierDelegates.column = actual.verifyGeneratedV3ColumnPostcondition;
+	v3VerifierDelegates.index = actual.verifyGeneratedV3IndexPostcondition;
+	v3VerifierDelegates.check = actual.verifyGeneratedV3CheckPostcondition;
 	return {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
@@ -36,6 +50,25 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 		verifyGeneratedV3CheckPostcondition: (...args: unknown[]) =>
 			verifyGeneratedV3CheckPostcondition(...args),
 	};
+});
+
+beforeEach(() => {
+	verifyGeneratedV3TablePostcondition.mockReset();
+	verifyGeneratedV3ColumnPostcondition.mockReset();
+	verifyGeneratedV3IndexPostcondition.mockReset();
+	verifyGeneratedV3CheckPostcondition.mockReset();
+	verifyGeneratedV3TablePostcondition.mockImplementation(
+		v3VerifierDelegates.table,
+	);
+	verifyGeneratedV3ColumnPostcondition.mockImplementation(
+		v3VerifierDelegates.column,
+	);
+	verifyGeneratedV3IndexPostcondition.mockImplementation(
+		v3VerifierDelegates.index,
+	);
+	verifyGeneratedV3CheckPostcondition.mockImplementation(
+		v3VerifierDelegates.check,
+	);
 });
 
 import {
@@ -86,6 +119,20 @@ const dataDestructiveStep: NormalizedManagedStep = {
 	requiresVacancy: false,
 	replayPolicy: 'recorded',
 };
+
+/** Every generated fixture uses the address-free v3 declaration contract. */
+function v3<const Declaration extends Record<string, unknown>>(
+	declaration: Declaration,
+) {
+	return {
+		postconditionVersion: 3 as const,
+		targetBinding: {
+			bindingVersion: 1 as const,
+			bindingKind: 'managed-step-address' as const,
+		},
+		declaration: { canonicalFormVersion: 1 as const, ...declaration },
+	};
+}
 
 function indexProjectionRow(overrides: Record<string, unknown> = {}) {
 	return {
@@ -151,6 +198,8 @@ function indexReadbackExecutor(input: {
 }) {
 	return {
 		query: vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT index_relation.relkind AS relation_kind'))
+				return { rows: [{ relation_kind: 'i', table_name: 'accounts' }] };
 			if (sql.includes('WHERE namespace.nspname'))
 				return { rows: [indexProjectionRow(input.live)] };
 			if (sql.includes('WHERE relation.oid'))
@@ -394,11 +443,7 @@ describe('generator execution fixture shim', () => {
 			{
 				...dataDestructiveStep,
 				expectedDeclaration: {
-					value: {
-						postconditionVersion: 2,
-						kind: 'column',
-						column: { name: 'id', type: 'bigint' },
-					},
+					value: v3({ kind: 'column', column: { type: 'bigint' } }),
 					digest: 'column-postcondition',
 				},
 				address: {
@@ -445,16 +490,14 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
 					column: {
-						name: 'id',
 						type: 'integer',
 						nullable: false,
-						identity: null,
+						default: { defaultKind: 'none', hasDefault: false, identity: null },
 					},
-				},
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
@@ -494,7 +537,7 @@ describe('generator execution fixture shim', () => {
 			'generated column id projection names another column',
 		],
 		['no projected column', undefined, 'generated column id is absent'],
-	] as const)('refuses generated column proof for %s', async (_case, row, message) => {
+	] as const)('refuses generated column binding or proof for %s', async (_case, row, message) => {
 		const address = {
 			...dataDestructiveStep.address,
 			kind: 'column' as const,
@@ -505,11 +548,10 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: { name: 'id', type: 'integer', nullable: false },
-				},
+					column: { type: 'integer', nullable: false },
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
@@ -530,7 +572,11 @@ describe('generator execution fixture shim', () => {
 		}));
 		await expect(
 			readTestGeneratedPostcondition({ query }, step, address),
-		).rejects.toThrow(message);
+		).rejects.toThrow(
+			row === undefined || row.column_name !== 'id' || row.relation_kind === 'v'
+				? 'generated postcondition binding did not resolve'
+				: message,
+		);
 		if (row?.relation_kind === 'v')
 			expect(query.mock.calls[0]?.[0]).toContain(
 				'relation.relkind AS relation_kind',
@@ -548,16 +594,10 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: {
-						name: 'body',
-						type: 'text',
-						nullable: true,
-						collation: null,
-					},
-				},
+					column: { type: 'text', nullable: true, authoredCollation: null },
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
@@ -588,13 +628,21 @@ describe('generator execution fixture shim', () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [
-						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: {
+								defaultKind: 'none',
+								hasDefault: false,
+								identity: null,
+							},
+						},
 					],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 			statementBundle: {
@@ -639,11 +687,10 @@ describe('generator execution fixture shim', () => {
 		const tableStep: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [{ name: 'id', type: 'integer', nullable: false }],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 		};
@@ -670,11 +717,10 @@ describe('generator execution fixture shim', () => {
 		const columnStep: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: { name: 'id', type: 'integer', nullable: false },
-				},
+					column: { type: 'integer', nullable: false },
+				}),
 				digest: 'column-postcondition',
 			},
 			address: {
@@ -723,13 +769,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -738,7 +780,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -770,15 +812,13 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'constraint',
-					constraint: {
-						type: 'c',
-						expression: 'CHECK (id > 0)',
+				value: v3({
+					kind: 'check',
+					check: {
+						expression: { canonicalFormVersion: 1, sql: 'CHECK (id > 0)' },
 						notValid: false,
 					},
-				},
+				}),
 				digest: 'constraint-postcondition',
 			},
 			address: {
@@ -789,6 +829,14 @@ describe('generator execution fixture shim', () => {
 			},
 		} as const;
 		const query = vi.fn(async (sql: string) => {
+			if (
+				sql.startsWith(
+					'SELECT relation.relkind AS relation_kind, constraint_item',
+				)
+			)
+				return {
+					rows: [{ relation_kind: 'r', constraint_name: 'accounts_check' }],
+				};
 			if (sql.includes('namespace.nspname'))
 				return {
 					rows: [
@@ -844,13 +892,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -859,7 +903,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -890,13 +934,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -905,7 +945,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -958,6 +998,7 @@ describe('generator execution fixture shim', () => {
 		expect(query).not.toHaveBeenCalled();
 	});
 
+	// Stage four destiny: these v2 reader fixtures assert REPLAN_REQUIRED.
 	it.each([
 		[
 			'enum labels',
@@ -1020,6 +1061,7 @@ describe('generator execution fixture shim', () => {
 		).rejects.toThrow('postcondition differs');
 	});
 
+	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
 	it('strictly decodes non-CHECK constraint read-back before recording observed', async () => {
 		const address = {
 			...dataDestructiveStep.address,
@@ -1073,6 +1115,7 @@ describe('generator execution fixture shim', () => {
 		);
 	});
 
+	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
 	it('decodes an empty enum from its NULL label row', async () => {
 		const address = {
 			...dataDestructiveStep.address,
@@ -1100,6 +1143,7 @@ describe('generator execution fixture shim', () => {
 		).resolves.toMatchObject({ value: { kind: 'enum', labels: [] } });
 	});
 
+	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
 	it('decodes enum labels in query order', async () => {
 		const address = {
 			...dataDestructiveStep.address,
@@ -1136,6 +1180,7 @@ describe('generator execution fixture shim', () => {
 		});
 	});
 
+	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
 	it('refuses an absent enum type even when its expected labels are empty', async () => {
 		const address = {
 			...dataDestructiveStep.address,
@@ -1159,6 +1204,7 @@ describe('generator execution fixture shim', () => {
 		).rejects.toThrow('generated enum order_state is absent');
 	});
 
+	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
 	it('refuses a same-named non-enum type and malformed enum labels', async () => {
 		const address = {
 			...dataDestructiveStep.address,
@@ -1202,6 +1248,7 @@ describe('generator execution fixture shim', () => {
 		);
 	});
 
+	// Stage four destiny: these v2 reader fixtures assert REPLAN_REQUIRED.
 	it('strictly decodes sequence and extension read-back before recording observed', async () => {
 		const sequenceAddress = {
 			...dataDestructiveStep.address,
@@ -1287,13 +1334,21 @@ describe('generator execution fixture shim', () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [
-						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: {
+								defaultKind: 'none',
+								hasDefault: false,
+								identity: null,
+							},
+						},
 					],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 			statementBundle: {

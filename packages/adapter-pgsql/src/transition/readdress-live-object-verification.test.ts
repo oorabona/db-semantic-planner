@@ -67,6 +67,7 @@ const identity = {
 	format: 1,
 	value: { oid: '42' },
 };
+// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
 const expected = {
 	value: {
 		postconditionVersion: 2 as const,
@@ -460,6 +461,7 @@ describe('re-address live-object verification', () => {
 		).rejects.toThrow('is not dependent on target table orders_archive');
 	});
 
+	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
 	it('keeps a decodable v2 index member on identity read-back (#576)', async () => {
 		setupAdmission();
 		const priorReadChain = mocks.readChain.getMockImplementation()!;
@@ -523,6 +525,7 @@ describe('re-address live-object verification', () => {
 		expect(member).not.toHaveProperty('postDdlReadBack');
 	});
 
+	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
 	it('refuses a v2 recorded root declaration that differs from the reviewed step', async () => {
 		setupAdmission();
 		mocks.project.mockImplementation((chain) =>

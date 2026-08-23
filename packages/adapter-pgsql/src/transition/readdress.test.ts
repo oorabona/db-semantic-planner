@@ -19,6 +19,7 @@ const source = {
 };
 
 describe('re-address declaration re-keying', () => {
+	// Stage four destiny: this v2 decoder fixture asserts REPLAN_REQUIRED.
 	it('keeps a typed v2 table postcondition byte-identical', () => {
 		const declaration = {
 			value: {
