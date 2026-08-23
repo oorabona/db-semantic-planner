@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
 	DeclarableResourceAddress,
+	JsonValue,
 	LedgerClaimKind,
 	NormalizedManagedStep,
 } from '@dbsp/types';
@@ -21,7 +22,7 @@ type Address = DeclarableResourceAddress & {
 
 type Meta = Readonly<Record<string, unknown>>;
 
-type GeneratedColumnPostcondition = {
+export type GeneratedColumnPostcondition = {
 	readonly name: string;
 	readonly type?: string;
 	readonly nullable?: boolean;
@@ -82,32 +83,6 @@ export type GeneratedIndexPostcondition = {
 	readonly with?: Readonly<Record<string, string>>;
 	readonly where?: string;
 };
-
-/** ModelIR-derived, digest-covered catalogue projection for a generated step. */
-export type GeneratedPostconditionV2 = { readonly postconditionVersion: 2 } & (
-	| {
-			readonly kind: 'table';
-			readonly columns: readonly GeneratedColumnPostcondition[];
-	  }
-	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
-	| {
-			readonly kind: 'constraint';
-			readonly constraint: GeneratedConstraintPostcondition;
-	  }
-	| { readonly kind: 'index'; readonly index: GeneratedIndexPostcondition }
-	| { readonly kind: 'enum'; readonly labels: readonly string[] }
-	| {
-			readonly kind: 'sequence';
-			readonly startValue?: string;
-			readonly incrementBy?: string;
-			readonly minValue?: string;
-			readonly maxValue?: string;
-			readonly cycle?: boolean;
-	  }
-	| { readonly kind: 'extension'; readonly version?: string }
-	| { readonly kind: 'absent' }
-	| { readonly kind: 'exempt'; readonly reason: string }
-);
 
 /** A canonical SQL fact, never an unversioned deparse string. */
 export type CanonicalSqlFact = {
@@ -254,16 +229,54 @@ export type GeneratedPostconditionV3 = {
 	readonly targetBinding: TargetBinding;
 };
 
+/** Legacy serialized input is kept only so callers can surface REPLAN_REQUIRED. */
+export type GeneratedPostconditionV2 =
+	| {
+			readonly postconditionVersion: 2;
+			readonly kind: 'index';
+			readonly index: GeneratedIndexPostcondition;
+		  }
+	| {
+			readonly postconditionVersion: 2;
+			readonly kind: 'table';
+			readonly columns: readonly GeneratedColumnPostcondition[];
+		  }
+	| {
+			readonly postconditionVersion: 2;
+			readonly kind: 'constraint';
+			readonly constraint: GeneratedConstraintPostcondition;
+		  }
+	| {
+			readonly postconditionVersion: 2;
+			readonly kind:
+				| 'column'
+				| 'enum'
+				| 'sequence'
+				| 'extension'
+				| 'absent'
+				| 'exempt';
+		  };
+
 export type GeneratedPostcondition =
 	| GeneratedPostconditionV2
 	| GeneratedPostconditionV3;
+
+/** The version tag is part of the digest domain, never an implicit convention. */
+export function generatedPostconditionDigest(
+	value: GeneratedPostcondition,
+): string {
+	return createHash('sha256')
+		.update(`generated-postcondition:v${value.postconditionVersion}\u0000`)
+		.update(JSON.stringify(value))
+		.digest('hex');
+}
 
 function postconditionPayload(
 	value: GeneratedPostcondition,
 ): import('@dbsp/types').LedgerPayload {
 	return {
-		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		value: value as unknown as import('@dbsp/types').JsonValue,
+		digest: generatedPostconditionDigest(value),
 	};
 }
 

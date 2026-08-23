@@ -18,10 +18,6 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
-	verifyGeneratedCheckPostcondition,
-	verifyGeneratedColumnPostcondition,
-	verifyGeneratedIndexPostcondition,
-	verifyGeneratedTablePostcondition,
 	verifyGeneratedV3CheckPostcondition,
 	verifyGeneratedV3ColumnPostcondition,
 	verifyGeneratedV3IndexPostcondition,
@@ -530,6 +526,8 @@ export async function readGeneratedPostcondition(
 			decodedPostcondition,
 			address,
 		);
+	throw new Error('generated postcondition decoder returned no supported version');
+	/* deleted v2 CLI route
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
 		const postcondition = generatedPostcondition(step, address);
@@ -778,6 +776,7 @@ export async function readGeneratedPostcondition(
 		});
 	}
 	throw new Error(`generated ${address.kind} has no declarable read-back`);
+	*/
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {

@@ -7,12 +7,12 @@ import { generateCreateIndex } from './ddl-generator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
 	CanonicalSqlFact,
+	GeneratedColumnPostcondition,
 	GeneratedColumnDefaultState,
 	GeneratedConstraintPostcondition,
 	GeneratedIndexPostcondition,
 	GeneratedPostcondition,
 	GeneratedPostconditionDeclarationV3,
-	GeneratedPostconditionV2,
 	GeneratedPostconditionV3,
 	TargetBinding,
 } from './managed-step-manifest.js';
@@ -309,9 +309,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function replan(message: string): Error {
-	return new Error(
-		`${message}; replan to produce version 2 typed postconditions`,
+export class GeneratedPostconditionReplanRequiredError extends Error {
+	readonly code = 'REPLAN_REQUIRED';
+	readonly diagnostic: Readonly<{
+		versionSeen: unknown;
+		stepIdentity: string | undefined;
+	}>;
+
+	constructor(
+		message: string,
+		versionSeen: unknown = undefined,
+		stepIdentity: string | undefined = undefined,
+	) {
+		super(`${message}; REPLAN_REQUIRED: produce a version 3 postcondition`);
+		this.name = 'GeneratedPostconditionReplanRequiredError';
+		this.diagnostic = { versionSeen, stepIdentity };
+	}
+}
+
+function replan(
+	message: string,
+	versionSeen: unknown = undefined,
+	stepIdentity: string | undefined = undefined,
+): GeneratedPostconditionReplanRequiredError {
+	return new GeneratedPostconditionReplanRequiredError(
+		message,
+		versionSeen,
+		stepIdentity,
 	);
 }
 
@@ -378,88 +402,9 @@ function checkedIdentifier(
 	return identifier;
 }
 
-/** Decode and snapshot the complete supported COLUMN projection of a v2 postcondition. */
-export function decodeColumnPostcondition(
-	value: unknown,
-): Extract<GeneratedPostconditionV2, { readonly kind: 'column' }>['column'] {
-	const unsupported = 'generated column postcondition is unsupported';
-	if (
-		!isRecord(value) ||
-		!exactKeys(value, [
-			'name',
-			'type',
-			'nullable',
-			'hasDefault',
-			'defaultKind',
-			'default',
-			'collation',
-			'identity',
-		])
-	)
-		throw replan(unsupported);
-	const name = checkedIdentifier(value.name, 'column', unsupported);
-	const type = value.type;
-	const nullable = value.nullable;
-	const hasDefault = value.hasDefault;
-	const defaultKind = value.defaultKind;
-	const defaultValue = value.default;
-	const collation = value.collation;
-	const identity = value.identity;
-	const decodedType =
-		type === undefined ? undefined : strictString(type, unsupported);
-	const decodedNullable =
-		nullable === undefined ? undefined : strictBoolean(nullable, unsupported);
-	const decodedHasDefault =
-		hasDefault === undefined
-			? undefined
-			: strictBoolean(hasDefault, unsupported);
-	let decodedDefaultKind: 'authored' | 'generated-sequence' | undefined;
-	if (defaultKind === undefined) decodedDefaultKind = undefined;
-	else if (defaultKind === 'authored' || defaultKind === 'generated-sequence')
-		decodedDefaultKind = defaultKind;
-	else throw replan(unsupported);
-	let decodedDefault: string | undefined;
-	if (
-		decodedHasDefault === true &&
-		decodedDefaultKind !== 'generated-sequence'
-	) {
-		if (defaultValue === undefined) throw replan(unsupported);
-		decodedDefault = strictString(defaultValue, unsupported);
-		try {
-			validateCheckExpression(decodedDefault, 'generated column default');
-		} catch {
-			throw replan(
-				'generated column default is not a setting-independent expression',
-			);
-		}
-	} else if (defaultValue !== undefined) {
-		throw replan(unsupported);
-	}
-	if (decodedDefaultKind !== undefined && decodedHasDefault !== true)
-		throw replan(unsupported);
-	const decodedCollation =
-		collation === undefined || collation === null
-			? collation
-			: strictString(collation, unsupported);
-	let decodedIdentity: 'always' | 'byDefault' | null | undefined;
-	if (identity === undefined || identity === null) decodedIdentity = identity;
-	else if (identity === 'always' || identity === 'byDefault')
-		decodedIdentity = identity;
-	else throw replan(unsupported);
-	return {
-		name,
-		...(decodedType === undefined ? {} : { type: decodedType }),
-		...(decodedNullable === undefined ? {} : { nullable: decodedNullable }),
-		...(decodedHasDefault === undefined
-			? {}
-			: { hasDefault: decodedHasDefault }),
-		...(decodedDefaultKind === undefined
-			? {}
-			: { defaultKind: decodedDefaultKind }),
-		...(decodedDefault === undefined ? {} : { default: decodedDefault }),
-		...(decodedCollation === undefined ? {} : { collation: decodedCollation }),
-		...(decodedIdentity === undefined ? {} : { identity: decodedIdentity }),
-	};
+/** @deprecated Version-2 column decoding is no longer an interpretation path. */
+export function decodeColumnPostcondition(_value: unknown): never {
+	throw replan('generated postcondition version is no longer interpretable', 2);
 }
 
 function decodeCanonicalSqlFact(
@@ -663,21 +608,16 @@ function decodeV3GeneratedPostcondition(
 				!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'constraint'])
 			)
 				throw replan(unsupported);
-			const constraint = decodeGeneratedPostcondition({
-				postconditionVersion: 2,
-				kind: 'constraint',
-				constraint: declaration.constraint,
-			});
-			if (
-				constraint.postconditionVersion !== 2 ||
-				constraint.kind !== 'constraint' ||
-				constraint.constraint.type === 'c'
-			)
+			const constraint = declaration.constraint;
+			if (!isRecord(constraint) || constraint.type === 'c')
 				throw replan(unsupported);
 			decoded = {
 				...header,
 				kind: 'constraint',
-				constraint: constraint.constraint,
+				constraint: constraint as unknown as Extract<
+					GeneratedPostconditionDeclarationV3,
+					{ readonly kind: 'constraint' }
+				>['constraint'],
 			};
 			break;
 		}
@@ -850,12 +790,19 @@ function decodeV3GeneratedPostcondition(
  */
 export function decodeGeneratedPostcondition(
 	value: unknown,
+	stepIdentity?: string,
 ): GeneratedPostcondition {
 	if (!isRecord(value))
-		throw replan('generated postcondition format is unsupported');
+		throw replan('generated postcondition format is unsupported', undefined, stepIdentity);
 	const postconditionVersion = value.postconditionVersion;
-	const kind = value.kind;
 	if (postconditionVersion === 3) return decodeV3GeneratedPostcondition(value);
+	throw replan(
+		'generated postcondition version is no longer interpretable',
+		postconditionVersion,
+		stepIdentity,
+	);
+	/*
+	const kind = value.kind;
 	if (postconditionVersion !== 2 || typeof kind !== 'string')
 		throw replan('generated postcondition format is unsupported');
 	const unsupported = 'generated postcondition is unsupported';
@@ -1314,6 +1261,10 @@ function decodeCheckExpectation(
 		expression: value.constraint.expression,
 		notValid: value.constraint.notValid,
 	};
+}
+
+*/
+
 }
 
 function nullableStringList(value: unknown): readonly (string | null)[] {
@@ -1846,19 +1797,13 @@ const GENERATED_SEQUENCE_EVIDENCE_SQL =
 const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
 
 function isGeneratedSequenceDefault(
-	specification: Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 ): boolean {
 	return specification.defaultKind === 'generated-sequence';
 }
 
 function requiresStagedDefault(
-	specification: Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 ): boolean {
 	return (
 		specification.hasDefault === true &&
@@ -1867,10 +1812,7 @@ function requiresStagedDefault(
 }
 
 function requiresStableColumnProof(
-	specification: Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 ): boolean {
 	return (
 		requiresStagedDefault(specification) ||
@@ -1920,10 +1862,7 @@ async function lockAuthoredDefaultTarget(
 async function stageAuthoredDefaults(
 	session: GeneratedPostconditionSession,
 	target: GeneratedPostconditionTarget,
-	columns: readonly Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'][],
+	columns: readonly GeneratedColumnPostcondition[],
 ): Promise<ReadonlyMap<string, string>> {
 	const expected = columns.filter(requiresStagedDefault);
 	if (expected.length === 0) return new Map();
@@ -1976,10 +1915,7 @@ type ColumnPostconditionMismatch =
 
 async function defaultPostconditionMatches(
 	actual: GeneratedColumnProjection,
-	specification: Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 	stagedDefaults: ReadonlyMap<string, string>,
 ): Promise<boolean> {
 	if (specification.hasDefault === false) return actual.default === undefined;
@@ -1992,10 +1928,7 @@ async function defaultPostconditionMatches(
 
 async function columnPostconditionMatches(
 	actual: GeneratedColumnProjection,
-	specification: Extract<
-		GeneratedPostconditionV2,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 	stagedDefaults: ReadonlyMap<string, string>,
 ): Promise<ColumnPostconditionMismatch | undefined> {
 	if (
@@ -2030,18 +1963,12 @@ async function columnPostconditionMatches(
  * Inline primary keys, indexes, and constraints are proved by their own
  * postconditions and are never implied by this proof.
  */
-export async function verifyGeneratedTablePostcondition(input: {
+async function verifyTableStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly columns: readonly GeneratedColumnPostcondition[];
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
 	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeGeneratedPostcondition(input.postcondition);
-		if (
-			postcondition.postconditionVersion !== 2 ||
-			postcondition.kind !== 'table'
-		)
-			throw replan('generated table postcondition is unsupported');
 		const verify = async () => {
 			const rows = (
 				await session.query(
@@ -2049,7 +1976,7 @@ export async function verifyGeneratedTablePostcondition(input: {
 					[input.target.schema, input.target.table],
 				)
 			).rows;
-			const expected = postcondition.columns;
+			const expected = input.columns;
 			if (rows.length === 0)
 				throw structuralMismatch(
 					`generated table ${input.target.name} is absent`,
@@ -2093,7 +2020,7 @@ export async function verifyGeneratedTablePostcondition(input: {
 			}
 			return { kind: 'table' as const, projection: { columns: live } };
 		};
-		if (!postcondition.columns.some(requiresStableColumnProof)) return verify();
+		if (!input.columns.some(requiresStableColumnProof)) return verify();
 		return scratchScope(session, async () => {
 			await lockAuthoredDefaultTarget(
 				session,
@@ -2105,22 +2032,16 @@ export async function verifyGeneratedTablePostcondition(input: {
 	});
 }
 
-export async function verifyGeneratedColumnPostcondition(input: {
+async function verifyColumnStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly column: GeneratedColumnPostcondition;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
 	readonly kind: 'column';
 	readonly projection: GeneratedColumnProjection;
 }> {
 	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeGeneratedPostcondition(input.postcondition);
-		if (
-			postcondition.postconditionVersion !== 2 ||
-			postcondition.kind !== 'column'
-		)
-			throw replan('generated column postcondition is unsupported');
-		const expected = postcondition.column;
+		const expected = input.column;
 		if (expected.name !== input.target.name)
 			throw new Error(
 				`generated column ${input.target.name} structural postcondition names another column`,
@@ -2180,13 +2101,13 @@ export async function verifyGeneratedColumnPostcondition(input: {
 	});
 }
 
-export async function verifyGeneratedIndexPostcondition(input: {
+async function verifyIndexStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly index: GeneratedIndexPostcondition;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
 	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const expected = decodeIndexExpectation(input.postcondition, input.target);
+		const expected = input.index;
 		const scratchTable = nextScratchName('table');
 		const scratchIndex = nextScratchName('index');
 		// Render before acquiring/using the capability: malformed index material must
@@ -2297,16 +2218,16 @@ async function readScratchCheckProjection(
 	);
 }
 
-export async function verifyGeneratedCheckPostcondition(input: {
+async function verifyCheckStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly check: Extract<GeneratedConstraintPostcondition, { readonly type: 'c' }>;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
 	readonly kind: 'constraint';
 	readonly projection: CheckProjection;
 }> {
 	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const expected = decodeCheckExpectation(input.postcondition);
+		const expected = input.check;
 		const clause = renderCheckConstraintClause({
 			expression: expected.expression,
 			notValid: expected.notValid,
@@ -2354,13 +2275,67 @@ export async function verifyGeneratedCheckPostcondition(input: {
 	});
 }
 
+/** @deprecated Version-2 structural entry points are terminal replan refusals. */
+export async function verifyGeneratedTablePostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
+	void input.session;
+	void input.target;
+	decodeGeneratedPostcondition(input.postcondition);
+	throw new Error('unreachable');
+}
+
+/** @deprecated Version-2 structural entry points are terminal replan refusals. */
+export async function verifyGeneratedColumnPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{
+	readonly kind: 'column';
+	readonly projection: GeneratedColumnProjection;
+}> {
+	void input.session;
+	void input.target;
+	decodeGeneratedPostcondition(input.postcondition);
+	throw new Error('unreachable');
+}
+
+/** @deprecated Version-2 structural entry points are terminal replan refusals. */
+export async function verifyGeneratedIndexPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
+	void input.session;
+	void input.target;
+	decodeGeneratedPostcondition(input.postcondition);
+	throw new Error('unreachable');
+}
+
+/** @deprecated Version-2 structural entry points are terminal replan refusals. */
+export async function verifyGeneratedCheckPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly target: GeneratedPostconditionTarget;
+}): Promise<{
+	readonly kind: 'constraint';
+	readonly projection: CheckProjection;
+}> {
+	void input.session;
+	void input.target;
+	decodeGeneratedPostcondition(input.postcondition);
+	throw new Error('unreachable');
+}
+
 function v3ColumnPostcondition(
 	declaration: Extract<
 		GeneratedPostconditionDeclarationV3,
 		{ readonly kind: 'column' }
 	>['column'],
 	name: string,
-): Extract<GeneratedPostconditionV2, { readonly kind: 'column' }>['column'] {
+): GeneratedColumnPostcondition {
 	const defaultState = declaration.default;
 	return {
 		name,
@@ -2435,15 +2410,11 @@ export async function verifyGeneratedV3TablePostcondition(input: {
 		address: input.address,
 		expectedKind: 'table',
 	});
-	return verifyGeneratedTablePostcondition({
+	return verifyTableStructure({
 		session: input.session,
-		postcondition: {
-			postconditionVersion: 2,
-			kind: 'table',
-			columns: postcondition.declaration.columns.map((column) =>
-				v3ColumnPostcondition(column, column.name),
-			),
-		},
+		columns: postcondition.declaration.columns.map((column) =>
+			v3ColumnPostcondition(column, column.name),
+		),
 		target,
 	});
 }
@@ -2467,16 +2438,9 @@ export async function verifyGeneratedV3ColumnPostcondition(input: {
 		address: input.address,
 		expectedKind: 'column',
 	});
-	return verifyGeneratedColumnPostcondition({
+	return verifyColumnStructure({
 		session: input.session,
-		postcondition: {
-			postconditionVersion: 2,
-			kind: 'column',
-			column: v3ColumnPostcondition(
-				postcondition.declaration.column,
-				target.name,
-			),
-		},
+		column: v3ColumnPostcondition(postcondition.declaration.column, target.name),
 		target,
 	});
 }
@@ -2495,26 +2459,23 @@ export async function verifyGeneratedV3IndexPostcondition(input: {
 		expectedKind: 'index',
 	});
 	const index = postcondition.declaration.index;
-	return verifyGeneratedIndexPostcondition({
+	const { expressions, where, ...indexFacts } = index;
+	return verifyIndexStructure({
 		session: input.session,
-		postcondition: {
-			postconditionVersion: 2,
-			kind: 'index',
-			index: {
+		index: {
 				schema: target.schema,
 				table: target.table,
 				name: target.name,
-				...index,
-				...(index.expressions === undefined
-					? {}
-					: {
-							expressions: index.expressions.map(
+			...indexFacts,
+			...(expressions === undefined
+				? {}
+				: {
+						expressions: expressions.map(
 								(expression) => expression.sql,
 							),
 						}),
-				...(index.where === undefined ? {} : { where: index.where.sql }),
+			...(where === undefined ? {} : { where: where.sql }),
 			},
-		},
 		target,
 	});
 }
@@ -2535,16 +2496,12 @@ export async function verifyGeneratedV3CheckPostcondition(input: {
 		address: input.address,
 		expectedKind: 'constraint',
 	});
-	return verifyGeneratedCheckPostcondition({
+	return verifyCheckStructure({
 		session: input.session,
-		postcondition: {
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: {
-				type: 'c',
-				expression: postcondition.declaration.check.expression.sql,
-				notValid: postcondition.declaration.check.notValid,
-			},
+		check: {
+			type: 'c',
+			expression: postcondition.declaration.check.expression.sql,
+			notValid: postcondition.declaration.check.notValid,
 		},
 		target,
 	});
