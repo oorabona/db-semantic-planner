@@ -22,6 +22,10 @@ import {
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	verifyGeneratedV3CheckPostcondition,
+	verifyGeneratedV3ColumnPostcondition,
+	verifyGeneratedV3IndexPostcondition,
+	verifyGeneratedV3TablePostcondition,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -426,6 +430,89 @@ function generatedPostcondition(
 }
 
 /**
+ * Version 3 binds its address separately from its structural declaration. The
+ * adapter owns both binding resolution and structural proof, so the CLI only
+ * dispatches from the decoded declaration kind and carries the step address.
+ */
+async function readGeneratedV3Postcondition(
+	executor: GeneratedPostconditionSession,
+	postcondition: Extract<
+		GeneratedPostcondition,
+		{ readonly postconditionVersion: 3 }
+	>,
+	address: LedgerAddress,
+): Promise<LedgerPayload> {
+	switch (postcondition.declaration.kind) {
+		case 'column': {
+			const verified = await verifyGeneratedV3ColumnPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: 'column',
+				type: verified.projection.type,
+				nullable: verified.projection.nullable,
+				default: verified.projection.default,
+				collation: verified.projection.collation,
+				identity: verified.projection.identity,
+			});
+		}
+		case 'check': {
+			const verified = await verifyGeneratedV3CheckPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				type: 'c',
+				expression: verified.projection.expression,
+				validated: verified.projection.validated,
+				noInherit: verified.projection.noInherit,
+				enforced: verified.projection.enforced,
+				isLocal: verified.projection.isLocal,
+				inheritanceCount: verified.projection.inheritanceCount,
+				parentId: verified.projection.parentId,
+			});
+		}
+		case 'index': {
+			const verified = await verifyGeneratedV3IndexPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				projection: verified.projection,
+			});
+		}
+		case 'table': {
+			const verified = await verifyGeneratedV3TablePostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				columns: verified.projection.columns.map((column) => ({
+					name: column.name,
+					type: column.type,
+					nullable: column.nullable,
+					default: column.default,
+					collation: column.collation,
+					identity: column.identity,
+				})),
+			});
+		}
+		default:
+			throw new Error(
+				`generated v3 ${postcondition.declaration.kind} has no declarable read-back`,
+			);
+	}
+}
+
+/**
  * Generated DDL has no operation runtime to supply an observation. Read the
  * precise catalogue fields it changes; a same-named object is never enough to
  * write an `observed` terminal.
@@ -436,6 +523,13 @@ export async function readGeneratedPostcondition(
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
 	executor = assertGeneratedPostconditionSession(executor);
+	const decodedPostcondition = generatedPostcondition(step, address);
+	if (decodedPostcondition.postconditionVersion === 3)
+		return readGeneratedV3Postcondition(
+			executor,
+			decodedPostcondition,
+			address,
+		);
 	const parent = address.parent?.name;
 	if (address.kind === 'column' && parent && address.schema) {
 		const postcondition = generatedPostcondition(step, address);

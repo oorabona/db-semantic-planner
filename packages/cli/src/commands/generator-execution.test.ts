@@ -10,6 +10,10 @@ const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgPersistedTableReaddress = vi.hoisted(() => vi.fn());
+const verifyGeneratedV3TablePostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedV3ColumnPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedV3IndexPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedV3CheckPostcondition = vi.hoisted(() => vi.fn());
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
@@ -23,6 +27,14 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			executePgDeclaredAdoption(...args),
 		executePgPersistedTableReaddress: (...args: unknown[]) =>
 			executePgPersistedTableReaddress(...args),
+		verifyGeneratedV3TablePostcondition: (...args: unknown[]) =>
+			verifyGeneratedV3TablePostcondition(...args),
+		verifyGeneratedV3ColumnPostcondition: (...args: unknown[]) =>
+			verifyGeneratedV3ColumnPostcondition(...args),
+		verifyGeneratedV3IndexPostcondition: (...args: unknown[]) =>
+			verifyGeneratedV3IndexPostcondition(...args),
+		verifyGeneratedV3CheckPostcondition: (...args: unknown[]) =>
+			verifyGeneratedV3CheckPostcondition(...args),
 	};
 });
 
@@ -149,6 +161,162 @@ function indexReadbackExecutor(input: {
 }
 
 describe('generator execution fixture shim', () => {
+	it.each([
+		[
+			'table',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'table',
+					columns: [{ name: 'id' }],
+				},
+			},
+			dataDestructiveStep.address,
+			verifyGeneratedV3TablePostcondition,
+			{
+				kind: 'table',
+				projection: {
+					columns: [
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: undefined,
+							collation: null,
+							identity: null,
+						},
+					],
+				},
+			},
+		],
+		[
+			'column',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'column',
+					column: { type: 'integer', nullable: false },
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'column',
+				name: 'id',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedV3ColumnPostcondition,
+			{
+				kind: 'column',
+				projection: {
+					type: 'integer',
+					nullable: false,
+					default: undefined,
+					collation: null,
+					identity: null,
+				},
+			},
+		],
+		[
+			'index',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'index',
+					index: {
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'index',
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedV3IndexPostcondition,
+			{ kind: 'index', projection: { method: 'btree' } },
+		],
+		[
+			'check',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'check',
+					check: {
+						expression: {
+							canonicalFormVersion: 1,
+							sql: 'CHECK (id > 0)',
+						},
+						notValid: false,
+					},
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'constraint',
+				name: 'accounts_id_check',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedV3CheckPostcondition,
+			{
+				kind: 'constraint',
+				projection: {
+					expression: 'CHECK (id > 0)',
+					validated: true,
+					noInherit: false,
+					enforced: true,
+					isLocal: true,
+					inheritanceCount: 0,
+					parentId: 0,
+				},
+			},
+		],
+	] as const)('routes a v3 %s postcondition through its binding-aware verifier', async (_kind, value, address, verify, result) => {
+		vi.clearAllMocks();
+		verify.mockResolvedValue(result);
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: { value, digest: 'v3-postcondition' },
+		} as unknown as NormalizedManagedStep;
+
+		await readTestGeneratedPostcondition(
+			{ query: vi.fn() },
+			step,
+			address as LedgerAddress,
+		);
+
+		expect(verify).toHaveBeenCalledWith(
+			expect.objectContaining({ postcondition: value, address }),
+		);
+	});
+
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
 		const attempts: string[] = [];
 		preflightPgDeclaredAdoption.mockResolvedValue({ outcome: 'ready' });
