@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.5.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.5.0...adapter-pgsql-v3.5.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** pool admission aborts on failures no server reported ([a3b9aa9](https://github.com/oorabona/db-semantic-planner/commit/a3b9aa9b))
+* **adapter-pgsql:** borrowed-client reservations abort on every non-server failure ([3695863](https://github.com/oorabona/db-semantic-planner/commit/36958631))
+* **adapter-pgsql:** only protocol-evidenced errors classify as server-reported ([152f00f](https://github.com/oorabona/db-semantic-planner/commit/152f00ff))
+* **adapter-pgsql:** one evidence rule for every classifier and total failure bookkeeping ([9b57ad1](https://github.com/oorabona/db-semantic-planner/commit/9b57ad13))
+
+
+### Documentation
+
+* **adapter-pgsql:** reservation and routine claims state exactly what the classifier delivers ([9f93c72](https://github.com/oorabona/db-semantic-planner/commit/9f93c72e))
+
 ## [3.5.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.4.0...adapter-pgsql-v3.5.0) (2026-08-20)
 
 
