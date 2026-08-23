@@ -2,7 +2,11 @@ import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
-import type { HookErrorHandler, HookStore } from './hooks.js';
+import type {
+	HookErrorHandler,
+	HookStore,
+	ObserverErrorHandler,
+} from './hooks.js';
 import type { DefaultFilters } from './schema.js';
 
 /**
@@ -20,5 +24,6 @@ export interface QueryBuilderContext {
 	readonly defaultFilters?: DefaultFilters | undefined;
 	readonly hookStore?: HookStore | undefined;
 	readonly onHookError?: HookErrorHandler | undefined;
+	readonly onObserverError?: ObserverErrorHandler | undefined;
 	readonly inTransaction?: boolean | undefined;
 }

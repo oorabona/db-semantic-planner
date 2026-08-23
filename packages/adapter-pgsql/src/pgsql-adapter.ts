@@ -3331,17 +3331,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
 		const result = await this.executeWithMeta(query);
-		return result.rows;
+		return result.rows as T[];
 	}
 
 	/**
 	 * Execute a query and return rows plus PostgreSQL result metadata.
 	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
-	async executeWithMeta<T = unknown>(
-		query: CompiledQuery<T>,
-	): Promise<{
-		readonly rows: T[];
+	async executeWithMeta(query: CompiledQuery): Promise<{
+		readonly rows: readonly unknown[];
 		readonly rowCount: number;
 		readonly command?: string;
 	}> {
@@ -3351,7 +3349,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			Record<string, unknown>
 		>(guardedQuery.sql, guardedQuery.parameters, { prepareEligible: true });
 		const metadata = queryResultMetadata(result);
-		const rows = this.transformResultRows(result.rows, guardedQuery) as T[];
+		const rows = this.transformResultRows(result.rows, guardedQuery);
 		return {
 			rows,
 			rowCount: metadata.rowCount ?? 0,

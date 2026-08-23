@@ -43,9 +43,11 @@ import {
 import {
 	type HookStore,
 	hasHooks,
+	normalizeHookError,
 	type QueryHookContext,
 	type QueryResultType,
 	runAfterQueryHooks,
+	runAfterQueryObservers,
 	runBeforeQueryHooks,
 	runOnErrorHooks,
 	withReentrancyGuard,
@@ -983,7 +985,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		// Build raw intent (without defaultFilters) for hooks
 		const rawIntent = this.buildIntent(false);
 		const beforeCtx: QueryHookContext = {
-			table: this.from,
+			table: rawIntent.from,
 			operation: 'select',
 			intent: rawIntent,
 			resultType: 'exists',
@@ -995,8 +997,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Run beforeQuery hooks
 		let intent: QueryIntent;
+		let afterHookCtx: QueryHookContext;
 		try {
-			const afterHookCtx = await runBeforeQueryHooks(
+			afterHookCtx = await runBeforeQueryHooks(
 				store.beforeQuery,
 				beforeCtx,
 				this.ctx.onHookError,
@@ -1007,7 +1010,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				throw await runOnErrorHooks(store.onError, {
 					table: this.from,
 					operation: 'select',
-					error: error as Error,
+					error: normalizeHookError(error),
 					intent: rawIntent,
 					phase: 'beforeQuery',
 				});
@@ -1044,7 +1047,7 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// afterQuery with boolean result
 		const afterCtx: QueryHookContext = {
-			table: this.from,
+			table: intent.from,
 			operation: 'select',
 			intent,
 			resultType: 'exists',
@@ -1054,8 +1057,20 @@ export class QueryBuilderImpl<TResult = unknown>
 			...(this.ctx.schemaName !== undefined && {
 				schemaName: this.ctx.schemaName,
 			}),
+			...(this.ctx.inTransaction !== undefined && {
+				inTransaction: this.ctx.inTransaction,
+			}),
+			...(afterHookCtx.correlationId !== undefined && {
+				correlationId: afterHookCtx.correlationId,
+			}),
 		};
 		try {
+			await runAfterQueryObservers(
+				store.afterQueryObservers,
+				afterCtx,
+				result,
+				this.ctx.onObserverError,
+			);
 			return await runAfterQueryHooks(
 				store.afterQuery,
 				afterCtx,
@@ -1067,7 +1082,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				throw await runOnErrorHooks(store.onError, {
 					table: this.from,
 					operation: 'select',
-					error: error as Error,
+					error: normalizeHookError(error),
 					intent,
 					phase: 'afterQuery',
 					sql: compiled.sql,
@@ -1350,8 +1365,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// 3. Run beforeQuery hooks (FIFO) — may modify intent
 		let intent: QueryIntent;
+		let afterHookCtx: QueryHookContext;
 		try {
-			const afterHookCtx = await runBeforeQueryHooks(
+			afterHookCtx = await runBeforeQueryHooks(
 				store.beforeQuery,
 				beforeCtx,
 				this.ctx.onHookError,
@@ -1363,7 +1379,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				const finalError = await runOnErrorHooks(store.onError, {
 					table: this.from,
 					operation: 'select',
-					error: error as Error,
+					error: normalizeHookError(error),
 					intent: rawIntent,
 					phase: 'beforeQuery',
 				});
@@ -1414,7 +1430,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				const finalError = await runOnErrorHooks(store.onError, {
 					table: this.from,
 					operation: 'select',
-					error: error as Error,
+					error: normalizeHookError(error),
 					intent,
 					phase: 'afterQuery',
 					sql: compiledWithIncludes.main.sql,
@@ -1455,7 +1471,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		// 8. Build afterQuery context with timing + SQL info
 		const duration = Date.now() - startTime;
 		const afterCtx: QueryHookContext = {
-			table: this.from,
+			table: intent.from,
 			operation: 'select',
 			intent,
 			resultType,
@@ -1465,10 +1481,22 @@ export class QueryBuilderImpl<TResult = unknown>
 			...(this.ctx.schemaName !== undefined && {
 				schemaName: this.ctx.schemaName,
 			}),
+			...(this.ctx.inTransaction !== undefined && {
+				inTransaction: this.ctx.inTransaction,
+			}),
+			...(afterHookCtx.correlationId !== undefined && {
+				correlationId: afterHookCtx.correlationId,
+			}),
 		};
 
 		// 9. Run afterQuery hooks (LIFO) — may transform results
 		try {
+			await runAfterQueryObservers(
+				store.afterQueryObservers,
+				afterCtx,
+				mainResults,
+				this.ctx.onObserverError,
+			);
 			// SAFETY: R defaults to TResult[] from callers; afterQuery hooks may
 			// transform the shape, hence the generic.  The double cast bridges
 			// the gap between the concrete TResult[] and the generic R.
@@ -1484,7 +1512,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				const finalError = await runOnErrorHooks(store.onError, {
 					table: this.from,
 					operation: 'select',
-					error: error as Error,
+					error: normalizeHookError(error),
 					intent,
 					phase: 'afterQuery',
 					sql: compiledWithIncludes.main.sql,

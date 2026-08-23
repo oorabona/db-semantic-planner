@@ -35,10 +35,13 @@ import type {
 	HookStore,
 	MutationHookContext,
 	MutationOperation,
+	ObserverErrorHandler,
 } from './hooks.js';
 import {
 	hasHooks,
+	normalizeHookError,
 	runAfterMutationHooks,
+	runAfterMutationObservers,
 	runBeforeMutationHooks,
 	runOnErrorHooks,
 	withReentrancyGuard,
@@ -106,6 +109,7 @@ type MutationBaseOpts = {
 	schemaName?: string | undefined;
 	hookStore?: HookStore | undefined;
 	onHookError?: HookErrorHandler | undefined;
+	onObserverError?: ObserverErrorHandler | undefined;
 	inTransaction?: boolean | undefined;
 };
 
@@ -134,6 +138,7 @@ export type RunMutationWithHooksOptions<
 	readonly intent: TIntent;
 	readonly hookStore?: HookStore | undefined;
 	readonly onHookError?: HookErrorHandler | undefined;
+	readonly onObserverError?: ObserverErrorHandler | undefined;
 	readonly schemaName?: string | undefined;
 	readonly inTransaction?: boolean | undefined;
 	readonly prepare: (intent: TIntent) => PreparedMutationExecution<T>;
@@ -194,14 +199,33 @@ async function runMutationWithHooksInner<
 			);
 		}
 
-		const prepared = opts.prepare(intent);
+		const executedIntent = intent;
+		const prepared = opts.prepare(executedIntent);
 		const duration = Date.now() - startTime;
 		const execution = await prepared.execute();
 		let result = execution.result;
 
-		if (store.afterMutation.length > 0) {
+		if (
+			store.afterMutationObservers.length > 0 ||
+			store.afterMutation.length > 0
+		) {
+			const { cardinality: executedCardinality, data: executedData } =
+				extractMutationIntentData(executedIntent);
 			const afterCtx: MutationHookContext = Object.freeze({
-				...ctx,
+				table: executedIntent.table,
+				operation: executedIntent.type as MutationOperation,
+				intent: executedIntent,
+				cardinality: executedCardinality,
+				...(executedData !== undefined ? { data: executedData } : {}),
+				...(opts.schemaName !== undefined
+					? { schemaName: opts.schemaName }
+					: {}),
+				...(opts.inTransaction !== undefined
+					? { inTransaction: opts.inTransaction }
+					: {}),
+				...(ctx.correlationId !== undefined
+					? { correlationId: ctx.correlationId }
+					: {}),
 				sql: prepared.sql,
 				parameters: prepared.parameters,
 				duration,
@@ -209,10 +233,19 @@ async function runMutationWithHooksInner<
 					? { affectedRows: execution.affectedRows }
 					: {}),
 			});
+			const afterMutationResult = [
+				...(prepared.getAfterMutationResult?.(execution.result) ?? []),
+			];
+			await runAfterMutationObservers(
+				store.afterMutationObservers,
+				afterCtx,
+				afterMutationResult,
+				opts.onObserverError,
+			);
 			const transformed = await runAfterMutationHooks(
 				store.afterMutation,
 				afterCtx,
-				[...(prepared.getAfterMutationResult?.(execution.result) ?? [])],
+				afterMutationResult,
 				opts.onHookError,
 			);
 			if (prepared.returnAfterMutationResult) {
@@ -233,7 +266,7 @@ async function runMutationWithHooksInner<
 			const errorCtx = {
 				table: opts.table,
 				operation,
-				error: error as Error,
+				error: normalizeHookError(error),
 				intent,
 				phase: 'beforeMutation' as const,
 				...(opts.schemaName !== undefined
@@ -305,6 +338,7 @@ abstract class MutationBuilderBase<
 	protected readonly returningColumns: readonly string[] | undefined;
 	protected readonly hookStore: HookStore | undefined;
 	protected readonly onHookError: HookErrorHandler | undefined;
+	protected readonly onObserverError: ObserverErrorHandler | undefined;
 	protected readonly inTransaction: boolean | undefined;
 
 	protected constructor(
@@ -319,6 +353,7 @@ abstract class MutationBuilderBase<
 		this.returningColumns = opts.returning;
 		this.hookStore = opts.hookStore;
 		this.onHookError = opts.onHookError;
+		this.onObserverError = opts.onObserverError;
 		this.inTransaction = opts.inTransaction;
 	}
 
@@ -343,6 +378,7 @@ abstract class MutationBuilderBase<
 			schemaName: this.schemaName,
 			hookStore: this.hookStore,
 			onHookError: this.onHookError,
+			onObserverError: this.onObserverError,
 			inTransaction: this.inTransaction,
 		};
 	}
@@ -401,6 +437,7 @@ abstract class MutationBuilderBase<
 			intent,
 			hookStore: this.hookStore,
 			onHookError: this.onHookError,
+			onObserverError: this.onObserverError,
 			schemaName: this.schemaName,
 			inTransaction: this.inTransaction,
 			prepare: (preparedIntent) =>
@@ -425,6 +462,7 @@ abstract class MutationBuilderBase<
 			intent,
 			hookStore: this.hookStore,
 			onHookError: this.onHookError,
+			onObserverError: this.onObserverError,
 			schemaName: this.schemaName,
 			inTransaction: this.inTransaction,
 			prepare: (preparedIntent) =>

@@ -393,9 +393,8 @@ Hooks fire inside transactions. `QueryHookContext` and `MutationHookContext` bot
 const { createHookManager } = await import('@dbsp/core');
 
 const seenScopes: Array<boolean | undefined> = [];
-const hooks = createHookManager().afterMutation((ctx, results) => {
+const hooks = createHookManager().observeAfterMutation((ctx, _results) => {
   seenScopes.push(ctx.inTransaction);
-  return results;
 });
 
 const hookedOrm = createOrm({ schema: db, adapter, hooks });
@@ -429,7 +428,7 @@ if (seenScopes[0] !== true || seenScopes[1] !== undefined) {
 }
 ```
 
-For anything that must happen only after a successful commit — publishing an event, sending a mail — do it after `await orm.transaction(...)` returns. A hook cannot know whether the commit will succeed.
+For anything that must happen only after a successful commit — publishing an event, sending a mail, or writing an audit trail — do it after `await orm.transaction(...)` returns. A hook cannot know whether the commit will succeed; use a database trigger or transactional outbox when the audit record must be atomic with the write.
 
 ## Compile-only mode
 

@@ -164,7 +164,9 @@ export {
 // E17b: Query/Mutation Hooks
 export {
 	type AfterMutationHook,
+	type AfterMutationObserver,
 	type AfterQueryHook,
+	type AfterQueryObserver,
 	type BeforeMutationHook,
 	type BeforeQueryHook,
 	createHookManager,
@@ -173,6 +175,7 @@ export {
 	type HookManager,
 	type MutationHookContext,
 	type MutationOperation,
+	type ObserverErrorHandler,
 	type OnErrorHook,
 	type QueryHookContext,
 	type QueryResultType,

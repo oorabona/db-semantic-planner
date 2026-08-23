@@ -600,10 +600,8 @@ export interface ExecutingAdapter extends BaseAdapter {
 	execute<T>(query: CompiledQuery<T>): Promise<T[]>;
 
 	/** Execute a compiled query and return the rows plus result metadata, when the adapter supports it. */
-	executeWithMeta?<T = unknown>(
-		query: CompiledQuery<T>,
-	): Promise<{
-		readonly rows: T[];
+	executeWithMeta?(query: CompiledQuery): Promise<{
+		readonly rows: readonly unknown[];
 		readonly rowCount: number;
 		readonly command?: string;
 	}>;

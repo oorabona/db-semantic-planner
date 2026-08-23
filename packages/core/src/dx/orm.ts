@@ -10,6 +10,7 @@ import {
 	getHookStore,
 	type HookErrorHandler,
 	type HookManager,
+	type ObserverErrorHandler,
 } from './hooks.js';
 import type { WarningCategory } from './logger.js';
 import { negotiateFeatures } from './negotiate-features.js';
@@ -134,6 +135,12 @@ export interface SimplifiedOrmOptions<
 	readonly onHookError?: HookErrorHandler;
 
 	/**
+	 * Non-fatal diagnostic sink for observer failures and snapshot skips.
+	 * Its return value is ignored and it can never abort query or mutation work.
+	 */
+	readonly onObserverError?: ObserverErrorHandler;
+
+	/**
 	 * Behavior when schema uses features the adapter doesn't support.
 	 * Default: 'warning' (emit warning + skip).
 	 * Use 'error' for strict environments, 'ignore' to suppress.
@@ -230,6 +237,7 @@ export function createOrm<T extends SchemaDefinition>(
 		planOptions: globalPlanOptions,
 		hooks: hookManager,
 		onHookError,
+		onObserverError,
 		unsupportedFeatures,
 		suppressDxWarnings,
 	} = options;
@@ -325,5 +333,6 @@ export function createOrm<T extends SchemaDefinition>(
 		onHookError,
 		undefined, // inTransaction
 		tablesProxy,
+		onObserverError,
 	) as unknown as OrmInstance<InferDB<T>>;
 }
