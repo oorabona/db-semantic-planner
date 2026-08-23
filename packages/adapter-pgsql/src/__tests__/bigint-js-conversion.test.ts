@@ -332,7 +332,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		const rows = await orm
 			.insert('events')
 			.values({ id: 'event-1', sequence: 1n })
-			.returning<{ sequence: bigint }>(['sequence'])
+			.returning(['sequence'])
 			.execute();
 
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);

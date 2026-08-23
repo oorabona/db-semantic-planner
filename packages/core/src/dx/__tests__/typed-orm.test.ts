@@ -12,7 +12,8 @@
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { normalizeSQL } from '../../sql-utils.js';
-import { eq } from '../filters.js';
+import { ref as expressionRef, op } from '../expressions.js';
+import { eq, sql } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
 
@@ -22,16 +23,22 @@ const db = schema({
 		name: 'string',
 		email: 'string',
 		active: 'boolean',
+		createdAt: { type: 'timestamp', default: 'now()' },
 	},
 	posts: {
 		id: { type: 'integer', primaryKey: true },
 		title: 'string',
+		published: 'boolean',
 		authorId: ref('users'),
 	},
 });
 
 const adapter = createPgsqlCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
+
+function skipRuntimeTypeCanaries(): boolean {
+	return (import.meta as { vitest?: unknown }).vitest === undefined;
+}
 
 describe('DX-040-SURFACE: orm.tables', () => {
 	it('SC-01: orm.tables returns table ref objects', () => {
@@ -197,24 +204,183 @@ describe('DX-040-SURFACE: typed mutations via TableRef', () => {
 		orm.select('users');
 	});
 
-	it('SC-13: string-based insert() is not on public OrmInstance type', () => {
-		// @ts-expect-error -- insert() is not on public OrmInstance
+	it('SC-13: string-keyed insert() is on public OrmInstance type', () => {
 		orm.insert('users');
 	});
 
-	it('SC-14: string-based update() is not on public OrmInstance type', () => {
-		// @ts-expect-error -- update() is not on public OrmInstance
+	it('SC-14: string-keyed update() is on public OrmInstance type', () => {
 		orm.update('users');
 	});
 
-	it('SC-15: string-based delete() is not on public OrmInstance type', () => {
-		// @ts-expect-error -- delete() is not on public OrmInstance
+	it('SC-15: string-keyed delete() is on public OrmInstance type', () => {
 		orm.delete('users');
 	});
 
-	it('SC-16: string-based upsert() is not on public OrmInstance type', () => {
-		// @ts-expect-error -- upsert() is not on public OrmInstance
+	it('SC-16: string-keyed upsert() is on public OrmInstance type', () => {
 		orm.upsert('users');
+	});
+
+	it('SC-17: guide string mutations preserve their SQL', () => {
+		const insert = orm
+			.insert('users')
+			.values({ name: 'Alice', email: 'alice@example.com' })
+			.returning(['id', 'name', 'createdAt'])
+			.dump();
+		const update = orm
+			.update('users')
+			.set({ active: false })
+			.where(eq('email', 'alice@example.com'))
+			.dump();
+		const remove = orm.delete('posts').where(eq('published', false)).dump();
+		const upsert = orm
+			.upsert('users')
+			.values({ name: 'Alice', email: 'alice@example.com', active: true })
+			.onConflict(['email'])
+			.doUpdate()
+			.dump();
+
+		expect(normalizeSQL(insert.sql)).toBe(
+			'insert into users (name, email) values ($1, $2) returning users.id as id, users.name as name, users."createdat" as "createdat"',
+		);
+		expect(normalizeSQL(update.sql)).toBe(
+			'update users set active = $1 where users.email = $2',
+		);
+		expect(normalizeSQL(remove.sql)).toBe(
+			'delete from posts where posts.published = $1',
+		);
+		expect(normalizeSQL(upsert.sql)).toBe(
+			'insert into users (name, email, active) values ($1, $2, $3) on conflict (email) do update set name = excluded.name, active = excluded.active',
+		);
+	});
+
+	it('SC-18: set() and doUpdate() accept and dump raw SQL expressions', () => {
+		const update = orm
+			.update('users')
+			.set({ createdAt: sql('now()') })
+			.where(eq('id', 1))
+			.dump();
+		const upsert = orm
+			.upsert('users')
+			.values({ id: 1, name: 'Alice', email: 'alice@example.com' })
+			.onConflict(['id'])
+			.doUpdate({ createdAt: sql('now()') })
+			.dump();
+
+		expect(normalizeSQL(update.sql)).toContain('"createdat" = now()');
+		expect(normalizeSQL(upsert.sql)).toContain('"createdat" = now()');
+	});
+
+	it('SC-19: string-keyed mutations reject unknown tables and invalid row contracts', () => {
+		if (skipRuntimeTypeCanaries()) {
+			// @ts-expect-error -- only schema table names are accepted
+			orm.insert('missing');
+			// @ts-expect-error -- only schema table names are accepted
+			orm.update('missing');
+			// @ts-expect-error -- only schema table names are accepted
+			orm.delete('missing');
+			// @ts-expect-error -- only schema table names are accepted
+			orm.upsert('missing');
+			// @ts-expect-error -- values keys are constrained to users columns
+			orm.insert('users').values({ unknown: true });
+			// @ts-expect-error -- values use the column value type
+			orm.insert('users').values({ active: 'true' });
+			// @ts-expect-error -- set keys are constrained to users columns
+			orm.update('users').set({ unknown: true });
+			// @ts-expect-error -- set values use the column value type
+			orm.update('users').set({ active: 'true' });
+			// @ts-expect-error -- batch values keys are constrained to users columns
+			orm.update('users').batchSet('id', [{ unknown: true }]);
+			// @ts-expect-error -- batch values use the column value type
+			orm.update('users').batchSet('id', [{ active: 'true' }]);
+			// @ts-expect-error -- returned columns are constrained to users columns
+			orm.insert('users').returning(['unknown']);
+			// @ts-expect-error -- conflict keys are constrained to users columns
+			orm.upsert('users').onConflict(['unknown']);
+			// @ts-expect-error -- upsert values keys are constrained to users columns
+			orm.upsert('users').values({ unknown: true });
+			// @ts-expect-error -- upsert values use the column value type
+			orm.upsert('users').values({ active: 'true' });
+			// @ts-expect-error -- conflict update keys are constrained to users columns
+			orm.upsert('users').doUpdate({ unknown: true });
+			// @ts-expect-error -- conflict update values use the column value type
+			orm.upsert('users').doUpdate({ active: 'true' });
+
+			const extraUpdateKey = { active: false, isAdmin: true };
+			// @ts-expect-error -- exact mutation payloads reject extra variable keys
+			orm.update('users').set(extraUpdateKey);
+			const extraInsertKey = { name: 'Alice', isAdmin: true };
+			// @ts-expect-error -- exact mutation payloads reject extra variable keys
+			orm.insert('users').values(extraInsertKey);
+			const extraInsertRows = [{ name: 'Alice', isAdmin: true }];
+			// @ts-expect-error -- exact mutation payloads reject extra keys in array rows
+			orm.insert('users').values(extraInsertRows);
+			const extraBatchKey = [{ active: false, isAdmin: true }];
+			// @ts-expect-error -- exact mutation payloads reject extra keys in array rows
+			orm.update('users').batchSet('id', extraBatchKey);
+			// @ts-expect-error -- batch rows remain scalar-only; raw SQL has no batch semantics
+			orm.update('users').batchSet('id', [{ createdAt: sql('now()') }]);
+			const extraUpsertKey = { active: false, isAdmin: true };
+			// @ts-expect-error -- exact mutation payloads reject extra variable keys
+			orm.upsert('users').doUpdate(extraUpsertKey);
+			const extraUpsertRows = [{ name: 'Alice', isAdmin: true }];
+			// @ts-expect-error -- exact mutation payloads reject extra keys in array rows
+			orm.upsert('users').values(extraUpsertRows);
+		}
+	});
+
+	it('SC-20: union table mutations only accept shared column keys', () => {
+		if (skipRuntimeTypeCanaries()) {
+			const table: 'users' | 'posts' = Math.random() > 0.5 ? 'users' : 'posts';
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.insert(table).returning(['email']);
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.update(table).returning(['email']);
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.delete(table).returning(['email']);
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.upsert(table).returning(['email']);
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.upsert(table).onConflict(['email']);
+			// @ts-expect-error -- email is not a column shared by every union member
+			orm.update(table).batchSet('email', [{ id: 1 }]);
+		}
+	});
+
+	it('SC-21: TableRef mutations reject invalid row contracts', () => {
+		if (skipRuntimeTypeCanaries()) {
+			const { users } = orm.tables;
+			// @ts-expect-error -- values keys are constrained to users columns
+			orm.into(users).values({ unknown: true });
+			// @ts-expect-error -- values use the column value type
+			orm.into(users).values({ active: 'true' });
+			// @ts-expect-error -- set keys are constrained to users columns
+			orm.modify(users).set({ unknown: true });
+			// @ts-expect-error -- set values use the column value type
+			orm.modify(users).set({ active: 'true' });
+			// @ts-expect-error -- batch values keys are constrained to users columns
+			orm.modify(users).batchSet('id', [{ unknown: true }]);
+			// @ts-expect-error -- batch values use the column value type
+			orm.modify(users).batchSet('id', [{ active: 'true' }]);
+			// @ts-expect-error -- returned columns are constrained to users columns
+			orm.into(users).returning(['unknown']);
+			// @ts-expect-error -- conflict keys are constrained to users columns
+			orm.upsertInto(users).onConflict(['unknown']);
+			// @ts-expect-error -- upsert values keys are constrained to users columns
+			orm.upsertInto(users).values({ unknown: true });
+			// @ts-expect-error -- upsert values use the column value type
+			orm.upsertInto(users).values({ active: 'true' });
+			// @ts-expect-error -- conflict update keys are constrained to users columns
+			orm.upsertInto(users).doUpdate({ unknown: true });
+			// @ts-expect-error -- conflict update values use the column value type
+			orm.upsertInto(users).doUpdate({ active: 'true' });
+		}
+	});
+
+	it('SC-22: mutation where() accepts PredicateRef', () => {
+		const predicate = op('=', expressionRef('active'), true);
+		const builder = orm.update('users').set({ active: false }).where(predicate);
+
+		expect(builder).toBeDefined();
 	});
 });
 
@@ -258,10 +424,16 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 	it('SC-17: from(users).all() infers exact row type without cast', () => {
 		const { users } = orm.tables;
 		const query = orm.from(users);
-		// Must resolve to { id: number; name: string; email: string; active: boolean }[]
+		// Must resolve to the full users row without any cast.
 		// without any `as unknown as T` cast
 		expectTypeOf(query.all).returns.resolves.toEqualTypeOf<
-			{ id: number; name: string; email: string; active: boolean }[]
+			{
+				id: number;
+				name: string;
+				email: string;
+				active: boolean;
+				createdAt: Date;
+			}[]
 		>();
 	});
 
@@ -270,7 +442,13 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 		const query = orm.from(users).columns(['id', 'name']);
 		expectTypeOf(query.all).returns.resolves.toEqualTypeOf<
 			Pick<
-				{ id: number; name: string; email: string; active: boolean },
+				{
+					id: number;
+					name: string;
+					email: string;
+					active: boolean;
+					createdAt: Date;
+				},
 				'id' | 'name'
 			>[]
 		>();

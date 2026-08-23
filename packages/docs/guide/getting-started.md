@@ -251,6 +251,11 @@ orm.upsert('users')
 `orm.update()` and `orm.delete()` **require** a `.where()` clause. Calling `.execute()` without one throws an error. Use `orm.updateAll()` or `orm.deleteAll()` for intentional full-table operations.
 :::
 
+`values()`, `set()`, and `doUpdate()` check column keys and value types. Insert
+requiredness is still enforced by the database because generated/default-column
+metadata is not represented in the public row type; empty rows are rejected
+before SQL compilation.
+
 ::: tip Try it
 Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`
 :::
@@ -360,4 +365,3 @@ For derivable-builder loops, cursor vs offset trade-offs, streaming, and common 
 - **Recursive CTEs** — tree traversal with ancestors/descendants: [Recursive CTEs](./recursive-cte)
 - **Full API reference** — complete method listing with all options: [API Reference](/api/)
 - **Runnable examples** — eight realistic schemas (blog, ecommerce, iam, hierarchy, scheduling…) with `.dbsp` sessions and `.assert.dbsp` assertions: [examples/](https://github.com/oorabona/db-semantic-planner/tree/main/examples)
-

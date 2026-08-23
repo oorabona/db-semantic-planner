@@ -846,35 +846,43 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Mutation Methods (DX-010)
 		// =====================================================================
 
-		insert(table: string): InsertBuilder {
+		insert<K extends keyof DB & string>(table: K): InsertBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new InsertBuilder({ table, ...mutationOpts });
+			return new InsertBuilder<DB[K]>({ table, ...mutationOpts });
 		},
 
-		update(table: string): UpdateBuilder {
+		update<K extends keyof DB & string>(table: K): UpdateBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new UpdateBuilder({ table, ...mutationOpts });
+			return new UpdateBuilder<DB[K]>({ table, ...mutationOpts });
 		},
 
-		delete(table: string): DeleteBuilder {
+		delete<K extends keyof DB & string>(table: K): DeleteBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new DeleteBuilder({ table, ...mutationOpts });
+			return new DeleteBuilder<DB[K]>({ table, ...mutationOpts });
 		},
 
-		updateAll(table: string): UpdateBuilder {
+		updateAll<K extends keyof DB & string>(table: K): UpdateBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new UpdateBuilder({ table, allowAll: true, ...mutationOpts });
+			return new UpdateBuilder<DB[K]>({
+				table,
+				allowAll: true,
+				...mutationOpts,
+			});
 		},
 
-		deleteAll(table: string): DeleteBuilder {
+		deleteAll<K extends keyof DB & string>(table: K): DeleteBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new DeleteBuilder({ table, allowAll: true, ...mutationOpts });
+			return new DeleteBuilder<DB[K]>({
+				table,
+				allowAll: true,
+				...mutationOpts,
+			});
 		},
 
 		// DX-026: Upsert support
-		upsert(table: string): UpsertBuilder {
+		upsert<K extends keyof DB & string>(table: K): UpsertBuilder<DB[K]> {
 			validateIdentifier(table, 'table');
-			return new UpsertBuilder({ table, ...mutationOpts });
+			return new UpsertBuilder<DB[K]>({ table, ...mutationOpts });
 		},
 
 		// =====================================================================

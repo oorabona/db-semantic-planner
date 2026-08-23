@@ -1,29 +1,28 @@
-/** Test-only compatibility boundary for #441. */
-import type {
-	DeleteBuilder,
-	InsertBuilder,
-	OrmInstance,
-	UpdateBuilder,
-	UpsertBuilder,
-} from '@dbsp/core';
+/** Test-only positive compatibility assertion for #449. */
+import type { OrmInstance } from '@dbsp/core';
 
-type StringMutationEntrypoints = {
-	insert(table: string): InsertBuilder;
-	update(table: string): UpdateBuilder;
-	delete(table: string): DeleteBuilder;
-	upsert(table: string): UpsertBuilder;
+type KeyedMutationEntrypoints = {
+	insert(table: 'users'): unknown;
+	update(table: 'users'): unknown;
+	delete(table: 'users'): unknown;
+	upsert(table: 'users'): unknown;
 };
 
-declare const orm: OrmInstance;
+declare const orm: OrmInstance<{ users: { id: number } }>;
 export function verifyCompatibilityCanary(): void {
-	// @ts-expect-error #441: public OrmInstance omits string mutation entry points; remove this boundary when keyed public mutations are designed.
-	const _canary: StringMutationEntrypoints = orm;
+	const _canary: KeyedMutationEntrypoints = orm;
 	void _canary;
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.insert('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.update('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.delete('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.upsert('missing');
 }
 
-/** Test-only view of the existing runtime entry points. */
-export function stringMutationOrm<T extends OrmInstance>(
-	value: T,
-): T & StringMutationEntrypoints {
-	return value as T & StringMutationEntrypoints;
+/** @deprecated #449 makes the public mutation entry points schema-keyed. */
+export function stringMutationOrm<T extends OrmInstance>(value: T): T {
+	return value;
 }

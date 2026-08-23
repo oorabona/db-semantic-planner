@@ -963,7 +963,7 @@ export interface SqlRawExpression {
  * ```typescript
  * orm.upsert('files')
  *   .values({ id: 1, name: 'test' })
- *   .onConflict({ columns: ['id'] })
+ *   .onConflict(['id'])
  *   .doUpdate({ last_parsed: sql('now()'), count: sql('excluded.count + 1') })
  *   .execute();
  *

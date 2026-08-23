@@ -172,11 +172,12 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  *   - `orm.select(name)` - concise table-name form
  *   - `orm.from(table)` - TableRef form with column-level types
  *
- * Mutations use the typed TableRef-based methods:
- *   - `orm.into(table)` - INSERT
- *   - `orm.modify(table)` - UPDATE
- *   - `orm.removeFrom(table)` - DELETE
- *   - `orm.upsertInto(table)` - UPSERT (INSERT ... ON CONFLICT)
+ * Mutations have two schema-keyed surfaces:
+ *   - `orm.insert(name)`, `orm.update(name)`, `orm.delete(name)`, and
+ *     `orm.upsert(name)` are concise when the table name is already available.
+ *   - `orm.into(table)`, `orm.modify(table)`, `orm.removeFrom(table)`, and
+ *     `orm.upsertInto(table)` take a TableRef and fit flows that also use its
+ *     column references for typed filters and queries.
  *
  * @typeParam DB - Database row map type.
  *   Keys are table names, values are row types.
@@ -302,6 +303,18 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	select<K extends keyof DB & string, TResult = DB[K]>(
 		from: K,
 	): QueryBuilder<TResult>;
+
+	/** Start a type-safe INSERT operation from a schema table name. */
+	insert<K extends keyof DB & string>(table: K): InsertBuilder<DB[K]>;
+
+	/** Start a type-safe UPDATE operation from a schema table name. */
+	update<K extends keyof DB & string>(table: K): UpdateBuilder<DB[K]>;
+
+	/** Start a type-safe DELETE operation from a schema table name. */
+	delete<K extends keyof DB & string>(table: K): DeleteBuilder<DB[K]>;
+
+	/** Start a type-safe UPSERT operation from a schema table name. */
+	upsert<K extends keyof DB & string>(table: K): UpsertBuilder<DB[K]>;
 
 	/**
 	 * Start building a SELECT query from a typed TableRef.
@@ -551,7 +564,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *   .execute();
 	 * ```
 	 */
-	updateAll(table: string): UpdateBuilder;
+	updateAll<K extends keyof DB & string>(table: K): UpdateBuilder<DB[K]>;
 
 	/**
 	 * Start building a DELETE operation that affects all rows.
@@ -565,7 +578,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * await orm.deleteAll('tempData').execute();
 	 * ```
 	 */
-	deleteAll(table: string): DeleteBuilder;
+	deleteAll<K extends keyof DB & string>(table: K): DeleteBuilder<DB[K]>;
 
 	// =========================================================================
 	// Transaction Methods (DX-025)
@@ -792,32 +805,4 @@ export interface OrmInstanceInternal<DB = Record<string, unknown>>
 	select<K extends keyof DB & string, TResult = DB[K]>(
 		from: K,
 	): QueryBuilder<TResult>;
-
-	/**
-	 * Start building an INSERT operation (string-based API).
-	 *
-	 * @internal Use `orm.into(orm.tables.tableName)` for type-safe inserts.
-	 */
-	insert(table: string): InsertBuilder;
-
-	/**
-	 * Start building an UPDATE operation (string-based API).
-	 *
-	 * @internal Use `orm.modify(orm.tables.tableName)` for type-safe updates.
-	 */
-	update(table: string): UpdateBuilder;
-
-	/**
-	 * Start building a DELETE operation (string-based API).
-	 *
-	 * @internal Use `orm.removeFrom(orm.tables.tableName)` for type-safe deletes.
-	 */
-	delete(table: string): DeleteBuilder;
-
-	/**
-	 * Start building an UPSERT operation (string-based API).
-	 *
-	 * @internal Use `orm.upsertInto(orm.tables.tableName)` for type-safe upserts.
-	 */
-	upsert(table: string): UpsertBuilder;
 }

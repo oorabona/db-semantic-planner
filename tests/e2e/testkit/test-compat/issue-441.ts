@@ -1,21 +1,27 @@
 /** Test-only compatibility boundary for #441. */
-import type { DeleteBuilder, OrmInstance, UpdateBuilder } from '@dbsp/core';
+import type { OrmInstance } from '@dbsp/core';
 
-type StringMutationEntrypoints = {
-	update(table: string): UpdateBuilder;
-	delete(table: string): DeleteBuilder;
+type KeyedMutationEntrypoints = {
+	insert(table: 'users'): unknown;
+	update(table: 'users'): unknown;
+	delete(table: 'users'): unknown;
+	upsert(table: 'users'): unknown;
 };
 
-type AssertAssignable<T extends U, U> = T;
+declare const orm: OrmInstance<{ users: { id: number } }>;
+export function verifyCompatibilityCanary(): void {
+	const _canary: KeyedMutationEntrypoints = orm;
+	void _canary;
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.insert('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.update('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.delete('missing');
+	// @ts-expect-error keyed mutation entry points reject unknown tables
+	orm.upsert('missing');
+}
 
-type CompatibilityCanary = AssertAssignable<
-	// @ts-expect-error #441: public OrmInstance omits runtime string mutation entry points.
-	OrmInstance,
-	StringMutationEntrypoints
->;
-
-export function stringMutationOrm<T extends OrmInstance>(
-	value: T,
-): T & StringMutationEntrypoints {
-	return value as T & StringMutationEntrypoints;
+export function stringMutationOrm<T extends OrmInstance>(value: T): T {
+	return value;
 }

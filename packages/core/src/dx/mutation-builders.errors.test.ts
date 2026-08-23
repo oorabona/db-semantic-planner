@@ -20,6 +20,7 @@ import { createHookManager } from './hooks.js';
 import {
 	DeleteBuilder,
 	InsertBuilder,
+	type Updateable,
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
@@ -89,12 +90,113 @@ describe('InsertBuilder — error paths', () => {
 		);
 	});
 
+	it('rejects an empty insert row before it can compile zero-column VALUES', () => {
+		expect(() => orm.insert('users').values({})).toThrow(InvalidOperationError);
+		expect(() => orm.insert('users').values({})).toThrow(
+			/insert values\(\) requires every row to contain at least one column/,
+		);
+	});
+
+	it('rejects null, primitive, and nested-array insert rows with InvalidOperationError', () => {
+		expect(() => orm.insert('users').values([null] as never)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.insert('users').values('x' as never)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.insert('users').values([[]] as never)).toThrow(
+			InvalidOperationError,
+		);
+	});
+
+	it('accepts class instances as insert rows', () => {
+		class UserInput {
+			name = 'Alice';
+		}
+
+		expect(() =>
+			orm.insert('users').values(new UserInput() as never),
+		).not.toThrow();
+	});
+
 	it('should throw ExecutionError on dump() without adapter', () => {
 		const builder = new InsertBuilder({
 			...baseOptsNoAdapter(),
 			values: [{ name: 'Alice' }],
 		});
 		expect(() => builder.dump()).toThrow(ExecutionError);
+	});
+
+	it('rejects widened payload columns outside the model before they reach SQL', () => {
+		type User = {
+			id: number;
+			name: string;
+			email: string;
+			active: boolean;
+		};
+		const externalPayload: unknown = { active: false, isAdmin: true };
+		const widened = externalPayload as Updateable<User>;
+
+		expect(() => orm.update('users').set(widened)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.update('users').set(widened)).toThrow(/isAdmin/);
+	});
+
+	it('rejects unmodeled columns from every mutation payload entry point', () => {
+		const payload = { name: 'Alice', isAdmin: true } as never;
+		expect(() => orm.insert('users').values(payload)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.upsert('users').values(payload)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.update('users').set(payload)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.update('users').batchSet('id', [payload])).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.upsert('users').doUpdate(payload)).toThrow(
+			InvalidOperationError,
+		);
+	});
+
+	it('validates direct-model ORM payloads when the compiler resolves the table', () => {
+		const directModelOrm = createOrm({
+			model: testSchema.model,
+			adapter: createMockAdapter(),
+		}) as unknown as OrmInstanceInternal;
+
+		expect(() =>
+			directModelOrm.update('users').set({ name: 'Alice' }),
+		).not.toThrow();
+		expect(() =>
+			directModelOrm
+				.update('users')
+				.set({ name: 'Alice', isAdmin: true } as never),
+		).toThrow(InvalidOperationError);
+		expect(() =>
+			directModelOrm
+				.update('users')
+				.set({ name: 'Alice', isAdmin: true } as never),
+		).toThrow(
+			"Invalid update: update payload contains columns not present in model for table 'users': isAdmin",
+		);
+	});
+
+	it('skips payload-column validation when the ORM model cannot resolve the table', () => {
+		const modelLessOrm = createOrm({
+			model: { getTable: () => undefined } as any,
+			adapter: createMockAdapter(),
+		}) as unknown as OrmInstanceInternal;
+
+		expect(() =>
+			modelLessOrm.update('users').set({ id: 1, name: 'Alice' }),
+		).not.toThrow();
+		expect(() =>
+			modelLessOrm.update('users').set({ isAdmin: true } as never),
+		).not.toThrow();
 	});
 
 	it('should throw ExecutionError on execute() without adapter', async () => {
@@ -276,6 +378,33 @@ describe('UpsertBuilder — error paths', () => {
 		expect(() =>
 			orm.upsert('users').values([]).onConflict(['id']).doNothing().dump(),
 		).toThrow(/No values provided for upsert/);
+	});
+
+	it('rejects an empty upsert row before it can compile zero-column VALUES', () => {
+		expect(() => orm.upsert('users').values({})).toThrow(InvalidOperationError);
+		expect(() => orm.upsert('users').values({})).toThrow(
+			/upsert values\(\) requires every row to contain at least one column/,
+		);
+	});
+
+	it('rejects null and primitive upsert rows with InvalidOperationError', () => {
+		expect(() => orm.upsert('users').values([null] as never)).toThrow(
+			InvalidOperationError,
+		);
+		expect(() => orm.upsert('users').values('x' as never)).toThrow(
+			InvalidOperationError,
+		);
+	});
+
+	it.each([
+		null,
+		0,
+		false,
+		'',
+	])('doUpdate rejects explicit invalid payload %j instead of selecting auto-update', (set) => {
+		expect(() => orm.upsert('users').doUpdate(set as never)).toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('should throw ExecutionError on dump() without adapter', () => {
