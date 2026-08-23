@@ -14,7 +14,14 @@ import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { getColumnName } from './column-utils.js';
+import { InvalidOperationError } from './errors.js';
 import { buildExistsIntent } from './exists-intent.js';
+import {
+	hasPredicateRefDiscriminator,
+	isPredicateRef,
+	type PredicateRef,
+	predicateWhereIntent,
+} from './expressions.js';
 import { and } from './filters.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 import {
@@ -91,7 +98,7 @@ export interface FromBuilder<
 	 * Add a WHERE condition.
 	 * Multiple where() calls are combined with AND.
 	 */
-	where(condition: WhereIntent): FromBuilder<TTable, TResult>;
+	where(condition: WhereIntent | PredicateRef): FromBuilder<TTable, TResult>;
 
 	/**
 	 * Add ORDER BY clause.
@@ -200,8 +207,29 @@ class FromBuilderImpl<
 		return copy;
 	}
 
-	where(condition: WhereIntent): FromBuilder<TTable, TResult> {
+	where(condition: WhereIntent | PredicateRef): FromBuilder<TTable, TResult> {
 		const copy = this.clone();
+		if (isPredicateRef(condition)) {
+			copy.whereConditions.push(predicateWhereIntent(condition));
+			return copy;
+		}
+		if (hasPredicateRefDiscriminator(condition)) {
+			throw new InvalidOperationError(
+				'where',
+				"predicate belongs to another @dbsp/core copy; reconstruct it with this copy's predicate factories",
+			);
+		}
+		if (
+			typeof condition === 'object' &&
+			condition !== null &&
+			'__expr' in condition &&
+			condition.__expr === true
+		) {
+			throw new InvalidOperationError(
+				'where',
+				'expected a PredicateRef; use unsafeAsPredicate() to assert a deliberate boolean expression',
+			);
+		}
 		copy.whereConditions.push(condition);
 		return copy;
 	}

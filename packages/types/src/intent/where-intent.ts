@@ -5,7 +5,11 @@
 
 import type { ColumnListInput } from '../column-list.js';
 import type { RangeValue } from '../shared/utils.js';
-import type { ExpressionIntent, ParamIntent } from './expression-intent.js';
+import type {
+	ExpressionIntent,
+	ParamIntent,
+	StandaloneWhereExpressionIntent,
+} from './expression-intent.js';
 import type { ComparisonOperator, NullOperator } from './operators.js';
 import type { QueryIntent } from './query-intent.js';
 import type { RecursiveExistsOptions } from './recursive-types.js';
@@ -411,13 +415,21 @@ export interface WhereJsonExistsIntent {
 	readonly key: string | ParamIntent;
 }
 
-/** WHERE clause using a custom expression with comparison */
-export interface WhereExpressionIntent {
-	readonly kind: 'expression';
-	readonly expr: ExpressionIntent;
-	readonly operator: ComparisonOperator;
-	readonly value: unknown;
-}
+/** WHERE clause using a custom expression, optionally compared to a value. */
+export type WhereExpressionIntent =
+	| {
+			readonly kind: 'expression';
+			readonly expr: ExpressionIntent;
+			readonly operator: ComparisonOperator;
+			readonly value: unknown;
+	  }
+	| {
+			readonly kind: 'expression';
+			readonly expr: StandaloneWhereExpressionIntent;
+			/** A standalone expression that is already a SQL predicate. */
+			readonly operator?: never;
+			readonly value?: never;
+	  };
 
 /**
  * Where intent - filter conditions union type

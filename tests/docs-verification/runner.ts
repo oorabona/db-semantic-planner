@@ -96,6 +96,8 @@ import {
 \tisNotNull,
 \top,
 \tfn,
+\tboolFn,
+\tunsafeAsPredicate,
 \tcast,
 \tparam,
 \tliteral,

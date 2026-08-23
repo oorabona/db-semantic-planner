@@ -22,19 +22,28 @@ These map directly onto the PostgreSQL operators `&&`, `@>`, and `<@`, and they 
 
 ## API
 
-All three helpers share the same shape. Both the tuple form (returns an `ExpressionRef` for `.where()`) and the object form (returns a `WhereRangeIntent` for backward-compatible planner path) are supported.
+All three helpers share the same shape. Both the tuple form (returns an expression-shaped
+`PredicateExpressionRef` accepted by `.where()`) and the object form (returns a `WhereRangeIntent` for
+the backward-compatible planner path) are supported. Their symbolic operators (`&&`, `@>`,
+`<@`) remain in the narrow predicate operator set; logical compositions made with `op('AND',
+...)`, `op('OR', ...)`, or `op('NOT', ...)` are WHERE-only and should be passed directly to
+`.where()`.
 
 ### `rangeOverlaps(column, [lower, upper], rangeType?)`
 
 ```typescript
 // doctest: skip — API signature reference
-import { rangeOverlaps } from '@dbsp/core';
+import { rangeOverlaps, type PredicateExpressionRef, type RangeType } from '@dbsp/core';
 
-rangeOverlaps(
-  column: string,                       // column name on the table being queried
-  range: readonly [unknown, unknown],   // [lower, upper] tuple
-  rangeType?: RangeType,                // defaults to 'daterange'
-): ExpressionRef
+declare const column: string;
+declare const range: readonly [unknown, unknown];
+declare const rangeType: RangeType | undefined;
+
+const predicate: PredicateExpressionRef = rangeOverlaps(
+  column,    // column name on the table being queried
+  range,     // [lower, upper] tuple
+  rangeType, // defaults to 'daterange'
+);
 ```
 
 Compiles to `"column" && rangeType($1, $2)`.
@@ -94,7 +103,7 @@ __orm
   .select('bookings')
   .where(rangeOverlaps('period', ['2024-06-10', '2024-06-15']))
   .dump();
-// SQL: SELECT ... FROM "bookings" WHERE "period" && daterange($1, $2)
+// SQL: SELECT bookings.* FROM bookings WHERE period && daterange($1, $2)
 // params: ['2024-06-10', '2024-06-15']
 ```
 
@@ -121,7 +130,7 @@ __orm
   .select('pricingTiers')
   .where(rangeContains('validity', ['2024-06-15', '2024-06-16']))
   .dump();
-// SQL: SELECT ... FROM "pricingTiers" WHERE "validity" @> daterange($1, $2)
+// SQL: SELECT "pricingTiers".* FROM "pricingTiers" WHERE validity @> daterange($1, $2)
 ```
 
 ### Quarterly events
@@ -151,7 +160,7 @@ __orm
     ),
   )
   .dump();
-// SQL: SELECT ... FROM "events" WHERE "occursAt" <@ tstzrange($1, $2)
+// SQL: SELECT events.* FROM events WHERE "occursAt" <@ tstzrange($1, $2)
 ```
 
 ### Numeric range — pricing band
@@ -175,7 +184,7 @@ __orm
   .select('discounts')
   .where(rangeOverlaps('band', [50, 200], 'int4range'))
   .dump();
-// SQL: SELECT ... FROM "discounts" WHERE "band" && int4range($1, $2)
+// SQL: SELECT discounts.* FROM discounts WHERE band && int4range($1, $2)
 ```
 
 ---
@@ -224,6 +233,6 @@ This catches schema/usage drift at query construction time rather than producing
 
 ## Related
 
-- [Expression Primitives](./expression-primitives.md) — `op()`, `fn()`, `ref()` if you need a custom operator that range helpers don't cover (e.g. `&<` strict-left, `-|-` adjacent).
+- [Expression Primitives](./expression-primitives.md) — `op()`, `fn()`, `exprRef()` if you need a custom operator that range helpers don't cover (e.g. `&<` strict-left, `-|-` adjacent).
 - [DDL Helpers](./ddl-helpers.md) — create the GiST index that makes these queries fast.
 - [Joins](./joins.md) — combine range overlap checks with relation hydration.

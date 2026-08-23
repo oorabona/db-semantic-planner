@@ -9,7 +9,7 @@
  * to either support the same SQL or receive a capability error at runtime.
  */
 
-import type { ExpressionRef } from './expressions.js';
+import type { ExpressionRef, PredicateExpressionRef } from './expressions.js';
 import { array, fn, literal, namedArg, op, param, ref } from './expressions.js';
 
 // ============================================================================
@@ -90,7 +90,7 @@ export function fullTextSearch({
 	query,
 	fields,
 	tableAlias,
-}: FullTextSearchOptions): ExpressionRef {
+}: FullTextSearchOptions): PredicateExpressionRef {
 	const queryParam = param(query);
 	const boostExprs = fields.map(({ name: fieldName, boost: weight }) =>
 		fn(

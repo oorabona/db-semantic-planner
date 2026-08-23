@@ -24,7 +24,7 @@ import type {
 	WhereIntent,
 } from '../intent-ast.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
-import type { ExpressionRef } from './expressions.js';
+import type { ExpressionRef, PredicateRef } from './expressions.js';
 import type { DistinctField } from './filters.js';
 import type { WhereFilter } from './object-filter.js';
 import type {
@@ -533,7 +533,9 @@ export interface QueryBuilder<TResult = unknown> {
 	 * orm.select('users').where({ active: true, role: 'admin' })
 	 * ```
 	 */
-	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult>;
+	where(
+		condition: WhereIntent | PredicateRef | WhereFilter<TResult>,
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Add an explicit SQL JOIN clause to the query (non-hydrating, flat result).

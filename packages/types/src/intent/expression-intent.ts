@@ -282,6 +282,30 @@ export interface JsonPathExtractIntent {
 	readonly as?: string | undefined;
 }
 
+/**
+ * Operators whose result is a SQL predicate.
+ *
+ * This is deliberately closed: `op()` only brands these literal operators as
+ * predicates. Arbitrary operator strings remain ordinary expressions unless a
+ * caller explicitly opts into `unsafeAsPredicate()`.
+ */
+export type PredicateOperator =
+	| '='
+	| '!='
+	| '<>'
+	| '<'
+	| '<='
+	| '>'
+	| '>='
+	| 'AND'
+	| 'OR'
+	| 'NOT'
+	| '@@'
+	| '@@@'
+	| '&&'
+	| '<@'
+	| '@>';
+
 /** Custom binary operator expression (e.g., <=> for pgvector) */
 export interface CustomOpExpressionIntent {
 	readonly kind: 'customOp';
@@ -415,6 +439,28 @@ export type ExpressionIntent =
 	| NamedArgExpressionIntent
 	| StarExpressionIntent
 	| ArrayExpressionIntent;
+
+/**
+ * Expression intents that the standalone `WHERE` expression compiler accepts.
+ *
+ * This deliberately excludes SELECT-only and planner-only expression kinds.
+ * A standalone expression is used only when a local predicate wrapper derives
+ * `{ kind: 'expression', expr }` for `WHERE`.
+ */
+export type StandaloneWhereExpressionIntent =
+	| CustomOpExpressionIntent
+	| CustomFnExpressionIntent
+	| RefExpressionIntent
+	| ParamExpressionIntent
+	| CastExpressionIntent
+	| LiteralExpressionIntent
+	| UnaryExpressionIntent
+	| NamedArgExpressionIntent
+	| StarExpressionIntent
+	| ArrayExpressionIntent
+	| SubqueryExpressionIntent
+	| RelationColumnIntent
+	| CaseExpressionIntent;
 
 // ============================================================================
 // Window Functions (P3-A)

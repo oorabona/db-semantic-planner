@@ -34,12 +34,15 @@ import type {
 	LiteralExpressionIntent,
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
+	PredicateOperator,
 	RefExpressionIntent,
+	StandaloneWhereExpressionIntent,
 	StarExpressionIntent,
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
 	WhereIntent,
 } from '../intent-ast.js';
+import { InvalidOperationError } from './errors.js';
 import type { DistinctField } from './filters.js';
 import { isDistinctField as isDistinctFieldValue } from './filters.js';
 import type { ExpressionSpec } from './types.js';
@@ -84,6 +87,13 @@ export type ExprInput =
 	| number
 	| boolean
 	| readonly unknown[];
+
+export type { PredicateOperator } from '@dbsp/types';
+
+type BinaryPredicateOperator = Exclude<PredicateOperator, 'AND' | 'OR' | 'NOT'>;
+
+type NonPredicateOperator<TOperator extends string> =
+	TOperator extends PredicateOperator ? never : TOperator;
 
 // ============================================================================
 // Internal helpers
@@ -130,7 +140,7 @@ export class ExpressionRef {
 	readonly intent: ExpressionIntent;
 
 	constructor(intent: ExpressionIntent) {
-		this.intent = intent;
+		this.intent = Object.freeze(intent);
 	}
 
 	/**
@@ -206,6 +216,98 @@ export class ExpressionRef {
 	}
 }
 
+/** Marker used to identify an invalid predicate from a different core copy. */
+export const PREDICATE_REF_DISCRIMINATOR = 'dbsp.predicate.v1' as const;
+
+/**
+ * A predicate that is also a scalar expression.
+ *
+ * Its one canonical representation is the expression intent inherited from
+ * `ExpressionRef`; the WHERE form is derived when a builder consumes it.
+ */
+class ExpressionPredicateRef extends ExpressionRef {
+	readonly __predicateRef = PREDICATE_REF_DISCRIMINATOR;
+	declare readonly intent: StandaloneWhereExpressionIntent;
+
+	constructor(intent: StandaloneWhereExpressionIntent) {
+		super(Object.freeze(intent));
+		Object.freeze(this);
+	}
+
+	override as(alias: string): PredicateExpressionRef {
+		return new ExpressionPredicateRef({
+			...this.intent,
+			as: alias,
+		} as StandaloneWhereExpressionIntent);
+	}
+}
+
+/** A scalar predicate created by `op()`, `boolFn()`, or `unsafeAsPredicate()`. */
+export type PredicateExpressionRef = ExpressionPredicateRef;
+
+/**
+ * A composed predicate has no scalar-expression representation in this API.
+ * Its canonical representation is the complete WHERE intent.
+ */
+class WhereOnlyPredicateRef {
+	readonly __predicateRef = PREDICATE_REF_DISCRIMINATOR;
+
+	constructor(readonly intent: WhereIntent) {
+		if (intent.kind === 'and' || intent.kind === 'or') {
+			Object.freeze(intent.conditions);
+		}
+		Object.freeze(intent);
+		Object.freeze(this);
+	}
+}
+
+/** A composed predicate that is accepted only in `.where()`. */
+export type WhereOnlyPredicate = WhereOnlyPredicateRef;
+
+/**
+ * A value accepted by `.where()` as a predicate.
+ *
+ * The constructors are intentionally module-private. Use `op()`, predicate
+ * helpers, or `unsafeAsPredicate()` instead.
+ */
+export type PredicateRef = PredicateExpressionRef | WhereOnlyPredicate;
+
+/**
+ * Recognize only predicate instances constructed by this installed core copy.
+ *
+ * A predicate from another installed copy is unsupported: reconstruct it with
+ * this module's predicate factories before passing it to a builder.
+ */
+export function isPredicateRef(value: unknown): value is PredicateRef {
+	return (
+		value instanceof ExpressionPredicateRef ||
+		value instanceof WhereOnlyPredicateRef
+	);
+}
+
+/** @internal Detect a rejected foreign predicate before object-filter conversion. */
+export function hasPredicateRefDiscriminator(value: unknown): boolean {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		(value as { __predicateRef?: unknown }).__predicateRef ===
+			PREDICATE_REF_DISCRIMINATOR
+	);
+}
+
+function isExpressionPredicateRef(
+	predicate: PredicateRef,
+): predicate is PredicateExpressionRef {
+	return '__expr' in predicate && predicate.__expr === true;
+}
+
+/** Derive the WHERE representation from a predicate's single canonical intent. */
+export function predicateWhereIntent(predicate: PredicateRef): WhereIntent {
+	return isExpressionPredicateRef(predicate)
+		? { kind: 'expression', expr: predicate.intent }
+		: predicate.intent;
+}
+
 // ============================================================================
 // Factory functions
 // ============================================================================
@@ -261,20 +363,137 @@ export function cast(expr: ExpressionRef, typeName: string): ExpressionRef {
  * @example op('<=>', 'embedding', [0.1, 0.2])  // implicit conversions
  * @throws Error if operator fails validation (injection guard)
  */
+/** Logical AND / OR — both operands must be predicates. */
 export function op(
-	operator: string,
+	operator: 'AND' | 'OR',
+	left: PredicateRef,
+	right: PredicateRef,
+): WhereOnlyPredicate;
+
+/** Logical NOT — its sole operand must be a predicate. */
+export function op(operator: 'NOT', operand: PredicateRef): WhereOnlyPredicate;
+
+/** Predicate binary operators accept expression operands. */
+export function op(
+	operator: BinaryPredicateOperator,
 	left: ExprInput,
 	right: ExprInput,
-): ExpressionRef {
+): ExpressionPredicateRef;
+
+/** Any non-predicate operator remains an ordinary expression. */
+export function op<TOperator extends string>(
+	operator: NonPredicateOperator<TOperator>,
+	left: ExprInput,
+	right: ExprInput,
+): ExpressionRef;
+
+export function op(
+	operator: string,
+	...operands: (ExprInput | PredicateRef | undefined)[]
+): ExpressionRef | WhereOnlyPredicateRef {
+	const [left, right] = operands;
 	if (!operator || !OPERATOR_PATTERN.test(operator)) {
 		throw new Error(`Invalid operator: ${operator}`);
 	}
-	return new ExpressionRef({
+
+	if (operator === 'AND' || operator === 'OR') {
+		if (operands.length !== 2) {
+			throw new Error(`${operator} requires exactly two predicate operands`);
+		}
+		if (!isPredicateRef(left) || !isPredicateRef(right)) {
+			throw new Error(`${operator} requires predicate operands`);
+		}
+		return new WhereOnlyPredicateRef({
+			kind: operator === 'AND' ? 'and' : 'or',
+			conditions: [predicateWhereIntent(left), predicateWhereIntent(right)],
+		});
+	}
+
+	if (operator === 'NOT') {
+		if (operands.length !== 1) {
+			throw new Error('NOT requires exactly one predicate operand');
+		}
+		if (!isPredicateRef(left)) {
+			throw new Error('NOT requires a predicate operand');
+		}
+		return new WhereOnlyPredicateRef({
+			kind: 'not',
+			condition: predicateWhereIntent(left),
+		});
+	}
+
+	if (operands.length !== 2) {
+		throw new Error(`${operator} requires exactly two expression operands`);
+	}
+
+	const intent = {
 		kind: 'customOp',
 		operator,
-		left: toExpressionIntent(left),
-		right: toExpressionIntent(right),
-	} satisfies CustomOpExpressionIntent);
+		left: toExpressionIntent(left as ExprInput),
+		right: toExpressionIntent(right as ExprInput),
+	} satisfies CustomOpExpressionIntent;
+
+	if (isPredicateOperator(operator)) {
+		return new ExpressionPredicateRef(intent);
+	}
+	return new ExpressionRef(intent);
+}
+
+/**
+ * Assert that an arbitrary expression is boolean for use in WHERE.
+ *
+ * Use this only for a user-defined operator whose boolean result cannot be
+ * represented by the closed PredicateOperator union.
+ */
+export function unsafeAsPredicate(expr: ExpressionRef): PredicateExpressionRef {
+	if (expr instanceof ExpressionPredicateRef) return expr;
+	if (!isStandaloneWhereExpressionIntent(expr.intent)) {
+		throw new InvalidOperationError(
+			'unsafeAsPredicate',
+			`unsupported standalone WHERE expression kind '${expr.intent.kind}'`,
+		);
+	}
+	return new ExpressionPredicateRef(expr.intent);
+}
+
+function isStandaloneWhereExpressionIntent(
+	intent: ExpressionIntent,
+): intent is StandaloneWhereExpressionIntent {
+	switch (intent.kind) {
+		case 'customOp':
+		case 'customFn':
+		case 'ref':
+		case 'param':
+		case 'cast':
+		case 'literal':
+		case 'unary':
+		case 'namedArg':
+		case 'star':
+		case 'array':
+		case 'subquery':
+		case 'relationColumn':
+		case 'case':
+			return true;
+		default:
+			return false;
+	}
+}
+
+function isPredicateOperator(operator: string): operator is PredicateOperator {
+	return (
+		operator === '=' ||
+		operator === '!=' ||
+		operator === '<>' ||
+		operator === '<' ||
+		operator === '<=' ||
+		operator === '>' ||
+		operator === '>=' ||
+		operator === '@@' ||
+		operator === '@@@' ||
+		operator === '&&' ||
+		operator === '<@' ||
+		operator === '@>'
+	);
 }
 
 /**
@@ -372,6 +591,26 @@ export function fn(
 		...(orderByArgs.length > 0 ? { aggOrderBy: orderByArgs } : {}),
 	};
 	return new ExpressionRef(intent);
+}
+
+/**
+ * Declare that a custom function call is boolean-valued for use in WHERE.
+ *
+ * This has the same trust boundary as the SQL function name and arguments the
+ * caller writes: use it only when the declared function returns boolean.
+ * Unlike `fn()`, which builds a scalar expression, `boolFn()` builds a
+ * predicate that can be passed directly to `.where()`.
+ *
+ * @example boolFn('jsonb_exists', ref('data'), literal('phone'))
+ * @throws Error if name fails validation (injection guard)
+ */
+export function boolFn(
+	name: string,
+	...args: (ExprInput | DistinctField)[]
+): PredicateExpressionRef {
+	return new ExpressionPredicateRef(
+		fn(name, ...args).intent as CustomFnExpressionIntent,
+	);
 }
 
 /**
