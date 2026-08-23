@@ -3,7 +3,7 @@
  */
 
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { normalizeSQL } from '../sql-utils.js';
 import { eq, gt } from './filters.js';
 import { ref, schema, schemaToModelIR } from './schema.js';
@@ -276,15 +276,38 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 
 	describe('Type inference', () => {
 		it('from() preserves the inferred full row type', () => {
-			const s = createTestSchema();
-			const model = schemaToModelIR(s.definition);
-			const orm = createTypedOrm(model);
-			const { users } = s.tables;
+			const typedSchema = createTestSchema();
+			const typedOrm = createTypedOrm(schemaToModelIR(typedSchema.definition));
+			const typedUsersQuery = typedOrm.from(typedSchema.tables.users);
+			const typedPostsQuery = typedOrm.from(typedSchema.tables.posts);
 
-			// #443 documents the current package-boundary inference defect.  Do not
-			// cast a builder to a caller-selected row type: that would test the cast,
-			// not inference.  The compatibility canary remains the named boundary.
-			void orm.from(users);
+			// #443: schema-produced TableRefs retain their full row shape through from().
+			expectTypeOf(typedUsersQuery.all).returns.resolves.toEqualTypeOf<
+				{
+					readonly id: string;
+					readonly name: string;
+					readonly email: string;
+					readonly age: number | null;
+					readonly active: boolean;
+					readonly createdAt: Date;
+				}[]
+			>();
+			expectTypeOf(typedPostsQuery.all).returns.resolves.toEqualTypeOf<
+				{
+					readonly id: string;
+					readonly title: string;
+					readonly content: string | null;
+					readonly author: number | string;
+					readonly publishedAt: Date | null;
+				}[]
+			>();
+
+			type UserRow = Awaited<ReturnType<typeof typedUsersQuery.all>>[number];
+			function rejectsNonexistentColumn(row: UserRow): void {
+				// @ts-expect-error #443: inferred rows must not accept unknown columns.
+				void row.nonexistent;
+			}
+			void rejectsNonexistentColumn;
 		});
 
 		it('pick() changes the result fields', () => {

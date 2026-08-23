@@ -763,6 +763,8 @@ export type IndexMethod =
 	| 'gist'
 	| 'gin'
 	| 'brin'
+	| 'spgist'
+	| 'bloom'
 	| 'hnsw'
 	| 'ivfflat'
 	| 'bm25';

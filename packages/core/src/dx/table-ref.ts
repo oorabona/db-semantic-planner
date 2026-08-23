@@ -373,7 +373,7 @@ export type InferColumnTypes<
  * ```
  */
 export type InferTableRow<T> =
-	T extends TableRef<string, infer TColumns, infer _TRelations>
+	T extends TableRef<infer _TName, infer TColumns>
 		? InferColumnTypes<TColumns>
 		: never;
 
