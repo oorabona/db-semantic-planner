@@ -7,8 +7,8 @@ import { generateCreateIndex } from './ddl-generator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
 	CanonicalSqlFact,
-	GeneratedColumnPostcondition,
 	GeneratedColumnDefaultState,
+	GeneratedColumnPostcondition,
 	GeneratedConstraintPostcondition,
 	GeneratedIndexPostcondition,
 	GeneratedPostcondition,
@@ -16,6 +16,7 @@ import type {
 	GeneratedPostconditionV3,
 	TargetBinding,
 } from './managed-step-manifest.js';
+import { generatedPostconditionDigest } from './managed-step-manifest.js';
 import { quoteIdent } from './phases/utils.js';
 
 type GeneratedPostconditionQuery = {
@@ -321,7 +322,9 @@ export class GeneratedPostconditionReplanRequiredError extends Error {
 		versionSeen: unknown = undefined,
 		stepIdentity: string | undefined = undefined,
 	) {
-		super(`${message}; REPLAN_REQUIRED: produce a version 3 postcondition`);
+		super(
+			`${message}; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
+		);
 		this.name = 'GeneratedPostconditionReplanRequiredError';
 		this.diagnostic = { versionSeen, stepIdentity };
 	}
@@ -400,11 +403,6 @@ function checkedIdentifier(
 		throw replan(message);
 	}
 	return identifier;
-}
-
-/** @deprecated Version-2 column decoding is no longer an interpretation path. */
-export function decodeColumnPostcondition(_value: unknown): never {
-	throw replan('generated postcondition version is no longer interpretable', 2);
 }
 
 function decodeCanonicalSqlFact(
@@ -785,15 +783,19 @@ function decodeV3GeneratedPostcondition(
 }
 
 /**
- * Decode a v2 generated postcondition before a reader treats it as evidence.
- * Unsupported fields and relationships refuse into the existing replan path.
+ * Decode exactly one postcondition interpretation per version: only v3 is
+ * accepted. v1/v2 and every other value are named REPLAN_REQUIRED outcomes.
  */
 export function decodeGeneratedPostcondition(
 	value: unknown,
 	stepIdentity?: string,
 ): GeneratedPostcondition {
 	if (!isRecord(value))
-		throw replan('generated postcondition format is unsupported', undefined, stepIdentity);
+		throw replan(
+			'generated postcondition format is unsupported',
+			undefined,
+			stepIdentity,
+		);
 	const postconditionVersion = value.postconditionVersion;
 	if (postconditionVersion === 3) return decodeV3GeneratedPostcondition(value);
 	throw replan(
@@ -801,470 +803,29 @@ export function decodeGeneratedPostcondition(
 		postconditionVersion,
 		stepIdentity,
 	);
-	/*
-	const kind = value.kind;
-	if (postconditionVersion !== 2 || typeof kind !== 'string')
-		throw replan('generated postcondition format is unsupported');
-	const unsupported = 'generated postcondition is unsupported';
-	switch (kind) {
-		case 'table': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'columns']))
-				throw replan(unsupported);
-			const columns = strictUnknownArray(value.columns, unsupported).map(
-				(column) => decodeColumnPostcondition(column),
-			);
-			const names = new Set<string>();
-			for (const column of columns) {
-				if (names.has(column.name)) throw replan(unsupported);
-				names.add(column.name);
-			}
-			return { postconditionVersion, kind, columns };
-		}
-		case 'column': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'column']))
-				throw replan(unsupported);
-			const column = decodeColumnPostcondition(value.column);
-			return { postconditionVersion, kind, column };
-		}
-		case 'constraint': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'constraint']))
-				throw replan(unsupported);
-			const constraint = value.constraint;
-			if (!isRecord(constraint)) throw replan(unsupported);
-			const type = constraint.type;
-			if (type === 'c') {
-				if (!exactKeys(constraint, ['type', 'expression', 'notValid']))
-					throw replan(unsupported);
-				const expression = strictString(constraint.expression, unsupported);
-				const notValid = strictBoolean(constraint.notValid, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: { type: 'c', expression, notValid },
-				};
-			} else if (type === 'p' || type === 'u') {
-				if (
-					!exactKeys(constraint, [
-						'type',
-						'columns',
-						'deferrable',
-						'initiallyDeferred',
-						'enforced',
-					])
-				)
-					throw replan(unsupported);
-				const columns = stringList(constraint.columns, unsupported);
-				for (const name of columns)
-					checkedIdentifier(name, 'column', unsupported);
-				const deferrable = strictBoolean(constraint.deferrable, unsupported);
-				const initiallyDeferred = strictBoolean(
-					constraint.initiallyDeferred,
-					unsupported,
-				);
-				const enforced = strictBoolean(constraint.enforced, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: {
-						type,
-						columns,
-						deferrable,
-						initiallyDeferred,
-						enforced,
-					},
-				};
-			} else if (type === 'f') {
-				if (
-					!exactKeys(constraint, [
-						'type',
-						'columns',
-						'references',
-						'onDelete',
-						'onUpdate',
-						'deferrable',
-						'initiallyDeferred',
-						'enforced',
-						'notValid',
-					])
-				)
-					throw replan(unsupported);
-				const columns = stringList(constraint.columns, unsupported);
-				for (const name of columns)
-					checkedIdentifier(name, 'column', unsupported);
-				const references = constraint.references;
-				if (!isRecord(references)) throw replan(unsupported);
-				if (!exactKeys(references, ['schema', 'table', 'columns']))
-					throw replan(unsupported);
-				const schema = checkedIdentifier(
-					references.schema,
-					'schema',
-					unsupported,
-				);
-				const table = checkedIdentifier(references.table, 'table', unsupported);
-				const referenceColumns = stringList(references.columns, unsupported);
-				for (const name of referenceColumns)
-					checkedIdentifier(name, 'column', unsupported);
-				const onDelete = strictString(constraint.onDelete, unsupported);
-				const onUpdate = strictString(constraint.onUpdate, unsupported);
-				const deferrable = strictBoolean(constraint.deferrable, unsupported);
-				const initiallyDeferred = strictBoolean(
-					constraint.initiallyDeferred,
-					unsupported,
-				);
-				const enforced = strictBoolean(constraint.enforced, unsupported);
-				const notValid = strictBoolean(constraint.notValid, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: {
-						type: 'f',
-						columns,
-						references: { schema, table, columns: referenceColumns },
-						onDelete,
-						onUpdate,
-						deferrable,
-						initiallyDeferred,
-						enforced,
-						notValid,
-					},
-				};
-			} else throw replan(unsupported);
-		}
-		case 'index': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'index']))
-				throw replan(unsupported);
-			const index = value.index;
-			if (!isRecord(index)) throw replan(unsupported);
-			if (
-				!exactKeys(index, [
-					'schema',
-					'table',
-					'name',
-					'method',
-					'unique',
-					'valid',
-					'ready',
-					'live',
-					'columns',
-					'expressions',
-					'include',
-					'nullsNotDistinct',
-					'opclass',
-					'with',
-					'where',
-				])
-			)
-				throw replan(unsupported);
-			const schema = checkedIdentifier(index.schema, 'schema', unsupported);
-			const table = checkedIdentifier(index.table, 'table', unsupported);
-			const name = checkedIdentifier(index.name, 'alias', unsupported);
-			const method = strictString(index.method, unsupported);
-			if (
-				![
-					'btree',
-					'hash',
-					'gist',
-					'gin',
-					'brin',
-					'spgist',
-					'hnsw',
-					'ivfflat',
-					'bm25',
-					'bloom',
-				].includes(method)
-			)
-				throw replan(unsupported);
-			const unique = strictBoolean(index.unique, unsupported);
-			if (index.valid !== true || index.ready !== true || index.live !== true)
-				throw replan(unsupported);
-			const nullsNotDistinct = strictBoolean(
-				index.nullsNotDistinct,
-				unsupported,
-			);
-			const columns = stringList(index.columns, unsupported);
-			for (const column of columns)
-				checkedIdentifier(column, 'column', unsupported);
-			const expressionsValue = index.expressions;
-			const includeValue = index.include;
-			const opclassValue = index.opclass;
-			const withValue = index.with;
-			const expressions =
-				expressionsValue === undefined
-					? undefined
-					: stringList(expressionsValue, unsupported);
-			const include =
-				includeValue === undefined
-					? undefined
-					: stringList(includeValue, unsupported);
-			const opclass =
-				opclassValue === undefined
-					? undefined
-					: stringRecord(opclassValue, unsupported);
-			const withOptions =
-				withValue === undefined
-					? undefined
-					: stringRecord(withValue, unsupported);
-			const whereValue = index.where;
-			const where =
-				whereValue === undefined
-					? undefined
-					: strictString(whereValue, unsupported);
-			const decodedIndex: GeneratedIndexPostcondition = {
-				schema,
-				table,
-				name,
-				method,
-				unique,
-				valid: true,
-				ready: true,
-				live: true,
-				columns,
-				...(expressions === undefined ? {} : { expressions }),
-				...(include === undefined ? {} : { include }),
-				nullsNotDistinct,
-				...(opclass === undefined ? {} : { opclass }),
-				...(withOptions === undefined ? {} : { with: withOptions }),
-				...(where === undefined ? {} : { where }),
-			};
-			return { postconditionVersion, kind, index: decodedIndex };
-		}
-		case 'enum': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'labels']))
-				throw replan(unsupported);
-			const labels = stringList(value.labels, unsupported);
-			return { postconditionVersion, kind, labels };
-		}
-		case 'sequence': {
-			if (
-				!exactKeys(value, [
-					'postconditionVersion',
-					'kind',
-					'startValue',
-					'incrementBy',
-					'minValue',
-					'maxValue',
-					'cycle',
-				])
-			)
-				throw replan(unsupported);
-			const startValue = value.startValue;
-			const incrementBy = value.incrementBy;
-			const minValue = value.minValue;
-			const maxValue = value.maxValue;
-			const cycle = value.cycle;
-			const decodedStartValue =
-				startValue === undefined
-					? undefined
-					: strictString(startValue, unsupported);
-			const decodedIncrementBy =
-				incrementBy === undefined
-					? undefined
-					: strictString(incrementBy, unsupported);
-			const decodedMinValue =
-				minValue === undefined
-					? undefined
-					: strictString(minValue, unsupported);
-			const decodedMaxValue =
-				maxValue === undefined
-					? undefined
-					: strictString(maxValue, unsupported);
-			const decodedCycle =
-				cycle === undefined ? undefined : strictBoolean(cycle, unsupported);
-			return {
-				postconditionVersion,
-				kind,
-				...(decodedStartValue === undefined
-					? {}
-					: { startValue: decodedStartValue }),
-				...(decodedIncrementBy === undefined
-					? {}
-					: { incrementBy: decodedIncrementBy }),
-				...(decodedMinValue === undefined ? {} : { minValue: decodedMinValue }),
-				...(decodedMaxValue === undefined ? {} : { maxValue: decodedMaxValue }),
-				...(decodedCycle === undefined ? {} : { cycle: decodedCycle }),
-			};
-		}
-		case 'extension': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'version']))
-				throw replan(unsupported);
-			const versionValue = value.version;
-			const version =
-				versionValue === undefined
-					? undefined
-					: strictString(versionValue, unsupported);
-			return {
-				postconditionVersion,
-				kind,
-				...(version === undefined ? {} : { version }),
-			};
-		}
-		case 'absent':
-			if (!exactKeys(value, ['postconditionVersion', 'kind']))
-				throw replan(unsupported);
-			return { postconditionVersion, kind };
-		case 'exempt': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'reason']))
-				throw replan(unsupported);
-			const reason = strictString(value.reason, unsupported);
-			return { postconditionVersion, kind, reason };
-		}
-		default:
-			throw replan(unsupported);
-	}
 }
 
-function decodeIndexExpectation(
-	value: unknown,
-	target: GeneratedPostconditionTarget,
-): GeneratedIndexPostcondition {
-	if (
-		!isRecord(value) ||
-		!exactKeys(value, ['postconditionVersion', 'kind', 'index'])
-	)
-		throw replan('generated index postcondition format is unsupported');
-	if (
-		value.postconditionVersion !== 2 ||
-		value.kind !== 'index' ||
-		!isRecord(value.index)
-	)
-		throw replan('generated index postcondition is unsupported');
-	const index = value.index;
-	if (
-		!exactKeys(index, [
-			'schema',
-			'table',
-			'name',
-			'method',
-			'unique',
-			'valid',
-			'ready',
-			'live',
-			'columns',
-			'expressions',
-			'include',
-			'nullsNotDistinct',
-			'opclass',
-			'with',
-			'where',
-		]) ||
-		typeof index.schema !== 'string' ||
-		typeof index.table !== 'string' ||
-		typeof index.name !== 'string' ||
-		typeof index.method !== 'string' ||
-		typeof index.unique !== 'boolean' ||
-		index.valid !== true ||
-		index.ready !== true ||
-		index.live !== true ||
-		typeof index.nullsNotDistinct !== 'boolean' ||
-		(index.where !== undefined && typeof index.where !== 'string')
-	)
-		throw replan('generated index postcondition is unsupported');
-	try {
-		quoteIdent(index.schema, 'schema');
-		quoteIdent(index.table, 'table');
-		quoteIdent(index.name, 'alias');
-		quoteIdent(index.method, 'alias');
-	} catch {
-		throw replan('generated index postcondition is unsupported');
-	}
-	const columns = stringList(
-		index.columns,
-		'generated index postcondition is unsupported',
+/**
+ * The persisted digest is bound to the versioned wire value before decoding.
+ * A digest minted for one version cannot authenticate another version body.
+ */
+export function decodeGeneratedPostconditionPayload(
+	payload: { readonly value: unknown; readonly digest: string },
+	stepIdentity?: string,
+): GeneratedPostcondition {
+	const value = payload.value;
+	if (!isRecord(value) || typeof value.postconditionVersion !== 'number')
+		return decodeGeneratedPostcondition(value, stepIdentity);
+	const expectedDigest = generatedPostconditionDigest(
+		value as { readonly postconditionVersion: number },
 	);
-	if (columns.length === 0)
-		throw replan('generated index postcondition is unsupported');
-	try {
-		for (const column of columns) quoteIdent(column, 'column');
-	} catch {
-		throw replan('generated index postcondition is unsupported');
-	}
-	const expressions =
-		index.expressions === undefined
-			? undefined
-			: stringList(
-					index.expressions,
-					'generated index postcondition is unsupported',
-				);
-	const include =
-		index.include === undefined
-			? undefined
-			: stringList(
-					index.include,
-					'generated index postcondition is unsupported',
-				);
-	const opclass =
-		index.opclass === undefined
-			? undefined
-			: stringRecord(
-					index.opclass,
-					'generated index postcondition is unsupported',
-				);
-	const withOptions =
-		index.with === undefined
-			? undefined
-			: stringRecord(
-					index.with,
-					'generated index postcondition is unsupported',
-				);
-	if (
-		opclass &&
-		Object.keys(opclass).some((column) => !columns.includes(column))
-	)
+	if (payload.digest !== expectedDigest)
 		throw replan(
-			'generated index postcondition opclass keys do not name emitted columns',
+			'generated postcondition digest is not paired with its versioned value',
+			value.postconditionVersion,
+			stepIdentity,
 		);
-	if (
-		index.schema !== target.schema ||
-		index.table !== target.table ||
-		index.name !== target.name
-	)
-		throw new Error('generated index postcondition identity differs');
-	return {
-		schema: index.schema,
-		table: index.table,
-		name: index.name,
-		method: index.method,
-		unique: index.unique,
-		valid: true,
-		ready: true,
-		live: true,
-		columns,
-		...(expressions === undefined ? {} : { expressions }),
-		...(include === undefined ? {} : { include }),
-		nullsNotDistinct: index.nullsNotDistinct,
-		...(opclass === undefined ? {} : { opclass }),
-		...(withOptions === undefined ? {} : { with: withOptions }),
-		...(index.where === undefined ? {} : { where: index.where }),
-	};
-}
-
-function decodeCheckExpectation(
-	value: unknown,
-): Extract<GeneratedConstraintPostcondition, { readonly type: 'c' }> {
-	if (
-		!isRecord(value) ||
-		!exactKeys(value, ['postconditionVersion', 'kind', 'constraint'])
-	)
-		throw replan('generated CHECK postcondition format is unsupported');
-	if (
-		value.postconditionVersion !== 2 ||
-		value.kind !== 'constraint' ||
-		!isRecord(value.constraint) ||
-		!exactKeys(value.constraint, ['type', 'expression', 'notValid']) ||
-		value.constraint.type !== 'c' ||
-		typeof value.constraint.expression !== 'string' ||
-		typeof value.constraint.notValid !== 'boolean'
-	)
-		throw replan('generated CHECK postcondition is unsupported');
-	return {
-		type: 'c',
-		expression: value.constraint.expression,
-		notValid: value.constraint.notValid,
-	};
-}
-
-*/
-
+	return decodeGeneratedPostcondition(value, stepIdentity);
 }
 
 function nullableStringList(value: unknown): readonly (string | null)[] {
@@ -2220,7 +1781,10 @@ async function readScratchCheckProjection(
 
 async function verifyCheckStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly check: Extract<GeneratedConstraintPostcondition, { readonly type: 'c' }>;
+	readonly check: Extract<
+		GeneratedConstraintPostcondition,
+		{ readonly type: 'c' }
+	>;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
 	readonly kind: 'constraint';
@@ -2275,7 +1839,7 @@ async function verifyCheckStructure(input: {
 	});
 }
 
-/** @deprecated Version-2 structural entry points are terminal replan refusals. */
+/** Compatibility exports are terminal replan refusals; they do not decode a legacy shape. */
 export async function verifyGeneratedTablePostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2287,7 +1851,6 @@ export async function verifyGeneratedTablePostcondition(input: {
 	throw new Error('unreachable');
 }
 
-/** @deprecated Version-2 structural entry points are terminal replan refusals. */
 export async function verifyGeneratedColumnPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2302,7 +1865,6 @@ export async function verifyGeneratedColumnPostcondition(input: {
 	throw new Error('unreachable');
 }
 
-/** @deprecated Version-2 structural entry points are terminal replan refusals. */
 export async function verifyGeneratedIndexPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2314,7 +1876,6 @@ export async function verifyGeneratedIndexPostcondition(input: {
 	throw new Error('unreachable');
 }
 
-/** @deprecated Version-2 structural entry points are terminal replan refusals. */
 export async function verifyGeneratedCheckPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2397,7 +1958,7 @@ function decodeV3PostconditionKind<
 	};
 }
 
-/** Resolves the v3 table binding, then delegates its structure to the v2 proof. */
+/** Resolves the v3 table binding, then delegates its shared structural proof. */
 export async function verifyGeneratedV3TablePostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2419,7 +1980,7 @@ export async function verifyGeneratedV3TablePostcondition(input: {
 	});
 }
 
-/** Resolves the v3 column binding, then delegates its structure to the v2 proof. */
+/** Resolves the v3 column binding, then delegates its shared structural proof. */
 export async function verifyGeneratedV3ColumnPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2440,12 +2001,15 @@ export async function verifyGeneratedV3ColumnPostcondition(input: {
 	});
 	return verifyColumnStructure({
 		session: input.session,
-		column: v3ColumnPostcondition(postcondition.declaration.column, target.name),
+		column: v3ColumnPostcondition(
+			postcondition.declaration.column,
+			target.name,
+		),
 		target,
 	});
 }
 
-/** Resolves the v3 index binding, then delegates its structure to the v2 proof. */
+/** Resolves the v3 index binding, then delegates its shared structural proof. */
 export async function verifyGeneratedV3IndexPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
@@ -2463,24 +2027,22 @@ export async function verifyGeneratedV3IndexPostcondition(input: {
 	return verifyIndexStructure({
 		session: input.session,
 		index: {
-				schema: target.schema,
-				table: target.table,
-				name: target.name,
+			schema: target.schema,
+			table: target.table,
+			name: target.name,
 			...indexFacts,
 			...(expressions === undefined
 				? {}
 				: {
-						expressions: expressions.map(
-								(expression) => expression.sql,
-							),
-						}),
+						expressions: expressions.map((expression) => expression.sql),
+					}),
 			...(where === undefined ? {} : { where: where.sql }),
-			},
+		},
 		target,
 	});
 }
 
-/** Resolves the v3 CHECK binding, then delegates its structure to the v2 proof. */
+/** Resolves the v3 CHECK binding, then delegates its shared structural proof. */
 export async function verifyGeneratedV3CheckPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;

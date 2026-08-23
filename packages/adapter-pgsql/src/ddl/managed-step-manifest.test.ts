@@ -1,10 +1,14 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { decodeGeneratedPostcondition } from './generated-postcondition-verifier.js';
+import {
+	decodeGeneratedPostcondition,
+	decodeGeneratedPostconditionPayload,
+} from './generated-postcondition-verifier.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
+	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 
@@ -20,6 +24,32 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('O10 rejects both crossed digest/version pairings', () => {
+		const current = v3({ kind: 'absent' });
+		const legacy = { ...current, postconditionVersion: 2 };
+		const currentDigest = generatedPostconditionDigest(current);
+		const legacyDigest = generatedPostconditionDigest(legacy);
+
+		expect(() =>
+			decodeGeneratedPostconditionPayload(
+				{ value: legacy, digest: currentDigest },
+				'generator:v2-with-v3-digest',
+			),
+		).toThrow('digest is not paired');
+		expect(() =>
+			decodeGeneratedPostconditionPayload(
+				{ value: current, digest: legacyDigest },
+				'generator:v3-with-v2-digest',
+			),
+		).toThrow('digest is not paired');
+		expect(
+			decodeGeneratedPostconditionPayload(
+				{ value: current, digest: currentDigest },
+				'generator:v3-current',
+			),
+		).toEqual(current);
+	});
+
 	it('carries a typed target table postcondition for a re-address step', () => {
 		const step = createPgsqlGeneratedManagedStep({
 			change: {

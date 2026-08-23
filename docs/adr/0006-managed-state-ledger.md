@@ -6,6 +6,9 @@ Accepted. It decides what ADR 0005 left open: the recorded-state model, the atom
 change/record couple, and — because they turn out to be the same decision — how many commands may
 write DDL. It supersedes three rules of ADR 0005, named in "What ADR 0005 no longer says".
 
+Implementation status (#567): accepted and implemented — v3 is the current generated-postcondition
+wire format; persisted v1 and v2 values are refused as `REPLAN_REQUIRED` and must be re-planned.
+
 ## Decision
 
 ### The record describes managed intent and verified outcome, never the schema
@@ -246,6 +249,13 @@ cascade, not dbsp's choice. This is what lets one physical statement affect many
 without a group-token protocol.
 
 ### The declaration comes from the DSL inputs, produced and validated at plan time
+
+### Generated postcondition wire versions
+
+Generated postconditions are currently encoded as v3 declarations with a separate target binding.
+The decoder has one interpretation per version: v3 decodes; v1 and v2 are `REPLAN_REQUIRED` outcomes,
+not compatibility inputs or subset-reader candidates. Their digest includes the wire version, so a
+digest from one version cannot authenticate the value of another.
 
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*

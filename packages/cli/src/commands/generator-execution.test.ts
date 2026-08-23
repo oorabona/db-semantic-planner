@@ -1,5 +1,6 @@
 import {
 	type GeneratedPostconditionSession,
+	generatedPostconditionDigest,
 	type verifyGeneratedV3CheckPostcondition as VerifyGeneratedV3CheckPostcondition,
 	type verifyGeneratedV3ColumnPostcondition as VerifyGeneratedV3ColumnPostcondition,
 	type verifyGeneratedV3IndexPostcondition as VerifyGeneratedV3IndexPostcondition,
@@ -81,6 +82,23 @@ async function readTestGeneratedPostcondition(
 	step: NormalizedManagedStep,
 	address: Parameters<typeof readGeneratedPostcondition>[2],
 ) {
+	const declaration = step.expectedDeclaration;
+	const material =
+		declaration?.value &&
+		typeof declaration.value === 'object' &&
+		!Array.isArray(declaration.value) &&
+		typeof (declaration.value as { postconditionVersion?: unknown })
+			.postconditionVersion === 'number'
+			? {
+					...step,
+					expectedDeclaration: {
+						...declaration,
+						digest: generatedPostconditionDigest(
+							declaration.value as { postconditionVersion: number },
+						),
+					},
+				}
+			: step;
 	return withGeneratedPostconditionSession(
 		{
 			connect: async () => ({
@@ -88,7 +106,7 @@ async function readTestGeneratedPostcondition(
 				release: () => undefined,
 			}),
 		},
-		(session) => readGeneratedPostcondition(session, step, address),
+		(session) => readGeneratedPostcondition(session, material, address),
 	);
 }
 
@@ -571,7 +589,7 @@ describe('generator execution fixture shim', () => {
 						],
 		}));
 		await expect(
-			readTestGeneratedPostcondition({ query }, step, address),
+			readTestGeneratedPostcondition({ query }, step, address as LedgerAddress),
 		).rejects.toThrow(
 			row === undefined || row.column_name !== 'id' || row.relation_kind === 'v'
 				? 'generated postcondition binding did not resolve'
@@ -998,338 +1016,30 @@ describe('generator execution fixture shim', () => {
 		expect(query).not.toHaveBeenCalled();
 	});
 
-	// Stage four destiny: these v2 reader fixtures assert REPLAN_REQUIRED.
-	it.each([
-		[
-			'enum labels',
-			{ postconditionVersion: 2, kind: 'enum', labels: ['draft', 'paid'] },
-			{
-				...dataDestructiveStep.address,
-				kind: 'enum' as const,
-				name: 'order_state',
-			},
-			[{ type_kind: 'e', enum_label: 'draft' }],
-		],
-		[
-			'sequence properties',
-			{
-				postconditionVersion: 2,
-				kind: 'sequence',
-				startValue: '7',
-				incrementBy: '3',
-				cycle: false,
-			},
-			{
-				...dataDestructiveStep.address,
-				kind: 'sequence' as const,
-				name: 'order_number',
-			},
-			[
-				{
-					start_value: '7',
-					increment_by: '1',
-					min_value: '1',
-					max_value: '100',
-					cache_size: '1',
-					cycle: false,
-				},
-			],
-		],
-		[
-			'extension version',
-			{ postconditionVersion: 2, kind: 'extension', version: '1.3' },
-			{
-				...dataDestructiveStep.address,
-				scope: 'database' as const,
-				kind: 'extension' as const,
-				name: 'pgcrypto',
-			},
-			[{ version: '1.2' }],
-		],
-	] as const)('refuses a changed generated %s rather than recording observed', async (_name, value, address, rows) => {
-		const step = {
-			...dataDestructiveStep,
-			expectedDeclaration: { value, digest: 'typed-postcondition' },
-			address,
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows }) },
-				step,
-				address as never,
-			),
-		).rejects.toThrow('postcondition differs');
-	});
-
-	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
-	it('strictly decodes non-CHECK constraint read-back before recording observed', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'constraint' as const,
-			name: 'accounts_pkey',
-			parent: dataDestructiveStep.address!,
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'constraint',
-					constraint: {
-						type: 'p',
-						columns: ['id'],
-						deferrable: false,
-						initiallyDeferred: false,
-						enforced: true,
-					},
-				},
-				digest: 'constraint-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi
-						.fn()
-						.mockResolvedValue({ rows: [constraintProjectionRow()] }),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({
-			value: { kind: 'constraint', definition: 'PRIMARY KEY (id)' },
-		});
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [constraintProjectionRow({ constraint_definition: null })],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow(
-			'generated constraint accounts_pkey has an incomplete projection',
-		);
-	});
-
-	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
-	it('decodes an empty enum from its NULL label row', async () => {
+	it('folds legacy generated reader payloads into REPLAN_REQUIRED before query', async () => {
+		const query = vi.fn();
 		const address = {
 			...dataDestructiveStep.address,
 			kind: 'enum' as const,
 			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ type_kind: 'e', enum_label: null }],
-					}),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({ value: { kind: 'enum', labels: [] } });
-	});
-
-	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
-	it('decodes enum labels in query order', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'enum',
-					labels: ['draft', 'paid'],
-				},
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{ type_kind: 'e', enum_label: 'draft' },
-							{ type_kind: 'e', enum_label: 'paid' },
-						],
-					}),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({
-			value: { kind: 'enum', labels: ['draft', 'paid'] },
-		});
-	});
-
-	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
-	it('refuses an absent enum type even when its expected labels are empty', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [] }) },
-				step,
-				address,
-			),
-		).rejects.toThrow('generated enum order_state is absent');
-	});
-
-	// Stage four destiny: this v2 reader fixture asserts REPLAN_REQUIRED.
-	it('refuses a same-named non-enum type and malformed enum labels', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ type_kind: 'd', enum_label: null }],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow('generated enum order_state is not an enum');
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{ type_kind: 'e', enum_label: 'draft' },
-							{ type_kind: 'e', enum_label: 1 },
-						],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow(
-			'generated enum order_state has an incomplete projection',
-		);
-	});
-
-	// Stage four destiny: these v2 reader fixtures assert REPLAN_REQUIRED.
-	it('strictly decodes sequence and extension read-back before recording observed', async () => {
-		const sequenceAddress = {
-			...dataDestructiveStep.address,
-			kind: 'sequence' as const,
-			name: 'order_number',
-		} as LedgerAddress;
-		const sequenceStep = {
-			...dataDestructiveStep,
-			address: sequenceAddress,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'sequence',
-					startValue: '7',
-					incrementBy: '3',
-					cycle: false,
-				},
-				digest: 'sequence-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		const sequenceRow = {
-			start_value: '7',
-			increment_by: '3',
-			min_value: '1',
-			max_value: '100',
-			cache_size: '1',
-			cycle: false,
 		};
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [sequenceRow] }) },
-				sequenceStep,
-				sequenceAddress,
-			),
-		).resolves.toMatchObject({ value: { kind: 'sequence', cycle: false } });
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ ...sequenceRow, cycle: 'false' }],
-					}),
-				},
-				sequenceStep,
-				sequenceAddress,
-			),
-		).rejects.toThrow(
-			'generated sequence order_number has an incomplete projection',
-		);
-
-		const extensionAddress = {
-			...dataDestructiveStep.address,
-			scope: 'database' as const,
-			kind: 'extension' as const,
-			name: 'pgcrypto',
-		} as LedgerAddress;
-		const extensionStep = {
+		const step = {
 			...dataDestructiveStep,
-			address: extensionAddress,
+			stepKey: 'generator:legacy-enum',
+			address,
 			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'extension' },
-				digest: 'extension-postcondition',
+				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
+				digest: 'legacy',
 			},
 		} as unknown as NormalizedManagedStep;
 		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [{ version: '1.3' }] }) },
-				extensionStep,
-				extensionAddress,
-			),
-		).resolves.toMatchObject({ value: { kind: 'extension', version: '1.3' } });
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [{}] }) },
-				extensionStep,
-				extensionAddress,
-			),
-		).rejects.toThrow(
-			'generated extension pgcrypto has an incomplete projection',
-		);
+			readTestGeneratedPostcondition({ query }, step, address as LedgerAddress),
+		).rejects.toMatchObject({
+			code: 'REPLAN_REQUIRED',
+			diagnostic: { versionSeen: 2, stepIdentity: 'generator:legacy-enum' },
+		});
+		expect(query).not.toHaveBeenCalled();
 	});
-
 	it('reads CREATE TABLE columns when a separately-rendered constraint follows it', async () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,

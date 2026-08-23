@@ -2626,9 +2626,9 @@ async function runPgPairedReaddressOperation(
 				begun = false;
 				return refusal(`re-address pair ${request.pairId} lost a reservation`);
 			}
-			// Readdress chooses each member's callback before claims: decodable v2
-			// tables prove structure; declared undecodable payloads refuse; and only
-			// never-declared or #576-unprovable v2 kinds retain identity read-back.
+			// Readdress chooses each member's callback before claims: table
+			// declarations prove structure; declared undecodable payloads refuse; and
+			// only never-declared members retain identity read-back.
 			const targetObserved = await withPinnedGeneratedPostconditionSession(
 				executor,
 				(session) => readPgPairedReaddressObserved(session, member),

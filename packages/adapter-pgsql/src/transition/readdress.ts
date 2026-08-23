@@ -199,13 +199,15 @@ function digest(value: LedgerPayload['value']): string {
 	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function isVersion2Postcondition(value: unknown): boolean {
+function isAddressFreePostcondition(value: unknown): boolean {
 	return (
 		value !== null &&
 		typeof value === 'object' &&
 		!Array.isArray(value) &&
-		(value as { readonly postconditionVersion?: unknown })
-			.postconditionVersion === 2
+		typeof (value as { readonly postconditionVersion?: unknown })
+			.postconditionVersion === 'number' &&
+		(value as { readonly postconditionVersion: number })
+			.postconditionVersion !== 3
 	);
 }
 
@@ -214,10 +216,8 @@ export function rekeyDeclaration(
 	target: LedgerAddress,
 ): LedgerPayload {
 	const previous = declaration?.value;
-	// Version-2 postconditions describe a catalogue shape, not its address.
-	// Preserve the covered value and digest literally: the strict decoder rejects
-	// an address field and later readdress proof consumes this exact payload.
-	if (declaration && isVersion2Postcondition(previous)) return declaration;
+	// Only address-free declarations retain their covered payload on a re-key.
+	if (declaration && isAddressFreePostcondition(previous)) return declaration;
 	const value =
 		previous && typeof previous === 'object' && !Array.isArray(previous)
 			? { ...previous, name: target.name }
@@ -278,9 +278,11 @@ function generatedPostconditionProof(
 ): GeneratedProof {
 	if (!declaration)
 		throw new Error(
-			`generated postcondition is absent; replan to produce version 2 typed postconditions`,
+			`generated postcondition is absent; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 		);
-	const postcondition = decodeGeneratedPostcondition(declaration.value);
+	const postcondition = decodeGeneratedPostcondition(
+		declaration.value,
+	) as unknown as { readonly kind: 'table' | 'index' | 'constraint' };
 	const target = generatedProofTarget(address);
 	const observe = (projection: unknown): LedgerPayload => {
 		// Verifier projections may represent absent catalogue fields as undefined;
@@ -335,23 +337,23 @@ function generatedPostconditionProof(
 			};
 		default:
 			throw new Error(
-				`generated ${postcondition.kind} postcondition is unsupported; replan to produce version 2 typed postconditions`,
+				`generated ${postcondition.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 			);
 	}
 }
 
 /**
- * The one three-way member rule: decodable v2 tables prove structure; a
- * declared undecodable payload refuses with replan wording; no declaration,
- * or a decodable-but-unprovable v2 kind (the #576 address-bearing format),
- * retains identity read-back with its declared payload.
+ * A declared table proof is attempted; other declared members retain identity
+ * read-back with their declared payload.
  */
 function readdressMemberReadBack(
 	declaration: LedgerPayload | undefined,
 	address: LedgerAddress,
 ): GeneratedProof | undefined {
 	if (!declaration) return undefined;
-	const postcondition = decodeGeneratedPostcondition(declaration.value);
+	const postcondition = decodeGeneratedPostcondition(
+		declaration.value,
+	) as unknown as { readonly kind: string };
 	if (postcondition.kind !== 'table') return undefined;
 	return generatedPostconditionProof(declaration, address);
 }
@@ -563,7 +565,7 @@ async function verifyPgTargetOnlyReaddressNoOp(
 					);
 					if (proof.kind !== 'table')
 						throw new Error(
-							`generated ${proof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
+							`generated ${proof.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 						);
 					await withPinnedGeneratedPostconditionSession(session, proof.prove);
 					return { outcome: 'no-op' };
@@ -986,7 +988,7 @@ export async function executePgPersistedTableReaddress(
 					}
 					if (
 						root.sourceDeclared &&
-						isVersion2Postcondition(root.sourceDeclared.value) &&
+						isAddressFreePostcondition(root.sourceDeclared.value) &&
 						input.step.expectedDeclaration &&
 						root.sourceDeclared.digest !== input.step.expectedDeclaration.digest
 					)
@@ -1001,7 +1003,7 @@ export async function executePgPersistedTableReaddress(
 						);
 						if (rootAdmissionProof.kind !== 'table')
 							throw new Error(
-								`generated ${rootAdmissionProof.kind} postcondition is unsupported; replan to produce version 2 typed table postconditions`,
+								`generated ${rootAdmissionProof.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 							);
 						await withPinnedGeneratedPostconditionSession(
 							session,

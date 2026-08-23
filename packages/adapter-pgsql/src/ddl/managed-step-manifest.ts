@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
 	DeclarableResourceAddress,
-	JsonValue,
 	LedgerClaimKind,
 	NormalizedManagedStep,
 } from '@dbsp/types';
@@ -229,42 +228,13 @@ export type GeneratedPostconditionV3 = {
 	readonly targetBinding: TargetBinding;
 };
 
-/** Legacy serialized input is kept only so callers can surface REPLAN_REQUIRED. */
-export type GeneratedPostconditionV2 =
-	| {
-			readonly postconditionVersion: 2;
-			readonly kind: 'index';
-			readonly index: GeneratedIndexPostcondition;
-		  }
-	| {
-			readonly postconditionVersion: 2;
-			readonly kind: 'table';
-			readonly columns: readonly GeneratedColumnPostcondition[];
-		  }
-	| {
-			readonly postconditionVersion: 2;
-			readonly kind: 'constraint';
-			readonly constraint: GeneratedConstraintPostcondition;
-		  }
-	| {
-			readonly postconditionVersion: 2;
-			readonly kind:
-				| 'column'
-				| 'enum'
-				| 'sequence'
-				| 'extension'
-				| 'absent'
-				| 'exempt';
-		  };
-
-export type GeneratedPostcondition =
-	| GeneratedPostconditionV2
-	| GeneratedPostconditionV3;
+/** Only v3 is a decodable generated postcondition. Older values replan. */
+export type GeneratedPostcondition = GeneratedPostconditionV3;
 
 /** The version tag is part of the digest domain, never an implicit convention. */
-export function generatedPostconditionDigest(
-	value: GeneratedPostcondition,
-): string {
+export function generatedPostconditionDigest(value: {
+	readonly postconditionVersion: number;
+}): string {
 	return createHash('sha256')
 		.update(`generated-postcondition:v${value.postconditionVersion}\u0000`)
 		.update(JSON.stringify(value))
