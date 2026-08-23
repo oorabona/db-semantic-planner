@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	decodeGeneratedPostcondition,
+	GeneratedPostconditionBindingResolutionError,
 	GeneratedPostconditionProofInFlightError,
 	type GeneratedPostconditionSession,
 	GeneratedPostconditionSessionDeactivatedError,
@@ -11,6 +12,10 @@ import {
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	verifyGeneratedV3CheckPostcondition,
+	verifyGeneratedV3ColumnPostcondition,
+	verifyGeneratedV3IndexPostcondition,
+	verifyGeneratedV3TablePostcondition,
 	withGeneratedPostconditionSession,
 	withPinnedGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
@@ -33,6 +38,46 @@ const tablePostcondition = {
 	columns: [
 		{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
 	],
+};
+
+const v3Binding = {
+	bindingVersion: 1 as const,
+	bindingKind: 'managed-step-address' as const,
+};
+
+const tableAddress = {
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'table',
+	name: 'accounts',
+};
+
+const columnAddress = {
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'column',
+	name: 'id',
+	parent: tableAddress,
+};
+
+const indexAddress = {
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'index',
+	name: 'accounts_user_id_idx',
+	parent: tableAddress,
+};
+
+const checkAddress = {
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'constraint',
+	name: 'accounts_status_check',
+	parent: tableAddress,
 };
 
 const indexPostcondition = {
@@ -196,7 +241,7 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 
 describe('generated postcondition verifier', () => {
 	it('deactivates a retained capability after the public checkout bracket', async () => {
-		const query = vi.fn(async () => ({ rows: [] }));
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		const release = vi.fn();
 		let retained: GeneratedPostconditionSession | undefined;
 		await withGeneratedPostconditionSession(
@@ -1891,5 +1936,277 @@ describe('generated postcondition verifier', () => {
 				target: indexTarget,
 			}),
 		).rejects.toThrow('adapter-minted exclusive session capability');
+	});
+
+	it('resolves each v3 binding before delegating the existing structural proof', async () => {
+		const tableQuery = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT relation.relkind AS relation_kind FROM'))
+				return { rows: [{ relation_kind: 'r' }] };
+			if (sql.includes('attribute.attname = ANY')) return { rows: [] };
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						generated_sequence_default: false,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		await expect(
+			verifyGeneratedV3TablePostcondition({
+				session: testSession(tableQuery as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'table',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								default: {
+									defaultKind: 'none',
+									hasDefault: false,
+									identity: null,
+								},
+							},
+						],
+					},
+				},
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		expect(tableQuery).toHaveBeenCalledTimes(2);
+
+		const columnQuery = vi.fn(async (sql: string) => {
+			if (
+				sql.includes(
+					'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: [{ relation_kind: 'r', column_name: 'id' }] };
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						generated_sequence_default: false,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		await expect(
+			verifyGeneratedV3ColumnPostcondition({
+				session: testSession(columnQuery as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'column',
+						column: { type: 'integer', nullable: false },
+					},
+				},
+				address: columnAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'column' });
+		expect(columnQuery).toHaveBeenCalledTimes(2);
+
+		const indexQuery = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT index_relation.relkind AS relation_kind'))
+				return { rows: [{ relation_kind: 'i', table_name: 'accounts' }] };
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('WHERE namespace.nspname'))
+				return { rows: [indexRow()] };
+			if (sql.includes('WHERE relation.oid')) return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		await expect(
+			verifyGeneratedV3IndexPostcondition({
+				session: testSession(indexQuery as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'index',
+						index: {
+							method: 'btree',
+							unique: false,
+							valid: true,
+							ready: true,
+							live: true,
+							columns: ['UserID'],
+							nullsNotDistinct: false,
+						},
+					},
+				},
+				address: indexAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'index' });
+		expect(indexQuery).toHaveBeenCalledWith(
+			expect.stringContaining('FROM pg_catalog.pg_class index_relation'),
+			['tenant', 'accounts_user_id_idx'],
+		);
+
+		const checkQuery = vi.fn(async (sql: string) => {
+			if (
+				sql.startsWith(
+					'SELECT relation.relkind AS relation_kind, constraint_item',
+				)
+			)
+				return {
+					rows: [
+						{ relation_kind: 'r', constraint_name: 'accounts_status_check' },
+					],
+				};
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('namespace.nspname')) return { rows: [checkRow()] };
+			if (sql.includes('conrelid = $1')) return { rows: [checkRow()] };
+			return { rows: [] };
+		});
+		await expect(
+			verifyGeneratedV3CheckPostcondition({
+				session: testSession(checkQuery as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'check',
+						check: {
+							expression: {
+								canonicalFormVersion: 1,
+								sql: "CHECK (status = 'Active')",
+							},
+							notValid: false,
+						},
+					},
+				},
+				address: checkAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'constraint' });
+		expect(checkQuery).toHaveBeenCalledWith(
+			expect.stringContaining('FROM pg_catalog.pg_constraint constraint_item'),
+			['tenant', 'accounts', 'accounts_status_check'],
+		);
+	});
+
+	it('raises the named v3 binding failure before issuing structural queries', async () => {
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
+		await expect(
+			verifyGeneratedV3ColumnPostcondition({
+				session: testSession(query as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'column',
+						column: { type: 'integer' },
+					},
+				},
+				address: columnAddress,
+			}),
+		).rejects.toMatchObject({
+			name: 'GeneratedPostconditionBindingResolutionError',
+			sought: 'column tenant.accounts.id',
+			found: 'absent',
+		});
+		expect(query).toHaveBeenCalledTimes(1);
+		expect(query.mock.calls[0]?.[0]).toContain(
+			'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+		);
+	});
+
+	it('does not let a structural lookalike satisfy an unresolved v3 binding', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql.includes(
+					'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: [] };
+			// This is a structurally identical id column at another address. If the
+			// resolver were bypassed, the old proof would incorrectly accept it.
+			return {
+				rows: [
+					{
+						relation_kind: 'r',
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						column_default: null,
+						generated_sequence_default: false,
+						collation_name: null,
+						identity_kind: '',
+					},
+				],
+			};
+		});
+		await expect(
+			verifyGeneratedV3ColumnPostcondition({
+				session: testSession(query as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'column',
+						column: { type: 'integer', nullable: false },
+					},
+				},
+				address: columnAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(query).toHaveBeenCalledTimes(1);
+	});
+
+	it('names the observed slot when a v3 binding resolves to a different object', async () => {
+		const query = vi.fn(async () => ({
+			rows: [{ relation_kind: 'i', table_name: 'audit_accounts' }],
+		}));
+		await expect(
+			verifyGeneratedV3IndexPostcondition({
+				session: testSession(query as never),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'index',
+						index: {
+							method: 'btree',
+							unique: false,
+							valid: true,
+							ready: true,
+							live: true,
+							columns: ['UserID'],
+							nullsNotDistinct: false,
+						},
+					},
+				},
+				address: indexAddress,
+			}),
+		).rejects.toMatchObject({
+			sought: 'index tenant.accounts.accounts_user_id_idx',
+			found: 'index tenant.audit_accounts.accounts_user_id_idx',
+		});
+		expect(query).toHaveBeenCalledTimes(1);
 	});
 });

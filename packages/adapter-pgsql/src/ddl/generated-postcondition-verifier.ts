@@ -1,3 +1,4 @@
+import type { ResourceAddress } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
@@ -222,6 +223,30 @@ export type GeneratedPostconditionTarget = {
 	readonly table: string;
 	readonly name: string;
 };
+
+type ResolvableGeneratedPostconditionKind =
+	| 'table'
+	| 'column'
+	| 'index'
+	| 'constraint';
+
+/** The managed-step address that a v3 binding resolves, rather than a declaration address. */
+export type GeneratedPostconditionBindingAddress = ResourceAddress;
+
+/** A v3 binding selected no live object, or selected a slot other than the one declared. */
+export class GeneratedPostconditionBindingResolutionError extends Error {
+	readonly sought: string;
+	readonly found: string;
+
+	constructor(input: { readonly sought: string; readonly found: string }) {
+		super(
+			`generated postcondition binding did not resolve: sought ${input.sought}; found ${input.found}`,
+		);
+		this.name = 'GeneratedPostconditionBindingResolutionError';
+		this.sought = input.sought;
+		this.found = input.found;
+	}
+}
 
 type IndexProjection = {
 	readonly schema: string;
@@ -1627,6 +1652,142 @@ export function assertGeneratedPostconditionSession(
 	return requireGeneratedPostconditionSession(value);
 }
 
+function bindingSlot(
+	address: GeneratedPostconditionBindingAddress,
+	expectedKind: ResolvableGeneratedPostconditionKind,
+): {
+	readonly target: GeneratedPostconditionTarget;
+	readonly sought: string;
+	readonly found: string | undefined;
+} {
+	const schema = address.schema;
+	const parent = address.parent;
+	const parentSchema = parent?.schema ?? schema;
+	const expected = `${expectedKind} ${schema ?? '<missing-schema>'}.${parent?.name ?? address.name}${expectedKind === 'table' ? '' : `.${address.name}`}`;
+	if (
+		address.kind !== expectedKind ||
+		!schema ||
+		(expectedKind !== 'table' && (parent?.kind !== 'table' || !parentSchema))
+	)
+		return {
+			target: {
+				schema: schema ?? '',
+				table: parent?.name ?? '',
+				name: address.name,
+			},
+			sought: expected,
+			found: `${address.kind} ${schema ?? '<missing-schema>'}.${parent?.name ?? address.name}`,
+		};
+	return {
+		target: {
+			schema,
+			table: expectedKind === 'table' ? address.name : (parent?.name ?? ''),
+			name: address.name,
+		},
+		sought: expected,
+		found: undefined,
+	};
+}
+
+function relationBindingFound(
+	kind: ResolvableGeneratedPostconditionKind,
+	target: GeneratedPostconditionTarget,
+	row: Record<string, unknown> | undefined,
+): string | undefined {
+	if (!row) return 'absent';
+	const relationKind = row.relation_kind;
+	if (kind === 'table')
+		return relationKind === 'r' || relationKind === 'p'
+			? undefined
+			: `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+	if (kind === 'column') {
+		if (relationKind !== 'r' && relationKind !== 'p')
+			return `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+		if (row.column_name === null || row.column_name === undefined)
+			return 'absent';
+		return row.column_name === target.name
+			? undefined
+			: `column ${target.schema}.${target.table}.${String(row.column_name)}`;
+	}
+	if (kind === 'index') {
+		if (relationKind !== 'i' && relationKind !== 'I')
+			return `relation ${target.schema}.${target.name} (relkind ${String(relationKind)})`;
+		return row.table_name === target.table
+			? undefined
+			: `index ${target.schema}.${String(row.table_name)}.${target.name}`;
+	}
+	if (relationKind !== 'r' && relationKind !== 'p')
+		return `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+	return row.constraint_name === target.name
+		? undefined
+		: `constraint ${target.schema}.${target.table}.${String(row.constraint_name)}`;
+}
+
+/**
+ * Resolves the address selected by a v3 TargetBinding before structural proof.
+ * The declaration itself stays address-free; this only reads the managed-step
+ * slot through structured catalogue relations and returns the old verifier target.
+ */
+export async function resolveGeneratedPostconditionBinding(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly expectedKind: ResolvableGeneratedPostconditionKind;
+}): Promise<GeneratedPostconditionTarget> {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, input.expectedKind);
+	if (slot.found !== undefined)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const { target } = slot;
+		const row =
+			input.expectedKind === 'table'
+				? (
+						await session.query(
+							`SELECT relation.relkind AS relation_kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2`,
+							[target.schema, target.table],
+						)
+					).rows[0]
+				: input.expectedKind === 'column'
+					? (
+							await session.query(
+								`SELECT relation.relkind AS relation_kind, attribute.attname AS column_name FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped WHERE namespace.nspname = $1 AND relation.relname = $2`,
+								[target.schema, target.table, target.name],
+							)
+						).rows[0]
+					: input.expectedKind === 'index'
+						? (
+								await session.query(
+									`SELECT index_relation.relkind AS relation_kind, parent_relation.relname AS table_name FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace LEFT JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid LEFT JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
+									[target.schema, target.name],
+								)
+							).rows[0]
+						: (
+								await session.query(
+									`SELECT relation.relkind AS relation_kind, constraint_item.conname AS constraint_name FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
+									[target.schema, target.table, target.name],
+								)
+							).rows[0];
+		const found = relationBindingFound(input.expectedKind, target, row);
+		if (found !== undefined) {
+			const failure = new GeneratedPostconditionBindingResolutionError({
+				sought: slot.sought,
+				found,
+			});
+			markSafePreQueryFailure(failure, session);
+			throw failure;
+		}
+		return target;
+	});
+}
+
 function tableColumnProjection(
 	row: Record<string, unknown>,
 ): TableColumnProjection {
@@ -2190,5 +2351,201 @@ export async function verifyGeneratedCheckPostcondition(input: {
 				);
 			return { kind: 'constraint', projection: live };
 		});
+	});
+}
+
+function v3ColumnPostcondition(
+	declaration: Extract<
+		GeneratedPostconditionDeclarationV3,
+		{ readonly kind: 'column' }
+	>['column'],
+	name: string,
+): Extract<GeneratedPostconditionV2, { readonly kind: 'column' }>['column'] {
+	const defaultState = declaration.default;
+	return {
+		name,
+		...(declaration.type === undefined ? {} : { type: declaration.type }),
+		...(declaration.nullable === undefined
+			? {}
+			: { nullable: declaration.nullable }),
+		// A null authored collation means no COLLATE clause, not the catalogue's
+		// effective default; only an authored name participates in the old proof.
+		...(typeof declaration.authoredCollation === 'string'
+			? { collation: declaration.authoredCollation }
+			: {}),
+		...(defaultState === undefined
+			? {}
+			: defaultState.defaultKind === 'none'
+				? { hasDefault: false, identity: null }
+				: defaultState.defaultKind === 'identity'
+					? {
+							hasDefault: false,
+							identity: defaultState.identity,
+						}
+					: defaultState.defaultKind === 'generated-sequence'
+						? {
+								hasDefault: true,
+								defaultKind: 'generated-sequence' as const,
+								identity: null,
+							}
+						: {
+								hasDefault: true,
+								defaultKind: 'authored' as const,
+								default: defaultState.defaultExpression.sql,
+								identity: null,
+							}),
+	};
+}
+
+function decodeV3PostconditionKind<
+	K extends GeneratedPostconditionDeclarationV3['kind'],
+>(
+	value: unknown,
+	kind: K,
+): GeneratedPostconditionV3 & {
+	readonly declaration: Extract<
+		GeneratedPostconditionDeclarationV3,
+		{ readonly kind: K }
+	>;
+} {
+	const postcondition = decodeGeneratedPostcondition(value);
+	if (
+		postcondition.postconditionVersion !== 3 ||
+		postcondition.declaration.kind !== kind
+	)
+		throw replan(`generated v3 ${kind} postcondition is unsupported`);
+	return postcondition as GeneratedPostconditionV3 & {
+		readonly declaration: Extract<
+			GeneratedPostconditionDeclarationV3,
+			{ readonly kind: K }
+		>;
+	};
+}
+
+/** Resolves the v3 table binding, then delegates its structure to the v2 proof. */
+export async function verifyGeneratedV3TablePostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
+	const postcondition = decodeV3PostconditionKind(input.postcondition, 'table');
+	const target = await resolveGeneratedPostconditionBinding({
+		session: input.session,
+		targetBinding: postcondition.targetBinding,
+		address: input.address,
+		expectedKind: 'table',
+	});
+	return verifyGeneratedTablePostcondition({
+		session: input.session,
+		postcondition: {
+			postconditionVersion: 2,
+			kind: 'table',
+			columns: postcondition.declaration.columns.map((column) =>
+				v3ColumnPostcondition(column, column.name),
+			),
+		},
+		target,
+	});
+}
+
+/** Resolves the v3 column binding, then delegates its structure to the v2 proof. */
+export async function verifyGeneratedV3ColumnPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly kind: 'column';
+	readonly projection: GeneratedColumnProjection;
+}> {
+	const postcondition = decodeV3PostconditionKind(
+		input.postcondition,
+		'column',
+	);
+	const target = await resolveGeneratedPostconditionBinding({
+		session: input.session,
+		targetBinding: postcondition.targetBinding,
+		address: input.address,
+		expectedKind: 'column',
+	});
+	return verifyGeneratedColumnPostcondition({
+		session: input.session,
+		postcondition: {
+			postconditionVersion: 2,
+			kind: 'column',
+			column: v3ColumnPostcondition(
+				postcondition.declaration.column,
+				target.name,
+			),
+		},
+		target,
+	});
+}
+
+/** Resolves the v3 index binding, then delegates its structure to the v2 proof. */
+export async function verifyGeneratedV3IndexPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
+	const postcondition = decodeV3PostconditionKind(input.postcondition, 'index');
+	const target = await resolveGeneratedPostconditionBinding({
+		session: input.session,
+		targetBinding: postcondition.targetBinding,
+		address: input.address,
+		expectedKind: 'index',
+	});
+	const index = postcondition.declaration.index;
+	return verifyGeneratedIndexPostcondition({
+		session: input.session,
+		postcondition: {
+			postconditionVersion: 2,
+			kind: 'index',
+			index: {
+				schema: target.schema,
+				table: target.table,
+				name: target.name,
+				...index,
+				...(index.expressions === undefined
+					? {}
+					: {
+							expressions: index.expressions.map(
+								(expression) => expression.sql,
+							),
+						}),
+				...(index.where === undefined ? {} : { where: index.where.sql }),
+			},
+		},
+		target,
+	});
+}
+
+/** Resolves the v3 CHECK binding, then delegates its structure to the v2 proof. */
+export async function verifyGeneratedV3CheckPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly kind: 'constraint';
+	readonly projection: CheckProjection;
+}> {
+	const postcondition = decodeV3PostconditionKind(input.postcondition, 'check');
+	const target = await resolveGeneratedPostconditionBinding({
+		session: input.session,
+		targetBinding: postcondition.targetBinding,
+		address: input.address,
+		expectedKind: 'constraint',
+	});
+	return verifyGeneratedCheckPostcondition({
+		session: input.session,
+		postcondition: {
+			postconditionVersion: 2,
+			kind: 'constraint',
+			constraint: {
+				type: 'c',
+				expression: postcondition.declaration.check.expression.sql,
+				notValid: postcondition.declaration.check.notValid,
+			},
+		},
+		target,
 	});
 }
