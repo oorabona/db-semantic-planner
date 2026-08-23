@@ -12,13 +12,82 @@ import {
 	getTestPool,
 } from './testkit/index.js';
 
-const SCHEMA = 'prepared_statements_e2e';
+const SCHEMA = `prepared_statements_e2e_${randomUUID().replaceAll('-', '')}`;
 
 function compiled<T>(sql: string, parameters: readonly unknown[]) {
 	return projectionlessCompiledQuery<T>(
 		{ sql, parameters },
 		'prepared-statements-e2e',
 	);
+}
+
+function preparedName(sql: string): string {
+	return `dbsp_ps_${createHash('sha256')
+		.update(sql)
+		.digest('hex')
+		.slice(0, 32)}`;
+}
+
+function hasValues(
+	actual: unknown,
+	expected: readonly unknown[],
+): actual is readonly unknown[] {
+	return (
+		Array.isArray(actual) &&
+		actual.length === expected.length &&
+		actual.every((value, index) => Object.is(value, expected[index]))
+	);
+}
+
+function isNamedQuery(
+	argument: unknown,
+	name: string,
+	sql: string,
+	values: readonly unknown[],
+): boolean {
+	return (
+		typeof argument === 'object' &&
+		argument !== null &&
+		'name' in argument &&
+		'text' in argument &&
+		'values' in argument &&
+		argument.name === name &&
+		argument.text === sql &&
+		hasValues(argument.values, values)
+	);
+}
+
+function expectNamedReplayThenUnnamed(
+	calls: readonly (readonly unknown[])[],
+	name: string,
+	sql: string,
+	values: readonly unknown[],
+): void {
+	const targetCalls = calls.filter(([argument]) =>
+		typeof argument === 'string'
+			? argument === sql
+			: typeof argument === 'object' &&
+				argument !== null &&
+				'text' in argument &&
+				argument.text === sql,
+	);
+	let namedObserved = false;
+	let unnamedObservedAfterNamed = false;
+
+	for (const [argument, parameters] of targetCalls) {
+		if (isNamedQuery(argument, name, sql, values)) {
+			namedObserved = true;
+		} else if (
+			namedObserved &&
+			argument === sql &&
+			hasValues(parameters, values)
+		) {
+			unnamedObservedAfterNamed = true;
+		}
+	}
+
+	expect(namedObserved).toBe(true);
+	expect(unnamedObservedAfterNamed).toBe(true);
 }
 
 async function preparedCount(
@@ -61,6 +130,7 @@ async function expectPoolOwnedScopeToReplaceQuarantinedClient(
 		adapter: any,
 		callback: (scope: any) => Promise<void>,
 	) => Promise<void>,
+	replaysInsideScope = false,
 ): Promise<void> {
 	const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 1 });
 	try {
@@ -73,19 +143,37 @@ async function expectPoolOwnedScopeToReplaceQuarantinedClient(
 		const query = compiled<{ pid: number; value: number }>(sql, [17]);
 		let quarantinedPid: number | undefined;
 
-		await expect(
-			runScope(adapter, async (scope) => {
-				quarantinedPid = (await scope.execute(query))[0]?.pid;
-				await scope.execute(query);
-				await scope.executeRaw(`DEALLOCATE ${name}`);
-				await expect(scope.execute(query)).rejects.toMatchObject({
-					code: '26000',
-					routine: 'FetchPreparedStatement',
-				});
-			}),
-		).rejects.toThrow(
-			/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
-		);
+		const scope = runScope(adapter, async (scope) => {
+			quarantinedPid = (await scope.execute(query))[0]?.pid;
+			await scope.execute(query);
+			await scope.executeRaw(`DEALLOCATE ${name}`);
+			if (replaysInsideScope) {
+				const querySpy = vi.spyOn(scope.client, 'query');
+				try {
+					await expect(scope.execute(query)).resolves.toEqual([
+						expect.objectContaining({
+							pid: quarantinedPid,
+							value: 17,
+						}),
+					]);
+					expectNamedReplayThenUnnamed(querySpy.mock.calls, name, sql, [17]);
+				} finally {
+					querySpy.mockRestore();
+				}
+				return;
+			}
+			await expect(scope.execute(query)).rejects.toMatchObject({
+				code: '26000',
+				routine: 'FetchPreparedStatement',
+			});
+		});
+		if (replaysInsideScope) {
+			await expect(scope).resolves.toBeUndefined();
+		} else {
+			await expect(scope).rejects.toThrow(
+				/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
+			);
+		}
 		expect(quarantinedPid).toEqual(expect.any(Number));
 
 		const replacement = await adapter.execute(query);
@@ -284,6 +372,7 @@ describe('adapter prepared statements', () => {
 			const adapter = createPgsqlAdapter(client, {
 				borrowedClient: true,
 				preparedStatements: true,
+				replayInvalidatedPlans: true,
 			});
 			const table = `"${SCHEMA}".invalidated_plan`;
 			const sql = `SELECT * FROM ${table} WHERE id = $1`;
@@ -311,7 +400,65 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('uses unnamed execution after result-shape DDL invalidates a named plan in a caller-owned transaction', async () => {
+	it('does not replay a borrowed client after BEGIN is queued behind a failed named query', async () => {
+		const { client, close } = await getIsolatedClient();
+		let transactionOpen = false;
+		let queuedBegin: Promise<unknown> | undefined;
+		try {
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			const table = `"${SCHEMA}".queued_begin_after_named_failure`;
+			const sql = `SELECT * FROM ${table} WHERE id = $1`;
+
+			await adapter.executeDDL(
+				`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+			);
+			await adapter.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+			await (adapter as any).issueConnectionQuery(client, sql, [1], true);
+			await (adapter as any).issueConnectionQuery(client, sql, [1], true);
+			await client.query(`ALTER TABLE ${table} ADD COLUMN added text`);
+
+			const querySpy = vi.spyOn(client, 'query');
+			try {
+				const failed = (adapter as any).issueConnectionQuery(
+					client,
+					sql,
+					[1],
+					true,
+				);
+				queuedBegin = client.query('BEGIN');
+
+				await expect(failed).rejects.toMatchObject({
+					code: '0A000',
+					routine: 'RevalidateCachedQuery',
+				});
+				await queuedBegin;
+				transactionOpen = true;
+				expect(querySpy).not.toHaveBeenCalledWith(sql, [1]);
+			} finally {
+				querySpy.mockRestore();
+			}
+
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [1], true),
+			).resolves.toMatchObject({ rows: [{ id: 1, added: null }] });
+		} finally {
+			if (!transactionOpen && queuedBegin !== undefined) {
+				await queuedBegin.then(
+					() => {
+						transactionOpen = true;
+					},
+					() => undefined,
+				);
+			}
+			if (transactionOpen) await client.query('ROLLBACK');
+			await close();
+		}
+	});
+
+	it('rejects the invalidated call but quarantines subsequent execution in a caller-owned transaction', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -336,9 +483,19 @@ describe('adapter prepared statements', () => {
 					code: '0A000',
 					routine: 'RevalidateCachedQuery',
 				});
-				await expect(adapter.execute(query)).resolves.toEqual([
-					{ id: 1, added: null },
-				]);
+				const freshUnnamed = await adapter.executeRaw(sql, [1]);
+				const querySpy = vi.spyOn(client, 'query');
+				await expect(adapter.execute(query)).resolves.toEqual(freshUnnamed);
+				expect(querySpy).toHaveBeenCalledWith(sql, [1]);
+				expect(querySpy).not.toHaveBeenCalledWith({
+					name: `dbsp_ps_${createHash('sha256')
+						.update(sql)
+						.digest('hex')
+						.slice(0, 32)}`,
+					text: sql,
+					values: [1],
+				});
+				querySpy.mockRestore();
 			} finally {
 				await client.query('ROLLBACK');
 			}
@@ -350,7 +507,7 @@ describe('adapter prepared statements', () => {
 	it.each([
 		'DEALLOCATE ALL',
 		'DISCARD ALL',
-	])('uses unnamed execution after %s clears node-postgres server plans', async (reset) => {
+	])('quarantines %s-cleared server plans after the failed call', async (reset) => {
 		const { client, close } = await getIsolatedClient();
 		try {
 			const adapter = createPgsqlAdapter(client, {
@@ -464,6 +621,56 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
+	it('does not replay a nested missing prepared statement after an effectful function call', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
+		try {
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const sequence = `"${SCHEMA}".nested_missing_statement_sequence`;
+			const fn = `"${SCHEMA}".nextval_then_missing_statement`;
+			const sql = `SELECT ${fn}($1::boolean) AS value`;
+			const failingQuery = compiled<{ value: number }>(sql, [true]);
+
+			await adapter.executeDDL(`CREATE SEQUENCE ${sequence}`);
+			await adapter.executeDDL(`
+				CREATE FUNCTION ${fn}(should_fail boolean) RETURNS bigint
+				LANGUAGE plpgsql AS $$
+				BEGIN
+					IF should_fail THEN
+						PERFORM nextval('${SCHEMA}.nested_missing_statement_sequence');
+						EXECUTE 'EXECUTE nested_missing_statement';
+					END IF;
+					RETURN 0;
+				END;
+				$$`);
+
+			const scope = adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(compiled<{ value: number }>(sql, [false]));
+				await pinned.execute(compiled<{ value: number }>(sql, [false]));
+				await expect(pinned.execute(failingQuery)).rejects.toMatchObject({
+					code: '26000',
+					routine: 'FetchPreparedStatement',
+					message:
+						'prepared statement "nested_missing_statement" does not exist',
+				});
+			});
+			await expect(scope).rejects.toThrow(
+				/PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope/,
+			);
+
+			expect(
+				await adapter.executeRaw<{
+					last_value: string;
+					is_called: boolean;
+				}>(`SELECT last_value::text, is_called FROM ${sequence}`),
+			).toEqual([{ last_value: '1', is_called: true }]);
+		} finally {
+			await pool.end();
+		}
+	});
+
 	it('quarantines a duplicate external prepared statement name on its client', async () => {
 		const { client, close } = await getIsolatedClient();
 		try {
@@ -472,10 +679,7 @@ describe('adapter prepared statements', () => {
 				preparedStatements: true,
 			});
 			const sql = 'SELECT $1::int AS value';
-			const name = `dbsp_ps_${createHash('sha256')
-				.update(sql)
-				.digest('hex')
-				.slice(0, 32)}`;
+			const name = preparedName(sql);
 			const query = compiled<{ value: number }>(sql, [11]);
 
 			await client.query(`PREPARE ${name}(integer) AS ${sql}`);
@@ -583,9 +787,10 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it('replaces a quarantined client after a pinned pool-owned scope', async () => {
-		await expectPoolOwnedScopeToReplaceQuarantinedClient((adapter, callback) =>
-			adapter.withPinnedConnection(callback),
+	it('replays inside a pinned pool-owned scope before replacing its quarantined client', async () => {
+		await expectPoolOwnedScopeToReplaceQuarantinedClient(
+			(adapter, callback) => adapter.withPinnedConnection(callback),
+			true,
 		);
 	});
 

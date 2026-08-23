@@ -158,19 +158,38 @@ node-postgres keeps its own per-connection statement map and cannot safely be
 resynchronized. A result-shape-changing DDL can return SQLSTATE `0A000` for a
 cached plan; after `DEALLOCATE ALL`, `DISCARD ALL`, or a connection/proxy reset, the
 next named execution can return `26000`; an externally created statement in the reserved namespace can
-return `42P05`. dbsp always propagates that failed call once; it never retries an
-adapter call in place. For a direct `Pool` query, node-postgres releases the
-errored client and removes it from the pool, so a replacement connection prepares
+return `42P05`. For a direct `Pool` query, dbsp propagates that failed call; node-postgres
+releases the errored client and removes it from the pool, so a replacement connection prepares
 the same name cleanly on its next eligible execution. There is no pool-wide
 failure state or downgrade.
 
-For a caller-borrowed client, dbsp falls back to unnamed execution on that physical
-client using node-postgres-shaped protocol heuristics as prepared-statement
-infrastructure evidence: PostgreSQL errors with a string `severity` together with
+For a caller-borrowed client, dbsp records quarantine using node-postgres-shaped
+protocol heuristics as prepared-statement infrastructure evidence: PostgreSQL errors with a string `severity` together with
 the exact `code`/`routine` pairs (`0A000` from `RevalidateCachedQuery`, `42P05`
 from `StorePreparedStatement`, or `26000` from `FetchPreparedStatement`) and
-node-postgres's exact local duplicate-name collision. The local collision is raised
-before any query is sent; `0A000`, `42P05`, and that collision affect that SQL only.
+node-postgres's exact local duplicate-name collision. These four classifications
+do not prove that the outer statement has not executed: a function it invokes can
+perform work before a nested prepared-statement operation raises the same server
+error. dbsp propagates the original failure on a caller-borrowed client, even when
+its ReadyForQuery status is idle: that status does not reserve node-postgres's command
+queue, so another caller can already have queued `BEGIN`, `SET ROLE`, `SET search_path`,
+or `DISCARD ALL` ahead of a replay. The caller's next eligible execution uses the
+recorded unnamed quarantine.
+
+dbsp can replay the original call exactly once through unnamed execution only in a
+dbsp-managed pinned scope created from a pool-owned checked-out client. In that
+scope dbsp owns the physical client and holds its per-client statement lock across
+the failed named call and the replay. Even there, it replays only when ReadyForQuery
+says no transaction is open; an open or unknown transaction state never replays.
+For `26000`/`FetchPreparedStatement` and `42P05`/`StorePreparedStatement`, it
+replays only when PostgreSQL reports a prepared-statement name equal to dbsp's own
+admission name for that attempt; an absent or different name propagates. `0A000`/
+`RevalidateCachedQuery` carries no statement identity, so it propagates by default
+after quarantine. Set `replayInvalidatedPlans: true` only
+when you assert that your statements do not invoke functions performing effectful
+work before nested prepared-statement operations; that opt-in permits the same
+bounded `0A000` replay. Every other error propagates, as does any replay failure.
+The local collision, `0A000`, and `42P05` affect that SQL only.
 A verified `26000` is treated as possible client-wide loss because the SQLSTATE
 alone cannot distinguish a full connection reset from a targeted `DEALLOCATE <name>`;
 every later eligible SQL runs unnamed on that client. An absent or unexpected
@@ -179,8 +198,8 @@ client quarantine, except for the routine-less driver-local duplicate-name colli
 which installs SQL-scoped persistent quarantine. A locally thrown lookalike carrying
 the same shape can affect admission or quarantine for its SQL or client. An
 unconfirmed position-bearing failure during initial admission can still lose its
-reservation, so that SQL runs unnamed until it is sighted again. Every adapter
-call still executes at most once.
+reservation, so that SQL runs unnamed until it is sighted again. Other than the
+bounded unnamed replay above, every adapter call executes at most once.
 
 The client-wide scope after a verified `26000` is a deliberate, accepted cost:
 the SQLSTATE alone cannot distinguish a full connection reset (where every
