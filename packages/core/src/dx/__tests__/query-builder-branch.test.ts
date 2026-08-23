@@ -347,13 +347,10 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 // ============================================================================
 
 describe('QueryBuilderImpl.where branches', () => {
-	it('where(ExpressionRef) → wraps as expression kind intent', () => {
-		const report = whereExpression(
-			orm.select('users'),
-			exprRef('active'),
-		).plan();
-		const w = report.intent.where as { kind: string };
-		expect(w?.kind).toBe('expression');
+	it('where(ExpressionRef) rejects an unbranded boolean expression', () => {
+		expect(() =>
+			whereExpression(orm.select('users'), exprRef('active')),
+		).toThrow(/Invalid where: expected a PredicateRef/);
 	});
 
 	it('where(WhereIntent) → passthrough without conversion', () => {

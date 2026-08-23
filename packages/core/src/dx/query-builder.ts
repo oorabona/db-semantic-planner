@@ -26,7 +26,13 @@ import {
 	validateIdentifier,
 } from './errors.js';
 import { buildExistsIntent } from './exists-intent.js';
-import { ExpressionRef } from './expressions.js';
+import {
+	ExpressionRef,
+	hasPredicateRefDiscriminator,
+	isPredicateRef,
+	type PredicateRef,
+	predicateWhereIntent,
+} from './expressions.js';
 import {
 	and,
 	type DistinctField,
@@ -551,21 +557,28 @@ export class QueryBuilderImpl<TResult = unknown>
 		return builder;
 	}
 
-	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult> {
+	where(
+		condition: WhereIntent | PredicateRef | WhereFilter<TResult>,
+	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		// Detect ExpressionRef used as a standalone boolean WHERE predicate.
-		// op('!=', exprRef('a'), exprRef('b')) returns ExpressionRef which has __expr:true
-		// but no `kind` property, so isWhereIntent() returns false and objectToWhereIntent()
-		// would map `__expr: true` as a column field. Handle this before the WhereIntent check.
-		if (condition instanceof ExpressionRef) {
-			// Wrap the expression intent in a WhereExpressionIntent with no value/operator.
-			// The WHERE handler detects this and emits the expression node directly.
-			const whereExpr = {
-				kind: 'expression',
-				expr: condition.intent,
-			} as unknown as WhereIntent;
-			builder.whereIntents.push(whereExpr);
+		if (isPredicateRef(condition)) {
+			builder.whereIntents.push(predicateWhereIntent(condition));
 			return builder;
+		}
+		if (hasPredicateRefDiscriminator(condition)) {
+			throw new InvalidOperationError(
+				'where',
+				"predicate belongs to another @dbsp/core copy; reconstruct it with this copy's predicate factories",
+			);
+		}
+		if (
+			condition instanceof ExpressionRef ||
+			isExpressionSpec(condition as ColumnSpec)
+		) {
+			throw new InvalidOperationError(
+				'where',
+				'expected a PredicateRef; use unsafeAsPredicate() to assert a deliberate boolean expression',
+			);
 		}
 		// Convert object filter to WhereIntent if needed
 		const intent = isWhereIntent(condition)

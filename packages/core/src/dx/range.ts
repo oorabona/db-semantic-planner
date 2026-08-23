@@ -25,7 +25,14 @@
 
 import type { RangeOperand, RangeValue } from '@dbsp/types';
 import type { WhereRangeIntent } from '../intent-ast.js';
-import { type ExpressionRef, fn, op, param, ref } from './expressions.js';
+import {
+	type ExpressionRef,
+	fn,
+	op,
+	type PredicateExpressionRef,
+	param,
+	ref,
+} from './expressions.js';
 
 export type { RangeOperand, RangeValue } from '@dbsp/types';
 
@@ -92,7 +99,7 @@ export function rangeOverlaps(
 	column: string,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
-): ExpressionRef;
+): PredicateExpressionRef;
 
 /**
  * Range OVERLAPS — object API: delegates to WhereRangeIntent (planner path)
@@ -109,7 +116,7 @@ export function rangeOverlaps(
 	fieldOrColumn: string,
 	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
-): ExpressionRef | WhereRangeIntent {
+): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
@@ -138,7 +145,7 @@ export function rangeContains(
 	column: string,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
-): ExpressionRef;
+): PredicateExpressionRef;
 
 /**
  * Range CONTAINS — object API: delegates to WhereRangeIntent (planner path)
@@ -154,7 +161,7 @@ export function rangeContains(
 	fieldOrColumn: string,
 	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
-): ExpressionRef | WhereRangeIntent {
+): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
@@ -182,7 +189,7 @@ export function rangeContainedBy(
 	column: string,
 	range: readonly [unknown, unknown],
 	rangeType?: RangeType,
-): ExpressionRef;
+): PredicateExpressionRef;
 
 /**
  * Range CONTAINED BY — object API: delegates to WhereRangeIntent (planner path)
@@ -199,7 +206,7 @@ export function rangeContainedBy(
 	fieldOrColumn: string,
 	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
-): ExpressionRef | WhereRangeIntent {
+): PredicateExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
 		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];

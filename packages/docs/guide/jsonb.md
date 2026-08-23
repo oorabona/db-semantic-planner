@@ -67,12 +67,11 @@ import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
 const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
-// WHERE data->>'email' = $1
+// WHERE (data ->> 'email') = $1
 orm.select('profiles')
   .where(op('=', op('->>', exprRef('data'), literal('email')), param('alice@example.com')))
   .dump();
-// SQL: SELECT ... FROM "profiles"
-// WHERE "data" ->> 'email' = $1
+// SQL: SELECT profiles.* FROM profiles WHERE (data ->> 'email') = $1
 // params: ['alice@example.com']
 ```
 
@@ -93,12 +92,11 @@ const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 const roleFilter = { role: 'admin' };
 
-// WHERE data @> $1::jsonb
+// WHERE data @> CAST($1 AS jsonb)
 orm.select('profiles')
   .where(op('@>', exprRef('data'), cast(param(JSON.stringify(roleFilter)), 'jsonb')))
   .dump();
-// SQL: SELECT ... FROM "profiles"
-// WHERE "data" @> $1::jsonb
+// SQL: SELECT profiles.* FROM profiles WHERE data @> CAST($1 AS jsonb)
 // params: ['{"role":"admin"}']
 ```
 
@@ -111,7 +109,7 @@ The `cast(..., 'jsonb')` is necessary because `$N` parameters are untyped — Po
 Check whether a specific key is present in the document:
 
 ```typescript
-import { schema, createOrm, fn, exprRef, literal } from '@dbsp/core';
+import { schema, createOrm, boolFn, exprRef, literal } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
@@ -119,15 +117,14 @@ const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 // WHERE jsonb_exists(data, 'phone')
 orm.select('profiles')
-  .where(fn('jsonb_exists', exprRef('data'), literal('phone')))
+  .where(boolFn('jsonb_exists', exprRef('data'), literal('phone')))
   .dump();
-// SQL: SELECT ... FROM "profiles"
-// WHERE jsonb_exists("data", 'phone')
+// SQL: SELECT profiles.* FROM profiles WHERE jsonb_exists(data, 'phone')
 ```
 
-As noted in the introduction, `op('?', ...)` throws at compile time because `?` is not in the static operator allowlist. `fn('jsonb_exists', ...)` is the equivalent — it calls the PostgreSQL built-in that backs the `?` operator.
+As noted in the introduction, `op('?', ...)` throws during expression construction because `?` fails the operator-token regex. `boolFn('jsonb_exists', ...)` is the equivalent — it calls the PostgreSQL built-in that backs the `?` operator. `fn()` builds a scalar expression; use `boolFn()` when you declare that the function is boolean-valued and want to use it as a predicate.
 
-For array key-existence use `fn('jsonb_exists_any', ...)` (`?|`) or `fn('jsonb_exists_all', ...)` (`?&`).
+For array key-existence use `boolFn('jsonb_exists_any', ...)` (`?|`) or `boolFn('jsonb_exists_all', ...)` (`?&`).
 
 ---
 
@@ -149,7 +146,7 @@ orm.select('profiles')
     op('->', op('->', exprRef('data'), literal('tags')), literal(0)),
   ])
   .dump();
-// SQL: SELECT "id", "data" -> 'tags' -> 0 FROM "profiles"
+// SQL: SELECT profiles.id, (data -> 'tags') -> 0 FROM profiles
 ```
 
 Integer indexes into JSON arrays use a bare integer literal (not quoted). The result type is `jsonb`; cast to `text` via `->>` or `cast(..., 'text')` for string comparisons.
@@ -175,8 +172,7 @@ orm.select('profiles')
   ])
   .groupBy(['userId'])
   .dump();
-// SQL: SELECT "userId", jsonb_agg("data") AS "allData"
-// FROM "profiles" GROUP BY "userId"
+// SQL: SELECT profiles."userId", jsonb_agg(data) AS "allData" FROM profiles GROUP BY profiles."userId"
 ```
 
 `fn(name, ...args)` calls a named PostgreSQL function. It is part of the expression primitives — see [Expression Primitives](./expression-primitives) for the full signature.

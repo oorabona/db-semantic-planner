@@ -25,16 +25,25 @@ one or more text columns of a table, with optional per-field boost weights.
 ### `fullTextSearch(options)` — import from `@dbsp/core`
 
 Produces a `WHERE` filter using the ParadeDB `@@@` operator with per-field boost weights.
+`@@@` remains one of the symbolic predicate operators accepted by `op()`; this helper is
+the focused API for constructing its ParadeDB operand.
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
-import { fullTextSearch } from '@dbsp/core';
+// doctest: skip — API signature reference
+import {
+  fullTextSearch,
+  type FullTextSearchField,
+  type PredicateExpressionRef,
+} from '@dbsp/core';
 
-fullTextSearch({
-  query: string | unknown,   // query string — bound as a $N parameter per field
-  fields: FullTextSearchField[],  // columns to search
-  tableAlias: string,        // table name as it appears in the FROM clause
-}): ExpressionRef
+declare const query: string | unknown;
+declare const fields: FullTextSearchField[];
+
+const predicate: PredicateExpressionRef = fullTextSearch({
+  query,             // query string — bound as a $N parameter per field
+  fields,            // columns to search
+  tableAlias: 'docs', // table name as it appears in the FROM clause
+});
 ```
 
 `FullTextSearchField`:
@@ -49,7 +58,7 @@ type FullTextSearchField = {
 **Generated SQL:**
 
 ```sql
-"tableAlias" @@@ paradedb.boolean(
+tableAlias @@@ paradedb.boolean(
   should => ARRAY[
     paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)),
     paradedb.boost(1, paradedb.parse(field => 'doc', query_string => $2)),
@@ -99,10 +108,11 @@ const __ftsArticlesDb = schema({
     title: 'string',
     body: 'text',
     status: 'string',
-    searchVector: { type: 'tsvector', nullable: true },
+    searchVector: { type: 'text', dbType: 'tsvector', nullable: true },
   },
 } as const);
 const __ftsArticlesOrm = createOrm({ schema: __ftsArticlesDb, adapter: createPgsqlCompileOnlyAdapter() });
+const searchTerm = 'database internals';
 
 const results = await __ftsArticlesOrm
   .select('articles')
@@ -116,14 +126,7 @@ const results = await __ftsArticlesOrm
   }))
   .dump();
 
-// SQL:
-//   SELECT * FROM "articles"
-//   WHERE articles @@@ paradedb.boolean(
-//     should => ARRAY[
-//       paradedb.boost(1, paradedb.parse(field => 'title', query_string => $1)),
-//       paradedb.boost(1, paradedb.parse(field => 'body', query_string => $2))
-//     ]
-//   )
+// SQL: SELECT articles.* FROM articles WHERE articles @@@ paradedb.boolean(should => ARRAY[paradedb.boost(1, paradedb.parse(field => 'title', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'body', query_string => $2))])
 // params: [searchTerm, searchTerm]
 ```
 
@@ -147,6 +150,7 @@ const __ftsSymbolsDb = schema({
   },
 } as const);
 const __ftsSymbolsOrm = createOrm({ schema: __ftsSymbolsDb, adapter: createPgsqlCompileOnlyAdapter() });
+const searchTerm = 'database internals';
 
 const results = await __ftsSymbolsOrm
   .select('symbols')
@@ -161,14 +165,7 @@ const results = await __ftsSymbolsOrm
   }))
   .dump();
 
-// SQL:
-//   WHERE symbols @@@ paradedb.boolean(
-//     should => ARRAY[
-//       paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)),
-//       paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $2)),
-//       paradedb.boost(1, paradedb.parse(field => 'doc_comment', query_string => $3))
-//     ]
-//   )
+// SQL: SELECT symbols.* FROM symbols WHERE symbols @@@ paradedb.boolean(should => ARRAY[paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $2)), paradedb.boost(1, paradedb.parse(field => 'doc_comment', query_string => $3))])
 // params: [searchTerm, searchTerm, searchTerm]
 ```
 
@@ -190,6 +187,7 @@ const __ftsSymbolsScoreDb = schema({
   },
 } as const);
 const __ftsSymbolsScoreOrm = createOrm({ schema: __ftsSymbolsScoreDb, adapter: createPgsqlCompileOnlyAdapter() });
+const searchTerm = 'database internals';
 
 const results = await __ftsSymbolsScoreOrm
   .select('symbols')
@@ -206,17 +204,7 @@ const results = await __ftsSymbolsScoreOrm
   .limit(20)
   .dump();
 
-// SQL:
-//   SELECT *, paradedb.score(id) AS "score"
-//   FROM "symbols"
-//   WHERE symbols @@@ paradedb.boolean(
-//     should => ARRAY[
-//       paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)),
-//       paradedb.boost(1, paradedb.parse(field => 'doc_comment', query_string => $2))
-//     ]
-//   )
-//   ORDER BY paradedb.score(id) DESC
-//   LIMIT 20
+// SQL: SELECT symbols.*, paradedb.score(id) AS score FROM symbols WHERE symbols @@@ paradedb.boolean(should => ARRAY[paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'doc_comment', query_string => $2))]) ORDER BY paradedb.score(id) DESC LIMIT 20
 // params: [searchTerm, searchTerm]
 ```
 
@@ -240,6 +228,7 @@ const __ftsArticlesWhereDb = schema({
   },
 } as const);
 const __ftsArticlesWhereOrm = createOrm({ schema: __ftsArticlesWhereDb, adapter: createPgsqlCompileOnlyAdapter() });
+const searchTerm = 'database internals';
 
 const results = await __ftsArticlesWhereOrm
   .select('articles')
@@ -254,15 +243,7 @@ const results = await __ftsArticlesWhereOrm
   }))
   .dump();
 
-// SQL:
-//   SELECT * FROM "articles"
-//   WHERE "articles"."status" = $1
-//   AND articles @@@ paradedb.boolean(
-//     should => ARRAY[
-//       paradedb.boost(2, paradedb.parse(field => 'title', query_string => $2)),
-//       paradedb.boost(1, paradedb.parse(field => 'body', query_string => $3))
-//     ]
-//   )
+// SQL: SELECT articles.* FROM articles WHERE articles.status = $1 AND articles @@@ paradedb.boolean(should => ARRAY[paradedb.boost(2, paradedb.parse(field => 'title', query_string => $2)), paradedb.boost(1, paradedb.parse(field => 'body', query_string => $3))])
 // params: ['published', searchTerm, searchTerm]
 ```
 
@@ -273,17 +254,18 @@ const results = await __ftsArticlesWhereOrm
 When the BM25 index uses a key field other than `id`, pass the field name explicitly.
 
 ```typescript
-import { textScore } from '@dbsp/core';
+import { createOrm, schema, textScore } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-orm.select('users')
+const __ftsUsersDb = schema({ users: { id: 'uuid' } } as const);
+const __ftsUsersOrm = createOrm({ schema: __ftsUsersDb, adapter: createPgsqlCompileOnlyAdapter() });
+
+__ftsUsersOrm.select('users')
   .columns(['*', textScore('id').as('relevance')])
   .orderBy(textScore('id'), 'desc')
   .dump();
 
-// SQL:
-//   SELECT *, paradedb.score(id) AS "relevance"
-//   FROM "users"
-//   ORDER BY paradedb.score(id) DESC
+// SQL: SELECT users.*, paradedb.score(id) AS relevance FROM users ORDER BY paradedb.score(id) DESC
 ```
 
 ---
@@ -392,4 +374,3 @@ field structs and explicit boost values. The older `bm25Search` (from
 `@dbsp/adapter-pgsql`) accepts an object of `{ field: weight }` pairs and is
 suitable for simpler cases. Prefer `fullTextSearch` for new code — it is
 adapter-agnostic and lives in core.
-
