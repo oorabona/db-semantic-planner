@@ -20,11 +20,7 @@ import {
 	readPgRemovalEffectsClosure,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
-	verifyGeneratedConstraintPostcondition,
-	verifyGeneratedEnumPostcondition,
-	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
-	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
@@ -285,6 +281,29 @@ function generatedPayload(value: unknown): LedgerPayload {
 	};
 }
 
+/** A deliberately non-structural read-back for the four #597 kinds. */
+async function identityObserved(
+	executor: GeneratedPostconditionSession,
+	address: LedgerAddress,
+): Promise<LedgerPayload> {
+	const live = await readPgCatalogueIdentity(executor, address);
+	if (!live?.catalogueIdentity)
+		throw new Error(
+			`generated ${address.kind} identity observation is absent at ${address.name}`,
+		);
+	return generatedPayload({
+		kind: 'identity-observed',
+		observedKind: address.kind,
+		address: {
+			scope: address.scope,
+			schema: address.schema,
+			name: address.name,
+		},
+		identity: live.catalogueIdentity,
+		structuralSemantics: 'unverified',
+	});
+}
+
 function generatedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
@@ -349,15 +368,7 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'constraint': {
-			const verified = await verifyGeneratedConstraintPostcondition({
-				session: executor,
-				postcondition,
-				address,
-			});
-			return generatedPayload({
-				kind: verified.kind,
-				projection: verified.projection,
-			});
+			return identityObserved(executor, address);
 		}
 		case 'index': {
 			const verified = await verifyGeneratedIndexPostcondition({
@@ -389,34 +400,13 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'enum': {
-			const verified = await verifyGeneratedEnumPostcondition({
-				session: executor,
-				postcondition,
-				address,
-			});
-			return generatedPayload({ kind: verified.kind, labels: verified.labels });
+			return identityObserved(executor, address);
 		}
 		case 'sequence': {
-			const verified = await verifyGeneratedSequencePostcondition({
-				session: executor,
-				postcondition,
-				address,
-			});
-			return generatedPayload({
-				kind: verified.kind,
-				projection: verified.projection,
-			});
+			return identityObserved(executor, address);
 		}
 		case 'extension': {
-			const verified = await verifyGeneratedExtensionPostcondition({
-				session: executor,
-				postcondition,
-				address,
-			});
-			return generatedPayload({
-				kind: verified.kind,
-				version: verified.version,
-			});
+			return identityObserved(executor, address);
 		}
 		case 'absent': {
 			// Removal admission owns the destructive absence read-back.  Consume it

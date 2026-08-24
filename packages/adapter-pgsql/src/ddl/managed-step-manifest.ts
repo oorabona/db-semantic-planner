@@ -13,8 +13,8 @@ import {
 	type GeneratedMutationClassification,
 } from './destructive-classification.js';
 import {
+	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
-	validateGeneratedPostconditionV3Declaration,
 } from './generated-postcondition-v3-validator.js';
 import { formatSqlDefault } from './phases/utils.js';
 import type { ChangeKind, SchemaChange } from './schema-diff.js';
@@ -313,9 +313,12 @@ export function generatedPostconditionDigest(value: {
 function postconditionPayload(
 	value: GeneratedPostcondition,
 ): import('@dbsp/types').LedgerPayload {
+	const snapshot = snapshotGeneratedPostconditionJson(
+		value,
+	) as GeneratedPostcondition;
 	return {
-		value: value as unknown as import('@dbsp/types').JsonValue,
-		digest: generatedPostconditionDigest(value),
+		value: snapshot as unknown as import('@dbsp/types').JsonValue,
+		digest: generatedPostconditionDigest(snapshot),
 	};
 }
 
@@ -390,10 +393,10 @@ function columnDeclaration(
 function v3Payload(
 	declaration: GeneratedPostconditionDeclarationV3,
 ): import('@dbsp/types').LedgerPayload {
-	validateGeneratedPostconditionV3Declaration(declaration);
+	const snapshot = parseGeneratedPostconditionV3Declaration(declaration);
 	return postconditionPayload({
 		postconditionVersion: 3,
-		declaration,
+		declaration: snapshot,
 		targetBinding: targetBinding(),
 	});
 }

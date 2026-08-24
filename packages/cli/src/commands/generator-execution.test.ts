@@ -3,11 +3,7 @@ import {
 	generatedPostconditionDigest,
 	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
 	type verifyGeneratedColumnPostcondition as VerifyGeneratedColumnPostcondition,
-	type verifyGeneratedConstraintPostcondition as VerifyGeneratedConstraintPostcondition,
-	type verifyGeneratedEnumPostcondition as VerifyGeneratedEnumPostcondition,
-	type verifyGeneratedExtensionPostcondition as VerifyGeneratedExtensionPostcondition,
 	type verifyGeneratedIndexPostcondition as VerifyGeneratedIndexPostcondition,
-	type verifyGeneratedSequencePostcondition as VerifyGeneratedSequencePostcondition,
 	type verifyGeneratedTablePostcondition as VerifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
@@ -23,21 +19,11 @@ const verifyGeneratedTablePostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedColumnPostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedIndexPostcondition = vi.hoisted(() => vi.fn());
 const verifyGeneratedCheckPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedConstraintPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedEnumPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedSequencePostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedExtensionPostcondition = vi.hoisted(() => vi.fn());
 const v3VerifierDelegates = vi.hoisted(() => ({
 	table: undefined as unknown as typeof VerifyGeneratedTablePostcondition,
 	column: undefined as unknown as typeof VerifyGeneratedColumnPostcondition,
 	index: undefined as unknown as typeof VerifyGeneratedIndexPostcondition,
 	check: undefined as unknown as typeof VerifyGeneratedCheckPostcondition,
-	constraint:
-		undefined as unknown as typeof VerifyGeneratedConstraintPostcondition,
-	enum: undefined as unknown as typeof VerifyGeneratedEnumPostcondition,
-	sequence: undefined as unknown as typeof VerifyGeneratedSequencePostcondition,
-	extension:
-		undefined as unknown as typeof VerifyGeneratedExtensionPostcondition,
 }));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
@@ -46,11 +32,6 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	v3VerifierDelegates.column = actual.verifyGeneratedColumnPostcondition;
 	v3VerifierDelegates.index = actual.verifyGeneratedIndexPostcondition;
 	v3VerifierDelegates.check = actual.verifyGeneratedCheckPostcondition;
-	v3VerifierDelegates.constraint =
-		actual.verifyGeneratedConstraintPostcondition;
-	v3VerifierDelegates.enum = actual.verifyGeneratedEnumPostcondition;
-	v3VerifierDelegates.sequence = actual.verifyGeneratedSequencePostcondition;
-	v3VerifierDelegates.extension = actual.verifyGeneratedExtensionPostcondition;
 	return {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
@@ -69,14 +50,6 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			verifyGeneratedIndexPostcondition(...args),
 		verifyGeneratedCheckPostcondition: (...args: unknown[]) =>
 			verifyGeneratedCheckPostcondition(...args),
-		verifyGeneratedConstraintPostcondition: (...args: unknown[]) =>
-			verifyGeneratedConstraintPostcondition(...args),
-		verifyGeneratedEnumPostcondition: (...args: unknown[]) =>
-			verifyGeneratedEnumPostcondition(...args),
-		verifyGeneratedSequencePostcondition: (...args: unknown[]) =>
-			verifyGeneratedSequencePostcondition(...args),
-		verifyGeneratedExtensionPostcondition: (...args: unknown[]) =>
-			verifyGeneratedExtensionPostcondition(...args),
 	};
 });
 
@@ -85,10 +58,6 @@ beforeEach(() => {
 	verifyGeneratedColumnPostcondition.mockReset();
 	verifyGeneratedIndexPostcondition.mockReset();
 	verifyGeneratedCheckPostcondition.mockReset();
-	verifyGeneratedConstraintPostcondition.mockReset();
-	verifyGeneratedEnumPostcondition.mockReset();
-	verifyGeneratedSequencePostcondition.mockReset();
-	verifyGeneratedExtensionPostcondition.mockReset();
 	verifyGeneratedTablePostcondition.mockImplementation(
 		v3VerifierDelegates.table,
 	);
@@ -100,16 +69,6 @@ beforeEach(() => {
 	);
 	verifyGeneratedCheckPostcondition.mockImplementation(
 		v3VerifierDelegates.check,
-	);
-	verifyGeneratedConstraintPostcondition.mockImplementation(
-		v3VerifierDelegates.constraint,
-	);
-	verifyGeneratedEnumPostcondition.mockImplementation(v3VerifierDelegates.enum);
-	verifyGeneratedSequencePostcondition.mockImplementation(
-		v3VerifierDelegates.sequence,
-	);
-	verifyGeneratedExtensionPostcondition.mockImplementation(
-		v3VerifierDelegates.extension,
 	);
 });
 
@@ -498,8 +457,8 @@ describe('generator execution fixture shim', () => {
 				name: 'accounts_pkey',
 				parent: dataDestructiveStep.address,
 			},
-			verifyGeneratedConstraintPostcondition,
-			{ kind: 'constraint', projection: { type: 'p' } },
+			undefined,
+			undefined,
 		],
 		[
 			'enum',
@@ -510,8 +469,8 @@ describe('generator execution fixture shim', () => {
 				name: 'status',
 				parent: undefined,
 			},
-			verifyGeneratedEnumPostcondition,
-			{ kind: 'enum', labels: ['active'] },
+			undefined,
+			undefined,
 		],
 		[
 			'sequence',
@@ -522,8 +481,8 @@ describe('generator execution fixture shim', () => {
 				name: 'accounts_id_seq',
 				parent: undefined,
 			},
-			verifyGeneratedSequencePostcondition,
-			{ kind: 'sequence', projection: { start_value: '1', increment_by: '1' } },
+			undefined,
+			undefined,
 		],
 		[
 			'extension',
@@ -535,24 +494,30 @@ describe('generator execution fixture shim', () => {
 				kind: 'extension',
 				name: 'pgcrypto',
 			},
-			verifyGeneratedExtensionPostcondition,
-			{ kind: 'extension', version: '1.0' },
+			undefined,
+			undefined,
 		],
-	] as const)('reads back every additional produced v3 %s kind after execution', async (_label, value, address, verify, result) => {
-		verify.mockResolvedValue(result);
+	] as const)('records an identity-only observation for every deferred v3 %s kind', async (_label, value, address, _verify, _result) => {
 		const step = {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: { value, digest: 'v3-postcondition' },
 		} as unknown as NormalizedManagedStep;
 		await readTestGeneratedPostcondition(
-			{ query: vi.fn() },
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
 			step,
 			address as LedgerAddress,
 		);
-		expect(verify).toHaveBeenCalledWith(
-			expect.objectContaining({ postcondition: value, address }),
+		const observed = await readTestGeneratedPostcondition(
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+			step,
+			address as LedgerAddress,
 		);
+		expect(observed.value).toMatchObject({
+			kind: 'identity-observed',
+			observedKind: address.kind,
+			structuralSemantics: 'unverified',
+		});
 	});
 
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {

@@ -29,11 +29,7 @@ export {
 	GeneratedPostconditionWorkInFlightError,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
-	verifyGeneratedConstraintPostcondition,
-	verifyGeneratedEnumPostcondition,
-	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
-	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';

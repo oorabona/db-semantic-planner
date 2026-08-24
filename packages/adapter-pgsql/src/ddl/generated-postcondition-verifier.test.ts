@@ -10,11 +10,7 @@ import {
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
-	verifyGeneratedConstraintPostcondition,
-	verifyGeneratedEnumPostcondition,
-	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
-	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 	withPinnedGeneratedPostconditionSession,
@@ -264,6 +260,58 @@ function tableSession(
 }
 
 describe('generated postcondition verifier', () => {
+	it('redacts authored defaults from table mismatch diagnostics', async () => {
+		const secret = "'operator-secret-7f2'::text";
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'token',
+							column_type: 'text',
+							is_not_null: true,
+							column_default: "'live'::text",
+						},
+					],
+					{ token: secret },
+				),
+				postcondition: v3Table([
+					{
+						name: 'token',
+						type: 'text',
+						nullable: false,
+						default: authoredDefault(secret),
+					},
+				]),
+				address: tableAddress,
+			}),
+		).rejects.not.toThrow(secret);
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'token',
+							column_type: 'text',
+							is_not_null: true,
+							column_default: "'live'::text",
+						},
+					],
+					{ token: secret },
+				),
+				postcondition: v3Table([
+					{
+						name: 'token',
+						type: 'text',
+						nullable: false,
+						default: authoredDefault(secret),
+					},
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('columns[0].default');
+	});
+
 	it('reports the complete JSON path when canonicalization finds an undefined member', () => {
 		const malformed = {
 			postconditionVersion: 3,
@@ -285,25 +333,13 @@ describe('generated postcondition verifier', () => {
 		);
 	});
 
-	it('re-decodes a caller-mutated decoded declaration before proving it', async () => {
+	it('returns an immutable decoded declaration', () => {
 		const decoded = decodeGeneratedPostcondition(
 			v3Column({ type: 'integer', nullable: false }),
 		) as { declaration: { kind: 'column'; column: { type?: unknown } } };
-		decoded.declaration.column.type = 42;
-		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
-
-		await expect(
-			verifyGeneratedColumnPostcondition({
-				session: mintGeneratedPostconditionSession({ query }),
-				postcondition: decoded,
-				address: columnAddress,
-			}),
-		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
-		expect(
-			query.mock.calls.some(([sql]) =>
-				String(sql).startsWith('LOCK TABLE ONLY'),
-			),
-		).toBe(false);
+		expect(() => {
+			decoded.declaration.column.type = 42;
+		}).toThrow(TypeError);
 	});
 
 	it('returns a clean client when its relation disappears before LOCK', async () => {
@@ -482,71 +518,6 @@ describe('generated postcondition verifier', () => {
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
 	});
 
-	it.each([
-		['a', 'NO ACTION'],
-		['r', 'RESTRICT'],
-		['c', 'CASCADE'],
-		['n', 'SET NULL'],
-		['d', 'SET DEFAULT'],
-	] as const)('maps PostgreSQL FK action %s to %s before comparison', async (code, action) => {
-		const query = vi.fn(async (sql: string) => {
-			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
-			if (sql.includes('constraint_item.conname AS constraint_name'))
-				return {
-					rows: [
-						{
-							database_name: 'app',
-							relation_kind: 'r',
-							relation_oid: '101',
-							object_oid: '102',
-							constraint_name: 'accounts_user_id_fkey',
-						},
-					],
-				};
-			return {
-				rows: [
-					{
-						constraint_type: 'f',
-						key_columns: ['user_id'],
-						referenced_schema: 'tenant',
-						referenced_table: 'users',
-						referenced_columns: ['id'],
-						on_delete: code,
-						on_update: code,
-						is_deferrable: false,
-						is_deferred: false,
-						is_enforced: true,
-						is_validated: true,
-					},
-				],
-			};
-		});
-		await expect(
-			verifyGeneratedConstraintPostcondition({
-				session: mintGeneratedPostconditionSession({ query }),
-				postcondition: {
-					postconditionVersion: 3,
-					targetBinding: v3Binding,
-					declaration: {
-						canonicalFormVersion: 1,
-						kind: 'constraint',
-						constraint: {
-							type: 'f',
-							columns: ['user_id'],
-							references: { schema: 'tenant', table: 'users', columns: ['id'] },
-							onDelete: action,
-							onUpdate: action,
-							deferrable: false,
-							initiallyDeferred: false,
-							enforced: true,
-							notValid: false,
-						},
-					},
-				},
-				address: { ...checkAddress, name: 'accounts_user_id_fkey' },
-			}),
-		).resolves.toMatchObject({ kind: 'constraint' });
-	});
 	it.each([
 		[
 			'malformed primary constraint',
@@ -965,160 +936,6 @@ describe('generated postcondition verifier', () => {
 		);
 	});
 
-	it('returns a complete typed sequence snapshot even when the declaration omits every field', async () => {
-		const sequenceAddress = {
-			scope: 'schema' as const,
-			engine: 'postgresql',
-			database: 'app',
-			schema: 'tenant',
-			kind: 'sequence' as const,
-			name: 'accounts_id_seq',
-		};
-		const sequence = {
-			postconditionVersion: 3 as const,
-			targetBinding: v3Binding,
-			declaration: {
-				canonicalFormVersion: 1 as const,
-				kind: 'sequence' as const,
-			},
-		};
-		const query = vi.fn(async (sql: string) =>
-			sql.includes('pg_catalog.current_database()')
-				? {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'S',
-								relation_oid: '104',
-								object_oid: '104',
-							},
-						],
-					}
-				: {
-						rows: [
-							{
-								start_value: '1',
-								increment_by: '1',
-								min_value: '1',
-								max_value: '9223372036854775807',
-								cycle: false,
-							},
-						],
-					},
-		);
-		await expect(
-			verifyGeneratedSequencePostcondition({
-				session: mintGeneratedPostconditionSession({ query }),
-				postcondition: sequence,
-				address: sequenceAddress,
-			}),
-		).resolves.toMatchObject({
-			kind: 'sequence',
-			projection: {
-				start_value: '1',
-				increment_by: '1',
-				min_value: '1',
-				max_value: '9223372036854775807',
-				cycle: false,
-			},
-		});
-		const malformedQuery = vi.fn(async (sql: string) =>
-			sql.includes('pg_catalog.current_database()')
-				? {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'S',
-								relation_oid: '104',
-								object_oid: '104',
-							},
-						],
-					}
-				: {
-						rows: [
-							{
-								start_value: '1',
-								increment_by: '1',
-								min_value: '1',
-								max_value: '9223372036854775807',
-								cycle: 'false',
-							},
-						],
-					},
-		);
-		await expect(
-			verifyGeneratedSequencePostcondition({
-				session: mintGeneratedPostconditionSession({
-					query: malformedQuery as GeneratedPostconditionSession['query'],
-				}),
-				postcondition: sequence,
-				address: sequenceAddress,
-			}),
-		).rejects.toThrow(
-			'generated sequence verifier could not read a complete projection',
-		);
-	});
-
-	it('rejects an enum rename-and-recreate adversary from one binding-and-label snapshot', async () => {
-		const query = vi.fn(async (sql: string) => {
-			if (sql.includes('FROM pg_catalog.pg_type')) {
-				if (!sql.includes('ARRAY(SELECT enum_item.enumlabel'))
-					return {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'e',
-								relation_oid: '101',
-								object_oid: '101',
-							},
-						],
-					};
-				// After X is renamed away and Y takes its address, one statement can
-				// observe only Y's identity and labels together.
-				return {
-					rows: [
-						{
-							database_name: 'app',
-							relation_kind: 'e',
-							relation_oid: '202',
-							object_oid: '202',
-							labels: ['replacement'],
-						},
-					],
-				};
-			}
-			if (sql.includes('FROM pg_catalog.pg_enum'))
-				return { rows: [{ labels: ['old'] }] };
-			return { rows: [] };
-		});
-		await expect(
-			verifyGeneratedEnumPostcondition({
-				session: mintGeneratedPostconditionSession({ query }),
-				postcondition: {
-					postconditionVersion: 3,
-					targetBinding: v3Binding,
-					declaration: {
-						canonicalFormVersion: 1,
-						kind: 'enum',
-						labels: ['old'],
-					},
-				},
-				address: {
-					scope: 'schema',
-					engine: 'postgresql',
-					database: 'app',
-					schema: 'tenant',
-					kind: 'enum',
-					name: 'account_status',
-				},
-			}),
-		).rejects.toThrow('generated enum account_status postcondition differs');
-		expect(
-			query.mock.calls.filter(([sql]) =>
-				String(sql).includes('FROM pg_catalog.pg_type'),
-			),
-		).toHaveLength(1);
-	});
 	it.each([
 		['table', { postconditionVersion: 2, kind: 'table', columns: [] }],
 		['column', { postconditionVersion: 2, kind: 'column', column: {} }],
@@ -2223,7 +2040,7 @@ describe('generated postcondition verifier', () => {
 				]),
 				address: tableAddress,
 			}),
-		).rejects.toThrow('column postcondition differs');
+		).rejects.toThrow('columns[0].name');
 	});
 
 	it('refuses pool-shaped and hand-built capabilities', async () => {
@@ -2320,7 +2137,7 @@ describe('generated postcondition verifier', () => {
 				]),
 				address: tableAddress,
 			}),
-		).rejects.toThrow('column postcondition differs');
+		).rejects.toThrow('columns[0].collation');
 		await expect(
 			verifyGeneratedTablePostcondition({
 				session: tableSession([
@@ -2345,7 +2162,7 @@ describe('generated postcondition verifier', () => {
 				]),
 				address: tableAddress,
 			}),
-		).rejects.toThrow('column postcondition differs');
+		).rejects.toThrow('columns[0].identity');
 	});
 
 	it('accepts undeclared live collation and identity fields and projects them faithfully', async () => {
@@ -2416,213 +2233,5 @@ describe('generated postcondition verifier', () => {
 				address: columnAddress,
 			}),
 		).rejects.toThrow('default postcondition differs');
-	});
-
-	it.each([
-		[
-			'primary key',
-			'constraint',
-			{
-				type: 'p',
-				columns: ['id'],
-				deferrable: false,
-				initiallyDeferred: false,
-				enforced: true,
-			},
-			{
-				constraint_type: 'p',
-				key_columns: ['id'],
-				referenced_schema: null,
-				referenced_table: null,
-				referenced_columns: [],
-				on_delete: ' ',
-				on_update: ' ',
-				is_deferrable: false,
-				is_deferred: false,
-				is_enforced: true,
-				is_validated: true,
-			},
-		],
-		[
-			'unique constraint',
-			'constraint',
-			{
-				type: 'u',
-				columns: ['email'],
-				deferrable: true,
-				initiallyDeferred: true,
-				enforced: true,
-			},
-			{
-				constraint_type: 'u',
-				key_columns: ['email'],
-				referenced_schema: null,
-				referenced_table: null,
-				referenced_columns: [],
-				on_delete: ' ',
-				on_update: ' ',
-				is_deferrable: true,
-				is_deferred: true,
-				is_enforced: true,
-				is_validated: true,
-			},
-		],
-		[
-			'enum',
-			'enum',
-			{ labels: ['pending', 'active'] },
-			{ labels: ['pending', 'active'] },
-		],
-		[
-			'sequence',
-			'sequence',
-			{
-				startValue: '10',
-				incrementBy: '2',
-				minValue: '1',
-				maxValue: '999',
-				cycle: false,
-			},
-			{
-				start_value: '10',
-				increment_by: '2',
-				min_value: '1',
-				max_value: '999',
-				cycle: false,
-			},
-		],
-		['extension', 'extension', { version: '1.2' }, { version: '1.2' }],
-	] as const)('verifies real non-CHECK %s catalogue rows without CLI mocks', async (_label, kind, declaration, projection) => {
-		const address =
-			kind === 'constraint'
-				? { ...checkAddress, name: 'accounts_key' }
-				: kind === 'enum'
-					? {
-							scope: 'schema' as const,
-							engine: 'postgresql',
-							database: 'app',
-							schema: 'tenant',
-							kind: 'enum',
-							name: 'account_status',
-						}
-					: kind === 'sequence'
-						? {
-								scope: 'schema' as const,
-								engine: 'postgresql',
-								database: 'app',
-								schema: 'tenant',
-								kind: 'sequence',
-								name: 'accounts_id_seq',
-							}
-						: {
-								scope: 'database' as const,
-								engine: 'postgresql',
-								database: 'app',
-								kind: 'extension',
-								name: 'pgcrypto',
-							};
-		const query = vi.fn(async (sql: string) => {
-			if (sql.includes('pg_catalog.current_database()')) {
-				if (kind === 'constraint')
-					return {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'r',
-								relation_oid: '101',
-								object_oid: '102',
-								constraint_name: 'accounts_key',
-							},
-						],
-					};
-				if (kind === 'enum')
-					return {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'e',
-								relation_oid: '103',
-								object_oid: '103',
-								...projection,
-							},
-						],
-					};
-				if (kind === 'sequence')
-					return {
-						rows: [
-							{
-								database_name: 'app',
-								relation_kind: 'S',
-								relation_oid: '104',
-								object_oid: '104',
-							},
-						],
-					};
-				return {
-					rows: [
-						{
-							database_name: 'app',
-							relation_kind: 'x',
-							relation_oid: '105',
-							object_oid: '105',
-							...projection,
-						},
-					],
-				};
-			}
-			return { rows: [projection] };
-		});
-		const session = mintGeneratedPostconditionSession({ query });
-		const postcondition = {
-			postconditionVersion: 3 as const,
-			targetBinding: v3Binding,
-			declaration: {
-				canonicalFormVersion: 1 as const,
-				kind,
-				...(kind === 'constraint'
-					? { constraint: declaration }
-					: kind === 'enum'
-						? declaration
-						: kind === 'sequence'
-							? declaration
-							: declaration),
-			},
-		};
-		const verified =
-			kind === 'constraint'
-				? await verifyGeneratedConstraintPostcondition({
-						session,
-						postcondition,
-						address,
-					})
-				: kind === 'enum'
-					? await verifyGeneratedEnumPostcondition({
-							session,
-							postcondition,
-							address,
-						})
-					: kind === 'sequence'
-						? await verifyGeneratedSequencePostcondition({
-								session,
-								postcondition,
-								address,
-							})
-						: await verifyGeneratedExtensionPostcondition({
-								session,
-								postcondition,
-								address,
-							});
-		expect(verified.kind).toBe(
-			kind === 'enum'
-				? 'enum'
-				: kind === 'sequence'
-					? 'sequence'
-					: kind === 'extension'
-						? 'extension'
-						: 'constraint',
-		);
-		expect(query).toHaveBeenCalledTimes(
-			kind === 'constraint' || kind === 'sequence' ? 6 : 4,
-		);
 	});
 });

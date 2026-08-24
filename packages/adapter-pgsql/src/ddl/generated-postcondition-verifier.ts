@@ -9,8 +9,8 @@ import {
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import {
+	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
-	validateGeneratedPostconditionV3Declaration,
 } from './generated-postcondition-v3-validator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
@@ -968,12 +968,19 @@ function decodeV3GeneratedPostcondition(
 		default:
 			throw replan(unsupported);
 	}
+	let normalized: GeneratedPostconditionDeclarationV3;
 	try {
-		validateGeneratedPostconditionV3Declaration(decoded);
+		normalized = parseGeneratedPostconditionV3Declaration(decoded);
 	} catch (error) {
 		throw replan(unsupported, undefined, undefined, error);
 	}
-	return { postconditionVersion: 3, declaration: decoded, targetBinding };
+	return {
+		postconditionVersion: 3,
+		declaration: normalized,
+		targetBinding: snapshotGeneratedPostconditionJson(
+			targetBinding,
+		) as TargetBinding,
+	};
 }
 
 /**
@@ -1400,6 +1407,20 @@ function structuralMismatch(message: string): Error {
 	return error;
 }
 
+/**
+ * Refusal text is an operator diagnostic, not a SQL/deparse transport. Keep
+ * expected and live facts out of it: authored defaults can contain secrets.
+ */
+function structuralMismatchField(
+	target: string,
+	field: string,
+	summary: 'count' | 'value' = 'value',
+): Error {
+	return structuralMismatch(
+		`generated ${target} structural postcondition differs at ${field}: ${summary} mismatch (values redacted)`,
+	);
+}
+
 function isStructuralMismatchFailure(error: unknown): boolean {
 	return (
 		error !== null &&
@@ -1775,46 +1796,6 @@ async function stabilizeGeneratedPostconditionBinding(input: {
  * structure must therefore be selected by one catalogue statement so READ
  * COMMITTED observes one snapshot rather than two independently-resolved names.
  */
-function unlockedGeneratedPostconditionBindingSlot(input: {
-	readonly targetBinding: TargetBinding;
-	readonly address: GeneratedPostconditionBindingAddress;
-	readonly expectedKind: 'enum' | 'extension';
-}) {
-	if (
-		input.targetBinding.bindingVersion !== 1 ||
-		input.targetBinding.bindingKind !== 'managed-step-address'
-	)
-		throw replan('generated postcondition target binding is unsupported');
-	const slot = bindingSlot(input.address, input.expectedKind);
-	if (slot.found !== undefined)
-		throw bindingResolutionFailure({
-			sought: slot.sought,
-			found: slot.found,
-		});
-	return slot;
-}
-
-function assertUnlockedBindingRow(input: {
-	readonly kind: 'enum' | 'extension';
-	readonly slot: ReturnType<typeof unlockedGeneratedPostconditionBindingSlot>;
-	readonly address: GeneratedPostconditionBindingAddress;
-	readonly row: Record<string, unknown> | undefined;
-}): GeneratedPostconditionTarget {
-	const { row, slot } = input;
-	if (!row || row.database_name !== input.address.database)
-		throw bindingResolutionFailure({
-			sought: slot.sought,
-			found: !row ? 'absent' : `database ${String(row.database_name)}`,
-		});
-	const expectedRelationKind = input.kind === 'enum' ? 'e' : 'x';
-	if (row.relation_kind !== expectedRelationKind)
-		throw bindingResolutionFailure({
-			sought: slot.sought,
-			found: 'absent',
-		});
-	return bindingIdentity(input.kind, slot.target, row);
-}
-
 function tableColumnProjection(
 	row: Record<string, unknown>,
 ): TableColumnProjection {
@@ -2043,8 +2024,10 @@ async function verifyTableStructure(input: {
 				);
 			const columnRows = rows.filter((row) => row.column_name !== null);
 			if (columnRows.length !== expected.length)
-				throw structuralMismatch(
-					`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
+				throw structuralMismatchField(
+					`table ${input.target.name}`,
+					'columns.count',
+					'count',
 				);
 			const live = columnRows.map(tableColumnProjection);
 			const stagedDefaults = await stageAuthoredDefaults(
@@ -2054,17 +2037,25 @@ async function verifyTableStructure(input: {
 			);
 			for (const [ordinal, specification] of expected.entries()) {
 				const actual = live[ordinal];
+				const mismatch = actual
+					? await columnPostconditionMatches(
+							actual,
+							specification,
+							stagedDefaults,
+						)
+					: 'presence';
 				if (
 					!actual ||
 					actual.name !== specification.name ||
-					(await columnPostconditionMatches(
-						actual,
-						specification,
-						stagedDefaults,
-					)) !== undefined
+					mismatch !== undefined
 				)
-					throw structuralMismatch(
-						`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+					throw structuralMismatchField(
+						`table ${input.target.name}`,
+						!actual
+							? `columns[${ordinal}].presence`
+							: actual.name !== specification.name
+								? `columns[${ordinal}].name`
+								: `columns[${ordinal}].${mismatch}`,
 					);
 			}
 			return { kind: 'table' as const, projection: { columns: live } };
@@ -2500,297 +2491,5 @@ export async function verifyGeneratedCheckPostcondition(input: {
 			},
 			target,
 		});
-	});
-}
-
-type ConstraintProjection = {
-	readonly type: 'p' | 'u' | 'f';
-	readonly columns: readonly string[];
-	readonly referencedSchema: string | null;
-	readonly referencedTable: string | null;
-	readonly referencedColumns: readonly string[];
-	readonly onDelete: GeneratedForeignKeyAction;
-	readonly onUpdate: GeneratedForeignKeyAction;
-	readonly deferrable: boolean;
-	readonly initiallyDeferred: boolean;
-	readonly enforced: boolean;
-	readonly notValid: boolean;
-};
-
-function constraintProjection(
-	row: Record<string, unknown>,
-): ConstraintProjection {
-	if (
-		(row.constraint_type !== 'p' &&
-			row.constraint_type !== 'u' &&
-			row.constraint_type !== 'f') ||
-		!Array.isArray(row.key_columns) ||
-		row.key_columns.some((value) => typeof value !== 'string') ||
-		!Array.isArray(row.referenced_columns) ||
-		row.referenced_columns.some((value) => typeof value !== 'string') ||
-		(typeof row.referenced_schema !== 'string' &&
-			row.referenced_schema !== null) ||
-		(typeof row.referenced_table !== 'string' &&
-			row.referenced_table !== null) ||
-		typeof row.on_delete !== 'string' ||
-		typeof row.on_update !== 'string' ||
-		typeof row.is_deferrable !== 'boolean' ||
-		typeof row.is_deferred !== 'boolean' ||
-		typeof row.is_enforced !== 'boolean' ||
-		typeof row.is_validated !== 'boolean'
-	)
-		throw new Error(
-			'generated constraint verifier could not read a complete projection',
-		);
-	const foreignKeyAction = (value: string): GeneratedForeignKeyAction => {
-		switch (value) {
-			case 'a':
-				return 'NO ACTION';
-			case 'r':
-				return 'RESTRICT';
-			case 'c':
-				return 'CASCADE';
-			case 'n':
-				return 'SET NULL';
-			case 'd':
-				return 'SET DEFAULT';
-			default:
-				throw new Error(
-					'generated constraint verifier could not read a known foreign-key action',
-				);
-		}
-	};
-	const foreignKeyActions =
-		row.constraint_type === 'f'
-			? {
-					onDelete: foreignKeyAction(row.on_delete),
-					onUpdate: foreignKeyAction(row.on_update),
-				}
-			: {
-					onDelete: 'NO ACTION' as const,
-					onUpdate: 'NO ACTION' as const,
-				};
-	return {
-		type: row.constraint_type,
-		columns: row.key_columns,
-		referencedSchema: row.referenced_schema,
-		referencedTable: row.referenced_table,
-		referencedColumns: row.referenced_columns,
-		...foreignKeyActions,
-		deferrable: row.is_deferrable,
-		initiallyDeferred: row.is_deferred,
-		enforced: row.is_enforced,
-		notValid: !row.is_validated,
-	};
-}
-
-const CONSTRAINT_PROJECTION_SELECT =
-	"SELECT constraint_item.contype AS constraint_type, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_item(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_item.attnum ORDER BY key_item.position) AS key_columns, reference_namespace.nspname AS referenced_schema, reference_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS key_item(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = key_item.attnum ORDER BY key_item.position) AS referenced_columns, constraint_item.confdeltype::text AS on_delete, constraint_item.confupdtype::text AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated, CASE WHEN constraint_json.value ? 'conenforced' THEN (constraint_json.value ->> 'conenforced')::boolean ELSE true END AS is_enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_json LEFT JOIN pg_catalog.pg_class reference_relation ON reference_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace reference_namespace ON reference_namespace.oid = reference_relation.relnamespace";
-
-export async function verifyGeneratedConstraintPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{
-	readonly kind: 'constraint';
-	readonly projection: ConstraintProjection;
-}> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'constraint',
-		);
-		const target = await stabilizeGeneratedPostconditionBinding({
-			session,
-			targetBinding: postcondition.targetBinding,
-			address: input.address,
-			expectedKind: 'constraint',
-		});
-		const row = (
-			await session.query(
-				`${CONSTRAINT_PROJECTION_SELECT} WHERE constraint_item.oid = $1::pg_catalog.oid`,
-				[target.objectOid],
-			)
-		).rows[0];
-		if (!row)
-			throw structuralMismatch(`generated constraint ${target.name} is absent`);
-		const actual = constraintProjection(row);
-		const expected = postcondition.declaration.constraint;
-		const sameColumns = (left: readonly string[], right: readonly string[]) =>
-			JSON.stringify(left) === JSON.stringify(right);
-		const matches =
-			actual.type === expected.type &&
-			sameColumns(actual.columns, expected.columns) &&
-			actual.deferrable === expected.deferrable &&
-			actual.initiallyDeferred === expected.initiallyDeferred &&
-			actual.enforced === expected.enforced &&
-			(expected.type !== 'f' ||
-				(actual.referencedSchema === expected.references.schema &&
-					actual.referencedTable === expected.references.table &&
-					sameColumns(actual.referencedColumns, expected.references.columns) &&
-					actual.onDelete === expected.onDelete &&
-					actual.onUpdate === expected.onUpdate &&
-					actual.notValid === expected.notValid));
-		if (!matches)
-			throw structuralMismatch(
-				`generated constraint ${target.name} postcondition differs`,
-			);
-		return { kind: 'constraint', projection: actual };
-	});
-}
-
-export async function verifyGeneratedEnumPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{ readonly kind: 'enum'; readonly labels: readonly string[] }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'enum',
-		);
-		const slot = unlockedGeneratedPostconditionBindingSlot({
-			targetBinding: postcondition.targetBinding,
-			address: input.address,
-			expectedKind: 'enum',
-		});
-		const row = (
-			await session.query(
-				"SELECT pg_catalog.current_database() AS database_name, type_item.oid::text AS relation_oid, type_item.oid::text AS object_oid, 'e'::text AS relation_kind, ARRAY(SELECT enum_item.enumlabel::text FROM pg_catalog.pg_enum enum_item WHERE enum_item.enumtypid = type_item.oid ORDER BY enum_item.enumsortorder) AS labels FROM pg_catalog.pg_type type_item JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type_item.typnamespace WHERE namespace.nspname = $1 AND type_item.typname = $2 AND type_item.typtype = 'e'",
-				[slot.target.schema, slot.target.name],
-			)
-		).rows[0];
-		const target = assertUnlockedBindingRow({
-			kind: 'enum',
-			slot,
-			address: input.address,
-			row,
-		});
-		if (
-			!row ||
-			!Array.isArray(row.labels) ||
-			row.labels.some((label) => typeof label !== 'string') ||
-			JSON.stringify(row.labels) !==
-				JSON.stringify(postcondition.declaration.labels)
-		)
-			throw structuralMismatch(
-				`generated enum ${target.name} postcondition differs`,
-			);
-		return { kind: 'enum', labels: row.labels };
-	});
-}
-
-type SequenceProjection = {
-	readonly start_value: string;
-	readonly increment_by: string;
-	readonly min_value: string;
-	readonly max_value: string;
-	readonly cycle: boolean;
-};
-
-function sequenceProjection(row: Record<string, unknown>): SequenceProjection {
-	if (
-		typeof row.start_value !== 'string' ||
-		typeof row.increment_by !== 'string' ||
-		typeof row.min_value !== 'string' ||
-		typeof row.max_value !== 'string' ||
-		typeof row.cycle !== 'boolean'
-	)
-		throw new Error(
-			'generated sequence verifier could not read a complete projection',
-		);
-	return {
-		start_value: row.start_value,
-		increment_by: row.increment_by,
-		min_value: row.min_value,
-		max_value: row.max_value,
-		cycle: row.cycle,
-	};
-}
-
-export async function verifyGeneratedSequencePostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{
-	readonly kind: 'sequence';
-	readonly projection: Readonly<Record<string, unknown>>;
-}> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'sequence',
-		);
-		const target = await stabilizeGeneratedPostconditionBinding({
-			session,
-			targetBinding: postcondition.targetBinding,
-			address: input.address,
-			expectedKind: 'sequence',
-		});
-		const row = (
-			await session.query(
-				'SELECT sequence.start_value::text AS start_value, sequence.increment_by::text AS increment_by, sequence.min_value::text AS min_value, sequence.max_value::text AS max_value, sequence.cycle AS cycle FROM pg_catalog.pg_sequence sequence WHERE sequence.seqrelid = $1::pg_catalog.oid',
-				[target.objectOid],
-			)
-		).rows[0];
-		if (!row)
-			throw structuralMismatch(`generated sequence ${target.name} is absent`);
-		const actual = sequenceProjection(row);
-		const expected = postcondition.declaration;
-		if (
-			(expected.startValue !== undefined &&
-				actual.start_value !== expected.startValue) ||
-			(expected.incrementBy !== undefined &&
-				actual.increment_by !== expected.incrementBy) ||
-			(expected.minValue !== undefined &&
-				actual.min_value !== expected.minValue) ||
-			(expected.maxValue !== undefined &&
-				actual.max_value !== expected.maxValue) ||
-			(expected.cycle !== undefined && actual.cycle !== expected.cycle)
-		)
-			throw structuralMismatch(
-				`generated sequence ${target.name} postcondition differs`,
-			);
-		return { kind: 'sequence', projection: actual };
-	});
-}
-
-export async function verifyGeneratedExtensionPostcondition(input: {
-	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
-	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{ readonly kind: 'extension'; readonly version: string }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'extension',
-		);
-		const slot = unlockedGeneratedPostconditionBindingSlot({
-			targetBinding: postcondition.targetBinding,
-			address: input.address,
-			expectedKind: 'extension',
-		});
-		const row = (
-			await session.query(
-				"SELECT pg_catalog.current_database() AS database_name, extension.oid::text AS relation_oid, extension.oid::text AS object_oid, 'x'::text AS relation_kind, extension.extversion::text AS version FROM pg_catalog.pg_extension extension WHERE extension.extname = $1",
-				[slot.target.name],
-			)
-		).rows[0];
-		const target = assertUnlockedBindingRow({
-			kind: 'extension',
-			slot,
-			address: input.address,
-			row,
-		});
-		if (
-			!row ||
-			typeof row.version !== 'string' ||
-			(postcondition.declaration.version !== undefined &&
-				row.version !== postcondition.declaration.version)
-		)
-			throw structuralMismatch(
-				`generated extension ${target.name} postcondition differs`,
-			);
-		return { kind: 'extension', version: row.version };
 	});
 }

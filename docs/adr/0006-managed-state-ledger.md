@@ -251,6 +251,8 @@ without a group-token protocol.
 ### The declaration comes from the DSL inputs, produced and validated at plan time
 
 Generated postconditions are currently encoded as v3 declarations with a separate target binding.
+The declarations are address-free; execution records each unchanged declaration under the target
+event address selected by that binding.
 
 ### Generated postcondition wire versions
 
@@ -265,8 +267,10 @@ managed-step address, acquires one user-relation lock for relation-backed object
 bound catalogue identity and reads structure while that lock remains held. This deliberately never
 locks `pg_catalog` rows. Index proofs retain the parent-table lock for the table's value, while their
 index binding, OID, parent identity, and structural projection are one catalogue statement; that is a
-single-snapshot observation, not a claim that hostile index DDL is excluded. Enum and extension proofs
-are likewise one-statement binding-and-projection observations.
+single-snapshot observation, not a claim that hostile index DDL is excluded. Table, column, index, and
+CHECK declarations receive structural proofs. Non-CHECK constraints, enums, sequences, and extensions
+currently receive only a typed identity-and-existence observation at the bound address; their structural
+semantics are explicitly unverified pending #597.
 
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*
@@ -326,7 +330,8 @@ sharing one pair identifier. Nothing re-keys an existing row.
 2. verify, before any DDL, that the source carries its recorded identity and every target address
    is vacant;
 3. in one transaction: issue the DDL, re-read the identities, append every pair event — the
-   opening ones carrying the re-keyed declarations and those read-backs.
+   opening ones recording the address-free declarations unchanged under their target event addresses
+   and carrying those read-backs.
 
 A crash rolls step 3 back entirely, leaving the open pair. Recovery, keyed by the pair
 identifier, reads the **whole reserved closure** and has exactly three answers: the complete

@@ -1,5 +1,6 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { parseGeneratedPostconditionV3Declaration } from './generated-postcondition-v3-validator.js';
 import {
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
@@ -24,6 +25,134 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('uses one parser domain for producer declarations and persisted decoding', () => {
+		const declarations = [
+			{ kind: 'absent' },
+			{
+				kind: 'column',
+				column: {
+					default: {
+						defaultKind: 'authored',
+						hasDefault: true,
+						identity: null,
+						defaultExpression: { canonicalFormVersion: 1, sql: "'safe'::text" },
+					},
+				},
+			},
+			{ kind: 'enum', labels: ['open', 'closed'] },
+			{ kind: 'sequence', startValue: '1', incrementBy: '1' },
+			{ kind: 'extension', version: '1.0' },
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: false,
+				},
+			},
+			{
+				kind: 'index',
+				index: {
+					method: 'hostile',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: false,
+				},
+			},
+			{ kind: 'sequence', incrementBy: '0' },
+			{ kind: 'sequence', incrementBy: 'NaN' },
+			{ kind: 'enum', labels: ['duplicate', 'duplicate'] },
+		] as const;
+		for (const declaration of declarations) {
+			const value = v3(declaration);
+			const parsed = () =>
+				parseGeneratedPostconditionV3Declaration(value.declaration);
+			const decoded = () => decodeGeneratedPostcondition(value);
+			expect({
+				parser: (() => {
+					try {
+						parsed();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+				decoder: (() => {
+					try {
+						decoded();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			}).toEqual(
+				expect.objectContaining({
+					parser: expect.any(Boolean),
+					decoder: expect.any(Boolean),
+				}),
+			);
+			expect(
+				(() => {
+					try {
+						parsed();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			).toBe(
+				(() => {
+					try {
+						decoded();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			);
+		}
+	});
+
+	it('stores an immutable postcondition snapshot despite later caller mutation', () => {
+		const change = {
+			kind: 'create_index' as const,
+			table: 'accounts',
+			destructive: false,
+			details: 'create account token index',
+			meta: { index: { columns: ['token'] } },
+		};
+		const payload = generatedPostconditionForChange({
+			change,
+			schema: 'public',
+		});
+		const before = JSON.stringify(payload?.value);
+		const digest = payload?.digest;
+		change.meta.index.columns[0] = 'mutated-secret';
+		expect(JSON.stringify(payload?.value)).toBe(before);
+		expect(payload?.digest).toBe(digest);
+	});
+
+	it('names the shared parser rule when producer index material is hostile', () => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_index',
+					table: 'accounts',
+					destructive: false,
+					details: 'hostile index',
+					meta: { index: { columns: ['id'], method: 'hostile' } },
+				},
+				schema: 'public',
+			}),
+		).toThrow('index method allowlist');
+	});
 	it('digests canonical postconditions independently of object key order', () => {
 		const value = v3({
 			kind: 'table',
