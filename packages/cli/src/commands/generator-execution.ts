@@ -26,6 +26,7 @@ import {
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -988,6 +989,19 @@ export async function executeGeneratorPlan(input: {
 					request: admitRequest,
 					readBackAndResolve: async (session) => {
 						const live = await readPgCatalogueIdentity(session, address);
+						const declarationObserved =
+							step.classification === 'data-destructive' &&
+							step.expectedDeclaration !== undefined
+								? await withGeneratedPostconditionSession(
+										{
+											connect: async () => ({
+												query: session.query.bind(session),
+												release: () => undefined,
+											}),
+										},
+										(proof) => readGeneratedPostcondition(proof, step, address),
+									)
+								: undefined;
 						const survivors: LedgerAddress[] =
 							step.classification === 'removal' && live ? [address] : [];
 						const childLives = await Promise.all(
@@ -1082,7 +1096,9 @@ export async function executeGeneratorPlan(input: {
 										: {}),
 									...(step.classification === 'removal'
 										? {}
-										: { observed: observed(address) }),
+										: {
+												observed: declarationObserved ?? observed(address),
+											}),
 								},
 							},
 						];

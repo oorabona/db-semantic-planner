@@ -35,7 +35,7 @@ const check = 'catalogue_cases_quantity_check';
 const connectionTimeoutMillis = 5_000;
 const statementTimeoutMillis = 10_000;
 const hookTimeoutMillis = 60_000;
-const testTimeoutMillis = 150_000;
+const testTimeoutMillis = 160_000;
 
 let matrixDatabaseName: string | undefined;
 
@@ -67,8 +67,9 @@ function matrixAddresses() {
 	};
 }
 
-// The longest proof has 13 bounded statements (feature probe + 12 scratch
-// statements) and two 5 s checkouts: 13 * 10 s + 2 * 5 s = 140 s < 150 s.
+// The longest proof has 14 bounded statements (feature probe plus the 13
+// statement single-scope index proof) and two 5 s checkouts:
+// 14 * 10 s + 2 * 5 s = 150 s < 160 s.
 // beforeAll has 4 statements and 3 checkouts: 4 * 10 s + 3 * 5 s = 55 s < 60 s.
 
 if (matrixDatabaseUrl === undefined)
@@ -505,7 +506,8 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent CHECK enforcement feature and refuses a present NULL',
 		async (signal) => {
 			const checkLiveProjection = (sql: string) =>
-				sql.includes('WHERE constraint_item.oid = $1::pg_catalog.oid');
+				sql.includes('constraint_item.conrelid = $1::pg_catalog.oid') &&
+				sql.includes('constraint_item.oid = $2::pg_catalog.oid');
 			const enforcedExists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_constraint', 'conenforced'),
 			);

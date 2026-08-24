@@ -1304,6 +1304,83 @@ describe('generator execution fixture shim', () => {
 		expect(Object.isFrozen(manifest.steps)).toBe(true);
 	});
 
+	it('consumes a typed data-destructive declaration for its terminal observation', async () => {
+		const address = {
+			...dataDestructiveStep.address!,
+			kind: 'column' as const,
+			name: 'id',
+			parent: dataDestructiveStep.address!,
+		};
+		const declaration = v3({
+			kind: 'column',
+			column: { type: 'bigint', nullable: false },
+		});
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: declaration,
+				digest: generatedPostconditionDigest(declaration),
+			},
+		} as unknown as NormalizedManagedStep;
+		verifyGeneratedColumnPostcondition.mockResolvedValue({
+			kind: 'column',
+			projection: {
+				type: 'bigint',
+				nullable: false,
+				default: undefined,
+				collation: null,
+				identity: null,
+			},
+		});
+		let observed: unknown;
+		executePgAdmittedOperation.mockImplementation(
+			async (
+				_executor,
+				input: {
+					operation: {
+						readBackAndResolve: (executor: {
+							query(): Promise<{
+								readonly rows: readonly Record<string, unknown>[];
+							}>;
+						}) => Promise<{
+							readonly members: readonly {
+								readonly member: { readonly observed?: unknown };
+							}[];
+						}>;
+					};
+				},
+			) => {
+				const resolution = await input.operation.readBackAndResolve({
+					query: async () => ({ rows: [{ parent_oid: '501' }] }),
+				});
+				observed = resolution.members[0]?.member.observed;
+				return { kind: 'executed-destructive-outcome' };
+			},
+		);
+
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				accepts: ['destructive-plan-accepted:reviewed-plan'],
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({ outcome: 'completed' });
+		expect(verifyGeneratedColumnPostcondition).toHaveBeenCalledWith(
+			expect.objectContaining({ postcondition: declaration }),
+		);
+		expect(observed).toMatchObject({
+			value: { kind: 'column', type: 'bigint', nullable: false },
+		});
+	});
+
 	it('preserves a post-executing open claim as recovery-required', async () => {
 		executePgAdmittedOperation.mockResolvedValue({
 			kind: 'outcome-recovery-required',

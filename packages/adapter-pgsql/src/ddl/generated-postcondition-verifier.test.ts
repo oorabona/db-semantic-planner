@@ -116,6 +116,17 @@ function indexRow(overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function boundIndexRow(overrides: Record<string, unknown> = {}) {
+	return {
+		database_name: 'app',
+		relation_kind: 'i',
+		parent_relation_kind: 'r',
+		relation_oid: '101',
+		object_oid: '102',
+		...indexRow(overrides),
+	};
+}
+
 function checkRow(overrides: Record<string, unknown> = {}) {
 	return {
 		expression: "(status = 'Active'::text)",
@@ -195,7 +206,8 @@ const v3Check = (sql = "CHECK (status = 'Active')", notValid = false) => ({
 /** A successful v3 binding followed by caller-controlled catalogue rows. */
 function successfulSession(query: GeneratedPostconditionSession['query']) {
 	return testSession(async (sql, params) =>
-		sql.includes('pg_catalog.current_database()')
+		sql.includes('pg_catalog.current_database()') &&
+		!sql.includes('index_meta.indisunique')
 			? { rows: [{}] }
 			: query(sql, params),
 	);
@@ -210,6 +222,8 @@ function indexSession(input: {
 			return { rows: [{ has_temp_privilege: true }] };
 		if (sql.includes('WHERE relation.oid = $1::pg_catalog.regclass'))
 			return { rows: [indexRow(input.staged)] };
+		if (sql.includes('WHERE namespace.nspname = $1'))
+			return { rows: [indexRow(input.live)] };
 		if (sql.includes('WHERE relation.oid = $1::pg_catalog.oid'))
 			return { rows: [indexRow(input.live)] };
 		return { rows: [] };
@@ -270,6 +284,27 @@ describe('generated postcondition verifier', () => {
 				async () => undefined,
 			),
 		).resolves.toBeUndefined();
+	});
+
+	it('re-decodes a caller-mutated decoded declaration before proving it', async () => {
+		const decoded = decodeGeneratedPostcondition(
+			v3Column({ type: 'integer', nullable: false }),
+		) as { declaration: { kind: 'column'; column: { type?: unknown } } };
+		decoded.declaration.column.type = 42;
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
+
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: decoded,
+				address: columnAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 	});
 
 	it('opens a rollback-only transaction before a standalone proof lock', async () => {
@@ -342,6 +377,97 @@ describe('generated postcondition verifier', () => {
 			}),
 		).rejects.toBe(failure);
 		expect(query.mock.calls.map(([sql]) => sql).at(-1)).toBe('ROLLBACK');
+	});
+
+	it('returns a clean client when its relation disappears before LOCK', async () => {
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: async (sql: string) => {
+							if (sql.startsWith('LOCK TABLE ONLY'))
+								throw Object.assign(new Error('relation vanished'), {
+									code: '42P01',
+								});
+							return { rows: [] };
+						},
+						release,
+					}),
+				},
+				(session) =>
+					verifyGeneratedColumnPostcondition({
+						session,
+						postcondition: v3Column({ type: 'integer', nullable: false }),
+						address: columnAddress,
+					}),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('uses the binding OID and attnum for the column structural query', async () => {
+		const boundIdentity = ['701', 9] as const;
+		const structuralParams: unknown[][] = [];
+		const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (
+				sql.startsWith('SELECT pg_catalog.current_database()') &&
+				sql.includes('attribute.attnum')
+			)
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'r',
+							relation_oid: boundIdentity[0],
+							column_name: 'id',
+							attribute_number: boundIdentity[1],
+						},
+					],
+				};
+			if (sql.includes('attribute.attnum = $2')) {
+				structuralParams.push([...(params ?? [])]);
+				return {
+					rows:
+						params?.[0] === boundIdentity[0] && params?.[1] === boundIdentity[1]
+							? [
+									{
+										relation_kind: 'r',
+										column_name: 'id',
+										column_type: 'integer',
+										is_not_null: true,
+										column_default: null,
+										generated_sequence_default: false,
+										collation_name: null,
+										identity_kind: '',
+									},
+								]
+							: [
+									{
+										relation_kind: 'r',
+										column_name: 'id',
+										column_type: 'text',
+										is_not_null: false,
+										column_default: null,
+										generated_sequence_default: false,
+										collation_name: null,
+										identity_kind: '',
+									},
+								],
+				};
+			}
+			return { rows: [] };
+		});
+
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: v3Column({ type: 'integer', nullable: false }),
+				address: columnAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'column' });
+		expect(structuralParams).toEqual([[...boundIdentity]]);
 	});
 
 	it('refuses mismatched scopes before acquiring a relation lock', async () => {
@@ -1236,7 +1362,7 @@ describe('generated postcondition verifier', () => {
 			}),
 		).resolves.toMatchObject({ kind: 'index' });
 		expect(indexQuery).toHaveBeenCalledWith(
-			expect.stringContaining('FROM pg_catalog.pg_class index_relation'),
+			expect.stringContaining('WHERE namespace.nspname = $1'),
 			['tenant', 'accounts_user_id_idx'],
 		);
 
@@ -1526,7 +1652,7 @@ describe('generated postcondition verifier', () => {
 				},
 			),
 		).rejects.toBeUndefined();
-		expect(falsyRelease).toHaveBeenCalledWith(expect.any(Error));
+		expect(falsyRelease).toHaveBeenCalledWith(undefined);
 
 		const safeThenOpenedTransactionRelease = vi.fn();
 		await expect(
@@ -1587,7 +1713,10 @@ describe('generated postcondition verifier', () => {
 		expect(laterRelease).toHaveBeenCalledWith(marked);
 
 		const mismatchQuery = vi.fn(async (sql: string) => {
-			if (sql.includes('pg_catalog.current_database()'))
+			if (
+				sql.includes('pg_catalog.current_database()') &&
+				!sql.includes('index_meta.indisunique')
+			)
 				return {
 					rows: [
 						{
@@ -1604,7 +1733,8 @@ describe('generated postcondition verifier', () => {
 				return { rows: [{ has_temp_privilege: true }] };
 			if (sql.includes('pg_catalog.regclass'))
 				return { rows: [indexRow({ key_columns: ['other'] })] };
-			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			if (sql.includes('index_meta.indisunique'))
+				return { rows: [boundIndexRow()] };
 			return { rows: [] };
 		});
 		const cleanScratchRelease = vi.fn();
@@ -1651,7 +1781,10 @@ describe('generated postcondition verifier', () => {
 		mismatchQuery.mockImplementation(async (sql: string) => {
 			if (sql.startsWith('ROLLBACK TO SAVEPOINT'))
 				throw new Error('rollback failed');
-			if (sql.includes('pg_catalog.current_database()'))
+			if (
+				sql.includes('pg_catalog.current_database()') &&
+				!sql.includes('index_meta.indisunique')
+			)
 				return {
 					rows: [
 						{
@@ -1668,7 +1801,8 @@ describe('generated postcondition verifier', () => {
 				return { rows: [{ has_temp_privilege: true }] };
 			if (sql.includes('pg_catalog.regclass'))
 				return { rows: [indexRow({ key_columns: ['other'] })] };
-			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			if (sql.includes('index_meta.indisunique'))
+				return { rows: [boundIndexRow()] };
 			return { rows: [] };
 		});
 		await expect(
@@ -1690,9 +1824,26 @@ describe('generated postcondition verifier', () => {
 		expect(cleanupRelease).toHaveBeenCalledWith(expect.any(Error));
 	});
 
+	it('passes an unknown callback failure to release verbatim', async () => {
+		const failure = { reason: 'opaque callback failure' };
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release }) },
+				async () => {
+					throw failure;
+				},
+			),
+		).rejects.toBe(failure);
+		expect(release).toHaveBeenCalledWith(failure);
+	});
+
 	it('sets standalone lock timeout and preserves an enclosing pinned lock bound', async () => {
 		const standalone = vi.fn(async (sql: string) => {
-			if (sql.includes('pg_catalog.current_database()'))
+			if (
+				sql.includes('pg_catalog.current_database()') &&
+				!sql.includes('index_meta.indisunique')
+			)
 				return {
 					rows: [
 						{
@@ -1707,8 +1858,11 @@ describe('generated postcondition verifier', () => {
 				};
 			if (sql.includes('has_database_privilege'))
 				return { rows: [{ has_temp_privilege: true }] };
-			if (sql.includes('pg_catalog.oid') || sql.includes('pg_catalog.regclass'))
-				return { rows: [indexRow()] };
+			if (
+				sql.includes('index_meta.indisunique') ||
+				sql.includes('pg_catalog.regclass')
+			)
+				return { rows: [boundIndexRow()] };
 			return { rows: [] };
 		});
 		await withGeneratedPostconditionSession(
@@ -1728,7 +1882,8 @@ describe('generated postcondition verifier', () => {
 		const query = vi.fn(async (sql: string) => {
 			if (sql.includes('has_database_privilege'))
 				return { rows: [{ has_temp_privilege: true }] };
-			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			if (sql.includes('index_meta.indisunique'))
+				return { rows: [boundIndexRow()] };
 			if (sql.includes('pg_catalog.regclass')) return { rows: [indexRow()] };
 			return { rows: [] };
 		});
@@ -1736,7 +1891,8 @@ describe('generated postcondition verifier', () => {
 		await withPinnedGeneratedPostconditionSession(
 			{
 				query: async (sql) =>
-					sql.includes('pg_catalog.current_database()')
+					sql.includes('pg_catalog.current_database()') &&
+					!sql.includes('index_meta.indisunique')
 						? {
 								rows: [
 									{
@@ -1788,6 +1944,49 @@ describe('generated postcondition verifier', () => {
 		).rejects.toThrow('complete projection');
 	});
 
+	it('rejects an index rename adversary from one binding-and-projection snapshot', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (
+				sql.includes('index_meta.indisunique') &&
+				sql.includes('WHERE namespace.nspname = $1')
+			)
+				// A replacement took the name after the original index was renamed.
+				return {
+					rows: [
+						boundIndexRow({
+							key_columns: ['replacement_id'],
+							key_definitions: ['replacement_id'],
+						}),
+					],
+				};
+			if (sql.includes('pg_catalog.regclass')) return { rows: [indexRow()] };
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			return { rows: [] };
+		});
+
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('postcondition differs');
+		expect(
+			query.mock.calls.filter(
+				([sql]) =>
+					String(sql).includes('index_meta.indisunique') &&
+					String(sql).includes('WHERE namespace.nspname = $1'),
+			),
+		).toHaveLength(1);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('WHERE relation.oid = $1::pg_catalog.oid'),
+			),
+		).toBe(false);
+	});
+
 	it('preserves every own option key, rejects unmodeled index features, and preserves quoted identifier case', async () => {
 		const source = v3Index({
 			columns: ['__proto__'],
@@ -1824,7 +2023,7 @@ describe('generated postcondition verifier', () => {
 		await expect(
 			verifyGeneratedIndexPostcondition({
 				session: successfulSession(async (sql) => {
-					if (sql.includes('pg_catalog.oid'))
+					if (sql.includes('index_meta.indisunique'))
 						throw new Error('permission denied');
 					return { rows: [] };
 				}),
@@ -2060,14 +2259,13 @@ describe('generated postcondition verifier', () => {
 					}),
 			),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(release).toHaveBeenCalledWith(
-			expect.any(GeneratedPostconditionBindingResolutionError),
-		);
+		expect(release).toHaveBeenCalledWith();
 		await expect(
 			verifyGeneratedColumnPostcondition({
 				session: mintGeneratedPostconditionSession({
 					query: async (sql) =>
-						sql.includes('pg_catalog.current_database()')
+						sql.includes('pg_catalog.current_database()') &&
+						!sql.includes('index_meta.indisunique')
 							? {
 									rows: [
 										{

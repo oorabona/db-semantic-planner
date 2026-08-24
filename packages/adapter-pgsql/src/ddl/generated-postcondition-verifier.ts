@@ -2,7 +2,10 @@ import type { ResourceAddress } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
-import { lockPgRelation } from '../transition/lock-relation.js';
+import {
+	lockPgRelation,
+	PgResolvableRelationLockError,
+} from '../transition/lock-relation.js';
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
@@ -58,8 +61,6 @@ const cleanScratchFailures = new WeakMap<
 >();
 const structuralMismatchFailures = new WeakSet<object>();
 const scratchRollbackSafeFailures = new WeakSet<object>();
-/** Decoder-minted values may cross package boundaries without a second parse. */
-const decodedGeneratedPostconditions = new WeakSet<object>();
 const generatedPostconditionSessionLockTimeouts = new WeakMap<object, number>();
 
 /** An adapter-minted, exclusive PostgreSQL session for rollback-only proof. */
@@ -201,14 +202,7 @@ export async function withGeneratedPostconditionSession<T>(
 	const shouldEvict =
 		failed && !isSafeGeneratedPostconditionFailure(failure, capability);
 	try {
-		if (shouldEvict)
-			await client.release(
-				failure instanceof Error
-					? failure
-					: new Error('generated postcondition verification failed', {
-							cause: failure,
-						}),
-			);
+		if (shouldEvict) await client.release(failure);
 		else await client.release();
 	} catch (releaseError) {
 		if (failed)
@@ -969,7 +963,6 @@ export function decodeGeneratedPostcondition(
 				postconditionVersion,
 				stepIdentity,
 			);
-			decodedGeneratedPostconditions.add(decoded);
 			return decoded;
 		} catch (error) {
 			if (error instanceof GeneratedPostconditionReplanRequiredError)
@@ -1088,20 +1081,68 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 }
 
 const INDEX_PROJECTION_SELECT =
-	"SELECT namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, index_meta.indisprimary AS is_primary, index_meta.indisexclusion AS is_exclusion, index_meta.indimmediate AS is_immediate, constraint_item.oid IS NOT NULL AS is_constraint_owned, CASE WHEN index_meta_json.value ? 'indnullsnotdistinct' THEN (index_meta_json.value ->> 'indnullsnotdistinct')::boolean ELSE false END AS nulls_not_distinct, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END AS key_count, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_meta.indexrelid";
+	"SELECT pg_catalog.current_database() AS database_name, relation.relkind AS parent_relation_kind, index_relation.relkind AS relation_kind, relation.oid::text AS relation_oid, index_relation.oid::text AS object_oid, namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, index_meta.indisprimary AS is_primary, index_meta.indisexclusion AS is_exclusion, index_meta.indimmediate AS is_immediate, constraint_item.oid IS NOT NULL AS is_constraint_owned, CASE WHEN index_meta_json.value ? 'indnullsnotdistinct' THEN (index_meta_json.value ->> 'indnullsnotdistinct')::boolean ELSE false END AS nulls_not_distinct, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END AS key_count, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_meta.indexrelid";
 
-async function readLiveIndexProjection(
-	session: GeneratedPostconditionSession,
-	target: GeneratedPostconditionTarget,
-): Promise<IndexProjection> {
+/**
+ * The parent table lock protects the table while the index proof runs, but it
+ * cannot lock an index relation. Bind the index and project its structure in
+ * this one catalogue statement so a rename cannot split those observations.
+ */
+async function stabilizeGeneratedIndexBindingAndProjection(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly target: GeneratedPostconditionTarget;
+	readonly projection: IndexProjection;
+}> {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, 'index');
+	if (slot.found !== undefined)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	if (slot.stabilizationRelation)
+		try {
+			await lockPgRelation(input.session, slot.stabilizationRelation);
+		} catch (error) {
+			if (
+				error instanceof PgResolvableRelationLockError &&
+				isRecord(error.cause) &&
+				error.cause.code === '42P01'
+			)
+				throw new GeneratedPostconditionBindingResolutionError({
+					sought: slot.sought,
+					found: 'absent',
+				});
+			throw error;
+		}
 	const row = (
-		await session.query(
-			`${INDEX_PROJECTION_SELECT} WHERE relation.oid = $1::pg_catalog.oid AND index_relation.oid = $2::pg_catalog.oid`,
-			[target.relationOid, target.objectOid],
+		await input.session.query(
+			`${INDEX_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
+			[slot.target.schema, slot.target.name],
 		)
 	).rows[0];
-	if (!row) throw new Error(`generated index ${target.name} is absent`);
-	return indexProjection(row);
+	if (!row || row.database_name !== input.address.database)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: !row ? 'absent' : `database ${String(row.database_name)}`,
+		});
+	const found = relationBindingFound('index', slot.target, row);
+	if (found !== undefined)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found,
+		});
+	return {
+		target: bindingIdentity('index', slot.target, row),
+		projection: indexProjection(row),
+	};
 }
 
 async function readScratchIndexProjection(
@@ -1173,7 +1214,8 @@ async function scratchScope<T>(
 	if (workFailed) {
 		if (
 			isStructuralMismatchFailure(workError) ||
-			isScratchRollbackSafeFailure(workError)
+			isScratchRollbackSafeFailure(workError) ||
+			workError instanceof GeneratedPostconditionBindingResolutionError
 		)
 			markCleanScratchFailure(workError, session);
 		throw workError;
@@ -1646,7 +1688,22 @@ async function stabilizeGeneratedPostconditionBinding(input: {
 			found: slot.found,
 		});
 	if (slot.stabilizationRelation)
-		await lockPgRelation(input.session, slot.stabilizationRelation);
+		try {
+			await lockPgRelation(input.session, slot.stabilizationRelation);
+		} catch (error) {
+			// A relation that vanished between address validation and LOCK is ordinary
+			// stale-plan drift, not a poisoned client. Preserve every other lock error.
+			if (
+				error instanceof PgResolvableRelationLockError &&
+				isRecord(error.cause) &&
+				error.cause.code === '42P01'
+			)
+				throw new GeneratedPostconditionBindingResolutionError({
+					sought: slot.sought,
+					found: 'absent',
+				});
+			throw error;
+		}
 	return resolveGeneratedPostconditionBinding(input);
 }
 
@@ -1764,15 +1821,6 @@ function requiresStagedDefault(
 	return (
 		specification.hasDefault === true &&
 		!isGeneratedSequenceDefault(specification)
-	);
-}
-
-function requiresStableColumnProof(
-	specification: GeneratedColumnPostcondition,
-): boolean {
-	return (
-		requiresStagedDefault(specification) ||
-		isGeneratedSequenceDefault(specification)
 	);
 }
 
@@ -1958,8 +2006,7 @@ async function verifyTableStructure(input: {
 			}
 			return { kind: 'table' as const, projection: { columns: live } };
 		};
-		if (!input.columns.some(requiresStableColumnProof)) return verify();
-		return scratchScope(session, verify);
+		return verify();
 	})(input.session);
 }
 
@@ -2020,8 +2067,7 @@ async function verifyColumnStructure(input: {
 				);
 			return { kind: 'column' as const, projection };
 		};
-		if (!requiresStableColumnProof(expected)) return verify();
-		return scratchScope(session, verify);
+		return verify();
 	})(input.session);
 }
 
@@ -2029,6 +2075,7 @@ async function verifyIndexStructure(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly index: GeneratedIndexPostcondition;
 	readonly target: GeneratedPostconditionTarget;
+	readonly live: IndexProjection;
 }): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
 	return (async (session) => {
 		const expected = input.index;
@@ -2042,8 +2089,8 @@ async function verifyIndexStructure(input: {
 			undefined,
 			identityNaming,
 		);
-		return scratchScope(session, async () => {
-			const live = await readLiveIndexProjection(session, input.target);
+		return (async () => {
+			const live = input.live;
 			if (
 				live.schema !== expected.schema ||
 				live.table !== expected.table ||
@@ -2068,7 +2115,7 @@ async function verifyIndexStructure(input: {
 					`generated index ${input.target.name} postcondition differs`,
 				);
 			return { kind: 'index', projection: live };
-		});
+		})();
 	})(input.session);
 }
 
@@ -2157,7 +2204,7 @@ async function verifyCheckStructure(input: {
 			notValid: expected.notValid,
 		});
 		validateCheckExpression(clause, 'generated CHECK postcondition');
-		return scratchScope(session, async () => {
+		return (async () => {
 			const live = await readLiveCheckProjection(session, input.target);
 			if (live.validated !== !expected.notValid)
 				throw structuralMismatch(
@@ -2192,7 +2239,7 @@ async function verifyCheckStructure(input: {
 					`generated constraint ${input.target.name} postcondition differs`,
 				);
 			return { kind: 'constraint', projection: live };
-		});
+		})();
 	})(input.session);
 }
 
@@ -2250,10 +2297,7 @@ function decodeV3PostconditionKind<
 		{ readonly kind: K }
 	>;
 } {
-	const postcondition =
-		isRecord(value) && decodedGeneratedPostconditions.has(value)
-			? (value as GeneratedPostcondition)
-			: decodeGeneratedPostcondition(value);
+	const postcondition = decodeGeneratedPostcondition(value);
 	if (
 		postcondition.postconditionVersion !== 3 ||
 		postcondition.declaration.kind !== kind
@@ -2336,12 +2380,12 @@ export async function verifyGeneratedIndexPostcondition(input: {
 			input.postcondition,
 			'index',
 		);
-		const target = await stabilizeGeneratedPostconditionBinding({
+		const bound = await stabilizeGeneratedIndexBindingAndProjection({
 			session,
 			targetBinding: postcondition.targetBinding,
 			address: input.address,
-			expectedKind: 'index',
 		});
+		const { target } = bound;
 		const index = postcondition.declaration.index;
 		const { expressions, where, ...indexFacts } = index;
 		return verifyIndexStructure({
@@ -2359,6 +2403,7 @@ export async function verifyGeneratedIndexPostcondition(input: {
 				...(where === undefined ? {} : { where: where.sql }),
 			},
 			target,
+			live: bound.projection,
 		});
 	});
 }

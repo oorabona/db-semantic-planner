@@ -263,10 +263,10 @@ digest from one version cannot authenticate the value of another.
 Each public verifier owns one non-reentrant proof bracket: it decodes once, validates the complete
 managed-step address, acquires one user-relation lock for relation-backed objects, then resolves the
 bound catalogue identity and reads structure while that lock remains held. This deliberately never
-locks `pg_catalog` rows. Enum and extension proofs are narrower: each resolves its binding,
-catalogue identity, and structural projection in one catalogue statement, so it is a
-single-snapshot observation authorized by the ledger path, not a claim against hostile
-concurrent DDL.
+locks `pg_catalog` rows. Index proofs retain the parent-table lock for the table's value, while their
+index binding, OID, parent identity, and structural projection are one catalogue statement; that is a
+single-snapshot observation, not a claim that hostile index DDL is excluded. Enum and extension proofs
+are likewise one-statement binding-and-projection observations.
 
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*
