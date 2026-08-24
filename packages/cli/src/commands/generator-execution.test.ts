@@ -482,6 +482,11 @@ describe('generator execution fixture shim', () => {
 		} as unknown as NormalizedManagedStep;
 		verifyGeneratedColumnPostcondition.mockResolvedValue({
 			kind: 'column',
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { parentOid: 'proof-scope-X', name: 'id' },
+			},
 			projection: {
 				type: 'integer',
 				nullable: false,
@@ -1112,6 +1117,7 @@ describe('generator execution fixture shim', () => {
 				return {
 					rows: [
 						{
+							constraint_type: 'c',
 							expression: '(id < 0)',
 							validated: true,
 							no_inherit: false,
@@ -1126,6 +1132,7 @@ describe('generator execution fixture shim', () => {
 				return {
 					rows: [
 						{
+							constraint_type: 'c',
 							expression: '(id > 0)',
 							validated: true,
 							no_inherit: false,
@@ -1406,6 +1413,11 @@ describe('generator execution fixture shim', () => {
 		} as unknown as NormalizedManagedStep;
 		verifyGeneratedColumnPostcondition.mockResolvedValue({
 			kind: 'column',
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { parentOid: 'proof-scope-X', name: 'id' },
+			},
 			projection: {
 				type: 'bigint',
 				nullable: false,
@@ -1415,6 +1427,7 @@ describe('generator execution fixture shim', () => {
 			},
 		});
 		let observed: unknown;
+		let recordedIdentity: unknown;
 		executePgAdmittedOperation.mockImplementation(
 			async (
 				_executor,
@@ -1426,16 +1439,22 @@ describe('generator execution fixture shim', () => {
 							}>;
 						}) => Promise<{
 							readonly members: readonly {
-								readonly member: { readonly observed?: unknown };
+								readonly member: {
+									readonly observed?: unknown;
+									readonly catalogueIdentity?: unknown;
+								};
 							}[];
 						}>;
 					};
 				},
 			) => {
 				const resolution = await input.operation.readBackAndResolve({
-					query: async () => ({ rows: [{ parent_oid: '501' }] }),
+					query: async () => ({
+						rows: [{ parent_oid: 'separate-read-Y' }],
+					}),
 				});
 				observed = resolution.members[0]?.member.observed;
+				recordedIdentity = resolution.members[0]?.member.catalogueIdentity;
 				return { kind: 'executed-destructive-outcome' };
 			},
 		);
@@ -1459,6 +1478,11 @@ describe('generator execution fixture shim', () => {
 		);
 		expect(observed).toMatchObject({
 			value: { kind: 'column', type: 'bigint', nullable: false },
+		});
+		expect(recordedIdentity).toEqual({
+			engine: 'postgresql',
+			format: 1,
+			value: { parentOid: 'proof-scope-X', name: 'id' },
 		});
 	});
 

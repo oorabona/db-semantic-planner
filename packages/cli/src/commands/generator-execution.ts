@@ -306,7 +306,10 @@ async function identityObserved(
 	postcondition: GeneratedPostcondition,
 	address: GeneratedPostconditionBindingAddress,
 	kind: 'constraint' | 'enum' | 'sequence' | 'extension',
-): Promise<GeneratedIdentityObservation> {
+): Promise<{
+	readonly observed: GeneratedIdentityObservation;
+	readonly catalogueIdentity: NonNullable<LedgerAddress['catalogueIdentity']>;
+}> {
 	const verified = await verifyGeneratedIdentityPostcondition({
 		session: executor,
 		postcondition,
@@ -327,10 +330,13 @@ async function identityObserved(
 		}),
 	) as LedgerPayload['value'];
 	return {
-		value,
-		digest: canonicalJsonDigest(value),
-		payloadKind: 'generated-identity-observation',
-	} satisfies GeneratedIdentityObservation;
+		catalogueIdentity: verified.catalogueIdentity,
+		observed: {
+			value,
+			digest: canonicalJsonDigest(value),
+			payloadKind: 'generated-identity-observation',
+		} satisfies GeneratedIdentityObservation,
+	};
 }
 
 function generatedPostcondition(
@@ -361,7 +367,10 @@ async function readGeneratedV3Postcondition(
 		{ readonly postconditionVersion: 3 }
 	>,
 	address: LedgerAddress,
-): Promise<GeneratedPostconditionObservation> {
+): Promise<{
+	readonly observed: GeneratedPostconditionObservation;
+	readonly catalogueIdentity?: NonNullable<LedgerAddress['catalogueIdentity']>;
+}> {
 	const bindingAddress = toGeneratedPostconditionBindingAddress(address);
 	switch (postcondition.declaration.kind) {
 		case 'column': {
@@ -370,20 +379,23 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: 'column',
-				type: verified.projection.type,
-				nullable: verified.projection.nullable,
-				...(verified.projection.default === undefined
-					? {}
-					: { default: verified.projection.default }),
-				...(verified.projection.collation === undefined
-					? {}
-					: { collation: verified.projection.collation }),
-				...(verified.projection.identity === undefined
-					? {}
-					: { identity: verified.projection.identity }),
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: 'column',
+					type: verified.projection.type,
+					nullable: verified.projection.nullable,
+					...(verified.projection.default === undefined
+						? {}
+						: { default: verified.projection.default }),
+					...(verified.projection.collation === undefined
+						? {}
+						: { collation: verified.projection.collation }),
+					...(verified.projection.identity === undefined
+						? {}
+						: { identity: verified.projection.identity }),
+				}),
+			};
 		}
 		case 'check': {
 			const verified = await verifyGeneratedCheckPostcondition({
@@ -391,17 +403,20 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				type: 'c',
-				expression: verified.projection.expression,
-				validated: verified.projection.validated,
-				noInherit: verified.projection.noInherit,
-				enforced: verified.projection.enforced,
-				isLocal: verified.projection.isLocal,
-				inheritanceCount: verified.projection.inheritanceCount,
-				parentId: verified.projection.parentId,
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					type: 'c',
+					expression: verified.projection.expression,
+					validated: verified.projection.validated,
+					noInherit: verified.projection.noInherit,
+					enforced: verified.projection.enforced,
+					isLocal: verified.projection.isLocal,
+					inheritanceCount: verified.projection.inheritanceCount,
+					parentId: verified.projection.parentId,
+				}),
+			};
 		}
 		case 'constraint': {
 			return identityObserved(
@@ -417,10 +432,13 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				projection: verified.projection,
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					projection: verified.projection,
+				}),
+			};
 		}
 		case 'table': {
 			const verified = await verifyGeneratedTablePostcondition({
@@ -428,21 +446,26 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				columns: verified.projection.columns.map((column) => ({
-					name: column.name,
-					type: column.type,
-					nullable: column.nullable,
-					...(column.default === undefined ? {} : { default: column.default }),
-					...(column.collation === undefined
-						? {}
-						: { collation: column.collation }),
-					...(column.identity === undefined
-						? {}
-						: { identity: column.identity }),
-				})),
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					columns: verified.projection.columns.map((column) => ({
+						name: column.name,
+						type: column.type,
+						nullable: column.nullable,
+						...(column.default === undefined
+							? {}
+							: { default: column.default }),
+						...(column.collation === undefined
+							? {}
+							: { collation: column.collation }),
+						...(column.identity === undefined
+							? {}
+							: { identity: column.identity }),
+					})),
+				}),
+			};
 		}
 		case 'enum': {
 			return identityObserved(executor, postcondition, bindingAddress, 'enum');
@@ -471,7 +494,7 @@ async function readGeneratedV3Postcondition(
 				throw new Error(
 					`generated ${address.kind} absence postcondition differs: ${address.name} is still present`,
 				);
-			return generatedPayload({ kind: 'absent' });
+			return { observed: generatedPayload({ kind: 'absent' }) };
 		}
 		default:
 			throw new Error('generated v3 postcondition has no declarable read-back');
@@ -491,11 +514,13 @@ export async function readGeneratedPostcondition(
 	executor = assertGeneratedPostconditionSession(executor);
 	const decodedPostcondition = generatedPostcondition(step, address);
 	if (decodedPostcondition.postconditionVersion === 3)
-		return readGeneratedV3Postcondition(
-			executor,
-			decodedPostcondition,
-			address,
-		);
+		return (
+			await readGeneratedV3Postcondition(
+				executor,
+				decodedPostcondition,
+				address,
+			)
+		).observed;
 	throw new Error(
 		'generated postcondition decoder returned no supported version',
 	);
@@ -1033,8 +1058,7 @@ export async function executeGeneratorPlan(input: {
 					kind: 'destructive-outcome',
 					request: admitRequest,
 					readBackAndResolve: async (session) => {
-						const live = await readPgCatalogueIdentity(session, address);
-						const declarationObserved =
+						const declarationReadBack =
 							step.classification === 'data-destructive' &&
 							step.expectedDeclaration !== undefined
 								? await withGeneratedPostconditionSession(
@@ -1044,9 +1068,31 @@ export async function executeGeneratorPlan(input: {
 												release: () => undefined,
 											}),
 										},
-										(proof) => readGeneratedPostcondition(proof, step, address),
+										(proof) => {
+											const postcondition = generatedPostcondition(
+												step,
+												address,
+											);
+											if (postcondition.postconditionVersion !== 3)
+												throw new Error(
+													'generated postcondition decoder returned no supported version',
+												);
+											return readGeneratedV3Postcondition(
+												proof,
+												postcondition,
+												address,
+											);
+										},
 									)
 								: undefined;
+						const live =
+							step.classification === 'removal'
+								? await readPgCatalogueIdentity(session, address)
+								: undefined;
+						const terminalCatalogueIdentity =
+							step.classification === 'removal'
+								? live?.catalogueIdentity
+								: declarationReadBack?.catalogueIdentity;
 						const survivors: LedgerAddress[] =
 							step.classification === 'removal' && live ? [address] : [];
 						const childLives = await Promise.all(
@@ -1135,13 +1181,14 @@ export async function executeGeneratorPlan(input: {
 										step.classification === 'removal' ? 'absent' : 'observed',
 									// The append protocol reads this address's terminal on its
 									// pinned transaction session after the post-DDL read-back.
-									...(live?.catalogueIdentity
-										? { catalogueIdentity: live.catalogueIdentity }
-										: {}),
+									...(terminalCatalogueIdentity === undefined
+										? {}
+										: { catalogueIdentity: terminalCatalogueIdentity }),
 									...(step.classification === 'removal'
 										? {}
 										: {
-												observed: declarationObserved ?? observed(address),
+												observed:
+													declarationReadBack?.observed ?? observed(address),
 											}),
 								},
 							},

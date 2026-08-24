@@ -235,17 +235,17 @@ type GeneratedPostconditionTarget = {
 	readonly attributeNumber?: number;
 };
 
-type ResolvableGeneratedPostconditionKind =
-	| 'table'
-	| 'column'
+type ResolvableGeneratedPostconditionKind = 'table' | 'column' | 'constraint';
+
+type GeneratedPostconditionBindingKind =
+	| ResolvableGeneratedPostconditionKind
 	| 'index'
-	| 'constraint'
 	| 'enum'
 	| 'sequence'
 	| 'extension';
 
 type GeneratedPostconditionSchemaBindingKind = Exclude<
-	ResolvableGeneratedPostconditionKind,
+	GeneratedPostconditionBindingKind,
 	'extension'
 >;
 type GeneratedPostconditionTableChildKind = 'column' | 'index' | 'constraint';
@@ -1163,7 +1163,7 @@ export function assertGeneratedPostconditionSession(
 
 function bindingSlot(
 	address: GeneratedPostconditionBindingAddress,
-	expectedKind: ResolvableGeneratedPostconditionKind,
+	expectedKind: GeneratedPostconditionBindingKind,
 ): {
 	readonly target: GeneratedPostconditionTarget;
 	readonly sought: string;
@@ -1241,7 +1241,7 @@ function bindingSlot(
 }
 
 function relationBindingFound(
-	kind: ResolvableGeneratedPostconditionKind,
+	kind: GeneratedPostconditionBindingKind,
 	target: GeneratedPostconditionTarget,
 	row: Record<string, unknown> | undefined,
 ): string | undefined {
@@ -1277,7 +1277,7 @@ function relationBindingFound(
 }
 
 function bindingIdentity(
-	kind: ResolvableGeneratedPostconditionKind,
+	kind: GeneratedPostconditionBindingKind,
 	target: GeneratedPostconditionTarget,
 	row: Record<string, unknown>,
 ): GeneratedPostconditionTarget {
@@ -1351,39 +1351,11 @@ async function resolveGeneratedPostconditionBinding(input: {
 				[target.schema, target.table, target.name],
 			)
 		).rows[0];
-	else if (input.expectedKind === 'index')
-		row = (
-			await session.query(
-				`SELECT pg_catalog.current_database() AS database_name, index_relation.relkind AS relation_kind, parent_relation.relkind AS parent_relation_kind, parent_relation.oid::text AS relation_oid, index_relation.oid::text AS object_oid, parent_relation.relname AS table_name FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace LEFT JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid LEFT JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
-				[target.schema, target.name],
-			)
-		).rows[0];
 	else if (input.expectedKind === 'constraint')
 		row = (
 			await session.query(
 				`SELECT pg_catalog.current_database() AS database_name, relation.relkind AS relation_kind, relation.oid::text AS relation_oid, constraint_item.oid::text AS object_oid, constraint_item.conname AS constraint_name FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
 				[target.schema, target.table, target.name],
-			)
-		).rows[0];
-	else if (input.expectedKind === 'enum')
-		row = (
-			await session.query(
-				`SELECT pg_catalog.current_database() AS database_name, type_item.oid::text AS relation_oid, type_item.oid::text AS object_oid, 'e'::text AS relation_kind FROM pg_catalog.pg_type type_item JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type_item.typnamespace WHERE namespace.nspname = $1 AND type_item.typname = $2 AND type_item.typtype = 'e'`,
-				[target.schema, target.name],
-			)
-		).rows[0];
-	else if (input.expectedKind === 'sequence')
-		row = (
-			await session.query(
-				`SELECT pg_catalog.current_database() AS database_name, relation.oid::text AS relation_oid, relation.oid::text AS object_oid, relation.relkind AS relation_kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2`,
-				[target.schema, target.name],
-			)
-		).rows[0];
-	else
-		row = (
-			await session.query(
-				`SELECT pg_catalog.current_database() AS database_name, extension.oid::text AS relation_oid, extension.oid::text AS object_oid, 'x'::text AS relation_kind FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
-				[target.name],
 			)
 		).rows[0];
 	if (!row || row.database_name !== input.address.database) {
@@ -1393,20 +1365,7 @@ async function resolveGeneratedPostconditionBinding(input: {
 		});
 		throw failure;
 	}
-	const found =
-		input.expectedKind === 'enum'
-			? row.relation_kind === 'e'
-				? undefined
-				: 'absent'
-			: input.expectedKind === 'sequence'
-				? row.relation_kind === 'S'
-					? undefined
-					: 'absent'
-				: input.expectedKind === 'extension'
-					? row.relation_kind === 'x'
-						? undefined
-						: 'absent'
-					: relationBindingFound(input.expectedKind, target, row);
+	const found = relationBindingFound(input.expectedKind, target, row);
 	if (found !== undefined) {
 		const failure = bindingResolutionFailure({
 			sought: slot.sought,
@@ -1415,6 +1374,53 @@ async function resolveGeneratedPostconditionBinding(input: {
 		throw failure;
 	}
 	return bindingIdentity(input.expectedKind, target, row);
+}
+
+/**
+ * These identity-only kinds cannot be stabilized by a user relation lock.
+ * Select their name, subtype, and identity in one catalogue statement instead
+ * of resolving a name and then re-reading it in a separate snapshot.
+ */
+async function resolveGeneratedPostconditionIdentityBinding(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly expectedKind: 'enum' | 'sequence' | 'extension';
+}): Promise<GeneratedPostconditionTarget> {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, input.expectedKind);
+	if (slot.found !== undefined)
+		throw bindingResolutionFailure({ sought: slot.sought, found: slot.found });
+	const row = (
+		await input.session.query(
+			input.expectedKind === 'enum'
+				? `SELECT pg_catalog.current_database() AS database_name, type_item.oid::text AS relation_oid, type_item.oid::text AS object_oid, 'e'::text AS relation_kind FROM pg_catalog.pg_type type_item JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type_item.typnamespace WHERE namespace.nspname = $1 AND type_item.typname = $2 AND type_item.typtype = 'e'`
+				: input.expectedKind === 'sequence'
+					? `SELECT pg_catalog.current_database() AS database_name, relation.oid::text AS relation_oid, relation.oid::text AS object_oid, relation.relkind AS relation_kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2`
+					: `SELECT pg_catalog.current_database() AS database_name, extension.oid::text AS relation_oid, extension.oid::text AS object_oid, 'x'::text AS relation_kind FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
+			input.expectedKind === 'extension'
+				? [slot.target.name]
+				: [slot.target.schema, slot.target.name],
+		)
+	).rows[0];
+	if (!row || row.database_name !== input.address.database)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found: !row ? 'absent' : `database ${String(row.database_name)}`,
+		});
+	const expectedRelationKind =
+		input.expectedKind === 'enum'
+			? 'e'
+			: input.expectedKind === 'sequence'
+				? 'S'
+				: 'x';
+	if (row.relation_kind !== expectedRelationKind)
+		throw bindingResolutionFailure({ sought: slot.sought, found: 'absent' });
+	return bindingIdentity(input.expectedKind, slot.target, row);
 }
 
 /** One lock acquisition, then one complete identity resolution under that lock. */
@@ -1838,7 +1844,7 @@ async function verifyIndexStructure(input: {
 }
 
 const CHECK_PROJECTION_SELECT =
-	"SELECT pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid, false) AS expression, constraint_item.convalidated AS validated, constraint_item.connoinherit AS no_inherit, constraint_item.conislocal AS is_local, constraint_item.coninhcount AS inheritance_count, CASE WHEN constraint_item_json.value ? 'conparentid' THEN (constraint_item_json.value ->> 'conparentid')::oid ELSE 0::oid END AS parent_id, CASE WHEN constraint_item_json.value ? 'conenforced' THEN (constraint_item_json.value ->> 'conenforced')::boolean ELSE true END AS enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json";
+	"SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_expr(constraint_item.conbin, constraint_item.conrelid, false) AS expression, constraint_item.convalidated AS validated, constraint_item.connoinherit AS no_inherit, constraint_item.conislocal AS is_local, constraint_item.coninhcount AS inheritance_count, CASE WHEN constraint_item_json.value ? 'conparentid' THEN (constraint_item_json.value ->> 'conparentid')::oid ELSE 0::oid END AS parent_id, CASE WHEN constraint_item_json.value ? 'conenforced' THEN (constraint_item_json.value ->> 'conenforced')::boolean ELSE true END AS enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json";
 
 function checkProjection(
 	row: Record<string, unknown>,
@@ -1875,11 +1881,16 @@ async function readLiveCheckProjection(
 ): Promise<CheckProjection> {
 	const row = (
 		await session.query(
-			`${CHECK_PROJECTION_SELECT} WHERE constraint_item.conrelid = $1::pg_catalog.oid AND constraint_item.oid = $2::pg_catalog.oid AND constraint_item.contype = 'c'`,
+			`${CHECK_PROJECTION_SELECT} WHERE constraint_item.conrelid = $1::pg_catalog.oid AND constraint_item.oid = $2::pg_catalog.oid`,
 			[target.relationOid, target.objectOid],
 		)
 	).rows[0];
 	if (!row) throw new Error(`generated constraint ${target.name} is absent`);
+	if (row.constraint_type !== 'c')
+		throw bindingResolutionFailure({
+			sought: `CHECK constraint ${target.schema}.${target.table}.${target.name}`,
+			found: `constraint ${target.schema}.${target.table}.${target.name} (contype ${String(row.constraint_type)})`,
+		});
 	return checkProjection(row, `generated constraint ${target.name} is absent`);
 }
 
@@ -2029,30 +2040,117 @@ function decodeV3PostconditionKind<
 	};
 }
 
+type GeneratedPostconditionCatalogueIdentity = NonNullable<
+	ResourceAddress['catalogueIdentity']
+>;
+
+function catalogueIdentityForGeneratedPostconditionTarget(
+	kind: GeneratedPostconditionBindingKind,
+	target: GeneratedPostconditionTarget,
+): GeneratedPostconditionCatalogueIdentity {
+	if (target.relationOid === undefined)
+		throw new Error(
+			'generated postcondition binding did not return a relation identity',
+		);
+	if (kind === 'column')
+		return {
+			engine: 'postgresql',
+			format: 1,
+			value: { parentOid: target.relationOid, name: target.name },
+		};
+	const oid = kind === 'table' ? target.relationOid : target.objectOid;
+	if (oid === undefined)
+		throw new Error(
+			'generated postcondition binding did not return an object identity',
+		);
+	return { engine: 'postgresql', format: 1, value: { oid } };
+}
+
+/**
+ * Decode and freeze the declaration plus the complete binding topology before
+ * scratchScope can begin a transaction.  In particular, stale v1/v2 values
+ * refuse without touching a broken or read-only PostgreSQL session.
+ */
+function prepareV3GeneratedPostcondition<
+	K extends GeneratedPostconditionDeclarationV3['kind'],
+>(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly declarationKind: K;
+	readonly expectedKind: GeneratedPostconditionBindingKind;
+}): {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: GeneratedPostconditionV3 & {
+		readonly declaration: Extract<
+			GeneratedPostconditionDeclarationV3,
+			{ readonly kind: K }
+		>;
+	};
+	readonly address: GeneratedPostconditionBindingAddress;
+} {
+	const session = requireGeneratedPostconditionSession(input.session);
+	try {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			input.declarationKind,
+		);
+		const address = toGeneratedPostconditionBindingAddress(input.address);
+		if (
+			postcondition.targetBinding.bindingVersion !== 1 ||
+			postcondition.targetBinding.bindingKind !== 'managed-step-address'
+		)
+			throw replan('generated postcondition target binding is unsupported');
+		const slot = bindingSlot(address, input.expectedKind);
+		if (slot.found !== undefined)
+			throw bindingResolutionFailure({
+				sought: slot.sought,
+				found: slot.found,
+			});
+		return { session, postcondition, address };
+	} catch (error) {
+		markSafePreQueryFailure(error, session);
+		throw error;
+	}
+}
+
 /** Resolves the v3 table binding, then delegates its shared structural proof. */
 export async function verifyGeneratedTablePostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'table',
-		);
+}): Promise<{
+	readonly kind: 'table';
+	readonly projection: TableProjection;
+	readonly catalogueIdentity: GeneratedPostconditionCatalogueIdentity;
+}> {
+	const prepared = prepareV3GeneratedPostcondition({
+		...input,
+		declarationKind: 'table',
+		expectedKind: 'table',
+	});
+	return withGeneratedPostconditionProof(prepared.session, async (session) => {
+		const { postcondition } = prepared;
 		const target = await stabilizeGeneratedPostconditionBinding({
 			session,
 			targetBinding: postcondition.targetBinding,
-			address: input.address,
+			address: prepared.address,
 			expectedKind: 'table',
 		});
-		return verifyTableStructure({
+		const verified = await verifyTableStructure({
 			session,
 			columns: postcondition.declaration.columns.map((column) =>
 				v3ColumnPostcondition(column, column.name),
 			),
 			target,
 		});
+		return {
+			...verified,
+			catalogueIdentity: catalogueIdentityForGeneratedPostconditionTarget(
+				'table',
+				target,
+			),
+		};
 	});
 }
 
@@ -2064,19 +2162,22 @@ export async function verifyGeneratedColumnPostcondition(input: {
 }): Promise<{
 	readonly kind: 'column';
 	readonly projection: GeneratedColumnProjection;
+	readonly catalogueIdentity: GeneratedPostconditionCatalogueIdentity;
 }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'column',
-		);
+	const prepared = prepareV3GeneratedPostcondition({
+		...input,
+		declarationKind: 'column',
+		expectedKind: 'column',
+	});
+	return withGeneratedPostconditionProof(prepared.session, async (session) => {
+		const { postcondition } = prepared;
 		const target = await stabilizeGeneratedPostconditionBinding({
 			session,
 			targetBinding: postcondition.targetBinding,
-			address: input.address,
+			address: prepared.address,
 			expectedKind: 'column',
 		});
-		return verifyColumnStructure({
+		const verified = await verifyColumnStructure({
 			session,
 			column: v3ColumnPostcondition(
 				postcondition.declaration.column,
@@ -2084,6 +2185,13 @@ export async function verifyGeneratedColumnPostcondition(input: {
 			),
 			target,
 		});
+		return {
+			...verified,
+			catalogueIdentity: catalogueIdentityForGeneratedPostconditionTarget(
+				'column',
+				target,
+			),
+		};
 	});
 }
 
@@ -2092,21 +2200,27 @@ export async function verifyGeneratedIndexPostcondition(input: {
 	readonly session: GeneratedPostconditionSession;
 	readonly postcondition: unknown;
 	readonly address: GeneratedPostconditionBindingAddress;
-}): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'index',
-		);
+}): Promise<{
+	readonly kind: 'index';
+	readonly projection: IndexProjection;
+	readonly catalogueIdentity: GeneratedPostconditionCatalogueIdentity;
+}> {
+	const prepared = prepareV3GeneratedPostcondition({
+		...input,
+		declarationKind: 'index',
+		expectedKind: 'index',
+	});
+	return withGeneratedPostconditionProof(prepared.session, async (session) => {
+		const { postcondition } = prepared;
 		const bound = await stabilizeGeneratedIndexBindingAndProjection({
 			session,
 			targetBinding: postcondition.targetBinding,
-			address: input.address,
+			address: prepared.address,
 		});
 		const { target } = bound;
 		const index = postcondition.declaration.index;
 		const { expressions, where, ...indexFacts } = index;
-		return verifyIndexStructure({
+		const verified = await verifyIndexStructure({
 			session,
 			index: {
 				schema: target.schema,
@@ -2123,6 +2237,13 @@ export async function verifyGeneratedIndexPostcondition(input: {
 			target,
 			live: bound.projection,
 		});
+		return {
+			...verified,
+			catalogueIdentity: catalogueIdentityForGeneratedPostconditionTarget(
+				'index',
+				target,
+			),
+		};
 	});
 }
 
@@ -2134,19 +2255,22 @@ export async function verifyGeneratedCheckPostcondition(input: {
 }): Promise<{
 	readonly kind: 'constraint';
 	readonly projection: CheckProjection;
+	readonly catalogueIdentity: GeneratedPostconditionCatalogueIdentity;
 }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			'check',
-		);
+	const prepared = prepareV3GeneratedPostcondition({
+		...input,
+		declarationKind: 'check',
+		expectedKind: 'constraint',
+	});
+	return withGeneratedPostconditionProof(prepared.session, async (session) => {
+		const { postcondition } = prepared;
 		const target = await stabilizeGeneratedPostconditionBinding({
 			session,
 			targetBinding: postcondition.targetBinding,
-			address: input.address,
+			address: prepared.address,
 			expectedKind: 'constraint',
 		});
-		return verifyCheckStructure({
+		const verified = await verifyCheckStructure({
 			session,
 			check: {
 				type: 'c',
@@ -2155,6 +2279,13 @@ export async function verifyGeneratedCheckPostcondition(input: {
 			},
 			target,
 		});
+		return {
+			...verified,
+			catalogueIdentity: catalogueIdentityForGeneratedPostconditionTarget(
+				'constraint',
+				target,
+			),
+		};
 	});
 }
 
@@ -2175,18 +2306,29 @@ export async function verifyGeneratedIdentityPostcondition(input: {
 		readonly relationOid: string;
 		readonly objectOid?: string;
 	}>;
+	readonly catalogueIdentity: GeneratedPostconditionCatalogueIdentity;
 }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeV3PostconditionKind(
-			input.postcondition,
-			input.kind,
-		);
-		const target = await stabilizeGeneratedPostconditionBinding({
-			session,
-			targetBinding: postcondition.targetBinding,
-			address: input.address,
-			expectedKind: input.kind,
-		});
+	const prepared = prepareV3GeneratedPostcondition({
+		...input,
+		declarationKind: input.kind,
+		expectedKind: input.kind,
+	});
+	return withGeneratedPostconditionProof(prepared.session, async (session) => {
+		const { postcondition } = prepared;
+		const target =
+			input.kind === 'constraint'
+				? await stabilizeGeneratedPostconditionBinding({
+						session,
+						targetBinding: postcondition.targetBinding,
+						address: prepared.address,
+						expectedKind: input.kind,
+					})
+				: await resolveGeneratedPostconditionIdentityBinding({
+						session,
+						targetBinding: postcondition.targetBinding,
+						address: prepared.address,
+						expectedKind: input.kind,
+					});
 		if (target.relationOid === undefined)
 			throw new Error(
 				'generated postcondition binding did not return a relation identity',
@@ -2199,6 +2341,10 @@ export async function verifyGeneratedIdentityPostcondition(input: {
 					? {}
 					: { objectOid: target.objectOid }),
 			},
+			catalogueIdentity: catalogueIdentityForGeneratedPostconditionTarget(
+				input.kind,
+				target,
+			),
 		};
 	});
 }

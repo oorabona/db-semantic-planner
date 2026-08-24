@@ -145,6 +145,7 @@ function boundIndexRow(overrides: Record<string, unknown> = {}) {
 
 function checkRow(overrides: Record<string, unknown> = {}) {
 	return {
+		constraint_type: 'c',
 		expression: "(status = 'Active'::text)",
 		validated: true,
 		no_inherit: false,
@@ -1116,6 +1117,63 @@ describe('generated postcondition verifier', () => {
 		}
 	});
 
+	it.each([
+		[
+			'table',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedTablePostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: tableAddress,
+				}),
+		],
+		[
+			'column',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedColumnPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: columnAddress,
+				}),
+		],
+		[
+			'index',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedIndexPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: indexAddress,
+				}),
+		],
+		[
+			'CHECK',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedCheckPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: checkAddress,
+				}),
+		],
+		[
+			'identity',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedIdentityPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: extensionAddress as never,
+					kind: 'extension',
+				}),
+		],
+	] as const)('refuses v1 %s before the proof bracket can issue a query', async (_kind, verify) => {
+		const query = vi.fn(async () => {
+			throw new Error('database must not be queried');
+		});
+		await expect(
+			verify(mintGeneratedPostconditionSession({ query })),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(query).not.toHaveBeenCalled();
+	});
+
 	// The removed v2 verifier tests are restated above as one refusal per shape
 	// family; a legacy payload never reaches catalogue, scratch, or subset proof.
 	it('resolves each v3 binding before delegating the existing structural proof', async () => {
@@ -2052,6 +2110,88 @@ describe('generated postcondition verifier', () => {
 		).rejects.toThrow(
 			'generated CHECK verifier could not read a complete projection',
 		);
+	});
+
+	it('keeps a healthy checkout for wrong-subtype CHECK drift, while a lock failure still poisons it', async () => {
+		const safeRelease = vi.fn();
+		let safeSavepointWithoutTransaction = true;
+		let wrongSubtypeFailure: unknown;
+		try {
+			await withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: async (sql) => {
+							if (
+								sql.startsWith('SAVEPOINT') &&
+								safeSavepointWithoutTransaction
+							) {
+								safeSavepointWithoutTransaction = false;
+								throw { code: '25P01' };
+							}
+							if (sql.includes('pg_catalog.current_database()'))
+								return {
+									rows: [
+										{
+											database_name: 'app',
+											relation_kind: 'r',
+											relation_oid: '101',
+											object_oid: '102',
+											constraint_name: 'accounts_status_check',
+										},
+									],
+								};
+							if (sql.includes('conrelid = $1::pg_catalog.oid'))
+								return { rows: [checkRow({ constraint_type: 'u' })] };
+							return { rows: [] };
+						},
+						release: safeRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedCheckPostcondition({
+						session,
+						postcondition: v3Check(),
+						address: checkAddress,
+					}),
+			);
+		} catch (error) {
+			wrongSubtypeFailure = error;
+		}
+		expect(safeRelease).toHaveBeenCalledWith();
+		expect(wrongSubtypeFailure).toBeInstanceOf(
+			GeneratedPostconditionBindingResolutionError,
+		);
+
+		const poisonedRelease = vi.fn();
+		let poisonedSavepointWithoutTransaction = true;
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: async (sql) => {
+							if (
+								sql.startsWith('SAVEPOINT') &&
+								poisonedSavepointWithoutTransaction
+							) {
+								poisonedSavepointWithoutTransaction = false;
+								throw { code: '25P01' };
+							}
+							if (sql.startsWith('LOCK TABLE ONLY'))
+								throw new Error('lock timeout');
+							return { rows: [] };
+						},
+						release: poisonedRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedCheckPostcondition({
+						session,
+						postcondition: v3Check(),
+						address: checkAddress,
+					}),
+			),
+		).rejects.toThrow('relation lock failed');
+		expect(poisonedRelease).toHaveBeenCalledWith(expect.any(Error));
 	});
 
 	it('uses the v3 default-state model for authored text, E literals, generated sequences, collation, identity, duplicates, and ordinals', async () => {
