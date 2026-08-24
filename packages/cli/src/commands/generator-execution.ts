@@ -26,7 +26,6 @@ import {
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
-	withGeneratedPostconditionProof,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -418,6 +417,16 @@ async function readGeneratedV3Postcondition(
 				version: verified.version,
 			});
 		}
+		case 'absent': {
+			// Removal admission owns the destructive absence read-back.  Consume it
+			// explicitly if this dispatcher is used for a terminal absence fact.
+			const live = await readPgCatalogueIdentity(executor, address);
+			if (live)
+				throw new Error(
+					`generated ${address.kind} absence postcondition differs: ${address.name} is still present`,
+				);
+			return generatedPayload({ kind: 'absent' });
+		}
 		default:
 			throw new Error(
 				`generated v3 ${postcondition.declaration.kind} has no declarable read-back`,
@@ -436,20 +445,16 @@ export async function readGeneratedPostcondition(
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
 	executor = assertGeneratedPostconditionSession(executor);
-	// Decode belongs to the counted proof bracket too: malformed persisted input
-	// has issued no query and must release a healthy checked-out session normally.
-	return withGeneratedPostconditionProof(executor, async (session) => {
-		const decodedPostcondition = generatedPostcondition(step, address);
-		if (decodedPostcondition.postconditionVersion === 3)
-			return readGeneratedV3Postcondition(
-				session,
-				decodedPostcondition,
-				address,
-			);
-		throw new Error(
-			'generated postcondition decoder returned no supported version',
+	const decodedPostcondition = generatedPostcondition(step, address);
+	if (decodedPostcondition.postconditionVersion === 3)
+		return readGeneratedV3Postcondition(
+			executor,
+			decodedPostcondition,
+			address,
 		);
-	});
+	throw new Error(
+		'generated postcondition decoder returned no supported version',
+	);
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {

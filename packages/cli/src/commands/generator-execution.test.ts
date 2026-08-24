@@ -144,8 +144,7 @@ async function readTestGeneratedPostcondition(
 		{
 			connect: async () => ({
 				query: async (sql: string, params?: readonly unknown[]) => {
-					if (sql.includes('FOR SHARE'))
-						return { rows: [{ relation_oid: '101' }] };
+					if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
 					const result = await executor.query(sql, params);
 					if (!sql.includes('pg_catalog.current_database()')) return result;
 					return {
@@ -153,7 +152,11 @@ async function readTestGeneratedPostcondition(
 							database_name: 'app',
 							relation_oid: '101',
 							...(sql.includes('index_relation.oid')
-								? { relation_kind: 'i', table_name: 'accounts' }
+								? {
+										relation_kind: 'i',
+										parent_relation_kind: 'r',
+										table_name: 'accounts',
+									}
 								: sql.includes('constraint_item.oid')
 									? { relation_kind: 'r', constraint_name: params?.[2] }
 									: { relation_kind: 'r' }),
@@ -281,8 +284,20 @@ function indexReadbackExecutor(input: {
 }) {
 	return {
 		query: vi.fn(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
 			if (sql.includes('FROM pg_catalog.pg_class index_relation'))
-				return { rows: [{ relation_kind: 'i', table_name: 'accounts' }] };
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'i',
+							parent_relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							table_name: 'accounts',
+						},
+					],
+				};
 			if (sql.includes('::pg_catalog.regclass'))
 				return { rows: [indexProjectionRow(input.staged)] };
 			if (sql.includes('index_meta.indisunique'))
@@ -293,6 +308,21 @@ function indexReadbackExecutor(input: {
 }
 
 describe('generator execution fixture shim', () => {
+	it('dispatches an absence declaration through the destructive absence read-back', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: v3({ kind: 'absent' }),
+				digest: 'absence-postcondition',
+			},
+		} as NormalizedManagedStep;
+		const query = vi.fn(async () => ({ rows: [] }));
+		await expect(
+			readTestGeneratedPostcondition({ query }, step, step.address!),
+		).resolves.toMatchObject({ value: { kind: 'absent' } });
+		expect(query).toHaveBeenCalled();
+	});
+
 	it.each([
 		[
 			'table',
@@ -715,8 +745,9 @@ describe('generator execution fixture shim', () => {
 			},
 		} as unknown as NormalizedManagedStep;
 		const query = vi.fn(async (sql: string) => ({
-			rows:
-				row === undefined
+			rows: sql.startsWith('LOCK TABLE ONLY')
+				? []
+				: row === undefined
 					? []
 					: [
 							sql.includes('relation.relkind AS relation_kind') ||

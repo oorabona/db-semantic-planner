@@ -250,12 +250,21 @@ without a group-token protocol.
 
 ### The declaration comes from the DSL inputs, produced and validated at plan time
 
+Generated postconditions are currently encoded as v3 declarations with a separate target binding.
+
 ### Generated postcondition wire versions
 
-Generated postconditions are currently encoded as v3 declarations with a separate target binding.
 The decoder has one interpretation per version: v3 decodes; v1 and v2 are `REPLAN_REQUIRED` outcomes,
 not compatibility inputs or subset-reader candidates. Their digest includes the wire version, so a
 digest from one version cannot authenticate the value of another.
+
+### Generated-postcondition proof stability
+
+Each public verifier owns one non-reentrant proof bracket: it decodes once, validates the complete
+managed-step address, acquires one user-relation lock for relation-backed objects, then resolves the
+bound catalogue identity and reads structure while that lock remains held. This deliberately never
+locks `pg_catalog` rows. Enum and extension proofs are narrower: they are snapshot-consistent
+observations authorized by the ledger path, not a claim against hostile concurrent DDL.
 
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*

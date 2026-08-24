@@ -961,18 +961,26 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				destructive: true,
 				details: 'absent',
 			}),
-			produce({
-				kind: 'alter_column_type',
-				table: 'orders',
-				column: 'state',
-				destructive: false,
-				details: 'exempt',
-			}),
 		];
 		for (const postcondition of postconditions)
 			expect(decodeGeneratedPostcondition(postcondition)).toEqual(
 				postcondition,
 			);
+	});
+
+	it('refuses alter_column_type without a typed target column', () => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'alter_column_type',
+					table: 'orders',
+					column: 'state',
+					destructive: false,
+					details: 'legacy target only',
+				},
+				schema: 'tenant',
+			}),
+		).toThrow('missing typed target column postcondition');
 	});
 
 	it('records authored identity and its address binding through JSON serialization', () => {

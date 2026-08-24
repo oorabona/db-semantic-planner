@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	decodeGeneratedPostcondition,
 	GeneratedPostconditionBindingResolutionError,
+	GeneratedPostconditionProofInFlightError,
 	GeneratedPostconditionReplanRequiredError,
 	type GeneratedPostconditionSession,
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedConstraintPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 
@@ -18,6 +21,7 @@ const v3Binding = {
 };
 
 const tableAddress = {
+	scope: 'schema' as const,
 	engine: 'postgresql',
 	database: 'app',
 	schema: 'tenant',
@@ -51,7 +55,7 @@ function testSession(
 ): GeneratedPostconditionSession {
 	return mintGeneratedPostconditionSession({
 		query: async (sql, params) => {
-			if (sql.includes('FOR SHARE')) return { rows: [{ relation_oid: '101' }] };
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
 			const result = await query(sql, params);
 			if (!sql.includes('pg_catalog.current_database()')) return result;
 			return {
@@ -59,7 +63,11 @@ function testSession(
 					database_name: 'app',
 					relation_oid: '101',
 					...(sql.includes('index_relation.oid')
-						? { relation_kind: 'i', table_name: 'accounts' }
+						? {
+								relation_kind: 'i',
+								parent_relation_kind: 'r',
+								table_name: 'accounts',
+							}
 						: sql.includes('constraint_item.oid')
 							? { relation_kind: 'r', constraint_name: params?.[2] }
 							: { relation_kind: 'r' }),
@@ -116,6 +124,159 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('generated postcondition verifier', () => {
+	it('refuses a second public proof entry on the same capability', async () => {
+		const session = mintGeneratedPostconditionSession({
+			query: async () => ({ rows: [] }),
+		});
+		await expect(
+			withGeneratedPostconditionProof(session, async () =>
+				withGeneratedPostconditionProof(session, async () => undefined),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
+	});
+
+	it('refuses mismatched scopes before acquiring a relation lock', async () => {
+		const query = vi.fn();
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'column', column: {} },
+				},
+				address: { ...columnAddress, scope: 'database' },
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(query).not.toHaveBeenCalled();
+	});
+
+	it('refuses an explicitly mismatched parent scope before acquiring a relation lock', async () => {
+		const query = vi.fn();
+		const mismatchedParent = { ...tableAddress, scope: 'database' };
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'column', column: {} },
+				},
+				address: {
+					...columnAddress,
+					parent: mismatchedParent,
+				},
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(query).not.toHaveBeenCalled();
+	});
+
+	it('refuses an index whose parent is not a table relation', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			return {
+				rows: [
+					{
+						database_name: 'app',
+						relation_kind: 'i',
+						parent_relation_kind: 'm',
+						relation_oid: '101',
+						object_oid: '102',
+						table_name: 'accounts',
+					},
+				],
+			};
+		});
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'index',
+						index: {
+							method: 'btree',
+							unique: false,
+							valid: true,
+							ready: true,
+							live: true,
+							columns: ['id'],
+							nullsNotDistinct: false,
+						},
+					},
+				},
+				address: indexAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+	});
+
+	it.each([
+		['a', 'NO ACTION'],
+		['r', 'RESTRICT'],
+		['c', 'CASCADE'],
+		['n', 'SET NULL'],
+		['d', 'SET DEFAULT'],
+	] as const)('maps PostgreSQL FK action %s to %s before comparison', async (code, action) => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (sql.includes('constraint_item.conname AS constraint_name'))
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							constraint_name: 'accounts_user_id_fkey',
+						},
+					],
+				};
+			return {
+				rows: [
+					{
+						constraint_type: 'f',
+						key_columns: ['user_id'],
+						referenced_schema: 'tenant',
+						referenced_table: 'users',
+						referenced_columns: ['id'],
+						on_delete: code,
+						on_update: code,
+						is_deferrable: false,
+						is_deferred: false,
+						is_enforced: true,
+						is_validated: true,
+					},
+				],
+			};
+		});
+		await expect(
+			verifyGeneratedConstraintPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind: 'constraint',
+						constraint: {
+							type: 'f',
+							columns: ['user_id'],
+							references: { schema: 'tenant', table: 'users', columns: ['id'] },
+							onDelete: action,
+							onUpdate: action,
+							deferrable: false,
+							initiallyDeferred: false,
+							enforced: true,
+							notValid: false,
+						},
+					},
+				},
+				address: { ...checkAddress, name: 'accounts_user_id_fkey' },
+			}),
+		).resolves.toMatchObject({ kind: 'constraint' });
+	});
 	it.each([
 		[
 			'malformed primary constraint',
@@ -186,6 +347,173 @@ describe('generated postcondition verifier', () => {
 		).toThrow(GeneratedPostconditionReplanRequiredError);
 	});
 
+	it.each([
+		[
+			'arbitrary FK action',
+			{
+				kind: 'constraint',
+				constraint: {
+					type: 'f',
+					columns: ['id'],
+					references: { schema: 'tenant', table: 'accounts', columns: ['id'] },
+					onDelete: 'TRUNCATE',
+					onUpdate: 'NO ACTION',
+					deferrable: false,
+					initiallyDeferred: false,
+					enforced: true,
+					notValid: false,
+				},
+			},
+		],
+		[
+			'unequal FK columns',
+			{
+				kind: 'constraint',
+				constraint: {
+					type: 'f',
+					columns: ['id'],
+					references: {
+						schema: 'tenant',
+						table: 'accounts',
+						columns: ['id', 'other'],
+					},
+					onDelete: 'NO ACTION',
+					onUpdate: 'NO ACTION',
+					deferrable: false,
+					initiallyDeferred: false,
+					enforced: true,
+					notValid: false,
+				},
+			},
+		],
+		[
+			'initially deferred non-deferrable constraint',
+			{
+				kind: 'constraint',
+				constraint: {
+					type: 'p',
+					columns: ['id'],
+					deferrable: false,
+					initiallyDeferred: true,
+					enforced: true,
+				},
+			},
+		],
+		[
+			'invalid index include identifier',
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					include: ['bad;name'],
+					nullsNotDistinct: false,
+				},
+			},
+		],
+		[
+			'invalid index opclass identifier',
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					opclass: { id: 'bad;opclass' },
+					nullsNotDistinct: false,
+				},
+			},
+		],
+		[
+			'invalid index WITH identifier',
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					with: { 'bad;option': '1' },
+					nullsNotDistinct: false,
+				},
+			},
+		],
+		[
+			'NULLS NOT DISTINCT on a non-unique index',
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: true,
+				},
+			},
+		],
+		[
+			'duplicate index member',
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id', 'id'],
+					nullsNotDistinct: false,
+				},
+			},
+		],
+	] as const)('decodes impossible %s as zero-query REPLAN_REQUIRED', (_label, declaration) => {
+		expect(() =>
+			decodeGeneratedPostcondition({
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration: { canonicalFormVersion: 1, ...declaration },
+			}),
+		).toThrow(GeneratedPostconditionReplanRequiredError);
+	});
+
+	it('retains the canonical-SQL validator failure in the REPLAN cause chain', () => {
+		try {
+			decodeGeneratedPostcondition({
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'check',
+					check: {
+						expression: {
+							canonicalFormVersion: 1,
+							sql: "CHECK (id = 'a\\b')",
+						},
+						notValid: false,
+					},
+				},
+			});
+			throw new Error('expected REPLAN_REQUIRED');
+		} catch (error) {
+			expect(error).toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+			expect((error as Error).cause).toBeInstanceOf(
+				GeneratedPostconditionReplanRequiredError,
+			);
+			expect(((error as Error).cause as Error).cause).toBeInstanceOf(Error);
+		}
+	});
+
 	it('keeps a zero-query malformed decode failure reusable', async () => {
 		const release = vi.fn();
 		await expect(
@@ -254,16 +582,21 @@ describe('generated postcondition verifier', () => {
 		expect(impossible).not.toHaveBeenCalled();
 	});
 
-	it('refuses identity substitution after binding', async () => {
-		const query = vi.fn(async (sql: string) =>
-			sql.includes('current_database')
+	it('stabilizes through the user relation rather than a catalogue row lock', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('FOR SHARE') || sql.includes('FOR UPDATE')) {
+				const error = new Error('permission denied for relation pg_class');
+				Object.assign(error, { code: '42501' });
+				throw error;
+			}
+			return sql.includes('current_database')
 				? {
 						rows: [
 							{ database_name: 'app', relation_kind: 'r', relation_oid: '101' },
 						],
 					}
-				: { rows: [{ relation_oid: '202' }] },
-		);
+				: { rows: [{ relation_oid: '202' }] };
+		});
 		await expect(
 			verifyGeneratedTablePostcondition({
 				session: mintGeneratedPostconditionSession({ query }),
@@ -274,10 +607,15 @@ describe('generated postcondition verifier', () => {
 				},
 				address: tableAddress,
 			}),
-		).rejects.toMatchObject({
-			name: 'GeneratedPostconditionBindingResolutionError',
-			found: 'identity disappeared or changed',
-		});
+		).rejects.toThrow(
+			'generated table verifier could not read a complete projection',
+		);
+		expect(query.mock.calls[0]?.[0]).toContain(
+			'LOCK TABLE ONLY "tenant"."accounts"',
+		);
+		expect(query.mock.calls.some(([sql]) => sql.includes('FOR SHARE'))).toBe(
+			false,
+		);
 	});
 	it.each([
 		['table', { postconditionVersion: 2, kind: 'table', columns: [] }],

@@ -49,8 +49,8 @@ export type GeneratedConstraintPostcondition =
 				readonly table: string;
 				readonly columns: readonly string[];
 			};
-			readonly onDelete: string;
-			readonly onUpdate: string;
+			readonly onDelete: GeneratedForeignKeyAction;
+			readonly onUpdate: GeneratedForeignKeyAction;
 			readonly deferrable: boolean;
 			readonly initiallyDeferred: boolean;
 			readonly enforced: boolean;
@@ -62,6 +62,14 @@ export type GeneratedConstraintPostcondition =
 			readonly expression: string;
 			readonly notValid: boolean;
 	  };
+
+/** The semantic FK actions PostgreSQL can represent in pg_constraint. */
+export type GeneratedForeignKeyAction =
+	| 'NO ACTION'
+	| 'RESTRICT'
+	| 'CASCADE'
+	| 'SET NULL'
+	| 'SET DEFAULT';
 
 export type GeneratedIndexPostcondition = {
 	/** The identity is persisted separately from the rendered CREATE INDEX SQL. */
@@ -206,7 +214,6 @@ export type GeneratedPostconditionDeclarationV3 = {
 	| V3SequenceDeclaration
 	| V3ExtensionDeclaration
 	| { readonly kind: 'absent' }
-	| { readonly kind: 'exempt'; readonly reason: string }
 );
 
 /**
@@ -534,6 +541,20 @@ function constraintPostcondition(
 		target?.kind === 'foreign-key'
 			? target.references
 			: requiredRecord(fk.references, change.kind);
+	const foreignKeyAction = (value: unknown): GeneratedForeignKeyAction => {
+		const action = typeof value === 'string' ? value : 'NO ACTION';
+		if (
+			action !== 'NO ACTION' &&
+			action !== 'RESTRICT' &&
+			action !== 'CASCADE' &&
+			action !== 'SET NULL' &&
+			action !== 'SET DEFAULT'
+		)
+			throw new Error(
+				`generator planning refuses ${change.kind}: unsupported foreign-key action ${JSON.stringify(action)}`,
+			);
+		return action;
+	};
 	return {
 		type: 'f',
 		columns: requiredColumnList(fk.columns, `${change.kind} columns`),
@@ -546,8 +567,8 @@ function constraintPostcondition(
 				`${change.kind} references.columns`,
 			),
 		},
-		onDelete: typeof fk.onDelete === 'string' ? fk.onDelete : 'NO ACTION',
-		onUpdate: typeof fk.onUpdate === 'string' ? fk.onUpdate : 'NO ACTION',
+		onDelete: foreignKeyAction(fk.onDelete),
+		onUpdate: foreignKeyAction(fk.onUpdate),
 		deferrable: fk.deferred === true,
 		initiallyDeferred: fk.deferred === true,
 		enforced: true,
@@ -607,15 +628,9 @@ export function generatedPostconditionForChange(input: {
 		});
 	}
 	if (change.kind === 'alter_column_type') {
-		// Older SchemaChange producers legitimately carry only the target SQL
-		// bundle. Preserve that accepted planning surface; it is a deliberate
-		// postcondition exemption because no trustworthy target type exists in
-		// the change material to compare against catalogue state.
-		return v3Payload({
-			canonicalFormVersion: 1,
-			kind: 'exempt',
-			reason: 'legacy alter_column_type has no typed target column',
-		});
+		throw new Error(
+			'generator planning refuses alter_column_type: missing typed target column postcondition',
+		);
 	}
 	if (change.kind === 'alter_column_nullable') {
 		const name = text(change.column, change.kind);
