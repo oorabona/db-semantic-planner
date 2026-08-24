@@ -2398,18 +2398,26 @@ export interface PgsqlAdapterOptions {
 	readonly preparedStatements?: boolean | PgsqlPreparedStatementsOptions;
 }
 
-export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
-	/**
-	 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
-	 * you assert that your statements do not invoke functions performing
-	 * effectful work before nested prepared-statement operations.
-	 *
-	 * Replay needs the adapter-owned serialized physical client available from a
-	 * pool; it is therefore not supported by borrowed or compile-only adapters.
-	 */
-	readonly replayInvalidatedPlans?: boolean;
+interface PgsqlPoolAdapterOptionsBase extends PgsqlAdapterOptions {
 	readonly borrowedClient?: false;
 }
+
+export type PgsqlPoolAdapterOptions =
+	| (PgsqlPoolAdapterOptionsBase & {
+			readonly replayInvalidatedPlans?: false | undefined;
+	  })
+	| (Omit<PgsqlPoolAdapterOptionsBase, 'preparedStatements'> & {
+			readonly preparedStatements: true | PgsqlPreparedStatementsOptions;
+			/**
+			 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
+			 * you assert that your statements do not invoke functions performing
+			 * effectful work before nested prepared-statement operations.
+			 *
+			 * Replay needs the adapter-owned serialized physical client available from a
+			 * pool; it is therefore not supported by borrowed or compile-only adapters.
+			 */
+			readonly replayInvalidatedPlans: true;
+	  });
 
 export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 	/** Replay is only available to a pool-owned pinned scope. */
@@ -2780,6 +2788,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.preparedStatements = normalizePreparedStatements(
 			options?.preparedStatements,
 		);
+		if (this.replayInvalidatedPlans && this.preparedStatements === false) {
+			throw new Error(
+				'replayInvalidatedPlans: true requires preparedStatements: true or a preparedStatements options object.',
+			);
+		}
 		if (this.preparedStatements !== false) {
 			const { maxStatements } = this.preparedStatements;
 			this.preparedStatementRegistry =
@@ -6563,15 +6576,28 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					MaybeMultipleQueryResults<T>
 				>;
 			}
-			// Only a dbsp-owned serialized client can reach the replay branch. Other
-			// modes retain the established shallow copy for their named submission.
-			const parameterSnapshot = ownsSerializedClientForPreparedStatementReplay
-				? captureReplayableParameterSnapshot(parameters)
-				: undefined;
-			const namedAttemptParameters =
-				parameterSnapshot === undefined
-					? [...parameters]
-					: cloneReplayableParameterValues(parameterSnapshot);
+			let parameterSnapshot: ReplayableParameterSnapshot | undefined;
+			let namedAttemptParameters: unknown[];
+			try {
+				// Only a dbsp-owned serialized client can reach the replay branch. Other
+				// modes retain the established shallow copy for their named submission.
+				parameterSnapshot = ownsSerializedClientForPreparedStatementReplay
+					? captureReplayableParameterSnapshot(parameters)
+					: undefined;
+				namedAttemptParameters =
+					parameterSnapshot === undefined
+						? [...parameters]
+						: cloneReplayableParameterValues(parameterSnapshot);
+			} catch (error) {
+				if (admission.reservation !== undefined) {
+					try {
+						this.preparedStatementRegistry.abort(admission.reservation);
+					} catch {
+						// A local construction failure remains the observable failure.
+					}
+				}
+				throw error;
+			}
 			try {
 				const result = (await executor.query<T>({
 					name: admission.name,

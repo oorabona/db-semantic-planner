@@ -216,6 +216,18 @@ describe('PgsqlAdapter', () => {
 				'replayInvalidatedPlans requires a pg Pool-owned adapter; it is not supported by borrowed-client or compile-only adapters.',
 			);
 		});
+
+		it('rejects replayInvalidatedPlans without preparedStatements for JavaScript callers', () => {
+			const pool = createMockPool();
+
+			expect(() =>
+				createPgsqlAdapter(pool, {
+					replayInvalidatedPlans: true,
+				} as any),
+			).toThrow(
+				'replayInvalidatedPlans: true requires preparedStatements: true or a preparedStatements options object.',
+			);
+		});
 	});
 
 	describe('createPgsqlAdapter', () => {
@@ -231,10 +243,16 @@ describe('PgsqlAdapter', () => {
 				createPgsqlAdapter(client, { borrowedClient: true }),
 			).toEqualTypeOf<PgsqlAdapter>();
 			expectTypeOf(
-				createPgsqlAdapter(pool, { replayInvalidatedPlans: true }),
+				createPgsqlAdapter(pool, {
+					preparedStatements: true,
+					replayInvalidatedPlans: true,
+				}),
 			).toEqualTypeOf<PgsqlAdapter>();
 
 			if (process.env.DBSP_TYPECHECK_ONLY === '1') {
+				const uncoupledPoolReplayOptions = {
+					replayInvalidatedPlans: true,
+				} as const;
 				const borrowedReplayOptions = {
 					borrowedClient: true,
 					replayInvalidatedPlans: true,
@@ -246,6 +264,8 @@ describe('PgsqlAdapter', () => {
 				createPgsqlAdapter(client);
 				// @ts-expect-error borrowedClient requires a PoolClient, not a Pool.
 				createPgsqlAdapter(pool, { borrowedClient: true });
+				// @ts-expect-error replay requires preparedStatements through a predeclared pool options object.
+				createPgsqlAdapter(pool, uncoupledPoolReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
 				createPgsqlAdapter(client, {
 					borrowedClient: true,
@@ -628,6 +648,46 @@ describe('PgsqlAdapter', () => {
 			await expect(serverAdapter.execute(queryB)).resolves.toEqual([{ id: 8 }]);
 
 			expect(serverPool.query).toHaveBeenNthCalledWith(4, sqlB, [8]);
+		});
+
+		it('aborts a reservation when named parameter iteration throws before submission', async () => {
+			const sqlA = 'SELECT id FROM parameter_iteration_a WHERE id = $1';
+			const sqlB = 'SELECT id FROM parameter_iteration_b WHERE id = $1';
+			const iterationError = new Error('parameter iterator failed');
+			const throwingParameters = [7];
+			Object.defineProperty(throwingParameters, Symbol.iterator, {
+				value() {
+					throw iterationError;
+				},
+			});
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [{ id: 8 }],
+				rowCount: 1,
+			} as any);
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: { maxStatements: 1 },
+			});
+
+			await (adapter as any).issueConnectionQuery(pool, sqlA, [7], true);
+			await expect(
+				(adapter as any).issueConnectionQuery(
+					pool,
+					sqlA,
+					throwingParameters,
+					true,
+				),
+			).rejects.toBe(iterationError);
+			expect(pool.query).toHaveBeenCalledTimes(1);
+
+			await (adapter as any).issueConnectionQuery(pool, sqlB, [8], true);
+			await (adapter as any).issueConnectionQuery(pool, sqlB, [8], true);
+
+			expect(pool.query).toHaveBeenNthCalledWith(3, {
+				name: derivePreparedStatementName(sqlB),
+				text: sqlB,
+				values: [8],
+			});
 		});
 
 		it('aborts a pool admission and rethrows the query error when classification reads a throwing getter', async () => {
