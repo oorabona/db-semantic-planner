@@ -95,6 +95,39 @@ describe('supportsExecution', () => {
 		} as unknown as BaseAdapter;
 		expect(supportsExecution(adapter)).toBe(true);
 	});
+
+	it('prefers executionAvailable without probing a raw connection', () => {
+		const getPoolInstance = vi.fn(() => {
+			throw new Error('raw connection probe must not run');
+		});
+		const executionAvailable = vi.fn(() => false);
+		const adapter = {
+			executionAvailable,
+			getPoolInstance,
+			execute: () => {},
+			executeOne: () => {},
+			executeOneOrThrow: () => {},
+		} as unknown as BaseAdapter;
+
+		expect(supportsExecution(adapter)).toBe(false);
+		expect(executionAvailable).toHaveBeenCalledOnce();
+		expect(getPoolInstance).not.toHaveBeenCalled();
+	});
+
+	it('falls back to the legacy raw connection probe when executionAvailable is absent', () => {
+		const getPoolInstance = vi.fn(() => {
+			throw new Error('connection unavailable');
+		});
+		const adapter = {
+			getPoolInstance,
+			execute: () => {},
+			executeOne: () => {},
+			executeOneOrThrow: () => {},
+		} as unknown as BaseAdapter;
+
+		expect(supportsExecution(adapter)).toBe(false);
+		expect(getPoolInstance).toHaveBeenCalledOnce();
+	});
 });
 
 // ============================================================================

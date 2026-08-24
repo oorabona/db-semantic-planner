@@ -142,7 +142,54 @@ describe('introspect', () => {
 			[],
 		]);
 		const sequence = (await introspect(pool)).sequences?.get('orders_id_seq');
-		expect(sequence?.startWith).toBe('9007199254740993');
+		expect(sequence).toMatchObject({
+			startWith: '9007199254740993',
+			incrementBy: '1',
+			minValue: '1',
+			maxValue: '9223372036854775807',
+		});
+		const sequenceQuery = (pool.query as ReturnType<typeof vi.fn>).mock
+			.calls[10]?.[0];
+		expect(sequenceQuery).toContain('s.start_value::text AS start_value');
+		expect(sequenceQuery).toContain('s.increment_by::text AS increment_by');
+		expect(sequenceQuery).toContain('s.min_value::text AS min_value');
+		expect(sequenceQuery).toContain('s.max_value::text AS max_value');
+	});
+
+	it('normalizes bigint sequence rows from an int8 parser into canonical strings', async () => {
+		const pool = createMockPool([
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[
+				{
+					name: 'orders_id_seq',
+					start_value: 9007199254740993n,
+					increment_by: -2n,
+					min_value: -9223372036854775808n,
+					max_value: 9223372036854775807n,
+					cycle: false,
+				},
+			],
+			[],
+			[],
+			[],
+		]);
+
+		const sequence = (await introspect(pool)).sequences?.get('orders_id_seq');
+		expect(sequence).toMatchObject({
+			startWith: '9007199254740993',
+			incrementBy: '-2',
+			minValue: '-9223372036854775808',
+			maxValue: '9223372036854775807',
+		});
 	});
 
 	it('should discover tables and columns', async () => {

@@ -35,6 +35,7 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
+import { normalizeSequenceInteger } from './ddl/generated-source-normalizers.js';
 import {
 	DBSP_META_SCHEMA,
 	isDbspLedgerInfrastructureTable,
@@ -279,10 +280,10 @@ interface CatalogResults {
 	extensions: Array<{ name: string }>;
 	sequences: Array<{
 		name: string;
-		start_value: string;
-		increment_by: string;
-		min_value: string;
-		max_value: string;
+		start_value: unknown;
+		increment_by: unknown;
+		min_value: unknown;
+		max_value: unknown;
 		cycle: boolean;
 	}>;
 	rls: Array<{ table_name: string; rls_enabled: boolean }>;
@@ -541,7 +542,12 @@ async function queryAllCatalogs(
 				max_value: string;
 				cycle: boolean;
 			}>(
-				`SELECT s.sequencename AS name, s.start_value, s.increment_by, s.min_value, s.max_value, s.cycle
+				`SELECT s.sequencename AS name,
+				        s.start_value::text AS start_value,
+				        s.increment_by::text AS increment_by,
+				        s.min_value::text AS min_value,
+				        s.max_value::text AS max_value,
+				        s.cycle
 			 FROM pg_sequences s
 			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
 			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
@@ -664,10 +670,10 @@ async function queryAllCatalogs(
 		QueryResult<{ name: string }>,
 		QueryResult<{
 			name: string;
-			start_value: string;
-			increment_by: string;
-			min_value: string;
-			max_value: string;
+			start_value: unknown;
+			increment_by: unknown;
+			min_value: unknown;
+			max_value: unknown;
 			cycle: boolean;
 		}>,
 		QueryResult<{ table_name: string; rls_enabled: boolean }>,
@@ -1247,13 +1253,29 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 }
 
 /** Build a Map<seqName, SequenceIR> from raw sequence rows. */
+function normalizeIntrospectedSequenceInteger(
+	value: unknown,
+	context: string,
+): string {
+	// The catalogue query casts these facts to text. Keep the mapper defensive for
+	// callers whose global int8 parser still supplied bigint rows, without making
+	// the process-global parser part of the introspection contract.
+	const normalized = normalizeSequenceInteger(
+		typeof value === 'bigint' ? value.toString() : value,
+		context,
+	);
+	if (normalized === undefined)
+		throw new Error(`${context}: sequence integer is required`);
+	return normalized;
+}
+
 function buildSequenceMap(
 	rows: Array<{
 		name: string;
-		start_value: string;
-		increment_by: string;
-		min_value: string;
-		max_value: string;
+		start_value: unknown;
+		increment_by: unknown;
+		min_value: unknown;
+		max_value: unknown;
 		cycle: boolean;
 	}>,
 ): Map<string, SequenceIR> {
@@ -1261,10 +1283,22 @@ function buildSequenceMap(
 	for (const row of rows) {
 		result.set(row.name, {
 			name: row.name,
-			startWith: row.start_value,
-			incrementBy: row.increment_by,
-			minValue: row.min_value,
-			maxValue: row.max_value,
+			startWith: normalizeIntrospectedSequenceInteger(
+				row.start_value,
+				`sequence ${row.name} START WITH`,
+			),
+			incrementBy: normalizeIntrospectedSequenceInteger(
+				row.increment_by,
+				`sequence ${row.name} INCREMENT BY`,
+			),
+			minValue: normalizeIntrospectedSequenceInteger(
+				row.min_value,
+				`sequence ${row.name} MINVALUE`,
+			),
+			maxValue: normalizeIntrospectedSequenceInteger(
+				row.max_value,
+				`sequence ${row.name} MAXVALUE`,
+			),
 			cycle: row.cycle,
 		});
 	}

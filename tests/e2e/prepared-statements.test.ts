@@ -1,7 +1,7 @@
 import { fork } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgsqlAdapter, PgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,30 @@ function hasValues(
 		actual.length === expected.length &&
 		actual.every((value, index) => Object.is(value, expected[index]))
 	);
+}
+
+function hasCachedPlanInvalidationInCauseChain(error: unknown): boolean {
+	const seen = new Set<unknown>();
+	let current = error;
+
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (
+			'code' in current &&
+			current.code === '0A000' &&
+			'routine' in current &&
+			current.routine === 'RevalidateCachedQuery'
+		) {
+			return true;
+		}
+		current = 'cause' in current ? current.cause : undefined;
+	}
+
+	return false;
 }
 
 function isNamedQuery(
@@ -91,15 +115,24 @@ function expectNamedReplayThenUnnamed(
 }
 
 async function preparedCount(
-	client: PoolClient,
+	executor: PoolClient | PgsqlAdapter,
 	sql?: string,
 ): Promise<number> {
-	const result = await client.query<{ count: string }>(
-		`SELECT count(*)::text AS count FROM pg_prepared_statements
-		 WHERE name LIKE 'dbsp_ps_%'${sql === undefined ? '' : ' AND statement = $1'}`,
-		sql === undefined ? [] : [sql],
-	);
-	return Number(result.rows[0]?.count ?? '0');
+	const statement = `SELECT count(*)::text AS count FROM pg_prepared_statements
+		 WHERE name LIKE 'dbsp_ps_%'${sql === undefined ? '' : ' AND statement = $1'}`;
+	const parameters = sql === undefined ? [] : [sql];
+	const rows =
+		executor instanceof PgsqlAdapter
+			? await executor.executeRaw<{ count: string }>(statement, parameters)
+			: (await executor.query<{ count: string }>(statement, parameters)).rows;
+	return Number(rows[0]?.count ?? '0');
+}
+
+function requirePgsqlAdapter(adapter: unknown): PgsqlAdapter {
+	if (!(adapter instanceof PgsqlAdapter)) {
+		throw new TypeError('Expected a PgsqlAdapter pinned connection.');
+	}
+	return adapter;
 }
 
 async function getIsolatedClient(): Promise<{
@@ -367,36 +400,74 @@ describe('adapter prepared statements', () => {
 	});
 
 	it('uses unnamed execution after result-shape DDL invalidates a named plan', async () => {
-		const { client, close } = await getIsolatedClient();
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
 		try {
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
+			const adapter = createPgsqlAdapter(pool, {
 				preparedStatements: true,
 				replayInvalidatedPlans: true,
 			});
-			const table = `"${SCHEMA}".invalidated_plan`;
-			const sql = `SELECT * FROM ${table} WHERE id = $1`;
-			const query = compiled<{ id: number; added?: string }>(sql, [1]);
+			await adapter.withPinnedConnection(async (pinned) => {
+				const pgPinned = requirePgsqlAdapter(pinned);
+				const table = `"${SCHEMA}".invalidated_plan`;
+				const sql = `SELECT * FROM ${table} WHERE id = $1`;
+				const query = compiled<{ id: number; added?: string }>(sql, [1]);
 
-			await adapter.executeDDL(
-				`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
-			);
-			await adapter.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
-			await adapter.execute(query);
-			await adapter.execute(query);
-			expect(await preparedCount(client, sql)).toBe(1);
-			await adapter.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
+				await pgPinned.executeDDL(
+					`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+				);
+				await pgPinned.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+				await pgPinned.execute(query);
+				await pgPinned.execute(query);
+				expect(await preparedCount(pgPinned, sql)).toBe(1);
+				await pgPinned.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
 
-			await expect(adapter.execute(query)).rejects.toMatchObject({
-				code: '0A000',
-				routine: 'RevalidateCachedQuery',
+				await expect(pgPinned.execute(query)).resolves.toEqual([
+					{ id: 1, added: null },
+				]);
+				expect(await preparedCount(pgPinned, sql)).toBe(1);
 			});
-			await expect(adapter.execute(query)).resolves.toEqual([
-				{ id: 1, added: null },
-			]);
-			expect(await preparedCount(client, sql)).toBe(1);
 		} finally {
-			await close();
+			await pool.end();
+		}
+	});
+
+	it('rejects after result-shape DDL invalidates a named plan without replay', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
+		try {
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: true,
+			});
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					const pgPinned = requirePgsqlAdapter(pinned);
+					const table = `"${SCHEMA}".invalidated_plan_without_replay`;
+					const sql = `SELECT * FROM ${table} WHERE id = $1`;
+					const query = compiled<{ id: number; added?: string }>(sql, [1]);
+
+					await pgPinned.executeDDL(
+						`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+					);
+					await pgPinned.executeRaw(
+						`INSERT INTO ${table} (id) VALUES ($1)`,
+						[1],
+					);
+					await pgPinned.execute(query);
+					await pgPinned.execute(query);
+					expect(await preparedCount(pgPinned, sql)).toBe(1);
+					await pgPinned.executeDDL(
+						`ALTER TABLE ${table} ADD COLUMN added text`,
+					);
+					await pgPinned.execute(query);
+				}),
+			).rejects.toSatisfy(hasCachedPlanInvalidationInCauseChain);
+		} finally {
+			await pool.end();
 		}
 	});
 

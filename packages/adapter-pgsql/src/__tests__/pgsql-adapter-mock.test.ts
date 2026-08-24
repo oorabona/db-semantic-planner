@@ -617,9 +617,9 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 			['SELECT pg_advisory_unlock($1) AS unlocked', [42n]],
 		]);
 		expect(client.release).toHaveBeenCalledOnce();
-		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual(
-			[],
-		);
+		expect((client.release as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+			expect.any(Error),
+		]);
 	});
 
 	it("returns acquired false on wait:'try' without running the callback or unlocking", async () => {
