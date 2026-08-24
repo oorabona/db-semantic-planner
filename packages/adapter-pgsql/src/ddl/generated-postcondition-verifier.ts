@@ -1127,7 +1127,7 @@ async function scratchScope<T>(
 	const savepoint = nextScratchName('scope');
 	let savepointActive = false;
 	let transactionStarted = false;
-	let result: T | undefined;
+	let result!: T;
 	let workError: unknown;
 	let workFailed = false;
 	try {
@@ -1182,10 +1182,6 @@ async function scratchScope<T>(
 		throw new AggregateError(
 			cleanupErrors,
 			'generated postcondition scratch cleanup failed',
-		);
-	if (result === undefined)
-		throw new Error(
-			'generated postcondition scratch scope completed without a result',
 		);
 	return result;
 }
@@ -1369,28 +1365,6 @@ function markSafePreQueryFailure(
 		preQueryFailures.set(error, safeFailure(capability));
 }
 
-/**
- * Managed-step addresses may retain the SQL spelling that named a relation.
- * Catalogue lookups and relation locks instead require the catalogue relname:
- * one quote layer removed, escaped quotes restored, and no case folding.
- */
-function catalogueIdentifier(value: string): string {
-	if (!value.startsWith('"') || !value.endsWith('"') || value.length < 2)
-		return value;
-	let raw = '';
-	for (let index = 1; index < value.length - 1; index += 1) {
-		const character = value[index]!;
-		if (character !== '"') {
-			raw += character;
-			continue;
-		}
-		if (value[index + 1] !== '"') return value;
-		raw += '"';
-		index += 1;
-	}
-	return raw;
-}
-
 /** Refuse structural lookalikes before any proof or catalogue read. */
 export function assertGeneratedPostconditionSession(
 	value: unknown,
@@ -1410,11 +1384,11 @@ function bindingSlot(
 		readonly table: string;
 	};
 } {
-	const schema = address.schema && catalogueIdentifier(address.schema);
+	const schema = address.schema;
 	const parent = address.parent;
-	const parentSchema = parent?.schema && catalogueIdentifier(parent.schema);
-	const parentName = parent && catalogueIdentifier(parent.name);
-	const name = catalogueIdentifier(address.name);
+	const parentSchema = parent?.schema;
+	const parentName = parent?.name;
+	const name = address.name;
 	const scope = (address as ResourceAddress & { readonly scope?: unknown })
 		.scope;
 	const parentScope = parent
@@ -1674,6 +1648,51 @@ async function stabilizeGeneratedPostconditionBinding(input: {
 	if (slot.stabilizationRelation)
 		await lockPgRelation(input.session, slot.stabilizationRelation);
 	return resolveGeneratedPostconditionBinding(input);
+}
+
+/**
+ * Enum and extension proof cannot hold a user-relation lock. Their binding and
+ * structure must therefore be selected by one catalogue statement so READ
+ * COMMITTED observes one snapshot rather than two independently-resolved names.
+ */
+function unlockedGeneratedPostconditionBindingSlot(input: {
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly expectedKind: 'enum' | 'extension';
+}) {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, input.expectedKind);
+	if (slot.found !== undefined)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	return slot;
+}
+
+function assertUnlockedBindingRow(input: {
+	readonly kind: 'enum' | 'extension';
+	readonly slot: ReturnType<typeof unlockedGeneratedPostconditionBindingSlot>;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly row: Record<string, unknown> | undefined;
+}): GeneratedPostconditionTarget {
+	const { row, slot } = input;
+	if (!row || row.database_name !== input.address.database)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: !row ? 'absent' : `database ${String(row.database_name)}`,
+		});
+	const expectedRelationKind = input.kind === 'enum' ? 'e' : 'x';
+	if (row.relation_kind !== expectedRelationKind)
+		throw new GeneratedPostconditionBindingResolutionError({
+			sought: slot.sought,
+			found: 'absent',
+		});
+	return bindingIdentity(input.kind, slot.target, row);
 }
 
 function tableColumnProjection(
@@ -2433,14 +2452,23 @@ function constraintProjection(
 				);
 		}
 	};
+	const foreignKeyActions =
+		row.constraint_type === 'f'
+			? {
+					onDelete: foreignKeyAction(row.on_delete),
+					onUpdate: foreignKeyAction(row.on_update),
+				}
+			: {
+					onDelete: 'NO ACTION' as const,
+					onUpdate: 'NO ACTION' as const,
+				};
 	return {
 		type: row.constraint_type,
 		columns: row.key_columns,
 		referencedSchema: row.referenced_schema,
 		referencedTable: row.referenced_table,
 		referencedColumns: row.referenced_columns,
-		onDelete: foreignKeyAction(row.on_delete),
-		onUpdate: foreignKeyAction(row.on_update),
+		...foreignKeyActions,
 		deferrable: row.is_deferrable,
 		initiallyDeferred: row.is_deferred,
 		enforced: row.is_enforced,
@@ -2513,18 +2541,23 @@ export async function verifyGeneratedEnumPostcondition(input: {
 			input.postcondition,
 			'enum',
 		);
-		const target = await stabilizeGeneratedPostconditionBinding({
-			session,
+		const slot = unlockedGeneratedPostconditionBindingSlot({
 			targetBinding: postcondition.targetBinding,
 			address: input.address,
 			expectedKind: 'enum',
 		});
 		const row = (
 			await session.query(
-				'SELECT ARRAY(SELECT enum_item.enumlabel::text FROM pg_catalog.pg_enum enum_item WHERE enum_item.enumtypid = $1::pg_catalog.oid ORDER BY enum_item.enumsortorder) AS labels FROM pg_catalog.pg_type type_item WHERE type_item.oid = $1::pg_catalog.oid',
-				[target.objectOid],
+				"SELECT pg_catalog.current_database() AS database_name, type_item.oid::text AS relation_oid, type_item.oid::text AS object_oid, 'e'::text AS relation_kind, ARRAY(SELECT enum_item.enumlabel::text FROM pg_catalog.pg_enum enum_item WHERE enum_item.enumtypid = type_item.oid ORDER BY enum_item.enumsortorder) AS labels FROM pg_catalog.pg_type type_item JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type_item.typnamespace WHERE namespace.nspname = $1 AND type_item.typname = $2 AND type_item.typtype = 'e'",
+				[slot.target.schema, slot.target.name],
 			)
 		).rows[0];
+		const target = assertUnlockedBindingRow({
+			kind: 'enum',
+			slot,
+			address: input.address,
+			row,
+		});
 		if (
 			!row ||
 			!Array.isArray(row.labels) ||
@@ -2537,6 +2570,34 @@ export async function verifyGeneratedEnumPostcondition(input: {
 			);
 		return { kind: 'enum', labels: row.labels };
 	});
+}
+
+type SequenceProjection = {
+	readonly start_value: string;
+	readonly increment_by: string;
+	readonly min_value: string;
+	readonly max_value: string;
+	readonly cycle: boolean;
+};
+
+function sequenceProjection(row: Record<string, unknown>): SequenceProjection {
+	if (
+		typeof row.start_value !== 'string' ||
+		typeof row.increment_by !== 'string' ||
+		typeof row.min_value !== 'string' ||
+		typeof row.max_value !== 'string' ||
+		typeof row.cycle !== 'boolean'
+	)
+		throw new Error(
+			'generated sequence verifier could not read a complete projection',
+		);
+	return {
+		start_value: row.start_value,
+		increment_by: row.increment_by,
+		min_value: row.min_value,
+		max_value: row.max_value,
+		cycle: row.cycle,
+	};
 }
 
 export async function verifyGeneratedSequencePostcondition(input: {
@@ -2566,22 +2627,23 @@ export async function verifyGeneratedSequencePostcondition(input: {
 		).rows[0];
 		if (!row)
 			throw structuralMismatch(`generated sequence ${target.name} is absent`);
+		const actual = sequenceProjection(row);
 		const expected = postcondition.declaration;
 		if (
 			(expected.startValue !== undefined &&
-				row.start_value !== expected.startValue) ||
+				actual.start_value !== expected.startValue) ||
 			(expected.incrementBy !== undefined &&
-				row.increment_by !== expected.incrementBy) ||
+				actual.increment_by !== expected.incrementBy) ||
 			(expected.minValue !== undefined &&
-				row.min_value !== expected.minValue) ||
+				actual.min_value !== expected.minValue) ||
 			(expected.maxValue !== undefined &&
-				row.max_value !== expected.maxValue) ||
-			(expected.cycle !== undefined && row.cycle !== expected.cycle)
+				actual.max_value !== expected.maxValue) ||
+			(expected.cycle !== undefined && actual.cycle !== expected.cycle)
 		)
 			throw structuralMismatch(
 				`generated sequence ${target.name} postcondition differs`,
 			);
-		return { kind: 'sequence', projection: row };
+		return { kind: 'sequence', projection: actual };
 	});
 }
 
@@ -2595,18 +2657,23 @@ export async function verifyGeneratedExtensionPostcondition(input: {
 			input.postcondition,
 			'extension',
 		);
-		const target = await stabilizeGeneratedPostconditionBinding({
-			session,
+		const slot = unlockedGeneratedPostconditionBindingSlot({
 			targetBinding: postcondition.targetBinding,
 			address: input.address,
 			expectedKind: 'extension',
 		});
 		const row = (
 			await session.query(
-				'SELECT extension.extversion::text AS version FROM pg_catalog.pg_extension extension WHERE extension.oid = $1::pg_catalog.oid',
-				[target.objectOid],
+				"SELECT pg_catalog.current_database() AS database_name, extension.oid::text AS relation_oid, extension.oid::text AS object_oid, 'x'::text AS relation_kind, extension.extversion::text AS version FROM pg_catalog.pg_extension extension WHERE extension.extname = $1",
+				[slot.target.name],
 			)
 		).rows[0];
+		const target = assertUnlockedBindingRow({
+			kind: 'extension',
+			slot,
+			address: input.address,
+			row,
+		});
 		if (
 			!row ||
 			typeof row.version !== 'string' ||
