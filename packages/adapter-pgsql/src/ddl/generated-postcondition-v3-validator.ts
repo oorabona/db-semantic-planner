@@ -1,5 +1,5 @@
 import { identityNaming } from '../naming-plugin.js';
-import { validateCheckExpression } from '../validate.js';
+import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import type { GeneratedPostconditionDeclarationV3 } from './managed-step-manifest.js';
 
@@ -103,13 +103,244 @@ function canonicalSql(value: unknown, rule: string): void {
 	}
 }
 
-function sequenceInteger(value: string | undefined, rule: string): void {
+function sequenceInteger(
+	value: string | undefined,
+	rule: string,
+): bigint | undefined {
 	if (value === undefined) return;
 	if (!/^-?[0-9]+$/u.test(value)) refuse(rule);
 	try {
-		BigInt(value);
+		return BigInt(value);
 	} catch {
 		refuse(rule);
+	}
+}
+
+function record(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function exactKeys(
+	value: Record<string, unknown>,
+	keys: readonly string[],
+): void {
+	const allowed = new Set(keys);
+	if (!Object.keys(value).every((key) => allowed.has(key)))
+		refuse('declaration shape');
+}
+
+function string(value: unknown): asserts value is string {
+	if (typeof value !== 'string') refuse('declaration shape');
+}
+
+function boolean(value: unknown): asserts value is boolean {
+	if (typeof value !== 'boolean') refuse('declaration shape');
+}
+
+function identifierField(
+	value: unknown,
+	type: 'table' | 'column' | 'schema' | 'alias',
+): void {
+	string(value);
+	try {
+		validateIdentifier(value, type);
+	} catch {
+		refuse('declaration shape');
+	}
+}
+
+function strings(
+	value: unknown,
+	identifierType?: 'table' | 'column' | 'schema' | 'alias',
+): void {
+	if (!Array.isArray(value)) refuse('declaration shape');
+	for (const item of value) {
+		string(item);
+		if (identifierType) identifierField(item, identifierType);
+	}
+}
+
+function stringMap(value: unknown, keysMustBeIdentifiers = false): void {
+	if (!record(value)) refuse('declaration shape');
+	for (const [key, item] of Object.entries(value)) {
+		if (keysMustBeIdentifiers) identifierField(key, 'alias');
+		string(item);
+	}
+}
+
+function exactCanonicalSqlFact(value: unknown): void {
+	if (!record(value)) refuse('declaration shape');
+	exactKeys(value, ['canonicalFormVersion', 'sql']);
+	if (value.canonicalFormVersion !== 1) refuse('declaration shape');
+	string(value.sql);
+}
+
+function exactDefault(value: unknown): void {
+	if (!record(value)) refuse('declaration shape');
+	if (value.defaultKind === 'authored') {
+		exactKeys(value, [
+			'defaultKind',
+			'hasDefault',
+			'identity',
+			'defaultExpression',
+		]);
+		boolean(value.hasDefault);
+		exactCanonicalSqlFact(value.defaultExpression);
+		return;
+	}
+	exactKeys(value, ['defaultKind', 'hasDefault', 'identity']);
+	boolean(value.hasDefault);
+}
+
+function exactColumn(value: unknown, named: boolean): void {
+	if (!record(value)) refuse('declaration shape');
+	exactKeys(value, [
+		...(named ? ['name'] : []),
+		'type',
+		'nullable',
+		'authoredCollation',
+		'default',
+	]);
+	if (named) string(value.name);
+	if (value.type !== undefined) string(value.type);
+	if (value.nullable !== undefined) boolean(value.nullable);
+	if (value.authoredCollation !== undefined && value.authoredCollation !== null)
+		string(value.authoredCollation);
+	if (value.default !== undefined) exactDefault(value.default);
+}
+
+/** Exact wire decoding belongs to the declaration parser, never a reader-only arm. */
+function exactDeclaration(value: Record<string, unknown>): void {
+	if (value.canonicalFormVersion !== 1 || typeof value.kind !== 'string')
+		refuse('declaration shape');
+	switch (value.kind) {
+		case 'table':
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'columns']);
+			if (!Array.isArray(value.columns)) refuse('declaration shape');
+			for (const column of value.columns) exactColumn(column, true);
+			return;
+		case 'column':
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'column']);
+			exactColumn(value.column, false);
+			return;
+		case 'check':
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'check']);
+			if (!record(value.check)) refuse('declaration shape');
+			exactKeys(value.check, ['expression', 'notValid']);
+			exactCanonicalSqlFact(value.check.expression);
+			boolean(value.check.notValid);
+			return;
+		case 'constraint': {
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'constraint']);
+			if (!record(value.constraint)) refuse('declaration shape');
+			const constraint = value.constraint;
+			if (constraint.type === 'p' || constraint.type === 'u') {
+				exactKeys(constraint, [
+					'type',
+					'columns',
+					'deferrable',
+					'initiallyDeferred',
+					'enforced',
+				]);
+				strings(constraint.columns);
+				boolean(constraint.deferrable);
+				boolean(constraint.initiallyDeferred);
+				boolean(constraint.enforced);
+				return;
+			}
+			exactKeys(constraint, [
+				'type',
+				'columns',
+				'references',
+				'onDelete',
+				'onUpdate',
+				'deferrable',
+				'initiallyDeferred',
+				'enforced',
+				'notValid',
+			]);
+			strings(constraint.columns);
+			if (!record(constraint.references)) refuse('declaration shape');
+			exactKeys(constraint.references, ['schema', 'table', 'columns']);
+			string(constraint.references.schema);
+			string(constraint.references.table);
+			strings(constraint.references.columns);
+			string(constraint.onDelete);
+			string(constraint.onUpdate);
+			boolean(constraint.deferrable);
+			boolean(constraint.initiallyDeferred);
+			boolean(constraint.enforced);
+			boolean(constraint.notValid);
+			return;
+		}
+		case 'index': {
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'index']);
+			if (!record(value.index)) refuse('declaration shape');
+			const index = value.index;
+			exactKeys(index, [
+				'method',
+				'unique',
+				'valid',
+				'ready',
+				'live',
+				'columns',
+				'expressions',
+				'include',
+				'nullsNotDistinct',
+				'opclass',
+				'with',
+				'where',
+			]);
+			string(index.method);
+			boolean(index.unique);
+			boolean(index.valid);
+			boolean(index.ready);
+			boolean(index.live);
+			strings(index.columns);
+			boolean(index.nullsNotDistinct);
+			if (index.expressions !== undefined) {
+				if (!Array.isArray(index.expressions)) refuse('declaration shape');
+				for (const expression of index.expressions)
+					exactCanonicalSqlFact(expression);
+			}
+			if (index.include !== undefined) strings(index.include);
+			if (index.opclass !== undefined) stringMap(index.opclass, true);
+			if (index.with !== undefined) stringMap(index.with, true);
+			if (index.where !== undefined) exactCanonicalSqlFact(index.where);
+			return;
+		}
+		case 'enum':
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'labels']);
+			strings(value.labels);
+			return;
+		case 'sequence':
+			exactKeys(value, [
+				'canonicalFormVersion',
+				'kind',
+				'startValue',
+				'incrementBy',
+				'minValue',
+				'maxValue',
+				'cycle',
+			]);
+			for (const key of [
+				'startValue',
+				'incrementBy',
+				'minValue',
+				'maxValue',
+			] as const)
+				if (value[key] !== undefined) string(value[key]);
+			if (value.cycle !== undefined) boolean(value.cycle);
+			return;
+		case 'extension':
+			exactKeys(value, ['canonicalFormVersion', 'kind', 'version']);
+			if (value.version !== undefined) string(value.version);
+			return;
+		case 'absent':
+			exactKeys(value, ['canonicalFormVersion', 'kind']);
+			return;
+		default:
+			refuse('declaration shape');
 	}
 }
 
@@ -185,6 +416,11 @@ export function validateGeneratedPostconditionV3Declaration(
 			if (!indexMethods.has(index.method)) refuse('index method allowlist');
 			identifiers(index.columns, 'index column identifiers');
 			unique(index.columns, 'unique index columns');
+			if (
+				index.columns.length === 0 &&
+				(index.expressions === undefined || index.expressions.length === 0)
+			)
+				refuse('non-empty index keys');
 			identifiers(index.include ?? [], 'index include column identifiers');
 			unique(index.include ?? [], 'unique index include columns');
 			if (index.nullsNotDistinct && !index.unique)
@@ -199,6 +435,11 @@ export function validateGeneratedPostconditionV3Declaration(
 				identifier(key, 'index storage parameter identifiers');
 			for (const expression of index.expressions ?? [])
 				canonicalSql(expression, 'safe canonical SQL');
+			if (
+				new Set((index.expressions ?? []).map((expression) => expression.sql))
+					.size !== (index.expressions ?? []).length
+			)
+				refuse('unique index expressions');
 			if (index.where !== undefined)
 				canonicalSql(index.where, 'safe canonical SQL');
 			try {
@@ -233,13 +474,13 @@ export function validateGeneratedPostconditionV3Declaration(
 			return;
 		case 'sequence':
 			sequenceInteger(declaration.startValue, 'sequence start value');
-			sequenceInteger(declaration.incrementBy, 'sequence increment value');
+			if (
+				sequenceInteger(declaration.incrementBy, 'sequence increment value') ===
+				0n
+			)
+				refuse('non-zero sequence increment');
 			sequenceInteger(declaration.minValue, 'sequence minimum value');
 			sequenceInteger(declaration.maxValue, 'sequence maximum value');
-			if (declaration.incrementBy === '0')
-				refuse('non-zero sequence increment');
-			return;
-		default:
 			return;
 	}
 }
@@ -251,6 +492,12 @@ export function validateGeneratedPostconditionV3Declaration(
  * side of the persisted digest boundary.
  */
 export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
+	if (
+		value !== null &&
+		typeof value === 'object' &&
+		immutableGeneratedPostconditionSnapshots.has(value)
+	)
+		return value;
 	const snapshot = (item: unknown, path: string): unknown => {
 		if (item === null || typeof item === 'string' || typeof item === 'boolean')
 			return item;
@@ -271,6 +518,10 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 				if (name === 'length') continue;
 				if (!/^(?:0|[1-9][0-9]*)$/u.test(name))
 					throw new TypeError(`${path}: array has a non-index member`);
+				if (BigInt(name) > 4294967294n)
+					throw new TypeError(
+						`${path}: array has an out-of-range index member`,
+					);
 				const descriptor = Object.getOwnPropertyDescriptor(item, name);
 				if (!descriptor || !('value' in descriptor))
 					throw new TypeError(
@@ -318,11 +569,16 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 			for (const member of Object.values(item as Record<string, unknown>))
 				freeze(member);
 			Object.freeze(item);
+			immutableGeneratedPostconditionSnapshots.add(item);
 		}
 		return item;
 	};
-	return freeze(snapshot(value, '$'));
+	const frozen = freeze(snapshot(value, '$'));
+	return frozen;
 }
+
+/** Branded by identity, not a forgeable property, once it crossed the JSON gate. */
+const immutableGeneratedPostconditionSnapshots = new WeakSet<object>();
 
 /**
  * Normalizes the producer's typed declaration through the same immutable JSON
@@ -340,15 +596,9 @@ export function parseGeneratedPostconditionV3Declaration(
 	} catch {
 		return refuse('own JSON declaration graph');
 	}
-	if (
-		!snapshot ||
-		typeof snapshot !== 'object' ||
-		Array.isArray(snapshot) ||
-		snapshot.canonicalFormVersion !== 1 ||
-		typeof snapshot.kind !== 'string'
-	)
-		refuse('declaration shape');
+	if (!record(snapshot)) refuse('declaration shape');
 	try {
+		exactDeclaration(snapshot);
 		validateGeneratedPostconditionV3Declaration(snapshot);
 	} catch (error) {
 		if (error instanceof GeneratedPostconditionV3DeclarationError) throw error;

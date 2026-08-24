@@ -29,6 +29,7 @@ export {
 	GeneratedPostconditionWorkInFlightError,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIdentityPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,

@@ -20,6 +20,7 @@ import {
 	readPgRemovalEffectsClosure,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIdentityPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
@@ -275,31 +276,43 @@ function observed(address: LedgerAddress): LedgerPayload {
 }
 
 function generatedPayload(value: unknown): LedgerPayload {
+	const encoded = JSON.stringify(value);
+	if (encoded === undefined)
+		throw new TypeError('generated observation is not JSON serializable');
+	const normalized = JSON.parse(encoded) as LedgerPayload['value'];
 	return {
-		value: value as LedgerPayload['value'],
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		value: normalized,
+		digest: createHash('sha256')
+			.update(JSON.stringify(normalized))
+			.digest('hex'),
 	};
 }
 
 /** A deliberately non-structural read-back for the four #597 kinds. */
 async function identityObserved(
 	executor: GeneratedPostconditionSession,
+	postcondition: GeneratedPostcondition,
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
-	const live = await readPgCatalogueIdentity(executor, address);
-	if (!live?.catalogueIdentity)
-		throw new Error(
-			`generated ${address.kind} identity observation is absent at ${address.name}`,
-		);
+	const verified = await verifyGeneratedIdentityPostcondition({
+		session: executor,
+		postcondition,
+		address,
+		kind: postcondition.declaration.kind as
+			| 'constraint'
+			| 'enum'
+			| 'sequence'
+			| 'extension',
+	});
 	return generatedPayload({
 		kind: 'identity-observed',
-		observedKind: address.kind,
+		observedKind: verified.kind,
 		address: {
 			scope: address.scope,
 			schema: address.schema,
 			name: address.name,
 		},
-		identity: live.catalogueIdentity,
+		identity: verified.identity,
 		structuralSemantics: 'unverified',
 	});
 }
@@ -368,7 +381,7 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'constraint': {
-			return identityObserved(executor, address);
+			return identityObserved(executor, postcondition, address);
 		}
 		case 'index': {
 			const verified = await verifyGeneratedIndexPostcondition({
@@ -400,13 +413,13 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'enum': {
-			return identityObserved(executor, address);
+			return identityObserved(executor, postcondition, address);
 		}
 		case 'sequence': {
-			return identityObserved(executor, address);
+			return identityObserved(executor, postcondition, address);
 		}
 		case 'extension': {
-			return identityObserved(executor, address);
+			return identityObserved(executor, postcondition, address);
 		}
 		case 'absent': {
 			// Removal admission owns the destructive absence read-back.  Consume it

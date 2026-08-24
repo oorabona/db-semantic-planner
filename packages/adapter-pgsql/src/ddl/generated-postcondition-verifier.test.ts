@@ -10,6 +10,7 @@ import {
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIdentityPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
@@ -260,6 +261,60 @@ function tableSession(
 }
 
 describe('generated postcondition verifier', () => {
+	it('begins before locking and rolls back the standalone identity proof', async () => {
+		const sql: string[] = [];
+		const session = mintGeneratedPostconditionSession({
+			query: async (statement) => {
+				sql.push(statement);
+				if (statement.startsWith('SAVEPOINT')) {
+					if (!sql.includes('BEGIN')) throw { code: '25P01' };
+					return { rows: [] };
+				}
+				if (statement.includes('relation.relkind AS relation_kind'))
+					return {
+						rows: [
+							{
+								database_name: 'app',
+								relation_oid: '101',
+								object_oid: '101',
+								relation_kind: 'S',
+							},
+						],
+					};
+				return { rows: [] };
+			},
+		});
+		await verifyGeneratedIdentityPostcondition({
+			session,
+			postcondition: {
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'sequence',
+					incrementBy: '1',
+				},
+			},
+			address: {
+				scope: 'schema',
+				engine: 'postgresql',
+				database: 'app',
+				schema: 'tenant',
+				kind: 'sequence',
+				name: 'accounts_id_seq',
+			},
+			kind: 'sequence',
+		});
+		const begin = sql.indexOf('BEGIN');
+		const lock = sql.findIndex((statement) =>
+			statement.startsWith('LOCK TABLE ONLY'),
+		);
+		const rollback = sql.indexOf('ROLLBACK');
+		expect(begin).toBeGreaterThanOrEqual(0);
+		expect(lock).toBeGreaterThan(begin);
+		expect(rollback).toBeGreaterThan(lock);
+	});
+
 	it('redacts authored defaults from table mismatch diagnostics', async () => {
 		const secret = "'operator-secret-7f2'::text";
 		await expect(

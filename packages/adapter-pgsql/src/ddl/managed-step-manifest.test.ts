@@ -1,6 +1,10 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { parseGeneratedPostconditionV3Declaration } from './generated-postcondition-v3-validator.js';
+import {
+	GeneratedPostconditionV3DeclarationError,
+	parseGeneratedPostconditionV3Declaration,
+	snapshotGeneratedPostconditionJson,
+} from './generated-postcondition-v3-validator.js';
 import {
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
@@ -67,8 +71,17 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			},
 			{ kind: 'sequence', incrementBy: '0' },
+			{ kind: 'sequence', incrementBy: '-0' },
+			{ kind: 'sequence', incrementBy: '00' },
+			{ kind: 'sequence', incrementBy: '-00' },
 			{ kind: 'sequence', incrementBy: 'NaN' },
 			{ kind: 'enum', labels: ['duplicate', 'duplicate'] },
+			// These used to fall through producer validation and fail only in the
+			// persisted reader; the parser is now the entire wire decoder.
+			{ kind: 'extension', version: 42 },
+			{ kind: 'sequence', cycle: 'yes' },
+			{ kind: 'column', column: { type: 42 } },
+			{ kind: 'not-a-v3-kind' },
 		] as const;
 		for (const declaration of declarations) {
 			const value = v3(declaration);
@@ -118,6 +131,34 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				})(),
 			);
 		}
+	});
+
+	it.each([
+		{ kind: 'extension', version: 42 },
+		{ kind: 'sequence', cycle: 'yes' },
+		{ kind: 'column', column: { type: 42 } },
+		{ kind: 'not-a-v3-kind' },
+	] as const)('refuses reader-divergence declaration %o in both parser and decoder', (declaration) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				...declaration,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+			'REPLAN_REQUIRED',
+		);
+	});
+
+	it.each([
+		'4294967295',
+		'4294967296',
+	])('refuses the out-of-range array property %s', (name) => {
+		const value: unknown[] = [];
+		Object.defineProperty(value, name, { value: 'hidden', enumerable: true });
+		expect(() => snapshotGeneratedPostconditionJson(value)).toThrow(
+			'out-of-range index member',
+		);
 	});
 
 	it('stores an immutable postcondition snapshot despite later caller mutation', () => {

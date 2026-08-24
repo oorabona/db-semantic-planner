@@ -110,15 +110,23 @@ async function readTestGeneratedPostcondition(
 						rows: result.rows.map((row) => ({
 							database_name: 'app',
 							relation_oid: '101',
-							...(sql.includes('index_relation.oid')
-								? {
-										relation_kind: 'i',
-										parent_relation_kind: 'r',
-										table_name: 'accounts',
-									}
-								: sql.includes('constraint_item.oid')
-									? { relation_kind: 'r', constraint_name: params?.[2] }
-									: { relation_kind: 'r' }),
+							...(sql.includes('type_item.oid')
+								? { relation_kind: 'e', object_oid: '102' }
+								: sql.includes('pg_catalog.pg_extension extension')
+									? { relation_kind: 'x', object_oid: '102' }
+									: sql.includes(
+												'relation.oid::text AS relation_oid, relation.oid::text AS object_oid',
+											)
+										? { relation_kind: 'S', object_oid: '102' }
+										: sql.includes('index_relation.oid')
+											? {
+													relation_kind: 'i',
+													parent_relation_kind: 'r',
+													table_name: 'accounts',
+												}
+											: sql.includes('constraint_item.oid')
+												? { relation_kind: 'r', constraint_name: params?.[2] }
+												: { relation_kind: 'r' }),
 							...(sql.includes('attribute.attnum')
 								? { attribute_number: 1 }
 								: {}),
@@ -436,6 +444,61 @@ describe('generator execution fixture shim', () => {
 		expect(verify).toHaveBeenCalledWith(
 			expect.objectContaining({ postcondition: value, address }),
 		);
+	});
+
+	it('refuses a deferred declaration/address kind mismatch before catalogue observation', async () => {
+		const query = vi.fn(async (_sql: string) => ({ rows: [{ oid: '401' }] }));
+		const address = {
+			scope: 'schema' as const,
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant',
+			kind: 'sequence' as const,
+			name: 'accounts_id_seq',
+		};
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: v3({ kind: 'enum', labels: ['active'] }),
+				digest: 'v3-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition({ query }, step, address),
+		).rejects.toThrow('generated postcondition binding');
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('pg_catalog.current_database()'),
+			),
+		).toBe(false);
+	});
+
+	it('normalizes deferred observation payloads before their persisted JSON round trip', async () => {
+		const address = {
+			scope: 'database' as const,
+			engine: 'postgresql',
+			database: 'app',
+			kind: 'extension' as const,
+			name: 'pgcrypto',
+		};
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: v3({ kind: 'extension', version: '1.0' }),
+				digest: 'v3-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		const observed = await readTestGeneratedPostcondition(
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+			step,
+			address,
+		);
+		expect(observed.value).toEqual(JSON.parse(JSON.stringify(observed.value)));
+		expect(
+			Object.hasOwn((observed.value as { address: object }).address, 'schema'),
+		).toBe(false);
 	});
 
 	it.each([

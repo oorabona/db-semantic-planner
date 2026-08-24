@@ -6,7 +6,7 @@ import {
 	lockPgRelation,
 	PgResolvableRelationLockError,
 } from '../transition/lock-relation.js';
-import { validateCheckExpression, validateIdentifier } from '../validate.js';
+import { validateCheckExpression } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import {
 	parseGeneratedPostconditionV3Declaration,
@@ -14,11 +14,8 @@ import {
 } from './generated-postcondition-v3-validator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
-	CanonicalSqlFact,
-	GeneratedColumnDefaultState,
 	GeneratedColumnPostcondition,
 	GeneratedConstraintPostcondition,
-	GeneratedForeignKeyAction,
 	GeneratedIndexPostcondition,
 	GeneratedPostcondition,
 	GeneratedPostconditionDeclarationV3,
@@ -391,77 +388,6 @@ function exactKeys(
 	return Object.keys(value).every((field) => allowed.has(field));
 }
 
-function stringList(value: unknown, message: string): readonly string[] {
-	if (!Array.isArray(value)) throw replan(message);
-	const snapshot = Array.from(value);
-	const result: string[] = [];
-	for (const item of snapshot) {
-		if (typeof item !== 'string') throw replan(message);
-		result.push(item);
-	}
-	return result;
-}
-
-function stringRecord(
-	value: unknown,
-	message: string,
-): Readonly<Record<string, string>> {
-	if (!isRecord(value)) throw replan(message);
-	const entries = Object.entries(value);
-	for (const [_key, item] of entries) {
-		if (typeof item !== 'string') throw replan(message);
-	}
-	return Object.fromEntries(entries) as Record<string, string>;
-}
-
-function strictString(value: unknown, message: string): string {
-	if (typeof value !== 'string') throw replan(message);
-	return value;
-}
-
-function strictBoolean(value: unknown, message: string): boolean {
-	if (typeof value !== 'boolean') throw replan(message);
-	return value;
-}
-
-function strictUnknownArray(
-	value: unknown,
-	message: string,
-): readonly unknown[] {
-	if (!Array.isArray(value)) throw replan(message);
-	return Array.from(value);
-}
-
-function checkedIdentifier(
-	value: unknown,
-	type: 'table' | 'column' | 'schema' | 'alias',
-	message: string,
-): string {
-	const identifier = strictString(value, message);
-	try {
-		validateIdentifier(identifier, type);
-	} catch (error) {
-		throw replan(message, undefined, undefined, error);
-	}
-	return identifier;
-}
-
-function decodeCanonicalSqlFact(
-	value: unknown,
-	message: string,
-): CanonicalSqlFact {
-	if (!isRecord(value) || !exactKeys(value, ['canonicalFormVersion', 'sql']))
-		throw replan(message);
-	if (value.canonicalFormVersion !== 1) throw replan(message);
-	const sql = strictString(value.sql, message);
-	try {
-		validateCheckExpression(sql, 'generated canonical SQL fact');
-	} catch (error) {
-		throw replan(message, undefined, undefined, error);
-	}
-	return { canonicalFormVersion: 1, sql };
-}
-
 function decodeTargetBinding(value: unknown, message: string): TargetBinding {
 	if (!isRecord(value) || !exactKeys(value, ['bindingVersion', 'bindingKind']))
 		throw replan(message);
@@ -473,201 +399,6 @@ function decodeTargetBinding(value: unknown, message: string): TargetBinding {
 	return { bindingVersion: 1, bindingKind: 'managed-step-address' };
 }
 
-function decodeColumnDefaultState(
-	value: unknown,
-	message: string,
-): GeneratedColumnDefaultState {
-	if (!isRecord(value)) throw replan(message);
-	const defaultKind = value.defaultKind;
-	if (defaultKind === 'none') {
-		if (!exactKeys(value, ['defaultKind', 'hasDefault', 'identity']))
-			throw replan(message);
-		if (value.hasDefault !== false || value.identity !== null)
-			throw replan(message);
-		return { defaultKind, hasDefault: false, identity: null };
-	}
-	if (defaultKind === 'generated-sequence') {
-		if (!exactKeys(value, ['defaultKind', 'hasDefault', 'identity']))
-			throw replan(message);
-		if (value.hasDefault !== true || value.identity !== null)
-			throw replan(message);
-		return { defaultKind, hasDefault: true, identity: null };
-	}
-	if (defaultKind === 'identity') {
-		if (!exactKeys(value, ['defaultKind', 'hasDefault', 'identity']))
-			throw replan(message);
-		if (
-			value.hasDefault !== false ||
-			(value.identity !== 'always' && value.identity !== 'byDefault')
-		)
-			throw replan(message);
-		return { defaultKind, hasDefault: false, identity: value.identity };
-	}
-	if (defaultKind === 'authored') {
-		if (
-			!exactKeys(value, [
-				'defaultKind',
-				'hasDefault',
-				'identity',
-				'defaultExpression',
-			])
-		)
-			throw replan(message);
-		if (value.hasDefault !== true || value.identity !== null)
-			throw replan(message);
-		return {
-			defaultKind,
-			hasDefault: true,
-			identity: null,
-			defaultExpression: decodeCanonicalSqlFact(
-				value.defaultExpression,
-				message,
-			),
-		};
-	}
-	throw replan(message);
-}
-
-function decodeConstraintDeclaration(
-	value: unknown,
-	message: string,
-): Extract<
-	GeneratedPostconditionDeclarationV3,
-	{ readonly kind: 'constraint' }
->['constraint'] {
-	if (!isRecord(value)) throw replan(message);
-	const type = value.type;
-	if (type === 'p' || type === 'u') {
-		if (
-			!exactKeys(value, [
-				'type',
-				'columns',
-				'deferrable',
-				'initiallyDeferred',
-				'enforced',
-			])
-		)
-			throw replan(message);
-		const columns = stringList(value.columns, message);
-		if (columns.length === 0) throw replan(message);
-		for (const column of columns) checkedIdentifier(column, 'column', message);
-		const deferrable = strictBoolean(value.deferrable, message);
-		const initiallyDeferred = strictBoolean(value.initiallyDeferred, message);
-		if (initiallyDeferred && !deferrable) throw replan(message);
-		if (new Set(columns).size !== columns.length) throw replan(message);
-		return {
-			type,
-			columns,
-			deferrable,
-			initiallyDeferred,
-			enforced: strictBoolean(value.enforced, message),
-		};
-	}
-	if (type !== 'f') throw replan(message);
-	if (
-		!exactKeys(value, [
-			'type',
-			'columns',
-			'references',
-			'onDelete',
-			'onUpdate',
-			'deferrable',
-			'initiallyDeferred',
-			'enforced',
-			'notValid',
-		])
-	)
-		throw replan(message);
-	const columns = stringList(value.columns, message);
-	if (columns.length === 0 || !isRecord(value.references))
-		throw replan(message);
-	for (const column of columns) checkedIdentifier(column, 'column', message);
-	const references = value.references;
-	if (!exactKeys(references, ['schema', 'table', 'columns']))
-		throw replan(message);
-	const referenceColumns = stringList(references.columns, message);
-	if (
-		referenceColumns.length === 0 ||
-		columns.length !== referenceColumns.length ||
-		new Set(columns).size !== columns.length ||
-		new Set(referenceColumns).size !== referenceColumns.length
-	)
-		throw replan(message);
-	for (const column of referenceColumns)
-		checkedIdentifier(column, 'column', message);
-	const onAction = (action: unknown): GeneratedForeignKeyAction => {
-		if (
-			action !== 'NO ACTION' &&
-			action !== 'RESTRICT' &&
-			action !== 'CASCADE' &&
-			action !== 'SET NULL' &&
-			action !== 'SET DEFAULT'
-		)
-			throw replan(message);
-		return action;
-	};
-	const deferrable = strictBoolean(value.deferrable, message);
-	const initiallyDeferred = strictBoolean(value.initiallyDeferred, message);
-	if (initiallyDeferred && !deferrable) throw replan(message);
-	return {
-		type: 'f',
-		columns,
-		references: {
-			schema: checkedIdentifier(references.schema, 'schema', message),
-			table: checkedIdentifier(references.table, 'table', message),
-			columns: referenceColumns,
-		},
-		onDelete: onAction(value.onDelete),
-		onUpdate: onAction(value.onUpdate),
-		deferrable,
-		initiallyDeferred,
-		enforced: strictBoolean(value.enforced, message),
-		notValid: strictBoolean(value.notValid, message),
-	};
-}
-
-function decodeV3ColumnDeclaration(
-	value: unknown,
-	message: string,
-	withName: boolean,
-): Readonly<Record<string, unknown>> {
-	if (!isRecord(value)) throw replan(message);
-	if (
-		!exactKeys(value, [
-			...(withName ? ['name'] : []),
-			'type',
-			'nullable',
-			'authoredCollation',
-			'default',
-		])
-	)
-		throw replan(message);
-	const name = withName
-		? checkedIdentifier(value.name, 'column', message)
-		: undefined;
-	const type =
-		value.type === undefined ? undefined : strictString(value.type, message);
-	const nullable =
-		value.nullable === undefined
-			? undefined
-			: strictBoolean(value.nullable, message);
-	const authoredCollation =
-		value.authoredCollation === undefined || value.authoredCollation === null
-			? value.authoredCollation
-			: strictString(value.authoredCollation, message);
-	const defaultState =
-		value.default === undefined
-			? undefined
-			: decodeColumnDefaultState(value.default, message);
-	return {
-		...(name === undefined ? {} : { name }),
-		...(type === undefined ? {} : { type }),
-		...(nullable === undefined ? {} : { nullable }),
-		...(authoredCollation === undefined ? {} : { authoredCollation }),
-		...(defaultState === undefined ? {} : { default: defaultState }),
-	};
-}
-
 function decodeV3GeneratedPostcondition(
 	value: Record<string, unknown>,
 	_versionSeen: unknown,
@@ -675,312 +406,24 @@ function decodeV3GeneratedPostcondition(
 ): GeneratedPostconditionV3 {
 	const unsupported = 'generated v3 postcondition is unsupported';
 	if (
-		!exactKeys(value, ['postconditionVersion', 'declaration', 'targetBinding'])
+		!exactKeys(value, [
+			'postconditionVersion',
+			'declaration',
+			'targetBinding',
+		]) ||
+		value.postconditionVersion !== 3
 	)
-		throw replan(unsupported);
-	if (value.postconditionVersion !== 3 || !isRecord(value.declaration))
 		throw replan(unsupported);
 	const targetBinding = decodeTargetBinding(value.targetBinding, unsupported);
-	const declaration = value.declaration;
-	if (
-		declaration.canonicalFormVersion !== 1 ||
-		typeof declaration.kind !== 'string'
-	)
-		throw replan(unsupported);
-	const header = { canonicalFormVersion: 1 as const };
-	let decoded: GeneratedPostconditionDeclarationV3;
-	switch (declaration.kind) {
-		case 'table': {
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'columns']))
-				throw replan(unsupported);
-			const columns = strictUnknownArray(declaration.columns, unsupported).map(
-				(column) => decodeV3ColumnDeclaration(column, unsupported, true),
-			);
-			const names = new Set<string>();
-			for (const column of columns) {
-				const name = column.name;
-				if (typeof name !== 'string' || names.has(name))
-					throw replan(unsupported);
-				names.add(name);
-			}
-			decoded = {
-				...header,
-				kind: 'table',
-				columns: columns as unknown as Extract<
-					GeneratedPostconditionDeclarationV3,
-					{ readonly kind: 'table' }
-				>['columns'],
-			};
-			break;
-		}
-		case 'column':
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'column']))
-				throw replan(unsupported);
-			decoded = {
-				...header,
-				kind: 'column',
-				column: decodeV3ColumnDeclaration(
-					declaration.column,
-					unsupported,
-					false,
-				),
-			} as GeneratedPostconditionDeclarationV3;
-			break;
-		case 'check': {
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'check']))
-				throw replan(unsupported);
-			const check = declaration.check;
-			if (!isRecord(check) || !exactKeys(check, ['expression', 'notValid']))
-				throw replan(unsupported);
-			decoded = {
-				...header,
-				kind: 'check',
-				check: {
-					expression: decodeCanonicalSqlFact(check.expression, unsupported),
-					notValid: strictBoolean(check.notValid, unsupported),
-				},
-			};
-			break;
-		}
-		case 'constraint': {
-			if (
-				!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'constraint'])
-			)
-				throw replan(unsupported);
-			decoded = {
-				...header,
-				kind: 'constraint',
-				constraint: decodeConstraintDeclaration(
-					declaration.constraint,
-					unsupported,
-				),
-			};
-			break;
-		}
-		case 'index': {
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'index']))
-				throw replan(unsupported);
-			const index = declaration.index;
-			if (
-				!isRecord(index) ||
-				!exactKeys(index, [
-					'method',
-					'unique',
-					'valid',
-					'ready',
-					'live',
-					'columns',
-					'expressions',
-					'include',
-					'nullsNotDistinct',
-					'opclass',
-					'with',
-					'where',
-				])
-			)
-				throw replan(unsupported);
-			const method = strictString(index.method, unsupported);
-			if (
-				![
-					'btree',
-					'hash',
-					'gist',
-					'gin',
-					'brin',
-					'spgist',
-					'hnsw',
-					'ivfflat',
-					'bm25',
-					'bloom',
-				].includes(method)
-			)
-				throw replan(unsupported);
-			const columns = stringList(index.columns, unsupported);
-			for (const column of columns)
-				checkedIdentifier(column, 'column', unsupported);
-			if (new Set(columns).size !== columns.length) throw replan(unsupported);
-			const expressions =
-				index.expressions === undefined
-					? undefined
-					: strictUnknownArray(index.expressions, unsupported).map(
-							(expression) => decodeCanonicalSqlFact(expression, unsupported),
-						);
-			if (
-				expressions &&
-				new Set(expressions.map((expression) => expression.sql)).size !==
-					expressions.length
-			)
-				throw replan(unsupported);
-			const include =
-				index.include === undefined
-					? undefined
-					: stringList(index.include, unsupported);
-			for (const column of include ?? [])
-				checkedIdentifier(column, 'column', unsupported);
-			if (include && new Set(include).size !== include.length)
-				throw replan(unsupported);
-			const opclass =
-				index.opclass === undefined
-					? undefined
-					: stringRecord(index.opclass, unsupported);
-			if (
-				columns.length === 0 &&
-				(expressions === undefined || expressions.length === 0)
-			)
-				throw replan(unsupported);
-			if (
-				opclass !== undefined &&
-				Object.keys(opclass).some((column) => !columns.includes(column))
-			)
-				throw replan(unsupported);
-			for (const [column, value] of Object.entries(opclass ?? {})) {
-				checkedIdentifier(column, 'column', unsupported);
-				checkedIdentifier(value, 'alias', unsupported);
-			}
-			const withOptions =
-				index.with === undefined
-					? undefined
-					: stringRecord(index.with, unsupported);
-			for (const key of Object.keys(withOptions ?? {}))
-				checkedIdentifier(key, 'alias', unsupported);
-			const where =
-				index.where === undefined
-					? undefined
-					: decodeCanonicalSqlFact(index.where, unsupported);
-			if (index.valid !== true || index.ready !== true || index.live !== true)
-				throw replan(unsupported);
-			const unique = strictBoolean(index.unique, unsupported);
-			const nullsNotDistinct = strictBoolean(
-				index.nullsNotDistinct,
-				unsupported,
-			);
-			if (nullsNotDistinct && !unique) throw replan(unsupported);
-			// Keep declaration representability aligned with the renderer. This is
-			// deliberately zero-query and preserves the renderer error as the cause.
-			try {
-				generateCreateIndex(
-					'dbsp_postcondition_decode',
-					{
-						name: 'dbsp_postcondition_decode_index',
-						columns,
-						method,
-						unique,
-						nullsNotDistinct,
-						...(expressions === undefined
-							? {}
-							: { expressions: expressions.map((fact) => fact.sql) }),
-						...(include === undefined ? {} : { include }),
-						...(opclass === undefined ? {} : { opclass }),
-						...(withOptions === undefined ? {} : { with: withOptions }),
-						...(where === undefined ? {} : { where: where.sql }),
-					},
-					undefined,
-					identityNaming,
-				);
-			} catch (error) {
-				throw replan(unsupported, undefined, undefined, error);
-			}
-			decoded = {
-				...header,
-				kind: 'index',
-				index: {
-					method,
-					unique,
-					valid: true,
-					ready: true,
-					live: true,
-					columns,
-					...(expressions === undefined ? {} : { expressions }),
-					...(include === undefined ? {} : { include }),
-					nullsNotDistinct,
-					...(opclass === undefined ? {} : { opclass }),
-					...(withOptions === undefined ? {} : { with: withOptions }),
-					...(where === undefined ? {} : { where }),
-				},
-			};
-			break;
-		}
-		case 'enum': {
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'labels']))
-				throw replan(unsupported);
-			const labels = stringList(declaration.labels, unsupported);
-			if (new Set(labels).size !== labels.length) throw replan(unsupported);
-			decoded = {
-				...header,
-				kind: 'enum',
-				labels,
-			};
-			break;
-		}
-		case 'sequence': {
-			if (
-				!exactKeys(declaration, [
-					'canonicalFormVersion',
-					'kind',
-					'startValue',
-					'incrementBy',
-					'minValue',
-					'maxValue',
-					'cycle',
-				])
-			)
-				throw replan(unsupported);
-			const optionalString = (item: unknown) =>
-				item === undefined ? undefined : strictString(item, unsupported);
-			const startValue = optionalString(declaration.startValue);
-			const incrementBy = optionalString(declaration.incrementBy);
-			const minValue = optionalString(declaration.minValue);
-			const maxValue = optionalString(declaration.maxValue);
-			const cycle =
-				declaration.cycle === undefined
-					? undefined
-					: strictBoolean(declaration.cycle, unsupported);
-			decoded = {
-				...header,
-				kind: 'sequence',
-				...(startValue === undefined ? {} : { startValue }),
-				...(incrementBy === undefined ? {} : { incrementBy }),
-				...(minValue === undefined ? {} : { minValue }),
-				...(maxValue === undefined ? {} : { maxValue }),
-				...(cycle === undefined ? {} : { cycle }),
-			};
-			break;
-		}
-		case 'extension': {
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind', 'version']))
-				throw replan(unsupported);
-			const version =
-				declaration.version === undefined
-					? undefined
-					: strictString(declaration.version, unsupported);
-			decoded = {
-				...header,
-				kind: 'extension',
-				...(version === undefined ? {} : { version }),
-			};
-			break;
-		}
-		case 'absent':
-			if (!exactKeys(declaration, ['canonicalFormVersion', 'kind']))
-				throw replan(unsupported);
-			decoded = { ...header, kind: 'absent' };
-			break;
-		default:
-			throw replan(unsupported);
-	}
-	let normalized: GeneratedPostconditionDeclarationV3;
 	try {
-		normalized = parseGeneratedPostconditionV3Declaration(decoded);
+		return {
+			postconditionVersion: 3,
+			declaration: parseGeneratedPostconditionV3Declaration(value.declaration),
+			targetBinding,
+		};
 	} catch (error) {
 		throw replan(unsupported, undefined, undefined, error);
 	}
-	return {
-		postconditionVersion: 3,
-		declaration: normalized,
-		targetBinding: snapshotGeneratedPostconditionJson(
-			targetBinding,
-		) as TargetBinding,
-	};
 }
 
 /**
@@ -2491,5 +1934,50 @@ export async function verifyGeneratedCheckPostcondition(input: {
 			},
 			target,
 		});
+	});
+}
+
+/**
+ * Binds the deliberately non-structural v3 kinds under the same rollback-only
+ * proof bracket as structural verifiers.  The declaration kind is the binding
+ * expectation, so a sequence slot can never observe an enum declaration (or
+ * vice versa) merely because the address happens to resolve.
+ */
+export async function verifyGeneratedIdentityPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly kind: 'constraint' | 'enum' | 'sequence' | 'extension';
+}): Promise<{
+	readonly kind: 'constraint' | 'enum' | 'sequence' | 'extension';
+	readonly identity: Readonly<{
+		readonly relationOid: string;
+		readonly objectOid?: string;
+	}>;
+}> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			input.kind,
+		);
+		const target = await stabilizeGeneratedPostconditionBinding({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+			expectedKind: input.kind,
+		});
+		if (target.relationOid === undefined)
+			throw new Error(
+				'generated postcondition binding did not return a relation identity',
+			);
+		return {
+			kind: input.kind,
+			identity: {
+				relationOid: target.relationOid,
+				...(target.objectOid === undefined
+					? {}
+					: { objectOid: target.objectOid }),
+			},
+		};
 	});
 }

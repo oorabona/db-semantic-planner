@@ -444,8 +444,9 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent index feature and refuses a present NULL',
 		async (signal) => {
 			const indexLiveProjection = (sql: string) =>
-				sql.includes('WHERE relation.oid = $1::pg_catalog.oid') &&
-				sql.includes('index_relation.oid = $2::pg_catalog.oid');
+				sql.includes(
+					'WHERE namespace.nspname = $1 AND index_relation.relname = $2',
+				) && sql.includes('index_meta.indisunique');
 			const exists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_index', 'indnullsnotdistinct'),
 			);
@@ -475,8 +476,9 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent index key-count feature and refuses a present NULL',
 		async (signal) => {
 			const indexLiveProjection = (sql: string) =>
-				sql.includes('WHERE relation.oid = $1::pg_catalog.oid') &&
-				sql.includes('index_relation.oid = $2::pg_catalog.oid');
+				sql.includes(
+					'WHERE namespace.nspname = $1 AND index_relation.relname = $2',
+				) && sql.includes('index_meta.indisunique');
 			const exists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_index', 'indnkeyatts'),
 			);
