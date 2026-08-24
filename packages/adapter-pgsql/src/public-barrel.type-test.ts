@@ -1,5 +1,10 @@
 // These execution primitives are deliberately reachable only through the
 // internal subpath (or the admitted-operation façade), never the public API.
+import type { PgsqlCompileOnlyAdapterOptions } from '@dbsp/adapter-pgsql';
+
+const compileOnlyOptions: PgsqlCompileOnlyAdapterOptions = {};
+void compileOnlyOptions;
+
 // @ts-expect-error destructive compatibility bridge is not public
 import { executePgDestructiveOutcome } from '@dbsp/adapter-pgsql';
 

@@ -59,6 +59,10 @@ function deferredPromise<T>() {
 
 describe('PgsqlAdapter', () => {
 	describe('constructor', () => {
+		it('accepts the zero-argument compile-only constructor overload', () => {
+			expectTypeOf(new PgsqlAdapter()).toEqualTypeOf<PgsqlAdapter>();
+		});
+
 		it('should create adapter with default options', () => {
 			const pool = createMockPool();
 			const adapter = new PgsqlAdapter(pool);
@@ -1042,6 +1046,9 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 				_txStatus: 'I',
 			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
 			const sql = 'SELECT id FROM users WHERE id = $1';
 			const bytes = Buffer.from([1, 2, 3]);
 			const timestamp = new Date('2026-08-24T12:00:00.000Z');
@@ -1062,27 +1069,13 @@ describe('PgsqlAdapter', () => {
 					throw error;
 				})
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-			});
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, parameters);
 
-			await (adapter as any).issueConnectionQuery(
-				client,
-				sql,
-				parameters,
-				true,
-				true,
-			);
-			await expect(
-				(adapter as any).issueConnectionQuery(
-					client,
-					sql,
-					parameters,
-					true,
-					true,
-				),
-			).resolves.toMatchObject({ rows: [{ id: 7 }] });
+			await adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(query);
+				await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
+			});
 
 			expect(client.query).toHaveBeenNthCalledWith(2, {
 				name: derivePreparedStatementName(sql),
@@ -1248,6 +1241,146 @@ describe('PgsqlAdapter', () => {
 				}),
 			).rejects.toBe(error);
 			expect(client.query).toHaveBeenCalledTimes(2);
+		});
+
+		it('declines replay when the physical client was exposed by an earlier pinned scope', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [7]);
+
+			let retained: PgsqlAdapter | undefined;
+			await adapter.withPinnedConnection(async (pinned) => {
+				retained = pinned as PgsqlAdapter;
+				expect(retained.getPoolInstance()).toBe(client);
+			});
+			expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					await pinned.execute(query);
+					await pinned.execute(query);
+				}),
+			).rejects.toBe(error);
+			expect(client.query).toHaveBeenCalledTimes(2);
+			expect(
+				vi
+					.mocked(client.query)
+					.mock.calls.filter(([statement]) => statement === sql),
+			).toHaveLength(1);
+			expect(() => retained!.getPoolInstance()).toThrow(
+				'This PostgreSQL pinned connection adapter belongs to a withPinnedConnection() scope that has ended.',
+			);
+		});
+
+		it('declines replay when a pinned client is exposed after named submission', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const namedFailure = deferredPromise<unknown>();
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockReturnValueOnce(namedFailure.promise as any)
+				.mockResolvedValueOnce({ rows: [], rowCount: 0 } as any)
+				.mockResolvedValueOnce({ rows: [], rowCount: 0 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [7]);
+
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					await pinned.execute(query);
+					const pending = pinned.execute(query);
+					await vi.waitFor(() => expect(client.query).toHaveBeenCalledTimes(2));
+					const rawClient = (
+						pinned as PgsqlAdapter
+					).getPoolInstance() as PoolClient;
+					await rawClient.query('BEGIN');
+					await rawClient.query('SET ROLE injected_role');
+					namedFailure.reject(error);
+					await expect(pending).rejects.toBe(error);
+				}),
+			).rejects.toBeInstanceOf(PgsqlTransactionAbortedError);
+			expect(
+				vi
+					.mocked(client.query)
+					.mock.calls.filter(([statement]) => statement === sql),
+			).toHaveLength(1);
+		});
+
+		it('snapshots a large Buffer with a byte copy and no descriptor walk', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM blobs WHERE bytes = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const bytes = Buffer.alloc(256 * 1024, 7);
+			const getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors;
+			const inspectedBuffers: Buffer[] = [];
+			const descriptors = vi
+				.spyOn(Object, 'getOwnPropertyDescriptors')
+				.mockImplementation((value: unknown) => {
+					if (Buffer.isBuffer(value)) inspectedBuffers.push(value);
+					return getOwnPropertyDescriptors(value as object);
+				});
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [bytes]);
+
+			try {
+				await adapter.withPinnedConnection(async (pinned) => {
+					await pinned.execute(query);
+					await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
+				});
+			} finally {
+				descriptors.mockRestore();
+			}
+
+			expect(inspectedBuffers).toHaveLength(0);
+			const replayBytes = vi.mocked(client.query).mock
+				.calls[2]?.[1] as unknown as unknown[];
+			expect(Buffer.isBuffer(replayBytes[0])).toBe(true);
+			expect(replayBytes[0]).not.toBe(bytes);
+			expect(replayBytes[0]).toEqual(bytes);
 		});
 
 		it('keeps named parameters shallow in pool and borrowed modes', async () => {

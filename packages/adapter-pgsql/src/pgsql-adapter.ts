@@ -305,7 +305,6 @@ type DbspScopeState = {
 	statementLock: DbspScopeStatementLock;
 	children: DbspScopeChildren;
 	closing: boolean;
-	rawClientExposed: boolean;
 	streamFailureRecovery: (() => Promise<void>) | undefined;
 };
 
@@ -351,6 +350,11 @@ type QueryResultMetadata = {
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
+
+// Raw aliases can outlive the adapter scope that exposed them. Keep this taint
+// on the physical connection so a later pool checkout cannot replay on a
+// session another caller may have changed.
+const rawClientExposures = new WeakSet<PoolClient>();
 const preparedStatementRegistries = new WeakMap<
 	Pool | PoolClient,
 	{
@@ -750,7 +754,6 @@ function cloneReplayableParameterValue(
 	if (Buffer.isBuffer(value)) {
 		if (Object.getPrototypeOf(value) !== Buffer.prototype)
 			throw new TypeError('custom Buffer is not replayable');
-		assertReplayableBuiltinProperties(value);
 		return Buffer.from(value);
 	}
 
@@ -793,17 +796,6 @@ function cloneReplayableParameterValue(
 		return copy;
 	} finally {
 		active.delete(value);
-	}
-}
-
-function assertReplayableBuiltinProperties(value: object): void {
-	const descriptors = Object.getOwnPropertyDescriptors(value);
-	for (const [key, descriptor] of Object.entries(descriptors)) {
-		if (
-			!('value' in descriptor) ||
-			(key === 'toPostgres' && typeof descriptor.value === 'function')
-		)
-			throw new TypeError('custom built-in parameter is not replayable');
 	}
 }
 
@@ -1167,7 +1159,6 @@ function createScopeState(
 			transactions: new Set(),
 		},
 		closing: false,
-		rawClientExposed: false,
 		streamFailureRecovery: undefined,
 	};
 }
@@ -2720,7 +2711,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	constructor(pool: Pool, options?: PgsqlPoolAdapterOptions);
 	constructor(client: PoolClient, options: PgsqlBorrowedClientAdapterOptions);
-	constructor(pool: undefined, options?: PgsqlCompileOnlyAdapterOptions);
+	constructor(pool?: undefined, options?: PgsqlCompileOnlyAdapterOptions);
 	constructor(
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
@@ -3262,8 +3253,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	getPoolInstance(): Pool | PoolClient {
 		const executor = this.requireConnection('getPoolInstance()');
-		if (isPoolClientLike(executor) && this.adapterManagedScopeIsLive()) {
-			this.scopeState!.rawClientExposed = true;
+		if (
+			isPoolClientLike(executor) &&
+			(this.adapterManagedTransaction || this.adapterManagedPinnedConnection)
+		) {
+			if (!this.adapterManagedScopeIsLive()) {
+				throw new Error(this.managedScopeEndedMessage());
+			}
+			rawClientExposures.add(executor);
 		}
 		return executor;
 	}
@@ -5411,13 +5408,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private releaseClient(client: PoolClient, error?: Error | boolean): void {
-		if (error === undefined && !hasPreparedStatementQuarantine(client)) {
+		if (
+			error === undefined &&
+			!hasPreparedStatementQuarantine(client) &&
+			!rawClientExposures.has(client)
+		) {
 			client.release();
 			return;
 		}
-		// A client-local fallback is only valid while the caller owns this exact
-		// physical connection. Pool-owned scopes must not return it as healthy.
-		client.release(error ?? true);
+		// A quarantined or externally aliased physical client must not return to
+		// the pool as healthy.
+		client.release(
+			error ?? new Error('dbsp released an externally exposed pool client'),
+		);
 	}
 
 	private async rollbackAndReleaseSavepoint(
@@ -6268,7 +6271,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			isPoolClientLike(executor) &&
 			this.adapterManagedPinnedConnection &&
 			this.adapterManagedScopeIsLive() &&
-			this.scopeState?.rawClientExposed === false
+			!rawClientExposures.has(executor)
 		);
 	}
 
@@ -6639,8 +6642,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								this.replayInvalidatedPlans,
 							) &&
 							parameterSnapshot !== undefined &&
-							ownsSerializedClientForPreparedStatementReplay &&
-							poolClientTransactionOpen(executor) === false;
+							poolClientTransactionOpen(executor) === false &&
+							// Entry-time ownership authorizes only the snapshot. Re-read
+							// it immediately before queueing an unnamed replay because
+							// getPoolInstance() can expose this client mid-flight.
+							this.ownsSerializedClientForPreparedStatementReplay(executor);
 					}
 				} catch {
 					// Quarantine classification cannot replace the query error.
