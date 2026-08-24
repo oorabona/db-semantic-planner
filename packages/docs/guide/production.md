@@ -168,8 +168,9 @@ protocol heuristics as prepared-statement infrastructure evidence. `0A000` from
 `RevalidateCachedQuery` and node-postgres's exact local duplicate-name collision
 keep their SQL-scoped rules. A `26000` from `FetchPreparedStatement` or `42P05`
 from `StorePreparedStatement` does so only when its canonical top-level `message`
-names the adapter's own admission; a localized, missing, nested, or mismatched name
-propagates without quarantine. These classifications do not prove that the outer
+names the adapter's own admission with its code-matched suffix; a localized, missing,
+nested, cross-paired, or mismatched name propagates without quarantine. These
+classifications do not prove that the outer
 statement has not executed: a function it invokes can perform work before a nested
 prepared-statement operation raises the same server error. dbsp propagates the
 original failure on a caller-borrowed client, even when its ReadyForQuery status is
@@ -185,8 +186,10 @@ the failed named call and the replay. Even there, it replays only when ReadyForQ
 says no transaction is open; an open or unknown transaction state never replays.
 For `26000`/`FetchPreparedStatement` and `42P05`/`StorePreparedStatement`, it
 replays and quarantines only when the canonical, top-level PostgreSQL `message`
-names dbsp's own admission name for that attempt. Localized, missing, nested, or
-mismatched names propagate without replay or quarantine. `0A000`/
+names dbsp's own admission name for that attempt with the code-matched suffix:
+`does not exist` for `26000`, `already exists` for `42P05`. Localized, missing,
+nested, cross-paired, or mismatched names propagate without replay or quarantine.
+`0A000`/
 `RevalidateCachedQuery` carries no statement identity, so it keeps its SQL-scoped
 quarantine and propagates by default. Set `replayInvalidatedPlans: true` only when
 you assert that your statements do not invoke functions performing effectful work
@@ -197,18 +200,21 @@ keeps its SQL-scoped quarantine rule. Every other error propagates.
 
 Replay snapshots only JSON-like value graphs (finite numbers, strings, booleans,
 `null`, arrays, plain or null-prototype objects) plus clean `Date` and `Buffer`
-instances. It excludes non-finite numbers, `undefined`, `bigint`, symbols,
-functions, proxies, cycles, sparse arrays, accessors, symbol keys, exotic
-prototypes, custom built-ins, and values with their own node-postgres `toPostgres`
-behavior.
+instances. It excludes non-finite numbers, `undefined`, `bigint`, symbol-valued
+parameters, functions, proxies, cycles, sparse arrays, accessors, symbol keys on
+plain objects, exotic prototypes, custom built-ins, and values with their own
+node-postgres `toPostgres` behavior. Serialization-irrelevant symbol metadata on
+arrays and Buffers is ignored.
 The snapshot detaches from later mutations to the supplied value graph, including
 its clean `Date` and `Buffer` values. It does not freeze built-in prototypes,
 timezone state, or node-postgres serialization configuration: those must remain
 stable until replay completes, and a process-global `toPostgres` or `toJSON`
 installed mid-flight is outside this guarantee. Each capture or replay copy is
 bounded independently to 64 Ki visited values, 16 MiB of UTF-8 string data, and
-16 MiB of Buffer data. Over budget or outside this domain, the named submission
-still proceeds with its shallow parameters, but transparent replay is declined.
+16 MiB of Buffer data. These budgets bound copied nodes and payload bytes;
+enumerating a plain object's existing property table is proportional to the
+caller's own object. Over budget or outside this domain, the named submission still
+proceeds with its shallow parameters, but transparent replay is declined.
 
 If the one permitted unnamed replay fails, dbsp throws the exported
 `PgsqlPreparedStatementReplayError`, rather than the replay error directly. Its
@@ -238,10 +244,12 @@ destroys it. dbsp-owned pinned, transaction, and scratch scopes do this themselv
 they never return a quarantined client to their pool as healthy. Replacing a borrowed
 client starts with no quarantine.
 
-Calling `getPoolInstance()` in a dbsp-managed scope exposes its raw physical client.
-That access permanently taints the connection, disables prepared-statement replay
-for it, and makes dbsp destroy it when the scope releases. Expect pool churn and do
-not expect session state on that connection to survive the scope.
+Calling `getPoolInstance()` in a pool-owned dbsp-managed scope exposes its raw
+physical client. That access permanently taints the connection, disables
+prepared-statement replay for it, and makes dbsp destroy it when the scope releases.
+Expect pool churn and do not expect session state on that connection to survive the
+scope. A borrowed client remains caller-owned: dbsp never releases it, and the
+caller decides its fate after raw exposure.
 
 ---
 

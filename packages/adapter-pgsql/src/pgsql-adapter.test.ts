@@ -239,6 +239,47 @@ describe('PgsqlAdapter', () => {
 				} as any),
 			).toThrow('replayInvalidatedPlans: expected a boolean.');
 		});
+
+		it.each([
+			{
+				label: 'throwing descriptor trap',
+				createOptions: () =>
+					new Proxy(
+						{},
+						{
+							getOwnPropertyDescriptor() {
+								throw new Error('descriptor trap escaped');
+							},
+						},
+					),
+			},
+			{
+				label: 'revoked Proxy',
+				createOptions: () => {
+					const proxy = Proxy.revocable({}, {});
+					proxy.revoke();
+					return proxy.proxy;
+				},
+			},
+			{
+				label: 'accessor descriptor',
+				createOptions: () =>
+					Object.defineProperty({}, 'replayInvalidatedPlans', {
+						enumerable: true,
+						get() {
+							throw new Error('accessor must not be read');
+						},
+					}),
+			},
+		])('refuses a $label replayInvalidatedPlans option with the named validation error', ({
+			createOptions,
+		}) => {
+			const pool = createMockPool();
+
+			expect(() => createPgsqlAdapter(pool, createOptions() as any)).toThrow(
+				'replayInvalidatedPlans: expected a boolean.',
+			);
+		});
 	});
 
 	describe('createPgsqlAdapter', () => {
@@ -1066,6 +1107,58 @@ describe('PgsqlAdapter', () => {
 			});
 		});
 
+		it.each([
+			{
+				label: '26000/FetchPreparedStatement with duplicate suffix',
+				error: (sql: string) => ({
+					code: '26000',
+					severity: 'ERROR',
+					routine: 'FetchPreparedStatement',
+					message: `prepared statement "${derivePreparedStatementName(sql)}" already exists`,
+				}),
+			},
+			{
+				label: '42P05/StorePreparedStatement with missing suffix',
+				error: (sql: string) => ({
+					code: '42P05',
+					severity: 'ERROR',
+					routine: 'StorePreparedStatement',
+					message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+				}),
+			},
+		])('propagates a cross-paired $label without replay or quarantine', async ({
+			error: createError,
+		}) => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = createError(sql);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true, true);
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [7], true, true),
+			).rejects.toBe(error);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true, true);
+			await (adapter as any).issueConnectionQuery(client, sql, [7], true, true);
+
+			expect(client.query).toHaveBeenNthCalledWith(4, {
+				name: derivePreparedStatementName(sql),
+				text: sql,
+				values: [7],
+			});
+		});
+
 		it('refuses a reserved-looking nested diagnostic name outside the server message', async () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
@@ -1232,7 +1325,7 @@ describe('PgsqlAdapter', () => {
 			}
 		});
 
-		it('replays a clean Date but declines a Date with own keys', async () => {
+		it('replays a clean Date', async () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
 				_txStatus: 'I',
@@ -1261,6 +1354,127 @@ describe('PgsqlAdapter', () => {
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [
 				new Date('2026-08-24T12:00:00.000Z'),
 			]);
+		});
+
+		it('declines a Date with a node-postgres hook shadowed without enumerating its keys', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE created_at = $1';
+			const value = Object.assign(new Date('2026-08-24T12:00:00.000Z'), {
+				getFullYear: () => 1999,
+			});
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const ownKeys = vi
+				.spyOn(Reflect, 'ownKeys')
+				.mockImplementation((target) => {
+					if (target === value)
+						throw new Error('Date keys must not be enumerated');
+					return [
+						...Object.getOwnPropertyNames(target),
+						...Object.getOwnPropertySymbols(target),
+					];
+				});
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+
+			try {
+				await expect(
+					adapter.withPinnedConnection(async (pinned) => {
+						await pinned.execute(testQuery(sql, [value]));
+						await pinned.execute(testQuery(sql, [value]));
+					}),
+				).rejects.toBe(error);
+			} finally {
+				ownKeys.mockRestore();
+			}
+			expect(client.query).toHaveBeenCalledTimes(2);
+		});
+
+		it('replays arrays and Buffers with serialization-irrelevant symbol metadata', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE payload = $1';
+			const metadata = Symbol('metadata');
+			const array = Object.assign([7], { [metadata]: 'ignored' });
+			const bytes = Object.assign(Buffer.from([1, 2, 3]), {
+				[metadata]: 'ignored',
+			});
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+
+			await adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(testQuery(sql, [array, bytes]));
+				await expect(
+					pinned.execute(testQuery(sql, [array, bytes])),
+				).resolves.toEqual([{ id: 7 }]);
+			});
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [
+				[7],
+				Buffer.from([1, 2, 3]),
+			]);
+		});
+
+		it('refuses an empty sparse array at its declared node limit without materializing its property table', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE payload = $1';
+			const value = new Array(64 * 1024);
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const descriptors = vi.spyOn(Object, 'getOwnPropertyDescriptors');
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+
+			try {
+				await expect(
+					adapter.withPinnedConnection(async (pinned) => {
+						await pinned.execute(testQuery(sql, [value]));
+						await pinned.execute(testQuery(sql, [value]));
+					}),
+				).rejects.toBe(error);
+			} finally {
+				descriptors.mockRestore();
+			}
+			expect(client.query).toHaveBeenCalledTimes(2);
+			expect(descriptors).not.toHaveBeenCalledWith(value);
 		});
 
 		it('refuses a Proxy parameter before its traps run', async () => {
@@ -1545,6 +1759,11 @@ describe('PgsqlAdapter', () => {
 				overBudget: () => ['x'.repeat(16 * 1024 * 1024 + 1)],
 			},
 			{
+				label: 'object-key-string-byte',
+				atBudget: () => [{ ['x'.repeat(16 * 1024 * 1024)]: null }],
+				overBudget: () => [{ ['x'.repeat(16 * 1024 * 1024 + 1)]: null }],
+			},
+			{
 				label: 'Buffer-byte',
 				atBudget: () => [Buffer.alloc(16 * 1024 * 1024, 7)],
 				overBudget: () => [Buffer.alloc(16 * 1024 * 1024 + 1, 7)],
@@ -1727,6 +1946,14 @@ describe('PgsqlAdapter', () => {
 		});
 
 		it.each([
+			{
+				label: 'symbol-valued parameter',
+				value: Symbol('not replayable'),
+			},
+			{
+				label: 'plain object symbol key',
+				value: Object.assign({}, { [Symbol('metadata')]: true }),
+			},
 			{
 				label: 'shadowed Date',
 				value: Object.assign(new Date('2026-08-24T12:00:00.000Z'), {

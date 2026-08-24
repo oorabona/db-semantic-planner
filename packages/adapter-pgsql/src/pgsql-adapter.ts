@@ -650,16 +650,30 @@ function isVerifiedPreparedStatementInfrastructureError(
  * code/routine pair alone cannot authorize replaying or quarantining that
  * outer statement. Do not consult diagnostic text from nested execution.
  *
- * This recognizes canonical/C-locale PostgreSQL messages only. Localized
- * deployments propagate 26000/42P05 failures without replay or quarantine.
+ * This recognizes canonical/C-locale PostgreSQL messages only, and correlates
+ * `does not exist` to 26000 and `already exists` to 42P05. Localized or
+ * cross-paired deployments propagate 26000/42P05 failures without replay or
+ * quarantine.
  */
 function reportedPreparedStatementName(error: unknown): string | undefined {
 	if (typeof error !== 'object' || error === null) return undefined;
-	const { message } = error as { readonly message?: unknown };
+	const { code, message } = error as {
+		readonly code?: unknown;
+		readonly message?: unknown;
+	};
 	if (typeof message !== 'string') return undefined;
-	return /^prepared statement "([^"]+)" (?:does not exist|already exists)$/.exec(
-		message,
-	)?.[1];
+	const match =
+		/^prepared statement "([^"]+)" (does not exist|already exists)$/.exec(
+			message,
+		);
+	if (match === null) return undefined;
+	const [, name, suffix] = match;
+	if (
+		(code === '26000' && suffix === 'does not exist') ||
+		(code === '42P05' && suffix === 'already exists')
+	)
+		return name;
+	return undefined;
 }
 
 /**
@@ -713,6 +727,27 @@ type ReplayableParameterSnapshot = unknown[];
 const REPLAY_SNAPSHOT_MAX_VISITED_NODES = 64 * 1024;
 const REPLAY_SNAPSHOT_MAX_STRING_BYTES = 16 * 1024 * 1024;
 const REPLAY_SNAPSHOT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+// These are the only own Date properties node-postgres can consult while it
+// serializes a Date. Checking this fixed list avoids enumerating caller-owned
+// Date metadata.
+const NODE_POSTGRES_DATE_SERIALIZATION_HOOKS = [
+	'getTimezoneOffset',
+	'getFullYear',
+	'getMonth',
+	'getDate',
+	'getHours',
+	'getMinutes',
+	'getSeconds',
+	'getMilliseconds',
+	'getUTCFullYear',
+	'getUTCMonth',
+	'getUTCDate',
+	'getUTCHours',
+	'getUTCMinutes',
+	'getUTCSeconds',
+	'getUTCMilliseconds',
+] as const;
 
 type ReplayableParameterSnapshotBudget = {
 	visitedNodes: number;
@@ -814,8 +849,10 @@ function cloneReplayableParameterValue(
 	if (value instanceof Date) {
 		if (Object.getPrototypeOf(value) !== Date.prototype)
 			throw new TypeError('custom Date is not replayable');
-		if (Reflect.ownKeys(value).length !== 0)
-			throw new TypeError('custom Date is not replayable');
+		for (const hook of NODE_POSTGRES_DATE_SERIALIZATION_HOOKS) {
+			if (Object.getOwnPropertyDescriptor(value, hook) !== undefined)
+				throw new TypeError('custom Date is not replayable');
+		}
 		return new Date(Date.prototype.getTime.call(value));
 	}
 	if (Buffer.isBuffer(value)) {
@@ -861,6 +898,7 @@ function cloneReplayableParameterValue(
 		for (const [key, descriptor] of Object.entries(descriptors)) {
 			if (!descriptor.enumerable || !('value' in descriptor))
 				throw new TypeError('non-JSON parameter property is not replayable');
+			consumeReplayableParameterSnapshotString(key, budget);
 			Object.defineProperty(copy, key, {
 				value: cloneReplayableParameterValue(
 					descriptor.value,
@@ -880,19 +918,14 @@ function cloneReplayableParameterValue(
 }
 
 function assertReplayableArrayProperties(value: unknown[]): void {
-	const descriptors = Object.getOwnPropertyDescriptors(value);
-	for (const [key, descriptor] of Object.entries(descriptors)) {
-		if (key === 'length') continue;
+	for (let index = 0; index < value.length; index += 1) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
 		if (
-			!/^0$|^[1-9][0-9]*$/.test(key) ||
+			descriptor === undefined ||
 			!descriptor.enumerable ||
 			!('value' in descriptor)
 		)
 			throw new TypeError('non-JSON array parameter is not replayable');
-	}
-	for (let index = 0; index < value.length; index += 1) {
-		if (!Object.hasOwn(value, index))
-			throw new TypeError('sparse array parameter is not replayable');
 	}
 }
 
@@ -2496,10 +2529,12 @@ export type PgsqlPoolAdapterOptions =
 			 *
 			 * Replay snapshots JSON-like values (finite numbers, strings, booleans,
 			 * `null`, arrays, plain or null-prototype objects) and clean `Date`/`Buffer`
-			 * instances. It excludes non-finite numbers, `undefined`, `bigint`, symbols,
-			 * functions, proxies, cycles, sparse arrays, accessors, symbol keys, exotic
-			 * prototypes, custom built-ins, and values with their own node-postgres
+			 * instances. It excludes non-finite numbers, `undefined`, `bigint`, functions,
+			 * proxies, cycles, sparse arrays, accessors, symbol-valued
+			 * parameters, symbol keys on plain objects, exotic prototypes, custom built-ins,
+			 * and values with their own node-postgres
 			 * `toPostgres` behavior.
+			 * Serialization-irrelevant symbol metadata on arrays and Buffers is ignored.
 			 * The detached snapshot covers later mutations to the supplied value graph,
 			 * not built-in prototypes, timezone state, or node-postgres serialization
 			 * configuration; a process-global `toPostgres` or `toJSON` installed while
@@ -2507,6 +2542,8 @@ export type PgsqlPoolAdapterOptions =
 			 * is independently limited to 64 Ki visited values, 16 MiB of UTF-8 strings,
 			 * and 16 MiB of Buffer data. An ineligible or over-budget value still receives
 			 * the initial named submission, but disables transparent replay.
+			 * These budgets bound copied nodes and payload bytes; enumerating a plain
+			 * object's existing property table is proportional to the caller's own object.
 			 *
 			 * Replay needs the adapter-owned serialized physical client available from a
 			 * pool; it is therefore not supported by borrowed or compile-only adapters.
@@ -2633,6 +2670,16 @@ function readReplayInvalidatedPlansOption(
 ): ReplayInvalidatedPlansOption {
 	if (typeof options !== 'object' || options === null)
 		return { present: false };
+	if (isProxy(options)) {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
+	try {
+		// A revoked Proxy is no longer reported by isProxy(), but this check still
+		// precedes descriptor access and lets the option reader keep its own error.
+		'replayInvalidatedPlans' in options;
+	} catch {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
 	const descriptor = Object.getOwnPropertyDescriptor(
 		options,
 		'replayInvalidatedPlans',
@@ -3364,10 +3411,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Get the underlying pg Pool or borrowed PoolClient instance.
 	 *
-	 * Exposing raw access from a dbsp-managed scope permanently taints that physical
-	 * client: external callers can queue commands outside dbsp's statement lock, so
-	 * replay is disabled and dbsp destroys the client at scope release. Expect pool
-	 * churn; session state on the exposed connection does not survive that release.
+	 * Exposing raw access from a pool-owned dbsp-managed scope permanently taints that
+	 * physical client: external callers can queue commands outside dbsp's statement
+	 * lock, so replay is disabled and dbsp destroys the client at scope release.
+	 * Expect pool churn; session state on that exposed connection does not survive the
+	 * release. A borrowed client remains caller-owned: dbsp never releases it, and the
+	 * caller decides its fate after raw exposure.
 	 */
 	getPoolInstance(): Pool | PoolClient {
 		const executor = this.requireConnection('getPoolInstance()');
@@ -7115,6 +7164,9 @@ export function createPgsqlAdapter<DB = unknown>(
 	connection: Pool | PoolClient,
 	options?: PgsqlPoolAdapterOptions | PgsqlBorrowedClientAdapterOptions,
 ): PgsqlAdapter<DB> {
+	// Validate this descriptor-backed option before the ownership guard performs
+	// any `in` checks on caller-owned options.
+	readReplayInvalidatedPlansOption(options);
 	if (isPoolClientLike(connection)) {
 		if (!hasBorrowedClientOption(options)) {
 			throw new Error(
