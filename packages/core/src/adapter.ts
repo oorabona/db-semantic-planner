@@ -72,8 +72,12 @@ export function supportsExecution(
 	adapter: BaseAdapter,
 ): adapter is ExecutingAdapter {
 	const connectionProvider = adapter as BaseAdapter & {
+		executionAvailable?: () => boolean;
 		getPoolInstance?: () => unknown;
 	};
+	if (typeof connectionProvider.executionAvailable === 'function') {
+		return connectionProvider.executionAvailable();
+	}
 	if (typeof connectionProvider.getPoolInstance === 'function') {
 		try {
 			connectionProvider.getPoolInstance();

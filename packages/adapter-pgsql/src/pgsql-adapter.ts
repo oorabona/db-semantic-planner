@@ -3245,6 +3245,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			: PGSQL_CONNECTION_UNAVAILABLE;
 	}
 
+	/** Side-effect-free execution availability for core feature detection. */
+	executionAvailable(): boolean {
+		return (this.client ?? this.pool) !== undefined;
+	}
+
 	/** PostgreSQL dialect capabilities for planner strategy selection */
 	get dialectCapabilities(): DialectCapabilities {
 		return POSTGRESQL_CAPABILITIES;

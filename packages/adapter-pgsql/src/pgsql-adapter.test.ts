@@ -4,7 +4,7 @@
  * Tests adapter interface implementation without database connection.
  */
 
-import type { PlanReport } from '@dbsp/core';
+import { type PlanReport, supportsExecution } from '@dbsp/core';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
 import { describe, expect, expectTypeOf, it, vi } from 'vitest';
@@ -292,6 +292,24 @@ describe('PgsqlAdapter', () => {
 			expectTypeOf(adapter.getPoolInstance()).toEqualTypeOf<
 				Pool | PoolClient
 			>();
+		});
+	});
+
+	describe('executionAvailable', () => {
+		it('is true for pool and pinned adapters, and false for compile-only adapters', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const adapter = createPgsqlAdapter(pool);
+
+			expect(adapter.executionAvailable()).toBe(true);
+			await adapter.withPinnedConnection(async (pinned) => {
+				expect((pinned as PgsqlAdapter).executionAvailable()).toBe(true);
+			});
+			expect(createPgsqlCompileOnlyAdapter().executionAvailable()).toBe(false);
 		});
 	});
 
@@ -1301,6 +1319,41 @@ describe('PgsqlAdapter', () => {
 				}),
 			).rejects.toBe(error);
 			expect(client.query).toHaveBeenCalledTimes(2);
+		});
+
+		it('keeps a pinned scope replay-eligible when supportsExecution checks it', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [7]);
+
+			await adapter.withPinnedConnection(async (pinned) => {
+				expect(supportsExecution(pinned)).toBe(true);
+			});
+			expect(vi.mocked(client.release).mock.calls[0]).toEqual([]);
+
+			await adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(query);
+				await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
+			});
+
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
 		});
 
 		it('declines replay when the physical client was exposed by an earlier pinned scope', async () => {

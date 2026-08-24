@@ -491,6 +491,13 @@ export interface BaseAdapter {
 	readonly connectionAvailability?: ConnectionAvailability;
 
 	/**
+	 * Optional side-effect-free execution availability check.
+	 *
+	 * When present, core uses this instead of probing a raw connection handle.
+	 */
+	executionAvailable?(): boolean;
+
+	/**
 	 * Whether this adapter instance is scoped inside a transaction.
 	 * Compile-only adapters and adapters without an active transaction report false.
 	 */
