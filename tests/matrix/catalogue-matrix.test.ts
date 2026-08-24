@@ -37,26 +37,35 @@ const statementTimeoutMillis = 10_000;
 const hookTimeoutMillis = 60_000;
 const testTimeoutMillis = 150_000;
 
-const tableAddress = {
-	scope: 'schema' as const,
-	engine: 'postgresql' as const,
-	database: 'matrix',
-	schema,
-	kind: 'table' as const,
-	name: table,
-};
-const indexAddress = {
-	...tableAddress,
-	kind: 'index' as const,
-	name: index,
-	parent: tableAddress,
-};
-const checkAddress = {
-	...tableAddress,
-	kind: 'constraint' as const,
-	name: check,
-	parent: tableAddress,
-};
+let matrixDatabaseName: string | undefined;
+
+function matrixAddresses() {
+	if (matrixDatabaseName === undefined)
+		throw new Error('catalogue matrix database name is not ready');
+	const tableAddress = {
+		scope: 'schema' as const,
+		engine: 'postgresql' as const,
+		database: matrixDatabaseName,
+		schema,
+		kind: 'table' as const,
+		name: table,
+	};
+	return {
+		tableAddress,
+		indexAddress: {
+			...tableAddress,
+			kind: 'index' as const,
+			name: index,
+			parent: tableAddress,
+		},
+		checkAddress: {
+			...tableAddress,
+			kind: 'constraint' as const,
+			name: check,
+			parent: tableAddress,
+		},
+	};
+}
 
 // The longest proof has 13 bounded statements (feature probe + 12 scratch
 // statements) and two 5 s checkouts: 13 * 10 s + 2 * 5 s = 140 s < 150 s.
@@ -256,7 +265,17 @@ matrixDescribe(matrixSuiteName, () => {
 		});
 		await matrixPhase('connect', async () => {
 			const client = await livePool().connect();
-			client.release();
+			try {
+				const result = await client.query<{ database_name: unknown }>(
+					'SELECT pg_catalog.current_database() AS database_name',
+				);
+				const databaseName = result.rows[0]?.database_name;
+				if (typeof databaseName !== 'string' || databaseName.length === 0)
+					throw new Error('current_database() did not return a database name');
+				matrixDatabaseName = databaseName;
+			} finally {
+				client.release();
+			}
 		});
 		ownedSchema = await matrixPhase('create schema', () =>
 			createOwnedMatrixSchema(livePool(), schema),
@@ -329,7 +348,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedTablePostcondition({
 						session,
 						postcondition: tablePostcondition,
-						address: tableAddress,
+						address: matrixAddresses().tableAddress,
 					}),
 			);
 
@@ -346,7 +365,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedIndexPostcondition({
 						session,
 						postcondition: indexPostcondition,
-						address: indexAddress,
+						address: matrixAddresses().indexAddress,
 					}),
 			);
 			expect(verified.kind).toBe('index');
@@ -362,7 +381,7 @@ matrixDescribe(matrixSuiteName, () => {
 					verifyGeneratedCheckPostcondition({
 						session,
 						postcondition: checkPostcondition,
-						address: checkAddress,
+						address: matrixAddresses().checkAddress,
 					}),
 			);
 			expect(verified.kind).toBe('constraint');
@@ -379,7 +398,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedTablePostcondition({
 							session,
 							postcondition: driftedTablePostcondition,
-							address: tableAddress,
+							address: matrixAddresses().tableAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -396,7 +415,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedIndexPostcondition({
 							session,
 							postcondition: driftedIndexPostcondition,
-							address: indexAddress,
+							address: matrixAddresses().indexAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -413,7 +432,7 @@ matrixDescribe(matrixSuiteName, () => {
 						verifyGeneratedCheckPostcondition({
 							session,
 							postcondition: driftedCheckPostcondition,
-							address: checkAddress,
+							address: matrixAddresses().checkAddress,
 						}),
 				),
 			).rejects.toThrow('postcondition differs');
@@ -424,8 +443,8 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent index feature and refuses a present NULL',
 		async (signal) => {
 			const indexLiveProjection = (sql: string) =>
-				sql.includes('WHERE namespace.nspname = $1') &&
-				sql.includes('index_relation.relname = $3');
+				sql.includes('WHERE relation.oid = $1::pg_catalog.oid') &&
+				sql.includes('index_relation.oid = $2::pg_catalog.oid');
 			const exists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_index', 'indnullsnotdistinct'),
 			);
@@ -433,21 +452,21 @@ matrixDescribe(matrixSuiteName, () => {
 				expect(exists).toBe(false);
 				return;
 			}
+			const fault = sessionWithPresentNull(
+				destroyMatrixClientOnAbort(livePool(), signal),
+				'nulls_not_distinct',
+				indexLiveProjection,
+			);
 			await expect(
-				withGeneratedPostconditionSession(
-					sessionWithPresentNull(
-						destroyMatrixClientOnAbort(livePool(), signal),
-						'nulls_not_distinct',
-						indexLiveProjection,
-					),
-					(session) =>
-						verifyGeneratedIndexPostcondition({
-							session,
-							postcondition: indexPostcondition,
-							address: indexAddress,
-						}),
+				withGeneratedPostconditionSession(fault, (session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						address: matrixAddresses().indexAddress,
+					}),
 				),
 			).rejects.toThrow('could not read a complete projection');
+			fault.assertFiredOnce();
 		},
 	);
 
@@ -455,8 +474,8 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent index key-count feature and refuses a present NULL',
 		async (signal) => {
 			const indexLiveProjection = (sql: string) =>
-				sql.includes('WHERE namespace.nspname = $1') &&
-				sql.includes('index_relation.relname = $3');
+				sql.includes('WHERE relation.oid = $1::pg_catalog.oid') &&
+				sql.includes('index_relation.oid = $2::pg_catalog.oid');
 			const exists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_index', 'indnkeyatts'),
 			);
@@ -464,21 +483,21 @@ matrixDescribe(matrixSuiteName, () => {
 				expect(exists).toBe(false);
 				return;
 			}
+			const fault = sessionWithPresentNull(
+				destroyMatrixClientOnAbort(livePool(), signal),
+				'key_count',
+				indexLiveProjection,
+			);
 			await expect(
-				withGeneratedPostconditionSession(
-					sessionWithPresentNull(
-						destroyMatrixClientOnAbort(livePool(), signal),
-						'key_count',
-						indexLiveProjection,
-					),
-					(session) =>
-						verifyGeneratedIndexPostcondition({
-							session,
-							postcondition: indexPostcondition,
-							address: indexAddress,
-						}),
+				withGeneratedPostconditionSession(fault, (session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: indexPostcondition,
+						address: matrixAddresses().indexAddress,
+					}),
 				),
 			).rejects.toThrow('could not read a complete projection');
+			fault.assertFiredOnce();
 		},
 	);
 
@@ -486,8 +505,7 @@ matrixDescribe(matrixSuiteName, () => {
 		'defaults an absent CHECK enforcement feature and refuses a present NULL',
 		async (signal) => {
 			const checkLiveProjection = (sql: string) =>
-				sql.includes('WHERE namespace.nspname = $1') &&
-				sql.includes("constraint_item.contype = 'c'");
+				sql.includes('WHERE constraint_item.oid = $1::pg_catalog.oid');
 			const enforcedExists = await withMatrixClient(signal, (client) =>
 				catalogueColumnExistsWith(client, 'pg_constraint', 'conenforced'),
 			);
@@ -495,21 +513,21 @@ matrixDescribe(matrixSuiteName, () => {
 				expect(enforcedExists).toBe(false);
 				return;
 			}
+			const fault = sessionWithPresentNull(
+				destroyMatrixClientOnAbort(livePool(), signal),
+				'enforced',
+				checkLiveProjection,
+			);
 			await expect(
-				withGeneratedPostconditionSession(
-					sessionWithPresentNull(
-						destroyMatrixClientOnAbort(livePool(), signal),
-						'enforced',
-						checkLiveProjection,
-					),
-					(session) =>
-						verifyGeneratedCheckPostcondition({
-							session,
-							postcondition: checkPostcondition,
-							address: checkAddress,
-						}),
+				withGeneratedPostconditionSession(fault, (session) =>
+					verifyGeneratedCheckPostcondition({
+						session,
+						postcondition: checkPostcondition,
+						address: matrixAddresses().checkAddress,
+					}),
 				),
 			).rejects.toThrow('could not read a complete projection');
+			fault.assertFiredOnce();
 		},
 	);
 });

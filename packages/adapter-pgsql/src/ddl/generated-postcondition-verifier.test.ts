@@ -5,14 +5,20 @@ import {
 	GeneratedPostconditionProofInFlightError,
 	GeneratedPostconditionReplanRequiredError,
 	type GeneratedPostconditionSession,
+	GeneratedPostconditionSessionDeactivatedError,
+	GeneratedPostconditionWorkInFlightError,
 	mintGeneratedPostconditionSession,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedConstraintPostcondition,
+	verifyGeneratedEnumPostcondition,
+	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
+	withPinnedGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 
 const v3Binding = {
@@ -121,6 +127,126 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 		parent_id: 0,
 		...overrides,
 	};
+}
+
+const canonical = (sql: string) => ({ canonicalFormVersion: 1 as const, sql });
+const noDefault = {
+	defaultKind: 'none' as const,
+	hasDefault: false,
+	identity: null,
+};
+const generatedSequence = {
+	defaultKind: 'generated-sequence' as const,
+	hasDefault: true,
+	identity: null,
+};
+const authoredDefault = (sql: string) => ({
+	defaultKind: 'authored' as const,
+	hasDefault: true,
+	identity: null,
+	defaultExpression: canonical(sql),
+});
+const v3Table = (columns: readonly Record<string, unknown>[]) => ({
+	postconditionVersion: 3 as const,
+	targetBinding: v3Binding,
+	declaration: {
+		canonicalFormVersion: 1 as const,
+		kind: 'table' as const,
+		columns,
+	},
+});
+const v3Column = (column: Record<string, unknown>) => ({
+	postconditionVersion: 3 as const,
+	targetBinding: v3Binding,
+	declaration: {
+		canonicalFormVersion: 1 as const,
+		kind: 'column' as const,
+		column,
+	},
+});
+const v3Index = (index: Record<string, unknown> = {}) => ({
+	postconditionVersion: 3 as const,
+	targetBinding: v3Binding,
+	declaration: {
+		canonicalFormVersion: 1 as const,
+		kind: 'index' as const,
+		index: {
+			method: 'btree',
+			unique: false,
+			valid: true,
+			ready: true,
+			live: true,
+			columns: ['UserID'],
+			nullsNotDistinct: false,
+			...index,
+		},
+	},
+});
+const v3Check = (sql = "CHECK (status = 'Active')", notValid = false) => ({
+	postconditionVersion: 3 as const,
+	targetBinding: v3Binding,
+	declaration: {
+		canonicalFormVersion: 1 as const,
+		kind: 'check' as const,
+		check: { expression: canonical(sql), notValid },
+	},
+});
+
+/** A successful v3 binding followed by caller-controlled catalogue rows. */
+function successfulSession(query: GeneratedPostconditionSession['query']) {
+	return testSession(async (sql, params) =>
+		sql.includes('pg_catalog.current_database()')
+			? { rows: [{}] }
+			: query(sql, params),
+	);
+}
+
+function indexSession(input: {
+	readonly live?: Record<string, unknown>;
+	readonly staged?: Record<string, unknown>;
+}) {
+	const query = vi.fn(async (sql: string) => {
+		if (sql.includes('has_database_privilege'))
+			return { rows: [{ has_temp_privilege: true }] };
+		if (sql.includes('WHERE relation.oid = $1::pg_catalog.regclass'))
+			return { rows: [indexRow(input.staged)] };
+		if (sql.includes('WHERE relation.oid = $1::pg_catalog.oid'))
+			return { rows: [indexRow(input.live)] };
+		return { rows: [] };
+	});
+	return { query, session: successfulSession(query as never) };
+}
+
+function tableSession(
+	rows: readonly Record<string, unknown>[],
+	staged: Record<string, string> = {},
+) {
+	return successfulSession(async (sql, params) => {
+		if (sql.includes('has_database_privilege'))
+			return { rows: [{ has_temp_privilege: true }] };
+		if (sql.includes('attribute.attname = ANY($2::text[])')) {
+			const names = params?.[1] as readonly string[];
+			return {
+				rows: names.flatMap((name) =>
+					staged[name] === undefined
+						? []
+						: [{ column_name: name, column_default: staged[name] }],
+				),
+			};
+		}
+		return {
+			rows: rows.map((row) => ({
+				relation_kind: 'r',
+				column_default: null,
+				generated_sequence_default: String(row.column_default).startsWith(
+					"nextval('",
+				),
+				collation_name: null,
+				identity_kind: '',
+				...row,
+			})),
+		};
+	});
 }
 
 describe('generated postcondition verifier', () => {
@@ -931,5 +1057,917 @@ describe('generated postcondition verifier', () => {
 			found: 'index tenant.audit_accounts.accounts_user_id_idx',
 		});
 		expect(query).toHaveBeenCalledTimes(1);
+	});
+
+	// Restored v3 ports of the session and structural guarantees that used to be
+	// covered only by the removed v2 suite.  The declarations are deliberately
+	// address-free; every fixture crosses the v3 binding resolver first.
+	it.each([
+		'public checkout',
+		'pinned protocol',
+	] as const)('deactivates a retained capability after the %s bracket', async (bracket) => {
+		let retained: GeneratedPostconditionSession | undefined;
+		const query = vi.fn(async () => ({ rows: [] }));
+		const release = vi.fn();
+		if (bracket === 'public checkout')
+			await withGeneratedPostconditionSession(
+				{ connect: async () => ({ query, release }) },
+				async (session) => {
+					retained = session;
+				},
+			);
+		else
+			await withPinnedGeneratedPostconditionSession(
+				{ query },
+				async (session) => {
+					retained = session;
+				},
+			);
+		if (!retained) throw new Error('expected retained capability');
+		await expect(retained.query('SELECT 1')).rejects.toBeInstanceOf(
+			GeneratedPostconditionSessionDeactivatedError,
+		);
+		if (bracket === 'public checkout') expect(release).toHaveBeenCalledWith();
+	});
+
+	it('refuses overlapping proofs and both successful brackets with work in flight', async () => {
+		const session = mintGeneratedPostconditionSession({
+			query: async () => ({ rows: [] }),
+		});
+		await expect(
+			withGeneratedPostconditionProof(session, async () =>
+				withGeneratedPostconditionProof(session, async () => undefined),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
+		for (const pinned of [false, true]) {
+			let allow!: () => void;
+			const started = new Promise<void>((resolve) => {
+				allow = resolve;
+			});
+			let release!: () => void;
+			const done = new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			const query = vi.fn(async () => {
+				allow();
+				await done;
+				return { rows: [] };
+			});
+			const work = async (capability: GeneratedPostconditionSession) => {
+				void capability.query('SELECT 1');
+				await started;
+			};
+			const result = pinned
+				? withPinnedGeneratedPostconditionSession({ query }, work)
+				: withGeneratedPostconditionSession(
+						{ connect: async () => ({ query, release: vi.fn() }) },
+						work,
+					);
+			await expect(result).rejects.toBeInstanceOf(
+				GeneratedPostconditionWorkInFlightError,
+			);
+			release();
+		}
+	});
+
+	it('keeps clean v3 failures reusable but evicts contaminated and release-error sessions', async () => {
+		const cleanRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: cleanRelease }) },
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: v3Index({ ordering: 'DESC' }),
+						address: indexAddress,
+					}),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(cleanRelease).toHaveBeenCalledWith();
+
+		const dirtyRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(async () => ({ rows: [] })),
+						release: dirtyRelease,
+					}),
+				},
+				async (session) => {
+					await session.query('SET ROLE verifier_test');
+					return verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: v3Index({ ordering: 'DESC' }),
+						address: indexAddress,
+					});
+				},
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(dirtyRelease).toHaveBeenCalledWith(expect.any(Error));
+
+		const proofFailure = new Error('proof failure');
+		const releaseFailure = new Error('release failure');
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(),
+						release: async () => {
+							throw releaseFailure;
+						},
+					}),
+				},
+				async () => {
+					throw proofFailure;
+				},
+			),
+		).rejects.toSatisfy(
+			(error: unknown) =>
+				error instanceof AggregateError &&
+				error.errors.includes(proofFailure) &&
+				error.errors.includes(releaseFailure),
+		);
+	});
+
+	it('covers falsy, previous-checkout, scratch-mismatch, and cleanup eviction branches', async () => {
+		const falsyRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: falsyRelease }) },
+				async (session) => {
+					await session.query('BEGIN');
+					throw undefined;
+				},
+			),
+		).rejects.toBeUndefined();
+		expect(falsyRelease).toHaveBeenCalledWith(expect.any(Error));
+
+		let marked: unknown;
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: vi.fn() }) },
+				async (session) => {
+					try {
+						return await verifyGeneratedIndexPostcondition({
+							session,
+							postcondition: v3Index({ ordering: 'DESC' }),
+							address: indexAddress,
+						});
+					} catch (error) {
+						marked = error;
+						throw error;
+					}
+				},
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		const laterRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release: laterRelease }) },
+				async () => {
+					throw marked;
+				},
+			),
+		).rejects.toBe(marked);
+		expect(laterRelease).toHaveBeenCalledWith(marked);
+
+		const mismatchQuery = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_catalog.current_database()'))
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'i',
+							parent_relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							table_name: 'accounts',
+						},
+					],
+				};
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('pg_catalog.regclass'))
+				return { rows: [indexRow({ key_columns: ['other'] })] };
+			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		const cleanScratchRelease = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: mismatchQuery,
+						release: cleanScratchRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: v3Index(),
+						address: indexAddress,
+					}),
+			),
+		).rejects.toThrow('postcondition differs');
+		expect(cleanScratchRelease).toHaveBeenCalledWith();
+
+		const cleanupRelease = vi.fn();
+		mismatchQuery.mockImplementation(async (sql: string) => {
+			if (sql.startsWith('ROLLBACK TO SAVEPOINT'))
+				throw new Error('rollback failed');
+			if (sql.includes('pg_catalog.current_database()'))
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'i',
+							parent_relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							table_name: 'accounts',
+						},
+					],
+				};
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('pg_catalog.regclass'))
+				return { rows: [indexRow({ key_columns: ['other'] })] };
+			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: mismatchQuery,
+						release: cleanupRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedIndexPostcondition({
+						session,
+						postcondition: v3Index(),
+						address: indexAddress,
+					}),
+			),
+		).rejects.toThrow('scratch cleanup failed');
+		expect(cleanupRelease).toHaveBeenCalledWith(expect.any(Error));
+	});
+
+	it('sets standalone lock timeout and preserves an enclosing pinned lock bound', async () => {
+		const standalone = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_catalog.current_database()'))
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'i',
+							parent_relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							table_name: 'accounts',
+						},
+					],
+				};
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('pg_catalog.oid') || sql.includes('pg_catalog.regclass'))
+				return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		await withGeneratedPostconditionSession(
+			{ connect: async () => ({ query: standalone, release: vi.fn() }) },
+			(session) =>
+				verifyGeneratedIndexPostcondition({
+					session,
+					postcondition: v3Index(),
+					address: indexAddress,
+				}),
+			37,
+		);
+		expect(standalone.mock.calls.map(([sql]) => sql)).toContain(
+			"SET LOCAL lock_timeout = '37ms'",
+		);
+		// The direct scratch fixture exercises the actual retained pinned bound.
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('has_database_privilege'))
+				return { rows: [{ has_temp_privilege: true }] };
+			if (sql.includes('pg_catalog.oid')) return { rows: [indexRow()] };
+			if (sql.includes('pg_catalog.regclass')) return { rows: [indexRow()] };
+			return { rows: [] };
+		});
+		await query("SET LOCAL lock_timeout = '37ms'");
+		await withPinnedGeneratedPostconditionSession(
+			{
+				query: async (sql) =>
+					sql.includes('pg_catalog.current_database()')
+						? {
+								rows: [
+									{
+										database_name: 'app',
+										relation_kind: 'i',
+										parent_relation_kind: 'r',
+										relation_oid: '101',
+										object_oid: '102',
+										table_name: 'accounts',
+									},
+								],
+							}
+						: query(sql),
+			},
+			(session) =>
+				verifyGeneratedIndexPostcondition({
+					session,
+					postcondition: v3Index(),
+					address: indexAddress,
+				}),
+		);
+		expect(query.mock.calls.map(([sql]) => sql)).toContain(
+			"SET LOCAL lock_timeout = '37ms'",
+		);
+		expect(query.mock.calls.map(([sql]) => sql)).not.toContain(
+			"SET LOCAL lock_timeout = '5000ms'",
+		);
+	});
+
+	it('accepts reversed reloptions, canonicalizes them, and rejects incomplete index booleans', async () => {
+		const first = await verifyGeneratedIndexPostcondition({
+			session: indexSession({
+				live: { reloptions: ['fillfactor=90', 'deduplicate_items=off'] },
+				staged: { reloptions: ['deduplicate_items=off', 'fillfactor=90'] },
+			}).session,
+			postcondition: v3Index(),
+			address: indexAddress,
+		});
+		expect(first.projection.reloptions).toEqual([
+			'deduplicate_items=off',
+			'fillfactor=90',
+		]);
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexSession({ live: { is_valid: 't' } }).session,
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('complete projection');
+	});
+
+	it('preserves every own option key, rejects unmodeled index features, and preserves quoted identifier case', async () => {
+		const source = v3Index({
+			columns: ['__proto__'],
+			opclass: JSON.parse('{"__proto__":"text_pattern_ops"}'),
+			with: JSON.parse('{"__proto__":"fillfactor=90"}'),
+		});
+		const decoded = decodeGeneratedPostcondition(source);
+		if (decoded.declaration.kind !== 'index') throw new Error('expected index');
+		expect(Object.keys(decoded.declaration.index.opclass ?? {})).toEqual([
+			'__proto__',
+		]);
+		expect(() =>
+			decodeGeneratedPostcondition(v3Index({ ordering: 'DESC' })),
+		).toThrow(GeneratedPostconditionReplanRequiredError);
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexSession({
+					staged: { key_columns: ['userid'], key_definitions: ['userid'] },
+				}).session,
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('postcondition differs');
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: indexSession({ live: { is_constraint_owned: true } }).session,
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('postcondition differs');
+	});
+
+	it('preserves server round-trip, CHECK case/validation, ownership, inheritance, and safe-zero-query guarantees', async () => {
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: successfulSession(async (sql) => {
+					if (sql.includes('pg_catalog.oid'))
+						throw new Error('permission denied');
+					return { rows: [] };
+				}),
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('permission denied');
+		for (const live of [
+			checkRow({ expression: "(status = 'active'::text)" }),
+			checkRow({ validated: false }),
+			checkRow({ is_local: false, inheritance_count: 1, parent_id: 7 }),
+			checkRow({ no_inherit: true }),
+			checkRow({ enforced: false }),
+		]) {
+			await expect(
+				verifyGeneratedCheckPostcondition({
+					session: successfulSession(async (sql) =>
+						sql.includes('constraint_item.oid')
+							? { rows: [live] }
+							: { rows: [checkRow()] },
+					),
+					postcondition: v3Check(),
+					address: checkAddress,
+				}),
+			).rejects.toThrow(/postcondition differs|complete projection/);
+		}
+		const query = vi.fn();
+		await expect(
+			verifyGeneratedCheckPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: v3Check('CHECK (true); SELECT pg_advisory_lock(42); --'),
+				address: checkAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(query).not.toHaveBeenCalled();
+	});
+
+	it('uses the v3 default-state model for authored text, E literals, generated sequences, collation, identity, duplicates, and ordinals', async () => {
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'status',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: "'pending'::text",
+						},
+					],
+					{ status: "'pending'::text" },
+				),
+				postcondition: v3Table([
+					{
+						name: 'status',
+						type: 'text',
+						nullable: true,
+						default: authoredDefault("'pending'"),
+					},
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession(
+					[
+						{
+							column_name: 'path',
+							column_type: 'text',
+							is_not_null: false,
+							column_default: String.raw`'C:\\Users'::text`,
+						},
+					],
+					{ path: String.raw`'C:\\Users'::text` },
+				),
+				postcondition: v3Table([
+					{ name: 'path', default: authoredDefault(String.raw`E'C:\\Users'`) },
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: testSession(async (sql) =>
+					sql.includes(
+						'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+					)
+						? { rows: [{ relation_kind: 'r', column_name: 'id' }] }
+						: {
+								rows: [
+									{
+										relation_kind: 'r',
+										column_name: 'id',
+										column_type: 'integer',
+										is_not_null: true,
+										column_default: "nextval('accounts_id_seq'::regclass)",
+										generated_sequence_default: true,
+										collation_name: null,
+										identity_kind: '',
+									},
+								],
+							},
+				),
+				postcondition: v3Column({ default: generatedSequence }),
+				address: columnAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'column' });
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'body',
+						column_type: 'text',
+						is_not_null: false,
+						collation_name: 'default',
+					},
+				]),
+				postcondition: v3Table([
+					{
+						name: 'body',
+						type: 'text',
+						nullable: true,
+						authoredCollation: null,
+						default: noDefault,
+					},
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({
+			projection: { columns: [{ collation: null }] },
+		});
+		const noReads = vi.fn();
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: mintGeneratedPostconditionSession({ query: noReads }),
+				postcondition: v3Table([{ name: 'id' }, { name: 'id' }]),
+				address: tableAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(noReads).not.toHaveBeenCalled();
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{ column_name: 'payload', column_type: 'text', is_not_null: true },
+					{ column_name: 'id', column_type: 'text', is_not_null: true },
+				]),
+				postcondition: v3Table([
+					{ name: 'id', type: 'text', nullable: false },
+					{ name: 'payload', type: 'text', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('column postcondition differs');
+	});
+
+	it('refuses pool-shaped and hand-built capabilities', async () => {
+		const pool = { query: vi.fn() };
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: pool as never,
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('adapter-minted exclusive session capability');
+		await expect(
+			verifyGeneratedIndexPostcondition({
+				session: (async () => ({ query: vi.fn() })) as never,
+				postcondition: v3Index(),
+				address: indexAddress,
+			}),
+		).rejects.toThrow('adapter-minted exclusive session capability');
+	});
+
+	it('releases v3 binding absence deterministically and rejects views before structural column proof', async () => {
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: vi.fn(async () => ({ rows: [] })),
+						release,
+					}),
+				},
+				(session) =>
+					verifyGeneratedColumnPostcondition({
+						session,
+						postcondition: v3Column({ default: noDefault }),
+						address: columnAddress,
+					}),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(release).toHaveBeenCalledWith(
+			expect.any(GeneratedPostconditionBindingResolutionError),
+		);
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({
+					query: async (sql) =>
+						sql.includes('pg_catalog.current_database()')
+							? {
+									rows: [
+										{
+											database_name: 'app',
+											relation_kind: 'v',
+											relation_oid: '101',
+											column_name: 'id',
+											attribute_number: 1,
+										},
+									],
+								}
+							: { rows: [] },
+				}),
+				postcondition: v3Column({ default: noDefault }),
+				address: columnAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+	});
+
+	it('refuses incomplete table fields plus declared collation and identity mismatches', async () => {
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{ column_name: 'id', column_type: 'integer', is_not_null: 't' },
+				]),
+				postcondition: v3Table([
+					{ name: 'id', type: 'integer', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('complete projection');
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'body',
+						column_type: 'text',
+						is_not_null: false,
+						collation_name: 'POSIX',
+					},
+				]),
+				postcondition: v3Table([
+					{
+						name: 'body',
+						type: 'text',
+						nullable: true,
+						authoredCollation: 'C',
+					},
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('column postcondition differs');
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						identity_kind: 'd',
+					},
+				]),
+				postcondition: v3Table([
+					{
+						name: 'id',
+						type: 'integer',
+						nullable: false,
+						default: {
+							defaultKind: 'identity',
+							hasDefault: false,
+							identity: 'always',
+						},
+					},
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('column postcondition differs');
+	});
+
+	it('enforces non-contradictory v3 default-state producer relationships and generated-sequence evidence', async () => {
+		for (const defaultState of [
+			{ defaultKind: 'none', hasDefault: true, identity: null },
+			{ defaultKind: 'authored', hasDefault: true, identity: null },
+			{ defaultKind: 'identity', hasDefault: false, identity: null },
+		])
+			expect(() =>
+				decodeGeneratedPostcondition(v3Column({ default: defaultState })),
+			).toThrow(GeneratedPostconditionReplanRequiredError);
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: testSession(async (sql) =>
+					sql.includes(
+						'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+					)
+						? { rows: [{ relation_kind: 'r', column_name: 'id' }] }
+						: {
+								rows: [
+									{
+										relation_kind: 'r',
+										column_name: 'id',
+										column_type: 'integer',
+										is_not_null: true,
+										column_default: '5',
+										generated_sequence_default: false,
+										collation_name: null,
+										identity_kind: '',
+									},
+								],
+							},
+				),
+				postcondition: v3Column({ default: generatedSequence }),
+				address: columnAddress,
+			}),
+		).rejects.toThrow('default postcondition differs');
+	});
+
+	it.each([
+		[
+			'primary key',
+			'constraint',
+			{
+				type: 'p',
+				columns: ['id'],
+				deferrable: false,
+				initiallyDeferred: false,
+				enforced: true,
+			},
+			{
+				constraint_type: 'p',
+				key_columns: ['id'],
+				referenced_schema: null,
+				referenced_table: null,
+				referenced_columns: [],
+				on_delete: 'a',
+				on_update: 'a',
+				is_deferrable: false,
+				is_deferred: false,
+				is_enforced: true,
+				is_validated: true,
+			},
+		],
+		[
+			'unique constraint',
+			'constraint',
+			{
+				type: 'u',
+				columns: ['email'],
+				deferrable: true,
+				initiallyDeferred: true,
+				enforced: true,
+			},
+			{
+				constraint_type: 'u',
+				key_columns: ['email'],
+				referenced_schema: null,
+				referenced_table: null,
+				referenced_columns: [],
+				on_delete: 'a',
+				on_update: 'a',
+				is_deferrable: true,
+				is_deferred: true,
+				is_enforced: true,
+				is_validated: true,
+			},
+		],
+		[
+			'enum',
+			'enum',
+			{ labels: ['pending', 'active'] },
+			{ labels: ['pending', 'active'] },
+		],
+		[
+			'sequence',
+			'sequence',
+			{
+				startValue: '10',
+				incrementBy: '2',
+				minValue: '1',
+				maxValue: '999',
+				cycle: false,
+			},
+			{
+				start_value: '10',
+				increment_by: '2',
+				min_value: '1',
+				max_value: '999',
+				cycle: false,
+			},
+		],
+		['extension', 'extension', { version: '1.2' }, { version: '1.2' }],
+	] as const)('verifies real non-CHECK %s catalogue rows without CLI mocks', async (_label, kind, declaration, projection) => {
+		const address =
+			kind === 'constraint'
+				? { ...checkAddress, name: 'accounts_key' }
+				: kind === 'enum'
+					? {
+							scope: 'schema' as const,
+							engine: 'postgresql',
+							database: 'app',
+							schema: 'tenant',
+							kind: 'enum',
+							name: 'account_status',
+						}
+					: kind === 'sequence'
+						? {
+								scope: 'schema' as const,
+								engine: 'postgresql',
+								database: 'app',
+								schema: 'tenant',
+								kind: 'sequence',
+								name: 'accounts_id_seq',
+							}
+						: {
+								scope: 'database' as const,
+								engine: 'postgresql',
+								database: 'app',
+								kind: 'extension',
+								name: 'pgcrypto',
+							};
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_catalog.current_database()')) {
+				if (kind === 'constraint')
+					return {
+						rows: [
+							{
+								database_name: 'app',
+								relation_kind: 'r',
+								relation_oid: '101',
+								object_oid: '102',
+								constraint_name: 'accounts_key',
+							},
+						],
+					};
+				if (kind === 'enum')
+					return {
+						rows: [
+							{
+								database_name: 'app',
+								relation_kind: 'e',
+								relation_oid: '103',
+								object_oid: '103',
+							},
+						],
+					};
+				if (kind === 'sequence')
+					return {
+						rows: [
+							{
+								database_name: 'app',
+								relation_kind: 'S',
+								relation_oid: '104',
+								object_oid: '104',
+							},
+						],
+					};
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'x',
+							relation_oid: '105',
+							object_oid: '105',
+						},
+					],
+				};
+			}
+			return { rows: [projection] };
+		});
+		const session = mintGeneratedPostconditionSession({ query });
+		const postcondition = {
+			postconditionVersion: 3 as const,
+			targetBinding: v3Binding,
+			declaration: {
+				canonicalFormVersion: 1 as const,
+				kind,
+				...(kind === 'constraint'
+					? { constraint: declaration }
+					: kind === 'enum'
+						? declaration
+						: kind === 'sequence'
+							? declaration
+							: declaration),
+			},
+		};
+		const verified =
+			kind === 'constraint'
+				? await verifyGeneratedConstraintPostcondition({
+						session,
+						postcondition,
+						address,
+					})
+				: kind === 'enum'
+					? await verifyGeneratedEnumPostcondition({
+							session,
+							postcondition,
+							address,
+						})
+					: kind === 'sequence'
+						? await verifyGeneratedSequencePostcondition({
+								session,
+								postcondition,
+								address,
+							})
+						: await verifyGeneratedExtensionPostcondition({
+								session,
+								postcondition,
+								address,
+							});
+		expect(verified.kind).toBe(
+			kind === 'enum'
+				? 'enum'
+				: kind === 'sequence'
+					? 'sequence'
+					: kind === 'extension'
+						? 'extension'
+						: 'constraint',
+		);
+		expect(query).toHaveBeenCalledTimes(
+			kind === 'constraint' || kind === 'sequence' ? 3 : 2,
+		);
 	});
 });
