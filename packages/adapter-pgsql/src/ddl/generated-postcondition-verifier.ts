@@ -1329,12 +1329,27 @@ export async function withGeneratedPostconditionProof<T>(
 	if (state.proofInFlight) throw new GeneratedPostconditionProofInFlightError();
 	state.proofInFlight = true;
 	const queryCount = generatedPostconditionQueryCounts.get(session) ?? 0;
+	let proofQueryCount = queryCount;
+	let workError: unknown;
+	let workErrorQueryCount = queryCount;
 	try {
-		return await work(session);
+		// scratchScope owns a rollback-only transaction only when this exclusive
+		// session is otherwise transactionless. It therefore also holds relation
+		// locks through binding and structural proof, without taking ownership of
+		// an enclosing DDL transaction.
+		return await scratchScope(session, () => {
+			proofQueryCount = generatedPostconditionQueryCounts.get(session) ?? 0;
+			return work(session).catch((error: unknown) => {
+				workError = error;
+				workErrorQueryCount =
+					generatedPostconditionQueryCounts.get(session) ?? 0;
+				throw error;
+			});
+		});
 	} catch (error) {
 		if (
 			isStructuralMismatchFailure(error) ||
-			(generatedPostconditionQueryCounts.get(session) ?? 0) === queryCount
+			(error === workError && workErrorQueryCount === proofQueryCount)
 		)
 			markSafePreQueryFailure(error, session);
 		throw error;

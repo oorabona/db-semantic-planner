@@ -261,8 +261,80 @@ describe('generated postcondition verifier', () => {
 		).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
 	});
 
+	it('opens a rollback-only transaction before a standalone proof lock', async () => {
+		let savepointAttempts = 0;
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SAVEPOINT ') && savepointAttempts++ === 0) {
+				const error = Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+				throw error;
+			}
+			return { rows: [] };
+		});
+		const session = mintGeneratedPostconditionSession({ query });
+
+		await withGeneratedPostconditionProof(session, async (proof) => {
+			await proof.query(
+				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+			);
+			return 'verified';
+		});
+
+		const statements = query.mock.calls.map(([sql]) => sql);
+		const begin = statements.indexOf('BEGIN');
+		const lock = statements.indexOf(
+			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+		expect(begin).toBeGreaterThanOrEqual(0);
+		expect(lock).toBeGreaterThan(begin);
+		expect(statements.at(-1)).toBe('ROLLBACK');
+	});
+
+	it('uses an enclosing transaction for a proof lock without ending it', async () => {
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
+		const session = mintGeneratedPostconditionSession({ query });
+
+		await withGeneratedPostconditionProof(session, async (proof) => {
+			await proof.query(
+				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+			);
+			return 'verified';
+		});
+
+		const statements = query.mock.calls.map(([sql]) => sql);
+		expect(statements).not.toContain('BEGIN');
+		expect(statements).not.toContain('COMMIT');
+		expect(statements).not.toContain('ROLLBACK');
+		expect(statements).toContain(
+			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+	});
+
+	it('rolls back an opened proof transaction and propagates its failure', async () => {
+		let savepointAttempts = 0;
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SAVEPOINT ') && savepointAttempts++ === 0) {
+				const error = Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+				throw error;
+			}
+			return { rows: [] };
+		});
+		const session = mintGeneratedPostconditionSession({ query });
+		const failure = new Error('named proof failure');
+
+		await expect(
+			withGeneratedPostconditionProof(session, async () => {
+				throw failure;
+			}),
+		).rejects.toBe(failure);
+		expect(query.mock.calls.map(([sql]) => sql).at(-1)).toBe('ROLLBACK');
+	});
+
 	it('refuses mismatched scopes before acquiring a relation lock', async () => {
-		const query = vi.fn();
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
 			verifyGeneratedColumnPostcondition({
 				session: mintGeneratedPostconditionSession({ query }),
@@ -274,11 +346,15 @@ describe('generated postcondition verifier', () => {
 				address: { ...columnAddress, scope: 'database' },
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(query).not.toHaveBeenCalled();
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 	});
 
 	it('refuses an explicitly mismatched parent scope before acquiring a relation lock', async () => {
-		const query = vi.fn();
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		const mismatchedParent = { ...tableAddress, scope: 'database' };
 		await expect(
 			verifyGeneratedColumnPostcondition({
@@ -294,7 +370,11 @@ describe('generated postcondition verifier', () => {
 				},
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(query).not.toHaveBeenCalled();
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 	});
 
 	it('refuses an index whose parent is not a table relation', async () => {
@@ -690,7 +770,7 @@ describe('generated postcondition verifier', () => {
 				address: tableAddress,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		const impossible = vi.fn();
+		const impossible = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
 			verifyGeneratedColumnPostcondition({
 				session: mintGeneratedPostconditionSession({ query: impossible }),
@@ -705,7 +785,11 @@ describe('generated postcondition verifier', () => {
 				},
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(impossible).not.toHaveBeenCalled();
+		expect(
+			impossible.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 	});
 
 	it('stabilizes through the user relation rather than a catalogue row lock', async () => {
@@ -736,9 +820,11 @@ describe('generated postcondition verifier', () => {
 		).rejects.toThrow(
 			'generated table verifier could not read a complete projection',
 		);
-		expect(query.mock.calls[0]?.[0]).toContain(
-			'LOCK TABLE ONLY "tenant"."accounts"',
-		);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('LOCK TABLE ONLY "tenant"."accounts"'),
+			),
+		).toBe(true);
 		expect(query.mock.calls.some(([sql]) => sql.includes('FOR SHARE'))).toBe(
 			false,
 		);
@@ -877,7 +963,7 @@ describe('generated postcondition verifier', () => {
 				address: tableAddress,
 			}),
 		).resolves.toMatchObject({ kind: 'table' });
-		expect(tableQuery).toHaveBeenCalledTimes(2);
+		expect(tableQuery).toHaveBeenCalledTimes(5);
 
 		const columnQuery = vi.fn(async (sql: string) => {
 			if (
@@ -916,7 +1002,7 @@ describe('generated postcondition verifier', () => {
 				address: columnAddress,
 			}),
 		).resolves.toMatchObject({ kind: 'column' });
-		expect(columnQuery).toHaveBeenCalledTimes(2);
+		expect(columnQuery).toHaveBeenCalledTimes(5);
 
 		const indexQuery = vi.fn(async (sql: string) => {
 			if (sql.startsWith('SELECT index_relation.relkind AS relation_kind'))
@@ -1021,10 +1107,12 @@ describe('generated postcondition verifier', () => {
 			sought: 'column tenant.accounts.id',
 			found: 'absent',
 		});
-		expect(query).toHaveBeenCalledTimes(1);
-		expect(query.mock.calls[0]?.[0]).toContain(
-			'attribute.attname AS column_name',
-		);
+		expect(query).toHaveBeenCalledTimes(4);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('attribute.attname AS column_name'),
+			),
+		).toBe(true);
 	});
 
 	it('does not let a structural lookalike satisfy an unresolved v3 binding', async () => {
@@ -1062,7 +1150,7 @@ describe('generated postcondition verifier', () => {
 				address: columnAddress,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(query).toHaveBeenCalledTimes(1);
+		expect(query).toHaveBeenCalledTimes(4);
 	});
 
 	it('names the observed slot when a v3 binding resolves to a different object', async () => {
@@ -1095,7 +1183,7 @@ describe('generated postcondition verifier', () => {
 			sought: 'index tenant.accounts.accounts_user_id_idx',
 			found: 'index tenant.audit_accounts.accounts_user_id_idx',
 		});
-		expect(query).toHaveBeenCalledTimes(1);
+		expect(query).toHaveBeenCalledTimes(4);
 	});
 
 	// Restored v3 ports of the session and structural guarantees that used to be
@@ -1515,7 +1603,7 @@ describe('generated postcondition verifier', () => {
 				}),
 			).rejects.toThrow(/postcondition differs|complete projection/);
 		}
-		const query = vi.fn();
+		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
 			verifyGeneratedCheckPostcondition({
 				session: mintGeneratedPostconditionSession({ query }),
@@ -1523,7 +1611,11 @@ describe('generated postcondition verifier', () => {
 				address: checkAddress,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
-		expect(query).not.toHaveBeenCalled();
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 	});
 
 	it('uses the v3 default-state model for authored text, E literals, generated sequences, collation, identity, duplicates, and ordinals', async () => {
@@ -1620,7 +1712,7 @@ describe('generated postcondition verifier', () => {
 		).resolves.toMatchObject({
 			projection: { columns: [{ collation: null }] },
 		});
-		const noReads = vi.fn();
+		const noReads = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
 			verifyGeneratedTablePostcondition({
 				session: mintGeneratedPostconditionSession({ query: noReads }),
@@ -1628,7 +1720,11 @@ describe('generated postcondition verifier', () => {
 				address: tableAddress,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
-		expect(noReads).not.toHaveBeenCalled();
+		expect(
+			noReads.mock.calls.some(([sql]) =>
+				String(sql).startsWith('LOCK TABLE ONLY'),
+			),
+		).toBe(false);
 		await expect(
 			verifyGeneratedTablePostcondition({
 				session: tableSession([
@@ -2006,7 +2102,7 @@ describe('generated postcondition verifier', () => {
 						: 'constraint',
 		);
 		expect(query).toHaveBeenCalledTimes(
-			kind === 'constraint' || kind === 'sequence' ? 3 : 2,
+			kind === 'constraint' || kind === 'sequence' ? 6 : 5,
 		);
 	});
 });
