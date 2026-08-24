@@ -543,6 +543,29 @@ export class PgsqlTransactionTimeoutError extends Error {
 }
 
 /**
+ * Raised when the single safe unnamed replay after a prepared-statement
+ * infrastructure failure also fails. The original infrastructure failure and
+ * the admission fingerprint identify the failed recovery without exposing
+ * parameter values; the replay failure is the standard Error `cause`.
+ */
+export class PgsqlPreparedStatementReplayError extends Error {
+	readonly dbspPreparedStatementReplay = true;
+	readonly originalInfrastructureError: unknown;
+	readonly originalError: unknown;
+
+	constructor(
+		readonly admissionFingerprint: string,
+		readonly infrastructureError: unknown,
+		cause: unknown,
+	) {
+		super('Prepared statement recovery replay failed.', { cause });
+		this.name = 'PgsqlPreparedStatementReplayError';
+		this.originalInfrastructureError = infrastructureError;
+		this.originalError = infrastructureError;
+	}
+}
+
+/**
  * A `pg.PoolClient` is a `pg.Pool` plus `release()`, and that structural shape
  * identifies the physical executor form. The validated structural form selects
  * executor-specific prepared-statement behavior; the caller's declaration controls
@@ -611,27 +634,39 @@ function isVerifiedPreparedStatementInfrastructureError(
 }
 
 /**
- * Read the statement identity PostgreSQL reports for server-side prepared
- * statement errors. The same extractor serves missing- and duplicate-name
- * errors: either can arise from a prepared-statement operation nested inside
- * the outer named statement, so the code/routine pair alone cannot authorize
- * replaying that outer statement.
+ * Read the statement identity PostgreSQL reports in its top-level `message`
+ * field for server-side prepared statement errors. The same extractor serves
+ * missing- and duplicate-name errors: either can arise from a prepared-
+ * statement operation nested inside the outer named statement, so the
+ * code/routine pair alone cannot authorize replaying or quarantining that
+ * outer statement. Do not consult diagnostic text from nested execution.
  */
 function reportedPreparedStatementName(error: unknown): string | undefined {
 	if (typeof error !== 'object' || error === null) return undefined;
-	const fields = error as Record<string, unknown>;
-	for (const field of [
-		fields.message,
-		fields.detail,
-		fields.hint,
-		fields.where,
-		fields.internalQuery,
-	]) {
-		if (typeof field !== 'string') continue;
-		const match = /prepared statement ["']([^"']+)["']/i.exec(field);
-		if (match?.[1] !== undefined) return match[1];
-	}
-	return undefined;
+	const { message } = error as { readonly message?: unknown };
+	if (typeof message !== 'string') return undefined;
+	return /^prepared statement "([^"]+)" (?:does not exist|already exists)$/.exec(
+		message,
+	)?.[1];
+}
+
+/**
+ * 0A000 does not report a prepared-statement identity, so preserve its
+ * existing conservative text-scoped quarantine. 26000 and 42P05 must name
+ * precisely the statement this adapter submitted before either can affect
+ * client state.
+ */
+function shouldQuarantinePreparedStatementInfrastructureError(
+	error: unknown,
+	attemptedName: string,
+): boolean {
+	if (!isVerifiedPreparedStatementInfrastructureError(error)) return false;
+	const { code, routine } = error as {
+		readonly code?: unknown;
+		readonly routine?: unknown;
+	};
+	if (code === '0A000' && routine === 'RevalidateCachedQuery') return true;
+	return reportedPreparedStatementName(error) === attemptedName;
 }
 
 function canReplayPreparedStatementInfrastructureError(
@@ -652,6 +687,132 @@ function canReplayPreparedStatementInfrastructureError(
 	)
 		return reportedPreparedStatementName(error) === attemptedName;
 	return false;
+}
+
+type ReplayableParameterSnapshot = unknown[];
+
+/**
+ * Produces the deliberately small parameter domain that can be replayed
+ * without consulting caller-owned state. JSON-like arrays/plain objects are
+ * copied recursively; Date and Buffer are the only supported object built-ins.
+ * Everything else is intentionally replay-ineligible while still being valid
+ * for the initial node-postgres submission.
+ */
+function captureReplayableParameterSnapshot(
+	parameters: readonly unknown[],
+): ReplayableParameterSnapshot | undefined {
+	try {
+		return cloneReplayableParameterValues(parameters);
+	} catch {
+		return undefined;
+	}
+}
+
+function cloneReplayableParameterValues(
+	parameters: readonly unknown[],
+): ReplayableParameterSnapshot {
+	const active = new WeakSet<object>();
+	const copies = new WeakMap<object, unknown>();
+	return parameters.map((parameter) =>
+		cloneReplayableParameterValue(parameter, active, copies),
+	);
+}
+
+function cloneReplayableParameterValue(
+	value: unknown,
+	active: WeakSet<object>,
+	copies: WeakMap<object, unknown>,
+): unknown {
+	if (value === null || typeof value === 'string' || typeof value === 'boolean')
+		return value;
+	if (typeof value === 'number' && Number.isFinite(value)) return value;
+	if (typeof value !== 'object')
+		throw new TypeError('parameter is outside the replayable value domain');
+	if (active.has(value))
+		throw new TypeError('cyclic parameter graph is not replayable');
+	const priorCopy = copies.get(value);
+	if (priorCopy !== undefined) return priorCopy;
+
+	if (value instanceof Date) {
+		if (Object.getPrototypeOf(value) !== Date.prototype)
+			throw new TypeError('custom Date is not replayable');
+		assertReplayableBuiltinProperties(value);
+		return new Date(Date.prototype.getTime.call(value));
+	}
+	if (Buffer.isBuffer(value)) {
+		if (Object.getPrototypeOf(value) !== Buffer.prototype)
+			throw new TypeError('custom Buffer is not replayable');
+		assertReplayableBuiltinProperties(value);
+		return Buffer.from(value);
+	}
+
+	active.add(value);
+	try {
+		if (Array.isArray(value)) {
+			if (Object.getPrototypeOf(value) !== Array.prototype)
+				throw new TypeError('custom array is not replayable');
+			assertReplayableArrayProperties(value);
+			const copy: unknown[] = new Array(value.length);
+			copies.set(value, copy);
+			for (let index = 0; index < value.length; index += 1) {
+				copy[index] = cloneReplayableParameterValue(
+					value[index],
+					active,
+					copies,
+				);
+			}
+			return copy;
+		}
+		const prototype = Object.getPrototypeOf(value);
+		if (prototype !== Object.prototype && prototype !== null)
+			throw new TypeError('custom object is not replayable');
+		const descriptors = Object.getOwnPropertyDescriptors(value);
+		if (Object.getOwnPropertySymbols(value).length !== 0)
+			throw new TypeError('symbol-keyed parameter is not replayable');
+		const copy: Record<string, unknown> =
+			prototype === null ? Object.create(null) : {};
+		copies.set(value, copy);
+		for (const [key, descriptor] of Object.entries(descriptors)) {
+			if (!descriptor.enumerable || !('value' in descriptor))
+				throw new TypeError('non-JSON parameter property is not replayable');
+			copy[key] = cloneReplayableParameterValue(
+				descriptor.value,
+				active,
+				copies,
+			);
+		}
+		return copy;
+	} finally {
+		active.delete(value);
+	}
+}
+
+function assertReplayableBuiltinProperties(value: object): void {
+	const descriptors = Object.getOwnPropertyDescriptors(value);
+	for (const [key, descriptor] of Object.entries(descriptors)) {
+		if (
+			!('value' in descriptor) ||
+			(key === 'toPostgres' && typeof descriptor.value === 'function')
+		)
+			throw new TypeError('custom built-in parameter is not replayable');
+	}
+}
+
+function assertReplayableArrayProperties(value: unknown[]): void {
+	const descriptors = Object.getOwnPropertyDescriptors(value);
+	for (const [key, descriptor] of Object.entries(descriptors)) {
+		if (key === 'length') continue;
+		if (
+			!/^0$|^[1-9][0-9]*$/.test(key) ||
+			!descriptor.enumerable ||
+			!('value' in descriptor)
+		)
+			throw new TypeError('non-JSON array parameter is not replayable');
+	}
+	for (let index = 0; index < value.length; index += 1) {
+		if (!Object.hasOwn(value, index))
+			throw new TypeError('sparse array parameter is not replayable');
+	}
 }
 
 /**
@@ -6372,15 +6533,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					MaybeMultipleQueryResults<T>
 				>;
 			}
-			// This snapshot belongs to this named attempt. A caller can mutate its
-			// parameter array while the first submission is in flight; the bounded
-			// unnamed replay must retain the same bindings.
-			const parameterSnapshot = [...parameters];
+			// Capture the bounded replay domain before first submission. An
+			// ineligible value still reaches node-postgres for the initial attempt,
+			// but cannot authorize a replay from caller-owned mutable state.
+			const parameterSnapshot = captureReplayableParameterSnapshot(parameters);
+			const namedAttemptParameters =
+				parameterSnapshot === undefined
+					? [...parameters]
+					: cloneReplayableParameterValues(parameterSnapshot);
 			try {
 				const result = (await executor.query<T>({
 					name: admission.name,
 					text: sql,
-					values: parameterSnapshot,
+					values: namedAttemptParameters,
 				})) as MaybeMultipleQueryResults<T>;
 				if (admission.reservation !== undefined)
 					this.preparedStatementRegistry.confirm(admission.reservation);
@@ -6410,22 +6575,29 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 				let retryUnnamed = false;
 				try {
-					if (
-						isPoolClientLike(executor) &&
-						(isVerifiedPreparedStatementInfrastructureError(error) ||
+					if (isPoolClientLike(executor)) {
+						const localNameCollision =
 							isDriverLocalPreparedStatementNameCollision(
 								error,
 								admission.name,
-							))
-					) {
-						// A verified 26000 is treated as possible client-wide loss because
-						// SQLSTATE cannot distinguish a full reset from targeted deallocation;
-						// the other verified failures remain text-scoped.
-						quarantinePreparedStatement(
-							executor,
-							sql,
-							isVerifiedClientWidePreparedStatementLoss(error),
-						);
+							);
+						if (
+							localNameCollision ||
+							shouldQuarantinePreparedStatementInfrastructureError(
+								error,
+								admission.name,
+							)
+						) {
+							// A verified 26000 is treated as possible client-wide loss because
+							// SQLSTATE cannot distinguish a full reset from targeted deallocation;
+							// the other verified failures remain text-scoped.
+							quarantinePreparedStatement(
+								executor,
+								sql,
+								!localNameCollision &&
+									isVerifiedClientWidePreparedStatementLoss(error),
+							);
+						}
 						// A matching 26000/42P05 reports this named statement itself. 0A000
 						// has no statement identity, so its replay requires the caller's
 						// explicit effect-safety assertion. An aborted or open transaction
@@ -6438,6 +6610,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								admission.name,
 								this.replayInvalidatedPlans,
 							) &&
+							parameterSnapshot !== undefined &&
 							ownsSerializedClientForPreparedStatementReplay &&
 							poolClientTransactionOpen(executor) === false;
 					}
@@ -6445,11 +6618,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					// Quarantine classification cannot replace the query error.
 				}
 				if (retryUnnamed) {
-					// node-postgres treats its input as owned today; copy again so a send
-					// path that mutates it cannot affect this bounded retry.
-					return executor.query<T>(sql, [...parameterSnapshot]) as Promise<
-						MaybeMultipleQueryResults<T>
-					>;
+					try {
+						return (await executor.query<T>(
+							sql,
+							cloneReplayableParameterValues(parameterSnapshot!),
+						)) as MaybeMultipleQueryResults<T>;
+					} catch (replayError) {
+						throw new PgsqlPreparedStatementReplayError(
+							admission.reservation?.fingerprint ??
+								derivePreparedStatementFingerprint(sql),
+							error,
+							replayError,
+						);
+					}
 				}
 				throw error;
 			}
