@@ -8,7 +8,10 @@ import {
 	type verifyGeneratedTablePostcondition as VerifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
-import type { ValidatedManagedStepManifest } from '@dbsp/core';
+import {
+	canonicalJsonDigest,
+	type ValidatedManagedStepManifest,
+} from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1026,6 +1029,7 @@ describe('generator execution fixture shim', () => {
 			columns: [{ collation: 'C', identity: 'always' }],
 		});
 		expect(firstTable.digest).not.toBe(secondTable.digest);
+		expect(firstTable.digest).toBe(canonicalJsonDigest(firstTable.value));
 		const firstColumn = await columnRead('C');
 		const secondColumn = await columnRead('POSIX');
 		expect(firstColumn.value).toMatchObject({
@@ -1033,6 +1037,7 @@ describe('generator execution fixture shim', () => {
 			identity: 'always',
 		});
 		expect(firstColumn.digest).not.toBe(secondColumn.digest);
+		expect(firstColumn.digest).toBe(canonicalJsonDigest(firstColumn.value));
 	});
 
 	it('retains the structural index postcondition guard with live and scratch projections', async () => {

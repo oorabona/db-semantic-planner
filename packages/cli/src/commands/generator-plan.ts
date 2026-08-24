@@ -6,7 +6,7 @@
  * document is nevertheless persisted in the same journal and digest domain so
  * that it is inspectable before an operator makes a fresh live-state decision.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import {
 	assertDeclarableChangeKind,
 	classifyGeneratedMutation,
@@ -24,6 +24,8 @@ import {
 import type { InProcessProvenPlan } from '@dbsp/core';
 import {
 	acquireTransitionLease,
+	canonicalJson,
+	canonicalJsonDigest,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
@@ -77,17 +79,13 @@ export type GeneratorDurablePlan = InProcessProvenPlan & {
 	readonly generator: GeneratorPlanMaterial;
 };
 
-function digest(value: unknown): string {
-	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
 function adoptionDeclaration(table: TableIR): LedgerPayload {
 	// The live differ is the shape comparator. Persist the exact authored table
 	// shape, rather than a boolean that could later be reinterpreted.
 	const value = JSON.parse(
-		JSON.stringify({ kind: 'table', name: table.name, shape: table }),
+		canonicalJson({ kind: 'table', name: table.name, shape: table }),
 	) as LedgerPayload['value'];
-	return { value, digest: digest(value) };
+	return { value, digest: canonicalJsonDigest(value) };
 }
 
 function replacementStatements(table: TableIR, schema: string) {
@@ -714,7 +712,10 @@ export async function runGeneratorPlan(input: {
 		const run: TransitionRunMetadata = {
 			runId: `dbsp-generator-${randomUUID()}`,
 			planDigest,
-			targetContextDigest: digest({ database: await databaseId(pool), schema }),
+			targetContextDigest: canonicalJsonDigest({
+				database: await databaseId(pool),
+				schema,
+			}),
 			databaseId: await databaseId(pool),
 			coreVersion: 'schema-differ-generator-v1',
 			startedAt: new Date().toISOString(),

@@ -203,6 +203,11 @@ export type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 export { createApplier } from './applier.js';
+export {
+	CanonicalJsonError,
+	canonicalJson,
+	canonicalJsonDigest,
+} from './canonical-json.js';
 export { type CheckDelta, checkDelta } from './check-delta.js';
 export { createComparator } from './comparator.js';
 export {

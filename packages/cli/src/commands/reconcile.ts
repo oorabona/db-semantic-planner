@@ -19,6 +19,8 @@ import { recoverPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	assumptionAccepted,
+	canonicalJson,
+	canonicalJsonDigest,
 	outcomeClaimId,
 	projectLedgerChain,
 	resourceScopeCovers,
@@ -160,11 +162,11 @@ function recoveryPayload(
 	>[2],
 ): LedgerPayload {
 	const value = JSON.parse(
-		JSON.stringify({ catalogueIdentity: identity }),
+		canonicalJson({ catalogueIdentity: identity }),
 	) as LedgerPayload['value'];
 	return {
 		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		digest: canonicalJsonDigest(value),
 	};
 }
 

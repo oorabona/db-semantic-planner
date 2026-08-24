@@ -1,5 +1,5 @@
 /** Live-only executor for the no-argument schema-differ plan. */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	assertGeneratedPostconditionSession,
@@ -28,6 +28,8 @@ import {
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import {
+	canonicalJson,
+	canonicalJsonDigest,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
@@ -289,15 +291,11 @@ type GeneratedPostconditionObservation =
 	| GeneratedStructuralObservation;
 
 function generatedPayload(value: unknown): GeneratedStructuralObservation {
-	const encoded = JSON.stringify(value);
-	if (encoded === undefined)
-		throw new TypeError('generated observation is not JSON serializable');
+	const encoded = canonicalJson(value);
 	const normalized = JSON.parse(encoded) as LedgerPayload['value'];
 	return {
 		value: normalized,
-		digest: createHash('sha256')
-			.update(JSON.stringify(normalized))
-			.digest('hex'),
+		digest: canonicalJsonDigest(normalized),
 		payloadKind: 'generated-structural-observation',
 	} satisfies GeneratedStructuralObservation;
 }
@@ -316,7 +314,7 @@ async function identityObserved(
 		kind,
 	});
 	const value = JSON.parse(
-		JSON.stringify({
+		canonicalJson({
 			kind: 'identity-observed',
 			observedKind: verified.kind,
 			address: {
@@ -330,7 +328,7 @@ async function identityObserved(
 	) as LedgerPayload['value'];
 	return {
 		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		digest: canonicalJsonDigest(value),
 		payloadKind: 'generated-identity-observation',
 	} satisfies GeneratedIdentityObservation;
 }
@@ -376,9 +374,15 @@ async function readGeneratedV3Postcondition(
 				kind: 'column',
 				type: verified.projection.type,
 				nullable: verified.projection.nullable,
-				default: verified.projection.default,
-				collation: verified.projection.collation,
-				identity: verified.projection.identity,
+				...(verified.projection.default === undefined
+					? {}
+					: { default: verified.projection.default }),
+				...(verified.projection.collation === undefined
+					? {}
+					: { collation: verified.projection.collation }),
+				...(verified.projection.identity === undefined
+					? {}
+					: { identity: verified.projection.identity }),
 			});
 		}
 		case 'check': {
@@ -430,9 +434,13 @@ async function readGeneratedV3Postcondition(
 					name: column.name,
 					type: column.type,
 					nullable: column.nullable,
-					default: column.default,
-					collation: column.collation,
-					identity: column.identity,
+					...(column.default === undefined ? {} : { default: column.default }),
+					...(column.collation === undefined
+						? {}
+						: { collation: column.collation }),
+					...(column.identity === undefined
+						? {}
+						: { identity: column.identity }),
 				})),
 			});
 		}
@@ -1057,11 +1065,10 @@ export async function executeGeneratorPlan(input: {
 								(survivor) =>
 									`${survivor.kind} ${survivor.schema ?? '<database>'}.${survivor.name}`,
 							);
+							const survivorValue = { survivors: survivorNames };
 							const survivorObservation = {
-								value: { survivors: survivorNames },
-								digest: createHash('sha256')
-									.update(JSON.stringify(survivorNames))
-									.digest('hex'),
+								value: survivorValue,
+								digest: canonicalJsonDigest(survivorValue),
 							};
 							return {
 								rootClaimId: claim.claimId,
