@@ -20,8 +20,13 @@ import {
 	readPgRemovalEffectsClosure,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedConstraintPostcondition,
+	verifyGeneratedEnumPostcondition,
+	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionProof,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -343,6 +348,17 @@ async function readGeneratedV3Postcondition(
 				parentId: verified.projection.parentId,
 			});
 		}
+		case 'constraint': {
+			const verified = await verifyGeneratedConstraintPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				projection: verified.projection,
+			});
+		}
 		case 'index': {
 			const verified = await verifyGeneratedIndexPostcondition({
 				session: executor,
@@ -372,6 +388,36 @@ async function readGeneratedV3Postcondition(
 				})),
 			});
 		}
+		case 'enum': {
+			const verified = await verifyGeneratedEnumPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({ kind: verified.kind, labels: verified.labels });
+		}
+		case 'sequence': {
+			const verified = await verifyGeneratedSequencePostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				projection: verified.projection,
+			});
+		}
+		case 'extension': {
+			const verified = await verifyGeneratedExtensionPostcondition({
+				session: executor,
+				postcondition,
+				address,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				version: verified.version,
+			});
+		}
 		default:
 			throw new Error(
 				`generated v3 ${postcondition.declaration.kind} has no declarable read-back`,
@@ -390,16 +436,20 @@ export async function readGeneratedPostcondition(
 	address: LedgerAddress,
 ): Promise<LedgerPayload> {
 	executor = assertGeneratedPostconditionSession(executor);
-	const decodedPostcondition = generatedPostcondition(step, address);
-	if (decodedPostcondition.postconditionVersion === 3)
-		return readGeneratedV3Postcondition(
-			executor,
-			decodedPostcondition,
-			address,
+	// Decode belongs to the counted proof bracket too: malformed persisted input
+	// has issued no query and must release a healthy checked-out session normally.
+	return withGeneratedPostconditionProof(executor, async (session) => {
+		const decodedPostcondition = generatedPostcondition(step, address);
+		if (decodedPostcondition.postconditionVersion === 3)
+			return readGeneratedV3Postcondition(
+				session,
+				decodedPostcondition,
+				address,
+			);
+		throw new Error(
+			'generated postcondition decoder returned no supported version',
 		);
-	throw new Error(
-		'generated postcondition decoder returned no supported version',
-	);
+	});
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {

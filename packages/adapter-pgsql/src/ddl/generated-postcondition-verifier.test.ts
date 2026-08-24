@@ -9,6 +9,7 @@ import {
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 
 const v3Binding = {
@@ -48,7 +49,30 @@ const checkAddress = {
 function testSession(
 	query: GeneratedPostconditionSession['query'],
 ): GeneratedPostconditionSession {
-	return mintGeneratedPostconditionSession({ query });
+	return mintGeneratedPostconditionSession({
+		query: async (sql, params) => {
+			if (sql.includes('FOR SHARE')) return { rows: [{ relation_oid: '101' }] };
+			const result = await query(sql, params);
+			if (!sql.includes('pg_catalog.current_database()')) return result;
+			return {
+				rows: result.rows.map((row) => ({
+					database_name: 'app',
+					relation_oid: '101',
+					...(sql.includes('index_relation.oid')
+						? { relation_kind: 'i', table_name: 'accounts' }
+						: sql.includes('constraint_item.oid')
+							? { relation_kind: 'r', constraint_name: params?.[2] }
+							: { relation_kind: 'r' }),
+					...(sql.includes('attribute.attnum') ? { attribute_number: 1 } : {}),
+					...(sql.includes('index_relation.oid') ||
+					sql.includes('constraint_item.oid')
+						? { object_oid: '102' }
+						: {}),
+					...row,
+				})),
+			};
+		},
+	});
 }
 
 function indexRow(overrides: Record<string, unknown> = {}) {
@@ -92,6 +116,169 @@ function checkRow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('generated postcondition verifier', () => {
+	it.each([
+		[
+			'malformed primary constraint',
+			'constraint',
+			{
+				type: 'p',
+				columns: [],
+				deferrable: false,
+				initiallyDeferred: false,
+				enforced: true,
+			},
+		],
+		[
+			'malformed foreign constraint',
+			'constraint',
+			{
+				type: 'f',
+				columns: ['id'],
+				references: { schema: 'tenant', table: 'accounts', columns: [] },
+				onDelete: 'a',
+				onUpdate: 'a',
+				deferrable: false,
+				initiallyDeferred: false,
+				enforced: true,
+				notValid: false,
+			},
+		],
+		[
+			'empty index key',
+			'index',
+			{
+				method: 'btree',
+				unique: false,
+				valid: true,
+				ready: true,
+				live: true,
+				columns: [],
+				nullsNotDistinct: false,
+			},
+		],
+		[
+			'unemitted opclass key',
+			'index',
+			{
+				method: 'btree',
+				unique: false,
+				valid: true,
+				ready: true,
+				live: true,
+				columns: ['id'],
+				nullsNotDistinct: false,
+				opclass: { missing: 'int4_ops' },
+			},
+		],
+	] as const)('refuses %s before any catalogue proof', (_label, kind, declaration) => {
+		expect(() =>
+			decodeGeneratedPostcondition({
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration: {
+					canonicalFormVersion: 1,
+					kind,
+					...(kind === 'constraint'
+						? { constraint: declaration }
+						: { index: declaration }),
+				},
+			}),
+		).toThrow(GeneratedPostconditionReplanRequiredError);
+	});
+
+	it('keeps a zero-query malformed decode failure reusable', async () => {
+		const release = vi.fn();
+		await expect(
+			withGeneratedPostconditionSession(
+				{ connect: async () => ({ query: vi.fn(), release }) },
+				(session) =>
+					verifyGeneratedTablePostcondition({
+						session,
+						postcondition: {
+							postconditionVersion: 3,
+							targetBinding: v3Binding,
+							declaration: {
+								canonicalFormVersion: 1,
+								kind: 'table',
+								columns: [
+									{
+										name: 'id',
+										default: {
+											defaultKind: 'none',
+											hasDefault: true,
+											identity: null,
+										},
+									},
+								],
+							},
+						},
+						address: tableAddress,
+					}),
+			),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(release).toHaveBeenCalledWith();
+	});
+
+	it('refuses a wrong database and an impossible parent before structure', async () => {
+		const wrongDatabase = vi.fn(async () => ({
+			rows: [
+				{ database_name: 'staging', relation_kind: 'r', relation_oid: '101' },
+			],
+		}));
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: mintGeneratedPostconditionSession({ query: wrongDatabase }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'table', columns: [] },
+				},
+				address: tableAddress,
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		const impossible = vi.fn();
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query: impossible }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'column', column: {} },
+				},
+				address: {
+					...columnAddress,
+					parent: { ...tableAddress, database: 'staging' },
+				},
+			}),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(impossible).not.toHaveBeenCalled();
+	});
+
+	it('refuses identity substitution after binding', async () => {
+		const query = vi.fn(async (sql: string) =>
+			sql.includes('current_database')
+				? {
+						rows: [
+							{ database_name: 'app', relation_kind: 'r', relation_oid: '101' },
+						],
+					}
+				: { rows: [{ relation_oid: '202' }] },
+		);
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'table', columns: [] },
+				},
+				address: tableAddress,
+			}),
+		).rejects.toMatchObject({
+			name: 'GeneratedPostconditionBindingResolutionError',
+			found: 'identity disappeared or changed',
+		});
+	});
 	it.each([
 		['table', { postconditionVersion: 2, kind: 'table', columns: [] }],
 		['column', { postconditionVersion: 2, kind: 'column', column: {} }],
@@ -333,18 +520,13 @@ describe('generated postcondition verifier', () => {
 		});
 		expect(query).toHaveBeenCalledTimes(1);
 		expect(query.mock.calls[0]?.[0]).toContain(
-			'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+			'attribute.attname AS column_name',
 		);
 	});
 
 	it('does not let a structural lookalike satisfy an unresolved v3 binding', async () => {
 		const query = vi.fn(async (sql: string) => {
-			if (
-				sql.includes(
-					'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
-				)
-			)
-				return { rows: [] };
+			if (sql.includes('pg_catalog.current_database()')) return { rows: [] };
 			// This is a structurally identical id column at another address. If the
 			// resolver were bypassed, the old proof would incorrectly accept it.
 			return {

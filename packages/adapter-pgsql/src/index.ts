@@ -88,8 +88,13 @@ export {
 	type SchemaDiff,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedConstraintPostcondition,
+	verifyGeneratedEnumPostcondition,
+	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 } from './ddl/index.js';
 // EXPLAIN support

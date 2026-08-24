@@ -31,8 +31,13 @@ export {
 	resolveGeneratedPostconditionBinding,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedConstraintPostcondition,
+	verifyGeneratedEnumPostcondition,
+	verifyGeneratedExtensionPostcondition,
 	verifyGeneratedIndexPostcondition,
+	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 export {
