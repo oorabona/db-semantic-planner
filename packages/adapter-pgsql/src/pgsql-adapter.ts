@@ -702,6 +702,63 @@ function canReplayPreparedStatementInfrastructureError(
 type ReplayableParameterSnapshot = unknown[];
 
 /**
+ * Replay is an optional recovery path, so its defensive copy must remain
+ * bounded. These limits apply independently to each snapshot or replay copy:
+ * 64 Ki visited values, 16 MiB of UTF-8 string data, and 16 MiB of Buffer
+ * data. Parameters above a limit remain valid for the named submission but
+ * decline transparent replay.
+ */
+const REPLAY_SNAPSHOT_MAX_VISITED_NODES = 64 * 1024;
+const REPLAY_SNAPSHOT_MAX_STRING_BYTES = 16 * 1024 * 1024;
+const REPLAY_SNAPSHOT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+type ReplayableParameterSnapshotBudget = {
+	visitedNodes: number;
+	stringBytes: number;
+	bufferBytes: number;
+};
+
+function createReplayableParameterSnapshotBudget(): ReplayableParameterSnapshotBudget {
+	return {
+		visitedNodes: REPLAY_SNAPSHOT_MAX_VISITED_NODES,
+		stringBytes: REPLAY_SNAPSHOT_MAX_STRING_BYTES,
+		bufferBytes: REPLAY_SNAPSHOT_MAX_BUFFER_BYTES,
+	};
+}
+
+function consumeReplayableParameterSnapshotNode(
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	if (budget.visitedNodes === 0)
+		throw new TypeError('replayable parameter snapshot node budget exceeded');
+	budget.visitedNodes -= 1;
+}
+
+function consumeReplayableParameterSnapshotString(
+	value: string,
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	// Every UTF-8 code unit occupies at least one byte. Refuse oversized
+	// strings before Buffer.byteLength() scans their full contents.
+	if (value.length > budget.stringBytes)
+		throw new TypeError('replayable parameter snapshot string budget exceeded');
+	const bytes = Buffer.byteLength(value);
+	if (bytes > budget.stringBytes)
+		throw new TypeError('replayable parameter snapshot string budget exceeded');
+	budget.stringBytes -= bytes;
+}
+
+function consumeReplayableParameterSnapshotBuffer(
+	value: Buffer,
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	// Check before Buffer.from() allocates its copy.
+	if (value.byteLength > budget.bufferBytes)
+		throw new TypeError('replayable parameter snapshot Buffer budget exceeded');
+	budget.bufferBytes -= value.byteLength;
+}
+
+/**
  * Produces the deliberately small parameter domain that can be replayed
  * without consulting caller-owned state. JSON-like arrays/plain objects are
  * copied recursively; Date and Buffer are the only supported object built-ins.
@@ -723,18 +780,26 @@ function cloneReplayableParameterValues(
 ): ReplayableParameterSnapshot {
 	const active = new WeakSet<object>();
 	const copies = new WeakMap<object, unknown>();
-	return parameters.map((parameter) =>
-		cloneReplayableParameterValue(parameter, active, copies),
-	);
+	const budget = createReplayableParameterSnapshotBudget();
+	const copy: unknown[] = [];
+	for (const parameter of parameters) {
+		copy.push(cloneReplayableParameterValue(parameter, active, copies, budget));
+	}
+	return copy;
 }
 
 function cloneReplayableParameterValue(
 	value: unknown,
 	active: WeakSet<object>,
 	copies: WeakMap<object, unknown>,
+	budget: ReplayableParameterSnapshotBudget,
 ): unknown {
-	if (value === null || typeof value === 'string' || typeof value === 'boolean')
+	consumeReplayableParameterSnapshotNode(budget);
+	if (value === null || typeof value === 'boolean') return value;
+	if (typeof value === 'string') {
+		consumeReplayableParameterSnapshotString(value, budget);
 		return value;
+	}
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value !== 'object')
 		throw new TypeError('parameter is outside the replayable value domain');
@@ -754,6 +819,7 @@ function cloneReplayableParameterValue(
 	if (Buffer.isBuffer(value)) {
 		if (Object.getPrototypeOf(value) !== Buffer.prototype)
 			throw new TypeError('custom Buffer is not replayable');
+		consumeReplayableParameterSnapshotBuffer(value, budget);
 		return Buffer.from(value);
 	}
 
@@ -762,6 +828,12 @@ function cloneReplayableParameterValue(
 		if (Array.isArray(value)) {
 			if (Object.getPrototypeOf(value) !== Array.prototype)
 				throw new TypeError('custom array is not replayable');
+			// Refuse before descriptor inspection or new Array(length) can allocate
+			// for more child values than this copy may visit.
+			if (value.length > budget.visitedNodes)
+				throw new TypeError(
+					'replayable parameter snapshot node budget exceeded',
+				);
 			assertReplayableArrayProperties(value);
 			const copy: unknown[] = new Array(value.length);
 			copies.set(value, copy);
@@ -770,6 +842,7 @@ function cloneReplayableParameterValue(
 					value[index],
 					active,
 					copies,
+					budget,
 				);
 			}
 			return copy;
@@ -787,7 +860,12 @@ function cloneReplayableParameterValue(
 			if (!descriptor.enumerable || !('value' in descriptor))
 				throw new TypeError('non-JSON parameter property is not replayable');
 			Object.defineProperty(copy, key, {
-				value: cloneReplayableParameterValue(descriptor.value, active, copies),
+				value: cloneReplayableParameterValue(
+					descriptor.value,
+					active,
+					copies,
+					budget,
+				),
 				enumerable: true,
 				writable: true,
 				configurable: true,
@@ -2529,24 +2607,24 @@ function hasManagedTransactionsOption(
 	);
 }
 
-function hasReplayInvalidatedPlansOption(
-	options: PgsqlAdapterConstructionOptions | undefined,
-): boolean {
-	return (
-		typeof options === 'object' &&
-		options !== null &&
-		'replayInvalidatedPlans' in options
-	);
-}
+type ReplayInvalidatedPlansOption =
+	| { readonly present: false }
+	| { readonly present: true; readonly value: boolean };
 
-function replayInvalidatedPlansEnabled(
+function readReplayInvalidatedPlansOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
-): boolean {
-	return (
-		hasReplayInvalidatedPlansOption(options) &&
-		(options as { readonly replayInvalidatedPlans?: unknown })
-			.replayInvalidatedPlans === true
+): ReplayInvalidatedPlansOption {
+	if (typeof options !== 'object' || options === null)
+		return { present: false };
+	const descriptor = Object.getOwnPropertyDescriptor(
+		options,
+		'replayInvalidatedPlans',
 	);
+	if (descriptor === undefined) return { present: false };
+	if (!('value' in descriptor) || typeof descriptor.value !== 'boolean') {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
+	return { present: true, value: descriptor.value };
 }
 
 function isAdapterManagedTransactionOption(
@@ -2724,6 +2802,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
 	) {
+		const replayInvalidatedPlansOption =
+			readReplayInvalidatedPlansOption(options);
 		const declaredBorrowed = hasBorrowedClientOption(options);
 
 		if (pool != null) {
@@ -2763,7 +2843,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.borrowedClient = false;
 		}
 		if (
-			hasReplayInvalidatedPlansOption(options) &&
+			replayInvalidatedPlansOption.present &&
 			this.pool === undefined &&
 			!isPgsqlAdapterInternalOptions(options)
 		) {
@@ -2784,7 +2864,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
-		this.replayInvalidatedPlans = replayInvalidatedPlansEnabled(options);
+		this.replayInvalidatedPlans =
+			replayInvalidatedPlansOption.present &&
+			replayInvalidatedPlansOption.value;
 		this.preparedStatements = normalizePreparedStatements(
 			options?.preparedStatements,
 		);

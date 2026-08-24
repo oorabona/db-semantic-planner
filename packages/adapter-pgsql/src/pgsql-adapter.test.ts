@@ -228,6 +228,17 @@ describe('PgsqlAdapter', () => {
 				'replayInvalidatedPlans: true requires preparedStatements: true or a preparedStatements options object.',
 			);
 		});
+
+		it('rejects an own non-boolean replayInvalidatedPlans option', () => {
+			const pool = createMockPool();
+
+			expect(() =>
+				createPgsqlAdapter(pool, {
+					preparedStatements: true,
+					replayInvalidatedPlans: 'true',
+				} as any),
+			).toThrow('replayInvalidatedPlans: expected a boolean.');
+		});
 	});
 
 	describe('createPgsqlAdapter', () => {
@@ -1259,11 +1270,11 @@ describe('PgsqlAdapter', () => {
 				{
 					getPrototypeOf() {
 						trapCalls += 1;
-						throw new Error('proxy trap ran');
+						return Object.prototype;
 					},
 					ownKeys() {
 						trapCalls += 1;
-						throw new Error('proxy trap ran');
+						return ['id'];
 					},
 				},
 			);
@@ -1271,6 +1282,9 @@ describe('PgsqlAdapter', () => {
 				release: vi.fn(),
 				_txStatus: 'I',
 			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
 			const sql = 'SELECT id FROM users WHERE payload = $1';
 			const error = {
 				code: '26000',
@@ -1278,15 +1292,35 @@ describe('PgsqlAdapter', () => {
 				routine: 'FetchPreparedStatement',
 				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
 			};
-			vi.mocked(client.query).mockRejectedValueOnce(error);
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-			});
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
 
 			await expect(
-				(adapter as any).issueConnectionQuery(client, sql, [value], true, true),
+				adapter.withPinnedConnection(async (pinned) => {
+					await (pinned as any).issueConnectionQuery(
+						client,
+						sql,
+						[value],
+						true,
+						true,
+					);
+					await (pinned as any).issueConnectionQuery(
+						client,
+						sql,
+						[value],
+						true,
+						true,
+					);
+				}),
 			).rejects.toBe(error);
+			expect(client.query).toHaveBeenCalledTimes(2);
+			expect(
+				vi
+					.mocked(client.query)
+					.mock.calls.filter(([statement]) => statement === sql),
+			).toHaveLength(1);
 			expect(trapCalls).toBe(0);
 		});
 
@@ -1383,7 +1417,10 @@ describe('PgsqlAdapter', () => {
 				retained = pinned as PgsqlAdapter;
 				expect(retained.getPoolInstance()).toBe(client);
 			});
-			expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+			expect(client.release).toHaveBeenCalledOnce();
+			const [releaseReason] = vi.mocked(client.release).mock.calls[0] ?? [];
+			expect(releaseReason).toBeTruthy();
+			expect(releaseReason).toBeInstanceOf(Error);
 
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {
@@ -1495,6 +1532,131 @@ describe('PgsqlAdapter', () => {
 			expect(replayBytes[0]).not.toBe(bytes);
 			expect(replayBytes[0]).toEqual(bytes);
 		});
+
+		it.each([
+			{
+				label: 'visited-node',
+				atBudget: () => Array.from({ length: 64 * 1024 }, () => 7),
+				overBudget: () => Array.from({ length: 64 * 1024 + 1 }, () => 7),
+			},
+			{
+				label: 'string-byte',
+				atBudget: () => ['x'.repeat(16 * 1024 * 1024)],
+				overBudget: () => ['x'.repeat(16 * 1024 * 1024 + 1)],
+			},
+			{
+				label: 'Buffer-byte',
+				atBudget: () => [Buffer.alloc(16 * 1024 * 1024, 7)],
+				overBudget: () => [Buffer.alloc(16 * 1024 * 1024 + 1, 7)],
+			},
+		])('replays at the $label budget boundary and declines an over-budget snapshot', async ({
+			label,
+			atBudget,
+			overBudget,
+		}) => {
+			const sql = 'SELECT id FROM replay_snapshot_budget WHERE payload = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const run = async (
+				parameters: unknown[],
+				expectedReplay: boolean,
+			): Promise<PoolClient> => {
+				const client = Object.assign(createMockPool(), {
+					release: vi.fn(),
+					_txStatus: 'I',
+				}) as unknown as PoolClient;
+				const pool = Object.assign(createMockPool(), {
+					connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+				});
+				vi.mocked(client.query)
+					.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+					.mockRejectedValueOnce(error);
+				if (expectedReplay) {
+					vi.mocked(client.query).mockResolvedValueOnce({
+						rows: [{ id: 7 }],
+						rowCount: 1,
+					} as any);
+				}
+				const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+
+				if (expectedReplay) {
+					await adapter.withPinnedConnection(async (pinned) => {
+						await (pinned as any).issueConnectionQuery(
+							client,
+							sql,
+							parameters,
+							true,
+							true,
+						);
+						await expect(
+							(pinned as any).issueConnectionQuery(
+								client,
+								sql,
+								parameters,
+								true,
+								true,
+							),
+						).resolves.toEqual({ rows: [{ id: 7 }], rowCount: 1 });
+					});
+					expect(client.query).toHaveBeenCalledTimes(3);
+					expect(client.query).toHaveBeenNthCalledWith(
+						3,
+						sql,
+						expect.any(Array),
+					);
+				} else {
+					await expect(
+						adapter.withPinnedConnection(async (pinned) => {
+							await (pinned as any).issueConnectionQuery(
+								client,
+								sql,
+								parameters,
+								true,
+								true,
+							);
+							await (pinned as any).issueConnectionQuery(
+								client,
+								sql,
+								parameters,
+								true,
+								true,
+							);
+						}),
+					).rejects.toBe(error);
+					expect(client.query).toHaveBeenCalledTimes(2);
+					expect(
+						vi
+							.mocked(client.query)
+							.mock.calls.filter(([statement]) => statement === sql),
+					).toHaveLength(1);
+					expect(
+						(
+							vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+								readonly values: unknown[];
+							}
+						).values[0],
+					).toBe(parameters[0]);
+				}
+				return client;
+			};
+
+			await run(atBudget(), true);
+			if (label !== 'Buffer-byte') {
+				await run(overBudget(), false);
+				return;
+			}
+			const bufferFrom = vi.spyOn(Buffer, 'from');
+			try {
+				await run(overBudget(), false);
+			} finally {
+				bufferFrom.mockRestore();
+			}
+			expect(bufferFrom).not.toHaveBeenCalled();
+		}, 30_000);
 
 		it('keeps named parameters shallow in pool and borrowed modes', async () => {
 			const parameter = { nested: { mutable: true } };
