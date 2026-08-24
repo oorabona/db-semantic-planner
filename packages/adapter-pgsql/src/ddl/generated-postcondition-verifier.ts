@@ -8,6 +8,10 @@ import {
 } from '../transition/lock-relation.js';
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
+import {
+	snapshotGeneratedPostconditionJson,
+	validateGeneratedPostconditionV3Declaration,
+} from './generated-postcondition-v3-validator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
 	CanonicalSqlFact,
@@ -202,7 +206,14 @@ export async function withGeneratedPostconditionSession<T>(
 	const shouldEvict =
 		failed && !isSafeGeneratedPostconditionFailure(failure, capability);
 	try {
-		if (shouldEvict) await client.release(failure);
+		if (shouldEvict)
+			await client.release(
+				failure instanceof Error
+					? failure
+					: new Error('generated postcondition verification failed', {
+							cause: failure,
+						}),
+			);
 		else await client.release();
 	} catch (releaseError) {
 		if (failed)
@@ -242,6 +253,8 @@ export type GeneratedPostconditionBindingAddress = ResourceAddress & {
 };
 
 /** A v3 binding selected no live object, or selected a slot other than the one declared. */
+const bindingResolutionFailures = new WeakSet<object>();
+
 export class GeneratedPostconditionBindingResolutionError extends Error {
 	readonly sought: string;
 	readonly found: string;
@@ -254,6 +267,23 @@ export class GeneratedPostconditionBindingResolutionError extends Error {
 		this.sought = input.sought;
 		this.found = input.found;
 	}
+}
+
+function bindingResolutionFailure(input: {
+	readonly sought: string;
+	readonly found: string;
+}): GeneratedPostconditionBindingResolutionError {
+	const error = new GeneratedPostconditionBindingResolutionError(input);
+	bindingResolutionFailures.add(error);
+	return error;
+}
+
+function isBindingResolutionFailure(error: unknown): boolean {
+	return (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function') &&
+		bindingResolutionFailures.has(error)
+	);
 }
 
 type IndexProjection = {
@@ -938,6 +968,11 @@ function decodeV3GeneratedPostcondition(
 		default:
 			throw replan(unsupported);
 	}
+	try {
+		validateGeneratedPostconditionV3Declaration(decoded);
+	} catch (error) {
+		throw replan(unsupported, undefined, undefined, error);
+	}
 	return { postconditionVersion: 3, declaration: decoded, targetBinding };
 }
 
@@ -946,6 +981,24 @@ function decodeV3GeneratedPostcondition(
  * accepted. v1/v2 and every other value are named REPLAN_REQUIRED outcomes.
  */
 export function decodeGeneratedPostcondition(
+	value: unknown,
+	stepIdentity?: string,
+): GeneratedPostcondition {
+	let snapshot: unknown;
+	try {
+		snapshot = snapshotGeneratedPostconditionJson(value);
+	} catch (error) {
+		throw replan(
+			'generated postcondition format is unsupported',
+			undefined,
+			stepIdentity,
+			error,
+		);
+	}
+	return decodeGeneratedPostconditionSnapshot(snapshot, stepIdentity);
+}
+
+function decodeGeneratedPostconditionSnapshot(
 	value: unknown,
 	stepIdentity?: string,
 ): GeneratedPostcondition {
@@ -990,9 +1043,19 @@ export function decodeGeneratedPostconditionPayload(
 	payload: { readonly value: unknown; readonly digest: string },
 	stepIdentity?: string,
 ): GeneratedPostcondition {
-	const value = payload.value;
+	let value: unknown;
+	try {
+		value = snapshotGeneratedPostconditionJson(payload.value);
+	} catch (error) {
+		throw new GeneratedPostconditionReplanRequiredError(
+			'generated postcondition digest cannot be decoded',
+			undefined,
+			stepIdentity,
+			{ cause: error },
+		);
+	}
 	if (!isRecord(value) || typeof value.postconditionVersion !== 'number')
-		return decodeGeneratedPostcondition(value, stepIdentity);
+		return decodeGeneratedPostconditionSnapshot(value, stepIdentity);
 	let expectedDigest: string;
 	try {
 		expectedDigest = generatedPostconditionDigest(
@@ -1012,7 +1075,7 @@ export function decodeGeneratedPostconditionPayload(
 			value.postconditionVersion,
 			stepIdentity,
 		);
-	return decodeGeneratedPostcondition(value, stepIdentity);
+	return decodeGeneratedPostconditionSnapshot(value, stepIdentity);
 }
 
 function nullableStringList(value: unknown): readonly (string | null)[] {
@@ -1103,7 +1166,7 @@ async function stabilizeGeneratedIndexBindingAndProjection(input: {
 		throw replan('generated postcondition target binding is unsupported');
 	const slot = bindingSlot(input.address, 'index');
 	if (slot.found !== undefined)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: slot.found,
 		});
@@ -1116,7 +1179,7 @@ async function stabilizeGeneratedIndexBindingAndProjection(input: {
 				isRecord(error.cause) &&
 				error.cause.code === '42P01'
 			)
-				throw new GeneratedPostconditionBindingResolutionError({
+				throw bindingResolutionFailure({
 					sought: slot.sought,
 					found: 'absent',
 				});
@@ -1129,13 +1192,13 @@ async function stabilizeGeneratedIndexBindingAndProjection(input: {
 		)
 	).rows[0];
 	if (!row || row.database_name !== input.address.database)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: !row ? 'absent' : `database ${String(row.database_name)}`,
 		});
 	const found = relationBindingFound('index', slot.target, row);
 	if (found !== undefined)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found,
 		});
@@ -1215,7 +1278,7 @@ async function scratchScope<T>(
 		if (
 			isStructuralMismatchFailure(workError) ||
 			isScratchRollbackSafeFailure(workError) ||
-			workError instanceof GeneratedPostconditionBindingResolutionError
+			isBindingResolutionFailure(workError)
 		)
 			markCleanScratchFailure(workError, session);
 		throw workError;
@@ -1353,7 +1416,7 @@ function isScratchRollbackSafeFailure(error: unknown): boolean {
 	);
 }
 
-export async function withGeneratedPostconditionProof<T>(
+async function withGeneratedPostconditionProof<T>(
 	input: GeneratedPostconditionSession,
 	work: (session: GeneratedPostconditionSession) => Promise<T>,
 ): Promise<T> {
@@ -1583,7 +1646,7 @@ async function resolveGeneratedPostconditionBinding(input: {
 		throw replan('generated postcondition target binding is unsupported');
 	const slot = bindingSlot(input.address, input.expectedKind);
 	if (slot.found !== undefined)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: slot.found,
 		});
@@ -1639,7 +1702,7 @@ async function resolveGeneratedPostconditionBinding(input: {
 			)
 		).rows[0];
 	if (!row || row.database_name !== input.address.database) {
-		const failure = new GeneratedPostconditionBindingResolutionError({
+		const failure = bindingResolutionFailure({
 			sought: slot.sought,
 			found: !row ? 'absent' : `database ${String(row.database_name)}`,
 		});
@@ -1660,7 +1723,7 @@ async function resolveGeneratedPostconditionBinding(input: {
 						: 'absent'
 					: relationBindingFound(input.expectedKind, target, row);
 	if (found !== undefined) {
-		const failure = new GeneratedPostconditionBindingResolutionError({
+		const failure = bindingResolutionFailure({
 			sought: slot.sought,
 			found,
 		});
@@ -1683,7 +1746,7 @@ async function stabilizeGeneratedPostconditionBinding(input: {
 		throw replan('generated postcondition target binding is unsupported');
 	const slot = bindingSlot(input.address, input.expectedKind);
 	if (slot.found !== undefined)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: slot.found,
 		});
@@ -1698,7 +1761,7 @@ async function stabilizeGeneratedPostconditionBinding(input: {
 				isRecord(error.cause) &&
 				error.cause.code === '42P01'
 			)
-				throw new GeneratedPostconditionBindingResolutionError({
+				throw bindingResolutionFailure({
 					sought: slot.sought,
 					found: 'absent',
 				});
@@ -1724,7 +1787,7 @@ function unlockedGeneratedPostconditionBindingSlot(input: {
 		throw replan('generated postcondition target binding is unsupported');
 	const slot = bindingSlot(input.address, input.expectedKind);
 	if (slot.found !== undefined)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: slot.found,
 		});
@@ -1739,13 +1802,13 @@ function assertUnlockedBindingRow(input: {
 }): GeneratedPostconditionTarget {
 	const { row, slot } = input;
 	if (!row || row.database_name !== input.address.database)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: !row ? 'absent' : `database ${String(row.database_name)}`,
 		});
 	const expectedRelationKind = input.kind === 'enum' ? 'e' : 'x';
 	if (row.relation_kind !== expectedRelationKind)
-		throw new GeneratedPostconditionBindingResolutionError({
+		throw bindingResolutionFailure({
 			sought: slot.sought,
 			found: 'absent',
 		});

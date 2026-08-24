@@ -1,3 +1,5 @@
+import * as adapterPublic from '../index.js';
+import * as adapterDdl from './index.js';
 import type {
 	GeneratedColumnDefaultState,
 	GeneratedPostconditionDeclarationV3,
@@ -54,3 +56,8 @@ const addressedColumnDeclaration: GeneratedPostconditionDeclarationV3 = {
 void contradictoryAuthoredDefault;
 void contradictoryIdentityDefault;
 void addressedColumnDeclaration;
+
+// @ts-expect-error The raw rollback-only proof bracket is module-private.
+void adapterDdl.withGeneratedPostconditionProof;
+// @ts-expect-error The adapter root barrel must not reopen the raw proof bracket.
+void adapterPublic.withGeneratedPostconditionProof;

@@ -484,6 +484,91 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toThrow('opclass keys must name emitted columns');
 	});
 
+	it.each([
+		{
+			rule: 'unique index columns',
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'duplicate index columns',
+				meta: { index: { columns: ['account_id', 'account_id'] } },
+			},
+		},
+		{
+			rule: 'unique enum labels',
+			change: {
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'duplicate enum labels',
+				meta: { enum: { name: 'state', values: ['new', 'new'] } },
+			},
+		},
+		{
+			rule: 'equal foreign-key column list lengths',
+			change: {
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: 'unequal foreign key lists',
+				meta: {
+					fk: {
+						columns: ['account_id'],
+						references: {
+							schema: 'public',
+							table: 'accounts',
+							columns: ['id', 'tenant_id'],
+						},
+					},
+				},
+			},
+		},
+		{
+			rule: 'table column identifiers',
+			change: {
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: 'invalid identifier',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'not valid', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+		},
+		{
+			rule: 'NULLS NOT DISTINCT requires a unique index',
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'invalid nulls not distinct',
+				meta: {
+					index: {
+						columns: ['account_id'],
+						unique: false,
+						nullsNotDistinct: true,
+					},
+				},
+			},
+		},
+	] as const)('refuses $rule at the producer boundary before digesting', ({
+		rule,
+		change,
+	}) => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: change as import('./schema-diff.js').SchemaChange,
+				schema: 'public',
+			}),
+		).toThrow(rule);
+	});
+
 	it('refuses a null CHECK before it can derive a foreign-key address', () => {
 		const change = {
 			kind: 'validate_constraint' as const,

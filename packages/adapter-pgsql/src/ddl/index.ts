@@ -35,7 +35,6 @@ export {
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
-	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 export {

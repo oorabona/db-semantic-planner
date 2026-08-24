@@ -12,6 +12,10 @@ import {
 	classifyGeneratedMutation,
 	type GeneratedMutationClassification,
 } from './destructive-classification.js';
+import {
+	snapshotGeneratedPostconditionJson,
+	validateGeneratedPostconditionV3Declaration,
+} from './generated-postcondition-v3-validator.js';
 import { formatSqlDefault } from './phases/utils.js';
 import type { ChangeKind, SchemaChange } from './schema-diff.js';
 
@@ -242,20 +246,25 @@ export type GeneratedPostcondition = GeneratedPostconditionV3;
  * JSON-compatible serialization whose object-member order survives PostgreSQL
  * jsonb normalization. Arrays intentionally retain their supplied order.
  */
-function canonicalGeneratedPostconditionJson(value: unknown): string {
+function canonicalGeneratedPostconditionJson(
+	value: unknown,
+	path = '$',
+): string {
 	if (value === null) return 'null';
 	if (value === undefined)
 		throw new TypeError(
-			'generated postcondition digest cannot serialize undefined values',
+			`generated postcondition digest cannot serialize undefined values at ${path}`,
 		);
 	if (Array.isArray(value)) {
 		const entries: string[] = [];
 		for (let index = 0; index < value.length; index += 1) {
 			if (!Object.hasOwn(value, index))
 				throw new TypeError(
-					'generated postcondition digest cannot serialize undefined array members',
+					`generated postcondition digest cannot serialize undefined array members at ${path}[${index}]`,
 				);
-			entries.push(canonicalGeneratedPostconditionJson(value[index]));
+			entries.push(
+				canonicalGeneratedPostconditionJson(value[index], `${path}[${index}]`),
+			);
 		}
 		return `[${entries.join(',')}]`;
 	}
@@ -267,15 +276,15 @@ function canonicalGeneratedPostconditionJson(value: unknown): string {
 				const member = record[key];
 				if (member === undefined)
 					throw new TypeError(
-						'generated postcondition digest cannot serialize undefined object members',
+						`generated postcondition digest cannot serialize undefined object members at ${path}.${key}`,
 					);
-				return `${JSON.stringify(key)}:${canonicalGeneratedPostconditionJson(member)}`;
+				return `${JSON.stringify(key)}:${canonicalGeneratedPostconditionJson(member, `${path}.${key}`)}`;
 			})
 			.join(',')}}`;
 	}
 	if (typeof value === 'number' && !Number.isFinite(value))
 		throw new TypeError(
-			'generated postcondition digest can only serialize finite numbers',
+			`generated postcondition digest can only serialize finite numbers at ${path}`,
 		);
 	if (
 		typeof value !== 'string' &&
@@ -283,7 +292,7 @@ function canonicalGeneratedPostconditionJson(value: unknown): string {
 		typeof value !== 'number'
 	)
 		throw new TypeError(
-			'generated postcondition digest can only serialize JSON values',
+			`generated postcondition digest can only serialize JSON values at ${path}`,
 		);
 	return JSON.stringify(value);
 }
@@ -292,9 +301,12 @@ function canonicalGeneratedPostconditionJson(value: unknown): string {
 export function generatedPostconditionDigest(value: {
 	readonly postconditionVersion: number;
 }): string {
+	const snapshot = snapshotGeneratedPostconditionJson(value) as {
+		readonly postconditionVersion: number;
+	};
 	return createHash('sha256')
-		.update(`generated-postcondition:v${value.postconditionVersion}\u0000`)
-		.update(canonicalGeneratedPostconditionJson(value))
+		.update(`generated-postcondition:v${snapshot.postconditionVersion}\u0000`)
+		.update(canonicalGeneratedPostconditionJson(snapshot))
 		.digest('hex');
 }
 
@@ -378,6 +390,7 @@ function columnDeclaration(
 function v3Payload(
 	declaration: GeneratedPostconditionDeclarationV3,
 ): import('@dbsp/types').LedgerPayload {
+	validateGeneratedPostconditionV3Declaration(declaration);
 	return postconditionPayload({
 		postconditionVersion: 3,
 		declaration,
@@ -583,7 +596,7 @@ function constraintPostcondition(
  * An untyped alter_column_type deliberately returns undefined: destructive
  * execution owns that case through its digest-bound acceptance and read-back.
  */
-export function generatedPostconditionForChange(input: {
+function generatedPostconditionForChangeUnchecked(input: {
 	readonly change: SchemaChange;
 	readonly schema: string;
 }): import('@dbsp/types').LedgerPayload | undefined {
@@ -788,6 +801,29 @@ export function generatedPostconditionForChange(input: {
 	throw new Error(
 		`generator planning refuses ${change.kind}: no typed postcondition is available`,
 	);
+}
+
+export function generatedPostconditionForChange(input: {
+	readonly change: SchemaChange;
+	readonly schema: string;
+}): import('@dbsp/types').LedgerPayload | undefined {
+	try {
+		return generatedPostconditionForChangeUnchecked(input);
+	} catch (error) {
+		const identity = `${input.change.kind}:${input.change.table}${
+			input.change.column === undefined ? '' : `:${input.change.column}`
+		}`;
+		if (
+			error instanceof Error &&
+			(error.name === 'GeneratedPostconditionV3DeclarationError' ||
+				error.message.startsWith('generated postcondition digest '))
+		)
+			throw new Error(
+				`generator planning refuses ${input.change.kind} at ${identity}: ${error.message}`,
+				{ cause: error },
+			);
+		throw error;
+	}
 }
 
 /**

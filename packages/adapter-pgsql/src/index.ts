@@ -92,7 +92,6 @@ export {
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
-	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 } from './ddl/index.js';
 // EXPLAIN support

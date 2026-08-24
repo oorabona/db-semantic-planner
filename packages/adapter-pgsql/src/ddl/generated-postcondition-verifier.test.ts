@@ -16,10 +16,10 @@ import {
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedSequencePostcondition,
 	verifyGeneratedTablePostcondition,
-	withGeneratedPostconditionProof,
 	withGeneratedPostconditionSession,
 	withPinnedGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
+import { generatedPostconditionDigest } from './managed-step-manifest.js';
 
 const v3Binding = {
 	bindingVersion: 1 as const,
@@ -264,26 +264,25 @@ function tableSession(
 }
 
 describe('generated postcondition verifier', () => {
-	it('refuses a second public proof entry on the same capability', async () => {
-		const session = mintGeneratedPostconditionSession({
-			query: async () => ({ rows: [] }),
-		});
-		await expect(
-			withGeneratedPostconditionProof(session, async () =>
-				withGeneratedPostconditionProof(session, async () => undefined),
-			),
-		).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
+	it('reports the complete JSON path when canonicalization finds an undefined member', () => {
+		const malformed = {
+			postconditionVersion: 3,
+			declaration: { nested: undefined },
+		};
+		expect(() => generatedPostconditionDigest(malformed)).toThrow(
+			'$.declaration.nested',
+		);
 	});
 
-	it('returns undefined when a public proof callback completes without a value', async () => {
-		await expect(
-			withGeneratedPostconditionProof(
-				mintGeneratedPostconditionSession({
-					query: async () => ({ rows: [] }),
-				}),
-				async () => undefined,
-			),
-		).resolves.toBeUndefined();
+	it('refuses prototype-supplied v3 members before digest interpretation', () => {
+		const inherited = Object.create({
+			postconditionVersion: 3,
+			declaration: { canonicalFormVersion: 1, kind: 'absent' },
+			targetBinding: v3Binding,
+		});
+		expect(() => decodeGeneratedPostcondition(inherited)).toThrow(
+			'REPLAN_REQUIRED',
+		);
 	});
 
 	it('re-decodes a caller-mutated decoded declaration before proving it', async () => {
@@ -305,78 +304,6 @@ describe('generated postcondition verifier', () => {
 				String(sql).startsWith('LOCK TABLE ONLY'),
 			),
 		).toBe(false);
-	});
-
-	it('opens a rollback-only transaction before a standalone proof lock', async () => {
-		let savepointAttempts = 0;
-		const query = vi.fn(async (sql: string) => {
-			if (sql.startsWith('SAVEPOINT ') && savepointAttempts++ === 0) {
-				const error = Object.assign(new Error('no active transaction'), {
-					code: '25P01',
-				});
-				throw error;
-			}
-			return { rows: [] };
-		});
-		const session = mintGeneratedPostconditionSession({ query });
-
-		await withGeneratedPostconditionProof(session, async (proof) => {
-			await proof.query(
-				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-			);
-			return 'verified';
-		});
-
-		const statements = query.mock.calls.map(([sql]) => sql);
-		const begin = statements.indexOf('BEGIN');
-		const lock = statements.indexOf(
-			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-		);
-		expect(begin).toBeGreaterThanOrEqual(0);
-		expect(lock).toBeGreaterThan(begin);
-		expect(statements.at(-1)).toBe('ROLLBACK');
-	});
-
-	it('uses an enclosing transaction for a proof lock without ending it', async () => {
-		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
-		const session = mintGeneratedPostconditionSession({ query });
-
-		await withGeneratedPostconditionProof(session, async (proof) => {
-			await proof.query(
-				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-			);
-			return 'verified';
-		});
-
-		const statements = query.mock.calls.map(([sql]) => sql);
-		expect(statements).not.toContain('BEGIN');
-		expect(statements).not.toContain('COMMIT');
-		expect(statements).not.toContain('ROLLBACK');
-		expect(statements).toContain(
-			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-		);
-	});
-
-	it('rolls back an opened proof transaction and propagates its failure', async () => {
-		let savepointAttempts = 0;
-		const query = vi.fn(async (sql: string) => {
-			if (sql.startsWith('SAVEPOINT ') && savepointAttempts++ === 0) {
-				const error = Object.assign(new Error('no active transaction'), {
-					code: '25P01',
-				});
-				throw error;
-			}
-			return { rows: [] };
-		});
-		const session = mintGeneratedPostconditionSession({ query });
-		const failure = new Error('named proof failure');
-
-		await expect(
-			withGeneratedPostconditionProof(session, async () => {
-				throw failure;
-			}),
-		).rejects.toBe(failure);
-		expect(query.mock.calls.map(([sql]) => sql).at(-1)).toBe('ROLLBACK');
 	});
 
 	it('returns a clean client when its relation disappears before LOCK', async () => {
@@ -1541,15 +1468,7 @@ describe('generated postcondition verifier', () => {
 		if (bracket === 'public checkout') expect(release).toHaveBeenCalledWith();
 	});
 
-	it('refuses overlapping proofs and both successful brackets with work in flight', async () => {
-		const session = mintGeneratedPostconditionSession({
-			query: async () => ({ rows: [] }),
-		});
-		await expect(
-			withGeneratedPostconditionProof(session, async () =>
-				withGeneratedPostconditionProof(session, async () => undefined),
-			),
-		).rejects.toBeInstanceOf(GeneratedPostconditionProofInFlightError);
+	it('refuses a successful bracket with raw capability work in flight', async () => {
 		for (const pinned of [false, true]) {
 			let allow!: () => void;
 			const started = new Promise<void>((resolve) => {
@@ -1578,6 +1497,77 @@ describe('generated postcondition verifier', () => {
 				GeneratedPostconditionWorkInFlightError,
 			);
 			release();
+		}
+	});
+
+	it('refuses overlapping public proofs through both bracket forms', async () => {
+		for (const pinned of [false, true]) {
+			let openFirstQuery!: () => void;
+			const firstQueryOpened = new Promise<void>((resolve) => {
+				openFirstQuery = resolve;
+			});
+			let releaseFirstQuery!: () => void;
+			const firstQueryReleased = new Promise<void>((resolve) => {
+				releaseFirstQuery = resolve;
+			});
+			let queryCount = 0;
+			const query = vi.fn(async (sql: string) => {
+				queryCount += 1;
+				if (queryCount === 1) {
+					openFirstQuery();
+					await firstQueryReleased;
+				}
+				if (sql.includes('has_database_privilege'))
+					return { rows: [{ has_temp_privilege: true }] };
+				if (sql.includes('pg_catalog.current_database() AS database_name'))
+					return {
+						rows: [
+							{
+								database_name: 'app',
+								relation_kind: 'r',
+								relation_oid: '101',
+							},
+						],
+					};
+				return {
+					rows: [
+						{
+							relation_kind: 'r',
+							column_name: 'id',
+							column_type: 'integer',
+							is_not_null: true,
+							column_default: null,
+							generated_sequence_default: false,
+							collation_name: null,
+							identity_kind: '',
+						},
+					],
+				};
+			});
+			const prove = (session: GeneratedPostconditionSession) =>
+				verifyGeneratedTablePostcondition({
+					session,
+					postcondition: v3Table([
+						{ name: 'id', type: 'integer', nullable: false },
+					]),
+					address: tableAddress,
+				});
+			const work = async (session: GeneratedPostconditionSession) => {
+				const first = prove(session);
+				await firstQueryOpened;
+				await expect(prove(session)).rejects.toBeInstanceOf(
+					GeneratedPostconditionProofInFlightError,
+				);
+				releaseFirstQuery();
+				await expect(first).resolves.toMatchObject({ kind: 'table' });
+			};
+			if (pinned)
+				await withPinnedGeneratedPostconditionSession({ query }, work);
+			else
+				await withGeneratedPostconditionSession(
+					{ connect: async () => ({ query, release: vi.fn() }) },
+					work,
+				);
 		}
 	});
 
@@ -1641,19 +1631,30 @@ describe('generated postcondition verifier', () => {
 		);
 	});
 
-	it('covers falsy, previous-checkout, scratch-mismatch, and cleanup eviction branches', async () => {
-		const falsyRelease = vi.fn();
+	it.each([
+		['undefined', undefined],
+		['null', null],
+		['false', false],
+		['zero', 0],
+		['empty string', ''],
+		['NaN', Number.NaN],
+	] as const)('evicts a contaminated checkout for falsy primitive %s', async (_label, failure) => {
+		const release = vi.fn();
 		await expect(
 			withGeneratedPostconditionSession(
-				{ connect: async () => ({ query: vi.fn(), release: falsyRelease }) },
+				{ connect: async () => ({ query: vi.fn(), release }) },
 				async (session) => {
 					await session.query('BEGIN');
-					throw undefined;
+					throw failure;
 				},
 			),
-		).rejects.toBeUndefined();
-		expect(falsyRelease).toHaveBeenCalledWith(undefined);
+		).rejects.toBe(failure);
+		expect(release).toHaveBeenCalledWith(
+			expect.objectContaining({ cause: failure }),
+		);
+	});
 
+	it('covers previous-checkout, scratch-mismatch, and cleanup eviction branches', async () => {
 		const safeThenOpenedTransactionRelease = vi.fn();
 		await expect(
 			withGeneratedPostconditionSession(
@@ -1824,7 +1825,7 @@ describe('generated postcondition verifier', () => {
 		expect(cleanupRelease).toHaveBeenCalledWith(expect.any(Error));
 	});
 
-	it('passes an unknown callback failure to release verbatim', async () => {
+	it('preserves an unknown callback failure while evicting with a truthy Error', async () => {
 		const failure = { reason: 'opaque callback failure' };
 		const release = vi.fn();
 		await expect(
@@ -1835,7 +1836,9 @@ describe('generated postcondition verifier', () => {
 				},
 			),
 		).rejects.toBe(failure);
-		expect(release).toHaveBeenCalledWith(failure);
+		expect(release).toHaveBeenCalledWith(
+			expect.objectContaining({ cause: failure }),
+		);
 	});
 
 	it('sets standalone lock timeout and preserves an enclosing pinned lock bound', async () => {
@@ -2343,6 +2346,39 @@ describe('generated postcondition verifier', () => {
 				address: tableAddress,
 			}),
 		).rejects.toThrow('column postcondition differs');
+	});
+
+	it('accepts undeclared live collation and identity fields and projects them faithfully', async () => {
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'body',
+						column_type: 'text',
+						is_not_null: false,
+						collation_name: 'POSIX',
+					},
+					{
+						column_name: 'id',
+						column_type: 'integer',
+						is_not_null: true,
+						identity_kind: 'a',
+					},
+				]),
+				postcondition: v3Table([
+					{ name: 'body', type: 'text', nullable: true },
+					{ name: 'id', type: 'integer', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({
+			projection: {
+				columns: [
+					{ name: 'body', collation: 'POSIX', identity: null },
+					{ name: 'id', collation: null, identity: 'always' },
+				],
+			},
+		});
 	});
 
 	it('enforces non-contradictory v3 default-state producer relationships and generated-sequence evidence', async () => {

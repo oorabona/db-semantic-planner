@@ -19,8 +19,6 @@ import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
 import {
 	decodeGeneratedPostconditionPayload,
 	type GeneratedPostconditionSession,
-	verifyGeneratedCheckPostcondition,
-	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withPinnedGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
@@ -256,7 +254,7 @@ async function verifyPgOwnedSequenceTarget(
 }
 
 type GeneratedProof = {
-	readonly kind: string;
+	readonly kind: 'table';
 	readonly prove: (
 		session: GeneratedPostconditionSession,
 	) => Promise<LedgerPayload>;
@@ -298,34 +296,6 @@ function generatedPostconditionProof(
 						).projection,
 					),
 			};
-		case 'index':
-			return {
-				kind: 'index',
-				prove: async (session) =>
-					observe(
-						(
-							await verifyGeneratedIndexPostcondition({
-								session,
-								postcondition,
-								address,
-							})
-						).projection,
-					),
-			};
-		case 'check':
-			return {
-				kind: 'constraint',
-				prove: async (session) =>
-					observe(
-						(
-							await verifyGeneratedCheckPostcondition({
-								session,
-								postcondition,
-								address,
-							})
-						).projection,
-					),
-			};
 		default:
 			throw new Error(
 				`generated ${postcondition.declaration.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
@@ -334,8 +304,9 @@ function generatedPostconditionProof(
 }
 
 /**
- * A declared table proof is attempted; other declared members retain identity
- * read-back with their declared payload.
+ * Table declarations receive structural read-back. Every non-table member
+ * receives generic identity observation while its declaration remains in
+ * targetDeclared; undecodable declarations refuse before either claim.
  */
 function readdressMemberReadBack(
 	declaration: LedgerPayload | undefined,
@@ -555,10 +526,6 @@ async function verifyPgTargetOnlyReaddressNoOp(
 						input.step.expectedDeclaration,
 						target,
 					);
-					if (proof.kind !== 'table')
-						throw new Error(
-							`generated ${proof.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
-						);
 					await withPinnedGeneratedPostconditionSession(session, proof.prove);
 					return { outcome: 'no-op' };
 				} catch (error) {
@@ -993,10 +960,6 @@ export async function executePgPersistedTableReaddress(
 							input.step.expectedDeclaration,
 							source,
 						);
-						if (rootAdmissionProof.kind !== 'table')
-							throw new Error(
-								`generated ${rootAdmissionProof.kind} postcondition is unsupported; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
-							);
 						await withPinnedGeneratedPostconditionSession(
 							session,
 							rootAdmissionProof.prove,
