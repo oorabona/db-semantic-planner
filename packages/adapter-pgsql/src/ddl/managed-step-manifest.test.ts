@@ -1,6 +1,7 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	GENERATED_POSTCONDITION_MAX_JSON_BYTES,
 	GeneratedPostconditionV3DeclarationError,
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
@@ -31,14 +32,14 @@ function v3(declaration: Record<string, unknown>) {
 
 describe('PostgreSQL generated managed-step manifest', () => {
 	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
-		const sequence = { name: 'orders_id_seq', startWith: '001' };
+		const sequence = { name: 'orders_id_seq', startWith: '9007199254740993' };
 		expect(
 			buildSequenceClause(
 				'CREATE SEQUENCE',
 				'"orders_id_seq"',
 				sequence as never,
 			),
-		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 1;');
+		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 9007199254740993;');
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -50,7 +51,45 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'tenant',
 			})?.value,
-		).toEqual(v3({ kind: 'sequence', startValue: '1' }));
+		).toEqual(v3({ kind: 'sequence', startValue: '9007199254740993' }));
+	});
+
+	it.each([
+		Number.MAX_SAFE_INTEGER + 1,
+		1e21,
+		'9223372036854775808',
+		'-9223372036854775809',
+		9223372036854775808n,
+	])('refuses sequence source %o consistently before SQL or manifest recording', (startWith) => {
+		const sequence = { name: 'orders_id_seq', startWith };
+		expect(() =>
+			buildSequenceClause(
+				'CREATE SEQUENCE',
+				'"orders_id_seq"',
+				sequence as never,
+			),
+		).toThrow();
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: 'unsafe numeric source',
+					meta: { sequence },
+				},
+				schema: 'tenant',
+			}),
+		).toThrow();
+	});
+
+	it('rejects non-boolean sequence flags instead of applying truthiness', () => {
+		expect(() =>
+			buildSequenceClause('CREATE SEQUENCE', '"orders_id_seq"', {
+				name: 'orders_id_seq',
+				cycle: 'false',
+			} as never),
+		).toThrow('expected a boolean');
 	});
 
 	it('uses one parser domain for producer declarations and persisted decoding', () => {
@@ -171,6 +210,82 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toThrow(GeneratedPostconditionV3DeclarationError);
 		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
 			'REPLAN_REQUIRED',
+		);
+	});
+
+	it.each([
+		'valid',
+		'ready',
+		'live',
+	] as const)('refuses index %s=false at the zero-query decoder boundary', (flag) => {
+		const declaration = {
+			kind: 'index',
+			index: {
+				method: 'btree',
+				unique: false,
+				valid: true,
+				ready: true,
+				live: true,
+				columns: ['id'],
+				nullsNotDistinct: false,
+				[flag]: false,
+			},
+		};
+		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+			'REPLAN_REQUIRED',
+		);
+	});
+
+	it('refuses aliases and cycles before declaration shape decoding', () => {
+		const shared = { type: 'BIGINT' };
+		const alias = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [shared, shared],
+		};
+		const cycle: Record<string, unknown> = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [],
+		};
+		cycle.self = cycle;
+		for (const value of [alias, cycle])
+			expect(() => parseGeneratedPostconditionV3Declaration(value)).toThrow(
+				GeneratedPostconditionV3DeclarationError,
+			);
+	});
+
+	it('refuses depth and serialized UTF-8 byte bounds before declaration decoding', () => {
+		let deep: unknown = { leaf: true };
+		for (let depth = 0; depth < 7; depth += 1) deep = { nested: deep };
+		expect(() => parseGeneratedPostconditionV3Declaration(deep)).toThrow(
+			'own JSON declaration graph',
+		);
+		const oversized = {
+			canonicalFormVersion: 1,
+			kind: 'enum',
+			labels: ['é'.repeat(GENERATED_POSTCONDITION_MAX_JSON_BYTES)],
+		};
+		expect(() => parseGeneratedPostconditionV3Declaration(oversized)).toThrow(
+			GeneratedPostconditionV3DeclarationError,
+		);
+	});
+
+	it('accepts a maximal legal v3 declaration without exhausting the UTF-8 budget', () => {
+		const emptyLabelDeclaration = {
+			canonicalFormVersion: 1,
+			kind: 'enum',
+			labels: [''],
+		};
+		const fixedBytes = new TextEncoder().encode(
+			JSON.stringify(emptyLabelDeclaration),
+		).byteLength;
+		const declaration = {
+			...emptyLabelDeclaration,
+			labels: ['x'.repeat(GENERATED_POSTCONDITION_MAX_JSON_BYTES - fixedBytes)],
+		};
+		expect(parseGeneratedPostconditionV3Declaration(declaration)).toEqual(
+			declaration,
 		);
 	});
 

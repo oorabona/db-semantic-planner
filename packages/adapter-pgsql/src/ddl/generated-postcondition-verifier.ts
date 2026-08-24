@@ -344,22 +344,45 @@ function bindingAddressTopologyFailure(
 	});
 }
 
+const POSTGRESQL_ENGINE = 'postgresql';
+
+function hasOnlyOwnFields(value: object, fields: readonly string[]): boolean {
+	const allowed = new Set(fields);
+	return (
+		Object.getOwnPropertySymbols(value).length === 0 &&
+		Object.getOwnPropertyNames(value).every((field) => allowed.has(field))
+	);
+}
+
+function nonEmptyString(value: unknown): value is string {
+	return typeof value === 'string' && value.length > 0;
+}
+
 function canonicalGeneratedPostconditionTableParent(
 	address: LedgerAddress,
 ): GeneratedPostconditionTableParent | undefined {
 	const parent = address.parent;
 	if (
 		!isRecord(parent) ||
+		!hasOnlyOwnFields(parent, [
+			'scope',
+			'engine',
+			'database',
+			'schema',
+			'parent',
+			'kind',
+			'name',
+		]) ||
 		(parent.scope !== undefined && parent.scope !== 'schema') ||
+		parent.engine !== POSTGRESQL_ENGINE ||
 		parent.engine !== address.engine ||
+		!nonEmptyString(parent.database) ||
 		parent.database !== address.database ||
-		typeof parent.schema !== 'string' ||
+		!nonEmptyString(parent.schema) ||
 		parent.schema !== address.schema ||
 		parent.kind !== 'table' ||
-		typeof parent.name !== 'string' ||
-		parent.parent !== undefined ||
-		parent.catalogueIdentity !== undefined ||
-		parent.qualifiedBy !== undefined
+		!nonEmptyString(parent.name) ||
+		parent.parent !== undefined
 	)
 		return undefined;
 	return {
@@ -380,60 +403,92 @@ function canonicalGeneratedPostconditionTableParent(
 export function toGeneratedPostconditionBindingAddress(
 	address: LedgerAddress,
 ): GeneratedPostconditionBindingAddress {
-	const {
-		scope: _scope,
-		schema: _schema,
-		parent: _parent,
-		kind: _kind,
-		...resource
-	} = address;
+	if (
+		!nonEmptyString(address.engine) ||
+		address.engine !== POSTGRESQL_ENGINE ||
+		!nonEmptyString(address.database) ||
+		!nonEmptyString(address.name)
+	)
+		throw bindingAddressTopologyFailure(address);
 	switch (address.kind) {
 		case 'table':
 		case 'enum':
 		case 'sequence':
 			if (
 				address.scope !== 'schema' ||
-				typeof address.schema !== 'string' ||
+				!nonEmptyString(address.schema) ||
 				address.schema.length === 0 ||
-				address.parent !== undefined
+				address.parent !== undefined ||
+				!hasOnlyOwnFields(address, [
+					'scope',
+					'engine',
+					'database',
+					'schema',
+					'parent',
+					'kind',
+					'name',
+				])
 			)
 				throw bindingAddressTopologyFailure(address);
 			return {
-				...resource,
+				engine: POSTGRESQL_ENGINE,
+				database: address.database,
 				scope: 'schema',
 				schema: address.schema,
 				kind: address.kind,
+				name: address.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		case 'column':
 		case 'index':
 		case 'constraint': {
 			if (
 				address.scope !== 'schema' ||
-				typeof address.schema !== 'string' ||
-				address.schema.length === 0
+				!nonEmptyString(address.schema) ||
+				!hasOnlyOwnFields(address, [
+					'scope',
+					'engine',
+					'database',
+					'schema',
+					'parent',
+					'kind',
+					'name',
+				])
 			)
 				throw bindingAddressTopologyFailure(address);
 			const parent = canonicalGeneratedPostconditionTableParent(address);
 			if (parent === undefined) throw bindingAddressTopologyFailure(address);
 			return {
-				...resource,
+				engine: POSTGRESQL_ENGINE,
+				database: address.database,
 				scope: 'schema',
 				schema: address.schema,
 				parent,
 				kind: address.kind,
+				name: address.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		}
 		case 'extension':
 			if (
 				address.scope !== 'database' ||
 				address.schema !== undefined ||
-				address.parent !== undefined
+				address.parent !== undefined ||
+				!hasOnlyOwnFields(address, [
+					'scope',
+					'engine',
+					'database',
+					'schema',
+					'parent',
+					'kind',
+					'name',
+				])
 			)
 				throw bindingAddressTopologyFailure(address);
 			return {
-				...resource,
+				engine: POSTGRESQL_ENGINE,
+				database: address.database,
 				scope: 'database',
 				kind: 'extension',
+				name: address.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		default:
 			throw bindingAddressTopologyFailure(address);

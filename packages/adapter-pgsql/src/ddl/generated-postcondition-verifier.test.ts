@@ -435,6 +435,26 @@ describe('generated postcondition verifier', () => {
 		);
 	});
 
+	it.each([
+		{ ...tableAddress, engine: '' },
+		{ ...tableAddress, engine: 'sqlite' },
+		{ ...tableAddress, database: '' },
+		{ ...tableAddress, name: '' },
+		{ ...tableAddress, schema: '' },
+		{
+			...tableAddress,
+			catalogueIdentity: { engine: 'postgresql', format: 1, value: {} },
+		},
+		{ ...tableAddress, qualifiedBy: ['redirected'] },
+		{ ...tableAddress, redirected: true },
+		{ ...columnAddress, parent: { ...tableParent, name: '' } },
+		{ ...extensionAddress, database: '' },
+	])('refuses malformed v3 binding address contents %o', (address) => {
+		expect(() => toGeneratedPostconditionBindingAddress(address)).toThrow(
+			GeneratedPostconditionBindingResolutionError,
+		);
+	});
+
 	it('refuses prototype-supplied v3 members before digest interpretation', () => {
 		const inherited = Object.create({
 			postconditionVersion: 3,

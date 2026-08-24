@@ -293,9 +293,8 @@ function exactDeclaration(value: Record<string, unknown>): void {
 			]);
 			string(index.method);
 			boolean(index.unique);
-			boolean(index.valid);
-			boolean(index.ready);
-			boolean(index.live);
+			if (index.valid !== true || index.ready !== true || index.live !== true)
+				refuse('declaration shape');
 			strings(index.columns);
 			boolean(index.nullsNotDistinct);
 			if (index.expressions !== undefined) {
@@ -491,6 +490,48 @@ export function validateGeneratedPostconditionV3Declaration(
  * prototypes are refused instead of being interpreted differently by either
  * side of the persisted digest boundary.
  */
+/** The fixed v3 wire envelope and declaration grammar reach at most five container edges. */
+export const GENERATED_POSTCONDITION_MAX_JSON_DEPTH = 5;
+/**
+ * Durable declarations are capped at 64 KiB of serialized UTF-8 JSON.  This
+ * caps both the persisted payload and the amount of graph we can copy before
+ * exact-key decoding rejects a hostile wide declaration.
+ */
+export const GENERATED_POSTCONDITION_MAX_JSON_BYTES = 64 * 1024;
+const GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS = 4_096;
+
+function serializedJsonStringUtf8Bytes(value: string): number {
+	let bytes = 2;
+	for (let index = 0; index < value.length; index += 1) {
+		const code = value.charCodeAt(index);
+		if (code === 0x22 || code === 0x5c || code <= 0x1f) {
+			bytes +=
+				code === 0x08 ||
+				code === 0x09 ||
+				code === 0x0a ||
+				code === 0x0c ||
+				code === 0x0d
+					? 2
+					: 6;
+			continue;
+		}
+		if (code >= 0xd800 && code <= 0xdbff) {
+			const next = value.charCodeAt(index + 1);
+			if (next >= 0xdc00 && next <= 0xdfff) {
+				bytes += 4;
+				index += 1;
+			} else bytes += 6;
+			continue;
+		}
+		if (code >= 0xdc00 && code <= 0xdfff) {
+			bytes += 6;
+			continue;
+		}
+		bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
+	}
+	return bytes;
+}
+
 export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 	if (
 		value !== null &&
@@ -498,83 +539,187 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 		immutableGeneratedPostconditionSnapshots.has(value)
 	)
 		return value;
-	const snapshot = (item: unknown, path: string): unknown => {
-		if (item === null || typeof item === 'string' || typeof item === 'boolean')
+	let bytes = 0;
+	const nonPrimitive = Symbol('nonPrimitive');
+	const seen = new WeakSet<object>();
+	const addBytes = (amount: number, path: string): void => {
+		bytes += amount;
+		if (bytes > GENERATED_POSTCONDITION_MAX_JSON_BYTES)
+			throw new TypeError(
+				`${path}: serialized JSON exceeds ${GENERATED_POSTCONDITION_MAX_JSON_BYTES} UTF-8 bytes`,
+			);
+	};
+	const primitive = (
+		item: unknown,
+		path: string,
+	): unknown | typeof nonPrimitive => {
+		if (item === null) {
+			addBytes(4, path);
+			return null;
+		}
+		if (typeof item === 'string') {
+			addBytes(serializedJsonStringUtf8Bytes(item), path);
 			return item;
+		}
+		if (typeof item === 'boolean') {
+			addBytes(item ? 4 : 5, path);
+			return item;
+		}
 		if (typeof item === 'number') {
 			if (!Number.isFinite(item))
 				throw new TypeError(`${path}: expected a finite JSON number`);
+			addBytes(String(Object.is(item, -0) ? 0 : item).length, path);
 			return item;
 		}
-		if (typeof item !== 'object' || item === undefined)
-			throw new TypeError(`${path}: expected an own JSON value`);
-		if (Array.isArray(item)) {
-			if (Object.getPrototypeOf(item) !== Array.prototype)
+		return nonPrimitive;
+	};
+	type Frame = {
+		readonly source: object;
+		readonly target: object;
+		readonly path: string;
+		readonly depth: number;
+	};
+	const root = primitive(value, '$');
+	if (root !== nonPrimitive) return root;
+	if (value === null || value === undefined || typeof value !== 'object')
+		throw new TypeError('$: expected an own JSON value');
+	const stack: Frame[] = [];
+	const copiedContainers: object[] = [];
+	const copyContainer = (
+		source: object,
+		path: string,
+		depth: number,
+	): object => {
+		if (depth > GENERATED_POSTCONDITION_MAX_JSON_DEPTH)
+			throw new TypeError(
+				`${path}: declaration exceeds JSON depth ${GENERATED_POSTCONDITION_MAX_JSON_DEPTH}`,
+			);
+		if (seen.has(source))
+			throw new TypeError(`${path}: declaration graph must be a tree`);
+		seen.add(source);
+		if (Array.isArray(source)) {
+			if (Object.getPrototypeOf(source) !== Array.prototype)
 				throw new TypeError(`${path}: array has an exotic prototype`);
-			if (Object.getOwnPropertySymbols(item).length > 0)
+			if (source.length > GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS)
+				throw new TypeError(
+					`${path}: array exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
+				);
+			if (Object.getOwnPropertySymbols(source).length > 0)
 				throw new TypeError(`${path}: array has symbol members`);
-			const names = Object.getOwnPropertyNames(item);
-			for (const name of names) {
-				if (name === 'length') continue;
-				if (!/^(?:0|[1-9][0-9]*)$/u.test(name))
-					throw new TypeError(`${path}: array has a non-index member`);
-				if (BigInt(name) > 4294967294n)
-					throw new TypeError(
-						`${path}: array has an out-of-range index member`,
-					);
-				const descriptor = Object.getOwnPropertyDescriptor(item, name);
-				if (!descriptor || !('value' in descriptor))
-					throw new TypeError(
-						`${path}[${name}]: accessor members are unsupported`,
-					);
-			}
-			const copied: unknown[] = [];
-			for (let index = 0; index < item.length; index += 1) {
-				if (!Object.hasOwn(item, index))
-					throw new TypeError(`${path}[${index}]: array holes are unsupported`);
-				copied.push(snapshot(item[index], `${path}[${index}]`));
-			}
+			const copied: unknown[] = new Array(source.length);
+			copiedContainers.push(copied);
+			stack.push({ source, target: copied, path, depth });
 			return copied;
 		}
-		if (Object.getPrototypeOf(item) !== Object.prototype)
+		if (Object.getPrototypeOf(source) !== Object.prototype)
 			throw new TypeError(`${path}: object has an exotic prototype`);
-		if (Object.getOwnPropertySymbols(item).length > 0)
+		if (Object.getOwnPropertySymbols(source).length > 0)
 			throw new TypeError(`${path}: object has symbol members`);
-		const copied: Record<string, unknown> = {};
-		for (const key of Object.keys(item)) {
-			const descriptor = Object.getOwnPropertyDescriptor(item, key);
-			if (!descriptor || !('value' in descriptor))
-				throw new TypeError(`${path}.${key}: accessor members are unsupported`);
-			if (descriptor.enumerable !== true)
+		let members = 0;
+		for (const key in source) {
+			if (!Object.hasOwn(source, key)) continue;
+			members += 1;
+			if (members > GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS)
 				throw new TypeError(
-					`${path}.${key}: non-enumerable members are unsupported`,
+					`${path}: object exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
 				);
-			Object.defineProperty(copied, key, {
-				value: snapshot(descriptor.value, `${path}.${key}`),
+		}
+		const copied: Record<string, unknown> = {};
+		copiedContainers.push(copied);
+		stack.push({ source, target: copied, path, depth });
+		return copied;
+	};
+	const snapshot = copyContainer(value, '$', 0);
+	while (stack.length > 0) {
+		const frame = stack.pop();
+		if (!frame) break;
+		if (Array.isArray(frame.source)) {
+			addBytes(2 + Math.max(0, frame.source.length - 1), frame.path);
+			for (let index = frame.source.length - 1; index >= 0; index -= 1) {
+				if (!Object.hasOwn(frame.source, index))
+					throw new TypeError(
+						`${frame.path}[${index}]: array holes are unsupported`,
+					);
+				const descriptor = Object.getOwnPropertyDescriptor(
+					frame.source,
+					String(index),
+				);
+				if (!descriptor || !('value' in descriptor))
+					throw new TypeError(
+						`${frame.path}[${index}]: accessor members are unsupported`,
+					);
+				if (descriptor.value === undefined)
+					throw new TypeError(
+						`${frame.path}[${index}]: expected an own JSON value`,
+					);
+				const copied = primitive(descriptor.value, `${frame.path}[${index}]`);
+				(frame.target as unknown[])[index] =
+					copied === nonPrimitive
+						? copyContainer(
+								descriptor.value as object,
+								`${frame.path}[${index}]`,
+								frame.depth + 1,
+							)
+						: copied;
+			}
+			for (const key of Object.getOwnPropertyNames(frame.source)) {
+				if (key === 'length') continue;
+				if (!/^(?:0|[1-9][0-9]*)$/u.test(key))
+					throw new TypeError(`${frame.path}: array has a non-index member`);
+				if (BigInt(key) > 4294967294n)
+					throw new TypeError(
+						`${frame.path}: array has an out-of-range index member`,
+					);
+			}
+			continue;
+		}
+		const keys: string[] = [];
+		for (const key in frame.source) {
+			if (!Object.hasOwn(frame.source, key)) continue;
+			keys.push(key);
+		}
+		addBytes(2 + Math.max(0, keys.length - 1), frame.path);
+		for (let index = keys.length - 1; index >= 0; index -= 1) {
+			const key = keys[index];
+			if (key === undefined) continue;
+			const descriptor = Object.getOwnPropertyDescriptor(frame.source, key);
+			if (
+				!descriptor ||
+				!('value' in descriptor) ||
+				descriptor.enumerable !== true
+			)
+				throw new TypeError(
+					`${frame.path}.${key}: own data members are required`,
+				);
+			if (descriptor.value === undefined)
+				throw new TypeError(`${frame.path}.${key}: expected an own JSON value`);
+			addBytes(serializedJsonStringUtf8Bytes(key) + 1, frame.path);
+			const copied = primitive(descriptor.value, `${frame.path}.${key}`);
+			Object.defineProperty(frame.target, key, {
+				value:
+					copied === nonPrimitive
+						? copyContainer(
+								descriptor.value as object,
+								`${frame.path}.${key}`,
+								frame.depth + 1,
+							)
+						: copied,
 				enumerable: true,
 				writable: true,
 				configurable: true,
 			});
 		}
-		for (const key of Object.getOwnPropertyNames(item)) {
-			if (!Object.hasOwn(copied, key))
+		for (const key of Object.getOwnPropertyNames(frame.source))
+			if (!Object.hasOwn(frame.target, key))
 				throw new TypeError(
-					`${path}.${key}: non-enumerable members are unsupported`,
+					`${frame.path}.${key}: non-enumerable members are unsupported`,
 				);
-		}
-		return copied;
-	};
-	const freeze = (item: unknown): unknown => {
-		if (item && typeof item === 'object') {
-			for (const member of Object.values(item as Record<string, unknown>))
-				freeze(member);
-			Object.freeze(item);
-			immutableGeneratedPostconditionSnapshots.add(item);
-		}
-		return item;
-	};
-	const frozen = freeze(snapshot(value, '$'));
-	return frozen;
+	}
+	for (const item of copiedContainers.reverse()) {
+		Object.freeze(item);
+		immutableGeneratedPostconditionSnapshots.add(item);
+	}
+	return snapshot;
 }
 
 /** Branded by identity, not a forgeable property, once it crossed the JSON gate. */
