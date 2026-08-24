@@ -1,7 +1,7 @@
 import { fork } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createPgsqlAdapter, PgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import { Pool, type PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -37,6 +37,30 @@ function hasValues(
 		actual.length === expected.length &&
 		actual.every((value, index) => Object.is(value, expected[index]))
 	);
+}
+
+function hasCachedPlanInvalidationInCauseChain(error: unknown): boolean {
+	const seen = new Set<unknown>();
+	let current = error;
+
+	while (
+		typeof current === 'object' &&
+		current !== null &&
+		!seen.has(current)
+	) {
+		seen.add(current);
+		if (
+			'code' in current &&
+			current.code === '0A000' &&
+			'routine' in current &&
+			current.routine === 'RevalidateCachedQuery'
+		) {
+			return true;
+		}
+		current = 'cause' in current ? current.cause : undefined;
+	}
+
+	return false;
 }
 
 function isNamedQuery(
@@ -100,6 +124,21 @@ async function preparedCount(
 		sql === undefined ? [] : [sql],
 	);
 	return Number(result.rows[0]?.count ?? '0');
+}
+
+function requirePgsqlAdapter(adapter: unknown): PgsqlAdapter {
+	if (!(adapter instanceof PgsqlAdapter)) {
+		throw new TypeError('Expected a PgsqlAdapter pinned connection.');
+	}
+	return adapter;
+}
+
+function requirePoolClient(adapter: PgsqlAdapter): PoolClient {
+	const connection = adapter.getPoolInstance();
+	if (!('release' in connection)) {
+		throw new TypeError('Expected a PoolClient pinned connection.');
+	}
+	return connection;
 }
 
 async function getIsolatedClient(): Promise<{
@@ -377,29 +416,75 @@ describe('adapter prepared statements', () => {
 				replayInvalidatedPlans: true,
 			});
 			await adapter.withPinnedConnection(async (pinned) => {
-				const client = pinned.getPoolInstance() as PoolClient;
+				const pgPinned = requirePgsqlAdapter(pinned);
+				const client = requirePoolClient(pgPinned);
 				const table = `"${SCHEMA}".invalidated_plan`;
 				const sql = `SELECT * FROM ${table} WHERE id = $1`;
 				const query = compiled<{ id: number; added?: string }>(sql, [1]);
 
-				await pinned.executeDDL(
+				await pgPinned.executeDDL(
 					`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
 				);
-				await pinned.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
-				await pinned.execute(query);
-				await pinned.execute(query);
+				await pgPinned.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+				await pgPinned.execute(query);
+				await pgPinned.execute(query);
 				expect(await preparedCount(client, sql)).toBe(1);
-				await pinned.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
+				await pgPinned.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
 
-				await expect(pinned.execute(query)).rejects.toMatchObject({
-					code: '0A000',
-					routine: 'RevalidateCachedQuery',
-				});
-				await expect(pinned.execute(query)).resolves.toEqual([
-					{ id: 1, added: null },
-				]);
+				const querySpy = vi.spyOn(client, 'query');
+				try {
+					await expect(pgPinned.execute(query)).resolves.toEqual([
+						{ id: 1, added: null },
+					]);
+					expectNamedReplayThenUnnamed(
+						querySpy.mock.calls,
+						preparedName(sql),
+						sql,
+						[1],
+					);
+				} finally {
+					querySpy.mockRestore();
+				}
 				expect(await preparedCount(client, sql)).toBe(1);
 			});
+		} finally {
+			await pool.end();
+		}
+	});
+
+	it('rejects after result-shape DDL invalidates a named plan without replay', async () => {
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
+		try {
+			const adapter = createPgsqlAdapter(pool, {
+				preparedStatements: true,
+			});
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					const pgPinned = requirePgsqlAdapter(pinned);
+					const client = requirePoolClient(pgPinned);
+					const table = `"${SCHEMA}".invalidated_plan_without_replay`;
+					const sql = `SELECT * FROM ${table} WHERE id = $1`;
+					const query = compiled<{ id: number; added?: string }>(sql, [1]);
+
+					await pgPinned.executeDDL(
+						`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+					);
+					await pgPinned.executeRaw(
+						`INSERT INTO ${table} (id) VALUES ($1)`,
+						[1],
+					);
+					await pgPinned.execute(query);
+					await pgPinned.execute(query);
+					expect(await preparedCount(client, sql)).toBe(1);
+					await pgPinned.executeDDL(
+						`ALTER TABLE ${table} ADD COLUMN added text`,
+					);
+					await pgPinned.execute(query);
+				}),
+			).rejects.toSatisfy(hasCachedPlanInvalidationInCauseChain);
 		} finally {
 			await pool.end();
 		}
