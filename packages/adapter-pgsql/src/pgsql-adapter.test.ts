@@ -231,6 +231,13 @@ describe('PgsqlAdapter', () => {
 			).toEqualTypeOf<PgsqlAdapter>();
 
 			if (process.env.DBSP_TYPECHECK_ONLY === '1') {
+				const borrowedReplayOptions = {
+					borrowedClient: true,
+					replayInvalidatedPlans: true,
+				} as const;
+				const compileOnlyReplayOptions = {
+					replayInvalidatedPlans: true,
+				} as const;
 				// @ts-expect-error a PoolClient requires an explicit borrowedClient opt-in.
 				createPgsqlAdapter(client);
 				// @ts-expect-error borrowedClient requires a PoolClient, not a Pool.
@@ -240,10 +247,16 @@ describe('PgsqlAdapter', () => {
 					borrowedClient: true,
 					replayInvalidatedPlans: true,
 				});
+				// @ts-expect-error replay remains forbidden through a predeclared borrowed options object.
+				createPgsqlAdapter(client, borrowedReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
 				createPgsqlCompileOnlyAdapter({ replayInvalidatedPlans: true });
+				// @ts-expect-error replay remains forbidden through a predeclared compile-only options object.
+				createPgsqlCompileOnlyAdapter(compileOnlyReplayOptions);
 				// @ts-expect-error replay requires a pool-owned adapter.
 				new PgsqlAdapter(undefined, { replayInvalidatedPlans: true });
+				// @ts-expect-error replay remains forbidden through a predeclared compile-only options object.
+				new PgsqlAdapter(undefined, compileOnlyReplayOptions);
 			}
 		});
 	});
@@ -1092,7 +1105,226 @@ describe('PgsqlAdapter', () => {
 			expect(replayValues[2]).not.toBe(nested);
 		});
 
+		it('keeps an own __proto__ JSON member through named execution and replay', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE payload = $1';
+			const payload = JSON.parse('{"__proto__":{"tenant":"wrong"}}');
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [payload]);
+
+			await adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(query);
+				await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
+			});
+
+			const namedValues = (
+				vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+					readonly values: unknown[];
+				}
+			).values;
+			const replayValues = vi.mocked(client.query).mock
+				.calls[2]?.[1] as unknown as unknown[];
+			for (const value of [namedValues[0], replayValues[0]]) {
+				expect(Object.hasOwn(value as object, '__proto__')).toBe(true);
+				expect(
+					Object.getOwnPropertyDescriptor(value as object, '__proto__')?.value,
+				).toEqual({
+					tenant: 'wrong',
+				});
+			}
+		});
+
+		it('replays a clean Date but declines a Date with own keys', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE created_at = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [new Date('2026-08-24T12:00:00.000Z')]);
+
+			await adapter.withPinnedConnection(async (pinned) => {
+				await pinned.execute(query);
+				await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
+			});
+			expect(client.query).toHaveBeenNthCalledWith(3, sql, [
+				new Date('2026-08-24T12:00:00.000Z'),
+			]);
+		});
+
+		it('refuses a Proxy parameter before its traps run', async () => {
+			let trapCalls = 0;
+			const value = new Proxy(
+				{ id: 7 },
+				{
+					getPrototypeOf() {
+						trapCalls += 1;
+						throw new Error('proxy trap ran');
+					},
+					ownKeys() {
+						trapCalls += 1;
+						throw new Error('proxy trap ran');
+					},
+				},
+			);
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const sql = 'SELECT id FROM users WHERE payload = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query).mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+
+			await expect(
+				(adapter as any).issueConnectionQuery(client, sql, [value], true, true),
+			).rejects.toBe(error);
+			expect(trapCalls).toBe(0);
+		});
+
+		it('declines replay after getPoolInstance exposes a pinned client', async () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM users WHERE id = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const query = testQuery(sql, [7]);
+
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					expect((pinned as PgsqlAdapter).getPoolInstance()).toBe(client);
+					await pinned.execute(query);
+					await pinned.execute(query);
+				}),
+			).rejects.toBe(error);
+			expect(client.query).toHaveBeenCalledTimes(2);
+		});
+
+		it('keeps named parameters shallow in pool and borrowed modes', async () => {
+			const parameter = { nested: { mutable: true } };
+			const sql = 'SELECT id FROM users WHERE payload = $1';
+			const pool = createMockPool();
+			vi.mocked(pool.query).mockResolvedValue({
+				rows: [{ id: 7 }],
+				rowCount: 1,
+			} as any);
+			const poolAdapter = createPgsqlAdapter(pool, {
+				preparedStatements: true,
+			});
+			await (poolAdapter as any).issueConnectionQuery(
+				pool,
+				sql,
+				[parameter],
+				true,
+				false,
+			);
+			await (poolAdapter as any).issueConnectionQuery(
+				pool,
+				sql,
+				[parameter],
+				true,
+				false,
+			);
+			expect(
+				(
+					vi.mocked(pool.query).mock.calls[1]?.[0] as unknown as {
+						values: unknown[];
+					}
+				).values[0],
+			).toBe(parameter);
+
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			vi.mocked(client.query).mockResolvedValue({
+				rows: [{ id: 7 }],
+				rowCount: 1,
+			} as any);
+			const borrowedAdapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				preparedStatements: true,
+			});
+			await (borrowedAdapter as any).issueConnectionQuery(
+				client,
+				sql,
+				[parameter],
+				true,
+				false,
+			);
+			await (borrowedAdapter as any).issueConnectionQuery(
+				client,
+				sql,
+				[parameter],
+				true,
+				false,
+			);
+			expect(
+				(
+					vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+						values: unknown[];
+					}
+				).values[0],
+			).toBe(parameter);
+		});
+
 		it.each([
+			{
+				label: 'shadowed Date',
+				value: Object.assign(new Date('2026-08-24T12:00:00.000Z'), {
+					getFullYear: () => 1999,
+				}),
+			},
 			{
 				label: 'custom toPostgres value',
 				value: { toPostgres: () => 'serialized' },
@@ -1156,7 +1388,9 @@ describe('PgsqlAdapter', () => {
 				severity: 'ERROR',
 				routine: 'RevalidateCachedQuery',
 			};
-			const replayError = new Error('unnamed replay failed');
+			const replayError = new Error(
+				`unnamed replay failed for ${'top-secret-replay-parameter'}`,
+			);
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(initialError)
@@ -1172,15 +1406,17 @@ describe('PgsqlAdapter', () => {
 				await pinned.execute(query);
 				await pinned.execute(query);
 			});
-			await expect(operation).rejects.toBeInstanceOf(
-				PgsqlPreparedStatementReplayError,
-			);
-			await expect(operation).rejects.toMatchObject({
+			const recoveryError = await operation.catch((error: unknown) => error);
+			expect(recoveryError).toBeInstanceOf(PgsqlPreparedStatementReplayError);
+			expect(recoveryError).toMatchObject({
 				admissionFingerprint: derivePreparedStatementFingerprint(sql),
 				infrastructureError: initialError,
 				cause: replayError,
 			});
-			await expect(operation).rejects.not.toThrow(secret);
+			expect((recoveryError as Error).message).not.toContain(secret);
+			expect(
+				(recoveryError as Error & { cause: Error }).cause.message,
+			).toContain(secret);
 			expect(client.query).toHaveBeenCalledTimes(3);
 			expect(client.query).toHaveBeenNthCalledWith(3, sql, [secret]);
 		});

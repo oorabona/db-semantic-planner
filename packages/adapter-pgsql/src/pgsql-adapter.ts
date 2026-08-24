@@ -8,6 +8,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { isProxy } from 'node:util/types';
 import type {
 	AlterColumnOptions,
 	CreateIndexOptions,
@@ -304,6 +305,7 @@ type DbspScopeState = {
 	statementLock: DbspScopeStatementLock;
 	children: DbspScopeChildren;
 	closing: boolean;
+	rawClientExposed: boolean;
 	streamFailureRecovery: (() => Promise<void>) | undefined;
 };
 
@@ -545,8 +547,9 @@ export class PgsqlTransactionTimeoutError extends Error {
 /**
  * Raised when the single safe unnamed replay after a prepared-statement
  * infrastructure failure also fails. The original infrastructure failure and
- * the admission fingerprint identify the failed recovery without exposing
- * parameter values; the replay failure is the standard Error `cause`.
+ * the admission fingerprint identify the failed recovery. DBSP-authored
+ * messages carry no parameter values; preserved upstream errors, including
+ * the standard Error `cause` for the replay failure, are unsanitized.
  */
 export class PgsqlPreparedStatementReplayError extends Error {
 	readonly dbspPreparedStatementReplay = true;
@@ -640,6 +643,9 @@ function isVerifiedPreparedStatementInfrastructureError(
  * statement operation nested inside the outer named statement, so the
  * code/routine pair alone cannot authorize replaying or quarantining that
  * outer statement. Do not consult diagnostic text from nested execution.
+ *
+ * This recognizes canonical/C-locale PostgreSQL messages only. Localized
+ * deployments propagate 26000/42P05 failures without replay or quarantine.
  */
 function reportedPreparedStatementName(error: unknown): string | undefined {
 	if (typeof error !== 'object' || error === null) return undefined;
@@ -728,6 +734,7 @@ function cloneReplayableParameterValue(
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value !== 'object')
 		throw new TypeError('parameter is outside the replayable value domain');
+	if (isProxy(value)) throw new TypeError('Proxy parameter is not replayable');
 	if (active.has(value))
 		throw new TypeError('cyclic parameter graph is not replayable');
 	const priorCopy = copies.get(value);
@@ -736,7 +743,8 @@ function cloneReplayableParameterValue(
 	if (value instanceof Date) {
 		if (Object.getPrototypeOf(value) !== Date.prototype)
 			throw new TypeError('custom Date is not replayable');
-		assertReplayableBuiltinProperties(value);
+		if (Reflect.ownKeys(value).length !== 0)
+			throw new TypeError('custom Date is not replayable');
 		return new Date(Date.prototype.getTime.call(value));
 	}
 	if (Buffer.isBuffer(value)) {
@@ -775,11 +783,12 @@ function cloneReplayableParameterValue(
 		for (const [key, descriptor] of Object.entries(descriptors)) {
 			if (!descriptor.enumerable || !('value' in descriptor))
 				throw new TypeError('non-JSON parameter property is not replayable');
-			copy[key] = cloneReplayableParameterValue(
-				descriptor.value,
-				active,
-				copies,
-			);
+			Object.defineProperty(copy, key, {
+				value: cloneReplayableParameterValue(descriptor.value, active, copies),
+				enumerable: true,
+				writable: true,
+				configurable: true,
+			});
 		}
 		return copy;
 	} finally {
@@ -1158,6 +1167,7 @@ function createScopeState(
 			transactions: new Set(),
 		},
 		closing: false,
+		rawClientExposed: false,
 		streamFailureRecovery: undefined,
 	};
 }
@@ -2411,6 +2421,8 @@ export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
 }
 
 export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
+	/** Replay is only available to a pool-owned pinned scope. */
+	readonly replayInvalidatedPlans?: never;
 	/** This connection belongs to the caller. dbsp never releases it. */
 	readonly borrowedClient: true;
 
@@ -2442,11 +2454,17 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 	readonly managedTransactions?: true;
 }
 
-interface PgsqlAdapterInternalOptions
-	extends PgsqlBorrowedClientAdapterOptions {
+/** Options for a connectionless adapter, which cannot own replay serialization. */
+export interface PgsqlCompileOnlyAdapterOptions extends PgsqlAdapterOptions {
+	readonly replayInvalidatedPlans?: never;
+}
+
+interface PgsqlAdapterInternalOptions extends PgsqlAdapterOptions {
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	/** Propagated only to adapter-owned client scopes created from a pool. */
 	readonly replayInvalidatedPlans?: boolean;
+	readonly borrowedClient: true;
+	readonly managedTransactions?: true;
 	readonly adapterManagedTransaction?: true;
 	readonly adapterManagedPinnedConnection?: true;
 	readonly rollbackOnlyScope?: true;
@@ -2702,7 +2720,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	constructor(pool: Pool, options?: PgsqlPoolAdapterOptions);
 	constructor(client: PoolClient, options: PgsqlBorrowedClientAdapterOptions);
-	constructor(pool: undefined, options?: PgsqlAdapterOptions);
+	constructor(pool: undefined, options?: PgsqlCompileOnlyAdapterOptions);
 	constructor(
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
@@ -3237,9 +3255,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Get the underlying pg Pool or borrowed PoolClient instance.
+	 *
+	 * Exposing a client from a dbsp-managed scope lets external callers queue
+	 * commands outside dbsp's statement lock, so that scope can no longer replay
+	 * a failed named statement safely.
 	 */
 	getPoolInstance(): Pool | PoolClient {
-		return this.requireConnection('getPoolInstance()');
+		const executor = this.requireConnection('getPoolInstance()');
+		if (isPoolClientLike(executor) && this.adapterManagedScopeIsLive()) {
+			this.scopeState!.rawClientExposed = true;
+		}
+		return executor;
 	}
 
 	// =========================================================================
@@ -6241,7 +6267,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return (
 			isPoolClientLike(executor) &&
 			this.adapterManagedPinnedConnection &&
-			this.adapterManagedScopeIsLive()
+			this.adapterManagedScopeIsLive() &&
+			this.scopeState?.rawClientExposed === false
 		);
 	}
 
@@ -6533,10 +6560,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					MaybeMultipleQueryResults<T>
 				>;
 			}
-			// Capture the bounded replay domain before first submission. An
-			// ineligible value still reaches node-postgres for the initial attempt,
-			// but cannot authorize a replay from caller-owned mutable state.
-			const parameterSnapshot = captureReplayableParameterSnapshot(parameters);
+			// Only a dbsp-owned serialized client can reach the replay branch. Other
+			// modes retain the established shallow copy for their named submission.
+			const parameterSnapshot = ownsSerializedClientForPreparedStatementReplay
+				? captureReplayableParameterSnapshot(parameters)
+				: undefined;
 			const namedAttemptParameters =
 				parameterSnapshot === undefined
 					? [...parameters]
@@ -6988,7 +7016,7 @@ export function createPgsqlAdapter<DB = unknown>(
  * ```
  */
 export function createPgsqlCompileOnlyAdapter<DB = unknown>(
-	options?: PgsqlAdapterOptions,
+	options?: PgsqlCompileOnlyAdapterOptions,
 ): PgsqlAdapter<DB> {
 	return new PgsqlAdapter<DB>(undefined, options);
 }

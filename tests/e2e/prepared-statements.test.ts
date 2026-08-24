@@ -115,15 +115,17 @@ function expectNamedReplayThenUnnamed(
 }
 
 async function preparedCount(
-	client: PoolClient,
+	executor: PoolClient | PgsqlAdapter,
 	sql?: string,
 ): Promise<number> {
-	const result = await client.query<{ count: string }>(
-		`SELECT count(*)::text AS count FROM pg_prepared_statements
-		 WHERE name LIKE 'dbsp_ps_%'${sql === undefined ? '' : ' AND statement = $1'}`,
-		sql === undefined ? [] : [sql],
-	);
-	return Number(result.rows[0]?.count ?? '0');
+	const statement = `SELECT count(*)::text AS count FROM pg_prepared_statements
+		 WHERE name LIKE 'dbsp_ps_%'${sql === undefined ? '' : ' AND statement = $1'}`;
+	const parameters = sql === undefined ? [] : [sql];
+	const rows =
+		executor instanceof PgsqlAdapter
+			? await executor.executeRaw<{ count: string }>(statement, parameters)
+			: (await executor.query<{ count: string }>(statement, parameters)).rows;
+	return Number(rows[0]?.count ?? '0');
 }
 
 function requirePgsqlAdapter(adapter: unknown): PgsqlAdapter {
@@ -131,14 +133,6 @@ function requirePgsqlAdapter(adapter: unknown): PgsqlAdapter {
 		throw new TypeError('Expected a PgsqlAdapter pinned connection.');
 	}
 	return adapter;
-}
-
-function requirePoolClient(adapter: PgsqlAdapter): PoolClient {
-	const connection = adapter.getPoolInstance();
-	if (!('release' in connection)) {
-		throw new TypeError('Expected a PoolClient pinned connection.');
-	}
-	return connection;
 }
 
 async function getIsolatedClient(): Promise<{
@@ -417,7 +411,6 @@ describe('adapter prepared statements', () => {
 			});
 			await adapter.withPinnedConnection(async (pinned) => {
 				const pgPinned = requirePgsqlAdapter(pinned);
-				const client = requirePoolClient(pgPinned);
 				const table = `"${SCHEMA}".invalidated_plan`;
 				const sql = `SELECT * FROM ${table} WHERE id = $1`;
 				const query = compiled<{ id: number; added?: string }>(sql, [1]);
@@ -428,24 +421,13 @@ describe('adapter prepared statements', () => {
 				await pgPinned.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
 				await pgPinned.execute(query);
 				await pgPinned.execute(query);
-				expect(await preparedCount(client, sql)).toBe(1);
+				expect(await preparedCount(pgPinned, sql)).toBe(1);
 				await pgPinned.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
 
-				const querySpy = vi.spyOn(client, 'query');
-				try {
-					await expect(pgPinned.execute(query)).resolves.toEqual([
-						{ id: 1, added: null },
-					]);
-					expectNamedReplayThenUnnamed(
-						querySpy.mock.calls,
-						preparedName(sql),
-						sql,
-						[1],
-					);
-				} finally {
-					querySpy.mockRestore();
-				}
-				expect(await preparedCount(client, sql)).toBe(1);
+				await expect(pgPinned.execute(query)).resolves.toEqual([
+					{ id: 1, added: null },
+				]);
+				expect(await preparedCount(pgPinned, sql)).toBe(1);
 			});
 		} finally {
 			await pool.end();
@@ -464,7 +446,6 @@ describe('adapter prepared statements', () => {
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {
 					const pgPinned = requirePgsqlAdapter(pinned);
-					const client = requirePoolClient(pgPinned);
 					const table = `"${SCHEMA}".invalidated_plan_without_replay`;
 					const sql = `SELECT * FROM ${table} WHERE id = $1`;
 					const query = compiled<{ id: number; added?: string }>(sql, [1]);
@@ -478,7 +459,7 @@ describe('adapter prepared statements', () => {
 					);
 					await pgPinned.execute(query);
 					await pgPinned.execute(query);
-					expect(await preparedCount(client, sql)).toBe(1);
+					expect(await preparedCount(pgPinned, sql)).toBe(1);
 					await pgPinned.executeDDL(
 						`ALTER TABLE ${table} ADD COLUMN added text`,
 					);
