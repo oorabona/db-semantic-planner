@@ -23,6 +23,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	introspect,
 	PgsqlAdvisoryLockOptionsError,
+	PgsqlPreparedStatementReplayError,
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
@@ -320,6 +321,26 @@ describe('@dbsp/adapter-pgsql public API', () => {
 	// here, which is the gap this covers. Constructing one and asserting it is one
 	// would pass no matter what index.ts exports.
 
+	it('constructs the published prepared-statement replay error with its stable fields', () => {
+		const infrastructureError = new Error('prepared statement was invalidated');
+		const replayError = new Error('unnamed replay failed');
+		const error = new PgsqlPreparedStatementReplayError(
+			'0f9e8d7c',
+			infrastructureError,
+			replayError,
+		);
+
+		expect(error).toMatchObject({
+			message: 'Prepared statement recovery replay failed.',
+			cause: replayError,
+			infrastructureError,
+			admissionFingerprint: '0f9e8d7c',
+		});
+		expect(error).toHaveProperty('cause', replayError);
+		expect(error).toHaveProperty('infrastructureError', infrastructureError);
+		expect(error).toHaveProperty('admissionFingerprint', '0f9e8d7c');
+	});
+
 	it('throws the transaction-control error the entry point publishes', async () => {
 		const client = makeClient(async (sql: string) =>
 			sql === 'SAVEPOINT s'
@@ -579,7 +600,7 @@ describe('PgsqlAdapter.withAdvisoryLock', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
-	it('blocks, runs the callback on the pinned client, unlocks, and releases cleanly', async () => {
+	it('blocks, runs the callback on the pinned client, unlocks, and destroys the exposed client', async () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql.includes('pg_advisory_unlock')) {

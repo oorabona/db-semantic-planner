@@ -550,10 +550,12 @@ export class PgsqlTransactionTimeoutError extends Error {
 
 /**
  * Raised when the single safe unnamed replay after a prepared-statement
- * infrastructure failure also fails. The original infrastructure failure and
- * the admission fingerprint identify the failed recovery. DBSP-authored
- * messages carry no parameter values; preserved upstream errors, including
- * the standard Error `cause` for the replay failure, are unsanitized.
+ * infrastructure failure also fails. `message` is always the safe constant
+ * `Prepared statement recovery replay failed.`; `cause` is the replay error;
+ * `infrastructureError` is the original infrastructure error; and
+ * `admissionFingerprint` identifies the admitted statement. DBSP-authored
+ * messages carry no parameter values; preserved upstream errors, including the
+ * standard Error `cause`, are unsanitized.
  */
 export class PgsqlPreparedStatementReplayError extends Error {
 	readonly dbspPreparedStatementReplay = true;
@@ -2489,7 +2491,22 @@ export type PgsqlPoolAdapterOptions =
 			/**
 			 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
 			 * you assert that your statements do not invoke functions performing
-			 * effectful work before nested prepared-statement operations.
+			 * effectful work before nested prepared-statement operations. This requires
+			 * `preparedStatements: true` (or a prepared-statements options object).
+			 *
+			 * Replay snapshots JSON-like values (finite numbers, strings, booleans,
+			 * `null`, arrays, plain or null-prototype objects) and clean `Date`/`Buffer`
+			 * instances. It excludes non-finite numbers, `undefined`, `bigint`, symbols,
+			 * functions, proxies, cycles, sparse arrays, accessors, symbol keys, exotic
+			 * prototypes, custom built-ins, and values with their own node-postgres
+			 * `toPostgres` behavior.
+			 * The detached snapshot covers later mutations to the supplied value graph,
+			 * not built-in prototypes, timezone state, or node-postgres serialization
+			 * configuration; a process-global `toPostgres` or `toJSON` installed while
+			 * the call is in flight is outside the guarantee. Each capture or replay copy
+			 * is independently limited to 64 Ki visited values, 16 MiB of UTF-8 strings,
+			 * and 16 MiB of Buffer data. An ineligible or over-budget value still receives
+			 * the initial named submission, but disables transparent replay.
 			 *
 			 * Replay needs the adapter-owned serialized physical client available from a
 			 * pool; it is therefore not supported by borrowed or compile-only adapters.
@@ -3347,9 +3364,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Get the underlying pg Pool or borrowed PoolClient instance.
 	 *
-	 * Exposing a client from a dbsp-managed scope lets external callers queue
-	 * commands outside dbsp's statement lock, so that scope can no longer replay
-	 * a failed named statement safely.
+	 * Exposing raw access from a dbsp-managed scope permanently taints that physical
+	 * client: external callers can queue commands outside dbsp's statement lock, so
+	 * replay is disabled and dbsp destroys the client at scope release. Expect pool
+	 * churn; session state on the exposed connection does not survive that release.
 	 */
 	getPoolInstance(): Pool | PoolClient {
 		const executor = this.requireConnection('getPoolInstance()');
