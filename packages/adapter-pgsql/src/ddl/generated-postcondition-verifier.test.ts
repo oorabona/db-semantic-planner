@@ -743,6 +743,45 @@ describe('generated postcondition verifier', () => {
 			false,
 		);
 	});
+
+	it('locks the raw mixed-case catalogue relation from quoted address forms', async () => {
+		const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (
+				sql.includes('pg_catalog.current_database()') &&
+				params?.[0] === 'MixedSchema' &&
+				params?.[1] === 'QuotedTable'
+			)
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'r',
+							relation_oid: '101',
+						},
+					],
+				};
+			return { rows: [] };
+		});
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: {
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, kind: 'table', columns: [] },
+				},
+				address: {
+					...tableAddress,
+					schema: '"MixedSchema"',
+					name: '"QuotedTable"',
+				},
+			}),
+		).rejects.toThrow('generated table QuotedTable is absent');
+		expect(query.mock.calls.map(([sql]) => sql)).toContain(
+			'LOCK TABLE ONLY "MixedSchema"."QuotedTable" IN SHARE UPDATE EXCLUSIVE MODE',
+		);
+	});
 	it.each([
 		['table', { postconditionVersion: 2, kind: 'table', columns: [] }],
 		['column', { postconditionVersion: 2, kind: 'column', column: {} }],

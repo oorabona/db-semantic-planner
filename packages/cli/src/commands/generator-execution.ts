@@ -428,9 +428,7 @@ async function readGeneratedV3Postcondition(
 			return generatedPayload({ kind: 'absent' });
 		}
 		default:
-			throw new Error(
-				`generated v3 ${postcondition.declaration.kind} has no declarable read-back`,
-			);
+			throw new Error('generated v3 postcondition has no declarable read-back');
 	}
 }
 

@@ -1354,6 +1354,28 @@ function markSafePreQueryFailure(
 		preQueryFailures.set(error, safeFailure(capability));
 }
 
+/**
+ * Managed-step addresses may retain the SQL spelling that named a relation.
+ * Catalogue lookups and relation locks instead require the catalogue relname:
+ * one quote layer removed, escaped quotes restored, and no case folding.
+ */
+function catalogueIdentifier(value: string): string {
+	if (!value.startsWith('"') || !value.endsWith('"') || value.length < 2)
+		return value;
+	let raw = '';
+	for (let index = 1; index < value.length - 1; index += 1) {
+		const character = value[index]!;
+		if (character !== '"') {
+			raw += character;
+			continue;
+		}
+		if (value[index + 1] !== '"') return value;
+		raw += '"';
+		index += 1;
+	}
+	return raw;
+}
+
 /** Refuse structural lookalikes before any proof or catalogue read. */
 export function assertGeneratedPostconditionSession(
 	value: unknown,
@@ -1373,14 +1395,17 @@ function bindingSlot(
 		readonly table: string;
 	};
 } {
-	const schema = address.schema;
+	const schema = address.schema && catalogueIdentifier(address.schema);
 	const parent = address.parent;
+	const parentSchema = parent?.schema && catalogueIdentifier(parent.schema);
+	const parentName = parent && catalogueIdentifier(parent.name);
+	const name = catalogueIdentifier(address.name);
 	const scope = (address as ResourceAddress & { readonly scope?: unknown })
 		.scope;
 	const parentScope = parent
 		? (parent as ResourceAddress & { readonly scope?: unknown }).scope
 		: undefined;
-	const expected = `${expectedKind} ${schema ?? '<database>'}.${parent?.name ?? address.name}${expectedKind === 'table' || expectedKind === 'enum' || expectedKind === 'sequence' || expectedKind === 'extension' ? '' : `.${address.name}`}`;
+	const expected = `${expectedKind} ${schema ?? '<database>'}.${parentName ?? name}${expectedKind === 'table' || expectedKind === 'enum' || expectedKind === 'sequence' || expectedKind === 'extension' ? '' : `.${name}`}`;
 	const requiresTableParent =
 		expectedKind === 'column' ||
 		expectedKind === 'index' ||
@@ -1391,7 +1416,7 @@ function bindingSlot(
 		parent.engine === address.engine &&
 		parent.database === address.database &&
 		(parentScope === undefined || parentScope === scope) &&
-		parent.schema === schema &&
+		parentSchema === schema &&
 		parent.kind === 'table' &&
 		parent.parent === undefined;
 	if (
@@ -1405,11 +1430,11 @@ function bindingSlot(
 		return {
 			target: {
 				schema: schema ?? '',
-				table: parent?.name ?? '',
-				name: address.name,
+				table: parentName ?? '',
+				name,
 			},
 			sought: expected,
-			found: `${address.engine}/${address.database} ${address.kind} ${schema ?? '<missing-schema>'}.${parent?.name ?? address.name}`,
+			found: `${address.engine}/${address.database} ${address.kind} ${schema ?? '<missing-schema>'}.${parentName ?? name}`,
 		};
 	return {
 		target: {
@@ -1419,9 +1444,9 @@ function bindingSlot(
 				expectedKind === 'enum' ||
 				expectedKind === 'sequence' ||
 				expectedKind === 'extension'
-					? address.name
-					: (parent?.name ?? ''),
-			name: address.name,
+					? name
+					: (parentName ?? ''),
+			name,
 		},
 		sought: expected,
 		found: undefined,
@@ -1430,7 +1455,7 @@ function bindingSlot(
 			: {
 					stabilizationRelation: {
 						schema: schema!,
-						table: requiresTableParent ? parent!.name : address.name,
+						table: requiresTableParent ? parentName! : name,
 					},
 				}),
 	};
