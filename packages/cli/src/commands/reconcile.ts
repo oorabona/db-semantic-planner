@@ -156,13 +156,15 @@ function ledgerHome(address: LedgerReservationRow['address']): LedgerHome {
 	return { scope: 'schema', schema: address.schema };
 }
 
-function recoveryPayload(
+export function recoveryPayload(
 	identity: Parameters<
 		NonNullable<Parameters<typeof recoverPgOutcomeClaim>[1]['readBack']>
 	>[2],
 ): LedgerPayload {
 	const value = JSON.parse(
-		canonicalJson({ catalogueIdentity: identity }),
+		canonicalJson({
+			...(identity === undefined ? {} : { catalogueIdentity: identity }),
+		}),
 	) as LedgerPayload['value'];
 	return {
 		value,
