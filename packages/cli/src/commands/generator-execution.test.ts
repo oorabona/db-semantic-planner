@@ -243,24 +243,6 @@ function columnProjectionRow(overrides: Record<string, unknown> = {}) {
 	};
 }
 
-function constraintProjectionRow(overrides: Record<string, unknown> = {}) {
-	return {
-		constraint_type: 'p',
-		constraint_definition: 'PRIMARY KEY (id)',
-		key_columns: ['id'],
-		referenced_schema: null,
-		referenced_table: null,
-		referenced_columns: [],
-		on_delete: 'a',
-		on_update: 'a',
-		is_deferrable: false,
-		is_deferred: false,
-		is_validated: true,
-		is_enforced: true,
-		...overrides,
-	};
-}
-
 function indexReadbackExecutor(input: {
 	readonly live?: Record<string, unknown>;
 	readonly staged?: Record<string, unknown>;
@@ -291,6 +273,18 @@ function indexReadbackExecutor(input: {
 }
 
 describe('generator execution fixture shim', () => {
+	it('names an undecodable generated declaration rather than a missing structural postcondition', async () => {
+		await expect(
+			readTestGeneratedPostcondition(
+				{ query: vi.fn() },
+				dataDestructiveStep,
+				dataDestructiveStep.address!,
+			),
+		).rejects.toThrow(
+			'generated table step generator:0 has no decodable generated declaration',
+		);
+	});
+
 	it('dispatches an absence declaration through the destructive absence read-back', async () => {
 		const step = {
 			...dataDestructiveStep,
