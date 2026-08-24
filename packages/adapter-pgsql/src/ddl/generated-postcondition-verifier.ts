@@ -9,6 +9,7 @@ import {
 import { validateCheckExpression } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import {
+	generatedPostconditionSnapshotStructuralPath,
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
 } from './generated-postcondition-v3-validator.js';
@@ -569,21 +570,37 @@ export class GeneratedPostconditionReplanRequiredError extends Error {
 	readonly diagnostic: Readonly<{
 		versionSeen: unknown;
 		stepIdentity: string | undefined;
+		structuralPath: string | undefined;
 	}>;
+	readonly structuralPath: string | undefined;
 
 	constructor(
 		message: string,
 		versionSeen: unknown = undefined,
 		stepIdentity: string | undefined = undefined,
+		structuralPath: string | undefined = undefined,
 		options?: ErrorOptions,
 	) {
 		super(
-			`${message}; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
+			`${message}${structuralPath === undefined ? '' : ` at ${structuralPath}`}; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
 			options,
 		);
 		this.name = 'GeneratedPostconditionReplanRequiredError';
-		this.diagnostic = { versionSeen, stepIdentity };
+		this.structuralPath = structuralPath;
+		this.diagnostic = { versionSeen, stepIdentity, structuralPath };
 	}
+}
+
+function structuralPathFrom(error: unknown): string | undefined {
+	if (
+		error === null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return;
+	const structuralPath = (error as { structuralPath?: unknown }).structuralPath;
+	return typeof structuralPath === 'string'
+		? structuralPath
+		: generatedPostconditionSnapshotStructuralPath(error);
 }
 
 function replan(
@@ -596,6 +613,7 @@ function replan(
 		message,
 		versionSeen,
 		stepIdentity,
+		structuralPathFrom(cause),
 		cause === undefined ? undefined : { cause },
 	);
 }
@@ -693,6 +711,7 @@ function decodeGeneratedPostconditionSnapshot(
 					error.message.replace(/; REPLAN_REQUIRED[\s\S]*$/, ''),
 					postconditionVersion,
 					stepIdentity,
+					error.structuralPath,
 					{ cause: error },
 				);
 			throw error;
@@ -721,6 +740,7 @@ export function decodeGeneratedPostconditionPayload(
 			'generated postcondition digest cannot be decoded',
 			undefined,
 			stepIdentity,
+			structuralPathFrom(error),
 			{ cause: error },
 		);
 	}
@@ -736,6 +756,7 @@ export function decodeGeneratedPostconditionPayload(
 			'generated postcondition digest cannot be decoded',
 			value.postconditionVersion,
 			stepIdentity,
+			structuralPathFrom(error),
 			{ cause: error },
 		);
 	}

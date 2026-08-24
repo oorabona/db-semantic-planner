@@ -3,7 +3,7 @@ import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
 import { transitionPlanDigest } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type { Pool, PoolClient } from 'pg';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
@@ -94,11 +94,23 @@ function recordingPoolFor(pool: Pool) {
 	const recording = Object.create(pool) as typeof pool;
 	async function checkout(): Promise<PoolClient> {
 		const client = await pool.connect();
-		const query = client.query.bind(client);
+		const query = client.query;
+		const release = client.release;
+		let restored = false;
+		const restore = () => {
+			if (restored) return;
+			restored = true;
+			client.query = query;
+			client.release = release;
+		};
 		client.query = (async (...args: Parameters<typeof client.query>) => {
 			statements.push(String(args[0]));
-			return query(...args);
+			return query.call(client, ...args);
 		}) as typeof client.query;
+		client.release = ((...args: Parameters<typeof client.release>) => {
+			restore();
+			return release.call(client, ...args);
+		}) as typeof client.release;
 		return client;
 	}
 	function connect(): Promise<PoolClient>;
@@ -124,17 +136,61 @@ function recordingPoolFor(pool: Pool) {
 	return { pool: recording, statements };
 }
 
-async function recordingPool() {
-	return recordingPoolFor(await getTestPool());
-}
-
-afterEach(async () => {
-	const pool = await getTestPool();
-	for (const schema of schemas.splice(0).reverse()) await dropSchema(schema);
-	await resetDbspMeta();
+describe('generated deferred kinds recording pool hygiene', () => {
+	it.each([
+		['success', 'promise'],
+		['verifier failure', 'callback'],
+		['release failure', 'promise'],
+	] as const)('restores the original query after %s through the %s release path', async (outcome, releasePath) => {
+		const originalQuery = vi.fn(async (sql: string) => {
+			if (outcome === 'verifier failure' && sql.includes('verifier_failure'))
+				throw new Error('verifier failed');
+			return { rows: [] };
+		});
+		const release = vi.fn(() => {
+			if (outcome === 'release failure') throw new Error('release failed');
+		});
+		const client = { query: originalQuery, release } as unknown as PoolClient;
+		const pool = {
+			connect: vi.fn(async () => client),
+		} as unknown as Pool;
+		const { pool: recording } = recordingPoolFor(pool);
+		if (releasePath === 'promise') {
+			const checkedOut = await recording.connect();
+			await checkedOut.query('SELECT success');
+			if (outcome === 'release failure')
+				expect(() => checkedOut.release()).toThrow('release failed');
+			else checkedOut.release();
+		} else {
+			await new Promise<void>((resolve, reject) => {
+				recording.connect((error, checkedOut, done) => {
+					if (error || !checkedOut) return reject(error);
+					void checkedOut.query('SELECT verifier_failure').then(
+						() => reject(new Error('expected verifier failure')),
+						() => {
+							done(new Error('verifier failed'));
+							resolve();
+						},
+					);
+				});
+			});
+		}
+		const later = await pool.connect();
+		expect(later.query).toBe(originalQuery);
+	});
 });
 
 describe.sequential('generated deferred kinds on real PostgreSQL', () => {
+	afterEach(async () => {
+		const pool = await getTestPool();
+		for (const schema of schemas.splice(0).reverse()) await dropSchema(schema);
+		await resetDbspMeta();
+	});
+
+	async function recordingPool() {
+		return recordingPoolFor(await getTestPool());
+	}
+
 	it('persists and executes generated sequence and enum steps with identity observations and no LOCK TABLE', async () => {
 		await resetDbspMeta();
 		const schema = schemaName();

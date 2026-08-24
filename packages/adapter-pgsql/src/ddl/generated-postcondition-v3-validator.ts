@@ -9,14 +9,26 @@ import type { GeneratedPostconditionDeclarationV3 } from './managed-step-manifes
  * exactly the same address-free declaration domain.
  */
 export class GeneratedPostconditionV3DeclarationError extends Error {
-	constructor(readonly rule: string) {
+	constructor(
+		readonly rule: string,
+		/** A sanitized JSON structural path, never an authored declaration value. */
+		readonly structuralPath: string | undefined = undefined,
+	) {
 		super(`generated postcondition v3 declaration violates ${rule}`);
 		this.name = 'GeneratedPostconditionV3DeclarationError';
 	}
 }
 
-function refuse(rule: string): never {
-	throw new GeneratedPostconditionV3DeclarationError(rule);
+function refuse(rule: string, structuralPath?: string): never {
+	throw new GeneratedPostconditionV3DeclarationError(rule, structuralPath);
+}
+
+export function generatedPostconditionSnapshotStructuralPath(
+	error: unknown,
+): string | undefined {
+	if (!(error instanceof Error)) return;
+	const path = /^\$(?:\.[^.[\]:\s]+|\[[0-9]+\])*/u.exec(error.message)?.[0];
+	return path === '$' && !error.message.startsWith('$:') ? undefined : path;
 }
 
 function identifier(value: string, rule: string): void {
@@ -738,8 +750,11 @@ export function parseGeneratedPostconditionV3Declaration(
 		snapshot = snapshotGeneratedPostconditionJson(
 			value,
 		) as GeneratedPostconditionDeclarationV3;
-	} catch {
-		return refuse('own JSON declaration graph');
+	} catch (error) {
+		return refuse(
+			'own JSON declaration graph',
+			generatedPostconditionSnapshotStructuralPath(error),
+		);
 	}
 	if (!record(snapshot)) refuse('declaration shape');
 	try {

@@ -1,6 +1,10 @@
 import type { LedgerAddress } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
+	GeneratedPostconditionV3DeclarationError,
+	parseGeneratedPostconditionV3Declaration,
+} from './generated-postcondition-v3-validator.js';
+import {
 	decodeGeneratedPostcondition,
 	GeneratedPostconditionBindingResolutionError,
 	GeneratedPostconditionProofInFlightError,
@@ -434,6 +438,48 @@ describe('generated postcondition verifier', () => {
 		expect(() => generatedPostconditionDigest(malformed)).toThrow(
 			'$.declaration.nested',
 		);
+	});
+
+	it('carries only the structural path from a parser refusal through the redacting formatter', () => {
+		const secret = "'operator-secret-structural-path'::text";
+		const declaration = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [
+				{
+					name: 'token',
+					default: secret,
+					invalid: undefined,
+				},
+			],
+		};
+		try {
+			parseGeneratedPostconditionV3Declaration(declaration);
+			throw new Error('expected parser refusal');
+		} catch (error) {
+			expect(error).toBeInstanceOf(GeneratedPostconditionV3DeclarationError);
+			expect(error).toMatchObject({
+				structuralPath: '$.columns[0].invalid',
+			});
+			expect((error as Error).message).not.toContain(secret);
+		}
+		try {
+			decodeGeneratedPostcondition({
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration,
+			});
+			throw new Error('expected REPLAN_REQUIRED');
+		} catch (error) {
+			expect(error).toMatchObject({
+				structuralPath: '$.declaration.columns[0].invalid',
+				diagnostic: { structuralPath: '$.declaration.columns[0].invalid' },
+			});
+			expect((error as Error).message).toContain(
+				'$.declaration.columns[0].invalid',
+			);
+			expect((error as Error).message).not.toContain(secret);
+		}
 	});
 
 	it.each([

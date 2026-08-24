@@ -300,7 +300,7 @@ function generatedPayload(value: unknown): GeneratedStructuralObservation {
 	} satisfies GeneratedStructuralObservation;
 }
 
-/** A deliberately non-structural read-back for the four #597 kinds. */
+/** An identity-only existence and catalogue-identity read-back for the four #597 kinds. */
 async function identityObserved(
 	executor: GeneratedPostconditionSession,
 	postcondition: GeneratedPostcondition,
@@ -350,7 +350,7 @@ function generatedPostcondition(
 		Array.isArray(declaration.value)
 	)
 		throw new Error(
-			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
+			`generated ${address.kind} step ${step.stepKey} has no decodable generated declaration`,
 		);
 	return decodeGeneratedPostconditionPayload(declaration, step.stepKey);
 }
@@ -502,9 +502,10 @@ async function readGeneratedV3Postcondition(
 }
 
 /**
- * Generated DDL has no operation runtime to supply an observation. Read the
- * precise catalogue fields it changes; a same-named object is never enough to
- * write an `observed` terminal.
+ * Generated DDL has no operation runtime to supply an observation. Structural
+ * declarations read the precise catalogue fields they change; the four #597
+ * identity-only declarations prove existence and catalogue identity, not shape.
+ * A same-named object is never enough to write an `observed` terminal.
  */
 export async function readGeneratedPostcondition(
 	executor: GeneratedPostconditionSession,
