@@ -5,11 +5,12 @@ import {
 	assertGeneratedPostconditionSession,
 	compareSchemata,
 	createPgsqlAdapter,
-	decodeGeneratedPostcondition,
+	decodeGeneratedPostconditionPayload,
 	executePgAdmittedOperation,
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
 	type GeneratedPostcondition,
+	type GeneratedPostconditionBindingAddress,
 	type GeneratedPostconditionSession,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
@@ -18,10 +19,13 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIdentityPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
+	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import {
 	outcomeClaimEventId,
@@ -273,202 +277,115 @@ function observed(address: LedgerAddress): LedgerPayload {
 	};
 }
 
-function generatedPayload(value: unknown): LedgerPayload {
+/** Durable payload roles are disjoint before the outcome protocol serializes them. */
+export type GeneratedIdentityObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-identity-observation';
+};
+export type GeneratedStructuralObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-structural-observation';
+};
+type GeneratedPostconditionObservation =
+	| GeneratedIdentityObservation
+	| GeneratedStructuralObservation;
+
+function generatedPayload(value: unknown): GeneratedStructuralObservation {
+	const encoded = JSON.stringify(value);
+	if (encoded === undefined)
+		throw new TypeError('generated observation is not JSON serializable');
+	const normalized = JSON.parse(encoded) as LedgerPayload['value'];
 	return {
-		value: value as LedgerPayload['value'],
+		value: normalized,
+		digest: createHash('sha256')
+			.update(JSON.stringify(normalized))
+			.digest('hex'),
+		payloadKind: 'generated-structural-observation',
+	} satisfies GeneratedStructuralObservation;
+}
+
+/** A deliberately non-structural read-back for the four #597 kinds. */
+async function identityObserved(
+	executor: GeneratedPostconditionSession,
+	postcondition: GeneratedPostcondition,
+	address: GeneratedPostconditionBindingAddress,
+	kind: 'constraint' | 'enum' | 'sequence' | 'extension',
+): Promise<GeneratedIdentityObservation> {
+	const verified = await verifyGeneratedIdentityPostcondition({
+		session: executor,
+		postcondition,
+		address,
+		kind,
+	});
+	const value = JSON.parse(
+		JSON.stringify({
+			kind: 'identity-observed',
+			observedKind: verified.kind,
+			address: {
+				scope: address.scope,
+				...(address.schema === undefined ? {} : { schema: address.schema }),
+				name: address.name,
+			},
+			identity: verified.identity,
+			structuralSemantics: 'unverified',
+		}),
+	) as LedgerPayload['value'];
+	return {
+		value,
 		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
-	};
-}
-
-function foreignKeyAction(code: unknown): string | undefined {
-	switch (code) {
-		case 'a':
-			return 'NO ACTION';
-		case 'r':
-			return 'RESTRICT';
-		case 'c':
-			return 'CASCADE';
-		case 'n':
-			return 'SET NULL';
-		case 'd':
-			return 'SET DEFAULT';
-		default:
-			return undefined;
-	}
-}
-
-function incompleteGeneratedProjection(kind: string, name: string): never {
-	throw new Error(`generated ${kind} ${name} has an incomplete projection`);
-}
-
-function strictGeneratedString(
-	value: unknown,
-	kind: string,
-	name: string,
-): string {
-	if (typeof value !== 'string') incompleteGeneratedProjection(kind, name);
-	return value;
-}
-
-function strictGeneratedBoolean(
-	value: unknown,
-	kind: string,
-	name: string,
-): boolean {
-	if (typeof value !== 'boolean') incompleteGeneratedProjection(kind, name);
-	return value;
-}
-
-function strictGeneratedStringArray(
-	value: unknown,
-	kind: string,
-	name: string,
-): readonly string[] {
-	if (!Array.isArray(value) || value.some((item) => typeof item !== 'string'))
-		incompleteGeneratedProjection(kind, name);
-	return value;
-}
-
-function strictGeneratedStringOrNull(
-	value: unknown,
-	kind: string,
-	name: string,
-): string | null {
-	if (typeof value !== 'string' && value !== null)
-		incompleteGeneratedProjection(kind, name);
-	return value;
-}
-
-function generatedConstraintProjection(
-	row: Record<string, unknown>,
-	name: string,
-): {
-	readonly type: string;
-	readonly definition: string;
-	readonly columns: readonly string[];
-	readonly referencedSchema: string | null;
-	readonly referencedTable: string | null;
-	readonly referencedColumns: readonly string[];
-	readonly onDelete: string;
-	readonly onUpdate: string;
-	readonly deferrable: boolean;
-	readonly initiallyDeferred: boolean;
-	readonly validated: boolean;
-	readonly enforced: boolean;
-} {
-	return {
-		type: strictGeneratedString(row.constraint_type, 'constraint', name),
-		definition: strictGeneratedString(
-			row.constraint_definition,
-			'constraint',
-			name,
-		),
-		columns: strictGeneratedStringArray(row.key_columns, 'constraint', name),
-		referencedSchema: strictGeneratedStringOrNull(
-			row.referenced_schema,
-			'constraint',
-			name,
-		),
-		referencedTable: strictGeneratedStringOrNull(
-			row.referenced_table,
-			'constraint',
-			name,
-		),
-		referencedColumns: strictGeneratedStringArray(
-			row.referenced_columns,
-			'constraint',
-			name,
-		),
-		onDelete: strictGeneratedString(row.on_delete, 'constraint', name),
-		onUpdate: strictGeneratedString(row.on_update, 'constraint', name),
-		deferrable: strictGeneratedBoolean(row.is_deferrable, 'constraint', name),
-		initiallyDeferred: strictGeneratedBoolean(
-			row.is_deferred,
-			'constraint',
-			name,
-		),
-		validated: strictGeneratedBoolean(row.is_validated, 'constraint', name),
-		enforced: strictGeneratedBoolean(row.is_enforced, 'constraint', name),
-	};
-}
-
-function generatedSequenceProjection(
-	row: Record<string, unknown>,
-	name: string,
-): {
-	readonly start_value: string;
-	readonly increment_by: string;
-	readonly min_value: string;
-	readonly max_value: string;
-	readonly cache_size: string;
-	readonly cycle: boolean;
-} {
-	return {
-		start_value: strictGeneratedString(row.start_value, 'sequence', name),
-		increment_by: strictGeneratedString(row.increment_by, 'sequence', name),
-		min_value: strictGeneratedString(row.min_value, 'sequence', name),
-		max_value: strictGeneratedString(row.max_value, 'sequence', name),
-		cache_size: strictGeneratedString(row.cache_size, 'sequence', name),
-		cycle: strictGeneratedBoolean(row.cycle, 'sequence', name),
-	};
+		payloadKind: 'generated-identity-observation',
+	} satisfies GeneratedIdentityObservation;
 }
 
 function generatedPostcondition(
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
 ): GeneratedPostcondition {
-	const value = step.expectedDeclaration?.value;
-	if (!value || typeof value !== 'object' || Array.isArray(value))
+	const declaration = step.expectedDeclaration;
+	if (
+		!declaration?.value ||
+		typeof declaration.value !== 'object' ||
+		Array.isArray(declaration.value)
+	)
 		throw new Error(
 			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
 		);
-	return decodeGeneratedPostcondition(value);
+	return decodeGeneratedPostconditionPayload(declaration, step.stepKey);
 }
 
 /**
- * Generated DDL has no operation runtime to supply an observation. Read the
- * precise catalogue fields it changes; a same-named object is never enough to
- * write an `observed` terminal.
+ * Version 3 binds its address separately from its structural declaration. The
+ * adapter owns both binding resolution and structural proof, so the CLI only
+ * dispatches from the decoded declaration kind and carries the step address.
  */
-export async function readGeneratedPostcondition(
+async function readGeneratedV3Postcondition(
 	executor: GeneratedPostconditionSession,
-	step: NormalizedManagedStep,
+	postcondition: Extract<
+		GeneratedPostcondition,
+		{ readonly postconditionVersion: 3 }
+	>,
 	address: LedgerAddress,
-): Promise<LedgerPayload> {
-	executor = assertGeneratedPostconditionSession(executor);
-	const parent = address.parent?.name;
-	if (address.kind === 'column' && parent && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'column')
-			throw new Error(
-				`generated column ${address.name} has a non-column structural postcondition`,
-			);
-		const verified = await verifyGeneratedColumnPostcondition({
-			session: executor,
-			postcondition,
-			target: { schema: address.schema, table: parent, name: address.name },
-		});
-		return generatedPayload({
-			kind: 'column',
-			type: verified.projection.type,
-			nullable: verified.projection.nullable,
-			default: verified.projection.default,
-			collation: verified.projection.collation,
-			identity: verified.projection.identity,
-		});
-	}
-	if (address.kind === 'constraint' && parent && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'constraint')
-			throw new Error(
-				`generated constraint ${address.name} has a non-constraint structural postcondition`,
-			);
-		const expected = postcondition.constraint;
-		if (expected.type === 'c') {
+): Promise<GeneratedPostconditionObservation> {
+	const bindingAddress = toGeneratedPostconditionBindingAddress(address);
+	switch (postcondition.declaration.kind) {
+		case 'column': {
+			const verified = await verifyGeneratedColumnPostcondition({
+				session: executor,
+				postcondition,
+				address: bindingAddress,
+			});
+			return generatedPayload({
+				kind: 'column',
+				type: verified.projection.type,
+				nullable: verified.projection.nullable,
+				default: verified.projection.default,
+				collation: verified.projection.collation,
+				identity: verified.projection.identity,
+			});
+		}
+		case 'check': {
 			const verified = await verifyGeneratedCheckPostcondition({
 				session: executor,
 				postcondition,
-				target: { schema: address.schema, table: parent, name: address.name },
+				address: bindingAddress,
 			});
 			return generatedPayload({
 				kind: verified.kind,
@@ -482,208 +399,98 @@ export async function readGeneratedPostcondition(
 				parentId: verified.projection.parentId,
 			});
 		}
-		const row = (
-			await executor.query(
-				`SELECT constraint_item.contype AS constraint_type, pg_catalog.pg_get_constraintdef(constraint_item.oid, true) AS constraint_definition, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.conkey) WITH ORDINALITY AS key_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.conrelid AND attribute.attnum = key_column.attnum ORDER BY key_column.position) AS key_columns, referenced_namespace.nspname AS referenced_schema, referenced_relation.relname AS referenced_table, ARRAY(SELECT attribute.attname::text FROM unnest(constraint_item.confkey) WITH ORDINALITY AS referenced_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = constraint_item.confrelid AND attribute.attnum = referenced_column.attnum ORDER BY referenced_column.position) AS referenced_columns, constraint_item.confdeltype AS on_delete, constraint_item.confupdtype AS on_update, constraint_item.condeferrable AS is_deferrable, constraint_item.condeferred AS is_deferred, constraint_item.convalidated AS is_validated, CASE WHEN constraint_item_json.value ? 'conenforced' THEN (constraint_item_json.value ->> 'conenforced')::boolean ELSE true END AS is_enforced FROM pg_catalog.pg_constraint constraint_item CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(constraint_item) AS value) constraint_item_json JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace LEFT JOIN pg_catalog.pg_class referenced_relation ON referenced_relation.oid = constraint_item.confrelid LEFT JOIN pg_catalog.pg_namespace referenced_namespace ON referenced_namespace.oid = referenced_relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
-				[address.schema, parent, address.name],
-			)
-		).rows[0];
-		if (!row) throw new Error(`generated constraint ${address.name} is absent`);
-		const projection = generatedConstraintProjection(row, address.name);
-		if (projection.type !== expected.type)
-			throw new Error(
-				`generated constraint ${address.name} postcondition differs`,
+		case 'constraint': {
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'constraint',
 			);
-		if (
-			(expected.type === 'p' || expected.type === 'u') &&
-			(JSON.stringify(projection.columns) !==
-				JSON.stringify(expected.columns) ||
-				projection.deferrable !== expected.deferrable ||
-				projection.initiallyDeferred !== expected.initiallyDeferred ||
-				projection.enforced !== expected.enforced)
-		)
-			throw new Error(
-				`generated constraint ${address.name} postcondition differs`,
-			);
-		if (expected.type === 'f') {
-			if (
-				JSON.stringify(projection.columns) !==
-					JSON.stringify(expected.columns) ||
-				projection.referencedTable !== expected.references.table ||
-				projection.referencedSchema !== expected.references.schema ||
-				JSON.stringify(projection.referencedColumns) !==
-					JSON.stringify(expected.references.columns) ||
-				foreignKeyAction(projection.onDelete) !== expected.onDelete ||
-				foreignKeyAction(projection.onUpdate) !== expected.onUpdate ||
-				projection.deferrable !== expected.deferrable ||
-				projection.initiallyDeferred !== expected.initiallyDeferred ||
-				projection.enforced !== expected.enforced ||
-				projection.validated === expected.notValid
-			)
-				throw new Error(
-					`generated constraint ${address.name} postcondition differs`,
-				);
 		}
-		return generatedPayload({
-			kind: 'constraint',
-			type: projection.type,
-			definition: projection.definition,
-			deferrable: projection.deferrable,
-			initiallyDeferred: projection.initiallyDeferred,
-			enforced: projection.enforced,
-		});
-	}
-	if (address.kind === 'index' && parent && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'index')
-			throw new Error(
-				`generated index ${address.name} has a non-index structural postcondition`,
+		case 'index': {
+			const verified = await verifyGeneratedIndexPostcondition({
+				session: executor,
+				postcondition,
+				address: bindingAddress,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				projection: verified.projection,
+			});
+		}
+		case 'table': {
+			const verified = await verifyGeneratedTablePostcondition({
+				session: executor,
+				postcondition,
+				address: bindingAddress,
+			});
+			return generatedPayload({
+				kind: verified.kind,
+				columns: verified.projection.columns.map((column) => ({
+					name: column.name,
+					type: column.type,
+					nullable: column.nullable,
+					default: column.default,
+					collation: column.collation,
+					identity: column.identity,
+				})),
+			});
+		}
+		case 'enum': {
+			return identityObserved(executor, postcondition, bindingAddress, 'enum');
+		}
+		case 'sequence': {
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'sequence',
 			);
-		const verified = await verifyGeneratedIndexPostcondition({
-			session: executor,
-			postcondition,
-			target: { schema: address.schema, table: parent, name: address.name },
-		});
-		return generatedPayload({
-			kind: verified.kind,
-			projection: verified.projection,
-		});
-	}
-	if (address.kind === 'table' && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'table')
-			throw new Error(
-				`generated table ${address.name} has a non-table structural postcondition`,
+		}
+		case 'extension': {
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'extension',
 			);
-		const verified = await verifyGeneratedTablePostcondition({
-			session: executor,
-			postcondition,
-			target: {
-				schema: address.schema,
-				table: address.name,
-				name: address.name,
-			},
-		});
-		return generatedPayload({
-			kind: verified.kind,
-			columns: verified.projection.columns.map((column) => ({
-				name: column.name,
-				type: column.type,
-				nullable: column.nullable,
-				default: column.default,
-				collation: column.collation,
-				identity: column.identity,
-			})),
-		});
-	}
-	if (address.kind === 'enum' && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'enum')
-			throw new Error(
-				`generated enum ${address.name} has a non-enum structural postcondition`,
-			);
-		const rows = (
-			await executor.query(
-				`SELECT type.typtype AS type_kind, enum_label.enumlabel::text AS enum_label FROM pg_catalog.pg_type type JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace LEFT JOIN pg_catalog.pg_enum enum_label ON enum_label.enumtypid = type.oid WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum_label.enumsortorder`,
-				[address.schema, address.name],
-			)
-		).rows;
-		if (rows.length === 0)
-			throw new Error(`generated enum ${address.name} is absent`);
-		const row = rows[0];
-		if (!row) incompleteGeneratedProjection('enum', address.name);
-		if (typeof row.type_kind !== 'string')
-			incompleteGeneratedProjection('enum', address.name);
-		if (row.type_kind !== 'e')
-			throw new Error(`generated enum ${address.name} is not an enum`);
-		const labels =
-			rows.length === 1 && row.enum_label === null
-				? []
-				: rows.map((enumRow) => {
-						if (
-							!enumRow ||
-							typeof enumRow.type_kind !== 'string' ||
-							enumRow.type_kind !== 'e' ||
-							typeof enumRow.enum_label !== 'string'
-						)
-							incompleteGeneratedProjection('enum', address.name);
-						return enumRow.enum_label;
-					});
-		if (JSON.stringify(labels) !== JSON.stringify(postcondition.labels))
-			throw new Error(`generated enum ${address.name} postcondition differs`);
-		return generatedPayload({ kind: 'enum', labels });
-	}
-	if (address.kind === 'sequence' && address.schema) {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'sequence')
-			throw new Error(
-				`generated sequence ${address.name} has a non-sequence structural postcondition`,
-			);
-		const row = (
-			await executor.query(
-				`SELECT sequence.start_value::text AS start_value, sequence.increment_by::text AS increment_by, sequence.min_value::text AS min_value, sequence.max_value::text AS max_value, sequence.cache_size::text AS cache_size, sequence.cycle AS cycle FROM pg_catalog.pg_sequences sequence WHERE sequence.schemaname = $1 AND sequence.sequencename = $2`,
-				[address.schema, address.name],
-			)
-		).rows[0];
-		if (!row) throw new Error(`generated sequence ${address.name} is absent`);
-		const projection = generatedSequenceProjection(row, address.name);
-		const actual = {
-			startValue: projection.start_value,
-			incrementBy: projection.increment_by,
-			minValue: projection.min_value,
-			maxValue: projection.max_value,
-			cycle: projection.cycle,
-		};
-		for (const key of [
-			'startValue',
-			'incrementBy',
-			'minValue',
-			'maxValue',
-			'cycle',
-		] as const)
-			if (
-				postcondition[key] !== undefined &&
-				postcondition[key] !== actual[key]
-			)
+		}
+		case 'absent': {
+			// Removal admission owns the destructive absence read-back.  Consume it
+			// explicitly if this dispatcher is used for a terminal absence fact.
+			const live = await readPgCatalogueIdentity(executor, address);
+			if (live)
 				throw new Error(
-					`generated sequence ${address.name} postcondition differs`,
+					`generated ${address.kind} absence postcondition differs: ${address.name} is still present`,
 				);
-		return generatedPayload({ kind: 'sequence', ...projection });
+			return generatedPayload({ kind: 'absent' });
+		}
+		default:
+			throw new Error('generated v3 postcondition has no declarable read-back');
 	}
-	if (address.kind === 'extension') {
-		const postcondition = generatedPostcondition(step, address);
-		if (postcondition.kind !== 'extension')
-			throw new Error(
-				`generated extension ${address.name} has a non-extension structural postcondition`,
-			);
-		const row = (
-			await executor.query(
-				`SELECT extension.extversion AS version FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
-				[address.name],
-			)
-		).rows[0];
-		if (!row)
-			throw new Error(
-				`generated extension ${address.name} version postcondition differs`,
-			);
-		const version = strictGeneratedString(
-			row.version,
-			'extension',
-			address.name,
+}
+
+/**
+ * Generated DDL has no operation runtime to supply an observation. Read the
+ * precise catalogue fields it changes; a same-named object is never enough to
+ * write an `observed` terminal.
+ */
+export async function readGeneratedPostcondition(
+	executor: GeneratedPostconditionSession,
+	step: NormalizedManagedStep,
+	address: LedgerAddress,
+): Promise<GeneratedPostconditionObservation> {
+	executor = assertGeneratedPostconditionSession(executor);
+	const decodedPostcondition = generatedPostcondition(step, address);
+	if (decodedPostcondition.postconditionVersion === 3)
+		return readGeneratedV3Postcondition(
+			executor,
+			decodedPostcondition,
+			address,
 		);
-		if (
-			postcondition.version !== undefined &&
-			version !== postcondition.version
-		)
-			throw new Error(
-				`generated extension ${address.name} version postcondition differs`,
-			);
-		return generatedPayload({
-			kind: 'extension',
-			version,
-		});
-	}
-	throw new Error(`generated ${address.kind} has no declarable read-back`);
+	throw new Error(
+		'generated postcondition decoder returned no supported version',
+	);
 }
 
 function containedBy(root: LedgerAddress, candidate: LedgerAddress): boolean {
@@ -1219,6 +1026,19 @@ export async function executeGeneratorPlan(input: {
 					request: admitRequest,
 					readBackAndResolve: async (session) => {
 						const live = await readPgCatalogueIdentity(session, address);
+						const declarationObserved =
+							step.classification === 'data-destructive' &&
+							step.expectedDeclaration !== undefined
+								? await withGeneratedPostconditionSession(
+										{
+											connect: async () => ({
+												query: session.query.bind(session),
+												release: () => undefined,
+											}),
+										},
+										(proof) => readGeneratedPostcondition(proof, step, address),
+									)
+								: undefined;
 						const survivors: LedgerAddress[] =
 							step.classification === 'removal' && live ? [address] : [];
 						const childLives = await Promise.all(
@@ -1313,7 +1133,9 @@ export async function executeGeneratorPlan(input: {
 										: {}),
 									...(step.classification === 'removal'
 										? {}
-										: { observed: observed(address) }),
+										: {
+												observed: declarationObserved ?? observed(address),
+											}),
 								},
 							},
 						];

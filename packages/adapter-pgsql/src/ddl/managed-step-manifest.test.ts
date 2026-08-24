@@ -1,13 +1,303 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	GeneratedPostconditionV3DeclarationError,
+	parseGeneratedPostconditionV3Declaration,
+	snapshotGeneratedPostconditionJson,
+} from './generated-postcondition-v3-validator.js';
+import {
+	decodeGeneratedPostcondition,
+	decodeGeneratedPostconditionPayload,
+} from './generated-postcondition-verifier.js';
+import {
 	addressForChange,
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
+	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
+import { buildSequenceClause } from './migration-sql.js';
+
+function v3(declaration: Record<string, unknown>) {
+	return {
+		postconditionVersion: 3,
+		targetBinding: {
+			bindingVersion: 1,
+			bindingKind: 'managed-step-address',
+		},
+		declaration: { canonicalFormVersion: 1, ...declaration },
+	};
+}
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
+		const sequence = { name: 'orders_id_seq', startWith: '001' };
+		expect(
+			buildSequenceClause(
+				'CREATE SEQUENCE',
+				'"orders_id_seq"',
+				sequence as never,
+			),
+		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 1;');
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: 'strict numeric source',
+					meta: { sequence },
+				},
+				schema: 'tenant',
+			})?.value,
+		).toEqual(v3({ kind: 'sequence', startValue: '1' }));
+	});
+
+	it('uses one parser domain for producer declarations and persisted decoding', () => {
+		const declarations = [
+			{ kind: 'absent' },
+			{
+				kind: 'column',
+				column: {
+					default: {
+						defaultKind: 'authored',
+						hasDefault: true,
+						identity: null,
+						defaultExpression: { canonicalFormVersion: 1, sql: "'safe'::text" },
+					},
+				},
+			},
+			{ kind: 'enum', labels: ['open', 'closed'] },
+			{ kind: 'sequence', startValue: '1', incrementBy: '1' },
+			{ kind: 'extension', version: '1.0' },
+			{
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: false,
+				},
+			},
+			{
+				kind: 'index',
+				index: {
+					method: 'hostile',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: false,
+				},
+			},
+			{ kind: 'sequence', incrementBy: '0' },
+			{ kind: 'sequence', incrementBy: '-0' },
+			{ kind: 'sequence', incrementBy: '00' },
+			{ kind: 'sequence', incrementBy: '-00' },
+			{ kind: 'sequence', incrementBy: 'NaN' },
+			{ kind: 'enum', labels: ['duplicate', 'duplicate'] },
+			// These used to fall through producer validation and fail only in the
+			// persisted reader; the parser is now the entire wire decoder.
+			{ kind: 'extension', version: 42 },
+			{ kind: 'sequence', cycle: 'yes' },
+			{ kind: 'column', column: { type: 42 } },
+			{ kind: 'not-a-v3-kind' },
+		] as const;
+		for (const declaration of declarations) {
+			const value = v3(declaration);
+			const parsed = () =>
+				parseGeneratedPostconditionV3Declaration(value.declaration);
+			const decoded = () => decodeGeneratedPostcondition(value);
+			expect({
+				parser: (() => {
+					try {
+						parsed();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+				decoder: (() => {
+					try {
+						decoded();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			}).toEqual(
+				expect.objectContaining({
+					parser: expect.any(Boolean),
+					decoder: expect.any(Boolean),
+				}),
+			);
+			expect(
+				(() => {
+					try {
+						parsed();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			).toBe(
+				(() => {
+					try {
+						decoded();
+						return true;
+					} catch {
+						return false;
+					}
+				})(),
+			);
+		}
+	});
+
+	it.each([
+		{ kind: 'extension', version: 42 },
+		{ kind: 'sequence', cycle: 'yes' },
+		{ kind: 'column', column: { type: 42 } },
+		{ kind: 'not-a-v3-kind' },
+	] as const)('refuses reader-divergence declaration %o in both parser and decoder', (declaration) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				...declaration,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+			'REPLAN_REQUIRED',
+		);
+	});
+
+	it.each([
+		'4294967295',
+		'4294967296',
+	])('refuses the out-of-range array property %s', (name) => {
+		const value: unknown[] = [];
+		Object.defineProperty(value, name, { value: 'hidden', enumerable: true });
+		expect(() => snapshotGeneratedPostconditionJson(value)).toThrow(
+			'out-of-range index member',
+		);
+	});
+
+	it('stores an immutable postcondition snapshot despite later caller mutation', () => {
+		const change = {
+			kind: 'create_index' as const,
+			table: 'accounts',
+			destructive: false,
+			details: 'create account token index',
+			meta: { index: { columns: ['token'] } },
+		};
+		const payload = generatedPostconditionForChange({
+			change,
+			schema: 'public',
+		});
+		const before = JSON.stringify(payload?.value);
+		const digest = payload?.digest;
+		change.meta.index.columns[0] = 'mutated-secret';
+		expect(JSON.stringify(payload?.value)).toBe(before);
+		expect(payload?.digest).toBe(digest);
+	});
+
+	it('names the shared parser rule when producer index material is hostile', () => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_index',
+					table: 'accounts',
+					destructive: false,
+					details: 'hostile index',
+					meta: { index: { columns: ['id'], method: 'hostile' } },
+				},
+				schema: 'public',
+			}),
+		).toThrow('index method allowlist');
+	});
+	it('digests canonical postconditions independently of object key order', () => {
+		const value = v3({
+			kind: 'table',
+			columns: [
+				{
+					name: 'id',
+					type: 'BIGINT',
+					default: {
+						defaultKind: 'none',
+						hasDefault: false,
+						identity: null,
+					},
+				},
+			],
+		});
+		const reordered = {
+			declaration: {
+				columns: [
+					{
+						default: {
+							identity: null,
+							hasDefault: false,
+							defaultKind: 'none',
+						},
+						type: 'BIGINT',
+						name: 'id',
+					},
+				],
+				kind: 'table',
+				canonicalFormVersion: 1,
+			},
+			targetBinding: {
+				bindingKind: 'managed-step-address',
+				bindingVersion: 1,
+			},
+			postconditionVersion: 3,
+		};
+		const semanticallyDifferent = {
+			...reordered,
+			declaration: { ...reordered.declaration, kind: 'absent' },
+		};
+		const differentVersion = { ...reordered, postconditionVersion: 2 };
+
+		expect(generatedPostconditionDigest(reordered)).toBe(
+			generatedPostconditionDigest(value),
+		);
+		expect(generatedPostconditionDigest(semanticallyDifferent)).not.toBe(
+			generatedPostconditionDigest(value),
+		);
+		expect(generatedPostconditionDigest(differentVersion)).not.toBe(
+			generatedPostconditionDigest(value),
+		);
+	});
+
+	it('O10 rejects both crossed digest/version pairings', () => {
+		const current = v3({ kind: 'absent' });
+		const legacy = { ...current, postconditionVersion: 2 };
+		const currentDigest = generatedPostconditionDigest(current);
+		const legacyDigest = generatedPostconditionDigest(legacy);
+
+		expect(() =>
+			decodeGeneratedPostconditionPayload(
+				{ value: legacy, digest: currentDigest },
+				'generator:v2-with-v3-digest',
+			),
+		).toThrow('digest is not paired');
+		expect(() =>
+			decodeGeneratedPostconditionPayload(
+				{ value: current, digest: legacyDigest },
+				'generator:v3-with-v2-digest',
+			),
+		).toThrow('digest is not paired');
+		expect(
+			decodeGeneratedPostconditionPayload(
+				{ value: current, digest: currentDigest },
+				'generator:v3-current',
+			),
+		).toEqual(current);
+	});
+
 	it('carries a typed target table postcondition for a re-address step', () => {
 		const step = createPgsqlGeneratedManagedStep({
 			change: {
@@ -31,13 +321,20 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			order: 0,
 			statements: ['ALTER TABLE "public"."users" RENAME TO "accounts"'],
 		});
-		expect(step.expectedDeclaration?.value).toEqual({
-			postconditionVersion: 2,
-			kind: 'table',
-			columns: [
-				{ name: 'id', type: 'BIGINT', nullable: false, hasDefault: false },
-			],
-		});
+		expect(step.expectedDeclaration?.value).toEqual(
+			v3({
+				kind: 'table',
+				columns: [
+					{
+						name: 'id',
+						type: 'BIGINT',
+						nullable: false,
+						authoredCollation: null,
+						default: { defaultKind: 'none', hasDefault: false, identity: null },
+					},
+				],
+			}),
+		);
 	});
 
 	it('refuses a re-address step without its typed target table postcondition', () => {
@@ -319,7 +616,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toMatchObject({ kind: 'table' });
+		).toMatchObject({ declaration: { kind: 'table' } });
 	});
 
 	it('preserves explicit notValid false over a textual NOT VALID suffix', () => {
@@ -340,11 +637,12 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'constraint',
-			constraint: {
-				type: 'c',
-				expression: 'CHECK (total > 0)',
-				notValid: false,
+			declaration: {
+				kind: 'check',
+				check: {
+					expression: { canonicalFormVersion: 1, sql: 'CHECK (total > 0)' },
+					notValid: false,
+				},
 			},
 		});
 	});
@@ -378,6 +676,91 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			}),
 		).toThrow('opclass keys must name emitted columns');
+	});
+
+	it.each([
+		{
+			rule: 'unique index columns',
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'duplicate index columns',
+				meta: { index: { columns: ['account_id', 'account_id'] } },
+			},
+		},
+		{
+			rule: 'unique enum labels',
+			change: {
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'duplicate enum labels',
+				meta: { enum: { name: 'state', values: ['new', 'new'] } },
+			},
+		},
+		{
+			rule: 'equal foreign-key column list lengths',
+			change: {
+				kind: 'add_foreign_key',
+				table: 'orders',
+				destructive: false,
+				details: 'unequal foreign key lists',
+				meta: {
+					fk: {
+						columns: ['account_id'],
+						references: {
+							schema: 'public',
+							table: 'accounts',
+							columns: ['id', 'tenant_id'],
+						},
+					},
+				},
+			},
+		},
+		{
+			rule: 'table column identifiers',
+			change: {
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: 'invalid identifier',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'not valid', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+		},
+		{
+			rule: 'NULLS NOT DISTINCT requires a unique index',
+			change: {
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'invalid nulls not distinct',
+				meta: {
+					index: {
+						columns: ['account_id'],
+						unique: false,
+						nullsNotDistinct: true,
+					},
+				},
+			},
+		},
+	] as const)('refuses $rule at the producer boundary before digesting', ({
+		rule,
+		change,
+	}) => {
+		expect(() =>
+			generatedPostconditionForChange({
+				change: change as import('./schema-diff.js').SchemaChange,
+				schema: 'public',
+			}),
+		).toThrow(rule);
 	});
 
 	it('refuses a null CHECK before it can derive a foreign-key address', () => {
@@ -422,7 +805,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({ postconditionVersion: 2, kind: 'enum', labels: [] });
+		).toEqual(v3({ kind: 'enum', labels: [] }));
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -434,17 +817,18 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: {
-				type: 'p',
-				columns: ['account_id'],
-				deferrable: false,
-				initiallyDeferred: false,
-				enforced: true,
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'constraint',
+				constraint: {
+					type: 'p',
+					columns: ['account_id'],
+					deferrable: false,
+					initiallyDeferred: false,
+					enforced: true,
+				},
+			}),
+		);
 	});
 
 	it.each([
@@ -536,20 +920,28 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			],
 		});
 
-		expect(step.expectedDeclaration?.value).toEqual({
-			postconditionVersion: 2,
-			kind: 'table',
-			columns: [
-				{
-					name: 'Amount',
-					type: 'numeric(10,2)',
-					nullable: false,
-					hasDefault: true,
-					defaultKind: 'authored',
-					default: 'round(random() * 10, 2)',
-				},
-			],
-		});
+		expect(step.expectedDeclaration?.value).toEqual(
+			v3({
+				kind: 'table',
+				columns: [
+					{
+						name: 'Amount',
+						type: 'numeric(10,2)',
+						nullable: false,
+						authoredCollation: null,
+						default: {
+							defaultKind: 'authored',
+							hasDefault: true,
+							identity: null,
+							defaultExpression: {
+								canonicalFormVersion: 1,
+								sql: 'round(random() * 10, 2)',
+							},
+						},
+					},
+				],
+			}),
+		);
 	});
 
 	it('records SERIAL defaults as generated-sequence expectations', () => {
@@ -571,17 +963,21 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'public',
 			})?.value,
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'column',
-			column: {
-				name: 'id',
-				type: 'INTEGER',
-				nullable: false,
-				hasDefault: true,
-				defaultKind: 'generated-sequence',
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'column',
+				column: {
+					type: 'INTEGER',
+					nullable: false,
+					authoredCollation: null,
+					default: {
+						defaultKind: 'generated-sequence',
+						hasDefault: true,
+						identity: null,
+					},
+				},
+			}),
+		);
 	});
 
 	it('shares the autoIncrement emission decision with the mapper', () => {
@@ -605,8 +1001,12 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'column',
-			column: { hasDefault: true, defaultKind: 'generated-sequence' },
+			declaration: {
+				kind: 'column',
+				column: {
+					default: { hasDefault: true, defaultKind: 'generated-sequence' },
+				},
+			},
 		});
 
 		expect(() =>
@@ -649,11 +1049,15 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				schema: 'public',
 			})?.value,
 		).toMatchObject({
-			kind: 'column',
-			column: {
-				hasDefault: true,
-				defaultKind: 'authored',
-				default: '42',
+			declaration: {
+				kind: 'column',
+				column: {
+					default: {
+						hasDefault: true,
+						defaultKind: 'authored',
+						defaultExpression: { sql: '42' },
+					},
+				},
 			},
 		});
 	});
@@ -672,15 +1076,18 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					check: { name: 'Order Check', expression: 'CHECK ("Total" > 0)' },
 				},
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: {
-				type: 'c',
-				expression: 'CHECK ("Total" > 0)',
-				notValid: false,
-			},
-		});
+		).toEqual(
+			v3({
+				kind: 'check',
+				check: {
+					expression: {
+						canonicalFormVersion: 1,
+						sql: 'CHECK ("Total" > 0)',
+					},
+					notValid: false,
+				},
+			}),
+		);
 		expect(
 			expectation({
 				kind: 'create_index',
@@ -695,9 +1102,11 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			}),
 		).toMatchObject({
-			postconditionVersion: 2,
-			kind: 'index',
-			index: { columns: ['account_id', 'created_at'], method: 'btree' },
+			postconditionVersion: 3,
+			declaration: {
+				kind: 'index',
+				index: { columns: ['account_id', 'created_at'], method: 'btree' },
+			},
 		});
 		expect(
 			expectation({
@@ -707,11 +1116,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'enum',
 				meta: { enum: { name: 'order_state', values: ['draft', 'paid'] } },
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'enum',
-			labels: ['draft', 'paid'],
-		});
+		).toEqual(v3({ kind: 'enum', labels: ['draft', 'paid'] }));
 		expect(
 			expectation({
 				kind: 'create_sequence',
@@ -727,13 +1132,14 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					},
 				},
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'sequence',
-			startValue: '7',
-			incrementBy: '3',
-			cycle: false,
-		});
+		).toEqual(
+			v3({
+				kind: 'sequence',
+				startValue: '7',
+				incrementBy: '3',
+				cycle: false,
+			}),
+		);
 		expect(
 			expectation({
 				kind: 'create_extension',
@@ -742,10 +1148,222 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'versioned extension',
 				meta: { extension: 'pgcrypto', extensionVersion: '1.3' },
 			}),
-		).toEqual({
-			postconditionVersion: 2,
-			kind: 'extension',
-			version: '1.3',
+		).toEqual(v3({ kind: 'extension', version: '1.3' }));
+	});
+
+	it('round-trips every v3 declaration kind through the single strict decoder', () => {
+		const produce = (
+			change: Parameters<typeof generatedPostconditionForChange>[0]['change'],
+		) => {
+			const payload = generatedPostconditionForChange({
+				change,
+				schema: 'tenant',
+			});
+			if (!payload) throw new Error(`missing postcondition for ${change.kind}`);
+			return payload.value;
+		};
+		const postconditions = [
+			produce({
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: 'table',
+				meta: {
+					table: {
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			}),
+			produce({
+				kind: 'add_column',
+				table: 'orders',
+				destructive: false,
+				details: 'column',
+				meta: {
+					column: {
+						name: 'state',
+						type: 'string',
+						nullable: false,
+						default: 'new',
+						collation: 'C',
+					},
+				},
+			}),
+			produce({
+				kind: 'create_index',
+				table: 'orders',
+				destructive: false,
+				details: 'index',
+				meta: { index: { columns: ['state'] } },
+			}),
+			produce({
+				kind: 'add_check_constraint',
+				table: 'orders',
+				destructive: false,
+				details: 'check',
+				meta: { check: { expression: 'CHECK (id > 0)' } },
+			}),
+			produce({
+				kind: 'add_primary_key',
+				table: 'orders',
+				destructive: false,
+				details: 'constraint',
+				meta: { columns: ['id'] },
+			}),
+			produce({
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'enum',
+				meta: { enum: { name: 'state', values: ['new'] } },
+			}),
+			produce({
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: 'sequence',
+				meta: { sequence: { name: 'orders_id_seq', startWith: 1 } },
+			}),
+			produce({
+				kind: 'create_extension',
+				table: '',
+				destructive: false,
+				details: 'extension',
+				meta: { extension: 'pgcrypto' },
+			}),
+			produce({
+				kind: 'drop_table',
+				table: 'orders',
+				destructive: true,
+				details: 'absent',
+			}),
+		];
+		for (const postcondition of postconditions)
+			expect(decodeGeneratedPostcondition(postcondition)).toEqual(
+				postcondition,
+			);
+	});
+
+	it('produces a typed column postcondition for alter_column_type', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'alter_column_type',
+					table: 'orders',
+					column: 'state',
+					destructive: false,
+					details: 'typed target',
+					meta: {
+						column: { name: 'state', type: 'string', nullable: false },
+					},
+				},
+				schema: 'tenant',
+			})?.value,
+		).toEqual(
+			v3({
+				kind: 'column',
+				column: {
+					type: 'VARCHAR(255)',
+					nullable: false,
+					authoredCollation: null,
+					default: { defaultKind: 'none', hasDefault: false, identity: null },
+				},
+			}),
+		);
+	});
+
+	it('leaves an untyped alter_column_type to destructive execution', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'alter_column_type',
+					table: 'orders',
+					column: 'state',
+					destructive: true,
+					details: 'untyped destructive target',
+				},
+				schema: 'tenant',
+			}),
+		).toBeUndefined();
+	});
+
+	it('records authored identity and its address binding through JSON serialization', () => {
+		const payload = generatedPostconditionForChange({
+			change: {
+				kind: 'add_column',
+				table: 'orders',
+				destructive: false,
+				details: 'identity column',
+				meta: {
+					column: {
+						name: 'id',
+						type: 'integer',
+						nullable: false,
+						identity: 'always',
+					},
+				},
+			},
+			schema: 'tenant',
 		});
+		if (!payload) throw new Error('missing identity postcondition');
+		const serialized = JSON.parse(JSON.stringify(payload.value));
+		expect(decodeGeneratedPostcondition(serialized)).toEqual(payload.value);
+		expect(serialized).toMatchObject({
+			targetBinding: {
+				bindingVersion: 1,
+				bindingKind: 'managed-step-address',
+			},
+			declaration: {
+				kind: 'column',
+				column: { default: { defaultKind: 'identity', identity: 'always' } },
+			},
+		});
+	});
+
+	it('strictly rejects leaked v3 target fields and contradictory default states', () => {
+		const declaration = {
+			canonicalFormVersion: 1 as const,
+			kind: 'column',
+			column: {
+				type: 'INTEGER',
+				default: { defaultKind: 'none', hasDefault: false, identity: null },
+			},
+		};
+		const column = {
+			postconditionVersion: 3,
+			targetBinding: {
+				bindingVersion: 1,
+				bindingKind: 'managed-step-address',
+			},
+			declaration,
+		};
+		expect(() =>
+			decodeGeneratedPostcondition({
+				...column,
+				declaration: {
+					...declaration,
+					column: { ...declaration.column, name: 'id' },
+				},
+			}),
+		).toThrow('replan');
+		expect(() =>
+			decodeGeneratedPostcondition({
+				...column,
+				declaration: {
+					...declaration,
+					column: {
+						...declaration.column,
+						default: {
+							defaultKind: 'identity',
+							hasDefault: true,
+							identity: 'always',
+						},
+					},
+				},
+			}),
+		).toThrow('replan');
 	});
 });

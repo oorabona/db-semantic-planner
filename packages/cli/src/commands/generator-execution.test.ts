@@ -1,18 +1,38 @@
 import {
+	GeneratedPostconditionBindingResolutionError,
 	type GeneratedPostconditionSession,
+	generatedPostconditionDigest,
+	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
+	type verifyGeneratedColumnPostcondition as VerifyGeneratedColumnPostcondition,
+	type verifyGeneratedIndexPostcondition as VerifyGeneratedIndexPostcondition,
+	type verifyGeneratedTablePostcondition as VerifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import type { ValidatedManagedStepManifest } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgPersistedTableReaddress = vi.hoisted(() => vi.fn());
+const verifyGeneratedTablePostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedColumnPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedIndexPostcondition = vi.hoisted(() => vi.fn());
+const verifyGeneratedCheckPostcondition = vi.hoisted(() => vi.fn());
+const v3VerifierDelegates = vi.hoisted(() => ({
+	table: undefined as unknown as typeof VerifyGeneratedTablePostcondition,
+	column: undefined as unknown as typeof VerifyGeneratedColumnPostcondition,
+	index: undefined as unknown as typeof VerifyGeneratedIndexPostcondition,
+	check: undefined as unknown as typeof VerifyGeneratedCheckPostcondition,
+}));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	v3VerifierDelegates.table = actual.verifyGeneratedTablePostcondition;
+	v3VerifierDelegates.column = actual.verifyGeneratedColumnPostcondition;
+	v3VerifierDelegates.index = actual.verifyGeneratedIndexPostcondition;
+	v3VerifierDelegates.check = actual.verifyGeneratedCheckPostcondition;
 	return {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
@@ -23,27 +43,118 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			executePgDeclaredAdoption(...args),
 		executePgPersistedTableReaddress: (...args: unknown[]) =>
 			executePgPersistedTableReaddress(...args),
+		verifyGeneratedTablePostcondition: (...args: unknown[]) =>
+			verifyGeneratedTablePostcondition(...args),
+		verifyGeneratedColumnPostcondition: (...args: unknown[]) =>
+			verifyGeneratedColumnPostcondition(...args),
+		verifyGeneratedIndexPostcondition: (...args: unknown[]) =>
+			verifyGeneratedIndexPostcondition(...args),
+		verifyGeneratedCheckPostcondition: (...args: unknown[]) =>
+			verifyGeneratedCheckPostcondition(...args),
 	};
+});
+
+beforeEach(() => {
+	verifyGeneratedTablePostcondition.mockReset();
+	verifyGeneratedColumnPostcondition.mockReset();
+	verifyGeneratedIndexPostcondition.mockReset();
+	verifyGeneratedCheckPostcondition.mockReset();
+	verifyGeneratedTablePostcondition.mockImplementation(
+		v3VerifierDelegates.table,
+	);
+	verifyGeneratedColumnPostcondition.mockImplementation(
+		v3VerifierDelegates.column,
+	);
+	verifyGeneratedIndexPostcondition.mockImplementation(
+		v3VerifierDelegates.index,
+	);
+	verifyGeneratedCheckPostcondition.mockImplementation(
+		v3VerifierDelegates.check,
+	);
 });
 
 import {
 	executeGeneratorPlan,
+	type GeneratedIdentityObservation,
+	type GeneratedStructuralObservation,
 	readGeneratedPostcondition,
 } from './generator-execution.js';
+
+const generatedIdentityObservation = {
+	value: { kind: 'identity-observed' },
+	digest: 'identity-observation',
+	payloadKind: 'generated-identity-observation',
+} satisfies GeneratedIdentityObservation;
+// @ts-expect-error Generated identity evidence cannot occupy a structural slot.
+const identityInStructuralSlot: GeneratedStructuralObservation =
+	generatedIdentityObservation;
+void identityInStructuralSlot;
 
 async function readTestGeneratedPostcondition(
 	executor: Pick<GeneratedPostconditionSession, 'query'>,
 	step: NormalizedManagedStep,
 	address: Parameters<typeof readGeneratedPostcondition>[2],
 ) {
+	const declaration = step.expectedDeclaration;
+	const material =
+		declaration?.value &&
+		typeof declaration.value === 'object' &&
+		!Array.isArray(declaration.value) &&
+		typeof (declaration.value as { postconditionVersion?: unknown })
+			.postconditionVersion === 'number'
+			? {
+					...step,
+					expectedDeclaration: {
+						...declaration,
+						digest: generatedPostconditionDigest(
+							declaration.value as { postconditionVersion: number },
+						),
+					},
+				}
+			: step;
 	return withGeneratedPostconditionSession(
 		{
 			connect: async () => ({
-				...executor,
+				query: async (sql: string, params?: readonly unknown[]) => {
+					if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+					const result = await executor.query(sql, params);
+					if (!sql.includes('pg_catalog.current_database()')) return result;
+					return {
+						rows: result.rows.map((row) => ({
+							database_name: 'app',
+							relation_oid: '101',
+							...(sql.includes('type_item.oid')
+								? { relation_kind: 'e', object_oid: '102' }
+								: sql.includes('pg_catalog.pg_extension extension')
+									? { relation_kind: 'x', object_oid: '102' }
+									: sql.includes(
+												'relation.oid::text AS relation_oid, relation.oid::text AS object_oid',
+											)
+										? { relation_kind: 'S', object_oid: '102' }
+										: sql.includes('index_relation.oid')
+											? {
+													relation_kind: 'i',
+													parent_relation_kind: 'r',
+													table_name: 'accounts',
+												}
+											: sql.includes('constraint_item.oid')
+												? { relation_kind: 'r', constraint_name: params?.[2] }
+												: { relation_kind: 'r' }),
+							...(sql.includes('attribute.attnum')
+								? { attribute_number: 1 }
+								: {}),
+							...(sql.includes('index_relation.oid') ||
+							sql.includes('constraint_item.oid')
+								? { object_oid: '102' }
+								: {}),
+							...row,
+						})),
+					};
+				},
 				release: () => undefined,
 			}),
 		},
-		(session) => readGeneratedPostcondition(session, step, address),
+		(session) => readGeneratedPostcondition(session, material, address),
 	);
 }
 
@@ -74,6 +185,20 @@ const dataDestructiveStep: NormalizedManagedStep = {
 	requiresVacancy: false,
 	replayPolicy: 'recorded',
 };
+
+/** Every generated fixture uses the address-free v3 declaration contract. */
+function v3<const Declaration extends Record<string, unknown>>(
+	declaration: Declaration,
+) {
+	return {
+		postconditionVersion: 3 as const,
+		targetBinding: {
+			bindingVersion: 1 as const,
+			bindingKind: 'managed-step-address' as const,
+		},
+		declaration: { canonicalFormVersion: 1 as const, ...declaration },
+	};
+}
 
 function indexProjectionRow(overrides: Record<string, unknown> = {}) {
 	return {
@@ -139,16 +264,373 @@ function indexReadbackExecutor(input: {
 }) {
 	return {
 		query: vi.fn(async (sql: string) => {
-			if (sql.includes('WHERE namespace.nspname'))
-				return { rows: [indexProjectionRow(input.live)] };
-			if (sql.includes('WHERE relation.oid'))
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (sql.includes('FROM pg_catalog.pg_class index_relation'))
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'i',
+							parent_relation_kind: 'r',
+							relation_oid: '101',
+							object_oid: '102',
+							table_name: 'accounts',
+						},
+					],
+				};
+			if (sql.includes('::pg_catalog.regclass'))
 				return { rows: [indexProjectionRow(input.staged)] };
+			if (sql.includes('index_meta.indisunique'))
+				return { rows: [indexProjectionRow(input.live)] };
 			return { rows: [] };
 		}),
 	};
 }
 
 describe('generator execution fixture shim', () => {
+	it('dispatches an absence declaration through the destructive absence read-back', async () => {
+		const step = {
+			...dataDestructiveStep,
+			expectedDeclaration: {
+				value: v3({ kind: 'absent' }),
+				digest: 'absence-postcondition',
+			},
+		} as NormalizedManagedStep;
+		const query = vi.fn(async () => ({ rows: [] }));
+		await expect(
+			readTestGeneratedPostcondition({ query }, step, step.address!),
+		).resolves.toMatchObject({ value: { kind: 'absent' } });
+		expect(query).toHaveBeenCalled();
+	});
+
+	it.each([
+		[
+			'table',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'table',
+					columns: [{ name: 'id' }],
+				},
+			},
+			dataDestructiveStep.address,
+			verifyGeneratedTablePostcondition,
+			{
+				kind: 'table',
+				projection: {
+					columns: [
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: undefined,
+							collation: null,
+							identity: null,
+						},
+					],
+				},
+			},
+		],
+		[
+			'column',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'column',
+					column: { type: 'integer', nullable: false },
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'column',
+				name: 'id',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedColumnPostcondition,
+			{
+				kind: 'column',
+				projection: {
+					type: 'integer',
+					nullable: false,
+					default: undefined,
+					collation: null,
+					identity: null,
+				},
+			},
+		],
+		[
+			'index',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'index',
+					index: {
+						method: 'btree',
+						unique: false,
+						valid: true,
+						ready: true,
+						live: true,
+						columns: ['id'],
+						nullsNotDistinct: false,
+					},
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'index',
+				name: 'accounts_id_idx',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedIndexPostcondition,
+			{ kind: 'index', projection: { method: 'btree' } },
+		],
+		[
+			'check',
+			{
+				postconditionVersion: 3,
+				targetBinding: {
+					bindingVersion: 1,
+					bindingKind: 'managed-step-address',
+				},
+				declaration: {
+					canonicalFormVersion: 1,
+					kind: 'check',
+					check: {
+						expression: {
+							canonicalFormVersion: 1,
+							sql: 'CHECK (id > 0)',
+						},
+						notValid: false,
+					},
+				},
+			},
+			{
+				...dataDestructiveStep.address,
+				kind: 'constraint',
+				name: 'accounts_id_check',
+				parent: dataDestructiveStep.address,
+			},
+			verifyGeneratedCheckPostcondition,
+			{
+				kind: 'constraint',
+				projection: {
+					expression: 'CHECK (id > 0)',
+					validated: true,
+					noInherit: false,
+					enforced: true,
+					isLocal: true,
+					inheritanceCount: 0,
+					parentId: 0,
+				},
+			},
+		],
+	] as const)('routes a v3 %s postcondition through its binding-aware verifier', async (_kind, value, address, verify, result) => {
+		vi.clearAllMocks();
+		verify.mockResolvedValue(result);
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: { value, digest: 'v3-postcondition' },
+		} as unknown as NormalizedManagedStep;
+
+		await readTestGeneratedPostcondition(
+			{ query: vi.fn() },
+			step,
+			address as LedgerAddress,
+		);
+
+		expect(verify).toHaveBeenCalledWith(
+			expect.objectContaining({ postcondition: value, address }),
+		);
+	});
+
+	it('refuses a malformed v3 binding address before verifier dispatch', async () => {
+		const address: LedgerAddress = {
+			...dataDestructiveStep.address!,
+			kind: 'column',
+			name: 'id',
+		};
+		const declaration = v3({
+			kind: 'column',
+			column: { type: 'integer', nullable: false },
+		});
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: declaration,
+				digest: generatedPostconditionDigest(declaration),
+			},
+		} as unknown as NormalizedManagedStep;
+		verifyGeneratedColumnPostcondition.mockResolvedValue({
+			kind: 'column',
+			projection: {
+				type: 'integer',
+				nullable: false,
+				default: undefined,
+				collation: null,
+				identity: null,
+			},
+		});
+
+		await expect(
+			readTestGeneratedPostcondition({ query: vi.fn() }, step, address),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(verifyGeneratedColumnPostcondition).not.toHaveBeenCalled();
+	});
+
+	it('refuses a deferred declaration/address kind mismatch before catalogue observation', async () => {
+		const query = vi.fn(async (_sql: string) => ({ rows: [{ oid: '401' }] }));
+		const address = {
+			scope: 'schema' as const,
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant',
+			kind: 'sequence' as const,
+			name: 'accounts_id_seq',
+		};
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: v3({ kind: 'enum', labels: ['active'] }),
+				digest: 'v3-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		await expect(
+			readTestGeneratedPostcondition({ query }, step, address),
+		).rejects.toThrow('generated postcondition binding');
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('pg_catalog.current_database()'),
+			),
+		).toBe(false);
+	});
+
+	it('normalizes deferred observation payloads before their persisted JSON round trip', async () => {
+		const address = {
+			scope: 'database' as const,
+			engine: 'postgresql',
+			database: 'app',
+			kind: 'extension' as const,
+			name: 'pgcrypto',
+		};
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: v3({ kind: 'extension', version: '1.0' }),
+				digest: 'v3-postcondition',
+			},
+		} as unknown as NormalizedManagedStep;
+		const observed = await readTestGeneratedPostcondition(
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+			step,
+			address,
+		);
+		expect(observed.value).toEqual(JSON.parse(JSON.stringify(observed.value)));
+		expect(
+			Object.hasOwn((observed.value as { address: object }).address, 'schema'),
+		).toBe(false);
+	});
+
+	it.each([
+		[
+			'non-CHECK constraint',
+			v3({
+				kind: 'constraint',
+				constraint: {
+					type: 'p',
+					columns: ['id'],
+					deferrable: false,
+					initiallyDeferred: false,
+					enforced: true,
+				},
+			}),
+			{
+				...dataDestructiveStep.address,
+				kind: 'constraint',
+				name: 'accounts_pkey',
+				parent: dataDestructiveStep.address,
+			},
+			undefined,
+			undefined,
+		],
+		[
+			'enum',
+			v3({ kind: 'enum', labels: ['active'] }),
+			{
+				...dataDestructiveStep.address,
+				kind: 'enum',
+				name: 'status',
+				parent: undefined,
+			},
+			undefined,
+			undefined,
+		],
+		[
+			'sequence',
+			v3({ kind: 'sequence', startValue: '1', incrementBy: '1' }),
+			{
+				...dataDestructiveStep.address,
+				kind: 'sequence',
+				name: 'accounts_id_seq',
+				parent: undefined,
+			},
+			undefined,
+			undefined,
+		],
+		[
+			'extension',
+			v3({ kind: 'extension', version: '1.0' }),
+			{
+				scope: 'database',
+				engine: 'postgresql',
+				database: 'app',
+				kind: 'extension',
+				name: 'pgcrypto',
+			},
+			undefined,
+			undefined,
+		],
+	] as const)('records an identity-only observation for every deferred v3 %s kind', async (_label, value, address, _verify, _result) => {
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: { value, digest: 'v3-postcondition' },
+		} as unknown as NormalizedManagedStep;
+		await readTestGeneratedPostcondition(
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+			step,
+			address as LedgerAddress,
+		);
+		const observed = await readTestGeneratedPostcondition(
+			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+			step,
+			address as LedgerAddress,
+		);
+		expect(observed.value).toMatchObject({
+			kind: 'identity-observed',
+			observedKind: address.kind,
+			structuralSemantics: 'unverified',
+		});
+	});
+
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
 		const attempts: string[] = [];
 		preflightPgDeclaredAdoption.mockResolvedValue({ outcome: 'ready' });
@@ -226,11 +708,7 @@ describe('generator execution fixture shim', () => {
 			{
 				...dataDestructiveStep,
 				expectedDeclaration: {
-					value: {
-						postconditionVersion: 2,
-						kind: 'column',
-						column: { name: 'id', type: 'bigint' },
-					},
+					value: v3({ kind: 'column', column: { type: 'bigint' } }),
 					digest: 'column-postcondition',
 				},
 				address: {
@@ -277,16 +755,14 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
 					column: {
-						name: 'id',
 						type: 'integer',
 						nullable: false,
-						identity: null,
+						default: { defaultKind: 'none', hasDefault: false, identity: null },
 					},
-				},
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
@@ -326,7 +802,7 @@ describe('generator execution fixture shim', () => {
 			'generated column id projection names another column',
 		],
 		['no projected column', undefined, 'generated column id is absent'],
-	] as const)('refuses generated column proof for %s', async (_case, row, message) => {
+	] as const)('refuses generated column binding or proof for %s', async (_case, row, message) => {
 		const address = {
 			...dataDestructiveStep.address,
 			kind: 'column' as const,
@@ -337,17 +813,17 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: { name: 'id', type: 'integer', nullable: false },
-				},
+					column: { type: 'integer', nullable: false },
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
 		const query = vi.fn(async (sql: string) => ({
-			rows:
-				row === undefined
+			rows: sql.startsWith('LOCK TABLE ONLY')
+				? []
+				: row === undefined
 					? []
 					: [
 							sql.includes('relation.relkind AS relation_kind') ||
@@ -361,12 +837,20 @@ describe('generator execution fixture shim', () => {
 						],
 		}));
 		await expect(
-			readTestGeneratedPostcondition({ query }, step, address),
-		).rejects.toThrow(message);
-		if (row?.relation_kind === 'v')
-			expect(query.mock.calls[0]?.[0]).toContain(
-				'relation.relkind AS relation_kind',
+			readTestGeneratedPostcondition({ query }, step, address as LedgerAddress),
+		).rejects.toThrow(
+			row === undefined || row.column_name !== 'id' || row.relation_kind === 'v'
+				? 'generated postcondition binding did not resolve'
+				: message,
+		);
+		if (row?.relation_kind === 'v') {
+			const bindingQuery = query.mock.calls.find(
+				([sql]) =>
+					typeof sql === 'string' &&
+					sql.includes('relation.relkind AS relation_kind'),
 			);
+			expect(bindingQuery?.[0]).toContain('relation.relkind AS relation_kind');
+		}
 	});
 
 	it('canonicalizes PostgreSQL default collation for generated column read-back', async () => {
@@ -380,16 +864,10 @@ describe('generator execution fixture shim', () => {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: {
-						name: 'body',
-						type: 'text',
-						nullable: true,
-						collation: null,
-					},
-				},
+					column: { type: 'text', nullable: true, authoredCollation: null },
+				}),
 				digest: 'column-postcondition',
 			},
 		} as unknown as NormalizedManagedStep;
@@ -420,13 +898,21 @@ describe('generator execution fixture shim', () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [
-						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: {
+								defaultKind: 'none',
+								hasDefault: false,
+								identity: null,
+							},
+						},
 					],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 			statementBundle: {
@@ -471,11 +957,10 @@ describe('generator execution fixture shim', () => {
 		const tableStep: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [{ name: 'id', type: 'integer', nullable: false }],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 		};
@@ -502,11 +987,10 @@ describe('generator execution fixture shim', () => {
 		const columnStep: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'column',
-					column: { name: 'id', type: 'integer', nullable: false },
-				},
+					column: { type: 'integer', nullable: false },
+				}),
 				digest: 'column-postcondition',
 			},
 			address: {
@@ -555,13 +1039,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -570,7 +1050,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -602,15 +1082,13 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'constraint',
-					constraint: {
-						type: 'c',
-						expression: 'CHECK (id > 0)',
+				value: v3({
+					kind: 'check',
+					check: {
+						expression: { canonicalFormVersion: 1, sql: 'CHECK (id > 0)' },
 						notValid: false,
 					},
-				},
+				}),
 				digest: 'constraint-postcondition',
 			},
 			address: {
@@ -621,7 +1099,11 @@ describe('generator execution fixture shim', () => {
 			},
 		} as const;
 		const query = vi.fn(async (sql: string) => {
-			if (sql.includes('namespace.nspname'))
+			if (sql.includes('constraint_item.oid::text AS object_oid'))
+				return {
+					rows: [{ relation_kind: 'r', constraint_name: 'accounts_check' }],
+				};
+			if (sql.includes('constraint_item.conrelid = $1::pg_catalog.oid'))
 				return {
 					rows: [
 						{
@@ -635,7 +1117,7 @@ describe('generator execution fixture shim', () => {
 						},
 					],
 				};
-			if (sql.includes('conrelid = $1'))
+			if (sql.includes('conrelid = $1::pg_catalog.regclass'))
 				return {
 					rows: [
 						{
@@ -676,13 +1158,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -691,7 +1169,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -722,13 +1200,9 @@ describe('generator execution fixture shim', () => {
 		const step = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'index',
 					index: {
-						schema: 'tenant',
-						table: 'accounts',
-						name: 'accounts_id_idx',
 						method: 'btree',
 						unique: false,
 						valid: true,
@@ -737,7 +1211,7 @@ describe('generator execution fixture shim', () => {
 						columns: ['id'],
 						nullsNotDistinct: false,
 					},
-				},
+				}),
 				digest: 'index-postcondition',
 			},
 			address: {
@@ -790,342 +1264,49 @@ describe('generator execution fixture shim', () => {
 		expect(query).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		[
-			'enum labels',
-			{ postconditionVersion: 2, kind: 'enum', labels: ['draft', 'paid'] },
-			{
-				...dataDestructiveStep.address,
-				kind: 'enum' as const,
-				name: 'order_state',
-			},
-			[{ type_kind: 'e', enum_label: 'draft' }],
-		],
-		[
-			'sequence properties',
-			{
-				postconditionVersion: 2,
-				kind: 'sequence',
-				startValue: '7',
-				incrementBy: '3',
-				cycle: false,
-			},
-			{
-				...dataDestructiveStep.address,
-				kind: 'sequence' as const,
-				name: 'order_number',
-			},
-			[
-				{
-					start_value: '7',
-					increment_by: '1',
-					min_value: '1',
-					max_value: '100',
-					cache_size: '1',
-					cycle: false,
-				},
-			],
-		],
-		[
-			'extension version',
-			{ postconditionVersion: 2, kind: 'extension', version: '1.3' },
-			{
-				...dataDestructiveStep.address,
-				scope: 'database' as const,
-				kind: 'extension' as const,
-				name: 'pgcrypto',
-			},
-			[{ version: '1.2' }],
-		],
-	] as const)('refuses a changed generated %s rather than recording observed', async (_name, value, address, rows) => {
-		const step = {
-			...dataDestructiveStep,
-			expectedDeclaration: { value, digest: 'typed-postcondition' },
-			address,
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows }) },
-				step,
-				address as never,
-			),
-		).rejects.toThrow('postcondition differs');
-	});
-
-	it('strictly decodes non-CHECK constraint read-back before recording observed', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'constraint' as const,
-			name: 'accounts_pkey',
-			parent: dataDestructiveStep.address!,
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'constraint',
-					constraint: {
-						type: 'p',
-						columns: ['id'],
-						deferrable: false,
-						initiallyDeferred: false,
-						enforced: true,
-					},
-				},
-				digest: 'constraint-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi
-						.fn()
-						.mockResolvedValue({ rows: [constraintProjectionRow()] }),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({
-			value: { kind: 'constraint', definition: 'PRIMARY KEY (id)' },
-		});
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [constraintProjectionRow({ constraint_definition: null })],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow(
-			'generated constraint accounts_pkey has an incomplete projection',
-		);
-	});
-
-	it('decodes an empty enum from its NULL label row', async () => {
+	it('folds legacy generated reader payloads into REPLAN_REQUIRED before query', async () => {
+		const query = vi.fn();
 		const address = {
 			...dataDestructiveStep.address,
 			kind: 'enum' as const,
 			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ type_kind: 'e', enum_label: null }],
-					}),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({ value: { kind: 'enum', labels: [] } });
-	});
-
-	it('decodes enum labels in query order', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'enum',
-					labels: ['draft', 'paid'],
-				},
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{ type_kind: 'e', enum_label: 'draft' },
-							{ type_kind: 'e', enum_label: 'paid' },
-						],
-					}),
-				},
-				step,
-				address,
-			),
-		).resolves.toMatchObject({
-			value: { kind: 'enum', labels: ['draft', 'paid'] },
-		});
-	});
-
-	it('refuses an absent enum type even when its expected labels are empty', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [] }) },
-				step,
-				address,
-			),
-		).rejects.toThrow('generated enum order_state is absent');
-	});
-
-	it('refuses a same-named non-enum type and malformed enum labels', async () => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'enum' as const,
-			name: 'order_state',
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
-				digest: 'enum-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ type_kind: 'd', enum_label: null }],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow('generated enum order_state is not an enum');
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{ type_kind: 'e', enum_label: 'draft' },
-							{ type_kind: 'e', enum_label: 1 },
-						],
-					}),
-				},
-				step,
-				address,
-			),
-		).rejects.toThrow(
-			'generated enum order_state has an incomplete projection',
-		);
-	});
-
-	it('strictly decodes sequence and extension read-back before recording observed', async () => {
-		const sequenceAddress = {
-			...dataDestructiveStep.address,
-			kind: 'sequence' as const,
-			name: 'order_number',
-		} as LedgerAddress;
-		const sequenceStep = {
-			...dataDestructiveStep,
-			address: sequenceAddress,
-			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
-					kind: 'sequence',
-					startValue: '7',
-					incrementBy: '3',
-					cycle: false,
-				},
-				digest: 'sequence-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		const sequenceRow = {
-			start_value: '7',
-			increment_by: '3',
-			min_value: '1',
-			max_value: '100',
-			cache_size: '1',
-			cycle: false,
 		};
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [sequenceRow] }) },
-				sequenceStep,
-				sequenceAddress,
-			),
-		).resolves.toMatchObject({ value: { kind: 'sequence', cycle: false } });
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [{ ...sequenceRow, cycle: 'false' }],
-					}),
-				},
-				sequenceStep,
-				sequenceAddress,
-			),
-		).rejects.toThrow(
-			'generated sequence order_number has an incomplete projection',
-		);
-
-		const extensionAddress = {
-			...dataDestructiveStep.address,
-			scope: 'database' as const,
-			kind: 'extension' as const,
-			name: 'pgcrypto',
-		} as LedgerAddress;
-		const extensionStep = {
+		const step = {
 			...dataDestructiveStep,
-			address: extensionAddress,
+			stepKey: 'generator:legacy-enum',
+			address,
 			expectedDeclaration: {
-				value: { postconditionVersion: 2, kind: 'extension' },
-				digest: 'extension-postcondition',
+				value: { postconditionVersion: 2, kind: 'enum', labels: [] },
+				digest: 'legacy',
 			},
 		} as unknown as NormalizedManagedStep;
 		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [{ version: '1.3' }] }) },
-				extensionStep,
-				extensionAddress,
-			),
-		).resolves.toMatchObject({ value: { kind: 'extension', version: '1.3' } });
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows: [{}] }) },
-				extensionStep,
-				extensionAddress,
-			),
-		).rejects.toThrow(
-			'generated extension pgcrypto has an incomplete projection',
-		);
+			readTestGeneratedPostcondition({ query }, step, address as LedgerAddress),
+		).rejects.toMatchObject({
+			code: 'REPLAN_REQUIRED',
+			diagnostic: { versionSeen: 2, stepIdentity: 'generator:legacy-enum' },
+		});
+		expect(query).not.toHaveBeenCalled();
 	});
-
 	it('reads CREATE TABLE columns when a separately-rendered constraint follows it', async () => {
 		const step: NormalizedManagedStep = {
 			...dataDestructiveStep,
 			expectedDeclaration: {
-				value: {
-					postconditionVersion: 2,
+				value: v3({
 					kind: 'table',
 					columns: [
-						{ name: 'id', type: 'integer', nullable: false, hasDefault: false },
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: {
+								defaultKind: 'none',
+								hasDefault: false,
+								identity: null,
+							},
+						},
 					],
-				},
+				}),
 				digest: 'table-postcondition',
 			},
 			statementBundle: {
@@ -1197,6 +1378,83 @@ describe('generator execution fixture shim', () => {
 		expect(manifest.steps).not.toBe(plan.steps);
 		expect(Object.isFrozen(manifest)).toBe(true);
 		expect(Object.isFrozen(manifest.steps)).toBe(true);
+	});
+
+	it('consumes a typed data-destructive declaration for its terminal observation', async () => {
+		const address = {
+			...dataDestructiveStep.address!,
+			kind: 'column' as const,
+			name: 'id',
+			parent: dataDestructiveStep.address!,
+		};
+		const declaration = v3({
+			kind: 'column',
+			column: { type: 'bigint', nullable: false },
+		});
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: declaration,
+				digest: generatedPostconditionDigest(declaration),
+			},
+		} as unknown as NormalizedManagedStep;
+		verifyGeneratedColumnPostcondition.mockResolvedValue({
+			kind: 'column',
+			projection: {
+				type: 'bigint',
+				nullable: false,
+				default: undefined,
+				collation: null,
+				identity: null,
+			},
+		});
+		let observed: unknown;
+		executePgAdmittedOperation.mockImplementation(
+			async (
+				_executor,
+				input: {
+					operation: {
+						readBackAndResolve: (executor: {
+							query(): Promise<{
+								readonly rows: readonly Record<string, unknown>[];
+							}>;
+						}) => Promise<{
+							readonly members: readonly {
+								readonly member: { readonly observed?: unknown };
+							}[];
+						}>;
+					};
+				},
+			) => {
+				const resolution = await input.operation.readBackAndResolve({
+					query: async () => ({ rows: [{ parent_oid: '501' }] }),
+				});
+				observed = resolution.members[0]?.member.observed;
+				return { kind: 'executed-destructive-outcome' };
+			},
+		);
+
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+				} as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				accepts: ['destructive-plan-accepted:reviewed-plan'],
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({ outcome: 'completed' });
+		expect(verifyGeneratedColumnPostcondition).toHaveBeenCalledWith(
+			expect.objectContaining({ postcondition: declaration }),
+		);
+		expect(observed).toMatchObject({
+			value: { kind: 'column', type: 'bigint', nullable: false },
+		});
 	});
 
 	it('preserves a post-executing open claim as recovery-required', async () => {

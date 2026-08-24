@@ -18,15 +18,19 @@ export {
 } from './destructive-classification.js';
 export {
 	assertGeneratedPostconditionSession,
-	decodeColumnPostcondition,
 	decodeGeneratedPostcondition,
+	decodeGeneratedPostconditionPayload,
+	type GeneratedPostconditionBindingAddress,
+	GeneratedPostconditionBindingResolutionError,
 	GeneratedPostconditionProofInFlightError,
+	GeneratedPostconditionReplanRequiredError,
 	type GeneratedPostconditionSession,
 	GeneratedPostconditionSessionDeactivatedError,
-	type GeneratedPostconditionTarget,
 	GeneratedPostconditionWorkInFlightError,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
+	verifyGeneratedIdentityPostcondition,
 	verifyGeneratedIndexPostcondition,
 	verifyGeneratedTablePostcondition,
 	withGeneratedPostconditionSession,
@@ -56,6 +60,7 @@ export {
 	assertDeclarableChangeKind,
 	createPgsqlGeneratedManagedStep,
 	type GeneratedPostcondition,
+	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 export {

@@ -6,6 +6,9 @@ Accepted. It decides what ADR 0005 left open: the recorded-state model, the atom
 change/record couple, and — because they turn out to be the same decision — how many commands may
 write DDL. It supersedes three rules of ADR 0005, named in "What ADR 0005 no longer says".
 
+Implementation status (#567): accepted and implemented — v3 is the current generated-postcondition
+wire format; persisted v1 and v2 values are refused as `REPLAN_REQUIRED` and must be re-planned.
+
 ## Decision
 
 ### The record describes managed intent and verified outcome, never the schema
@@ -247,6 +250,28 @@ without a group-token protocol.
 
 ### The declaration comes from the DSL inputs, produced and validated at plan time
 
+Generated postconditions are currently encoded as v3 declarations with a separate target binding.
+The declarations are address-free; execution records each unchanged declaration under the target
+event address selected by that binding.
+
+### Generated postcondition wire versions
+
+The decoder has one interpretation per version: v3 decodes; v1 and v2 are `REPLAN_REQUIRED` outcomes,
+not compatibility inputs or subset-reader candidates. Their digest includes the wire version, so a
+digest from one version cannot authenticate the value of another.
+
+### Generated-postcondition proof stability
+
+Each public verifier owns one non-reentrant proof bracket: it decodes once, validates the complete
+managed-step address, acquires one user-relation lock for relation-backed objects, then resolves the
+bound catalogue identity and reads structure while that lock remains held. This deliberately never
+locks `pg_catalog` rows. Index proofs retain the parent-table lock for the table's value, while their
+index binding, OID, parent identity, and structural projection are one catalogue statement; that is a
+single-snapshot observation, not a claim that hostile index DDL is excluded. Table, column, index, and
+CHECK declarations receive structural proofs. Non-CHECK constraints, enums, sequences, and extensions
+currently receive only a typed identity-and-existence observation at the bound address; their structural
+semantics are explicitly unverified pending #597.
+
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*
 does not guarantee it — `ColumnDef.default` is `unknown` — so **plan time validates every
@@ -305,7 +330,8 @@ sharing one pair identifier. Nothing re-keys an existing row.
 2. verify, before any DDL, that the source carries its recorded identity and every target address
    is vacant;
 3. in one transaction: issue the DDL, re-read the identities, append every pair event — the
-   opening ones carrying the re-keyed declarations and those read-backs.
+   opening ones recording the address-free declarations unchanged under their target event addresses
+   and carrying those read-backs.
 
 A crash rolls step 3 back entirely, leaving the open pair. Recovery, keyed by the pair
 identifier, reads the **whole reserved closure** and has exactly three answers: the complete

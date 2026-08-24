@@ -12,6 +12,14 @@ import {
 	classifyGeneratedMutation,
 	type GeneratedMutationClassification,
 } from './destructive-classification.js';
+import {
+	parseGeneratedPostconditionV3Declaration,
+	snapshotGeneratedPostconditionJson,
+} from './generated-postcondition-v3-validator.js';
+import {
+	normalizeOptionalBoolean,
+	normalizeSequenceInteger,
+} from './generated-source-normalizers.js';
 import { formatSqlDefault } from './phases/utils.js';
 import type { ChangeKind, SchemaChange } from './schema-diff.js';
 
@@ -21,7 +29,7 @@ type Address = DeclarableResourceAddress & {
 
 type Meta = Readonly<Record<string, unknown>>;
 
-type GeneratedColumnPostcondition = {
+export type GeneratedColumnPostcondition = {
 	readonly name: string;
 	readonly type?: string;
 	readonly nullable?: boolean;
@@ -49,8 +57,8 @@ export type GeneratedConstraintPostcondition =
 				readonly table: string;
 				readonly columns: readonly string[];
 			};
-			readonly onDelete: string;
-			readonly onUpdate: string;
+			readonly onDelete: GeneratedForeignKeyAction;
+			readonly onUpdate: GeneratedForeignKeyAction;
 			readonly deferrable: boolean;
 			readonly initiallyDeferred: boolean;
 			readonly enforced: boolean;
@@ -62,6 +70,14 @@ export type GeneratedConstraintPostcondition =
 			readonly expression: string;
 			readonly notValid: boolean;
 	  };
+
+/** The semantic FK actions PostgreSQL can represent in pg_constraint. */
+export type GeneratedForeignKeyAction =
+	| 'NO ACTION'
+	| 'RESTRICT'
+	| 'CASCADE'
+	| 'SET NULL'
+	| 'SET DEFAULT';
 
 export type GeneratedIndexPostcondition = {
 	/** The identity is persisted separately from the rendered CREATE INDEX SQL. */
@@ -83,39 +99,239 @@ export type GeneratedIndexPostcondition = {
 	readonly where?: string;
 };
 
-/** ModelIR-derived, digest-covered catalogue projection for a generated step. */
-export type GeneratedPostcondition = { readonly postconditionVersion: 2 } & (
+/** A canonical SQL fact, never an unversioned deparse string. */
+export type CanonicalSqlFact = {
+	readonly canonicalFormVersion: 1;
+	readonly sql: string;
+};
+
+/**
+ * The default, identity, and expression facts are one discriminated state.
+ * In particular, an identity cannot also claim an authored/default sequence
+ * expression, and a missing default cannot carry an expression.
+ */
+export type GeneratedColumnDefaultState =
 	| {
-			readonly kind: 'table';
-			readonly columns: readonly GeneratedColumnPostcondition[];
+			readonly defaultKind: 'none';
+			readonly hasDefault: false;
+			readonly identity: null;
+			readonly defaultExpression?: never;
 	  }
-	| { readonly kind: 'column'; readonly column: GeneratedColumnPostcondition }
 	| {
-			readonly kind: 'constraint';
-			readonly constraint: GeneratedConstraintPostcondition;
+			readonly defaultKind: 'authored';
+			readonly hasDefault: true;
+			readonly identity: null;
+			readonly defaultExpression: CanonicalSqlFact;
 	  }
-	| { readonly kind: 'index'; readonly index: GeneratedIndexPostcondition }
-	| { readonly kind: 'enum'; readonly labels: readonly string[] }
 	| {
-			readonly kind: 'sequence';
-			readonly startValue?: string;
-			readonly incrementBy?: string;
-			readonly minValue?: string;
-			readonly maxValue?: string;
-			readonly cycle?: boolean;
+			readonly defaultKind: 'generated-sequence';
+			readonly hasDefault: true;
+			readonly identity: null;
+			readonly defaultExpression?: never;
 	  }
-	| { readonly kind: 'extension'; readonly version?: string }
+	| {
+			readonly defaultKind: 'identity';
+			readonly hasDefault: false;
+			readonly identity: 'always' | 'byDefault';
+			readonly defaultExpression?: never;
+	  };
+
+type GeneratedColumnDeclaration = {
+	readonly type?: string;
+	readonly nullable?: boolean;
+	/** null means no COLLATE clause was authored; it is not an effective default. */
+	readonly authoredCollation?: string | null;
+	readonly default?: GeneratedColumnDefaultState;
+};
+
+type GeneratedTableColumnDeclaration = GeneratedColumnDeclaration & {
+	/** A table-shape member name, not the table target binding. */
+	readonly name: string;
+};
+
+type GeneratedIndexDeclaration = Omit<
+	GeneratedIndexPostcondition,
+	'schema' | 'table' | 'name' | 'expressions' | 'where'
+> & {
+	readonly expressions?: readonly CanonicalSqlFact[];
+	readonly where?: CanonicalSqlFact;
+};
+
+type GeneratedConstraintDeclaration =
+	| Extract<GeneratedConstraintPostcondition, { readonly type: 'p' | 'u' }>
+	| Extract<GeneratedConstraintPostcondition, { readonly type: 'f' }>;
+
+/** Table names live only in TargetBinding; columns describe table structure. */
+type V3TableDeclaration = {
+	readonly kind: 'table';
+	readonly columns: readonly GeneratedTableColumnDeclaration[];
+};
+/** Column names live only in TargetBinding; this is the column's shape. */
+type V3ColumnDeclaration = {
+	readonly kind: 'column';
+	readonly column: GeneratedColumnDeclaration;
+};
+/** Constraint names live only in TargetBinding; this is a non-CHECK constraint fact. */
+type V3ConstraintDeclaration = {
+	readonly kind: 'constraint';
+	readonly constraint: GeneratedConstraintDeclaration;
+};
+/** CHECK names live only in TargetBinding; expression is canonical and versioned. */
+type V3CheckDeclaration = {
+	readonly kind: 'check';
+	readonly check: {
+		readonly expression: CanonicalSqlFact;
+		readonly notValid: boolean;
+	};
+};
+/** Index schema, table, and name live only in TargetBinding; options are structured facts. */
+type V3IndexDeclaration = {
+	readonly kind: 'index';
+	readonly index: GeneratedIndexDeclaration;
+};
+/** Enum names live only in TargetBinding; labels are the declaration. */
+type V3EnumDeclaration = {
+	readonly kind: 'enum';
+	readonly labels: readonly string[];
+};
+/** Sequence names live only in TargetBinding; options are the declaration. */
+type V3SequenceDeclaration = {
+	readonly kind: 'sequence';
+	readonly startValue?: string;
+	readonly incrementBy?: string;
+	readonly minValue?: string;
+	readonly maxValue?: string;
+	readonly cycle?: boolean;
+};
+/** Extension names live only in TargetBinding; requested version is the declaration. */
+type V3ExtensionDeclaration = {
+	readonly kind: 'extension';
+	readonly version?: string;
+};
+
+/** Address-free v3 declaration variants. */
+export type GeneratedPostconditionDeclarationV3 = {
+	readonly canonicalFormVersion: 1;
+} & (
+	| V3TableDeclaration
+	| V3ColumnDeclaration
+	| V3ConstraintDeclaration
+	| V3CheckDeclaration
+	| V3IndexDeclaration
+	| V3EnumDeclaration
+	| V3SequenceDeclaration
+	| V3ExtensionDeclaration
 	| { readonly kind: 'absent' }
-	| { readonly kind: 'exempt'; readonly reason: string }
 );
+
+/**
+ * The separate binding selects the surrounding managed step's canonical
+ * address.  It is versioned independently so later verifiers can resolve it
+ * without teaching any declaration variant about physical addresses.
+ */
+export type TargetBinding = {
+	readonly bindingVersion: 1;
+	readonly bindingKind: 'managed-step-address';
+};
+
+/** Version 3 carries an address-free declaration and a separately decoded binding. */
+export type GeneratedPostconditionV3 = {
+	readonly postconditionVersion: 3;
+	/** v3 kind lives only in the address-free declaration, never beside the binding. */
+	readonly kind?: never;
+	readonly declaration: GeneratedPostconditionDeclarationV3;
+	readonly targetBinding: TargetBinding;
+};
+
+/** Only v3 is a decodable generated postcondition. Older values replan. */
+export type GeneratedPostcondition = GeneratedPostconditionV3;
+
+/**
+ * JSON-compatible serialization whose object-member order survives PostgreSQL
+ * jsonb normalization. Arrays intentionally retain their supplied order.
+ */
+function canonicalGeneratedPostconditionJson(
+	value: unknown,
+	path = '$',
+): string {
+	if (value === null) return 'null';
+	if (value === undefined)
+		throw new TypeError(
+			`generated postcondition digest cannot serialize undefined values at ${path}`,
+		);
+	if (Array.isArray(value)) {
+		const entries: string[] = [];
+		for (let index = 0; index < value.length; index += 1) {
+			if (!Object.hasOwn(value, index))
+				throw new TypeError(
+					`generated postcondition digest cannot serialize undefined array members at ${path}[${index}]`,
+				);
+			entries.push(
+				canonicalGeneratedPostconditionJson(value[index], `${path}[${index}]`),
+			);
+		}
+		return `[${entries.join(',')}]`;
+	}
+	if (typeof value === 'object') {
+		const record = value as Record<string, unknown>;
+		return `{${Object.keys(record)
+			.sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+			.map((key) => {
+				const member = record[key];
+				if (member === undefined)
+					throw new TypeError(
+						`generated postcondition digest cannot serialize undefined object members at ${path}.${key}`,
+					);
+				return `${JSON.stringify(key)}:${canonicalGeneratedPostconditionJson(member, `${path}.${key}`)}`;
+			})
+			.join(',')}}`;
+	}
+	if (typeof value === 'number' && !Number.isFinite(value))
+		throw new TypeError(
+			`generated postcondition digest can only serialize finite numbers at ${path}`,
+		);
+	if (
+		typeof value !== 'string' &&
+		typeof value !== 'boolean' &&
+		typeof value !== 'number'
+	)
+		throw new TypeError(
+			`generated postcondition digest can only serialize JSON values at ${path}`,
+		);
+	return JSON.stringify(value);
+}
+
+/** The version tag is part of the digest domain, never an implicit convention. */
+export function generatedPostconditionDigest(value: {
+	readonly postconditionVersion: number;
+}): string {
+	const snapshot = snapshotGeneratedPostconditionJson(value) as {
+		readonly postconditionVersion: number;
+	};
+	return createHash('sha256')
+		.update(`generated-postcondition:v${snapshot.postconditionVersion}\u0000`)
+		.update(canonicalGeneratedPostconditionJson(snapshot))
+		.digest('hex');
+}
 
 function postconditionPayload(
 	value: GeneratedPostcondition,
 ): import('@dbsp/types').LedgerPayload {
-	return {
+	const snapshot = snapshotGeneratedPostconditionJson(
 		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+	) as GeneratedPostcondition;
+	return {
+		value: snapshot as unknown as import('@dbsp/types').JsonValue,
+		digest: generatedPostconditionDigest(snapshot),
 	};
+}
+
+function canonicalSqlFact(sql: string): CanonicalSqlFact {
+	return { canonicalFormVersion: 1, sql };
+}
+
+function targetBinding(): TargetBinding {
+	return { bindingVersion: 1, bindingKind: 'managed-step-address' };
 }
 
 function requiredColumn(
@@ -134,23 +350,59 @@ function requiredColumn(
 	return column;
 }
 
-function columnPostcondition(
+function columnDefaultState(
+	column: import('@dbsp/types').ColumnIR,
+	schema: string,
+): GeneratedColumnDefaultState {
+	const { defaultKind } = decideColumnEmission(column, schema);
+	const identity = column.identity ?? null;
+	if (identity !== null) {
+		if (defaultKind !== undefined)
+			throw new Error(
+				`generator planning refuses ${column.name}: identity and default are contradictory`,
+			);
+		return { defaultKind: 'identity', hasDefault: false, identity };
+	}
+	if (defaultKind === undefined)
+		return { defaultKind: 'none', hasDefault: false, identity: null };
+	if (defaultKind === 'generated-sequence')
+		return {
+			defaultKind: 'generated-sequence',
+			hasDefault: true,
+			identity: null,
+		};
+	return {
+		defaultKind: 'authored',
+		hasDefault: true,
+		identity: null,
+		defaultExpression: canonicalSqlFact(
+			formatSqlDefault(column.default, 'generator postcondition'),
+		),
+	};
+}
+
+function columnDeclaration(
 	column: import('@dbsp/types').ColumnIR,
 	schema: string,
 	primaryKey = false,
-): GeneratedColumnPostcondition {
-	const { defaultKind } = decideColumnEmission(column, schema);
-	const hasDefault = defaultKind !== undefined;
+): GeneratedColumnDeclaration {
 	return {
-		name: column.name,
 		type: renderColumnDbType(column, schema),
 		nullable: primaryKey ? false : column.nullable,
-		hasDefault,
-		...(defaultKind === undefined ? {} : { defaultKind }),
-		...(defaultKind === 'authored'
-			? { default: formatSqlDefault(column.default, 'generator postcondition') }
-			: {}),
+		authoredCollation: column.collation ?? null,
+		default: columnDefaultState(column, schema),
 	};
+}
+
+function v3Payload(
+	declaration: GeneratedPostconditionDeclarationV3,
+): import('@dbsp/types').LedgerPayload {
+	const snapshot = parseGeneratedPostconditionV3Declaration(declaration);
+	return postconditionPayload({
+		postconditionVersion: 3,
+		declaration: snapshot,
+		targetBinding: targetBinding(),
+	});
 }
 
 function requiredRecord(
@@ -309,6 +561,20 @@ function constraintPostcondition(
 		target?.kind === 'foreign-key'
 			? target.references
 			: requiredRecord(fk.references, change.kind);
+	const foreignKeyAction = (value: unknown): GeneratedForeignKeyAction => {
+		const action = typeof value === 'string' ? value : 'NO ACTION';
+		if (
+			action !== 'NO ACTION' &&
+			action !== 'RESTRICT' &&
+			action !== 'CASCADE' &&
+			action !== 'SET NULL' &&
+			action !== 'SET DEFAULT'
+		)
+			throw new Error(
+				`generator planning refuses ${change.kind}: unsupported foreign-key action ${JSON.stringify(action)}`,
+			);
+		return action;
+	};
 	return {
 		type: 'f',
 		columns: requiredColumnList(fk.columns, `${change.kind} columns`),
@@ -321,8 +587,8 @@ function constraintPostcondition(
 				`${change.kind} references.columns`,
 			),
 		},
-		onDelete: typeof fk.onDelete === 'string' ? fk.onDelete : 'NO ACTION',
-		onUpdate: typeof fk.onUpdate === 'string' ? fk.onUpdate : 'NO ACTION',
+		onDelete: foreignKeyAction(fk.onDelete),
+		onUpdate: foreignKeyAction(fk.onUpdate),
 		deferrable: fk.deferred === true,
 		initiallyDeferred: fk.deferred === true,
 		enforced: true,
@@ -334,8 +600,10 @@ function constraintPostcondition(
  * Capture the ModelIR/SchemaChange shape that the executor must read back.
  * This is deliberately assembled before SQL rendering becomes the only durable
  * source, and is therefore covered by the normalized managed-step digest.
+ * An untyped alter_column_type deliberately returns undefined: destructive
+ * execution owns that case through its digest-bound acceptance and read-back.
  */
-export function generatedPostconditionForChange(input: {
+function generatedPostconditionForChangeUnchecked(input: {
 	readonly change: SchemaChange;
 	readonly schema: string;
 }): import('@dbsp/types').LedgerPayload | undefined {
@@ -355,12 +623,13 @@ export function generatedPostconditionForChange(input: {
 					? [shape.primaryKey]
 					: shape.primaryKey,
 		);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'table',
-			columns: shape.columns.map((column) =>
-				columnPostcondition(column, schema, primaryKey.has(column.name)),
-			),
+			columns: shape.columns.map((column) => ({
+				name: column.name,
+				...columnDeclaration(column, schema, primaryKey.has(column.name)),
+			})),
 		});
 	}
 	const column =
@@ -374,30 +643,10 @@ export function generatedPostconditionForChange(input: {
 					? requiredColumn(change.meta.column, change.kind)
 					: undefined;
 	if (column) {
-		const structural = columnPostcondition(column, schema);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'column',
-			column: {
-				...structural,
-				...(change.kind === 'alter_column_collation'
-					? { collation: column.collation ?? null }
-					: {}),
-				...(change.kind === 'alter_column_identity'
-					? { identity: column.identity ?? null }
-					: {}),
-			},
-		});
-	}
-	if (change.kind === 'alter_column_type') {
-		// Older SchemaChange producers legitimately carry only the target SQL
-		// bundle. Preserve that accepted planning surface; it is a deliberate
-		// postcondition exemption because no trustworthy target type exists in
-		// the change material to compare against catalogue state.
-		return postconditionPayload({
-			postconditionVersion: 2,
-			kind: 'exempt',
-			reason: 'legacy alter_column_type has no typed target column',
+			column: columnDeclaration(column, schema),
 		});
 	}
 	if (change.kind === 'alter_column_nullable') {
@@ -407,30 +656,34 @@ export function generatedPostconditionForChange(input: {
 			throw new Error(
 				'generator planning refuses alter_column_nullable: missing typed nullable postcondition',
 			);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		void name;
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'column',
-			column: { name, nullable },
+			column: { nullable },
 		});
 	}
 	if (change.kind === 'alter_column_default') {
 		const name = text(change.column, change.kind);
 		const hasDefault = change.meta?.default !== undefined;
-		return postconditionPayload({
-			postconditionVersion: 2,
+		void name;
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'column',
 			column: {
-				name,
-				hasDefault,
-				...(hasDefault ? { defaultKind: 'authored' as const } : {}),
-				...(hasDefault
+				default: hasDefault
 					? {
-							default: formatSqlDefault(
-								change.meta?.default,
-								'generator postcondition',
+							defaultKind: 'authored',
+							hasDefault: true,
+							identity: null,
+							defaultExpression: canonicalSqlFact(
+								formatSqlDefault(
+									change.meta?.default,
+									'generator postcondition',
+								),
 							),
 						}
-					: {}),
+					: { defaultKind: 'none', hasDefault: false, identity: null },
 			},
 		});
 	}
@@ -441,12 +694,23 @@ export function generatedPostconditionForChange(input: {
 		change.kind === 'validate_constraint' ||
 		change.kind === 'add_check_constraint' ||
 		(change.kind === 'alter_column_unique' && change.destructive !== true)
-	)
-		return postconditionPayload({
-			postconditionVersion: 2,
-			kind: 'constraint',
-			constraint: constraintPostcondition(change, schema),
-		});
+	) {
+		const constraint = constraintPostcondition(change, schema);
+		return constraint.type === 'c'
+			? v3Payload({
+					canonicalFormVersion: 1,
+					kind: 'check',
+					check: {
+						expression: canonicalSqlFact(constraint.expression),
+						notValid: constraint.notValid,
+					},
+				})
+			: v3Payload({
+					canonicalFormVersion: 1,
+					kind: 'constraint',
+					constraint,
+				});
+	}
 	if (change.kind === 'create_index') {
 		const index = change.meta?.index as
 			| import('@dbsp/types').IndexIR
@@ -464,13 +728,10 @@ export function generatedPostconditionForChange(input: {
 			throw new Error(
 				'generator planning refuses create_index: opclass keys must name emitted columns',
 			);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'index',
 			index: {
-				schema,
-				table: change.table,
-				name: index.name ?? `idx_${change.table}_${index.columns.join('_')}`,
 				method: index.method ?? 'btree',
 				unique: index.unique === true,
 				valid: true,
@@ -479,39 +740,57 @@ export function generatedPostconditionForChange(input: {
 				columns: index.columns,
 				...(index.expressions === undefined
 					? {}
-					: { expressions: index.expressions }),
+					: {
+							expressions: index.expressions.map(canonicalSqlFact),
+						}),
 				...(index.include === undefined ? {} : { include: index.include }),
 				nullsNotDistinct: index.nullsNotDistinct === true,
 				...(index.opclass === undefined ? {} : { opclass: index.opclass }),
 				...(index.with === undefined ? {} : { with: index.with }),
-				...(index.where === undefined ? {} : { where: index.where }),
+				...(index.where === undefined
+					? {}
+					: { where: canonicalSqlFact(index.where) }),
 			},
 		});
 	}
 	if (change.kind === 'create_enum' || change.kind === 'alter_enum_add_value') {
 		const enumDef = requiredRecord(change.meta?.enum, change.kind);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'enum',
 			labels: requiredList(enumDef.values, change.kind),
 		});
 	}
 	if (change.kind === 'create_sequence' || change.kind === 'alter_sequence') {
 		const sequence = requiredRecord(change.meta?.sequence, change.kind);
-		const numberProperty = (name: string): string | undefined =>
-			typeof sequence[name] === 'number' ? String(sequence[name]) : undefined;
-		const startValue = numberProperty('startWith');
-		const incrementBy = numberProperty('incrementBy');
-		const minValue = numberProperty('minValue');
-		const maxValue = numberProperty('maxValue');
-		return postconditionPayload({
-			postconditionVersion: 2,
+		const startValue = normalizeSequenceInteger(
+			sequence.startWith,
+			`${change.kind} sequence startWith`,
+		);
+		const incrementBy = normalizeSequenceInteger(
+			sequence.incrementBy,
+			`${change.kind} sequence incrementBy`,
+		);
+		const minValue = normalizeSequenceInteger(
+			sequence.minValue,
+			`${change.kind} sequence minValue`,
+		);
+		const maxValue = normalizeSequenceInteger(
+			sequence.maxValue,
+			`${change.kind} sequence maxValue`,
+		);
+		const cycle = normalizeOptionalBoolean(
+			sequence.cycle,
+			`${change.kind} sequence cycle`,
+		);
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'sequence',
 			...(startValue === undefined ? {} : { startValue }),
 			...(incrementBy === undefined ? {} : { incrementBy }),
 			...(minValue === undefined ? {} : { minValue }),
 			...(maxValue === undefined ? {} : { maxValue }),
-			...(typeof sequence.cycle === 'boolean' ? { cycle: sequence.cycle } : {}),
+			...(cycle === undefined ? {} : { cycle }),
 		});
 	}
 	if (change.kind === 'create_extension') {
@@ -520,12 +799,13 @@ export function generatedPostconditionForChange(input: {
 			throw new Error(
 				'generator planning refuses create_extension: invalid typed extension version',
 			);
-		return postconditionPayload({
-			postconditionVersion: 2,
+		return v3Payload({
+			canonicalFormVersion: 1,
 			kind: 'extension',
 			...(typeof version === 'string' ? { version } : {}),
 		});
 	}
+	if (change.kind === 'alter_column_type') return undefined;
 	if (
 		change.kind === 'drop_table' ||
 		change.kind === 'drop_column' ||
@@ -538,10 +818,33 @@ export function generatedPostconditionForChange(input: {
 		change.kind === 'drop_sequence' ||
 		(change.kind === 'alter_column_unique' && change.destructive === true)
 	)
-		return postconditionPayload({ postconditionVersion: 2, kind: 'absent' });
+		return v3Payload({ canonicalFormVersion: 1, kind: 'absent' });
 	throw new Error(
 		`generator planning refuses ${change.kind}: no typed postcondition is available`,
 	);
+}
+
+export function generatedPostconditionForChange(input: {
+	readonly change: SchemaChange;
+	readonly schema: string;
+}): import('@dbsp/types').LedgerPayload | undefined {
+	try {
+		return generatedPostconditionForChangeUnchecked(input);
+	} catch (error) {
+		const identity = `${input.change.kind}:${input.change.table}${
+			input.change.column === undefined ? '' : `:${input.change.column}`
+		}`;
+		if (
+			error instanceof Error &&
+			(error.name === 'GeneratedPostconditionV3DeclarationError' ||
+				error.message.startsWith('generated postcondition digest '))
+		)
+			throw new Error(
+				`generator planning refuses ${input.change.kind} at ${identity}: ${error.message}`,
+				{ cause: error },
+			);
+		throw error;
+	}
 }
 
 /**

@@ -19,6 +19,7 @@ import type {
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import { normalizeOptionalBoolean } from './generated-source-normalizers.js';
 import {
 	assertCreateIndexesSupported,
 	type IndexCapabilityContext,
@@ -449,8 +450,14 @@ export function generateAlterTableAddFK(
 	const onUpdate = fk.onUpdate
 		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
 		: '';
-	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
-	const notValid = fk.notValid ? ' NOT VALID' : '';
+	const deferred =
+		normalizeOptionalBoolean(fk.deferred, 'foreign key deferred') === true
+			? ' DEFERRABLE INITIALLY DEFERRED'
+			: '';
+	const notValid =
+		normalizeOptionalBoolean(fk.notValid, 'foreign key notValid') === true
+			? ' NOT VALID'
+			: '';
 
 	return `ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;
 }

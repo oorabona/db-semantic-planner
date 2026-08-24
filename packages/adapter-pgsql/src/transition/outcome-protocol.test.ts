@@ -23,6 +23,9 @@ import {
 	checkLiveAdmission,
 	checkValidatedManifest,
 	executePgAdmittedOperation,
+	type GeneratedDeclarationPayload,
+	type GeneratedIdentityObservation,
+	type GeneratedStructuralObservation,
 	lockPgJournalRun,
 	mintAdmittedPermit,
 	PgCommitAcknowledgementAmbiguousError,
@@ -33,6 +36,32 @@ import {
 	withPgOutcomeSession,
 	withPgTransitionTransaction,
 } from './outcome-protocol.js';
+
+const generatedIdentityObservation = {
+	value: { kind: 'table', name: 'orders' },
+	digest: 'identity-observation',
+	payloadKind: 'generated-identity-observation',
+} satisfies GeneratedIdentityObservation;
+const generatedDeclaration = {
+	value: { kind: 'table', name: 'orders' },
+	digest: 'declaration',
+	payloadKind: 'generated-declaration',
+} satisfies GeneratedDeclarationPayload;
+const generatedStructuralObservation = {
+	value: { columns: [] },
+	digest: 'structural-observation',
+	payloadKind: 'generated-structural-observation',
+} satisfies GeneratedStructuralObservation;
+// @ts-expect-error Identity observations cannot occupy declaration slots.
+const identityInDeclarationSlot: GeneratedDeclarationPayload =
+	generatedIdentityObservation;
+// @ts-expect-error Identity observations cannot occupy structural slots.
+const identityInStructuralSlot: GeneratedStructuralObservation =
+	generatedIdentityObservation;
+void generatedDeclaration;
+void generatedStructuralObservation;
+void identityInDeclarationSlot;
+void identityInStructuralSlot;
 
 // @ts-expect-error PgLockedRun is minted only at the journal-load/run-lock bridge.
 const structurallyBuiltLockedRun: PgLockedRun = {
@@ -55,12 +84,14 @@ describe('paired re-address observed evidence', () => {
 		const projection = {
 			value: { columns: [{ name: 'id', type: 'integer', nullable: false }] },
 			digest: 'projection-digest',
+			payloadKind: 'generated-structural-observation' as const,
 		};
 		await expect(
 			readPgPairedReaddressObserved({} as never, {
 				targetObserved: {
 					value: { kind: 'table', name: 'orders_archive' },
 					digest: 'address-only-digest',
+					payloadKind: 'generated-identity-observation',
 				},
 				postDdlReadBack: vi.fn(async () => projection),
 			}),

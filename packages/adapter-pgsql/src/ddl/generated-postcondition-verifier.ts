@@ -1,14 +1,28 @@
+import type { LedgerAddress, ResourceAddress } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
-import { validateCheckExpression, validateIdentifier } from '../validate.js';
+import {
+	lockPgRelation,
+	PgResolvableRelationLockError,
+} from '../transition/lock-relation.js';
+import { validateCheckExpression } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
+import {
+	parseGeneratedPostconditionV3Declaration,
+	snapshotGeneratedPostconditionJson,
+} from './generated-postcondition-v3-validator.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
+	GeneratedColumnPostcondition,
 	GeneratedConstraintPostcondition,
 	GeneratedIndexPostcondition,
 	GeneratedPostcondition,
+	GeneratedPostconditionDeclarationV3,
+	GeneratedPostconditionV3,
+	TargetBinding,
 } from './managed-step-manifest.js';
+import { generatedPostconditionDigest } from './managed-step-manifest.js';
 import { quoteIdent } from './phases/utils.js';
 
 type GeneratedPostconditionQuery = {
@@ -211,11 +225,228 @@ export async function withGeneratedPostconditionSession<T>(
 	return result;
 }
 
-export type GeneratedPostconditionTarget = {
+type GeneratedPostconditionTarget = {
 	readonly schema: string;
 	readonly table: string;
 	readonly name: string;
+	/** The catalogue object selected by the binding query, never a name relookup. */
+	readonly relationOid?: string;
+	readonly objectOid?: string;
+	readonly attributeNumber?: number;
 };
+
+type ResolvableGeneratedPostconditionKind =
+	| 'table'
+	| 'column'
+	| 'index'
+	| 'constraint'
+	| 'enum'
+	| 'sequence'
+	| 'extension';
+
+type GeneratedPostconditionSchemaBindingKind = Exclude<
+	ResolvableGeneratedPostconditionKind,
+	'extension'
+>;
+type GeneratedPostconditionTableChildKind = 'column' | 'index' | 'constraint';
+
+/** The canonical schema-scoped table parent of a managed table child. */
+type GeneratedPostconditionTableParent = {
+	readonly scope: 'schema';
+	readonly engine: string;
+	readonly database: string;
+	readonly schema: string;
+	readonly kind: 'table';
+	readonly name: string;
+	readonly parent?: never;
+	readonly catalogueIdentity?: never;
+	readonly qualifiedBy?: never;
+};
+
+type GeneratedPostconditionSchemaRootAddress<
+	K extends Exclude<
+		GeneratedPostconditionSchemaBindingKind,
+		GeneratedPostconditionTableChildKind
+	>,
+> = Omit<ResourceAddress, 'engine' | 'schema' | 'parent' | 'kind'> & {
+	readonly engine: string;
+	readonly scope: 'schema';
+	readonly schema: string;
+	readonly parent?: never;
+	readonly kind: K;
+};
+
+type GeneratedPostconditionTableChildAddress<
+	K extends GeneratedPostconditionTableChildKind,
+> = Omit<ResourceAddress, 'engine' | 'schema' | 'parent' | 'kind'> & {
+	readonly engine: string;
+	readonly scope: 'schema';
+	readonly schema: string;
+	readonly parent: GeneratedPostconditionTableParent;
+	readonly kind: K;
+};
+
+type GeneratedPostconditionExtensionAddress = Omit<
+	ResourceAddress,
+	'engine' | 'schema' | 'parent' | 'kind'
+> & {
+	readonly engine: string;
+	readonly scope: 'database';
+	readonly schema?: never;
+	readonly parent?: never;
+	readonly kind: 'extension';
+};
+
+/** The complete topology selected by a v3 managed-step binding. */
+export type GeneratedPostconditionBindingAddress =
+	| GeneratedPostconditionSchemaRootAddress<'table' | 'enum' | 'sequence'>
+	| GeneratedPostconditionTableChildAddress<GeneratedPostconditionTableChildKind>
+	| GeneratedPostconditionExtensionAddress;
+
+/** A v3 binding selected no live object, or selected a slot other than the one declared. */
+const bindingResolutionFailures = new WeakSet<object>();
+
+export class GeneratedPostconditionBindingResolutionError extends Error {
+	readonly sought: string;
+	readonly found: string;
+
+	constructor(input: { readonly sought: string; readonly found: string }) {
+		super(
+			`generated postcondition binding did not resolve: sought ${input.sought}; found ${input.found}`,
+		);
+		this.name = 'GeneratedPostconditionBindingResolutionError';
+		this.sought = input.sought;
+		this.found = input.found;
+	}
+}
+
+function bindingResolutionFailure(input: {
+	readonly sought: string;
+	readonly found: string;
+}): GeneratedPostconditionBindingResolutionError {
+	const error = new GeneratedPostconditionBindingResolutionError(input);
+	bindingResolutionFailures.add(error);
+	return error;
+}
+
+function bindingAddressDescription(address: LedgerAddress): string {
+	const parent = address.parent?.name;
+	return `${address.scope} ${address.engine}/${address.database} ${address.kind} ${address.schema ?? '<database>'}.${parent ?? address.name}`;
+}
+
+function bindingAddressTopologyFailure(
+	address: LedgerAddress,
+): GeneratedPostconditionBindingResolutionError {
+	return bindingResolutionFailure({
+		sought:
+			'a resolvable generated postcondition address with canonical topology',
+		found: bindingAddressDescription(address),
+	});
+}
+
+function canonicalGeneratedPostconditionTableParent(
+	address: LedgerAddress,
+): GeneratedPostconditionTableParent | undefined {
+	const parent = address.parent;
+	if (
+		!isRecord(parent) ||
+		(parent.scope !== undefined && parent.scope !== 'schema') ||
+		parent.engine !== address.engine ||
+		parent.database !== address.database ||
+		typeof parent.schema !== 'string' ||
+		parent.schema !== address.schema ||
+		parent.kind !== 'table' ||
+		typeof parent.name !== 'string' ||
+		parent.parent !== undefined ||
+		parent.catalogueIdentity !== undefined ||
+		parent.qualifiedBy !== undefined
+	)
+		return undefined;
+	return {
+		scope: 'schema',
+		engine: parent.engine,
+		database: parent.database,
+		schema: parent.schema,
+		kind: 'table',
+		name: parent.name,
+	};
+}
+
+/**
+ * Narrows a ledger address into the complete topology that a v3 verifier can
+ * bind.  Ledger addresses are intentionally broader, so this boundary must
+ * reject malformed persisted input before it reaches any verifier dispatch.
+ */
+export function toGeneratedPostconditionBindingAddress(
+	address: LedgerAddress,
+): GeneratedPostconditionBindingAddress {
+	const {
+		scope: _scope,
+		schema: _schema,
+		parent: _parent,
+		kind: _kind,
+		...resource
+	} = address;
+	switch (address.kind) {
+		case 'table':
+		case 'enum':
+		case 'sequence':
+			if (
+				address.scope !== 'schema' ||
+				typeof address.schema !== 'string' ||
+				address.schema.length === 0 ||
+				address.parent !== undefined
+			)
+				throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'schema',
+				schema: address.schema,
+				kind: address.kind,
+			} satisfies GeneratedPostconditionBindingAddress;
+		case 'column':
+		case 'index':
+		case 'constraint': {
+			if (
+				address.scope !== 'schema' ||
+				typeof address.schema !== 'string' ||
+				address.schema.length === 0
+			)
+				throw bindingAddressTopologyFailure(address);
+			const parent = canonicalGeneratedPostconditionTableParent(address);
+			if (parent === undefined) throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'schema',
+				schema: address.schema,
+				parent,
+				kind: address.kind,
+			} satisfies GeneratedPostconditionBindingAddress;
+		}
+		case 'extension':
+			if (
+				address.scope !== 'database' ||
+				address.schema !== undefined ||
+				address.parent !== undefined
+			)
+				throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'database',
+				kind: 'extension',
+			} satisfies GeneratedPostconditionBindingAddress;
+		default:
+			throw bindingAddressTopologyFailure(address);
+	}
+}
+
+function isBindingResolutionFailure(error: unknown): boolean {
+	return (
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function') &&
+		bindingResolutionFailures.has(error)
+	);
+}
 
 type IndexProjection = {
 	readonly schema: string;
@@ -278,9 +509,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function replan(message: string): Error {
-	return new Error(
-		`${message}; replan to produce version 2 typed postconditions`,
+export class GeneratedPostconditionReplanRequiredError extends Error {
+	readonly code = 'REPLAN_REQUIRED';
+	readonly diagnostic: Readonly<{
+		versionSeen: unknown;
+		stepIdentity: string | undefined;
+	}>;
+
+	constructor(
+		message: string,
+		versionSeen: unknown = undefined,
+		stepIdentity: string | undefined = undefined,
+		options?: ErrorOptions,
+	) {
+		super(
+			`${message}; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
+			options,
+		);
+		this.name = 'GeneratedPostconditionReplanRequiredError';
+		this.diagnostic = { versionSeen, stepIdentity };
+	}
+}
+
+function replan(
+	message: string,
+	versionSeen: unknown = undefined,
+	stepIdentity: string | undefined = undefined,
+	cause: unknown = undefined,
+): GeneratedPostconditionReplanRequiredError {
+	return new GeneratedPostconditionReplanRequiredError(
+		message,
+		versionSeen,
+		stepIdentity,
+		cause === undefined ? undefined : { cause },
 	);
 }
 
@@ -292,614 +553,144 @@ function exactKeys(
 	return Object.keys(value).every((field) => allowed.has(field));
 }
 
-function stringList(value: unknown, message: string): readonly string[] {
-	if (!Array.isArray(value)) throw replan(message);
-	const snapshot = Array.from(value);
-	const result: string[] = [];
-	for (const item of snapshot) {
-		if (typeof item !== 'string') throw replan(message);
-		result.push(item);
-	}
-	return result;
-}
-
-function stringRecord(
-	value: unknown,
-	message: string,
-): Readonly<Record<string, string>> {
-	if (!isRecord(value)) throw replan(message);
-	const entries = Object.entries(value);
-	for (const [_key, item] of entries) {
-		if (typeof item !== 'string') throw replan(message);
-	}
-	return Object.fromEntries(entries) as Record<string, string>;
-}
-
-function strictString(value: unknown, message: string): string {
-	if (typeof value !== 'string') throw replan(message);
-	return value;
-}
-
-function strictBoolean(value: unknown, message: string): boolean {
-	if (typeof value !== 'boolean') throw replan(message);
-	return value;
-}
-
-function strictUnknownArray(
-	value: unknown,
-	message: string,
-): readonly unknown[] {
-	if (!Array.isArray(value)) throw replan(message);
-	return Array.from(value);
-}
-
-function checkedIdentifier(
-	value: unknown,
-	type: 'table' | 'column' | 'schema' | 'alias',
-	message: string,
-): string {
-	const identifier = strictString(value, message);
-	try {
-		validateIdentifier(identifier, type);
-	} catch {
+function decodeTargetBinding(value: unknown, message: string): TargetBinding {
+	if (!isRecord(value) || !exactKeys(value, ['bindingVersion', 'bindingKind']))
 		throw replan(message);
-	}
-	return identifier;
+	if (
+		value.bindingVersion !== 1 ||
+		value.bindingKind !== 'managed-step-address'
+	)
+		throw replan(message);
+	return { bindingVersion: 1, bindingKind: 'managed-step-address' };
 }
 
-/** Decode and snapshot the complete supported COLUMN projection of a v2 postcondition. */
-export function decodeColumnPostcondition(
-	value: unknown,
-): Extract<GeneratedPostcondition, { readonly kind: 'column' }>['column'] {
-	const unsupported = 'generated column postcondition is unsupported';
+function decodeV3GeneratedPostcondition(
+	value: Record<string, unknown>,
+	_versionSeen: unknown,
+	_stepIdentity: string | undefined,
+): GeneratedPostconditionV3 {
+	const unsupported = 'generated v3 postcondition is unsupported';
 	if (
-		!isRecord(value) ||
 		!exactKeys(value, [
-			'name',
-			'type',
-			'nullable',
-			'hasDefault',
-			'defaultKind',
-			'default',
-			'collation',
-			'identity',
-		])
+			'postconditionVersion',
+			'declaration',
+			'targetBinding',
+		]) ||
+		value.postconditionVersion !== 3
 	)
 		throw replan(unsupported);
-	const name = checkedIdentifier(value.name, 'column', unsupported);
-	const type = value.type;
-	const nullable = value.nullable;
-	const hasDefault = value.hasDefault;
-	const defaultKind = value.defaultKind;
-	const defaultValue = value.default;
-	const collation = value.collation;
-	const identity = value.identity;
-	const decodedType =
-		type === undefined ? undefined : strictString(type, unsupported);
-	const decodedNullable =
-		nullable === undefined ? undefined : strictBoolean(nullable, unsupported);
-	const decodedHasDefault =
-		hasDefault === undefined
-			? undefined
-			: strictBoolean(hasDefault, unsupported);
-	let decodedDefaultKind: 'authored' | 'generated-sequence' | undefined;
-	if (defaultKind === undefined) decodedDefaultKind = undefined;
-	else if (defaultKind === 'authored' || defaultKind === 'generated-sequence')
-		decodedDefaultKind = defaultKind;
-	else throw replan(unsupported);
-	let decodedDefault: string | undefined;
-	if (
-		decodedHasDefault === true &&
-		decodedDefaultKind !== 'generated-sequence'
-	) {
-		if (defaultValue === undefined) throw replan(unsupported);
-		decodedDefault = strictString(defaultValue, unsupported);
-		try {
-			validateCheckExpression(decodedDefault, 'generated column default');
-		} catch {
-			throw replan(
-				'generated column default is not a setting-independent expression',
-			);
-		}
-	} else if (defaultValue !== undefined) {
-		throw replan(unsupported);
+	const targetBinding = decodeTargetBinding(value.targetBinding, unsupported);
+	try {
+		return {
+			postconditionVersion: 3,
+			declaration: parseGeneratedPostconditionV3Declaration(value.declaration),
+			targetBinding,
+		};
+	} catch (error) {
+		throw replan(unsupported, undefined, undefined, error);
 	}
-	if (decodedDefaultKind !== undefined && decodedHasDefault !== true)
-		throw replan(unsupported);
-	const decodedCollation =
-		collation === undefined || collation === null
-			? collation
-			: strictString(collation, unsupported);
-	let decodedIdentity: 'always' | 'byDefault' | null | undefined;
-	if (identity === undefined || identity === null) decodedIdentity = identity;
-	else if (identity === 'always' || identity === 'byDefault')
-		decodedIdentity = identity;
-	else throw replan(unsupported);
-	return {
-		name,
-		...(decodedType === undefined ? {} : { type: decodedType }),
-		...(decodedNullable === undefined ? {} : { nullable: decodedNullable }),
-		...(decodedHasDefault === undefined
-			? {}
-			: { hasDefault: decodedHasDefault }),
-		...(decodedDefaultKind === undefined
-			? {}
-			: { defaultKind: decodedDefaultKind }),
-		...(decodedDefault === undefined ? {} : { default: decodedDefault }),
-		...(decodedCollation === undefined ? {} : { collation: decodedCollation }),
-		...(decodedIdentity === undefined ? {} : { identity: decodedIdentity }),
-	};
 }
 
 /**
- * Decode a v2 generated postcondition before a reader treats it as evidence.
- * Unsupported fields and relationships refuse into the existing replan path.
+ * Decode exactly one postcondition interpretation per version: only v3 is
+ * accepted. v1/v2 and every other value are named REPLAN_REQUIRED outcomes.
  */
 export function decodeGeneratedPostcondition(
 	value: unknown,
+	stepIdentity?: string,
+): GeneratedPostcondition {
+	let snapshot: unknown;
+	try {
+		snapshot = snapshotGeneratedPostconditionJson(value);
+	} catch (error) {
+		throw replan(
+			'generated postcondition format is unsupported',
+			undefined,
+			stepIdentity,
+			error,
+		);
+	}
+	return decodeGeneratedPostconditionSnapshot(snapshot, stepIdentity);
+}
+
+function decodeGeneratedPostconditionSnapshot(
+	value: unknown,
+	stepIdentity?: string,
 ): GeneratedPostcondition {
 	if (!isRecord(value))
-		throw replan('generated postcondition format is unsupported');
-	const postconditionVersion = value.postconditionVersion;
-	const kind = value.kind;
-	if (postconditionVersion !== 2 || typeof kind !== 'string')
-		throw replan('generated postcondition format is unsupported');
-	const unsupported = 'generated postcondition is unsupported';
-	switch (kind) {
-		case 'table': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'columns']))
-				throw replan(unsupported);
-			const columns = strictUnknownArray(value.columns, unsupported).map(
-				(column) => decodeColumnPostcondition(column),
-			);
-			const names = new Set<string>();
-			for (const column of columns) {
-				if (names.has(column.name)) throw replan(unsupported);
-				names.add(column.name);
-			}
-			return { postconditionVersion, kind, columns };
-		}
-		case 'column': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'column']))
-				throw replan(unsupported);
-			const column = decodeColumnPostcondition(value.column);
-			return { postconditionVersion, kind, column };
-		}
-		case 'constraint': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'constraint']))
-				throw replan(unsupported);
-			const constraint = value.constraint;
-			if (!isRecord(constraint)) throw replan(unsupported);
-			const type = constraint.type;
-			if (type === 'c') {
-				if (!exactKeys(constraint, ['type', 'expression', 'notValid']))
-					throw replan(unsupported);
-				const expression = strictString(constraint.expression, unsupported);
-				const notValid = strictBoolean(constraint.notValid, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: { type: 'c', expression, notValid },
-				};
-			} else if (type === 'p' || type === 'u') {
-				if (
-					!exactKeys(constraint, [
-						'type',
-						'columns',
-						'deferrable',
-						'initiallyDeferred',
-						'enforced',
-					])
-				)
-					throw replan(unsupported);
-				const columns = stringList(constraint.columns, unsupported);
-				for (const name of columns)
-					checkedIdentifier(name, 'column', unsupported);
-				const deferrable = strictBoolean(constraint.deferrable, unsupported);
-				const initiallyDeferred = strictBoolean(
-					constraint.initiallyDeferred,
-					unsupported,
-				);
-				const enforced = strictBoolean(constraint.enforced, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: {
-						type,
-						columns,
-						deferrable,
-						initiallyDeferred,
-						enforced,
-					},
-				};
-			} else if (type === 'f') {
-				if (
-					!exactKeys(constraint, [
-						'type',
-						'columns',
-						'references',
-						'onDelete',
-						'onUpdate',
-						'deferrable',
-						'initiallyDeferred',
-						'enforced',
-						'notValid',
-					])
-				)
-					throw replan(unsupported);
-				const columns = stringList(constraint.columns, unsupported);
-				for (const name of columns)
-					checkedIdentifier(name, 'column', unsupported);
-				const references = constraint.references;
-				if (!isRecord(references)) throw replan(unsupported);
-				if (!exactKeys(references, ['schema', 'table', 'columns']))
-					throw replan(unsupported);
-				const schema = checkedIdentifier(
-					references.schema,
-					'schema',
-					unsupported,
-				);
-				const table = checkedIdentifier(references.table, 'table', unsupported);
-				const referenceColumns = stringList(references.columns, unsupported);
-				for (const name of referenceColumns)
-					checkedIdentifier(name, 'column', unsupported);
-				const onDelete = strictString(constraint.onDelete, unsupported);
-				const onUpdate = strictString(constraint.onUpdate, unsupported);
-				const deferrable = strictBoolean(constraint.deferrable, unsupported);
-				const initiallyDeferred = strictBoolean(
-					constraint.initiallyDeferred,
-					unsupported,
-				);
-				const enforced = strictBoolean(constraint.enforced, unsupported);
-				const notValid = strictBoolean(constraint.notValid, unsupported);
-				return {
-					postconditionVersion,
-					kind,
-					constraint: {
-						type: 'f',
-						columns,
-						references: { schema, table, columns: referenceColumns },
-						onDelete,
-						onUpdate,
-						deferrable,
-						initiallyDeferred,
-						enforced,
-						notValid,
-					},
-				};
-			} else throw replan(unsupported);
-		}
-		case 'index': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'index']))
-				throw replan(unsupported);
-			const index = value.index;
-			if (!isRecord(index)) throw replan(unsupported);
-			if (
-				!exactKeys(index, [
-					'schema',
-					'table',
-					'name',
-					'method',
-					'unique',
-					'valid',
-					'ready',
-					'live',
-					'columns',
-					'expressions',
-					'include',
-					'nullsNotDistinct',
-					'opclass',
-					'with',
-					'where',
-				])
-			)
-				throw replan(unsupported);
-			const schema = checkedIdentifier(index.schema, 'schema', unsupported);
-			const table = checkedIdentifier(index.table, 'table', unsupported);
-			const name = checkedIdentifier(index.name, 'alias', unsupported);
-			const method = strictString(index.method, unsupported);
-			if (
-				![
-					'btree',
-					'hash',
-					'gist',
-					'gin',
-					'brin',
-					'spgist',
-					'hnsw',
-					'ivfflat',
-					'bm25',
-					'bloom',
-				].includes(method)
-			)
-				throw replan(unsupported);
-			const unique = strictBoolean(index.unique, unsupported);
-			if (index.valid !== true || index.ready !== true || index.live !== true)
-				throw replan(unsupported);
-			const nullsNotDistinct = strictBoolean(
-				index.nullsNotDistinct,
-				unsupported,
-			);
-			const columns = stringList(index.columns, unsupported);
-			for (const column of columns)
-				checkedIdentifier(column, 'column', unsupported);
-			const expressionsValue = index.expressions;
-			const includeValue = index.include;
-			const opclassValue = index.opclass;
-			const withValue = index.with;
-			const expressions =
-				expressionsValue === undefined
-					? undefined
-					: stringList(expressionsValue, unsupported);
-			const include =
-				includeValue === undefined
-					? undefined
-					: stringList(includeValue, unsupported);
-			const opclass =
-				opclassValue === undefined
-					? undefined
-					: stringRecord(opclassValue, unsupported);
-			const withOptions =
-				withValue === undefined
-					? undefined
-					: stringRecord(withValue, unsupported);
-			const whereValue = index.where;
-			const where =
-				whereValue === undefined
-					? undefined
-					: strictString(whereValue, unsupported);
-			const decodedIndex: GeneratedIndexPostcondition = {
-				schema,
-				table,
-				name,
-				method,
-				unique,
-				valid: true,
-				ready: true,
-				live: true,
-				columns,
-				...(expressions === undefined ? {} : { expressions }),
-				...(include === undefined ? {} : { include }),
-				nullsNotDistinct,
-				...(opclass === undefined ? {} : { opclass }),
-				...(withOptions === undefined ? {} : { with: withOptions }),
-				...(where === undefined ? {} : { where }),
-			};
-			return { postconditionVersion, kind, index: decodedIndex };
-		}
-		case 'enum': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'labels']))
-				throw replan(unsupported);
-			const labels = stringList(value.labels, unsupported);
-			return { postconditionVersion, kind, labels };
-		}
-		case 'sequence': {
-			if (
-				!exactKeys(value, [
-					'postconditionVersion',
-					'kind',
-					'startValue',
-					'incrementBy',
-					'minValue',
-					'maxValue',
-					'cycle',
-				])
-			)
-				throw replan(unsupported);
-			const startValue = value.startValue;
-			const incrementBy = value.incrementBy;
-			const minValue = value.minValue;
-			const maxValue = value.maxValue;
-			const cycle = value.cycle;
-			const decodedStartValue =
-				startValue === undefined
-					? undefined
-					: strictString(startValue, unsupported);
-			const decodedIncrementBy =
-				incrementBy === undefined
-					? undefined
-					: strictString(incrementBy, unsupported);
-			const decodedMinValue =
-				minValue === undefined
-					? undefined
-					: strictString(minValue, unsupported);
-			const decodedMaxValue =
-				maxValue === undefined
-					? undefined
-					: strictString(maxValue, unsupported);
-			const decodedCycle =
-				cycle === undefined ? undefined : strictBoolean(cycle, unsupported);
-			return {
-				postconditionVersion,
-				kind,
-				...(decodedStartValue === undefined
-					? {}
-					: { startValue: decodedStartValue }),
-				...(decodedIncrementBy === undefined
-					? {}
-					: { incrementBy: decodedIncrementBy }),
-				...(decodedMinValue === undefined ? {} : { minValue: decodedMinValue }),
-				...(decodedMaxValue === undefined ? {} : { maxValue: decodedMaxValue }),
-				...(decodedCycle === undefined ? {} : { cycle: decodedCycle }),
-			};
-		}
-		case 'extension': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'version']))
-				throw replan(unsupported);
-			const versionValue = value.version;
-			const version =
-				versionValue === undefined
-					? undefined
-					: strictString(versionValue, unsupported);
-			return {
-				postconditionVersion,
-				kind,
-				...(version === undefined ? {} : { version }),
-			};
-		}
-		case 'absent':
-			if (!exactKeys(value, ['postconditionVersion', 'kind']))
-				throw replan(unsupported);
-			return { postconditionVersion, kind };
-		case 'exempt': {
-			if (!exactKeys(value, ['postconditionVersion', 'kind', 'reason']))
-				throw replan(unsupported);
-			const reason = strictString(value.reason, unsupported);
-			return { postconditionVersion, kind, reason };
-		}
-		default:
-			throw replan(unsupported);
-	}
-}
-
-function decodeIndexExpectation(
-	value: unknown,
-	target: GeneratedPostconditionTarget,
-): GeneratedIndexPostcondition {
-	if (
-		!isRecord(value) ||
-		!exactKeys(value, ['postconditionVersion', 'kind', 'index'])
-	)
-		throw replan('generated index postcondition format is unsupported');
-	if (
-		value.postconditionVersion !== 2 ||
-		value.kind !== 'index' ||
-		!isRecord(value.index)
-	)
-		throw replan('generated index postcondition is unsupported');
-	const index = value.index;
-	if (
-		!exactKeys(index, [
-			'schema',
-			'table',
-			'name',
-			'method',
-			'unique',
-			'valid',
-			'ready',
-			'live',
-			'columns',
-			'expressions',
-			'include',
-			'nullsNotDistinct',
-			'opclass',
-			'with',
-			'where',
-		]) ||
-		typeof index.schema !== 'string' ||
-		typeof index.table !== 'string' ||
-		typeof index.name !== 'string' ||
-		typeof index.method !== 'string' ||
-		typeof index.unique !== 'boolean' ||
-		index.valid !== true ||
-		index.ready !== true ||
-		index.live !== true ||
-		typeof index.nullsNotDistinct !== 'boolean' ||
-		(index.where !== undefined && typeof index.where !== 'string')
-	)
-		throw replan('generated index postcondition is unsupported');
-	try {
-		quoteIdent(index.schema, 'schema');
-		quoteIdent(index.table, 'table');
-		quoteIdent(index.name, 'alias');
-		quoteIdent(index.method, 'alias');
-	} catch {
-		throw replan('generated index postcondition is unsupported');
-	}
-	const columns = stringList(
-		index.columns,
-		'generated index postcondition is unsupported',
-	);
-	if (columns.length === 0)
-		throw replan('generated index postcondition is unsupported');
-	try {
-		for (const column of columns) quoteIdent(column, 'column');
-	} catch {
-		throw replan('generated index postcondition is unsupported');
-	}
-	const expressions =
-		index.expressions === undefined
-			? undefined
-			: stringList(
-					index.expressions,
-					'generated index postcondition is unsupported',
-				);
-	const include =
-		index.include === undefined
-			? undefined
-			: stringList(
-					index.include,
-					'generated index postcondition is unsupported',
-				);
-	const opclass =
-		index.opclass === undefined
-			? undefined
-			: stringRecord(
-					index.opclass,
-					'generated index postcondition is unsupported',
-				);
-	const withOptions =
-		index.with === undefined
-			? undefined
-			: stringRecord(
-					index.with,
-					'generated index postcondition is unsupported',
-				);
-	if (
-		opclass &&
-		Object.keys(opclass).some((column) => !columns.includes(column))
-	)
 		throw replan(
-			'generated index postcondition opclass keys do not name emitted columns',
+			'generated postcondition format is unsupported',
+			undefined,
+			stepIdentity,
 		);
-	if (
-		index.schema !== target.schema ||
-		index.table !== target.table ||
-		index.name !== target.name
-	)
-		throw new Error('generated index postcondition identity differs');
-	return {
-		schema: index.schema,
-		table: index.table,
-		name: index.name,
-		method: index.method,
-		unique: index.unique,
-		valid: true,
-		ready: true,
-		live: true,
-		columns,
-		...(expressions === undefined ? {} : { expressions }),
-		...(include === undefined ? {} : { include }),
-		nullsNotDistinct: index.nullsNotDistinct,
-		...(opclass === undefined ? {} : { opclass }),
-		...(withOptions === undefined ? {} : { with: withOptions }),
-		...(index.where === undefined ? {} : { where: index.where }),
-	};
+	const postconditionVersion = value.postconditionVersion;
+	if (postconditionVersion === 3) {
+		try {
+			const decoded = decodeV3GeneratedPostcondition(
+				value,
+				postconditionVersion,
+				stepIdentity,
+			);
+			return decoded;
+		} catch (error) {
+			if (error instanceof GeneratedPostconditionReplanRequiredError)
+				throw new GeneratedPostconditionReplanRequiredError(
+					error.message.replace(/; REPLAN_REQUIRED[\s\S]*$/, ''),
+					postconditionVersion,
+					stepIdentity,
+					{ cause: error },
+				);
+			throw error;
+		}
+	}
+	throw replan(
+		'generated postcondition version is no longer interpretable',
+		postconditionVersion,
+		stepIdentity,
+	);
 }
 
-function decodeCheckExpectation(
-	value: unknown,
-): Extract<GeneratedConstraintPostcondition, { readonly type: 'c' }> {
-	if (
-		!isRecord(value) ||
-		!exactKeys(value, ['postconditionVersion', 'kind', 'constraint'])
-	)
-		throw replan('generated CHECK postcondition format is unsupported');
-	if (
-		value.postconditionVersion !== 2 ||
-		value.kind !== 'constraint' ||
-		!isRecord(value.constraint) ||
-		!exactKeys(value.constraint, ['type', 'expression', 'notValid']) ||
-		value.constraint.type !== 'c' ||
-		typeof value.constraint.expression !== 'string' ||
-		typeof value.constraint.notValid !== 'boolean'
-	)
-		throw replan('generated CHECK postcondition is unsupported');
-	return {
-		type: 'c',
-		expression: value.constraint.expression,
-		notValid: value.constraint.notValid,
-	};
+/**
+ * The persisted digest is bound to the versioned wire value before decoding.
+ * A digest minted for one version cannot authenticate another version body.
+ */
+export function decodeGeneratedPostconditionPayload(
+	payload: { readonly value: unknown; readonly digest: string },
+	stepIdentity?: string,
+): GeneratedPostcondition {
+	let value: unknown;
+	try {
+		value = snapshotGeneratedPostconditionJson(payload.value);
+	} catch (error) {
+		throw new GeneratedPostconditionReplanRequiredError(
+			'generated postcondition digest cannot be decoded',
+			undefined,
+			stepIdentity,
+			{ cause: error },
+		);
+	}
+	if (!isRecord(value) || typeof value.postconditionVersion !== 'number')
+		return decodeGeneratedPostconditionSnapshot(value, stepIdentity);
+	let expectedDigest: string;
+	try {
+		expectedDigest = generatedPostconditionDigest(
+			value as { readonly postconditionVersion: number },
+		);
+	} catch (error) {
+		throw new GeneratedPostconditionReplanRequiredError(
+			'generated postcondition digest cannot be decoded',
+			value.postconditionVersion,
+			stepIdentity,
+			{ cause: error },
+		);
+	}
+	if (payload.digest !== expectedDigest)
+		throw replan(
+			'generated postcondition digest is not paired with its versioned value',
+			value.postconditionVersion,
+			stepIdentity,
+		);
+	return decodeGeneratedPostconditionSnapshot(value, stepIdentity);
 }
 
 function nullableStringList(value: unknown): readonly (string | null)[] {
@@ -968,20 +759,68 @@ function indexProjection(row: Record<string, unknown>): IndexProjection {
 }
 
 const INDEX_PROJECTION_SELECT =
-	"SELECT namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, index_meta.indisprimary AS is_primary, index_meta.indisexclusion AS is_exclusion, index_meta.indimmediate AS is_immediate, constraint_item.oid IS NOT NULL AS is_constraint_owned, CASE WHEN index_meta_json.value ? 'indnullsnotdistinct' THEN (index_meta_json.value ->> 'indnullsnotdistinct')::boolean ELSE false END AS nulls_not_distinct, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END AS key_count, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_meta.indexrelid";
+	"SELECT pg_catalog.current_database() AS database_name, relation.relkind AS parent_relation_kind, index_relation.relkind AS relation_kind, relation.oid::text AS relation_oid, index_relation.oid::text AS object_oid, namespace.nspname AS schema_name, relation.relname AS table_name, index_relation.relname AS index_name, access_method.amname AS method_name, index_meta.indisunique AS is_unique, index_meta.indisvalid AS is_valid, index_meta.indisready AS is_ready, index_meta.indislive AS is_live, index_meta.indisprimary AS is_primary, index_meta.indisexclusion AS is_exclusion, index_meta.indimmediate AS is_immediate, constraint_item.oid IS NOT NULL AS is_constraint_owned, CASE WHEN index_meta_json.value ? 'indnullsnotdistinct' THEN (index_meta_json.value ->> 'indnullsnotdistinct')::boolean ELSE false END AS nulls_not_distinct, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END AS key_count, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS key_column(attnum, position) LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = key_column.attnum WHERE key_column.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY key_column.position) AS key_columns, ARRAY(SELECT pg_catalog.pg_get_indexdef(index_meta.indexrelid, key_position, false) FROM pg_catalog.generate_series(1, CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END) AS key_position ORDER BY key_position) AS key_definitions, ARRAY(SELECT attribute.attname::text FROM unnest(index_meta.indkey) WITH ORDINALITY AS include_column(attnum, position) JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = include_column.attnum WHERE include_column.position > CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY include_column.position) AS include_columns, ARRAY(SELECT opclass.opcname::text FROM unnest(index_meta.indclass) WITH ORDINALITY AS index_opclass(opclass_oid, position) JOIN pg_catalog.pg_opclass opclass ON opclass.oid = index_opclass.opclass_oid WHERE index_opclass.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_opclass.position) AS opclasses, ARRAY(SELECT index_option.option::text FROM unnest(index_meta.indoption) WITH ORDINALITY AS index_option(option, position) WHERE index_option.position <= CASE WHEN index_meta_json.value ? 'indnkeyatts' THEN (index_meta_json.value ->> 'indnkeyatts')::integer ELSE index_meta.indnatts END ORDER BY index_option.position) AS key_options, COALESCE(index_relation.reloptions, ARRAY[]::text[]) AS reloptions, pg_catalog.pg_get_expr(index_meta.indpred, index_meta.indrelid, false) AS predicate_expression FROM pg_catalog.pg_index index_meta CROSS JOIN LATERAL (SELECT pg_catalog.to_jsonb(index_meta) AS value) index_meta_json JOIN pg_catalog.pg_class relation ON relation.oid = index_meta.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace JOIN pg_catalog.pg_class index_relation ON index_relation.oid = index_meta.indexrelid JOIN pg_catalog.pg_am access_method ON access_method.oid = index_relation.relam LEFT JOIN pg_catalog.pg_constraint constraint_item ON constraint_item.conindid = index_meta.indexrelid";
 
-async function readLiveIndexProjection(
-	session: GeneratedPostconditionSession,
-	target: GeneratedPostconditionTarget,
-): Promise<IndexProjection> {
+/**
+ * The parent table lock protects the table while the index proof runs, but it
+ * cannot lock an index relation. Bind the index and project its structure in
+ * this one catalogue statement so a rename cannot split those observations.
+ */
+async function stabilizeGeneratedIndexBindingAndProjection(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly target: GeneratedPostconditionTarget;
+	readonly projection: IndexProjection;
+}> {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, 'index');
+	if (slot.found !== undefined)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	if (slot.stabilizationRelation)
+		try {
+			await lockPgRelation(input.session, slot.stabilizationRelation);
+		} catch (error) {
+			if (
+				error instanceof PgResolvableRelationLockError &&
+				isRecord(error.cause) &&
+				error.cause.code === '42P01'
+			)
+				throw bindingResolutionFailure({
+					sought: slot.sought,
+					found: 'absent',
+				});
+			throw error;
+		}
 	const row = (
-		await session.query(
-			`${INDEX_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND relation.relname = $2 AND index_relation.relname = $3`,
-			[target.schema, target.table, target.name],
+		await input.session.query(
+			`${INDEX_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
+			[slot.target.schema, slot.target.name],
 		)
 	).rows[0];
-	if (!row) throw new Error(`generated index ${target.name} is absent`);
-	return indexProjection(row);
+	if (!row || row.database_name !== input.address.database)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found: !row ? 'absent' : `database ${String(row.database_name)}`,
+		});
+	const found = relationBindingFound('index', slot.target, row);
+	if (found !== undefined)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found,
+		});
+	return {
+		target: bindingIdentity('index', slot.target, row),
+		projection: indexProjection(row),
+	};
 }
 
 async function readScratchIndexProjection(
@@ -1007,7 +846,7 @@ async function scratchScope<T>(
 	const savepoint = nextScratchName('scope');
 	let savepointActive = false;
 	let transactionStarted = false;
-	let result: T | undefined;
+	let result!: T;
 	let workError: unknown;
 	let workFailed = false;
 	try {
@@ -1053,7 +892,8 @@ async function scratchScope<T>(
 	if (workFailed) {
 		if (
 			isStructuralMismatchFailure(workError) ||
-			isScratchRollbackSafeFailure(workError)
+			isScratchRollbackSafeFailure(workError) ||
+			isBindingResolutionFailure(workError)
 		)
 			markCleanScratchFailure(workError, session);
 		throw workError;
@@ -1062,10 +902,6 @@ async function scratchScope<T>(
 		throw new AggregateError(
 			cleanupErrors,
 			'generated postcondition scratch cleanup failed',
-		);
-	if (result === undefined)
-		throw new Error(
-			'generated postcondition scratch scope completed without a result',
 		);
 	return result;
 }
@@ -1179,6 +1015,20 @@ function structuralMismatch(message: string): Error {
 	return error;
 }
 
+/**
+ * Refusal text is an operator diagnostic, not a SQL/deparse transport. Keep
+ * expected and live facts out of it: authored defaults can contain secrets.
+ */
+function structuralMismatchField(
+	target: string,
+	field: string,
+	summary: 'count' | 'value' = 'value',
+): Error {
+	return structuralMismatch(
+		`generated ${target} structural postcondition differs at ${field}: ${summary} mismatch (values redacted)`,
+	);
+}
+
 function isStructuralMismatchFailure(error: unknown): boolean {
 	return (
 		error !== null &&
@@ -1203,15 +1053,33 @@ async function withGeneratedPostconditionProof<T>(
 	const state = generatedPostconditionSessionStates.get(session);
 	if (!state)
 		throw new Error('generated postcondition session state is absent');
+	// Public v3 entrypoints own one scope containing decoding, binding, locks,
+	// and structure. Internal proof helpers may be reused without opening a
+	// second scope on that same capability.
 	if (state.proofInFlight) throw new GeneratedPostconditionProofInFlightError();
 	state.proofInFlight = true;
 	const queryCount = generatedPostconditionQueryCounts.get(session) ?? 0;
+	let proofQueryCount = queryCount;
+	let workError: unknown;
+	let workErrorQueryCount = queryCount;
 	try {
-		return await work(session);
+		// scratchScope owns a rollback-only transaction only when this exclusive
+		// session is otherwise transactionless. It therefore also holds relation
+		// locks through binding and structural proof, without taking ownership of
+		// an enclosing DDL transaction.
+		return await scratchScope(session, () => {
+			proofQueryCount = generatedPostconditionQueryCounts.get(session) ?? 0;
+			return work(session).catch((error: unknown) => {
+				workError = error;
+				workErrorQueryCount =
+					generatedPostconditionQueryCounts.get(session) ?? 0;
+				throw error;
+			});
+		});
 	} catch (error) {
 		if (
 			isStructuralMismatchFailure(error) ||
-			(generatedPostconditionQueryCounts.get(session) ?? 0) === queryCount
+			(error === workError && workErrorQueryCount === proofQueryCount)
 		)
 			markSafePreQueryFailure(error, session);
 		throw error;
@@ -1238,6 +1106,305 @@ export function assertGeneratedPostconditionSession(
 	return requireGeneratedPostconditionSession(value);
 }
 
+function bindingSlot(
+	address: GeneratedPostconditionBindingAddress,
+	expectedKind: ResolvableGeneratedPostconditionKind,
+): {
+	readonly target: GeneratedPostconditionTarget;
+	readonly sought: string;
+	readonly found: string | undefined;
+	readonly stabilizationRelation?: {
+		readonly schema: string;
+		readonly table: string;
+	};
+} {
+	const schema = address.schema;
+	const parent = address.parent;
+	const parentSchema = parent?.schema;
+	const parentName = parent?.name;
+	const parentScope = parent
+		? (parent as ResourceAddress & { readonly scope?: unknown }).scope
+		: undefined;
+	const name = address.name;
+	const scope = address.scope;
+	const expected = `${expectedKind} ${schema ?? '<database>'}.${parentName ?? name}${expectedKind === 'table' || expectedKind === 'enum' || expectedKind === 'sequence' || expectedKind === 'extension' ? '' : `.${name}`}`;
+	const requiresTableParent =
+		expectedKind === 'column' ||
+		expectedKind === 'index' ||
+		expectedKind === 'constraint';
+	const schemaScoped = expectedKind !== 'extension';
+	const parentMatches =
+		parent !== undefined &&
+		parent.engine === address.engine &&
+		parent.database === address.database &&
+		(parentScope === undefined || parentScope === scope) &&
+		parentSchema === schema &&
+		parent.kind === 'table' &&
+		parent.parent === undefined;
+	if (
+		address.engine !== 'postgresql' ||
+		address.kind !== expectedKind ||
+		(schemaScoped && (scope !== 'schema' || !schema)) ||
+		(!schemaScoped && (scope !== 'database' || schema !== undefined)) ||
+		(requiresTableParent && !parentMatches) ||
+		(!requiresTableParent && parent !== undefined)
+	)
+		return {
+			target: {
+				schema: schema ?? '',
+				table: parentName ?? '',
+				name,
+			},
+			sought: expected,
+			found: `${address.engine}/${address.database} ${address.kind} ${schema ?? '<missing-schema>'}.${parentName ?? name}`,
+		};
+	return {
+		target: {
+			schema: schema ?? '',
+			table:
+				expectedKind === 'table' ||
+				expectedKind === 'enum' ||
+				expectedKind === 'sequence' ||
+				expectedKind === 'extension'
+					? name
+					: (parentName ?? ''),
+			name,
+		},
+		sought: expected,
+		found: undefined,
+		...(expectedKind === 'enum' ||
+		expectedKind === 'sequence' ||
+		expectedKind === 'extension'
+			? {}
+			: {
+					stabilizationRelation: {
+						schema: schema!,
+						table: requiresTableParent ? parentName! : name,
+					},
+				}),
+	};
+}
+
+function relationBindingFound(
+	kind: ResolvableGeneratedPostconditionKind,
+	target: GeneratedPostconditionTarget,
+	row: Record<string, unknown> | undefined,
+): string | undefined {
+	if (!row) return 'absent';
+	const relationKind = row.relation_kind;
+	if (kind === 'table')
+		return relationKind === 'r' || relationKind === 'p'
+			? undefined
+			: `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+	if (kind === 'column') {
+		if (relationKind !== 'r' && relationKind !== 'p')
+			return `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+		if (row.column_name === null || row.column_name === undefined)
+			return 'absent';
+		return row.column_name === target.name
+			? undefined
+			: `column ${target.schema}.${target.table}.${String(row.column_name)}`;
+	}
+	if (kind === 'index') {
+		if (relationKind !== 'i' && relationKind !== 'I')
+			return `relation ${target.schema}.${target.name} (relkind ${String(relationKind)})`;
+		if (row.parent_relation_kind !== 'r' && row.parent_relation_kind !== 'p')
+			return `relation ${target.schema}.${target.table} (relkind ${String(row.parent_relation_kind)})`;
+		return row.table_name === target.table
+			? undefined
+			: `index ${target.schema}.${String(row.table_name)}.${target.name}`;
+	}
+	if (relationKind !== 'r' && relationKind !== 'p')
+		return `relation ${target.schema}.${target.table} (relkind ${String(relationKind)})`;
+	return row.constraint_name === target.name
+		? undefined
+		: `constraint ${target.schema}.${target.table}.${String(row.constraint_name)}`;
+}
+
+function bindingIdentity(
+	kind: ResolvableGeneratedPostconditionKind,
+	target: GeneratedPostconditionTarget,
+	row: Record<string, unknown>,
+): GeneratedPostconditionTarget {
+	const relationOid = row.relation_oid;
+	const objectOid = row.object_oid;
+	if (typeof relationOid !== 'string' && typeof relationOid !== 'number')
+		throw new Error(
+			'generated postcondition binding did not return a relation identity',
+		);
+	if (
+		(kind === 'index' ||
+			kind === 'constraint' ||
+			kind === 'enum' ||
+			kind === 'extension') &&
+		typeof objectOid !== 'string' &&
+		typeof objectOid !== 'number'
+	)
+		throw new Error(
+			'generated postcondition binding did not return an object identity',
+		);
+	if (kind === 'column' && !Number.isInteger(row.attribute_number))
+		throw new Error(
+			'generated postcondition binding did not return an attribute identity',
+		);
+	return {
+		...target,
+		relationOid: String(relationOid),
+		...(objectOid === undefined ? {} : { objectOid: String(objectOid) }),
+		...(typeof row.attribute_number === 'number'
+			? { attributeNumber: row.attribute_number }
+			: {}),
+	};
+}
+
+/**
+ * Resolves the complete managed-step address after its user-relation lock is
+ * held. This helper is deliberately unscoped: only public verifier entries may
+ * open a proof bracket.
+ */
+async function resolveGeneratedPostconditionBinding(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly expectedKind: ResolvableGeneratedPostconditionKind;
+}): Promise<GeneratedPostconditionTarget> {
+	const session = input.session;
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, input.expectedKind);
+	if (slot.found !== undefined)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	const { target } = slot;
+	let row: Record<string, unknown> | undefined;
+	if (input.expectedKind === 'table')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, relation.relkind AS relation_kind, relation.oid::text AS relation_oid FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2`,
+				[target.schema, target.table],
+			)
+		).rows[0];
+	else if (input.expectedKind === 'column')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, relation.relkind AS relation_kind, relation.oid::text AS relation_oid, attribute.attname AS column_name, attribute.attnum AS attribute_number FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attname = $3 AND attribute.attnum > 0 AND NOT attribute.attisdropped WHERE namespace.nspname = $1 AND relation.relname = $2`,
+				[target.schema, target.table, target.name],
+			)
+		).rows[0];
+	else if (input.expectedKind === 'index')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, index_relation.relkind AS relation_kind, parent_relation.relkind AS parent_relation_kind, parent_relation.oid::text AS relation_oid, index_relation.oid::text AS object_oid, parent_relation.relname AS table_name FROM pg_catalog.pg_class index_relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = index_relation.relnamespace LEFT JOIN pg_catalog.pg_index index_definition ON index_definition.indexrelid = index_relation.oid LEFT JOIN pg_catalog.pg_class parent_relation ON parent_relation.oid = index_definition.indrelid WHERE namespace.nspname = $1 AND index_relation.relname = $2`,
+				[target.schema, target.name],
+			)
+		).rows[0];
+	else if (input.expectedKind === 'constraint')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, relation.relkind AS relation_kind, relation.oid::text AS relation_oid, constraint_item.oid::text AS object_oid, constraint_item.conname AS constraint_name FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3`,
+				[target.schema, target.table, target.name],
+			)
+		).rows[0];
+	else if (input.expectedKind === 'enum')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, type_item.oid::text AS relation_oid, type_item.oid::text AS object_oid, 'e'::text AS relation_kind FROM pg_catalog.pg_type type_item JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type_item.typnamespace WHERE namespace.nspname = $1 AND type_item.typname = $2 AND type_item.typtype = 'e'`,
+				[target.schema, target.name],
+			)
+		).rows[0];
+	else if (input.expectedKind === 'sequence')
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, relation.oid::text AS relation_oid, relation.oid::text AS object_oid, relation.relkind AS relation_kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2`,
+				[target.schema, target.name],
+			)
+		).rows[0];
+	else
+		row = (
+			await session.query(
+				`SELECT pg_catalog.current_database() AS database_name, extension.oid::text AS relation_oid, extension.oid::text AS object_oid, 'x'::text AS relation_kind FROM pg_catalog.pg_extension extension WHERE extension.extname = $1`,
+				[target.name],
+			)
+		).rows[0];
+	if (!row || row.database_name !== input.address.database) {
+		const failure = bindingResolutionFailure({
+			sought: slot.sought,
+			found: !row ? 'absent' : `database ${String(row.database_name)}`,
+		});
+		throw failure;
+	}
+	const found =
+		input.expectedKind === 'enum'
+			? row.relation_kind === 'e'
+				? undefined
+				: 'absent'
+			: input.expectedKind === 'sequence'
+				? row.relation_kind === 'S'
+					? undefined
+					: 'absent'
+				: input.expectedKind === 'extension'
+					? row.relation_kind === 'x'
+						? undefined
+						: 'absent'
+					: relationBindingFound(input.expectedKind, target, row);
+	if (found !== undefined) {
+		const failure = bindingResolutionFailure({
+			sought: slot.sought,
+			found,
+		});
+		throw failure;
+	}
+	return bindingIdentity(input.expectedKind, target, row);
+}
+
+/** One lock acquisition, then one complete identity resolution under that lock. */
+async function stabilizeGeneratedPostconditionBinding(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly targetBinding: TargetBinding;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly expectedKind: ResolvableGeneratedPostconditionKind;
+}): Promise<GeneratedPostconditionTarget> {
+	if (
+		input.targetBinding.bindingVersion !== 1 ||
+		input.targetBinding.bindingKind !== 'managed-step-address'
+	)
+		throw replan('generated postcondition target binding is unsupported');
+	const slot = bindingSlot(input.address, input.expectedKind);
+	if (slot.found !== undefined)
+		throw bindingResolutionFailure({
+			sought: slot.sought,
+			found: slot.found,
+		});
+	if (slot.stabilizationRelation)
+		try {
+			await lockPgRelation(input.session, slot.stabilizationRelation);
+		} catch (error) {
+			// A relation that vanished between address validation and LOCK is ordinary
+			// stale-plan drift, not a poisoned client. Preserve every other lock error.
+			if (
+				error instanceof PgResolvableRelationLockError &&
+				isRecord(error.cause) &&
+				error.cause.code === '42P01'
+			)
+				throw bindingResolutionFailure({
+					sought: slot.sought,
+					found: 'absent',
+				});
+			throw error;
+		}
+	return resolveGeneratedPostconditionBinding(input);
+}
+
+/**
+ * Enum and extension proof cannot hold a user-relation lock. Their binding and
+ * structure must therefore be selected by one catalogue statement so READ
+ * COMMITTED observes one snapshot rather than two independently-resolved names.
+ */
 function tableColumnProjection(
 	row: Record<string, unknown>,
 ): TableColumnProjection {
@@ -1296,35 +1463,17 @@ const GENERATED_SEQUENCE_EVIDENCE_SQL =
 const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
 
 function isGeneratedSequenceDefault(
-	specification: Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 ): boolean {
 	return specification.defaultKind === 'generated-sequence';
 }
 
 function requiresStagedDefault(
-	specification: Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 ): boolean {
 	return (
 		specification.hasDefault === true &&
 		!isGeneratedSequenceDefault(specification)
-	);
-}
-
-function requiresStableColumnProof(
-	specification: Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'],
-): boolean {
-	return (
-		requiresStagedDefault(specification) ||
-		isGeneratedSequenceDefault(specification)
 	);
 }
 
@@ -1349,31 +1498,10 @@ async function assertTemporaryTablePrivilege(
 		);
 }
 
-async function lockAuthoredDefaultTarget(
-	session: GeneratedPostconditionSession,
-	target: GeneratedPostconditionTarget,
-	absent: string,
-): Promise<void> {
-	try {
-		// ACCESS SHARE excludes only concurrent ACCESS EXCLUSIVE DDL that can
-		// change this projection; weaker maintenance and ordinary DML are admitted.
-		await session.query(
-			`LOCK TABLE ${quoteIdent(target.schema, 'schema')}.${quoteIdent(target.table, 'table')} IN ACCESS SHARE MODE`,
-		);
-	} catch (error) {
-		if (isRecord(error) && error.code === '42P01')
-			throw scratchRollbackSafe(new Error(absent));
-		throw error;
-	}
-}
-
 async function stageAuthoredDefaults(
 	session: GeneratedPostconditionSession,
 	target: GeneratedPostconditionTarget,
-	columns: readonly Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'][],
+	columns: readonly GeneratedColumnPostcondition[],
 ): Promise<ReadonlyMap<string, string>> {
 	const expected = columns.filter(requiresStagedDefault);
 	if (expected.length === 0) return new Map();
@@ -1426,10 +1554,7 @@ type ColumnPostconditionMismatch =
 
 async function defaultPostconditionMatches(
 	actual: GeneratedColumnProjection,
-	specification: Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 	stagedDefaults: ReadonlyMap<string, string>,
 ): Promise<boolean> {
 	if (specification.hasDefault === false) return actual.default === undefined;
@@ -1442,10 +1567,7 @@ async function defaultPostconditionMatches(
 
 async function columnPostconditionMatches(
 	actual: GeneratedColumnProjection,
-	specification: Extract<
-		GeneratedPostcondition,
-		{ readonly kind: 'column' }
-	>['column'],
+	specification: GeneratedColumnPostcondition,
 	stagedDefaults: ReadonlyMap<string, string>,
 ): Promise<ColumnPostconditionMismatch | undefined> {
 	if (
@@ -1480,23 +1602,20 @@ async function columnPostconditionMatches(
  * Inline primary keys, indexes, and constraints are proved by their own
  * postconditions and are never implied by this proof.
  */
-export async function verifyGeneratedTablePostcondition(input: {
+async function verifyTableStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly columns: readonly GeneratedColumnPostcondition[];
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeGeneratedPostcondition(input.postcondition);
-		if (postcondition.kind !== 'table')
-			throw replan('generated table postcondition is unsupported');
+	return (async (session) => {
 		const verify = async () => {
 			const rows = (
 				await session.query(
-					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND relation.relname = $2 ORDER BY attribute.attnum`,
-					[input.target.schema, input.target.table],
+					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE relation.oid = $1::pg_catalog.oid ORDER BY attribute.attnum`,
+					[input.target.relationOid],
 				)
 			).rows;
-			const expected = postcondition.columns;
+			const expected = input.columns;
 			if (rows.length === 0)
 				throw structuralMismatch(
 					`generated table ${input.target.name} is absent`,
@@ -1514,8 +1633,10 @@ export async function verifyGeneratedTablePostcondition(input: {
 				);
 			const columnRows = rows.filter((row) => row.column_name !== null);
 			if (columnRows.length !== expected.length)
-				throw structuralMismatch(
-					`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(expected)}, live ${JSON.stringify(columnRows)}`,
+				throw structuralMismatchField(
+					`table ${input.target.name}`,
+					'columns.count',
+					'count',
 				);
 			const live = columnRows.map(tableColumnProjection);
 			const stagedDefaults = await stageAuthoredDefaults(
@@ -1525,46 +1646,43 @@ export async function verifyGeneratedTablePostcondition(input: {
 			);
 			for (const [ordinal, specification] of expected.entries()) {
 				const actual = live[ordinal];
+				const mismatch = actual
+					? await columnPostconditionMatches(
+							actual,
+							specification,
+							stagedDefaults,
+						)
+					: 'presence';
 				if (
 					!actual ||
 					actual.name !== specification.name ||
-					(await columnPostconditionMatches(
-						actual,
-						specification,
-						stagedDefaults,
-					)) !== undefined
+					mismatch !== undefined
 				)
-					throw structuralMismatch(
-						`generated table ${input.target.name} column postcondition differs: expected ${JSON.stringify(specification)}, live ${JSON.stringify(actual)}`,
+					throw structuralMismatchField(
+						`table ${input.target.name}`,
+						!actual
+							? `columns[${ordinal}].presence`
+							: actual.name !== specification.name
+								? `columns[${ordinal}].name`
+								: `columns[${ordinal}].${mismatch}`,
 					);
 			}
 			return { kind: 'table' as const, projection: { columns: live } };
 		};
-		if (!postcondition.columns.some(requiresStableColumnProof)) return verify();
-		return scratchScope(session, async () => {
-			await lockAuthoredDefaultTarget(
-				session,
-				input.target,
-				`generated table ${input.target.name} is absent`,
-			);
-			return verify();
-		});
-	});
+		return verify();
+	})(input.session);
 }
 
-export async function verifyGeneratedColumnPostcondition(input: {
+async function verifyColumnStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly column: GeneratedColumnPostcondition;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
 	readonly kind: 'column';
 	readonly projection: GeneratedColumnProjection;
 }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const postcondition = decodeGeneratedPostcondition(input.postcondition);
-		if (postcondition.kind !== 'column')
-			throw replan('generated column postcondition is unsupported');
-		const expected = postcondition.column;
+	return (async (session) => {
+		const expected = input.column;
 		if (expected.name !== input.target.name)
 			throw new Error(
 				`generated column ${input.target.name} structural postcondition names another column`,
@@ -1572,8 +1690,8 @@ export async function verifyGeneratedColumnPostcondition(input: {
 		const verify = async () => {
 			const row = (
 				await session.query(
-					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3`,
-					[input.target.schema, input.target.table, input.target.name],
+					`${TABLE_COLUMN_PROJECTION_SELECT} WHERE relation.oid = $1::pg_catalog.oid AND attribute.attnum = $2`,
+					[input.target.relationOid, input.target.attributeNumber],
 				)
 			).rows[0];
 			if (!row)
@@ -1612,25 +1730,18 @@ export async function verifyGeneratedColumnPostcondition(input: {
 				);
 			return { kind: 'column' as const, projection };
 		};
-		if (!requiresStableColumnProof(expected)) return verify();
-		return scratchScope(session, async () => {
-			await lockAuthoredDefaultTarget(
-				session,
-				input.target,
-				`generated column ${input.target.name} is absent`,
-			);
-			return verify();
-		});
-	});
+		return verify();
+	})(input.session);
 }
 
-export async function verifyGeneratedIndexPostcondition(input: {
+async function verifyIndexStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly index: GeneratedIndexPostcondition;
 	readonly target: GeneratedPostconditionTarget;
+	readonly live: IndexProjection;
 }): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const expected = decodeIndexExpectation(input.postcondition, input.target);
+	return (async (session) => {
+		const expected = input.index;
 		const scratchTable = nextScratchName('table');
 		const scratchIndex = nextScratchName('index');
 		// Render before acquiring/using the capability: malformed index material must
@@ -1641,11 +1752,8 @@ export async function verifyGeneratedIndexPostcondition(input: {
 			undefined,
 			identityNaming,
 		);
-		return scratchScope(session, async () => {
-			await session.query(
-				`LOCK TABLE ${quoteIdent(expected.schema, 'schema')}.${quoteIdent(expected.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
-			);
-			const live = await readLiveIndexProjection(session, input.target);
+		return (async () => {
+			const live = input.live;
 			if (
 				live.schema !== expected.schema ||
 				live.table !== expected.table ||
@@ -1670,8 +1778,8 @@ export async function verifyGeneratedIndexPostcondition(input: {
 					`generated index ${input.target.name} postcondition differs`,
 				);
 			return { kind: 'index', projection: live };
-		});
-	});
+		})();
+	})(input.session);
 }
 
 const CHECK_PROJECTION_SELECT =
@@ -1712,8 +1820,8 @@ async function readLiveCheckProjection(
 ): Promise<CheckProjection> {
 	const row = (
 		await session.query(
-			`${CHECK_PROJECTION_SELECT} JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.conname = $3 AND constraint_item.contype = 'c'`,
-			[target.schema, target.table, target.name],
+			`${CHECK_PROJECTION_SELECT} WHERE constraint_item.conrelid = $1::pg_catalog.oid AND constraint_item.oid = $2::pg_catalog.oid AND constraint_item.contype = 'c'`,
+			[target.relationOid, target.objectOid],
 		)
 	).rows[0];
 	if (!row) throw new Error(`generated constraint ${target.name} is absent`);
@@ -1741,25 +1849,25 @@ async function readScratchCheckProjection(
 	);
 }
 
-export async function verifyGeneratedCheckPostcondition(input: {
+async function verifyCheckStructure(input: {
 	readonly session: GeneratedPostconditionSession;
-	readonly postcondition: unknown;
+	readonly check: Extract<
+		GeneratedConstraintPostcondition,
+		{ readonly type: 'c' }
+	>;
 	readonly target: GeneratedPostconditionTarget;
 }): Promise<{
 	readonly kind: 'constraint';
 	readonly projection: CheckProjection;
 }> {
-	return withGeneratedPostconditionProof(input.session, async (session) => {
-		const expected = decodeCheckExpectation(input.postcondition);
+	return (async (session) => {
+		const expected = input.check;
 		const clause = renderCheckConstraintClause({
 			expression: expected.expression,
 			notValid: expected.notValid,
 		});
 		validateCheckExpression(clause, 'generated CHECK postcondition');
-		return scratchScope(session, async () => {
-			await session.query(
-				`LOCK TABLE ${quoteIdent(input.target.schema, 'schema')}.${quoteIdent(input.target.table, 'table')} IN SHARE ROW EXCLUSIVE MODE`,
-			);
+		return (async () => {
 			const live = await readLiveCheckProjection(session, input.target);
 			if (live.validated !== !expected.notValid)
 				throw structuralMismatch(
@@ -1794,6 +1902,248 @@ export async function verifyGeneratedCheckPostcondition(input: {
 					`generated constraint ${input.target.name} postcondition differs`,
 				);
 			return { kind: 'constraint', projection: live };
+		})();
+	})(input.session);
+}
+
+function v3ColumnPostcondition(
+	declaration: Extract<
+		GeneratedPostconditionDeclarationV3,
+		{ readonly kind: 'column' }
+	>['column'],
+	name: string,
+): GeneratedColumnPostcondition {
+	const defaultState = declaration.default;
+	return {
+		name,
+		...(declaration.type === undefined ? {} : { type: declaration.type }),
+		...(declaration.nullable === undefined
+			? {}
+			: { nullable: declaration.nullable }),
+		// A null authored collation means no COLLATE clause, not the catalogue's
+		// effective default; only an authored name participates in the old proof.
+		...(typeof declaration.authoredCollation === 'string'
+			? { collation: declaration.authoredCollation }
+			: {}),
+		...(defaultState === undefined
+			? {}
+			: defaultState.defaultKind === 'none'
+				? { hasDefault: false, identity: null }
+				: defaultState.defaultKind === 'identity'
+					? {
+							hasDefault: false,
+							identity: defaultState.identity,
+						}
+					: defaultState.defaultKind === 'generated-sequence'
+						? {
+								hasDefault: true,
+								defaultKind: 'generated-sequence' as const,
+								identity: null,
+							}
+						: {
+								hasDefault: true,
+								defaultKind: 'authored' as const,
+								default: defaultState.defaultExpression.sql,
+								identity: null,
+							}),
+	};
+}
+
+function decodeV3PostconditionKind<
+	K extends GeneratedPostconditionDeclarationV3['kind'],
+>(
+	value: unknown,
+	kind: K,
+): GeneratedPostconditionV3 & {
+	readonly declaration: Extract<
+		GeneratedPostconditionDeclarationV3,
+		{ readonly kind: K }
+	>;
+} {
+	const postcondition = decodeGeneratedPostcondition(value);
+	if (
+		postcondition.postconditionVersion !== 3 ||
+		postcondition.declaration.kind !== kind
+	)
+		throw replan(`generated v3 ${kind} postcondition is unsupported`);
+	return postcondition as GeneratedPostconditionV3 & {
+		readonly declaration: Extract<
+			GeneratedPostconditionDeclarationV3,
+			{ readonly kind: K }
+		>;
+	};
+}
+
+/** Resolves the v3 table binding, then delegates its shared structural proof. */
+export async function verifyGeneratedTablePostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{ readonly kind: 'table'; readonly projection: TableProjection }> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			'table',
+		);
+		const target = await stabilizeGeneratedPostconditionBinding({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+			expectedKind: 'table',
 		});
+		return verifyTableStructure({
+			session,
+			columns: postcondition.declaration.columns.map((column) =>
+				v3ColumnPostcondition(column, column.name),
+			),
+			target,
+		});
+	});
+}
+
+/** Resolves the v3 column binding, then delegates its shared structural proof. */
+export async function verifyGeneratedColumnPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly kind: 'column';
+	readonly projection: GeneratedColumnProjection;
+}> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			'column',
+		);
+		const target = await stabilizeGeneratedPostconditionBinding({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+			expectedKind: 'column',
+		});
+		return verifyColumnStructure({
+			session,
+			column: v3ColumnPostcondition(
+				postcondition.declaration.column,
+				target.name,
+			),
+			target,
+		});
+	});
+}
+
+/** Resolves the v3 index binding, then delegates its shared structural proof. */
+export async function verifyGeneratedIndexPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{ readonly kind: 'index'; readonly projection: IndexProjection }> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			'index',
+		);
+		const bound = await stabilizeGeneratedIndexBindingAndProjection({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+		});
+		const { target } = bound;
+		const index = postcondition.declaration.index;
+		const { expressions, where, ...indexFacts } = index;
+		return verifyIndexStructure({
+			session,
+			index: {
+				schema: target.schema,
+				table: target.table,
+				name: target.name,
+				...indexFacts,
+				...(expressions === undefined
+					? {}
+					: {
+							expressions: expressions.map((expression) => expression.sql),
+						}),
+				...(where === undefined ? {} : { where: where.sql }),
+			},
+			target,
+			live: bound.projection,
+		});
+	});
+}
+
+/** Resolves the v3 CHECK binding, then delegates its shared structural proof. */
+export async function verifyGeneratedCheckPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+}): Promise<{
+	readonly kind: 'constraint';
+	readonly projection: CheckProjection;
+}> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			'check',
+		);
+		const target = await stabilizeGeneratedPostconditionBinding({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+			expectedKind: 'constraint',
+		});
+		return verifyCheckStructure({
+			session,
+			check: {
+				type: 'c',
+				expression: postcondition.declaration.check.expression.sql,
+				notValid: postcondition.declaration.check.notValid,
+			},
+			target,
+		});
+	});
+}
+
+/**
+ * Binds the deliberately non-structural v3 kinds under the same rollback-only
+ * proof bracket as structural verifiers.  The declaration kind is the binding
+ * expectation, so a sequence slot can never observe an enum declaration (or
+ * vice versa) merely because the address happens to resolve.
+ */
+export async function verifyGeneratedIdentityPostcondition(input: {
+	readonly session: GeneratedPostconditionSession;
+	readonly postcondition: unknown;
+	readonly address: GeneratedPostconditionBindingAddress;
+	readonly kind: 'constraint' | 'enum' | 'sequence' | 'extension';
+}): Promise<{
+	readonly kind: 'constraint' | 'enum' | 'sequence' | 'extension';
+	readonly identity: Readonly<{
+		readonly relationOid: string;
+		readonly objectOid?: string;
+	}>;
+}> {
+	return withGeneratedPostconditionProof(input.session, async (session) => {
+		const postcondition = decodeV3PostconditionKind(
+			input.postcondition,
+			input.kind,
+		);
+		const target = await stabilizeGeneratedPostconditionBinding({
+			session,
+			targetBinding: postcondition.targetBinding,
+			address: input.address,
+			expectedKind: input.kind,
+		});
+		if (target.relationOid === undefined)
+			throw new Error(
+				'generated postcondition binding did not return a relation identity',
+			);
+		return {
+			kind: input.kind,
+			identity: {
+				relationOid: target.relationOid,
+				...(target.objectOid === undefined
+					? {}
+					: { objectOid: target.objectOid }),
+			},
+		};
 	});
 }

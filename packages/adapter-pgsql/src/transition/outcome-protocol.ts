@@ -391,6 +391,25 @@ export interface PgSingleAdmittedOperation {
 }
 
 /**
+ * The three generated payload roles are intentionally disjoint at the type
+ * boundary. Their runtime serialization remains the ledger's `{ value,
+ * digest }` pair; the discriminant prevents a generic identity observation
+ * from being wired into a declaration or a structural-proof slot.
+ */
+export type GeneratedDeclarationPayload = LedgerPayload & {
+	readonly payloadKind: 'generated-declaration';
+};
+export type GeneratedIdentityObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-identity-observation';
+};
+export type GeneratedStructuralObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-structural-observation';
+};
+export type GeneratedPostconditionObservation =
+	| GeneratedIdentityObservation
+	| GeneratedStructuralObservation;
+
+/**
  * Readdress keeps its catalogue closure discovery in readdress.ts, while this
  * facade owns the only claim/permit/DDL/terminal path for the resulting pair.
  */
@@ -405,8 +424,8 @@ export interface PgPairedReaddressOperation {
 			readonly sourceClaimId: string;
 			readonly targetClaimId: string;
 			readonly sourceDeclared?: LedgerPayload;
-			readonly targetDeclared: LedgerPayload;
-			readonly targetObserved: LedgerPayload;
+			readonly targetDeclared: GeneratedDeclarationPayload;
+			readonly targetObserved: GeneratedIdentityObservation;
 			/**
 			 * Optional structural proof for a typed table declaration. The paired
 			 * protocol invokes it after DDL on its pinned transaction session, so
@@ -414,7 +433,7 @@ export interface PgPairedReaddressOperation {
 			 */
 			readonly postDdlReadBack?: (
 				executor: GeneratedPostconditionSession,
-			) => Promise<LedgerPayload>;
+			) => Promise<GeneratedStructuralObservation>;
 			/** Verifies a physical relationship that identity alone cannot prove. */
 			readonly postDdlVerify?: (
 				executor: TransitionJournalQueryable,
@@ -453,7 +472,7 @@ export async function readPgPairedReaddressObserved(
 		PgPairedReaddressOperation['request']['members'][number],
 		'targetObserved' | 'postDdlReadBack'
 	>,
-): Promise<LedgerPayload> {
+): Promise<GeneratedPostconditionObservation> {
 	return member.postDdlReadBack
 		? member.postDdlReadBack(executor)
 		: member.targetObserved;
@@ -2545,7 +2564,7 @@ async function runPgPairedReaddressOperation(
 			};
 			readonly sourceReservation: LedgerReservationRow;
 			readonly targetReservation: LedgerReservationRow;
-			readonly targetObserved: LedgerPayload;
+			readonly targetObserved: GeneratedPostconditionObservation;
 		}[] = [];
 		for (const member of request.members) {
 			for (const [address, eventId] of [
@@ -2626,9 +2645,9 @@ async function runPgPairedReaddressOperation(
 				begun = false;
 				return refusal(`re-address pair ${request.pairId} lost a reservation`);
 			}
-			// Readdress chooses each member's callback before claims: decodable v2
-			// tables prove structure; declared undecodable payloads refuse; and only
-			// never-declared or #576-unprovable v2 kinds retain identity read-back.
+			// Table declarations receive structural read-back. Every non-table member
+			// receives generic identity observation while its declaration remains in
+			// targetDeclared; undecodable declarations refuse before either claim.
 			const targetObserved = await withPinnedGeneratedPostconditionSession(
 				executor,
 				(session) => readPgPairedReaddressObserved(session, member),
