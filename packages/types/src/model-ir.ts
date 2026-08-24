@@ -309,13 +309,13 @@ export interface SequenceIR {
 	/** Sequence name */
 	readonly name: string;
 	/** Start value */
-	readonly startWith?: number;
+	readonly startWith?: number | string;
 	/** Increment step */
-	readonly incrementBy?: number;
+	readonly incrementBy?: number | string;
 	/** Minimum value */
-	readonly minValue?: number;
+	readonly minValue?: number | string;
 	/** Maximum value */
-	readonly maxValue?: number;
+	readonly maxValue?: number | string;
 	/** Whether to cycle */
 	readonly cycle?: boolean;
 	/** Schema name (if not default) */

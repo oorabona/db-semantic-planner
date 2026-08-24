@@ -246,10 +246,10 @@ export interface SchemaExtras {
 	sequences?: Record<
 		string,
 		{
-			startWith?: number;
-			incrementBy?: number;
-			minValue?: number;
-			maxValue?: number;
+			startWith?: number | string;
+			incrementBy?: number | string;
+			minValue?: number | string;
+			maxValue?: number | string;
 			cycle?: boolean;
 		}
 	>;

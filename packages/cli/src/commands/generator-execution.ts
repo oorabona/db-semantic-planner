@@ -1,5 +1,5 @@
 /** Live-only executor for the no-argument schema-differ plan. */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	assertGeneratedPostconditionSession,
@@ -28,6 +28,8 @@ import {
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import {
+	canonicalJson,
+	canonicalJsonDigest,
 	outcomeClaimEventId,
 	outcomeClaimId,
 	projectLedgerChain,
@@ -289,26 +291,25 @@ type GeneratedPostconditionObservation =
 	| GeneratedStructuralObservation;
 
 function generatedPayload(value: unknown): GeneratedStructuralObservation {
-	const encoded = JSON.stringify(value);
-	if (encoded === undefined)
-		throw new TypeError('generated observation is not JSON serializable');
+	const encoded = canonicalJson(value);
 	const normalized = JSON.parse(encoded) as LedgerPayload['value'];
 	return {
 		value: normalized,
-		digest: createHash('sha256')
-			.update(JSON.stringify(normalized))
-			.digest('hex'),
+		digest: canonicalJsonDigest(normalized),
 		payloadKind: 'generated-structural-observation',
 	} satisfies GeneratedStructuralObservation;
 }
 
-/** A deliberately non-structural read-back for the four #597 kinds. */
+/** An identity-only existence and catalogue-identity read-back for the four #597 kinds. */
 async function identityObserved(
 	executor: GeneratedPostconditionSession,
 	postcondition: GeneratedPostcondition,
 	address: GeneratedPostconditionBindingAddress,
 	kind: 'constraint' | 'enum' | 'sequence' | 'extension',
-): Promise<GeneratedIdentityObservation> {
+): Promise<{
+	readonly observed: GeneratedIdentityObservation;
+	readonly catalogueIdentity: NonNullable<LedgerAddress['catalogueIdentity']>;
+}> {
 	const verified = await verifyGeneratedIdentityPostcondition({
 		session: executor,
 		postcondition,
@@ -316,7 +317,7 @@ async function identityObserved(
 		kind,
 	});
 	const value = JSON.parse(
-		JSON.stringify({
+		canonicalJson({
 			kind: 'identity-observed',
 			observedKind: verified.kind,
 			address: {
@@ -329,10 +330,13 @@ async function identityObserved(
 		}),
 	) as LedgerPayload['value'];
 	return {
-		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
-		payloadKind: 'generated-identity-observation',
-	} satisfies GeneratedIdentityObservation;
+		catalogueIdentity: verified.catalogueIdentity,
+		observed: {
+			value,
+			digest: canonicalJsonDigest(value),
+			payloadKind: 'generated-identity-observation',
+		} satisfies GeneratedIdentityObservation,
+	};
 }
 
 function generatedPostcondition(
@@ -346,7 +350,7 @@ function generatedPostcondition(
 		Array.isArray(declaration.value)
 	)
 		throw new Error(
-			`generated ${address.kind} step ${step.stepKey} has no structural postcondition`,
+			`generated ${address.kind} step ${step.stepKey} has no decodable generated declaration`,
 		);
 	return decodeGeneratedPostconditionPayload(declaration, step.stepKey);
 }
@@ -363,7 +367,10 @@ async function readGeneratedV3Postcondition(
 		{ readonly postconditionVersion: 3 }
 	>,
 	address: LedgerAddress,
-): Promise<GeneratedPostconditionObservation> {
+): Promise<{
+	readonly observed: GeneratedPostconditionObservation;
+	readonly catalogueIdentity?: NonNullable<LedgerAddress['catalogueIdentity']>;
+}> {
 	const bindingAddress = toGeneratedPostconditionBindingAddress(address);
 	switch (postcondition.declaration.kind) {
 		case 'column': {
@@ -372,14 +379,23 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: 'column',
-				type: verified.projection.type,
-				nullable: verified.projection.nullable,
-				default: verified.projection.default,
-				collation: verified.projection.collation,
-				identity: verified.projection.identity,
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: 'column',
+					type: verified.projection.type,
+					nullable: verified.projection.nullable,
+					...(verified.projection.default === undefined
+						? {}
+						: { default: verified.projection.default }),
+					...(verified.projection.collation === undefined
+						? {}
+						: { collation: verified.projection.collation }),
+					...(verified.projection.identity === undefined
+						? {}
+						: { identity: verified.projection.identity }),
+				}),
+			};
 		}
 		case 'check': {
 			const verified = await verifyGeneratedCheckPostcondition({
@@ -387,17 +403,20 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				type: 'c',
-				expression: verified.projection.expression,
-				validated: verified.projection.validated,
-				noInherit: verified.projection.noInherit,
-				enforced: verified.projection.enforced,
-				isLocal: verified.projection.isLocal,
-				inheritanceCount: verified.projection.inheritanceCount,
-				parentId: verified.projection.parentId,
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					type: 'c',
+					expression: verified.projection.expression,
+					validated: verified.projection.validated,
+					noInherit: verified.projection.noInherit,
+					enforced: verified.projection.enforced,
+					isLocal: verified.projection.isLocal,
+					inheritanceCount: verified.projection.inheritanceCount,
+					parentId: verified.projection.parentId,
+				}),
+			};
 		}
 		case 'constraint': {
 			return identityObserved(
@@ -413,10 +432,13 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				projection: verified.projection,
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					projection: verified.projection,
+				}),
+			};
 		}
 		case 'table': {
 			const verified = await verifyGeneratedTablePostcondition({
@@ -424,17 +446,26 @@ async function readGeneratedV3Postcondition(
 				postcondition,
 				address: bindingAddress,
 			});
-			return generatedPayload({
-				kind: verified.kind,
-				columns: verified.projection.columns.map((column) => ({
-					name: column.name,
-					type: column.type,
-					nullable: column.nullable,
-					default: column.default,
-					collation: column.collation,
-					identity: column.identity,
-				})),
-			});
+			return {
+				catalogueIdentity: verified.catalogueIdentity,
+				observed: generatedPayload({
+					kind: verified.kind,
+					columns: verified.projection.columns.map((column) => ({
+						name: column.name,
+						type: column.type,
+						nullable: column.nullable,
+						...(column.default === undefined
+							? {}
+							: { default: column.default }),
+						...(column.collation === undefined
+							? {}
+							: { collation: column.collation }),
+						...(column.identity === undefined
+							? {}
+							: { identity: column.identity }),
+					})),
+				}),
+			};
 		}
 		case 'enum': {
 			return identityObserved(executor, postcondition, bindingAddress, 'enum');
@@ -463,7 +494,7 @@ async function readGeneratedV3Postcondition(
 				throw new Error(
 					`generated ${address.kind} absence postcondition differs: ${address.name} is still present`,
 				);
-			return generatedPayload({ kind: 'absent' });
+			return { observed: generatedPayload({ kind: 'absent' }) };
 		}
 		default:
 			throw new Error('generated v3 postcondition has no declarable read-back');
@@ -471,9 +502,10 @@ async function readGeneratedV3Postcondition(
 }
 
 /**
- * Generated DDL has no operation runtime to supply an observation. Read the
- * precise catalogue fields it changes; a same-named object is never enough to
- * write an `observed` terminal.
+ * Generated DDL has no operation runtime to supply an observation. Structural
+ * declarations read the precise catalogue fields they change; the four #597
+ * identity-only declarations prove existence and catalogue identity, not shape.
+ * A same-named object is never enough to write an `observed` terminal.
  */
 export async function readGeneratedPostcondition(
 	executor: GeneratedPostconditionSession,
@@ -483,11 +515,13 @@ export async function readGeneratedPostcondition(
 	executor = assertGeneratedPostconditionSession(executor);
 	const decodedPostcondition = generatedPostcondition(step, address);
 	if (decodedPostcondition.postconditionVersion === 3)
-		return readGeneratedV3Postcondition(
-			executor,
-			decodedPostcondition,
-			address,
-		);
+		return (
+			await readGeneratedV3Postcondition(
+				executor,
+				decodedPostcondition,
+				address,
+			)
+		).observed;
 	throw new Error(
 		'generated postcondition decoder returned no supported version',
 	);
@@ -1025,8 +1059,7 @@ export async function executeGeneratorPlan(input: {
 					kind: 'destructive-outcome',
 					request: admitRequest,
 					readBackAndResolve: async (session) => {
-						const live = await readPgCatalogueIdentity(session, address);
-						const declarationObserved =
+						const declarationReadBack =
 							step.classification === 'data-destructive' &&
 							step.expectedDeclaration !== undefined
 								? await withGeneratedPostconditionSession(
@@ -1036,9 +1069,31 @@ export async function executeGeneratorPlan(input: {
 												release: () => undefined,
 											}),
 										},
-										(proof) => readGeneratedPostcondition(proof, step, address),
+										(proof) => {
+											const postcondition = generatedPostcondition(
+												step,
+												address,
+											);
+											if (postcondition.postconditionVersion !== 3)
+												throw new Error(
+													'generated postcondition decoder returned no supported version',
+												);
+											return readGeneratedV3Postcondition(
+												proof,
+												postcondition,
+												address,
+											);
+										},
 									)
 								: undefined;
+						const live =
+							step.classification === 'removal'
+								? await readPgCatalogueIdentity(session, address)
+								: undefined;
+						const terminalCatalogueIdentity =
+							step.classification === 'removal'
+								? live?.catalogueIdentity
+								: declarationReadBack?.catalogueIdentity;
 						const survivors: LedgerAddress[] =
 							step.classification === 'removal' && live ? [address] : [];
 						const childLives = await Promise.all(
@@ -1057,11 +1112,10 @@ export async function executeGeneratorPlan(input: {
 								(survivor) =>
 									`${survivor.kind} ${survivor.schema ?? '<database>'}.${survivor.name}`,
 							);
+							const survivorValue = { survivors: survivorNames };
 							const survivorObservation = {
-								value: { survivors: survivorNames },
-								digest: createHash('sha256')
-									.update(JSON.stringify(survivorNames))
-									.digest('hex'),
+								value: survivorValue,
+								digest: canonicalJsonDigest(survivorValue),
 							};
 							return {
 								rootClaimId: claim.claimId,
@@ -1128,13 +1182,14 @@ export async function executeGeneratorPlan(input: {
 										step.classification === 'removal' ? 'absent' : 'observed',
 									// The append protocol reads this address's terminal on its
 									// pinned transaction session after the post-DDL read-back.
-									...(live?.catalogueIdentity
-										? { catalogueIdentity: live.catalogueIdentity }
-										: {}),
+									...(terminalCatalogueIdentity === undefined
+										? {}
+										: { catalogueIdentity: terminalCatalogueIdentity }),
 									...(step.classification === 'removal'
 										? {}
 										: {
-												observed: declarationObserved ?? observed(address),
+												observed:
+													declarationReadBack?.observed ?? observed(address),
 											}),
 								},
 							},

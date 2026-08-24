@@ -1,3 +1,4 @@
+import { canonicalJsonDigest } from '@dbsp/core';
 import { describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => {
@@ -132,6 +133,7 @@ import {
 	classifyReconcileFailure,
 	executionIdsForRun,
 	formatReconcileHuman,
+	recoveryPayload,
 	runReconcile,
 	unresolvedRecoveryDetail,
 } from './reconcile.js';
@@ -148,6 +150,21 @@ describe('reconcile durable outcome ordering', () => {
 		fixture.chain.mockReset();
 		fixture.chain.mockResolvedValue([]);
 	}
+
+	it('omits an absent recovered catalogue identity before canonicalizing', () => {
+		expect(recoveryPayload(undefined)).toEqual({
+			value: {},
+			digest: canonicalJsonDigest({}),
+		});
+	});
+
+	it('retains a null recovered catalogue identity before canonicalizing', () => {
+		const value = { catalogueIdentity: null };
+		expect(recoveryPayload(null as never)).toEqual({
+			value,
+			digest: canonicalJsonDigest(value),
+		});
+	});
 
 	it.each([
 		['authentication', { code: '28P01' }, 'reconcile'],

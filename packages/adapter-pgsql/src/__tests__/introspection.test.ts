@@ -115,6 +115,36 @@ const usersPostsFKs = [
 // ============================================================================
 
 describe('introspect', () => {
+	it('preserves PostgreSQL int64 sequence text exactly', async () => {
+		const pool = createMockPool([
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[
+				{
+					name: 'orders_id_seq',
+					start_value: '9007199254740993',
+					increment_by: '1',
+					min_value: '1',
+					max_value: '9223372036854775807',
+					cycle: false,
+				},
+			],
+			[],
+			[],
+			[],
+		]);
+		const sequence = (await introspect(pool)).sequences?.get('orders_id_seq');
+		expect(sequence?.startWith).toBe('9007199254740993');
+	});
+
 	it('should discover tables and columns', async () => {
 		const pool = createMockPool([usersPostsColumns, usersPostsPKs, []]);
 		const result = await introspect(pool);

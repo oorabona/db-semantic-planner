@@ -1261,10 +1261,10 @@ function buildSequenceMap(
 	for (const row of rows) {
 		result.set(row.name, {
 			name: row.name,
-			startWith: Number(row.start_value),
-			incrementBy: Number(row.increment_by),
-			minValue: Number(row.min_value),
-			maxValue: Number(row.max_value),
+			startWith: row.start_value,
+			incrementBy: row.increment_by,
+			minValue: row.min_value,
+			maxValue: row.max_value,
 			cycle: row.cycle,
 		});
 	}

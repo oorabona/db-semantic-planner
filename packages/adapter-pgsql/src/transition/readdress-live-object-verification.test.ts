@@ -1,3 +1,4 @@
+import { canonicalJsonDigest } from '@dbsp/core';
 import type { LedgerPayload } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -261,7 +262,7 @@ describe('re-address live-object verification', () => {
 		setupAdmission();
 		mocks.verifyTable.mockResolvedValue({
 			kind: 'table',
-			projection: expected.value,
+			projection: { columns: [] },
 		});
 		mocks.execute.mockResolvedValue({ kind: 'executed-paired-readdress' });
 		const client = executor();
@@ -281,6 +282,11 @@ describe('re-address live-object verification', () => {
 			pairId: expect.any(String),
 		});
 		const admitted = mocks.execute.mock.calls[0]?.[1];
+		expect(admitted.operation.request.members[0]?.targetDeclared).toMatchObject(
+			{
+				payloadKind: 'generated-declaration',
+			},
+		);
 		await expect(
 			admitted.operation.request.verifyLiveAdmission(client, {
 				name: 'owner',
@@ -733,6 +739,52 @@ describe('re-address live-object verification', () => {
 			mocks.readIdentity.mock.invocationCallOrder[2]!,
 		);
 		expect(mocks.verifyTable).toHaveBeenCalledTimes(1);
+	});
+
+	it('accepts a synthesized declaration after its jsonb key reorder', async () => {
+		const sourceDeclaration = {
+			value: { alpha: false, zebra: true },
+			digest: 'legacy',
+		};
+		const minted = rekeyDeclaration(sourceDeclaration, target);
+		const jsonbLoadedTarget = {
+			value: { alpha: false, name: target.name, zebra: true },
+			digest: minted.digest,
+		};
+		expect(canonicalJsonDigest(jsonbLoadedTarget.value)).toBe(minted.digest);
+
+		setupTargetOnlyNoOp(jsonbLoadedTarget);
+		mocks.project.mockImplementation((chain) =>
+			chain.marker === 'source'
+				? {
+						kind: 'projected-ledger-chain',
+						stableState: 'unknown',
+						declaration: sourceDeclaration,
+					}
+				: {
+						kind: 'projected-ledger-chain',
+						stableState: 'managed',
+						declaration: jsonbLoadedTarget,
+					},
+		);
+		mocks.verifyTable.mockResolvedValue({
+			kind: 'table',
+			projection: { columns: [] },
+		});
+
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: executor(),
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				executionId: 'attempt',
+				step: step(),
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toEqual({ outcome: 'no-op' });
 	});
 
 	it.each([

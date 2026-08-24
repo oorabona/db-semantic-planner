@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
+	canonicalJson,
+	canonicalJsonDigest,
 	outcomeClaimId,
 	projectLedgerChain,
 	type ValidatedManagedStepManifest,
@@ -196,10 +198,6 @@ function readdressPairSide(
 	return side === 'source' || side === 'target' ? side : undefined;
 }
 
-function digest(value: LedgerPayload['value']): string {
-	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
 function carriesGeneratedPostconditionVersion(value: unknown): boolean {
 	return (
 		value !== null &&
@@ -220,14 +218,15 @@ function decodeVersionedGeneratedPostcondition(
 	return true;
 }
 
-function canonicalJson(value: unknown): string {
-	if (value === null || typeof value !== 'object') return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-	const object = value as Record<string, unknown>;
-	return `{${Object.keys(object)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
-		.join(',')}}`;
+function generatedDeclaration(
+	value: LedgerPayload['value'],
+	digest: string,
+): GeneratedDeclarationPayload {
+	return {
+		value,
+		digest,
+		payloadKind: 'generated-declaration',
+	};
 }
 
 export function rekeyDeclaration(
@@ -239,28 +238,26 @@ export function rekeyDeclaration(
 	// one supported v3 form has no target address; every legacy/unknown/malformed
 	// version refuses at this boundary rather than becoming an undecodable target.
 	if (
+		declaration &&
 		decodeVersionedGeneratedPostcondition(
 			declaration,
 			`readdress:${target.kind}:${target.name}`,
 		)
 	) {
-		return declaration as GeneratedDeclarationPayload;
+		return generatedDeclaration(declaration.value, declaration.digest);
 	}
 	const value =
 		previous && typeof previous === 'object' && !Array.isArray(previous)
 			? { ...previous, name: target.name }
 			: { kind: target.kind, name: target.name };
-	return {
-		value,
-		digest: digest(value),
-	} as unknown as GeneratedDeclarationPayload;
+	return generatedDeclaration(value, canonicalJsonDigest(value));
 }
 
 function observed(address: LedgerAddress): GeneratedIdentityObservation {
 	const value = { kind: address.kind, name: address.name };
 	return {
 		value,
-		digest: digest(value),
+		digest: canonicalJsonDigest(value),
 		payloadKind: 'generated-identity-observation',
 	} satisfies GeneratedIdentityObservation;
 }
@@ -328,14 +325,12 @@ function generatedPostconditionProof(
 		`readdress:${address.kind}:${address.name}`,
 	);
 	const observe = (projection: unknown): GeneratedStructuralObservation => {
-		// Verifier projections may represent absent catalogue fields as undefined;
-		// ledger JSON uses their canonical serialized form.
 		const value = JSON.parse(
-			JSON.stringify(projection),
+			canonicalJson(projection),
 		) as LedgerPayload['value'];
 		return {
 			value,
-			digest: digest(value),
+			digest: canonicalJsonDigest(value),
 			payloadKind: 'generated-structural-observation',
 		} satisfies GeneratedStructuralObservation;
 	};
@@ -343,16 +338,34 @@ function generatedPostconditionProof(
 		case 'table':
 			return {
 				kind: 'table',
-				prove: async (session) =>
-					observe(
-						(
-							await verifyGeneratedTablePostcondition({
-								session,
-								postcondition,
-								address: tableBindingAddress(address),
-							})
-						).projection,
-					),
+				prove: async (session) => {
+					const verified = await verifyGeneratedTablePostcondition({
+						session,
+						postcondition,
+						address: tableBindingAddress(address),
+					});
+					return observe({
+						columns: verified.projection.columns.map((column) => ({
+							name: column.name,
+							type: column.type,
+							nullable: column.nullable,
+							...(column.generatedSequenceDefault === undefined
+								? {}
+								: {
+										generatedSequenceDefault: column.generatedSequenceDefault,
+									}),
+							...(column.collation === undefined
+								? {}
+								: { collation: column.collation }),
+							...(column.identity === undefined
+								? {}
+								: { identity: column.identity }),
+							...(column.default === undefined
+								? {}
+								: { default: column.default }),
+						})),
+					});
+				},
 			};
 		default:
 			throw new Error(

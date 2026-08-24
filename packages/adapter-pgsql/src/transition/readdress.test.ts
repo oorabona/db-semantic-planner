@@ -43,7 +43,11 @@ describe('re-address declaration re-keying', () => {
 			name: 'target_table',
 		});
 
-		expect(recorded).toBe(declaration);
+		expect(recorded).toMatchObject({
+			value,
+			digest: declaration.digest,
+			payloadKind: 'generated-declaration',
+		});
 		expect(
 			decodeGeneratedPostconditionPayload(
 				recorded,
@@ -94,6 +98,7 @@ describe('re-address declaration re-keying', () => {
 			),
 		).toMatchObject({
 			value: { kind: 'table', columns: ['id'], name: 'target_table' },
+			payloadKind: 'generated-declaration',
 		});
 	});
 });

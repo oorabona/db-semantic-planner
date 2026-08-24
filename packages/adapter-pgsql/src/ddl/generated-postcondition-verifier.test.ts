@@ -1,6 +1,10 @@
 import type { LedgerAddress } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
+	GeneratedPostconditionV3DeclarationError,
+	parseGeneratedPostconditionV3Declaration,
+} from './generated-postcondition-v3-validator.js';
+import {
 	decodeGeneratedPostcondition,
 	GeneratedPostconditionBindingResolutionError,
 	GeneratedPostconditionProofInFlightError,
@@ -145,6 +149,7 @@ function boundIndexRow(overrides: Record<string, unknown> = {}) {
 
 function checkRow(overrides: Record<string, unknown> = {}) {
 	return {
+		constraint_type: 'c',
 		expression: "(status = 'Active'::text)",
 		validated: true,
 		no_inherit: false,
@@ -319,6 +324,25 @@ describe('generated postcondition verifier', () => {
 			);
 	});
 
+	it('refuses inherited and accessor-carried binding addresses without reading them', () => {
+		const inherited = Object.create(tableAddress) as LedgerAddress;
+		expect(() => toGeneratedPostconditionBindingAddress(inherited)).toThrow(
+			GeneratedPostconditionBindingResolutionError,
+		);
+		const accessor = { ...tableAddress } as Record<string, unknown>;
+		Object.defineProperty(accessor, 'engine', {
+			enumerable: true,
+			get: () => {
+				throw new Error('must not be invoked');
+			},
+		});
+		expect(() =>
+			toGeneratedPostconditionBindingAddress(
+				accessor as unknown as LedgerAddress,
+			),
+		).toThrow(GeneratedPostconditionBindingResolutionError);
+	});
+
 	it('does not LOCK TABLE for a sequence identity proof', async () => {
 		const sql: string[] = [];
 		const session = mintGeneratedPostconditionSession({
@@ -432,6 +456,117 @@ describe('generated postcondition verifier', () => {
 		};
 		expect(() => generatedPostconditionDigest(malformed)).toThrow(
 			'$.declaration.nested',
+		);
+	});
+
+	it('carries only the structural path from a parser refusal through the redacting formatter', () => {
+		const secret = "'operator-secret-structural-path'::text";
+		const declaration = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [
+				{
+					name: 'token',
+					default: secret,
+					invalid: undefined,
+				},
+			],
+		};
+		try {
+			parseGeneratedPostconditionV3Declaration(declaration);
+			throw new Error('expected parser refusal');
+		} catch (error) {
+			expect(error).toBeInstanceOf(GeneratedPostconditionV3DeclarationError);
+			expect(error).not.toHaveProperty('structuralPath');
+			expect((error as Error).message).not.toContain(secret);
+		}
+		try {
+			decodeGeneratedPostcondition({
+				postconditionVersion: 3,
+				targetBinding: v3Binding,
+				declaration,
+			});
+			throw new Error('expected REPLAN_REQUIRED');
+		} catch (error) {
+			expect(error).toMatchObject({
+				structuralPath: '$.declaration.columns[0].invalid',
+				diagnostic: { structuralPath: '$.declaration.columns[0].invalid' },
+			});
+			expect((error as Error).message).toContain(
+				'$.declaration.columns[0].invalid',
+			);
+			expect((error as Error).message).not.toContain(secret);
+		}
+	});
+
+	it('keeps a four-argument replan error cause in ErrorOptions', () => {
+		const cause = new Error('original cause');
+		const error = new GeneratedPostconditionReplanRequiredError(
+			'generated postcondition is unsupported',
+			3,
+			'generator:0',
+			{ cause },
+		);
+		expect(error.cause).toBe(cause);
+		expect(error.message).not.toContain('[object Object]');
+	});
+
+	it('does not trust a path-shaped proxy trap error', () => {
+		const trapped = new Error('$.forged.path: attacker-controlled');
+		const forged = new Proxy(
+			{},
+			{
+				getPrototypeOf: () => {
+					throw trapped;
+				},
+			},
+		);
+		try {
+			decodeGeneratedPostcondition(forged);
+			throw new Error('expected REPLAN_REQUIRED');
+		} catch (error) {
+			expect(error).toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+			expect(error).toMatchObject({ structuralPath: undefined });
+			expect((error as Error).cause).toBe(trapped);
+		}
+	});
+
+	it('maps binding proxy-trap failures to a typed error with the original cause', () => {
+		const trapped = new Error('binding proxy trap');
+		const forged = new Proxy(tableAddress, {
+			getPrototypeOf: () => {
+				throw trapped;
+			},
+		});
+		try {
+			toGeneratedPostconditionBindingAddress(forged as LedgerAddress);
+			throw new Error('expected binding resolution failure');
+		} catch (error) {
+			expect(error).toBeInstanceOf(
+				GeneratedPostconditionBindingResolutionError,
+			);
+			expect((error as Error).cause).toBe(trapped);
+			expect((error as Error).message).not.toContain(trapped.message);
+		}
+	});
+
+	it.each([
+		{ ...tableAddress, engine: '' },
+		{ ...tableAddress, engine: 'sqlite' },
+		{ ...tableAddress, database: '' },
+		{ ...tableAddress, name: '' },
+		{ ...tableAddress, schema: '' },
+		{
+			...tableAddress,
+			catalogueIdentity: { engine: 'postgresql', format: 1, value: {} },
+		},
+		{ ...tableAddress, qualifiedBy: ['redirected'] },
+		{ ...tableAddress, redirected: true },
+		{ ...columnAddress, parent: { ...tableParent, name: '' } },
+		{ ...extensionAddress, database: '' },
+	])('refuses malformed v3 binding address contents %o', (address) => {
+		expect(() => toGeneratedPostconditionBindingAddress(address)).toThrow(
+			GeneratedPostconditionBindingResolutionError,
 		);
 	});
 
@@ -1094,6 +1229,63 @@ describe('generated postcondition verifier', () => {
 				diagnostic: { versionSeen: 1, stepIdentity: 'generator:v1' },
 			});
 		}
+	});
+
+	it.each([
+		[
+			'table',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedTablePostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: tableAddress,
+				}),
+		],
+		[
+			'column',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedColumnPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: columnAddress,
+				}),
+		],
+		[
+			'index',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedIndexPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: indexAddress,
+				}),
+		],
+		[
+			'CHECK',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedCheckPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: checkAddress,
+				}),
+		],
+		[
+			'identity',
+			(session: GeneratedPostconditionSession) =>
+				verifyGeneratedIdentityPostcondition({
+					session,
+					postcondition: { postconditionVersion: 1 },
+					address: extensionAddress as never,
+					kind: 'extension',
+				}),
+		],
+	] as const)('refuses v1 %s before the proof bracket can issue a query', async (_kind, verify) => {
+		const query = vi.fn(async () => {
+			throw new Error('database must not be queried');
+		});
+		await expect(
+			verify(mintGeneratedPostconditionSession({ query })),
+		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	// The removed v2 verifier tests are restated above as one refusal per shape
@@ -2032,6 +2224,88 @@ describe('generated postcondition verifier', () => {
 		).rejects.toThrow(
 			'generated CHECK verifier could not read a complete projection',
 		);
+	});
+
+	it('keeps a healthy checkout for wrong-subtype CHECK drift, while a lock failure still poisons it', async () => {
+		const safeRelease = vi.fn();
+		let safeSavepointWithoutTransaction = true;
+		let wrongSubtypeFailure: unknown;
+		try {
+			await withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: async (sql) => {
+							if (
+								sql.startsWith('SAVEPOINT') &&
+								safeSavepointWithoutTransaction
+							) {
+								safeSavepointWithoutTransaction = false;
+								throw { code: '25P01' };
+							}
+							if (sql.includes('pg_catalog.current_database()'))
+								return {
+									rows: [
+										{
+											database_name: 'app',
+											relation_kind: 'r',
+											relation_oid: '101',
+											object_oid: '102',
+											constraint_name: 'accounts_status_check',
+										},
+									],
+								};
+							if (sql.includes('conrelid = $1::pg_catalog.oid'))
+								return { rows: [checkRow({ constraint_type: 'u' })] };
+							return { rows: [] };
+						},
+						release: safeRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedCheckPostcondition({
+						session,
+						postcondition: v3Check(),
+						address: checkAddress,
+					}),
+			);
+		} catch (error) {
+			wrongSubtypeFailure = error;
+		}
+		expect(safeRelease).toHaveBeenCalledWith();
+		expect(wrongSubtypeFailure).toBeInstanceOf(
+			GeneratedPostconditionBindingResolutionError,
+		);
+
+		const poisonedRelease = vi.fn();
+		let poisonedSavepointWithoutTransaction = true;
+		await expect(
+			withGeneratedPostconditionSession(
+				{
+					connect: async () => ({
+						query: async (sql) => {
+							if (
+								sql.startsWith('SAVEPOINT') &&
+								poisonedSavepointWithoutTransaction
+							) {
+								poisonedSavepointWithoutTransaction = false;
+								throw { code: '25P01' };
+							}
+							if (sql.startsWith('LOCK TABLE ONLY'))
+								throw new Error('lock timeout');
+							return { rows: [] };
+						},
+						release: poisonedRelease,
+					}),
+				},
+				(session) =>
+					verifyGeneratedCheckPostcondition({
+						session,
+						postcondition: v3Check(),
+						address: checkAddress,
+					}),
+			),
+		).rejects.toThrow('relation lock failed');
+		expect(poisonedRelease).toHaveBeenCalledWith(expect.any(Error));
 	});
 
 	it('uses the v3 default-state model for authored text, E literals, generated sequences, collation, identity, duplicates, and ordinals', async () => {

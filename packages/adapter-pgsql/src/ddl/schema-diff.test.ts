@@ -3729,6 +3729,18 @@ describe('Sequences', () => {
 		expect(change?.destructive).toBe(false);
 	});
 
+	it('compares PostgreSQL int64 sequence values by canonical exact spelling', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', startWith: '9007199254740993' },
+		]);
+		const db = makeModelWithSequences([
+			{ name: 'order_seq', startWith: '9007199254740993' },
+		]);
+		expect(changeKinds(compareSchemata(schema, db).changes)).not.toContain(
+			'alter_sequence',
+		);
+	});
+
 	it('should detect altered sequence (cycle changed)', () => {
 		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
 		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);

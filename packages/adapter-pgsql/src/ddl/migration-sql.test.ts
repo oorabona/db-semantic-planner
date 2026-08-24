@@ -4094,8 +4094,8 @@ describe('Sequences — migration SQL', () => {
 	it('should accept strict numeric strings in sequence options', () => {
 		const seq: SequenceIR = {
 			name: 'order_seq',
-			startWith: '1' as unknown as number,
-			incrementBy: '-5' as unknown as number,
+			startWith: '1',
+			incrementBy: '-5',
 		};
 		const diff = makeDiff([
 			{
@@ -4110,6 +4110,21 @@ describe('Sequences — migration SQL', () => {
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toBe(
 			'CREATE SEQUENCE "order_seq" START WITH 1 INCREMENT BY -5;',
+		);
+	});
+
+	it('refuses the shared non-zero sequence increment rule before SQL emission', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: { name: 'order_seq', incrementBy: '0' } },
+			},
+		]);
+		expect(() => generateMigrationSQL(diff)).toThrow(
+			'sequence increment must be non-zero',
 		);
 	});
 

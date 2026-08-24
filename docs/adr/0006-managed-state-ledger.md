@@ -263,14 +263,15 @@ digest from one version cannot authenticate the value of another.
 ### Generated-postcondition proof stability
 
 Each public verifier owns one non-reentrant proof bracket: it decodes once, validates the complete
-managed-step address, acquires one user-relation lock for relation-backed objects, then resolves the
-bound catalogue identity and reads structure while that lock remains held. This deliberately never
-locks `pg_catalog` rows. Index proofs retain the parent-table lock for the table's value, while their
-index binding, OID, parent identity, and structural projection are one catalogue statement; that is a
-single-snapshot observation, not a claim that hostile index DDL is excluded. Table, column, index, and
-CHECK declarations receive structural proofs. Non-CHECK constraints, enums, sequences, and extensions
-currently receive only a typed identity-and-existence observation at the bound address; their structural
-semantics are explicitly unverified pending #597.
+managed-step address, acquires one user-relation lock for lockable table-backed structural proofs, then
+resolves the bound catalogue identity and reads structure while that lock remains held. This deliberately
+never locks `pg_catalog` rows. Sequence identity observations deliberately issue no `LOCK TABLE`:
+PostgreSQL rejects a lock on a relation whose `relkind` is `S`. Index proofs retain the parent-table lock
+for the table's value, while their index binding, OID, parent identity, and structural projection are one
+catalogue statement; that is a single-snapshot observation, not a claim that hostile index DDL is
+excluded. A structural read-back proves shape. An identity read-back proves only existence and catalogue
+identity: non-CHECK constraints, enums, sequences, and extensions currently receive that typed observation
+at the bound address, and their structural semantics are explicitly unverified pending #597.
 
 The fragment stored on an event is the per-object slice of the four inputs `schema()` accepts.
 The ten schemas under `examples/` round-trip byte-identical through `JSON.stringify`; the *type*

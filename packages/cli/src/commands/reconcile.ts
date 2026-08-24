@@ -19,6 +19,8 @@ import { recoverPgOutcomeClaim } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	assumptionAccepted,
+	canonicalJson,
+	canonicalJsonDigest,
 	outcomeClaimId,
 	projectLedgerChain,
 	resourceScopeCovers,
@@ -154,17 +156,19 @@ function ledgerHome(address: LedgerReservationRow['address']): LedgerHome {
 	return { scope: 'schema', schema: address.schema };
 }
 
-function recoveryPayload(
+export function recoveryPayload(
 	identity: Parameters<
 		NonNullable<Parameters<typeof recoverPgOutcomeClaim>[1]['readBack']>
 	>[2],
 ): LedgerPayload {
 	const value = JSON.parse(
-		JSON.stringify({ catalogueIdentity: identity }),
+		canonicalJson({
+			...(identity === undefined ? {} : { catalogueIdentity: identity }),
+		}),
 	) as LedgerPayload['value'];
 	return {
 		value,
-		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		digest: canonicalJsonDigest(value),
 	};
 }
 

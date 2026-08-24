@@ -1,6 +1,7 @@
 import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	GENERATED_POSTCONDITION_MAX_JSON_BYTES,
 	GeneratedPostconditionV3DeclarationError,
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
@@ -9,6 +10,7 @@ import {
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
 } from './generated-postcondition-verifier.js';
+import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
@@ -31,14 +33,10 @@ function v3(declaration: Record<string, unknown>) {
 
 describe('PostgreSQL generated managed-step manifest', () => {
 	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
-		const sequence = { name: 'orders_id_seq', startWith: '001' };
+		const sequence = { name: 'orders_id_seq', startWith: '9007199254740993' };
 		expect(
-			buildSequenceClause(
-				'CREATE SEQUENCE',
-				'"orders_id_seq"',
-				sequence as never,
-			),
-		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 1;');
+			buildSequenceClause('CREATE SEQUENCE', '"orders_id_seq"', sequence),
+		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 9007199254740993;');
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -50,7 +48,45 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 				schema: 'tenant',
 			})?.value,
-		).toEqual(v3({ kind: 'sequence', startValue: '1' }));
+		).toEqual(v3({ kind: 'sequence', startValue: '9007199254740993' }));
+	});
+
+	it.each([
+		Number.MAX_SAFE_INTEGER + 1,
+		1e21,
+		'9223372036854775808',
+		'-9223372036854775809',
+		9223372036854775808n,
+	])('refuses sequence source %o consistently before SQL or manifest recording', (startWith) => {
+		const sequence = { name: 'orders_id_seq', startWith };
+		expect(() =>
+			buildSequenceClause(
+				'CREATE SEQUENCE',
+				'"orders_id_seq"',
+				sequence as never,
+			),
+		).toThrow();
+		expect(() =>
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: 'unsafe numeric source',
+					meta: { sequence },
+				},
+				schema: 'tenant',
+			}),
+		).toThrow();
+	});
+
+	it('rejects non-boolean sequence flags instead of applying truthiness', () => {
+		expect(() =>
+			buildSequenceClause('CREATE SEQUENCE', '"orders_id_seq"', {
+				name: 'orders_id_seq',
+				cycle: 'false',
+			} as never),
+		).toThrow('expected a boolean');
 	});
 
 	it('uses one parser domain for producer declarations and persisted decoding', () => {
@@ -158,6 +194,34 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it.each([
+		['startValue', '9223372036854775808'],
+		['startValue', '+1'],
+		['startValue', '01'],
+		['startValue', '-0'],
+		['incrementBy', '9223372036854775808'],
+		['incrementBy', '+1'],
+		['incrementBy', '01'],
+		['incrementBy', '-0'],
+		['incrementBy', '0'],
+		['minValue', '9223372036854775808'],
+		['minValue', '+1'],
+		['minValue', '01'],
+		['minValue', '-0'],
+		['maxValue', '9223372036854775808'],
+		['maxValue', '+1'],
+		['maxValue', '01'],
+		['maxValue', '-0'],
+	] as const)('refuses exact sequence %s spelling %s', (field, value) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				kind: 'sequence',
+				[field]: value,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+	});
+
+	it.each([
 		{ kind: 'extension', version: 42 },
 		{ kind: 'sequence', cycle: 'yes' },
 		{ kind: 'column', column: { type: 42 } },
@@ -171,6 +235,139 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		).toThrow(GeneratedPostconditionV3DeclarationError);
 		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
 			'REPLAN_REQUIRED',
+		);
+	});
+
+	it.each([
+		'valid',
+		'ready',
+		'live',
+	] as const)('refuses index %s=false at the zero-query decoder boundary', (flag) => {
+		const declaration = {
+			kind: 'index',
+			index: {
+				method: 'btree',
+				unique: false,
+				valid: true,
+				ready: true,
+				live: true,
+				columns: ['id'],
+				nullsNotDistinct: false,
+				[flag]: false,
+			},
+		};
+		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+			'REPLAN_REQUIRED',
+		);
+	});
+
+	it('refuses aliases and cycles before declaration shape decoding', () => {
+		const shared = { type: 'BIGINT' };
+		const alias = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [shared, shared],
+		};
+		const cycle: Record<string, unknown> = {
+			canonicalFormVersion: 1,
+			kind: 'table',
+			columns: [],
+		};
+		cycle.self = cycle;
+		for (const value of [alias, cycle])
+			expect(() => parseGeneratedPostconditionV3Declaration(value)).toThrow(
+				GeneratedPostconditionV3DeclarationError,
+			);
+	});
+
+	it('refuses depth and serialized UTF-8 byte bounds before declaration decoding', () => {
+		let deep: unknown = { leaf: true };
+		for (let depth = 0; depth < 7; depth += 1) deep = { nested: deep };
+		expect(() => parseGeneratedPostconditionV3Declaration(deep)).toThrow(
+			'own JSON declaration graph',
+		);
+		const oversized = {
+			canonicalFormVersion: 1,
+			kind: 'enum',
+			labels: ['é'.repeat(GENERATED_POSTCONDITION_MAX_JSON_BYTES)],
+		};
+		expect(() => parseGeneratedPostconditionV3Declaration(oversized)).toThrow(
+			GeneratedPostconditionV3DeclarationError,
+		);
+	});
+
+	it('refuses a wide graph on its byte budget before target-array allocation', () => {
+		const wide = Object.fromEntries(
+			Array.from({ length: 10 }, (_, index) => [
+				`member${index}`,
+				new Array(4096).fill(null),
+			]),
+		);
+		expect(() => snapshotGeneratedPostconditionJson(wide)).toThrow(
+			'serialized JSON exceeds',
+		);
+	});
+
+	it('does not allocate target arrays before a wide graph exhausts its byte budget', () => {
+		const wide = Object.fromEntries(
+			Array.from({ length: 10 }, (_, index) => [
+				`member${index}`,
+				new Array(4096).fill(null),
+			]),
+		);
+		const originalArray = globalThis.Array;
+		let targetArrayAllocations = 0;
+		const trackedArray = new Proxy(originalArray, {
+			construct(target, argumentsList) {
+				targetArrayAllocations += 1;
+				return Reflect.construct(target, argumentsList, target);
+			},
+		});
+		try {
+			globalThis.Array = trackedArray;
+			expect(() => snapshotGeneratedPostconditionJson(wide)).toThrow(
+				'serialized JSON exceeds',
+			);
+			expect(targetArrayAllocations).toBe(0);
+		} finally {
+			globalThis.Array = originalArray;
+		}
+	});
+
+	it.each([
+		'9223372036854775808',
+		'-9223372036854775809',
+	])('refuses out-of-range persisted v3 sequence integers before decoding', (value) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				kind: 'sequence',
+				startValue: value,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+	});
+
+	it('refuses an enormous integer lexically before BigInt construction', () => {
+		expect(() =>
+			normalizeSequenceInteger('9'.repeat(2_000_000), 'sequence START WITH'),
+		).toThrow('outside PostgreSQL sequence bounds');
+	});
+
+	it('accepts a maximal legal v3 declaration without exhausting the UTF-8 budget', () => {
+		const emptyLabelDeclaration = {
+			canonicalFormVersion: 1,
+			kind: 'enum',
+			labels: [''],
+		};
+		const fixedBytes = new TextEncoder().encode(
+			JSON.stringify(emptyLabelDeclaration),
+		).byteLength;
+		const declaration = {
+			...emptyLabelDeclaration,
+			labels: ['x'.repeat(GENERATED_POSTCONDITION_MAX_JSON_BYTES - fixedBytes)],
+		};
+		expect(parseGeneratedPostconditionV3Declaration(declaration)).toEqual(
+			declaration,
 		);
 	});
 
@@ -1275,7 +1472,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		);
 	});
 
-	it('leaves an untyped alter_column_type to destructive execution', () => {
+	it('mints a partial column postcondition for an untyped alter_column_type', () => {
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -1286,8 +1483,8 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					details: 'untyped destructive target',
 				},
 				schema: 'tenant',
-			}),
-		).toBeUndefined();
+			})?.value,
+		).toEqual(v3({ kind: 'column', column: {} }));
 	});
 
 	it('records authored identity and its address binding through JSON serialization', () => {
