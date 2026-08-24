@@ -10,6 +10,8 @@ import { validateCheckExpression } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import {
 	generatedPostconditionSnapshotStructuralPath,
+	generatedPostconditionStructuralPath,
+	isGeneratedPostconditionV3DeclarationError,
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
 } from './generated-postcondition-v3-validator.js';
@@ -36,6 +38,7 @@ type GeneratedPostconditionQuery = {
 const generatedPostconditionSessionBrand = Symbol(
 	'generatedPostconditionSessionBrand',
 );
+const generatedPostconditionReplanErrors = new WeakSet<object>();
 type GeneratedPostconditionSessionState = {
 	active: boolean;
 	proofInFlight: boolean;
@@ -331,8 +334,10 @@ function bindingResolutionFailure(input: {
 }
 
 function bindingAddressDescription(address: LedgerAddress): string {
-	const parent = address.parent?.name;
-	return `${address.scope} ${address.engine}/${address.database} ${address.kind} ${address.schema ?? '<database>'}.${parent ?? address.name}`;
+	const captured = ownDataFields(address, ADDRESS_FIELDS);
+	if (captured === undefined) return 'malformed address';
+	const parent = ownDataFields(captured.parent, ADDRESS_FIELDS)?.name;
+	return `${captured.scope} ${captured.engine}/${captured.database} ${captured.kind} ${captured.schema ?? '<database>'}.${parent ?? captured.name}`;
 }
 
 function bindingAddressTopologyFailure(
@@ -346,13 +351,43 @@ function bindingAddressTopologyFailure(
 }
 
 const POSTGRESQL_ENGINE = 'postgresql';
+const ADDRESS_FIELDS = [
+	'scope',
+	'engine',
+	'database',
+	'schema',
+	'parent',
+	'kind',
+	'name',
+] as const;
 
-function hasOnlyOwnFields(value: object, fields: readonly string[]): boolean {
+/** Capture a plain address once; no inherited value or accessor may cross this boundary. */
+function ownDataFields(
+	value: unknown,
+	fields: readonly string[],
+): Record<string, unknown> | undefined {
+	if (
+		value === null ||
+		typeof value !== 'object' ||
+		Object.getPrototypeOf(value) !== Object.prototype
+	)
+		return;
 	const allowed = new Set(fields);
-	return (
-		Object.getOwnPropertySymbols(value).length === 0 &&
-		Object.getOwnPropertyNames(value).every((field) => allowed.has(field))
-	);
+	if (
+		Object.getOwnPropertySymbols(value).length > 0 ||
+		!Object.getOwnPropertyNames(value).every((field) => allowed.has(field))
+	)
+		return;
+	const captured: Record<string, unknown> = Object.create(null) as Record<
+		string,
+		unknown
+	>;
+	for (const field of Object.getOwnPropertyNames(value)) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, field);
+		if (!descriptor?.enumerable || !('value' in descriptor)) return;
+		captured[field] = descriptor.value;
+	}
+	return captured;
 }
 
 function nonEmptyString(value: unknown): value is string {
@@ -362,18 +397,9 @@ function nonEmptyString(value: unknown): value is string {
 function canonicalGeneratedPostconditionTableParent(
 	address: LedgerAddress,
 ): GeneratedPostconditionTableParent | undefined {
-	const parent = address.parent;
+	const parent = ownDataFields(address.parent, ADDRESS_FIELDS);
 	if (
-		!isRecord(parent) ||
-		!hasOnlyOwnFields(parent, [
-			'scope',
-			'engine',
-			'database',
-			'schema',
-			'parent',
-			'kind',
-			'name',
-		]) ||
+		parent === undefined ||
 		(parent.scope !== undefined && parent.scope !== 'schema') ||
 		parent.engine !== POSTGRESQL_ENGINE ||
 		parent.engine !== address.engine ||
@@ -404,92 +430,66 @@ function canonicalGeneratedPostconditionTableParent(
 export function toGeneratedPostconditionBindingAddress(
 	address: LedgerAddress,
 ): GeneratedPostconditionBindingAddress {
+	const captured = ownDataFields(address, ADDRESS_FIELDS);
+	if (captured === undefined) throw bindingAddressTopologyFailure(address);
 	if (
-		!nonEmptyString(address.engine) ||
-		address.engine !== POSTGRESQL_ENGINE ||
-		!nonEmptyString(address.database) ||
-		!nonEmptyString(address.name)
+		!nonEmptyString(captured.engine) ||
+		captured.engine !== POSTGRESQL_ENGINE ||
+		!nonEmptyString(captured.database) ||
+		!nonEmptyString(captured.name)
 	)
 		throw bindingAddressTopologyFailure(address);
-	switch (address.kind) {
+	switch (captured.kind) {
 		case 'table':
 		case 'enum':
 		case 'sequence':
 			if (
-				address.scope !== 'schema' ||
-				!nonEmptyString(address.schema) ||
-				address.schema.length === 0 ||
-				address.parent !== undefined ||
-				!hasOnlyOwnFields(address, [
-					'scope',
-					'engine',
-					'database',
-					'schema',
-					'parent',
-					'kind',
-					'name',
-				])
+				captured.scope !== 'schema' ||
+				!nonEmptyString(captured.schema) ||
+				captured.schema.length === 0 ||
+				captured.parent !== undefined
 			)
 				throw bindingAddressTopologyFailure(address);
 			return {
 				engine: POSTGRESQL_ENGINE,
-				database: address.database,
+				database: captured.database,
 				scope: 'schema',
-				schema: address.schema,
-				kind: address.kind,
-				name: address.name,
+				schema: captured.schema,
+				kind: captured.kind,
+				name: captured.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		case 'column':
 		case 'index':
 		case 'constraint': {
-			if (
-				address.scope !== 'schema' ||
-				!nonEmptyString(address.schema) ||
-				!hasOnlyOwnFields(address, [
-					'scope',
-					'engine',
-					'database',
-					'schema',
-					'parent',
-					'kind',
-					'name',
-				])
-			)
+			if (captured.scope !== 'schema' || !nonEmptyString(captured.schema))
 				throw bindingAddressTopologyFailure(address);
-			const parent = canonicalGeneratedPostconditionTableParent(address);
+			const parent = canonicalGeneratedPostconditionTableParent(
+				captured as unknown as LedgerAddress,
+			);
 			if (parent === undefined) throw bindingAddressTopologyFailure(address);
 			return {
 				engine: POSTGRESQL_ENGINE,
-				database: address.database,
+				database: captured.database,
 				scope: 'schema',
-				schema: address.schema,
+				schema: captured.schema,
 				parent,
-				kind: address.kind,
-				name: address.name,
+				kind: captured.kind,
+				name: captured.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		}
 		case 'extension':
 			if (
-				address.scope !== 'database' ||
-				address.schema !== undefined ||
-				address.parent !== undefined ||
-				!hasOnlyOwnFields(address, [
-					'scope',
-					'engine',
-					'database',
-					'schema',
-					'parent',
-					'kind',
-					'name',
-				])
+				captured.scope !== 'database' ||
+				captured.schema !== undefined ||
+				captured.parent !== undefined
 			)
 				throw bindingAddressTopologyFailure(address);
 			return {
 				engine: POSTGRESQL_ENGINE,
-				database: address.database,
+				database: captured.database,
 				scope: 'database',
 				kind: 'extension',
-				name: address.name,
+				name: captured.name,
 			} satisfies GeneratedPostconditionBindingAddress;
 		default:
 			throw bindingAddressTopologyFailure(address);
@@ -586,21 +586,24 @@ export class GeneratedPostconditionReplanRequiredError extends Error {
 			options,
 		);
 		this.name = 'GeneratedPostconditionReplanRequiredError';
+		generatedPostconditionReplanErrors.add(this);
 		this.structuralPath = structuralPath;
 		this.diagnostic = { versionSeen, stepIdentity, structuralPath };
 	}
 }
 
 function structuralPathFrom(error: unknown): string | undefined {
+	if (isGeneratedPostconditionV3DeclarationError(error))
+		return generatedPostconditionStructuralPath(error.structuralPath);
 	if (
-		error === null ||
-		(typeof error !== 'object' && typeof error !== 'function')
+		error !== null &&
+		(typeof error === 'object' || typeof error === 'function') &&
+		generatedPostconditionReplanErrors.has(error)
 	)
-		return;
-	const structuralPath = (error as { structuralPath?: unknown }).structuralPath;
-	return typeof structuralPath === 'string'
-		? structuralPath
-		: generatedPostconditionSnapshotStructuralPath(error);
+		return generatedPostconditionStructuralPath(
+			(error as GeneratedPostconditionReplanRequiredError).structuralPath,
+		);
+	return generatedPostconditionSnapshotStructuralPath(error);
 }
 
 function replan(

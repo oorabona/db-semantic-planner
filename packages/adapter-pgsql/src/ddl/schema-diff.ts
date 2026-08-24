@@ -46,6 +46,7 @@ import {
 	type NamingPlugin,
 } from '../naming-plugin.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
+import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 
 // ============================================================================
 // Types
@@ -1697,10 +1698,17 @@ function compareSequences(
 			const dbSeq = dbSeqs.get(name)!;
 			// Compare relevant properties
 			if (
-				seq.startWith !== dbSeq.startWith ||
-				seq.incrementBy !== dbSeq.incrementBy ||
-				seq.minValue !== dbSeq.minValue ||
-				seq.maxValue !== dbSeq.maxValue ||
+				normalizeSequenceInteger(seq.startWith, 'sequence START WITH') !==
+					normalizeSequenceInteger(dbSeq.startWith, 'sequence START WITH') ||
+				normalizeSequenceInteger(seq.incrementBy, 'sequence INCREMENT BY') !==
+					normalizeSequenceInteger(
+						dbSeq.incrementBy,
+						'sequence INCREMENT BY',
+					) ||
+				normalizeSequenceInteger(seq.minValue, 'sequence MINVALUE') !==
+					normalizeSequenceInteger(dbSeq.minValue, 'sequence MINVALUE') ||
+				normalizeSequenceInteger(seq.maxValue, 'sequence MAXVALUE') !==
+					normalizeSequenceInteger(dbSeq.maxValue, 'sequence MAXVALUE') ||
 				seq.cycle !== dbSeq.cycle
 			) {
 				changes.push({

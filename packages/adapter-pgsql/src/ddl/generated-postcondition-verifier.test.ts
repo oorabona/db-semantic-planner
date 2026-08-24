@@ -324,6 +324,25 @@ describe('generated postcondition verifier', () => {
 			);
 	});
 
+	it('refuses inherited and accessor-carried binding addresses without reading them', () => {
+		const inherited = Object.create(tableAddress) as LedgerAddress;
+		expect(() => toGeneratedPostconditionBindingAddress(inherited)).toThrow(
+			GeneratedPostconditionBindingResolutionError,
+		);
+		const accessor = { ...tableAddress } as Record<string, unknown>;
+		Object.defineProperty(accessor, 'engine', {
+			enumerable: true,
+			get: () => {
+				throw new Error('must not be invoked');
+			},
+		});
+		expect(() =>
+			toGeneratedPostconditionBindingAddress(
+				accessor as unknown as LedgerAddress,
+			),
+		).toThrow(GeneratedPostconditionBindingResolutionError);
+	});
+
 	it('does not LOCK TABLE for a sequence identity proof', async () => {
 		const sql: string[] = [];
 		const session = mintGeneratedPostconditionSession({

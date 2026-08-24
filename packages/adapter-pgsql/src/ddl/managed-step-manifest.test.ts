@@ -10,6 +10,7 @@ import {
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
 } from './generated-postcondition-verifier.js';
+import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
@@ -34,11 +35,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
 		const sequence = { name: 'orders_id_seq', startWith: '9007199254740993' };
 		expect(
-			buildSequenceClause(
-				'CREATE SEQUENCE',
-				'"orders_id_seq"',
-				sequence as never,
-			),
+			buildSequenceClause('CREATE SEQUENCE', '"orders_id_seq"', sequence),
 		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 9007199254740993;');
 		expect(
 			generatedPostconditionForChange({
@@ -269,6 +266,63 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		expect(() => parseGeneratedPostconditionV3Declaration(oversized)).toThrow(
 			GeneratedPostconditionV3DeclarationError,
 		);
+	});
+
+	it('refuses a wide graph on its byte budget before target-array allocation', () => {
+		const wide = Object.fromEntries(
+			Array.from({ length: 10 }, (_, index) => [
+				`member${index}`,
+				new Array(4096).fill(null),
+			]),
+		);
+		expect(() => snapshotGeneratedPostconditionJson(wide)).toThrow(
+			'serialized JSON exceeds',
+		);
+	});
+
+	it('does not allocate target arrays before a wide graph exhausts its byte budget', () => {
+		const wide = Object.fromEntries(
+			Array.from({ length: 10 }, (_, index) => [
+				`member${index}`,
+				new Array(4096).fill(null),
+			]),
+		);
+		const originalArray = globalThis.Array;
+		let targetArrayAllocations = 0;
+		const trackedArray = new Proxy(originalArray, {
+			construct(target, argumentsList) {
+				targetArrayAllocations += 1;
+				return Reflect.construct(target, argumentsList, target);
+			},
+		});
+		try {
+			globalThis.Array = trackedArray;
+			expect(() => snapshotGeneratedPostconditionJson(wide)).toThrow(
+				'serialized JSON exceeds',
+			);
+			expect(targetArrayAllocations).toBe(0);
+		} finally {
+			globalThis.Array = originalArray;
+		}
+	});
+
+	it.each([
+		'9223372036854775808',
+		'-9223372036854775809',
+	])('refuses out-of-range persisted v3 sequence integers before decoding', (value) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				kind: 'sequence',
+				startValue: value,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+	});
+
+	it('refuses an enormous integer lexically before BigInt construction', () => {
+		expect(() =>
+			normalizeSequenceInteger('9'.repeat(2_000_000), 'sequence START WITH'),
+		).toThrow('outside PostgreSQL sequence bounds');
 	});
 
 	it('accepts a maximal legal v3 declaration without exhausting the UTF-8 budget', () => {

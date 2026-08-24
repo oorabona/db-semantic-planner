@@ -35,6 +35,7 @@ import {
 	generateCreateIndex,
 } from './ddl-generator.js';
 import {
+	assertNonZeroSequenceIncrement,
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
@@ -261,6 +262,7 @@ export function buildSequenceClause(
 		seq.incrementBy,
 		'sequence INCREMENT BY',
 	);
+	assertNonZeroSequenceIncrement(incrementBy, 'sequence INCREMENT BY');
 	const minValue = normalizeSequenceInteger(seq.minValue, 'sequence MINVALUE');
 	const maxValue = normalizeSequenceInteger(seq.maxValue, 'sequence MAXVALUE');
 	const cycle = normalizeOptionalBoolean(seq.cycle, 'sequence CYCLE');

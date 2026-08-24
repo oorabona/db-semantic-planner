@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type {
 	CatalogueIdentity,
 	DeclarableKind,
@@ -10,6 +9,7 @@ import type {
 	ResourceAddress,
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
+import { canonicalJson, canonicalJsonDigest } from './canonical-json.js';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import { stableJson } from './stable-json.js';
@@ -103,13 +103,13 @@ export function assertCanonicalizableJson(
 	}
 }
 
-function canonicalJson(value: unknown, path: string): JsonValue {
+function canonicalPayload(value: unknown, path: string): JsonValue {
 	assertCanonicalizableJson(value, path);
-	return JSON.parse(JSON.stringify(value)) as JsonValue;
+	return JSON.parse(canonicalJson(value)) as JsonValue;
 }
 
 function digest(value: JsonValue): string {
-	return createHash('sha256').update(stableJson(value)).digest('hex');
+	return canonicalJsonDigest(value);
 }
 
 function address<K extends DeclarableKind>(
@@ -140,7 +140,7 @@ function declaration<K extends DeclarableKind>(
 	path: string,
 	parent?: ResourceAddress,
 ): ManagedDeclaration<K> {
-	const canonical = canonicalJson(fragment, path);
+	const canonical = canonicalPayload(fragment, path);
 	return {
 		address: address(context, kind, name, parent),
 		fragment: canonical,
@@ -338,7 +338,7 @@ export function declarationSetFromModel(
 		const b = stableJson(right.address);
 		return a < b ? -1 : a > b ? 1 : 0;
 	});
-	const setValue = canonicalJson(
+	const setValue = canonicalPayload(
 		{ version: 1, declarations: canonicalDeclarations },
 		'schema.declarations',
 	);

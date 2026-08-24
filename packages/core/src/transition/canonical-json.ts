@@ -21,7 +21,19 @@ export function canonicalJsonDigest(value: unknown): string {
 	return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
 
-function encodeCanonicalJson(value: unknown, path: string): string {
+const MAX_RENDERED_PATH_KEY = 160;
+
+function memberPath(path: string, key: string): string {
+	const rendered =
+		key.length <= MAX_RENDERED_PATH_KEY
+			? key
+			: `${key.slice(0, MAX_RENDERED_PATH_KEY)}…<truncated>`;
+	// JSON bracket notation is deliberate: member keys never appear raw in a
+	// diagnostic, and dots/control characters cannot impersonate path syntax.
+	return `${path}[${JSON.stringify(rendered)}]`;
+}
+
+function scalar(value: unknown, path: string): string | undefined {
 	if (value === null) return 'null';
 	switch (typeof value) {
 		case 'string':
@@ -41,56 +53,141 @@ function encodeCanonicalJson(value: unknown, path: string): string {
 		case 'symbol':
 			throw new CanonicalJsonError(path, `${typeof value} is not a JSON value`);
 		case 'object':
-			break;
+			return undefined;
 	}
+}
 
-	if (Array.isArray(value)) {
-		const values: string[] = [];
-		for (let index = 0; index < value.length; index += 1) {
-			if (!Object.hasOwn(value, index))
-				throw new CanonicalJsonError(
-					`${path}[${index}]`,
-					'array holes are not JSON values',
-				);
-			values.push(encodeCanonicalJson(value[index], `${path}[${index}]`));
+type EncodeTask =
+	| { readonly kind: 'value'; readonly value: unknown; readonly path: string }
+	| { readonly kind: 'text'; readonly text: string }
+	| {
+			readonly kind: 'close';
+			readonly value: object;
+			readonly text: ']' | '}';
+	  };
+
+/** Iterative so every refusal, including deep graphs and cycles, uses our error contract. */
+function encodeCanonicalJson(value: unknown, path: string): string {
+	const output: string[] = [];
+	const active = new WeakSet<object>();
+	const tasks: EncodeTask[] = [{ kind: 'value', value, path }];
+	while (tasks.length > 0) {
+		const task = tasks.pop();
+		if (!task) continue;
+		if (task.kind === 'text') {
+			output.push(task.text);
+			continue;
 		}
-		return `[${values.join(',')}]`;
-	}
-
-	if (
-		Object.getPrototypeOf(value) !== Object.prototype &&
-		Object.getPrototypeOf(value) !== null
-	)
-		throw new CanonicalJsonError(path, 'only plain objects are JSON objects');
-	const symbols = Object.getOwnPropertySymbols(value);
-	if (symbols.length > 0)
-		throw new CanonicalJsonError(
-			path,
-			'symbol-keyed members are not JSON members',
-		);
-	const entries = Object.entries(Object.getOwnPropertyDescriptors(value));
-	for (const [key, descriptor] of entries) {
-		if (!descriptor.enumerable)
+		if (task.kind === 'close') {
+			active.delete(task.value);
+			output.push(task.text);
+			continue;
+		}
+		const encoded = scalar(task.value, task.path);
+		if (encoded !== undefined) {
+			output.push(encoded);
+			continue;
+		}
+		const object = task.value as object;
+		if (active.has(object))
 			throw new CanonicalJsonError(
-				`${path}.${key}`,
-				'non-enumerable members are not JSON members',
+				task.path,
+				'cyclic values are not JSON values',
 			);
-		if (!('value' in descriptor))
-			throw new CanonicalJsonError(
-				`${path}.${key}`,
-				'accessor members are not JSON values',
-			);
-		if (descriptor.value === undefined)
-			throw new CanonicalJsonError(
-				`${path}.${key}`,
-				'undefined is not a JSON value',
-			);
-	}
-	return `{${entries
-		.sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-		.map(
-			([key, descriptor]) =>
-				`${JSON.stringify(key)}:${encodeCanonicalJson(descriptor.value, `${path}.${key}`)}`,
+		active.add(object);
+		if (Array.isArray(object)) {
+			if (Object.getPrototypeOf(object) !== Array.prototype)
+				throw new CanonicalJsonError(
+					task.path,
+					'arrays require Array.prototype',
+				);
+			if (Object.getOwnPropertySymbols(object).length > 0)
+				throw new CanonicalJsonError(
+					task.path,
+					'symbol-keyed members are not JSON members',
+				);
+			for (const key of Object.getOwnPropertyNames(object)) {
+				if (key === 'length') continue;
+				if (!/^(?:0|[1-9][0-9]*)$/u.test(key))
+					throw new CanonicalJsonError(
+						task.path,
+						'array non-index members are not JSON members',
+					);
+				if (BigInt(key) > 4294967294n)
+					throw new CanonicalJsonError(
+						task.path,
+						'array non-index members are not JSON members',
+					);
+			}
+			output.push('[');
+			tasks.push({ kind: 'close', value: object, text: ']' });
+			for (let index = object.length - 1; index >= 0; index -= 1) {
+				const itemPath = `${task.path}[${index}]`;
+				const descriptor = Object.getOwnPropertyDescriptor(
+					object,
+					String(index),
+				);
+				if (!descriptor)
+					throw new CanonicalJsonError(
+						itemPath,
+						'array holes are not JSON values',
+					);
+				if (!descriptor.enumerable || !('value' in descriptor))
+					throw new CanonicalJsonError(
+						itemPath,
+						'array members must be enumerable data properties',
+					);
+				if (index < object.length - 1) tasks.push({ kind: 'text', text: ',' });
+				tasks.push({ kind: 'value', value: descriptor.value, path: itemPath });
+			}
+			continue;
+		}
+		if (
+			Object.getPrototypeOf(object) !== Object.prototype &&
+			Object.getPrototypeOf(object) !== null
 		)
-		.join(',')}}`;
+			throw new CanonicalJsonError(
+				task.path,
+				'only plain objects are JSON objects',
+			);
+		if (Object.getOwnPropertySymbols(object).length > 0)
+			throw new CanonicalJsonError(
+				task.path,
+				'symbol-keyed members are not JSON members',
+			);
+		const entries = Object.entries(Object.getOwnPropertyDescriptors(object));
+		for (const [key, descriptor] of entries) {
+			const keyPath = memberPath(task.path, key);
+			if (!descriptor.enumerable)
+				throw new CanonicalJsonError(
+					keyPath,
+					'non-enumerable members are not JSON members',
+				);
+			if (!('value' in descriptor))
+				throw new CanonicalJsonError(
+					keyPath,
+					'accessor members are not JSON values',
+				);
+			if (descriptor.value === undefined)
+				throw new CanonicalJsonError(keyPath, 'undefined is not a JSON value');
+		}
+		entries.sort(([left], [right]) =>
+			left < right ? -1 : left > right ? 1 : 0,
+		);
+		output.push('{');
+		tasks.push({ kind: 'close', value: object, text: '}' });
+		for (let index = entries.length - 1; index >= 0; index -= 1) {
+			const entry = entries[index];
+			if (!entry) continue;
+			const [key, descriptor] = entry;
+			if (index < entries.length - 1) tasks.push({ kind: 'text', text: ',' });
+			tasks.push({
+				kind: 'value',
+				value: descriptor.value,
+				path: memberPath(task.path, key),
+			});
+			tasks.push({ kind: 'text', text: `${JSON.stringify(key)}:` });
+		}
+	}
+	return output.join('');
 }

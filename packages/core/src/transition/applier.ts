@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -27,6 +27,7 @@ import type {
 	TransitionRunJournal,
 	TransitionRunMetadata,
 } from '@dbsp/types';
+import { canonicalJsonDigest } from './canonical-json.js';
 import { matchLiveObservationContext } from './context-match.js';
 import { mintDurablyLoadedRun } from './durably-loaded-run.js';
 import { validateExecutionContract } from './execution-contract.js';
@@ -314,28 +315,25 @@ function evidenceIds(
 		.map((observation) => observation.id);
 }
 
-function canonicalJson(value: unknown): string {
-	if (value === null || typeof value !== 'object') return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-	const record = value as Record<string, unknown>;
-	return `{${Object.keys(record)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-		.join(',')}}`;
-}
-
 function managedOutcomeReadBack(
 	observations: readonly IssuedObservation[],
 ): LedgerPayload {
 	const value = {
+		// PostgreSQL jsonb omits undefined object members.  Request and result are
+		// the only optional members introduced here, so omit each before canonical
+		// hashing rather than minting a digest for the literal token "undefined".
 		observations: observations.map((observation) => ({
-			request: observation.request,
-			result: observation.result,
+			...(observation.request === undefined
+				? {}
+				: { request: observation.request }),
+			...(observation.result === undefined
+				? {}
+				: { result: observation.result }),
 		})),
 	} as unknown as LedgerPayload['value'];
 	return {
 		value,
-		digest: createHash('sha256').update(canonicalJson(value)).digest('hex'),
+		digest: canonicalJsonDigest(value),
 	};
 }
 
