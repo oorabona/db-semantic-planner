@@ -84,6 +84,7 @@ export {
 	renderCreateIndex,
 	type SchemaChange,
 	type SchemaDiff,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIdentityPostcondition,

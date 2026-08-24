@@ -1,4 +1,5 @@
 import {
+	GeneratedPostconditionBindingResolutionError,
 	type GeneratedPostconditionSession,
 	generatedPostconditionDigest,
 	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
@@ -74,8 +75,20 @@ beforeEach(() => {
 
 import {
 	executeGeneratorPlan,
+	type GeneratedIdentityObservation,
+	type GeneratedStructuralObservation,
 	readGeneratedPostcondition,
 } from './generator-execution.js';
+
+const generatedIdentityObservation = {
+	value: { kind: 'identity-observed' },
+	digest: 'identity-observation',
+	payloadKind: 'generated-identity-observation',
+} satisfies GeneratedIdentityObservation;
+// @ts-expect-error Generated identity evidence cannot occupy a structural slot.
+const identityInStructuralSlot: GeneratedStructuralObservation =
+	generatedIdentityObservation;
+void identityInStructuralSlot;
 
 async function readTestGeneratedPostcondition(
 	executor: Pick<GeneratedPostconditionSession, 'query'>,
@@ -444,6 +457,41 @@ describe('generator execution fixture shim', () => {
 		expect(verify).toHaveBeenCalledWith(
 			expect.objectContaining({ postcondition: value, address }),
 		);
+	});
+
+	it('refuses a malformed v3 binding address before verifier dispatch', async () => {
+		const address: LedgerAddress = {
+			...dataDestructiveStep.address!,
+			kind: 'column',
+			name: 'id',
+		};
+		const declaration = v3({
+			kind: 'column',
+			column: { type: 'integer', nullable: false },
+		});
+		const step = {
+			...dataDestructiveStep,
+			address,
+			expectedDeclaration: {
+				value: declaration,
+				digest: generatedPostconditionDigest(declaration),
+			},
+		} as unknown as NormalizedManagedStep;
+		verifyGeneratedColumnPostcondition.mockResolvedValue({
+			kind: 'column',
+			projection: {
+				type: 'integer',
+				nullable: false,
+				default: undefined,
+				collation: null,
+				identity: null,
+			},
+		});
+
+		await expect(
+			readTestGeneratedPostcondition({ query: vi.fn() }, step, address),
+		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
+		expect(verifyGeneratedColumnPostcondition).not.toHaveBeenCalled();
 	});
 
 	it('refuses a deferred declaration/address kind mismatch before catalogue observation', async () => {

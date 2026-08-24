@@ -1,3 +1,4 @@
+import type { LedgerPayload } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -52,7 +53,10 @@ vi.mock('../ddl/generated-postcondition-verifier.js', () => ({
 	verifyGeneratedCheckPostcondition: mocks.verifyCheck,
 }));
 
-import { executePgPersistedTableReaddress } from './readdress.js';
+import {
+	executePgPersistedTableReaddress,
+	rekeyDeclaration,
+} from './readdress.js';
 
 const source = {
 	scope: 'schema' as const,
@@ -139,7 +143,9 @@ function executor(
 	};
 }
 
-function setupTargetOnlyNoOp() {
+function setupTargetOnlyNoOp(
+	targetDeclaration: LedgerPayload = rekeyDeclaration(undefined, target),
+) {
 	mocks.locks.mockResolvedValue({ kind: 'acquired' });
 	mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
 		address.name === target.name
@@ -168,7 +174,11 @@ function setupTargetOnlyNoOp() {
 	mocks.project.mockImplementation((chain) =>
 		chain.marker === 'source'
 			? { kind: 'projected-ledger-chain', stableState: 'unknown' }
-			: { kind: 'projected-ledger-chain', stableState: 'managed' },
+			: {
+					kind: 'projected-ledger-chain',
+					stableState: 'managed',
+					declaration: targetDeclaration,
+				},
 	);
 }
 
@@ -533,17 +543,35 @@ describe('re-address live-object verification', () => {
 		expect(member).toBeUndefined();
 	});
 
-	it('refuses a v3 recorded root declaration that differs from the reviewed step', async () => {
+	it('admits a generated source whose creation declaration differs from the reviewed step', async () => {
 		setupAdmission();
 		mocks.project.mockImplementation((chain) =>
 			chain.marker === 'source'
 				? {
 						kind: 'projected-ledger-chain',
 						stableState: 'managed',
-						declaration: { ...expected, digest: 'different-reviewed-digest' },
+						declaration: {
+							value: {
+								postconditionVersion: 3,
+								targetBinding: {
+									bindingVersion: 1,
+									bindingKind: 'managed-step-address',
+								},
+								declaration: {
+									canonicalFormVersion: 1,
+									kind: 'table',
+									columns: [{ name: 'created_at' }],
+								},
+							},
+							digest: 'creation-declaration',
+						},
 					}
 				: { kind: 'projected-ledger-chain', stableState: 'absent' },
 		);
+		mocks.verifyTable.mockResolvedValue({
+			kind: 'table',
+			projection: { columns: [] },
+		});
 		await expect(
 			executePgPersistedTableReaddress({
 				executor: executor(),
@@ -556,13 +584,8 @@ describe('re-address live-object verification', () => {
 				database: source.database,
 				targetSchema: source.schema,
 			}),
-		).resolves.toMatchObject({
-			outcome: 'readdress-refused',
-			detail: expect.stringContaining(
-				'recorded declaration does not match reviewed step',
-			),
-		});
-		expect(mocks.verifyTable).not.toHaveBeenCalled();
+		).resolves.toMatchObject({ outcome: 'completed' });
+		expect(mocks.verifyTable).toHaveBeenCalledTimes(1);
 	});
 
 	it('carries verifier projection as the post-DDL observed payload', async () => {
@@ -638,7 +661,7 @@ describe('re-address live-object verification', () => {
 		});
 	});
 
-	it('proves the target shape for a fully matching target-only no-op', async () => {
+	it('reaches a target-only no-op for a versionless adopted target whose provenance differs from the reviewed declaration', async () => {
 		setupTargetOnlyNoOp();
 		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
 			address.name === target.name
@@ -664,7 +687,11 @@ describe('re-address live-object verification', () => {
 		mocks.project.mockImplementation((chain) =>
 			chain.marker === 'source'
 				? { kind: 'projected-ledger-chain', stableState: 'unknown' }
-				: { kind: 'projected-ledger-chain', stableState: 'managed' },
+				: {
+						kind: 'projected-ledger-chain',
+						stableState: 'managed',
+						declaration: rekeyDeclaration(undefined, target),
+					},
 		);
 		mocks.verifyTable.mockResolvedValue({
 			kind: 'table',
@@ -709,13 +736,62 @@ describe('re-address live-object verification', () => {
 	});
 
 	it.each([
+		['v1', { postconditionVersion: 1 }],
+		['v2', { postconditionVersion: 2 }],
+		['unknown version', { postconditionVersion: 77 }],
+	] as const)('refuses a version-carrying %s target before structural proof', async (_label, value) => {
+		setupTargetOnlyNoOp({ value, digest: 'legacy-versioned' });
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: executor(),
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				executionId: 'attempt',
+				step: step(),
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-refused',
+			detail: expect.stringContaining('declaration is not decodable'),
+		});
+		expect(mocks.verifyTable).not.toHaveBeenCalled();
+	});
+
+	it('refuses a target-only no-op whose declaration differs from the recorded source transfer', async () => {
+		setupTargetOnlyNoOp({
+			value: { kind: 'table', name: 'other_orders_archive' },
+			digest: 'different-source-transfer',
+		});
+		await expect(
+			executePgPersistedTableReaddress({
+				executor: executor(),
+				run: {} as never,
+				manifest: {} as never,
+				recomputedPlanDigest: 'plan',
+				approval: { approvals: [] },
+				executionId: 'attempt',
+				step: step(),
+				database: source.database,
+				targetSchema: source.schema,
+			}),
+		).resolves.toMatchObject({
+			outcome: 'readdress-refused',
+			detail: expect.stringContaining('is not the recorded source transfer'),
+		});
+		expect(mocks.verifyTable).not.toHaveBeenCalled();
+	});
+
+	it.each([
 		['Unicode', 'café', '"café"'],
 		['spaces', 'order items', '"order items"'],
 		['embedded double quotes', 'order"items', '"order""items"'],
 		['hyphens', 'order-items', '"order-items"'],
 	] as const)('locks a target-only no-op relation name with %s', async (_label, name, rendered) => {
-		setupTargetOnlyNoOp();
 		const namedTarget = { ...target, name };
+		setupTargetOnlyNoOp(rekeyDeclaration(undefined, namedTarget));
 		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
 			address.name === namedTarget.name
 				? { ...namedTarget, catalogueIdentity: identity }
@@ -740,7 +816,11 @@ describe('re-address live-object verification', () => {
 		mocks.project.mockImplementation((chain) =>
 			chain.marker === 'source'
 				? { kind: 'projected-ledger-chain', stableState: 'unknown' }
-				: { kind: 'projected-ledger-chain', stableState: 'managed' },
+				: {
+						kind: 'projected-ledger-chain',
+						stableState: 'managed',
+						declaration: rekeyDeclaration(undefined, namedTarget),
+					},
 		);
 		mocks.verifyTable.mockResolvedValue({
 			kind: 'table',
@@ -766,8 +846,8 @@ describe('re-address live-object verification', () => {
 	});
 
 	it('refuses a NUL-bearing target-only no-op relation name before its lock query', async () => {
-		setupTargetOnlyNoOp();
 		const nulTarget = { ...target, name: 'order\0items' };
+		setupTargetOnlyNoOp(rekeyDeclaration(undefined, nulTarget));
 		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
 			address.name === nulTarget.name
 				? { ...nulTarget, catalogueIdentity: identity }
@@ -936,7 +1016,7 @@ describe('re-address live-object verification', () => {
 		expect(mocks.verifyTable).not.toHaveBeenCalled();
 	});
 
-	it('refuses a structural mismatch in the target-only no-op proof', async () => {
+	it('refuses a changed current postcondition through the target-only no-op structural proof', async () => {
 		setupTargetOnlyNoOp();
 		mocks.verifyTable.mockRejectedValue(
 			new Error('column postcondition differs'),

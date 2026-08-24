@@ -16,6 +16,7 @@ import {
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
+import { buildSequenceClause } from './migration-sql.js';
 
 function v3(declaration: Record<string, unknown>) {
 	return {
@@ -29,6 +30,29 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
+		const sequence = { name: 'orders_id_seq', startWith: '001' };
+		expect(
+			buildSequenceClause(
+				'CREATE SEQUENCE',
+				'"orders_id_seq"',
+				sequence as never,
+			),
+		).toBe('CREATE SEQUENCE "orders_id_seq" START WITH 1;');
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: 'strict numeric source',
+					meta: { sequence },
+				},
+				schema: 'tenant',
+			})?.value,
+		).toEqual(v3({ kind: 'sequence', startValue: '1' }));
+	});
+
 	it('uses one parser domain for producer declarations and persisted decoding', () => {
 		const declarations = [
 			{ kind: 'absent' },

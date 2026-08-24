@@ -10,6 +10,7 @@ import {
 	executePgDeclaredAdoption,
 	executePgPersistedTableReaddress,
 	type GeneratedPostcondition,
+	type GeneratedPostconditionBindingAddress,
 	type GeneratedPostconditionSession,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
@@ -18,6 +19,7 @@ import {
 	readPgLedgerAddressChain,
 	readPgLedgerScopeCurrency,
 	readPgRemovalEffectsClosure,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIdentityPostcondition,
@@ -275,7 +277,18 @@ function observed(address: LedgerAddress): LedgerPayload {
 	};
 }
 
-function generatedPayload(value: unknown): LedgerPayload {
+/** Durable payload roles are disjoint before the outcome protocol serializes them. */
+export type GeneratedIdentityObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-identity-observation';
+};
+export type GeneratedStructuralObservation = LedgerPayload & {
+	readonly payloadKind: 'generated-structural-observation';
+};
+type GeneratedPostconditionObservation =
+	| GeneratedIdentityObservation
+	| GeneratedStructuralObservation;
+
+function generatedPayload(value: unknown): GeneratedStructuralObservation {
 	const encoded = JSON.stringify(value);
 	if (encoded === undefined)
 		throw new TypeError('generated observation is not JSON serializable');
@@ -285,36 +298,41 @@ function generatedPayload(value: unknown): LedgerPayload {
 		digest: createHash('sha256')
 			.update(JSON.stringify(normalized))
 			.digest('hex'),
-	};
+		payloadKind: 'generated-structural-observation',
+	} satisfies GeneratedStructuralObservation;
 }
 
 /** A deliberately non-structural read-back for the four #597 kinds. */
 async function identityObserved(
 	executor: GeneratedPostconditionSession,
 	postcondition: GeneratedPostcondition,
-	address: LedgerAddress,
-): Promise<LedgerPayload> {
+	address: GeneratedPostconditionBindingAddress,
+	kind: 'constraint' | 'enum' | 'sequence' | 'extension',
+): Promise<GeneratedIdentityObservation> {
 	const verified = await verifyGeneratedIdentityPostcondition({
 		session: executor,
 		postcondition,
 		address,
-		kind: postcondition.declaration.kind as
-			| 'constraint'
-			| 'enum'
-			| 'sequence'
-			| 'extension',
+		kind,
 	});
-	return generatedPayload({
-		kind: 'identity-observed',
-		observedKind: verified.kind,
-		address: {
-			scope: address.scope,
-			schema: address.schema,
-			name: address.name,
-		},
-		identity: verified.identity,
-		structuralSemantics: 'unverified',
-	});
+	const value = JSON.parse(
+		JSON.stringify({
+			kind: 'identity-observed',
+			observedKind: verified.kind,
+			address: {
+				scope: address.scope,
+				...(address.schema === undefined ? {} : { schema: address.schema }),
+				name: address.name,
+			},
+			identity: verified.identity,
+			structuralSemantics: 'unverified',
+		}),
+	) as LedgerPayload['value'];
+	return {
+		value,
+		digest: createHash('sha256').update(JSON.stringify(value)).digest('hex'),
+		payloadKind: 'generated-identity-observation',
+	} satisfies GeneratedIdentityObservation;
 }
 
 function generatedPostcondition(
@@ -345,13 +363,14 @@ async function readGeneratedV3Postcondition(
 		{ readonly postconditionVersion: 3 }
 	>,
 	address: LedgerAddress,
-): Promise<LedgerPayload> {
+): Promise<GeneratedPostconditionObservation> {
+	const bindingAddress = toGeneratedPostconditionBindingAddress(address);
 	switch (postcondition.declaration.kind) {
 		case 'column': {
 			const verified = await verifyGeneratedColumnPostcondition({
 				session: executor,
 				postcondition,
-				address,
+				address: bindingAddress,
 			});
 			return generatedPayload({
 				kind: 'column',
@@ -366,7 +385,7 @@ async function readGeneratedV3Postcondition(
 			const verified = await verifyGeneratedCheckPostcondition({
 				session: executor,
 				postcondition,
-				address,
+				address: bindingAddress,
 			});
 			return generatedPayload({
 				kind: verified.kind,
@@ -381,13 +400,18 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'constraint': {
-			return identityObserved(executor, postcondition, address);
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'constraint',
+			);
 		}
 		case 'index': {
 			const verified = await verifyGeneratedIndexPostcondition({
 				session: executor,
 				postcondition,
-				address,
+				address: bindingAddress,
 			});
 			return generatedPayload({
 				kind: verified.kind,
@@ -398,7 +422,7 @@ async function readGeneratedV3Postcondition(
 			const verified = await verifyGeneratedTablePostcondition({
 				session: executor,
 				postcondition,
-				address,
+				address: bindingAddress,
 			});
 			return generatedPayload({
 				kind: verified.kind,
@@ -413,13 +437,23 @@ async function readGeneratedV3Postcondition(
 			});
 		}
 		case 'enum': {
-			return identityObserved(executor, postcondition, address);
+			return identityObserved(executor, postcondition, bindingAddress, 'enum');
 		}
 		case 'sequence': {
-			return identityObserved(executor, postcondition, address);
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'sequence',
+			);
 		}
 		case 'extension': {
-			return identityObserved(executor, postcondition, address);
+			return identityObserved(
+				executor,
+				postcondition,
+				bindingAddress,
+				'extension',
+			);
 		}
 		case 'absent': {
 			// Removal admission owns the destructive absence read-back.  Consume it
@@ -445,7 +479,7 @@ export async function readGeneratedPostcondition(
 	executor: GeneratedPostconditionSession,
 	step: NormalizedManagedStep,
 	address: LedgerAddress,
-): Promise<LedgerPayload> {
+): Promise<GeneratedPostconditionObservation> {
 	executor = assertGeneratedPostconditionSession(executor);
 	const decodedPostcondition = generatedPostcondition(step, address);
 	if (decodedPostcondition.postconditionVersion === 3)

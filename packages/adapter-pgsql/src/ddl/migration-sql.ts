@@ -23,7 +23,6 @@ import { isEngineCanonicalCheck } from '../expression-provenance.js';
 import { identityNaming } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
-	assertNumericLiteral,
 	assertString,
 	sanitizeCommentText,
 	validateCheckExpression,
@@ -35,6 +34,10 @@ import {
 	assertPartitionStrategy,
 	generateCreateIndex,
 } from './ddl-generator.js';
+import {
+	normalizeOptionalBoolean,
+	normalizeSequenceInteger,
+} from './generated-source-normalizers.js';
 import {
 	assertCreateIndexesSupported,
 	type IndexCapabilityContext,
@@ -250,28 +253,27 @@ export function buildSequenceClause(
 	includeCycleNoCycle = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
-	if (seq.startWith !== undefined)
-		parts.push(
-			`START WITH ${assertNumericLiteral(seq.startWith, 'sequence START WITH')}`,
-		);
-	if (seq.incrementBy !== undefined)
-		parts.push(
-			`INCREMENT BY ${assertNumericLiteral(seq.incrementBy, 'sequence INCREMENT BY')}`,
-		);
-	if (seq.minValue !== undefined)
-		parts.push(
-			`MINVALUE ${assertNumericLiteral(seq.minValue, 'sequence MINVALUE')}`,
-		);
-	if (seq.maxValue !== undefined)
-		parts.push(
-			`MAXVALUE ${assertNumericLiteral(seq.maxValue, 'sequence MAXVALUE')}`,
-		);
+	const startWith = normalizeSequenceInteger(
+		seq.startWith,
+		'sequence START WITH',
+	);
+	const incrementBy = normalizeSequenceInteger(
+		seq.incrementBy,
+		'sequence INCREMENT BY',
+	);
+	const minValue = normalizeSequenceInteger(seq.minValue, 'sequence MINVALUE');
+	const maxValue = normalizeSequenceInteger(seq.maxValue, 'sequence MAXVALUE');
+	const cycle = normalizeOptionalBoolean(seq.cycle, 'sequence CYCLE');
+	if (startWith !== undefined) parts.push(`START WITH ${startWith}`);
+	if (incrementBy !== undefined) parts.push(`INCREMENT BY ${incrementBy}`);
+	if (minValue !== undefined) parts.push(`MINVALUE ${minValue}`);
+	if (maxValue !== undefined) parts.push(`MAXVALUE ${maxValue}`);
 	if (includeCycleNoCycle) {
 		// ALTER SEQUENCE: emit CYCLE or NO CYCLE when the flag is defined
-		if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
+		if (cycle !== undefined) parts.push(cycle ? 'CYCLE' : 'NO CYCLE');
 	} else {
 		// CREATE SEQUENCE: only emit CYCLE when truthy; silence NO CYCLE
-		if (seq.cycle) parts.push('CYCLE');
+		if (cycle === true) parts.push('CYCLE');
 	}
 	return `${parts.join(' ')};`;
 }
@@ -1867,8 +1869,14 @@ function generateAddFKSQL(
 	const onUpdate = fk.onUpdate
 		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
 		: '';
-	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
-	const notValid = fk.notValid ? ' NOT VALID' : '';
+	const deferred =
+		normalizeOptionalBoolean(fk.deferred, 'foreign key deferred') === true
+			? ' DEFERRABLE INITIALLY DEFERRED'
+			: '';
+	const notValid =
+		normalizeOptionalBoolean(fk.notValid, 'foreign key notValid') === true
+			? ' NOT VALID'
+			: '';
 	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;
 }
 

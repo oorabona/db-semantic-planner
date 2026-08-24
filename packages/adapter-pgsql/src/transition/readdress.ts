@@ -18,6 +18,7 @@ import type {
 import { sameControllerIdentity, sameLedgerAddress } from '@dbsp/types';
 import {
 	decodeGeneratedPostconditionPayload,
+	type GeneratedPostconditionBindingAddress,
 	type GeneratedPostconditionSession,
 	verifyGeneratedTablePostcondition,
 	withPinnedGeneratedPostconditionSession,
@@ -31,6 +32,9 @@ import { renderPgLockIdentifier } from './lock-identifier.js';
 import { lockPgRelation, pgLockRelationForAddress } from './lock-relation.js';
 import {
 	executePgAdmittedOperation,
+	type GeneratedDeclarationPayload,
+	type GeneratedIdentityObservation,
+	type GeneratedStructuralObservation,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
 	type PgPairedReaddressOperation,
@@ -196,42 +200,69 @@ function digest(value: LedgerPayload['value']): string {
 	return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-function isV3GeneratedPostcondition(value: unknown): boolean {
+function carriesGeneratedPostconditionVersion(value: unknown): boolean {
 	return (
 		value !== null &&
 		typeof value === 'object' &&
 		!Array.isArray(value) &&
-		typeof (value as { readonly postconditionVersion?: unknown })
-			.postconditionVersion === 'number' &&
-		(value as { readonly postconditionVersion: number })
-			.postconditionVersion === 3
+		Object.hasOwn(value, 'postconditionVersion')
 	);
+}
+
+/** Decode only declarations that claim a generated-postcondition version. */
+function decodeVersionedGeneratedPostcondition(
+	declaration: LedgerPayload | undefined,
+	context: string,
+): boolean {
+	if (!declaration || !carriesGeneratedPostconditionVersion(declaration.value))
+		return false;
+	decodeGeneratedPostconditionPayload(declaration, context);
+	return true;
+}
+
+function canonicalJson(value: unknown): string {
+	if (value === null || typeof value !== 'object') return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	const object = value as Record<string, unknown>;
+	return `{${Object.keys(object)
+		.sort()
+		.map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
+		.join(',')}}`;
 }
 
 export function rekeyDeclaration(
 	declaration: LedgerPayload | undefined,
 	target: LedgerAddress,
-): LedgerPayload {
+): GeneratedDeclarationPayload {
 	const previous = declaration?.value;
-	// A v3 declaration has no target address. Preserve its exact O10-covered
-	// payload when it is recorded for the re-address target.
-	if (declaration && isV3GeneratedPostcondition(previous)) {
-		decodeGeneratedPostconditionPayload(
+	// Every versioned generated declaration is decoded before re-keying. The
+	// one supported v3 form has no target address; every legacy/unknown/malformed
+	// version refuses at this boundary rather than becoming an undecodable target.
+	if (
+		decodeVersionedGeneratedPostcondition(
 			declaration,
 			`readdress:${target.kind}:${target.name}`,
-		);
-		return declaration;
+		)
+	) {
+		return declaration as GeneratedDeclarationPayload;
 	}
 	const value =
 		previous && typeof previous === 'object' && !Array.isArray(previous)
 			? { ...previous, name: target.name }
 			: { kind: target.kind, name: target.name };
-	return { value, digest: digest(value) };
+	return {
+		value,
+		digest: digest(value),
+	} as unknown as GeneratedDeclarationPayload;
 }
 
-function observed(address: LedgerAddress): LedgerPayload {
+function observed(address: LedgerAddress): GeneratedIdentityObservation {
 	const value = { kind: address.kind, name: address.name };
-	return { value, digest: digest(value) };
+	return {
+		value,
+		digest: digest(value),
+		payloadKind: 'generated-identity-observation',
+	} satisfies GeneratedIdentityObservation;
 }
 
 async function verifyPgOwnedSequenceTarget(
@@ -257,8 +288,31 @@ type GeneratedProof = {
 	readonly kind: 'table';
 	readonly prove: (
 		session: GeneratedPostconditionSession,
-	) => Promise<LedgerPayload>;
+	) => Promise<GeneratedStructuralObservation>;
 };
+
+function tableBindingAddress(
+	address: LedgerAddress,
+): GeneratedPostconditionBindingAddress {
+	if (
+		address.engine !== 'postgresql' ||
+		address.scope !== 'schema' ||
+		address.kind !== 'table' ||
+		!address.schema ||
+		address.parent !== undefined
+	)
+		throw new Error(
+			`generated table binding is unsupported for ${address.kind} ${address.name}`,
+		);
+	return {
+		engine: address.engine,
+		database: address.database,
+		scope: 'schema',
+		schema: address.schema,
+		kind: 'table',
+		name: address.name,
+	};
+}
 
 /** The decode-and-dispatch definition for root admission, no-op and table proofs. */
 function generatedPostconditionProof(
@@ -273,13 +327,17 @@ function generatedPostconditionProof(
 		declaration,
 		`readdress:${address.kind}:${address.name}`,
 	);
-	const observe = (projection: unknown): LedgerPayload => {
+	const observe = (projection: unknown): GeneratedStructuralObservation => {
 		// Verifier projections may represent absent catalogue fields as undefined;
 		// ledger JSON uses their canonical serialized form.
 		const value = JSON.parse(
 			JSON.stringify(projection),
 		) as LedgerPayload['value'];
-		return { value, digest: digest(value) };
+		return {
+			value,
+			digest: digest(value),
+			payloadKind: 'generated-structural-observation',
+		} satisfies GeneratedStructuralObservation;
 	};
 	switch (postcondition.declaration.kind) {
 		case 'table':
@@ -291,7 +349,7 @@ function generatedPostconditionProof(
 							await verifyGeneratedTablePostcondition({
 								session,
 								postcondition,
-								address,
+								address: tableBindingAddress(address),
 							})
 						).projection,
 					),
@@ -505,6 +563,36 @@ async function verifyPgTargetOnlyReaddressNoOp(
 						outcome: 'readdress-refused',
 						detail: `source ${source.name} has no complete re-address chain`,
 					};
+				try {
+					if (!targetProjection.declaration)
+						return {
+							outcome: 'readdress-refused',
+							detail: `target ${target.name} has no recorded declaration`,
+						};
+					decodeVersionedGeneratedPostcondition(
+						targetProjection.declaration,
+						`readdress:${target.kind}:${target.name}`,
+					);
+					const recordedSourceTransfer = rekeyDeclaration(
+						sourceProjection.declaration,
+						target,
+					);
+					if (
+						targetProjection.declaration.digest !==
+							recordedSourceTransfer.digest ||
+						canonicalJson(targetProjection.declaration.value) !==
+							canonicalJson(recordedSourceTransfer.value)
+					)
+						return {
+							outcome: 'readdress-refused',
+							detail: `target ${target.name} declaration is not the recorded source transfer`,
+						};
+				} catch (error) {
+					return {
+						outcome: 'readdress-refused',
+						detail: `target ${target.name} declaration is not decodable: ${error instanceof Error ? error.message : String(error)}`,
+					};
+				}
 				await session.query(
 					`LOCK TABLE ONLY ${renderPgLockIdentifier(target.schema)}.${renderPgLockIdentifier(target.name)} IN SHARE UPDATE EXCLUSIVE MODE`,
 				);
@@ -945,16 +1033,19 @@ export async function executePgPersistedTableReaddress(
 							catalogueIdentity: live.catalogueIdentity,
 						});
 					}
-					if (
-						root.sourceDeclared &&
-						isV3GeneratedPostcondition(root.sourceDeclared.value) &&
-						input.step.expectedDeclaration &&
-						root.sourceDeclared.digest !== input.step.expectedDeclaration.digest
-					)
-						return {
-							kind: 'outcome-protocol-refused',
-							reason: `recorded declaration does not match reviewed step for ${source.name}`,
-						};
+					if (root.sourceDeclared) {
+						try {
+							decodeVersionedGeneratedPostcondition(
+								root.sourceDeclared,
+								`readdress:${source.kind}:${source.name}`,
+							);
+						} catch (error) {
+							return {
+								kind: 'outcome-protocol-refused',
+								reason: `recorded declaration is not decodable for ${source.name}: ${error instanceof Error ? error.message : String(error)}`,
+							};
+						}
+					}
 					try {
 						const rootAdmissionProof = generatedPostconditionProof(
 							input.step.expectedDeclaration,

@@ -16,6 +16,10 @@ import {
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
 } from './generated-postcondition-v3-validator.js';
+import {
+	normalizeOptionalBoolean,
+	normalizeSequenceInteger,
+} from './generated-source-normalizers.js';
 import { formatSqlDefault } from './phases/utils.js';
 import type { ChangeKind, SchemaChange } from './schema-diff.js';
 
@@ -759,12 +763,26 @@ function generatedPostconditionForChangeUnchecked(input: {
 	}
 	if (change.kind === 'create_sequence' || change.kind === 'alter_sequence') {
 		const sequence = requiredRecord(change.meta?.sequence, change.kind);
-		const numberProperty = (name: string): string | undefined =>
-			typeof sequence[name] === 'number' ? String(sequence[name]) : undefined;
-		const startValue = numberProperty('startWith');
-		const incrementBy = numberProperty('incrementBy');
-		const minValue = numberProperty('minValue');
-		const maxValue = numberProperty('maxValue');
+		const startValue = normalizeSequenceInteger(
+			sequence.startWith,
+			`${change.kind} sequence startWith`,
+		);
+		const incrementBy = normalizeSequenceInteger(
+			sequence.incrementBy,
+			`${change.kind} sequence incrementBy`,
+		);
+		const minValue = normalizeSequenceInteger(
+			sequence.minValue,
+			`${change.kind} sequence minValue`,
+		);
+		const maxValue = normalizeSequenceInteger(
+			sequence.maxValue,
+			`${change.kind} sequence maxValue`,
+		);
+		const cycle = normalizeOptionalBoolean(
+			sequence.cycle,
+			`${change.kind} sequence cycle`,
+		);
 		return v3Payload({
 			canonicalFormVersion: 1,
 			kind: 'sequence',
@@ -772,7 +790,7 @@ function generatedPostconditionForChangeUnchecked(input: {
 			...(incrementBy === undefined ? {} : { incrementBy }),
 			...(minValue === undefined ? {} : { minValue }),
 			...(maxValue === undefined ? {} : { maxValue }),
-			...(typeof sequence.cycle === 'boolean' ? { cycle: sequence.cycle } : {}),
+			...(cycle === undefined ? {} : { cycle }),
 		});
 	}
 	if (change.kind === 'create_extension') {

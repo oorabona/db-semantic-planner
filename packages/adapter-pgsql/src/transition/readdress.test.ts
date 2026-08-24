@@ -72,6 +72,20 @@ describe('re-address declaration re-keying', () => {
 		).toThrow('digest is not paired');
 	});
 
+	it.each([
+		['v1', { postconditionVersion: 1 }],
+		['v2', { postconditionVersion: 2, kind: 'table', columns: [] }],
+		['unknown version', { postconditionVersion: 77 }],
+		['malformed v3 root', { postconditionVersion: 3 }],
+	] as const)('refuses a %s generated root instead of re-keying it', (_label, value) => {
+		expect(() =>
+			rekeyDeclaration(
+				{ value, digest: 'legacy-postcondition-digest' },
+				{ ...source, name: 'target_table' },
+			),
+		).toThrow('REPLAN_REQUIRED');
+	});
+
 	it('adds the target name to a legacy declaration as before', () => {
 		expect(
 			rekeyDeclaration(

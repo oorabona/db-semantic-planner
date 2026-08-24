@@ -1,3 +1,4 @@
+import type { LedgerAddress } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	decodeGeneratedPostcondition,
@@ -8,6 +9,7 @@ import {
 	GeneratedPostconditionSessionDeactivatedError,
 	GeneratedPostconditionWorkInFlightError,
 	mintGeneratedPostconditionSession,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIdentityPostcondition,
@@ -28,29 +30,46 @@ const tableAddress = {
 	engine: 'postgresql',
 	database: 'app',
 	schema: 'tenant',
-	kind: 'table',
+	kind: 'table' as const,
+	name: 'accounts',
+};
+
+const tableParent = {
+	scope: 'schema' as const,
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'table' as const,
 	name: 'accounts',
 };
 
 const columnAddress = {
 	...tableAddress,
-	kind: 'column',
+	kind: 'column' as const,
 	name: 'id',
-	parent: tableAddress,
+	parent: tableParent,
 };
 
 const indexAddress = {
 	...tableAddress,
-	kind: 'index',
+	kind: 'index' as const,
 	name: 'accounts_user_id_idx',
-	parent: tableAddress,
+	parent: tableParent,
 };
 
 const checkAddress = {
 	...tableAddress,
-	kind: 'constraint',
+	kind: 'constraint' as const,
 	name: 'accounts_status_check',
-	parent: tableAddress,
+	parent: tableParent,
+};
+
+const extensionAddress = {
+	scope: 'database' as const,
+	engine: 'postgresql',
+	database: 'app',
+	kind: 'extension',
+	name: 'pgcrypto',
 };
 
 function testSession(
@@ -261,7 +280,46 @@ function tableSession(
 }
 
 describe('generated postcondition verifier', () => {
-	it('begins before locking and rolls back the standalone identity proof', async () => {
+	it('narrows every resolvable ledger-address topology for v3 binding', () => {
+		const addresses: readonly LedgerAddress[] = [
+			tableAddress,
+			{ ...tableAddress, kind: 'enum', name: 'account_state' },
+			{ ...tableAddress, kind: 'sequence', name: 'account_number' },
+			columnAddress,
+			indexAddress,
+			checkAddress,
+			extensionAddress,
+		];
+		for (const address of addresses)
+			expect(toGeneratedPostconditionBindingAddress(address)).toEqual(address);
+	});
+
+	it('refuses ledger addresses outside the v3 binding topology', () => {
+		const extensionWithSchema: LedgerAddress = {
+			...extensionAddress,
+			schema: 'tenant',
+		};
+		const tableChildWithoutParent: LedgerAddress = {
+			...tableAddress,
+			kind: 'column',
+			name: 'id',
+		};
+		const unresolvableKind: LedgerAddress = {
+			...tableAddress,
+			kind: 'view',
+			name: 'account_view',
+		};
+		for (const address of [
+			extensionWithSchema,
+			tableChildWithoutParent,
+			unresolvableKind,
+		])
+			expect(() => toGeneratedPostconditionBindingAddress(address)).toThrow(
+				GeneratedPostconditionBindingResolutionError,
+			);
+	});
+
+	it('does not LOCK TABLE for a sequence identity proof', async () => {
 		const sql: string[] = [];
 		const session = mintGeneratedPostconditionSession({
 			query: async (statement) => {
@@ -302,7 +360,7 @@ describe('generated postcondition verifier', () => {
 				schema: 'tenant',
 				kind: 'sequence',
 				name: 'accounts_id_seq',
-			},
+			} as never,
 			kind: 'sequence',
 		});
 		const begin = sql.indexOf('BEGIN');
@@ -311,8 +369,8 @@ describe('generated postcondition verifier', () => {
 		);
 		const rollback = sql.indexOf('ROLLBACK');
 		expect(begin).toBeGreaterThanOrEqual(0);
-		expect(lock).toBeGreaterThan(begin);
-		expect(rollback).toBeGreaterThan(lock);
+		expect(lock).toBe(-1);
+		expect(rollback).toBeGreaterThan(begin);
 	});
 
 	it('redacts authored defaults from table mismatch diagnostics', async () => {
@@ -498,7 +556,7 @@ describe('generated postcondition verifier', () => {
 					targetBinding: v3Binding,
 					declaration: { canonicalFormVersion: 1, kind: 'column', column: {} },
 				},
-				address: { ...columnAddress, scope: 'database' },
+				address: { ...columnAddress, scope: 'database' } as never,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
 		expect(
@@ -522,7 +580,7 @@ describe('generated postcondition verifier', () => {
 				address: {
 					...columnAddress,
 					parent: mismatchedParent,
-				},
+				} as never,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
 		expect(
@@ -872,7 +930,7 @@ describe('generated postcondition verifier', () => {
 				address: {
 					...columnAddress,
 					parent: { ...tableAddress, database: 'staging' },
-				},
+				} as never,
 			}),
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
 		expect(

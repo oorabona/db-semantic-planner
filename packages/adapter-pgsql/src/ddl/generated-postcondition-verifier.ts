@@ -1,4 +1,4 @@
-import type { ResourceAddress } from '@dbsp/types';
+import type { LedgerAddress, ResourceAddress } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { dbTypesEqual } from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
@@ -244,10 +244,64 @@ type ResolvableGeneratedPostconditionKind =
 	| 'sequence'
 	| 'extension';
 
-/** The managed-step address that a v3 binding resolves, rather than a declaration address. */
-export type GeneratedPostconditionBindingAddress = ResourceAddress & {
-	readonly scope?: 'schema' | 'database';
+type GeneratedPostconditionSchemaBindingKind = Exclude<
+	ResolvableGeneratedPostconditionKind,
+	'extension'
+>;
+type GeneratedPostconditionTableChildKind = 'column' | 'index' | 'constraint';
+
+/** The canonical schema-scoped table parent of a managed table child. */
+type GeneratedPostconditionTableParent = {
+	readonly scope: 'schema';
+	readonly engine: string;
+	readonly database: string;
+	readonly schema: string;
+	readonly kind: 'table';
+	readonly name: string;
+	readonly parent?: never;
+	readonly catalogueIdentity?: never;
+	readonly qualifiedBy?: never;
 };
+
+type GeneratedPostconditionSchemaRootAddress<
+	K extends Exclude<
+		GeneratedPostconditionSchemaBindingKind,
+		GeneratedPostconditionTableChildKind
+	>,
+> = Omit<ResourceAddress, 'engine' | 'schema' | 'parent' | 'kind'> & {
+	readonly engine: string;
+	readonly scope: 'schema';
+	readonly schema: string;
+	readonly parent?: never;
+	readonly kind: K;
+};
+
+type GeneratedPostconditionTableChildAddress<
+	K extends GeneratedPostconditionTableChildKind,
+> = Omit<ResourceAddress, 'engine' | 'schema' | 'parent' | 'kind'> & {
+	readonly engine: string;
+	readonly scope: 'schema';
+	readonly schema: string;
+	readonly parent: GeneratedPostconditionTableParent;
+	readonly kind: K;
+};
+
+type GeneratedPostconditionExtensionAddress = Omit<
+	ResourceAddress,
+	'engine' | 'schema' | 'parent' | 'kind'
+> & {
+	readonly engine: string;
+	readonly scope: 'database';
+	readonly schema?: never;
+	readonly parent?: never;
+	readonly kind: 'extension';
+};
+
+/** The complete topology selected by a v3 managed-step binding. */
+export type GeneratedPostconditionBindingAddress =
+	| GeneratedPostconditionSchemaRootAddress<'table' | 'enum' | 'sequence'>
+	| GeneratedPostconditionTableChildAddress<GeneratedPostconditionTableChildKind>
+	| GeneratedPostconditionExtensionAddress;
 
 /** A v3 binding selected no live object, or selected a slot other than the one declared. */
 const bindingResolutionFailures = new WeakSet<object>();
@@ -273,6 +327,117 @@ function bindingResolutionFailure(input: {
 	const error = new GeneratedPostconditionBindingResolutionError(input);
 	bindingResolutionFailures.add(error);
 	return error;
+}
+
+function bindingAddressDescription(address: LedgerAddress): string {
+	const parent = address.parent?.name;
+	return `${address.scope} ${address.engine}/${address.database} ${address.kind} ${address.schema ?? '<database>'}.${parent ?? address.name}`;
+}
+
+function bindingAddressTopologyFailure(
+	address: LedgerAddress,
+): GeneratedPostconditionBindingResolutionError {
+	return bindingResolutionFailure({
+		sought:
+			'a resolvable generated postcondition address with canonical topology',
+		found: bindingAddressDescription(address),
+	});
+}
+
+function canonicalGeneratedPostconditionTableParent(
+	address: LedgerAddress,
+): GeneratedPostconditionTableParent | undefined {
+	const parent = address.parent;
+	if (
+		!isRecord(parent) ||
+		(parent.scope !== undefined && parent.scope !== 'schema') ||
+		parent.engine !== address.engine ||
+		parent.database !== address.database ||
+		typeof parent.schema !== 'string' ||
+		parent.schema !== address.schema ||
+		parent.kind !== 'table' ||
+		typeof parent.name !== 'string' ||
+		parent.parent !== undefined ||
+		parent.catalogueIdentity !== undefined ||
+		parent.qualifiedBy !== undefined
+	)
+		return undefined;
+	return {
+		scope: 'schema',
+		engine: parent.engine,
+		database: parent.database,
+		schema: parent.schema,
+		kind: 'table',
+		name: parent.name,
+	};
+}
+
+/**
+ * Narrows a ledger address into the complete topology that a v3 verifier can
+ * bind.  Ledger addresses are intentionally broader, so this boundary must
+ * reject malformed persisted input before it reaches any verifier dispatch.
+ */
+export function toGeneratedPostconditionBindingAddress(
+	address: LedgerAddress,
+): GeneratedPostconditionBindingAddress {
+	const {
+		scope: _scope,
+		schema: _schema,
+		parent: _parent,
+		kind: _kind,
+		...resource
+	} = address;
+	switch (address.kind) {
+		case 'table':
+		case 'enum':
+		case 'sequence':
+			if (
+				address.scope !== 'schema' ||
+				typeof address.schema !== 'string' ||
+				address.schema.length === 0 ||
+				address.parent !== undefined
+			)
+				throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'schema',
+				schema: address.schema,
+				kind: address.kind,
+			} satisfies GeneratedPostconditionBindingAddress;
+		case 'column':
+		case 'index':
+		case 'constraint': {
+			if (
+				address.scope !== 'schema' ||
+				typeof address.schema !== 'string' ||
+				address.schema.length === 0
+			)
+				throw bindingAddressTopologyFailure(address);
+			const parent = canonicalGeneratedPostconditionTableParent(address);
+			if (parent === undefined) throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'schema',
+				schema: address.schema,
+				parent,
+				kind: address.kind,
+			} satisfies GeneratedPostconditionBindingAddress;
+		}
+		case 'extension':
+			if (
+				address.scope !== 'database' ||
+				address.schema !== undefined ||
+				address.parent !== undefined
+			)
+				throw bindingAddressTopologyFailure(address);
+			return {
+				...resource,
+				scope: 'database',
+				kind: 'extension',
+			} satisfies GeneratedPostconditionBindingAddress;
+		default:
+			throw bindingAddressTopologyFailure(address);
+	}
 }
 
 function isBindingResolutionFailure(error: unknown): boolean {
@@ -957,12 +1122,11 @@ function bindingSlot(
 	const parent = address.parent;
 	const parentSchema = parent?.schema;
 	const parentName = parent?.name;
-	const name = address.name;
-	const scope = (address as ResourceAddress & { readonly scope?: unknown })
-		.scope;
 	const parentScope = parent
 		? (parent as ResourceAddress & { readonly scope?: unknown }).scope
 		: undefined;
+	const name = address.name;
+	const scope = address.scope;
 	const expected = `${expectedKind} ${schema ?? '<database>'}.${parentName ?? name}${expectedKind === 'table' || expectedKind === 'enum' || expectedKind === 'sequence' || expectedKind === 'extension' ? '' : `.${name}`}`;
 	const requiresTableParent =
 		expectedKind === 'column' ||
@@ -1008,7 +1172,9 @@ function bindingSlot(
 		},
 		sought: expected,
 		found: undefined,
-		...(expectedKind === 'enum' || expectedKind === 'extension'
+		...(expectedKind === 'enum' ||
+		expectedKind === 'sequence' ||
+		expectedKind === 'extension'
 			? {}
 			: {
 					stabilizationRelation: {

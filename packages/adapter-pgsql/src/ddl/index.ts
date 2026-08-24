@@ -27,6 +27,7 @@ export {
 	type GeneratedPostconditionSession,
 	GeneratedPostconditionSessionDeactivatedError,
 	GeneratedPostconditionWorkInFlightError,
+	toGeneratedPostconditionBindingAddress,
 	verifyGeneratedCheckPostcondition,
 	verifyGeneratedColumnPostcondition,
 	verifyGeneratedIdentityPostcondition,
