@@ -968,19 +968,47 @@ describe('PostgreSQL generated managed-step manifest', () => {
 			);
 	});
 
-	it('refuses alter_column_type without a typed target column', () => {
-		expect(() =>
+	it('produces a typed column postcondition for alter_column_type', () => {
+		expect(
 			generatedPostconditionForChange({
 				change: {
 					kind: 'alter_column_type',
 					table: 'orders',
 					column: 'state',
 					destructive: false,
-					details: 'legacy target only',
+					details: 'typed target',
+					meta: {
+						column: { name: 'state', type: 'string', nullable: false },
+					},
+				},
+				schema: 'tenant',
+			})?.value,
+		).toEqual(
+			v3({
+				kind: 'column',
+				column: {
+					type: 'VARCHAR(255)',
+					nullable: false,
+					authoredCollation: null,
+					default: { defaultKind: 'none', hasDefault: false, identity: null },
+				},
+			}),
+		);
+	});
+
+	it('leaves an untyped alter_column_type to destructive execution', () => {
+		expect(
+			generatedPostconditionForChange({
+				change: {
+					kind: 'alter_column_type',
+					table: 'orders',
+					column: 'state',
+					destructive: true,
+					details: 'untyped destructive target',
 				},
 				schema: 'tenant',
 			}),
-		).toThrow('missing typed target column postcondition');
+		).toBeUndefined();
 	});
 
 	it('records authored identity and its address binding through JSON serialization', () => {

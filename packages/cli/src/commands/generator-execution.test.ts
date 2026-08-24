@@ -767,10 +767,14 @@ describe('generator execution fixture shim', () => {
 				? 'generated postcondition binding did not resolve'
 				: message,
 		);
-		if (row?.relation_kind === 'v')
-			expect(query.mock.calls[0]?.[0]).toContain(
-				'relation.relkind AS relation_kind',
+		if (row?.relation_kind === 'v') {
+			const bindingQuery = query.mock.calls.find(
+				([sql]) =>
+					typeof sql === 'string' &&
+					sql.includes('relation.relkind AS relation_kind'),
 			);
+			expect(bindingQuery?.[0]).toContain('relation.relkind AS relation_kind');
+		}
 	});
 
 	it('canonicalizes PostgreSQL default collation for generated column read-back', async () => {

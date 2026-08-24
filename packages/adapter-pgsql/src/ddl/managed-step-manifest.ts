@@ -580,6 +580,8 @@ function constraintPostcondition(
  * Capture the ModelIR/SchemaChange shape that the executor must read back.
  * This is deliberately assembled before SQL rendering becomes the only durable
  * source, and is therefore covered by the normalized managed-step digest.
+ * An untyped alter_column_type deliberately returns undefined: destructive
+ * execution owns that case through its digest-bound acceptance and read-back.
  */
 export function generatedPostconditionForChange(input: {
 	readonly change: SchemaChange;
@@ -626,11 +628,6 @@ export function generatedPostconditionForChange(input: {
 			kind: 'column',
 			column: columnDeclaration(column, schema),
 		});
-	}
-	if (change.kind === 'alter_column_type') {
-		throw new Error(
-			'generator planning refuses alter_column_type: missing typed target column postcondition',
-		);
 	}
 	if (change.kind === 'alter_column_nullable') {
 		const name = text(change.column, change.kind);
@@ -774,6 +771,7 @@ export function generatedPostconditionForChange(input: {
 			...(typeof version === 'string' ? { version } : {}),
 		});
 	}
+	if (change.kind === 'alter_column_type') return undefined;
 	if (
 		change.kind === 'drop_table' ||
 		change.kind === 'drop_column' ||
