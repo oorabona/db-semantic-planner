@@ -2,6 +2,7 @@ import {
 	GeneratedPostconditionBindingResolutionError,
 	type GeneratedPostconditionSession,
 	generatedPostconditionDigest,
+	generatedPostconditionForChange,
 	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
 	type verifyGeneratedColumnPostcondition as VerifyGeneratedColumnPostcondition,
 	type verifyGeneratedIndexPostcondition as VerifyGeneratedIndexPostcondition,
@@ -1386,24 +1387,30 @@ describe('generator execution fixture shim', () => {
 		expect(Object.isFrozen(manifest.steps)).toBe(true);
 	});
 
-	it('consumes a typed data-destructive declaration for its terminal observation', async () => {
+	it('records proof-scoped identity and a real observation for an untyped column-type terminal', async () => {
 		const address = {
 			...dataDestructiveStep.address!,
 			kind: 'column' as const,
 			name: 'id',
 			parent: dataDestructiveStep.address!,
 		};
-		const declaration = v3({
-			kind: 'column',
-			column: { type: 'bigint', nullable: false },
+		const expectedDeclaration = generatedPostconditionForChange({
+			change: {
+				kind: 'alter_column_type',
+				table: 'accounts',
+				column: 'id',
+				destructive: true,
+				details: 'untyped column-type target',
+			},
+			schema: 'tenant',
 		});
+		if (!expectedDeclaration)
+			throw new Error('missing partial column declaration');
+		const declaration = expectedDeclaration.value;
 		const step = {
 			...dataDestructiveStep,
 			address,
-			expectedDeclaration: {
-				value: declaration,
-				digest: generatedPostconditionDigest(declaration),
-			},
+			expectedDeclaration,
 		} as unknown as NormalizedManagedStep;
 		verifyGeneratedColumnPostcondition.mockResolvedValue({
 			kind: 'column',
@@ -1467,8 +1474,10 @@ describe('generator execution fixture shim', () => {
 				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
-		expect(verifyGeneratedColumnPostcondition).toHaveBeenCalledWith(
-			expect.objectContaining({ postcondition: declaration }),
+		expect(verifyGeneratedColumnPostcondition.mock.calls[0]?.[0]).toMatchObject(
+			{
+				postcondition: declaration,
+			},
 		);
 		expect(observed).toMatchObject({
 			value: { kind: 'column', type: 'bigint', nullable: false },

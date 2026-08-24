@@ -71,4 +71,23 @@ describe('canonical durable JSON payloads', () => {
 			expect((caught as Error).message).not.toContain('a.b\nkey');
 		}
 	});
+
+	it('translates reflection proxy traps into CanonicalJsonError with cause', () => {
+		const trapped = new Error('proxy reflection trap');
+		const value = new Proxy(
+			{},
+			{
+				getPrototypeOf: () => {
+					throw trapped;
+				},
+			},
+		);
+		try {
+			canonicalJson(value);
+			throw new Error('expected canonical JSON refusal');
+		} catch (error) {
+			expect(error).toBeInstanceOf(CanonicalJsonError);
+			expect((error as Error).cause).toBe(trapped);
+		}
+	});
 });

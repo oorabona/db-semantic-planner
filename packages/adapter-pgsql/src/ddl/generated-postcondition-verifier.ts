@@ -11,6 +11,7 @@ import { generateCreateIndex } from './ddl-generator.js';
 import {
 	generatedPostconditionSnapshotStructuralPath,
 	generatedPostconditionStructuralPath,
+	generatedPostconditionV3DeclarationStructuralPath,
 	isGeneratedPostconditionV3DeclarationError,
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
@@ -309,14 +310,19 @@ export type GeneratedPostconditionBindingAddress =
 
 /** A v3 binding selected no live object, or selected a slot other than the one declared. */
 const bindingResolutionFailures = new WeakSet<object>();
+const bindingAddressReflectionFailures = new WeakMap<object, unknown>();
 
 export class GeneratedPostconditionBindingResolutionError extends Error {
 	readonly sought: string;
 	readonly found: string;
 
-	constructor(input: { readonly sought: string; readonly found: string }) {
+	constructor(
+		input: { readonly sought: string; readonly found: string },
+		options?: ErrorOptions,
+	) {
 		super(
 			`generated postcondition binding did not resolve: sought ${input.sought}; found ${input.found}`,
+			options,
 		);
 		this.name = 'GeneratedPostconditionBindingResolutionError';
 		this.sought = input.sought;
@@ -327,17 +333,26 @@ export class GeneratedPostconditionBindingResolutionError extends Error {
 function bindingResolutionFailure(input: {
 	readonly sought: string;
 	readonly found: string;
+	readonly cause?: unknown;
 }): GeneratedPostconditionBindingResolutionError {
-	const error = new GeneratedPostconditionBindingResolutionError(input);
+	const error = new GeneratedPostconditionBindingResolutionError(input, {
+		...(input.cause === undefined ? {} : { cause: input.cause }),
+	});
 	bindingResolutionFailures.add(error);
 	return error;
 }
 
 function bindingAddressDescription(address: LedgerAddress): string {
-	const captured = ownDataFields(address, ADDRESS_FIELDS);
-	if (captured === undefined) return 'malformed address';
-	const parent = ownDataFields(captured.parent, ADDRESS_FIELDS)?.name;
-	return `${captured.scope} ${captured.engine}/${captured.database} ${captured.kind} ${captured.schema ?? '<database>'}.${parent ?? captured.name}`;
+	try {
+		const captured = ownDataFields(address, ADDRESS_FIELDS);
+		if (captured === undefined) return 'malformed address';
+		const parent = ownDataFields(captured.parent, ADDRESS_FIELDS)?.name;
+		return `${captured.scope} ${captured.engine}/${captured.database} ${captured.kind} ${captured.schema ?? '<database>'}.${parent ?? captured.name}`;
+	} catch (error) {
+		if (address !== null && typeof address === 'object')
+			bindingAddressReflectionFailures.set(address, error);
+		return 'malformed address';
+	}
 }
 
 function bindingAddressTopologyFailure(
@@ -347,6 +362,9 @@ function bindingAddressTopologyFailure(
 		sought:
 			'a resolvable generated postcondition address with canonical topology',
 		found: bindingAddressDescription(address),
+		...(address !== null && typeof address === 'object'
+			? { cause: bindingAddressReflectionFailures.get(address) }
+			: {}),
 	});
 }
 
@@ -366,28 +384,35 @@ function ownDataFields(
 	value: unknown,
 	fields: readonly string[],
 ): Record<string, unknown> | undefined {
-	if (
-		value === null ||
-		typeof value !== 'object' ||
-		Object.getPrototypeOf(value) !== Object.prototype
-	)
+	try {
+		if (
+			value === null ||
+			typeof value !== 'object' ||
+			Object.getPrototypeOf(value) !== Object.prototype
+		)
+			return;
+		const allowed = new Set(fields);
+		const names = Object.getOwnPropertyNames(value);
+		if (
+			Object.getOwnPropertySymbols(value).length > 0 ||
+			!names.every((field) => allowed.has(field))
+		)
+			return;
+		const captured: Record<string, unknown> = Object.create(null) as Record<
+			string,
+			unknown
+		>;
+		for (const field of names) {
+			const descriptor = Object.getOwnPropertyDescriptor(value, field);
+			if (!descriptor?.enumerable || !('value' in descriptor)) return;
+			captured[field] = descriptor.value;
+		}
+		return captured;
+	} catch (error) {
+		if (value !== null && typeof value === 'object')
+			bindingAddressReflectionFailures.set(value, error);
 		return;
-	const allowed = new Set(fields);
-	if (
-		Object.getOwnPropertySymbols(value).length > 0 ||
-		!Object.getOwnPropertyNames(value).every((field) => allowed.has(field))
-	)
-		return;
-	const captured: Record<string, unknown> = Object.create(null) as Record<
-		string,
-		unknown
-	>;
-	for (const field of Object.getOwnPropertyNames(value)) {
-		const descriptor = Object.getOwnPropertyDescriptor(value, field);
-		if (!descriptor?.enumerable || !('value' in descriptor)) return;
-		captured[field] = descriptor.value;
 	}
-	return captured;
 }
 
 function nonEmptyString(value: unknown): value is string {
@@ -397,16 +422,25 @@ function nonEmptyString(value: unknown): value is string {
 function canonicalGeneratedPostconditionTableParent(
 	address: LedgerAddress,
 ): GeneratedPostconditionTableParent | undefined {
-	const parent = ownDataFields(address.parent, ADDRESS_FIELDS);
+	const captured = ownDataFields(address, ADDRESS_FIELDS);
+	if (captured === undefined) return;
+	const parent = ownDataFields(captured.parent, ADDRESS_FIELDS);
+	if (parent === undefined) {
+		if (captured.parent !== null && typeof captured.parent === 'object') {
+			const cause = bindingAddressReflectionFailures.get(captured.parent);
+			if (cause !== undefined)
+				bindingAddressReflectionFailures.set(address, cause);
+		}
+		return;
+	}
 	if (
-		parent === undefined ||
 		(parent.scope !== undefined && parent.scope !== 'schema') ||
 		parent.engine !== POSTGRESQL_ENGINE ||
-		parent.engine !== address.engine ||
+		parent.engine !== captured.engine ||
 		!nonEmptyString(parent.database) ||
-		parent.database !== address.database ||
+		parent.database !== captured.database ||
 		!nonEmptyString(parent.schema) ||
-		parent.schema !== address.schema ||
+		parent.schema !== captured.schema ||
 		parent.kind !== 'table' ||
 		!nonEmptyString(parent.name) ||
 		parent.parent !== undefined
@@ -463,9 +497,7 @@ export function toGeneratedPostconditionBindingAddress(
 		case 'constraint': {
 			if (captured.scope !== 'schema' || !nonEmptyString(captured.schema))
 				throw bindingAddressTopologyFailure(address);
-			const parent = canonicalGeneratedPostconditionTableParent(
-				captured as unknown as LedgerAddress,
-			);
+			const parent = canonicalGeneratedPostconditionTableParent(address);
 			if (parent === undefined) throw bindingAddressTopologyFailure(address);
 			return {
 				engine: POSTGRESQL_ENGINE,
@@ -578,8 +610,8 @@ export class GeneratedPostconditionReplanRequiredError extends Error {
 		message: string,
 		versionSeen: unknown = undefined,
 		stepIdentity: string | undefined = undefined,
-		structuralPath: string | undefined = undefined,
 		options?: ErrorOptions,
+		structuralPath: string | undefined = undefined,
 	) {
 		super(
 			`${message}${structuralPath === undefined ? '' : ` at ${structuralPath}`}; REPLAN_REQUIRED (replan required): produce a version 3 postcondition`,
@@ -594,7 +626,7 @@ export class GeneratedPostconditionReplanRequiredError extends Error {
 
 function structuralPathFrom(error: unknown): string | undefined {
 	if (isGeneratedPostconditionV3DeclarationError(error))
-		return generatedPostconditionStructuralPath(error.structuralPath);
+		return generatedPostconditionV3DeclarationStructuralPath(error);
 	if (
 		error !== null &&
 		(typeof error === 'object' || typeof error === 'function') &&
@@ -616,8 +648,8 @@ function replan(
 		message,
 		versionSeen,
 		stepIdentity,
-		structuralPathFrom(cause),
 		cause === undefined ? undefined : { cause },
+		structuralPathFrom(cause),
 	);
 }
 
@@ -714,8 +746,8 @@ function decodeGeneratedPostconditionSnapshot(
 					error.message.replace(/; REPLAN_REQUIRED[\s\S]*$/, ''),
 					postconditionVersion,
 					stepIdentity,
-					error.structuralPath,
 					{ cause: error },
+					error.structuralPath,
 				);
 			throw error;
 		}
@@ -743,8 +775,8 @@ export function decodeGeneratedPostconditionPayload(
 			'generated postcondition digest cannot be decoded',
 			undefined,
 			stepIdentity,
-			structuralPathFrom(error),
 			{ cause: error },
+			structuralPathFrom(error),
 		);
 	}
 	if (!isRecord(value) || typeof value.postconditionVersion !== 'number')
@@ -759,8 +791,8 @@ export function decodeGeneratedPostconditionPayload(
 			'generated postcondition digest cannot be decoded',
 			value.postconditionVersion,
 			stepIdentity,
-			structuralPathFrom(error),
 			{ cause: error },
+			structuralPathFrom(error),
 		);
 	}
 	if (payload.digest !== expectedDigest)

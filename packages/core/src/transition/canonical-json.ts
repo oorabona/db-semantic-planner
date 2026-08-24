@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 
 /** Raised when a value cannot cross the durable JSON payload boundary. */
 export class CanonicalJsonError extends TypeError {
-	constructor(path: string, detail: string) {
-		super(`canonical JSON refuses ${path}: ${detail}`);
+	constructor(path: string, detail: string, options?: ErrorOptions) {
+		super(`canonical JSON refuses ${path}: ${detail}`, options);
 		this.name = 'CanonicalJsonError';
 	}
 }
@@ -57,6 +57,15 @@ function scalar(value: unknown, path: string): string | undefined {
 	}
 }
 
+/** Reflection may invoke proxy traps; preserve the boundary's typed refusal. */
+function captureReflection<T>(path: string, capture: () => T): T {
+	try {
+		return capture();
+	} catch (error) {
+		throw new CanonicalJsonError(path, 'reflection failed', { cause: error });
+	}
+}
+
 type EncodeTask =
 	| { readonly kind: 'value'; readonly value: unknown; readonly path: string }
 	| { readonly kind: 'text'; readonly text: string }
@@ -95,18 +104,27 @@ function encodeCanonicalJson(value: unknown, path: string): string {
 				'cyclic values are not JSON values',
 			);
 		active.add(object);
-		if (Array.isArray(object)) {
-			if (Object.getPrototypeOf(object) !== Array.prototype)
+		const isArray = captureReflection(task.path, () => Array.isArray(object));
+		if (isArray) {
+			if (
+				captureReflection(task.path, () => Object.getPrototypeOf(object)) !==
+				Array.prototype
+			)
 				throw new CanonicalJsonError(
 					task.path,
 					'arrays require Array.prototype',
 				);
-			if (Object.getOwnPropertySymbols(object).length > 0)
+			if (
+				captureReflection(task.path, () => Object.getOwnPropertySymbols(object))
+					.length > 0
+			)
 				throw new CanonicalJsonError(
 					task.path,
 					'symbol-keyed members are not JSON members',
 				);
-			for (const key of Object.getOwnPropertyNames(object)) {
+			for (const key of captureReflection(task.path, () =>
+				Object.getOwnPropertyNames(object),
+			)) {
 				if (key === 'length') continue;
 				if (!/^(?:0|[1-9][0-9]*)$/u.test(key))
 					throw new CanonicalJsonError(
@@ -121,11 +139,14 @@ function encodeCanonicalJson(value: unknown, path: string): string {
 			}
 			output.push('[');
 			tasks.push({ kind: 'close', value: object, text: ']' });
-			for (let index = object.length - 1; index >= 0; index -= 1) {
+			const length = captureReflection(
+				task.path,
+				() => (object as unknown[]).length,
+			);
+			for (let index = length - 1; index >= 0; index -= 1) {
 				const itemPath = `${task.path}[${index}]`;
-				const descriptor = Object.getOwnPropertyDescriptor(
-					object,
-					String(index),
+				const descriptor = captureReflection(itemPath, () =>
+					Object.getOwnPropertyDescriptor(object, String(index)),
 				);
 				if (!descriptor)
 					throw new CanonicalJsonError(
@@ -137,25 +158,32 @@ function encodeCanonicalJson(value: unknown, path: string): string {
 						itemPath,
 						'array members must be enumerable data properties',
 					);
-				if (index < object.length - 1) tasks.push({ kind: 'text', text: ',' });
+				if (index < length - 1) tasks.push({ kind: 'text', text: ',' });
 				tasks.push({ kind: 'value', value: descriptor.value, path: itemPath });
 			}
 			continue;
 		}
-		if (
-			Object.getPrototypeOf(object) !== Object.prototype &&
-			Object.getPrototypeOf(object) !== null
-		)
+		const prototype = captureReflection(task.path, () =>
+			Object.getPrototypeOf(object),
+		);
+		if (prototype !== Object.prototype && prototype !== null)
 			throw new CanonicalJsonError(
 				task.path,
 				'only plain objects are JSON objects',
 			);
-		if (Object.getOwnPropertySymbols(object).length > 0)
+		if (
+			captureReflection(task.path, () => Object.getOwnPropertySymbols(object))
+				.length > 0
+		)
 			throw new CanonicalJsonError(
 				task.path,
 				'symbol-keyed members are not JSON members',
 			);
-		const entries = Object.entries(Object.getOwnPropertyDescriptors(object));
+		const entries = Object.entries(
+			captureReflection(task.path, () =>
+				Object.getOwnPropertyDescriptors(object),
+			),
+		);
 		for (const [key, descriptor] of entries) {
 			const keyPath = memberPath(task.path, key);
 			if (!descriptor.enumerable)

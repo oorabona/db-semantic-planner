@@ -477,9 +477,7 @@ describe('generated postcondition verifier', () => {
 			throw new Error('expected parser refusal');
 		} catch (error) {
 			expect(error).toBeInstanceOf(GeneratedPostconditionV3DeclarationError);
-			expect(error).toMatchObject({
-				structuralPath: '$.columns[0].invalid',
-			});
+			expect(error).not.toHaveProperty('structuralPath');
 			expect((error as Error).message).not.toContain(secret);
 		}
 		try {
@@ -498,6 +496,57 @@ describe('generated postcondition verifier', () => {
 				'$.declaration.columns[0].invalid',
 			);
 			expect((error as Error).message).not.toContain(secret);
+		}
+	});
+
+	it('keeps a four-argument replan error cause in ErrorOptions', () => {
+		const cause = new Error('original cause');
+		const error = new GeneratedPostconditionReplanRequiredError(
+			'generated postcondition is unsupported',
+			3,
+			'generator:0',
+			{ cause },
+		);
+		expect(error.cause).toBe(cause);
+		expect(error.message).not.toContain('[object Object]');
+	});
+
+	it('does not trust a path-shaped proxy trap error', () => {
+		const trapped = new Error('$.forged.path: attacker-controlled');
+		const forged = new Proxy(
+			{},
+			{
+				getPrototypeOf: () => {
+					throw trapped;
+				},
+			},
+		);
+		try {
+			decodeGeneratedPostcondition(forged);
+			throw new Error('expected REPLAN_REQUIRED');
+		} catch (error) {
+			expect(error).toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+			expect(error).toMatchObject({ structuralPath: undefined });
+			expect((error as Error).cause).toBe(trapped);
+		}
+	});
+
+	it('maps binding proxy-trap failures to a typed error with the original cause', () => {
+		const trapped = new Error('binding proxy trap');
+		const forged = new Proxy(tableAddress, {
+			getPrototypeOf: () => {
+				throw trapped;
+			},
+		});
+		try {
+			toGeneratedPostconditionBindingAddress(forged as LedgerAddress);
+			throw new Error('expected binding resolution failure');
+		} catch (error) {
+			expect(error).toBeInstanceOf(
+				GeneratedPostconditionBindingResolutionError,
+			);
+			expect((error as Error).cause).toBe(trapped);
+			expect((error as Error).message).not.toContain(trapped.message);
 		}
 	});
 

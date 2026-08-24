@@ -1,13 +1,12 @@
 import { identityNaming } from '../naming-plugin.js';
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
-import {
-	assertNonZeroSequenceIncrement,
-	normalizeSequenceInteger,
-} from './generated-source-normalizers.js';
+import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 import type { GeneratedPostconditionDeclarationV3 } from './managed-step-manifest.js';
 
 const generatedPostconditionV3DeclarationErrors = new WeakSet<object>();
+const generatedPostconditionV3DeclarationPaths = new WeakMap<object, string>();
+const generatedPostconditionSnapshotPaths = new WeakMap<object, string>();
 const STRUCTURAL_PATH = /^\$(?:\.[A-Za-z0-9_$-]+|\[[0-9]+\])*$/u;
 const MAX_STRUCTURAL_PATH_LENGTH = 512;
 
@@ -27,11 +26,7 @@ export function generatedPostconditionStructuralPath(
  * exactly the same address-free declaration domain.
  */
 export class GeneratedPostconditionV3DeclarationError extends Error {
-	constructor(
-		readonly rule: string,
-		/** A sanitized JSON structural path, never an authored declaration value. */
-		readonly structuralPath: string | undefined = undefined,
-	) {
+	constructor(readonly rule: string) {
 		super(`generated postcondition v3 declaration violates ${rule}`);
 		this.name = 'GeneratedPostconditionV3DeclarationError';
 		generatedPostconditionV3DeclarationErrors.add(this);
@@ -49,17 +44,30 @@ export function isGeneratedPostconditionV3DeclarationError(
 }
 
 function refuse(rule: string, structuralPath?: string): never {
-	throw new GeneratedPostconditionV3DeclarationError(rule, structuralPath);
+	const error = new GeneratedPostconditionV3DeclarationError(rule);
+	const sanitizedPath = generatedPostconditionStructuralPath(structuralPath);
+	if (sanitizedPath !== undefined)
+		generatedPostconditionV3DeclarationPaths.set(error, sanitizedPath);
+	throw error;
+}
+
+/** Structural paths are private parser evidence, not public error input. */
+export function generatedPostconditionV3DeclarationStructuralPath(
+	error: unknown,
+): string | undefined {
+	if (!isGeneratedPostconditionV3DeclarationError(error)) return;
+	return generatedPostconditionV3DeclarationPaths.get(error);
 }
 
 export function generatedPostconditionSnapshotStructuralPath(
 	error: unknown,
 ): string | undefined {
-	if (!(error instanceof Error)) return;
-	const path = /^(\$(?:\.[A-Za-z0-9_$-]+|\[[0-9]+\])*): /u.exec(
-		error.message,
-	)?.[1];
-	return generatedPostconditionStructuralPath(path);
+	if (
+		error === null ||
+		(typeof error !== 'object' && typeof error !== 'function')
+	)
+		return;
+	return generatedPostconditionSnapshotPaths.get(error);
 }
 
 function identifier(value: string, rule: string): void {
@@ -517,14 +525,11 @@ export function validateGeneratedPostconditionV3Declaration(
 			return;
 		case 'sequence':
 			sequenceInteger(declaration.startValue, 'sequence start value');
-			try {
-				assertNonZeroSequenceIncrement(
-					declaration.incrementBy,
-					'sequence increment value',
-				);
-			} catch {
+			if (
+				sequenceInteger(declaration.incrementBy, 'sequence increment value') ===
+				0n
+			)
 				refuse('non-zero sequence increment');
-			}
 			sequenceInteger(declaration.minValue, 'sequence minimum value');
 			sequenceInteger(declaration.maxValue, 'sequence maximum value');
 			return;
@@ -579,6 +584,15 @@ function serializedJsonStringUtf8Bytes(value: string): number {
 	return bytes;
 }
 
+/** Only snapshot refusals minted here may contribute a diagnostic path. */
+function snapshotRefusal(path: string, detail: string): never {
+	const error = new TypeError(`${path}: ${detail}`);
+	const sanitizedPath = generatedPostconditionStructuralPath(path);
+	if (sanitizedPath !== undefined)
+		generatedPostconditionSnapshotPaths.set(error, sanitizedPath);
+	throw error;
+}
+
 export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 	if (
 		value !== null &&
@@ -592,8 +606,9 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 	const addBytes = (amount: number, path: string): void => {
 		bytes += amount;
 		if (bytes > GENERATED_POSTCONDITION_MAX_JSON_BYTES)
-			throw new TypeError(
-				`${path}: serialized JSON exceeds ${GENERATED_POSTCONDITION_MAX_JSON_BYTES} UTF-8 bytes`,
+			snapshotRefusal(
+				path,
+				`serialized JSON exceeds ${GENERATED_POSTCONDITION_MAX_JSON_BYTES} UTF-8 bytes`,
 			);
 	};
 	const primitive = (
@@ -614,7 +629,7 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 		}
 		if (typeof item === 'number') {
 			if (!Number.isFinite(item))
-				throw new TypeError(`${path}: expected a finite JSON number`);
+				snapshotRefusal(path, 'expected a finite JSON number');
 			addBytes(String(Object.is(item, -0) ? 0 : item).length, path);
 			return item;
 		}
@@ -633,7 +648,7 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 	const root = primitive(value, '$');
 	if (root !== nonPrimitive) return root;
 	if (value === null || value === undefined || typeof value !== 'object')
-		throw new TypeError('$: expected an own JSON value');
+		snapshotRefusal('$', 'expected an own JSON value');
 	const validationStack: Array<{
 		readonly source: object;
 		readonly node: SnapshotNode;
@@ -646,47 +661,48 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 		depth: number,
 	): SnapshotNode => {
 		if (depth > GENERATED_POSTCONDITION_MAX_JSON_DEPTH)
-			throw new TypeError(
-				`${path}: declaration exceeds JSON depth ${GENERATED_POSTCONDITION_MAX_JSON_DEPTH}`,
+			snapshotRefusal(
+				path,
+				`declaration exceeds JSON depth ${GENERATED_POSTCONDITION_MAX_JSON_DEPTH}`,
 			);
 		if (seen.has(source))
-			throw new TypeError(`${path}: declaration graph must be a tree`);
+			snapshotRefusal(path, 'declaration graph must be a tree');
 		seen.add(source);
 		const array = Array.isArray(source);
 		const members: SnapshotMember[] = [];
 		const node: SnapshotNode = { array, path, members };
 		if (array) {
 			if (Object.getPrototypeOf(source) !== Array.prototype)
-				throw new TypeError(`${path}: array has an exotic prototype`);
+				snapshotRefusal(path, 'array has an exotic prototype');
 			if (source.length > GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS)
-				throw new TypeError(
-					`${path}: array exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
+				snapshotRefusal(
+					path,
+					`array exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
 				);
 			if (Object.getOwnPropertySymbols(source).length > 0)
-				throw new TypeError(`${path}: array has symbol members`);
+				snapshotRefusal(path, 'array has symbol members');
 			for (const key of Object.getOwnPropertyNames(source)) {
 				if (key === 'length') continue;
 				if (!/^(?:0|[1-9][0-9]*)$/u.test(key))
-					throw new TypeError(`${path}: array has a non-index member`);
+					snapshotRefusal(path, 'array has a non-index member');
 				if (BigInt(key) > 4294967294n)
-					throw new TypeError(
-						`${path}: array has an out-of-range index member`,
-					);
+					snapshotRefusal(path, 'array has an out-of-range index member');
 			}
 			addBytes(2 + Math.max(0, source.length - 1), path);
 			validationStack.push({ source, node, path, depth });
 			return node;
 		}
 		if (Object.getPrototypeOf(source) !== Object.prototype)
-			throw new TypeError(`${path}: object has an exotic prototype`);
+			snapshotRefusal(path, 'object has an exotic prototype');
 		if (Object.getOwnPropertySymbols(source).length > 0)
-			throw new TypeError(`${path}: object has symbol members`);
+			snapshotRefusal(path, 'object has symbol members');
 		if (
 			Object.getOwnPropertyNames(source).length >
 			GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS
 		)
-			throw new TypeError(
-				`${path}: object exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
+			snapshotRefusal(
+				path,
+				`object exceeds ${GENERATED_POSTCONDITION_MAX_CONTAINER_MEMBERS} members`,
 			);
 		validationStack.push({ source, node, path, depth });
 		return node;
@@ -698,24 +714,28 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 		if (Array.isArray(frame.source)) {
 			for (let index = 0; index < frame.source.length; index += 1) {
 				if (!Object.hasOwn(frame.source, index))
-					throw new TypeError(
-						`${frame.path}[${index}]: array holes are unsupported`,
+					snapshotRefusal(
+						`${frame.path}[${index}]`,
+						'array holes are unsupported',
 					);
 				const descriptor = Object.getOwnPropertyDescriptor(
 					frame.source,
 					String(index),
 				);
 				if (!descriptor || !('value' in descriptor))
-					throw new TypeError(
-						`${frame.path}[${index}]: accessor members are unsupported`,
+					snapshotRefusal(
+						`${frame.path}[${index}]`,
+						'accessor members are unsupported',
 					);
 				if (descriptor.value === undefined)
-					throw new TypeError(
-						`${frame.path}[${index}]: expected an own JSON value`,
+					snapshotRefusal(
+						`${frame.path}[${index}]`,
+						'expected an own JSON value',
 					);
 				if (descriptor.enumerable !== true)
-					throw new TypeError(
-						`${frame.path}[${index}]: own data members are required`,
+					snapshotRefusal(
+						`${frame.path}[${index}]`,
+						'own data members are required',
 					);
 				const itemPath = `${frame.path}[${index}]`;
 				const copied = primitive(descriptor.value, itemPath);
@@ -744,11 +764,12 @@ export function snapshotGeneratedPostconditionJson(value: unknown): unknown {
 				!('value' in descriptor) ||
 				descriptor.enumerable !== true
 			)
-				throw new TypeError(
-					`${frame.path}.${key}: own data members are required`,
+				snapshotRefusal(
+					`${frame.path}.${key}`,
+					'own data members are required',
 				);
 			if (descriptor.value === undefined)
-				throw new TypeError(`${frame.path}.${key}: expected an own JSON value`);
+				snapshotRefusal(`${frame.path}.${key}`, 'expected an own JSON value');
 			addBytes(serializedJsonStringUtf8Bytes(key) + 1, frame.path);
 			const copied = primitive(descriptor.value, `${frame.path}.${key}`);
 			frame.node.members.push({

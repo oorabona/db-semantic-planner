@@ -194,6 +194,34 @@ describe('PostgreSQL generated managed-step manifest', () => {
 	});
 
 	it.each([
+		['startValue', '9223372036854775808'],
+		['startValue', '+1'],
+		['startValue', '01'],
+		['startValue', '-0'],
+		['incrementBy', '9223372036854775808'],
+		['incrementBy', '+1'],
+		['incrementBy', '01'],
+		['incrementBy', '-0'],
+		['incrementBy', '0'],
+		['minValue', '9223372036854775808'],
+		['minValue', '+1'],
+		['minValue', '01'],
+		['minValue', '-0'],
+		['maxValue', '9223372036854775808'],
+		['maxValue', '+1'],
+		['maxValue', '01'],
+		['maxValue', '-0'],
+	] as const)('refuses exact sequence %s spelling %s', (field, value) => {
+		expect(() =>
+			parseGeneratedPostconditionV3Declaration({
+				canonicalFormVersion: 1,
+				kind: 'sequence',
+				[field]: value,
+			}),
+		).toThrow(GeneratedPostconditionV3DeclarationError);
+	});
+
+	it.each([
 		{ kind: 'extension', version: 42 },
 		{ kind: 'sequence', cycle: 'yes' },
 		{ kind: 'column', column: { type: 42 } },
@@ -1444,7 +1472,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		);
 	});
 
-	it('leaves an untyped alter_column_type to destructive execution', () => {
+	it('mints a partial column postcondition for an untyped alter_column_type', () => {
 		expect(
 			generatedPostconditionForChange({
 				change: {
@@ -1455,8 +1483,8 @@ describe('PostgreSQL generated managed-step manifest', () => {
 					details: 'untyped destructive target',
 				},
 				schema: 'tenant',
-			}),
-		).toBeUndefined();
+			})?.value,
+		).toEqual(v3({ kind: 'column', column: {} }));
 	});
 
 	it('records authored identity and its address binding through JSON serialization', () => {

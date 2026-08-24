@@ -805,7 +805,12 @@ function generatedPostconditionForChangeUnchecked(input: {
 			...(typeof version === 'string' ? { version } : {}),
 		});
 	}
-	if (change.kind === 'alter_column_type') return undefined;
+	if (change.kind === 'alter_column_type')
+		return v3Payload({
+			canonicalFormVersion: 1,
+			kind: 'column',
+			column: {},
+		});
 	if (
 		change.kind === 'drop_table' ||
 		change.kind === 'drop_column' ||
