@@ -185,6 +185,29 @@ describe('PgsqlAdapter', () => {
 				/preparedStatements\.maxStatements is configured borrowed client-wide: expected 1, received 2/,
 			);
 		});
+
+		it('rejects replayInvalidatedPlans for borrowed and compile-only JavaScript callers', () => {
+			const client = {
+				query: vi.fn(),
+				release: vi.fn(),
+			} as unknown as PoolClient;
+
+			expect(() =>
+				createPgsqlAdapter(client, {
+					borrowedClient: true,
+					replayInvalidatedPlans: true,
+				} as any),
+			).toThrow(
+				'replayInvalidatedPlans requires a pg Pool-owned adapter; it is not supported by borrowed-client or compile-only adapters.',
+			);
+			expect(() =>
+				createPgsqlCompileOnlyAdapter({
+					replayInvalidatedPlans: true,
+				} as any),
+			).toThrow(
+				'replayInvalidatedPlans requires a pg Pool-owned adapter; it is not supported by borrowed-client or compile-only adapters.',
+			);
+		});
 	});
 
 	describe('createPgsqlAdapter', () => {
@@ -199,12 +222,24 @@ describe('PgsqlAdapter', () => {
 			expectTypeOf(
 				createPgsqlAdapter(client, { borrowedClient: true }),
 			).toEqualTypeOf<PgsqlAdapter>();
+			expectTypeOf(
+				createPgsqlAdapter(pool, { replayInvalidatedPlans: true }),
+			).toEqualTypeOf<PgsqlAdapter>();
 
 			if (process.env.DBSP_TYPECHECK_ONLY === '1') {
 				// @ts-expect-error a PoolClient requires an explicit borrowedClient opt-in.
 				createPgsqlAdapter(client);
 				// @ts-expect-error borrowedClient requires a PoolClient, not a Pool.
 				createPgsqlAdapter(pool, { borrowedClient: true });
+				// @ts-expect-error replay requires a pool-owned adapter.
+				createPgsqlAdapter(client, {
+					borrowedClient: true,
+					replayInvalidatedPlans: true,
+				});
+				// @ts-expect-error replay requires a pool-owned adapter.
+				createPgsqlCompileOnlyAdapter({ replayInvalidatedPlans: true });
+				// @ts-expect-error replay requires a pool-owned adapter.
+				new PgsqlAdapter(undefined, { replayInvalidatedPlans: true });
 			}
 		});
 	});
@@ -935,35 +970,6 @@ describe('PgsqlAdapter', () => {
 			expect(client.query).toHaveBeenCalledTimes(2);
 		});
 
-		it('replays 0A000/RevalidateCachedQuery only with the caller assertion enabled', async () => {
-			const client = Object.assign(createMockPool(), {
-				release: vi.fn(),
-				_txStatus: 'I',
-			}) as unknown as PoolClient;
-			const sql = 'SELECT id FROM users WHERE id = $1';
-			const error = {
-				code: '0A000',
-				severity: 'ERROR',
-				routine: 'RevalidateCachedQuery',
-			};
-			vi.mocked(client.query)
-				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
-				.mockRejectedValueOnce(error)
-				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-				replayInvalidatedPlans: true,
-			});
-
-			await (adapter as any).issueConnectionQuery(client, sql, [7], true, true);
-			await expect(
-				(adapter as any).issueConnectionQuery(client, sql, [7], true, true),
-			).resolves.toMatchObject({ rows: [{ id: 7 }] });
-
-			expect(client.query).toHaveBeenNthCalledWith(3, sql, [7]);
-		});
-
 		it('replays with the named attempt parameter snapshot after the caller mutates its alias', async () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
@@ -1037,6 +1043,7 @@ describe('PgsqlAdapter', () => {
 				preparedStatements: true,
 				replayInvalidatedPlans: true,
 			});
+			expect((adapter as any).replayInvalidatedPlans).toBe(true);
 			const query = testQuery(sql, [7]);
 			await expect(
 				adapter.withPinnedConnection(async (pinned) => {

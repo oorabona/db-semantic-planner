@@ -367,36 +367,41 @@ describe('adapter prepared statements', () => {
 	});
 
 	it('uses unnamed execution after result-shape DDL invalidates a named plan', async () => {
-		const { client, close } = await getIsolatedClient();
+		const pool = new Pool({
+			connectionString: process.env.DATABASE_URL,
+			max: 1,
+		});
 		try {
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
+			const adapter = createPgsqlAdapter(pool, {
 				preparedStatements: true,
 				replayInvalidatedPlans: true,
 			});
-			const table = `"${SCHEMA}".invalidated_plan`;
-			const sql = `SELECT * FROM ${table} WHERE id = $1`;
-			const query = compiled<{ id: number; added?: string }>(sql, [1]);
+			await adapter.withPinnedConnection(async (pinned) => {
+				const client = pinned.getPoolInstance() as PoolClient;
+				const table = `"${SCHEMA}".invalidated_plan`;
+				const sql = `SELECT * FROM ${table} WHERE id = $1`;
+				const query = compiled<{ id: number; added?: string }>(sql, [1]);
 
-			await adapter.executeDDL(
-				`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
-			);
-			await adapter.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
-			await adapter.execute(query);
-			await adapter.execute(query);
-			expect(await preparedCount(client, sql)).toBe(1);
-			await adapter.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
+				await pinned.executeDDL(
+					`CREATE TABLE ${table} (id integer PRIMARY KEY)`,
+				);
+				await pinned.executeRaw(`INSERT INTO ${table} (id) VALUES ($1)`, [1]);
+				await pinned.execute(query);
+				await pinned.execute(query);
+				expect(await preparedCount(client, sql)).toBe(1);
+				await pinned.executeDDL(`ALTER TABLE ${table} ADD COLUMN added text`);
 
-			await expect(adapter.execute(query)).rejects.toMatchObject({
-				code: '0A000',
-				routine: 'RevalidateCachedQuery',
+				await expect(pinned.execute(query)).rejects.toMatchObject({
+					code: '0A000',
+					routine: 'RevalidateCachedQuery',
+				});
+				await expect(pinned.execute(query)).resolves.toEqual([
+					{ id: 1, added: null },
+				]);
+				expect(await preparedCount(client, sql)).toBe(1);
 			});
-			await expect(adapter.execute(query)).resolves.toEqual([
-				{ id: 1, added: null },
-			]);
-			expect(await preparedCount(client, sql)).toBe(1);
 		} finally {
-			await close();
+			await pool.end();
 		}
 	});
 

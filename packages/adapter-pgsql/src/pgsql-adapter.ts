@@ -2212,12 +2212,6 @@ export interface PgsqlPreparedStatementsOptions {
 }
 
 export interface PgsqlAdapterOptions {
-	/**
-	 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
-	 * you assert that your statements do not invoke functions performing
-	 * effectful work before nested prepared-statement operations.
-	 */
-	readonly replayInvalidatedPlans?: boolean;
 	/** Schema name for multi-tenant queries */
 	readonly schemaName?: string;
 	/**
@@ -2243,6 +2237,15 @@ export interface PgsqlAdapterOptions {
 }
 
 export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
+	/**
+	 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
+	 * you assert that your statements do not invoke functions performing
+	 * effectful work before nested prepared-statement operations.
+	 *
+	 * Replay needs the adapter-owned serialized physical client available from a
+	 * pool; it is therefore not supported by borrowed or compile-only adapters.
+	 */
+	readonly replayInvalidatedPlans?: boolean;
 	readonly borrowedClient?: false;
 }
 
@@ -2281,6 +2284,8 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 interface PgsqlAdapterInternalOptions
 	extends PgsqlBorrowedClientAdapterOptions {
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
+	/** Propagated only to adapter-owned client scopes created from a pool. */
+	readonly replayInvalidatedPlans?: boolean;
 	readonly adapterManagedTransaction?: true;
 	readonly adapterManagedPinnedConnection?: true;
 	readonly rollbackOnlyScope?: true;
@@ -2343,6 +2348,26 @@ function hasManagedTransactionsOption(
 		options !== null &&
 		'managedTransactions' in options &&
 		options.managedTransactions === true
+	);
+}
+
+function hasReplayInvalidatedPlansOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		typeof options === 'object' &&
+		options !== null &&
+		'replayInvalidatedPlans' in options
+	);
+}
+
+function replayInvalidatedPlansEnabled(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		hasReplayInvalidatedPlansOption(options) &&
+		(options as { readonly replayInvalidatedPlans?: unknown })
+			.replayInvalidatedPlans === true
 	);
 }
 
@@ -2454,7 +2479,7 @@ function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
 	options: PgsqlAdapterConstructionOptions,
 ): PgsqlAdapter<DB> {
 	return new PgsqlAdapter<DB>(
-		connection as Pool | undefined,
+		connection as Pool,
 		options as PgsqlPoolAdapterOptions,
 	);
 }
@@ -2514,7 +2539,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 *   or nothing at all for compile-only mode
 	 * @param options - configuration; declares connection ownership
 	 */
-	constructor(pool?: Pool | undefined, options?: PgsqlPoolAdapterOptions);
 	constructor(pool: Pool, options?: PgsqlPoolAdapterOptions);
 	constructor(client: PoolClient, options: PgsqlBorrowedClientAdapterOptions);
 	constructor(pool: undefined, options?: PgsqlAdapterOptions);
@@ -2560,6 +2584,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.client = undefined;
 			this.borrowedClient = false;
 		}
+		if (
+			hasReplayInvalidatedPlansOption(options) &&
+			this.pool === undefined &&
+			!isPgsqlAdapterInternalOptions(options)
+		) {
+			throw new Error(
+				'replayInvalidatedPlans requires a pg Pool-owned adapter; it is not supported by borrowed-client or compile-only adapters.',
+			);
+		}
 		this.managedTransactions = hasManagedTransactionsOption(options);
 		this.adapterManagedTransaction = isAdapterManagedTransactionOption(options);
 		this.adapterManagedPinnedConnection =
@@ -2573,7 +2606,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
-		this.replayInvalidatedPlans = options?.replayInvalidatedPlans === true;
+		this.replayInvalidatedPlans = replayInvalidatedPlansEnabled(options);
 		this.preparedStatements = normalizePreparedStatements(
 			options?.preparedStatements,
 		);
