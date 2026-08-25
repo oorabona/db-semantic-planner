@@ -3,11 +3,17 @@
  * Tests for DataTable scroll-near-end detection (AC-2: infinite scroll trigger).
  */
 import { cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DataTable } from './DataTable';
+
+beforeEach(() => {
+	vi.useFakeTimers();
+});
 
 afterEach(() => {
 	cleanup();
+	vi.clearAllTimers();
+	vi.useRealTimers();
 });
 
 // ── Fixtures ─────────────────────────────────────────────────────
