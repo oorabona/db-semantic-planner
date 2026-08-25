@@ -191,12 +191,13 @@ names dbsp's own admission name for that attempt with the code-matched suffix:
 nested, cross-paired, or mismatched names propagate without replay or quarantine.
 `0A000`/
 `RevalidateCachedQuery` carries no statement identity, so it keeps its SQL-scoped
-quarantine and propagates by default. Set `replayInvalidatedPlans: true` only when
+quarantine and propagates by default. Every other initial named-execution error
+propagates unchanged. Set `replayInvalidatedPlans: true` only when
 you assert that your statements do not invoke functions performing effectful work
 before nested prepared-statement operations; this pool-only option requires
 `preparedStatements: true` (or a prepared-statements options object) and permits the
 same bounded `0A000` replay. The routine-less driver-local duplicate-name collision
-keeps its SQL-scoped quarantine rule. Every other error propagates.
+keeps its SQL-scoped quarantine rule.
 
 Replay snapshots only JSON-like value graphs (finite numbers, strings, booleans,
 `null`, arrays, plain or null-prototype objects) plus clean `Date` and `Buffer`

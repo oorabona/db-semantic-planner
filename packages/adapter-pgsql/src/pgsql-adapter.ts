@@ -727,27 +727,10 @@ type ReplayableParameterSnapshot = unknown[];
 const REPLAY_SNAPSHOT_MAX_VISITED_NODES = 64 * 1024;
 const REPLAY_SNAPSHOT_MAX_STRING_BYTES = 16 * 1024 * 1024;
 const REPLAY_SNAPSHOT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
-
-// These are the only own Date properties node-postgres can consult while it
-// serializes a Date. Checking this fixed list avoids enumerating caller-owned
-// Date metadata.
-const NODE_POSTGRES_DATE_SERIALIZATION_HOOKS = [
-	'getTimezoneOffset',
-	'getFullYear',
-	'getMonth',
-	'getDate',
-	'getHours',
-	'getMinutes',
-	'getSeconds',
-	'getMilliseconds',
-	'getUTCFullYear',
-	'getUTCMonth',
-	'getUTCDate',
-	'getUTCHours',
-	'getUTCMinutes',
-	'getUTCSeconds',
-	'getUTCMilliseconds',
-] as const;
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+	Object.getPrototypeOf(Uint8Array.prototype),
+	'byteLength',
+)!.get!;
 
 type ReplayableParameterSnapshotBudget = {
 	visitedNodes: number;
@@ -790,9 +773,14 @@ function consumeReplayableParameterSnapshotBuffer(
 	budget: ReplayableParameterSnapshotBudget,
 ): void {
 	// Check before Buffer.from() allocates its copy.
-	if (value.byteLength > budget.bufferBytes)
+	const byteLength = Reflect.apply(
+		TYPED_ARRAY_BYTE_LENGTH_GETTER,
+		value,
+		[],
+	) as number;
+	if (byteLength > budget.bufferBytes)
 		throw new TypeError('replayable parameter snapshot Buffer budget exceeded');
-	budget.bufferBytes -= value.byteLength;
+	budget.bufferBytes -= byteLength;
 }
 
 /**
@@ -849,10 +837,8 @@ function cloneReplayableParameterValue(
 	if (value instanceof Date) {
 		if (Object.getPrototypeOf(value) !== Date.prototype)
 			throw new TypeError('custom Date is not replayable');
-		for (const hook of NODE_POSTGRES_DATE_SERIALIZATION_HOOKS) {
-			if (Object.getOwnPropertyDescriptor(value, hook) !== undefined)
-				throw new TypeError('custom Date is not replayable');
-		}
+		if (Reflect.ownKeys(value).length !== 0)
+			throw new TypeError('custom Date is not replayable');
 		return new Date(Date.prototype.getTime.call(value));
 	}
 	if (Buffer.isBuffer(value)) {

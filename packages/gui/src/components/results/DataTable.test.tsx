@@ -2,7 +2,7 @@
 /**
  * Tests for DataTable scroll-near-end detection (AC-2: infinite scroll trigger).
  */
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DataTable } from './DataTable';
 
@@ -28,12 +28,27 @@ const ROWS: Record<string, unknown>[] = Array.from({ length: 20 }, (_, i) => ({
 
 describe('DataTable', () => {
 	it('renders rows and columns', () => {
-		const { container } = render(<DataTable columns={COLUMNS} rows={ROWS} />);
-		const table = container.querySelector('table');
-		expect(table).toBeTruthy();
-		// Should have header cells for each column
-		const headers = container.querySelectorAll('thead th');
-		expect(headers.length).toBeGreaterThanOrEqual(COLUMNS.length);
+		const offsetHeight = vi
+			.spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+			.mockReturnValue(640);
+		const offsetWidth = vi
+			.spyOn(HTMLElement.prototype, 'offsetWidth', 'get')
+			.mockReturnValue(960);
+		try {
+			const { container } = render(<DataTable columns={COLUMNS} rows={ROWS} />);
+			act(() => {
+				vi.runOnlyPendingTimers();
+			});
+			const table = container.querySelector('table');
+			expect(table).toBeTruthy();
+			// Should have header cells for each column
+			const headers = container.querySelectorAll('thead th');
+			expect(headers.length).toBeGreaterThanOrEqual(COLUMNS.length);
+			expect(container.querySelector('tbody')?.textContent).toContain('row-1');
+		} finally {
+			offsetHeight.mockRestore();
+			offsetWidth.mockRestore();
+		}
 	});
 
 	describe('onScrollNearEnd (AC-2)', () => {

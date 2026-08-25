@@ -1408,7 +1408,7 @@ describe('PgsqlAdapter', () => {
 			]);
 		});
 
-		it('declines a Date with a node-postgres hook shadowed without enumerating its keys', async () => {
+		it('declines a decorated Date', async () => {
 			const client = Object.assign(createMockPool(), {
 				release: vi.fn(),
 				_txStatus: 'I',
@@ -1418,7 +1418,7 @@ describe('PgsqlAdapter', () => {
 			});
 			const sql = 'SELECT id FROM users WHERE created_at = $1';
 			const value = Object.assign(new Date('2026-08-24T12:00:00.000Z'), {
-				getFullYear: () => 1999,
+				futureNodePostgresSerializationHook: () => 1999,
 			});
 			const error = {
 				code: '26000',
@@ -1426,31 +1426,17 @@ describe('PgsqlAdapter', () => {
 				routine: 'FetchPreparedStatement',
 				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
 			};
-			const ownKeys = vi
-				.spyOn(Reflect, 'ownKeys')
-				.mockImplementation((target) => {
-					if (target === value)
-						throw new Error('Date keys must not be enumerated');
-					return [
-						...Object.getOwnPropertyNames(target),
-						...Object.getOwnPropertySymbols(target),
-					];
-				});
 			vi.mocked(client.query)
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
 				.mockRejectedValueOnce(error);
 			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
 
-			try {
-				await expect(
-					adapter.withPinnedConnection(async (pinned) => {
-						await pinned.execute(testQuery(sql, [value]));
-						await pinned.execute(testQuery(sql, [value]));
-					}),
-				).rejects.toBe(error);
-			} finally {
-				ownKeys.mockRestore();
-			}
+			await expect(
+				adapter.withPinnedConnection(async (pinned) => {
+					await pinned.execute(testQuery(sql, [value]));
+					await pinned.execute(testQuery(sql, [value]));
+				}),
+			).rejects.toBe(error);
 			expect(client.query).toHaveBeenCalledTimes(2);
 		});
 
@@ -1928,6 +1914,74 @@ describe('PgsqlAdapter', () => {
 			}
 			expect(bufferFrom).not.toHaveBeenCalled();
 		}, 30_000);
+
+		it.each([
+			{
+				label: 'data property',
+				shadowByteLength: (value: Buffer) => {
+					Object.defineProperty(value, 'byteLength', { value: 0 });
+				},
+			},
+			{
+				label: 'accessor',
+				shadowByteLength: (value: Buffer) => {
+					Object.defineProperty(value, 'byteLength', { get: () => 0 });
+				},
+			},
+		])('declines an oversized Buffer with a shadowed byteLength $label at capture and submits named shallowly', async ({
+			shadowByteLength,
+		}) => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+				_txStatus: 'I',
+			}) as unknown as PoolClient;
+			const pool = Object.assign(createMockPool(), {
+				connect: vi.fn<() => Promise<PoolClient>>().mockResolvedValue(client),
+			});
+			const sql = 'SELECT id FROM replay_snapshot_budget WHERE payload = $1';
+			const error = {
+				code: '26000',
+				severity: 'ERROR',
+				routine: 'FetchPreparedStatement',
+				message: `prepared statement "${derivePreparedStatementName(sql)}" does not exist`,
+			};
+			const value = Buffer.alloc(16 * 1024 * 1024 + 1, 7);
+			shadowByteLength(value);
+			vi.mocked(client.query)
+				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any)
+				.mockRejectedValueOnce(error);
+			const adapter = createPgsqlAdapter(pool, { preparedStatements: true });
+			const bufferFrom = vi.spyOn(Buffer, 'from');
+			try {
+				await (adapter as any).issueConnectionQuery(
+					client,
+					sql,
+					[value],
+					true,
+					true,
+				);
+				await expect(
+					(adapter as any).issueConnectionQuery(
+						client,
+						sql,
+						[value],
+						true,
+						true,
+					),
+				).rejects.toBe(error);
+			} finally {
+				bufferFrom.mockRestore();
+			}
+			expect(bufferFrom).not.toHaveBeenCalled();
+			expect(client.query).toHaveBeenCalledTimes(2);
+			expect(
+				(
+					vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+						readonly values: unknown[];
+					}
+				).values[0],
+			).toBe(value);
+		});
 
 		it('keeps named parameters shallow in pool and borrowed modes', async () => {
 			const parameter = { nested: { mutable: true } };
