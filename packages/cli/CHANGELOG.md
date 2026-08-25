@@ -1,5 +1,43 @@
 # Changelog
 
+## [3.0.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.2.0...cli-v3.0.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** SequenceIR and schema DSL sequence fields (startWith, incrementBy, minValue, maxValue) accept number | string; strict decimal strings carry exact int64 values.
+* **adapter-pgsql:** dbsp push and dbsp migrate removed. Use apply <run-id> to execute recorded plans or apply for unrecorded intents. CLI version 3.0.0.
+
+### Features
+
+* **adapter-pgsql:** Address-free v3 postconditions with explicit target binding ([#665](https://github.com/oorabona/db-semantic-planner/issues/665)) ([aa5daa8](https://github.com/oorabona/db-semantic-planner/commit/aa5daa899cc95640d92a90ebb3b4217b1e34a426))
+* **adapter-pgsql:** Canonical payload digests and exact int64 sequence contracts ([#672](https://github.com/oorabona/db-semantic-planner/issues/672)) ([afa6d24](https://github.com/oorabona/db-semantic-planner/commit/afa6d24f6902cd68ced15e02aefe737ad4cc362a))
+* **adapter-pgsql:** Managed-state ledger delivery 2 — admission, recovery, destructive authority ([#516](https://github.com/oorabona/db-semantic-planner/issues/516)) ([d5979c0](https://github.com/oorabona/db-semantic-planner/commit/d5979c0d7184ffb8b66ca4f9ddc1b148dd2c22b9))
+* **cli:** Let dbsp generate ddl target a PostgreSQL version ([#482](https://github.com/oorabona/db-semantic-planner/issues/482)) ([477544b](https://github.com/oorabona/db-semantic-planner/commit/477544bc9d9daf0fa71385a95e4c41ef9fb82833)), closes [#468](https://github.com/oorabona/db-semantic-planner/issues/468)
+* **core:** Execute a reviewed plan against a target it can prove is the one ([#479](https://github.com/oorabona/db-semantic-planner/issues/479)) ([e89f2be](https://github.com/oorabona/db-semantic-planner/commit/e89f2bee7206aeb4f21e8b06adde18aa984beb58)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Defaults compare in the server representation and serial defaults are expected ([fcb9fb1](https://github.com/oorabona/db-semantic-planner/commit/fcb9fb16d6ee92617e86d480eef59764c823759f)), closes [#566](https://github.com/oorabona/db-semantic-planner/issues/566)
+* **adapter-pgsql:** Emit CREATE INDEX without IF NOT EXISTS ([#483](https://github.com/oorabona/db-semantic-planner/issues/483)) ([b1c1863](https://github.com/oorabona/db-semantic-planner/commit/b1c1863a30b8944b687f63b4213700ad1b9702ec)), closes [#419](https://github.com/oorabona/db-semantic-planner/issues/419)
+* **adapter-pgsql:** Ledger recovery outcomes are explicit, attempt-bound, and session-safe ([#548](https://github.com/oorabona/db-semantic-planner/issues/548)) ([0bab857](https://github.com/oorabona/db-semantic-planner/commit/0bab857d2434f88234ce07cb105fdcb7852202e1))
+* **adapter-pgsql:** One adapter home for the v2 decoder and a table proof refusing contradictions ([#573](https://github.com/oorabona/db-semantic-planner/issues/573)) ([50eece0](https://github.com/oorabona/db-semantic-planner/commit/50eece0a5ac6930730728fb2af0f5b93b329c113))
+* **adapter-pgsql:** Postconditions are structural catalogue proofs, not rendered-text comparison ([#565](https://github.com/oorabona/db-semantic-planner/issues/565)) ([b67dbb2](https://github.com/oorabona/db-semantic-planner/commit/b67dbb2ca9b49416676e1882456aa31e66a8ca51))
+* **adapter-pgsql:** Reinitialize, index read-back, and key-list verification hardening ([#560](https://github.com/oorabona/db-semantic-planner/issues/560)) ([31e0e55](https://github.com/oorabona/db-semantic-planner/commit/31e0e55bfcd014ccd7837384308678f6590395c2))
+* **adapter-pgsql:** Session revocation is one core-owned latch per physical client ([#555](https://github.com/oorabona/db-semantic-planner/issues/555)) ([f115b95](https://github.com/oorabona/db-semantic-planner/commit/f115b953f2cce283d8b316dc25042fd4aa9b66d0))
+* **cli:** Every read-back proves the object kind and decodes its projection strictly ([#598](https://github.com/oorabona/db-semantic-planner/issues/598)) ([a7c1164](https://github.com/oorabona/db-semantic-planner/commit/a7c1164de818e8eb11884fc0b2c60df4882c8915))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 4.0.0
+    * @dbsp/core bumped to 4.0.0
+    * @dbsp/nql bumped to 1.10.4
+    * @dbsp/types bumped to 4.0.0
+
 ## [2.2.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.1.4...cli-v2.2.0) (2026-07-31)
 
 
