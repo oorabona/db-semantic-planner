@@ -204,8 +204,12 @@ Replay snapshots only JSON-like value graphs (finite numbers, strings, booleans,
 instances. It excludes non-finite numbers, `undefined`, `bigint`, symbol-valued
 parameters, functions, proxies, cycles, sparse arrays, accessors, symbol keys on
 plain objects, exotic prototypes, custom built-ins, and values with their own
-node-postgres `toPostgres` behavior. Serialization-irrelevant symbol metadata on
-arrays and Buffers is ignored.
+node-postgres `toPostgres` behavior. Those exclusions apply to parameter
+values and plain-object members. On arrays only numeric index
+properties participate and on Buffers only the bytes: any other own
+metadata there — string-keyed properties, accessors, symbol keys, or an
+own `toPostgres` — is discarded from the snapshot rather than disabling
+replay.
 The snapshot detaches from later mutations to the supplied value graph, including
 its clean `Date` and `Buffer` values. It does not freeze built-in prototypes,
 timezone state, or node-postgres serialization configuration: those must remain
