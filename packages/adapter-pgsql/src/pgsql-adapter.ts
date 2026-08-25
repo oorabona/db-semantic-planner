@@ -550,10 +550,12 @@ export class PgsqlTransactionTimeoutError extends Error {
 
 /**
  * Raised when the single safe unnamed replay after a prepared-statement
- * infrastructure failure also fails. The original infrastructure failure and
- * the admission fingerprint identify the failed recovery. DBSP-authored
- * messages carry no parameter values; preserved upstream errors, including
- * the standard Error `cause` for the replay failure, are unsanitized.
+ * infrastructure failure also fails. `message` is always the safe constant
+ * `Prepared statement recovery replay failed.`; `cause` is the replay error;
+ * `infrastructureError` is the original infrastructure error; and
+ * `admissionFingerprint` identifies the admitted statement. DBSP-authored
+ * messages carry no parameter values; preserved upstream errors, including the
+ * standard Error `cause`, are unsanitized.
  */
 export class PgsqlPreparedStatementReplayError extends Error {
 	readonly dbspPreparedStatementReplay = true;
@@ -648,16 +650,30 @@ function isVerifiedPreparedStatementInfrastructureError(
  * code/routine pair alone cannot authorize replaying or quarantining that
  * outer statement. Do not consult diagnostic text from nested execution.
  *
- * This recognizes canonical/C-locale PostgreSQL messages only. Localized
- * deployments propagate 26000/42P05 failures without replay or quarantine.
+ * This recognizes canonical/C-locale PostgreSQL messages only, and correlates
+ * `does not exist` to 26000 and `already exists` to 42P05. Localized or
+ * cross-paired deployments propagate 26000/42P05 failures without replay or
+ * quarantine.
  */
 function reportedPreparedStatementName(error: unknown): string | undefined {
 	if (typeof error !== 'object' || error === null) return undefined;
-	const { message } = error as { readonly message?: unknown };
+	const { code, message } = error as {
+		readonly code?: unknown;
+		readonly message?: unknown;
+	};
 	if (typeof message !== 'string') return undefined;
-	return /^prepared statement "([^"]+)" (?:does not exist|already exists)$/.exec(
-		message,
-	)?.[1];
+	const match =
+		/^prepared statement "([^"]+)" (does not exist|already exists)$/.exec(
+			message,
+		);
+	if (match === null) return undefined;
+	const [, name, suffix] = match;
+	if (
+		(code === '26000' && suffix === 'does not exist') ||
+		(code === '42P05' && suffix === 'already exists')
+	)
+		return name;
+	return undefined;
 }
 
 /**
@@ -702,6 +718,72 @@ function canReplayPreparedStatementInfrastructureError(
 type ReplayableParameterSnapshot = unknown[];
 
 /**
+ * Replay is an optional recovery path, so its defensive copy must remain
+ * bounded. These limits apply independently to each snapshot or replay copy:
+ * 64 Ki visited values, 16 MiB of UTF-8 string data, and 16 MiB of Buffer
+ * data. Parameters above a limit remain valid for the named submission but
+ * decline transparent replay.
+ */
+const REPLAY_SNAPSHOT_MAX_VISITED_NODES = 64 * 1024;
+const REPLAY_SNAPSHOT_MAX_STRING_BYTES = 16 * 1024 * 1024;
+const REPLAY_SNAPSHOT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+const TYPED_ARRAY_BYTE_LENGTH_GETTER = Object.getOwnPropertyDescriptor(
+	Object.getPrototypeOf(Uint8Array.prototype),
+	'byteLength',
+)!.get!;
+
+type ReplayableParameterSnapshotBudget = {
+	visitedNodes: number;
+	stringBytes: number;
+	bufferBytes: number;
+};
+
+function createReplayableParameterSnapshotBudget(): ReplayableParameterSnapshotBudget {
+	return {
+		visitedNodes: REPLAY_SNAPSHOT_MAX_VISITED_NODES,
+		stringBytes: REPLAY_SNAPSHOT_MAX_STRING_BYTES,
+		bufferBytes: REPLAY_SNAPSHOT_MAX_BUFFER_BYTES,
+	};
+}
+
+function consumeReplayableParameterSnapshotNode(
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	if (budget.visitedNodes === 0)
+		throw new TypeError('replayable parameter snapshot node budget exceeded');
+	budget.visitedNodes -= 1;
+}
+
+function consumeReplayableParameterSnapshotString(
+	value: string,
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	// Every UTF-8 code unit occupies at least one byte. Refuse oversized
+	// strings before Buffer.byteLength() scans their full contents.
+	if (value.length > budget.stringBytes)
+		throw new TypeError('replayable parameter snapshot string budget exceeded');
+	const bytes = Buffer.byteLength(value);
+	if (bytes > budget.stringBytes)
+		throw new TypeError('replayable parameter snapshot string budget exceeded');
+	budget.stringBytes -= bytes;
+}
+
+function consumeReplayableParameterSnapshotBuffer(
+	value: Buffer,
+	budget: ReplayableParameterSnapshotBudget,
+): void {
+	// Check before Buffer.from() allocates its copy.
+	const byteLength = Reflect.apply(
+		TYPED_ARRAY_BYTE_LENGTH_GETTER,
+		value,
+		[],
+	) as number;
+	if (byteLength > budget.bufferBytes)
+		throw new TypeError('replayable parameter snapshot Buffer budget exceeded');
+	budget.bufferBytes -= byteLength;
+}
+
+/**
  * Produces the deliberately small parameter domain that can be replayed
  * without consulting caller-owned state. JSON-like arrays/plain objects are
  * copied recursively; Date and Buffer are the only supported object built-ins.
@@ -723,18 +805,26 @@ function cloneReplayableParameterValues(
 ): ReplayableParameterSnapshot {
 	const active = new WeakSet<object>();
 	const copies = new WeakMap<object, unknown>();
-	return parameters.map((parameter) =>
-		cloneReplayableParameterValue(parameter, active, copies),
-	);
+	const budget = createReplayableParameterSnapshotBudget();
+	const copy: unknown[] = [];
+	for (const parameter of parameters) {
+		copy.push(cloneReplayableParameterValue(parameter, active, copies, budget));
+	}
+	return copy;
 }
 
 function cloneReplayableParameterValue(
 	value: unknown,
 	active: WeakSet<object>,
 	copies: WeakMap<object, unknown>,
+	budget: ReplayableParameterSnapshotBudget,
 ): unknown {
-	if (value === null || typeof value === 'string' || typeof value === 'boolean')
+	consumeReplayableParameterSnapshotNode(budget);
+	if (value === null || typeof value === 'boolean') return value;
+	if (typeof value === 'string') {
+		consumeReplayableParameterSnapshotString(value, budget);
 		return value;
+	}
 	if (typeof value === 'number' && Number.isFinite(value)) return value;
 	if (typeof value !== 'object')
 		throw new TypeError('parameter is outside the replayable value domain');
@@ -754,6 +844,7 @@ function cloneReplayableParameterValue(
 	if (Buffer.isBuffer(value)) {
 		if (Object.getPrototypeOf(value) !== Buffer.prototype)
 			throw new TypeError('custom Buffer is not replayable');
+		consumeReplayableParameterSnapshotBuffer(value, budget);
 		return Buffer.from(value);
 	}
 
@@ -762,6 +853,12 @@ function cloneReplayableParameterValue(
 		if (Array.isArray(value)) {
 			if (Object.getPrototypeOf(value) !== Array.prototype)
 				throw new TypeError('custom array is not replayable');
+			// Refuse before descriptor inspection or new Array(length) can allocate
+			// for more child values than this copy may visit.
+			if (value.length > budget.visitedNodes)
+				throw new TypeError(
+					'replayable parameter snapshot node budget exceeded',
+				);
 			assertReplayableArrayProperties(value);
 			const copy: unknown[] = new Array(value.length);
 			copies.set(value, copy);
@@ -770,6 +867,7 @@ function cloneReplayableParameterValue(
 					value[index],
 					active,
 					copies,
+					budget,
 				);
 			}
 			return copy;
@@ -786,8 +884,14 @@ function cloneReplayableParameterValue(
 		for (const [key, descriptor] of Object.entries(descriptors)) {
 			if (!descriptor.enumerable || !('value' in descriptor))
 				throw new TypeError('non-JSON parameter property is not replayable');
+			consumeReplayableParameterSnapshotString(key, budget);
 			Object.defineProperty(copy, key, {
-				value: cloneReplayableParameterValue(descriptor.value, active, copies),
+				value: cloneReplayableParameterValue(
+					descriptor.value,
+					active,
+					copies,
+					budget,
+				),
 				enumerable: true,
 				writable: true,
 				configurable: true,
@@ -800,19 +904,14 @@ function cloneReplayableParameterValue(
 }
 
 function assertReplayableArrayProperties(value: unknown[]): void {
-	const descriptors = Object.getOwnPropertyDescriptors(value);
-	for (const [key, descriptor] of Object.entries(descriptors)) {
-		if (key === 'length') continue;
+	for (let index = 0; index < value.length; index += 1) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
 		if (
-			!/^0$|^[1-9][0-9]*$/.test(key) ||
+			descriptor === undefined ||
 			!descriptor.enumerable ||
 			!('value' in descriptor)
 		)
 			throw new TypeError('non-JSON array parameter is not replayable');
-	}
-	for (let index = 0; index < value.length; index += 1) {
-		if (!Object.hasOwn(value, index))
-			throw new TypeError('sparse array parameter is not replayable');
 	}
 }
 
@@ -2411,7 +2510,26 @@ export type PgsqlPoolAdapterOptions =
 			/**
 			 * Enable one unnamed replay after `0A000`/`RevalidateCachedQuery` only when
 			 * you assert that your statements do not invoke functions performing
-			 * effectful work before nested prepared-statement operations.
+			 * effectful work before nested prepared-statement operations. This requires
+			 * `preparedStatements: true` (or a prepared-statements options object).
+			 *
+			 * Replay snapshots JSON-like values (finite numbers, strings, booleans,
+			 * `null`, arrays, plain or null-prototype objects) and clean `Date`/`Buffer`
+			 * instances. It excludes non-finite numbers, `undefined`, `bigint`, functions,
+			 * proxies, cycles, sparse arrays, accessors, symbol-valued
+			 * parameters, symbol keys on plain objects, exotic prototypes, custom built-ins,
+			 * and values with their own node-postgres
+			 * `toPostgres` behavior.
+			 * Serialization-irrelevant symbol metadata on arrays and Buffers is ignored.
+			 * The detached snapshot covers later mutations to the supplied value graph,
+			 * not built-in prototypes, timezone state, or node-postgres serialization
+			 * configuration; a process-global `toPostgres` or `toJSON` installed while
+			 * the call is in flight is outside the guarantee. Each capture or replay copy
+			 * is independently limited to 64 Ki visited values, 16 MiB of UTF-8 strings,
+			 * and 16 MiB of Buffer data. An ineligible or over-budget value still receives
+			 * the initial named submission, but disables transparent replay.
+			 * These budgets bound copied nodes and payload bytes; enumerating a plain
+			 * object's existing property table is proportional to the caller's own object.
 			 *
 			 * Replay needs the adapter-owned serialized physical client available from a
 			 * pool; it is therefore not supported by borrowed or compile-only adapters.
@@ -2496,12 +2614,18 @@ type PgsqlAdapterInternalConstructionOverrides =
 		readonly preparedStatementRegistry?: PreparedStatementRegistry;
 	};
 
+function isPropertyContainer(value: unknown): value is object {
+	return (
+		value !== null && (typeof value === 'object' || typeof value === 'function')
+	);
+}
+
 function isPgsqlAdapterInternalOptions(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): options is PgsqlAdapterInternalOptions {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		pgsqlAdapterInternalOptionsKey in options &&
 		options[pgsqlAdapterInternalOptionsKey] === true
 	);
@@ -2511,8 +2635,8 @@ function hasBorrowedClientOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): options is PgsqlBorrowedClientAdapterOptions | PgsqlAdapterInternalOptions {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		'borrowedClient' in options &&
 		options.borrowedClient === true
 	);
@@ -2522,31 +2646,40 @@ function hasManagedTransactionsOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): boolean {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		'managedTransactions' in options &&
 		options.managedTransactions === true
 	);
 }
 
-function hasReplayInvalidatedPlansOption(
-	options: PgsqlAdapterConstructionOptions | undefined,
-): boolean {
-	return (
-		typeof options === 'object' &&
-		options !== null &&
-		'replayInvalidatedPlans' in options
-	);
-}
+type ReplayInvalidatedPlansOption =
+	| { readonly present: false }
+	| { readonly present: true; readonly value: boolean };
 
-function replayInvalidatedPlansEnabled(
+function readReplayInvalidatedPlansOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
-): boolean {
-	return (
-		hasReplayInvalidatedPlansOption(options) &&
-		(options as { readonly replayInvalidatedPlans?: unknown })
-			.replayInvalidatedPlans === true
+): ReplayInvalidatedPlansOption {
+	if (!isPropertyContainer(options)) return { present: false };
+	if (isProxy(options)) {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
+	try {
+		// A revoked Proxy is no longer reported by isProxy(), but this check still
+		// precedes descriptor access and lets the option reader keep its own error.
+		'replayInvalidatedPlans' in options;
+	} catch {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
+	const descriptor = Object.getOwnPropertyDescriptor(
+		options,
+		'replayInvalidatedPlans',
 	);
+	if (descriptor === undefined) return { present: false };
+	if (!('value' in descriptor) || typeof descriptor.value !== 'boolean') {
+		throw new Error('replayInvalidatedPlans: expected a boolean.');
+	}
+	return { present: true, value: descriptor.value };
 }
 
 function isAdapterManagedTransactionOption(
@@ -2724,6 +2857,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
 	) {
+		const replayInvalidatedPlansOption =
+			readReplayInvalidatedPlansOption(options);
 		const declaredBorrowed = hasBorrowedClientOption(options);
 
 		if (pool != null) {
@@ -2763,7 +2898,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.borrowedClient = false;
 		}
 		if (
-			hasReplayInvalidatedPlansOption(options) &&
+			replayInvalidatedPlansOption.present &&
 			this.pool === undefined &&
 			!isPgsqlAdapterInternalOptions(options)
 		) {
@@ -2784,7 +2919,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.naming = getNamingPluginForDbCasing(this._dbCasing);
 		this.model = options?.model;
 		this.logger = options?.logger;
-		this.replayInvalidatedPlans = replayInvalidatedPlansEnabled(options);
+		this.replayInvalidatedPlans =
+			replayInvalidatedPlansOption.present &&
+			replayInvalidatedPlansOption.value;
 		this.preparedStatements = normalizePreparedStatements(
 			options?.preparedStatements,
 		);
@@ -3265,9 +3402,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Get the underlying pg Pool or borrowed PoolClient instance.
 	 *
-	 * Exposing a client from a dbsp-managed scope lets external callers queue
-	 * commands outside dbsp's statement lock, so that scope can no longer replay
-	 * a failed named statement safely.
+	 * Exposing raw access from a pool-owned dbsp-managed scope permanently taints that
+	 * physical client: external callers can queue commands outside dbsp's statement
+	 * lock, so replay is disabled and dbsp destroys the client at scope release.
+	 * Expect pool churn; session state on that exposed connection does not survive the
+	 * release. A borrowed client remains caller-owned: dbsp never releases it, and the
+	 * caller decides its fate after raw exposure.
 	 */
 	getPoolInstance(): Pool | PoolClient {
 		const executor = this.requireConnection('getPoolInstance()');
@@ -7015,6 +7155,9 @@ export function createPgsqlAdapter<DB = unknown>(
 	connection: Pool | PoolClient,
 	options?: PgsqlPoolAdapterOptions | PgsqlBorrowedClientAdapterOptions,
 ): PgsqlAdapter<DB> {
+	// Validate this descriptor-backed option before the ownership guard performs
+	// any `in` checks on caller-owned options.
+	readReplayInvalidatedPlansOption(options);
 	if (isPoolClientLike(connection)) {
 		if (!hasBorrowedClientOption(options)) {
 			throw new Error(

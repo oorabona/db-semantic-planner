@@ -23,7 +23,9 @@ export function generatedPostconditionStructuralPath(
 /**
  * A dependency-free v3 declaration domain check.  It intentionally knows no
  * catalogue addresses or PostgreSQL sessions, so producers and readers accept
- * exactly the same address-free declaration domain.
+ * exactly the same address-free declaration domain. Snapshot-graph refusals
+ * can carry a sanitized structural path; semantic refusals identify only their
+ * rule name and carry no path.
  */
 export class GeneratedPostconditionV3DeclarationError extends Error {
 	constructor(readonly rule: string) {
