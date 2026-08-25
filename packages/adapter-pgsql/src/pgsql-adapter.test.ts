@@ -1300,6 +1300,7 @@ describe('PgsqlAdapter', () => {
 					bytes[0] = 9;
 					timestamp.setUTCFullYear(2030);
 					nested.key = 'mutated';
+					parameters[0] = Buffer.from([4, 5, 6]);
 					throw error;
 				})
 				.mockResolvedValueOnce({ rows: [{ id: 7 }], rowCount: 1 } as any);
