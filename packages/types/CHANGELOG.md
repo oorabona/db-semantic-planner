@@ -1,5 +1,29 @@
 # Changelog
 
+## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.4.0...types-v4.0.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** replayInvalidatedPlans is accepted only by pool-owning adapter constructors; borrowed-client and compile-only constructors reject it.
+* **adapter-pgsql:** SequenceIR and schema DSL sequence fields (startWith, incrementBy, minValue, maxValue) accept number | string; strict decimal strings carry exact int64 values.
+* **adapter-pgsql:** dbsp push and dbsp migrate removed. Use apply <run-id> to execute recorded plans or apply for unrecorded intents. CLI version 3.0.0.
+
+### Features
+
+* **adapter-pgsql:** Canonical payload digests and exact int64 sequence contracts ([#672](https://github.com/oorabona/db-semantic-planner/issues/672)) ([afa6d24](https://github.com/oorabona/db-semantic-planner/commit/afa6d24f6902cd68ced15e02aefe737ad4cc362a))
+* **adapter-pgsql:** Managed-state ledger delivery 2 — admission, recovery, destructive authority ([#516](https://github.com/oorabona/db-semantic-planner/issues/516)) ([d5979c0](https://github.com/oorabona/db-semantic-planner/commit/d5979c0d7184ffb8b66ca4f9ddc1b148dd2c22b9))
+* **core:** Execute a reviewed plan against a target it can prove is the one ([#479](https://github.com/oorabona/db-semantic-planner/issues/479)) ([e89f2be](https://github.com/oorabona/db-semantic-planner/commit/e89f2bee7206aeb4f21e8b06adde18aa984beb58)), closes [#394](https://github.com/oorabona/db-semantic-planner/issues/394)
+* **core:** Observers observe, transformers preserve, and the execution port stops lying ([#645](https://github.com/oorabona/db-semantic-planner/issues/645)) ([0720c01](https://github.com/oorabona/db-semantic-planner/commit/0720c0179a13f09a54829efb672969f3c1ae7b76))
+* **core:** Where() accepts branded predicates and rejects every other expression ([#635](https://github.com/oorabona/db-semantic-planner/issues/635)) ([5f8fceb](https://github.com/oorabona/db-semantic-planner/commit/5f8fceb78e249f1e2b2c3f079f46b595b44858b7))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Identity-bound quarantine, faithful replay, exact sequence introspection ([#677](https://github.com/oorabona/db-semantic-planner/issues/677)) ([9c64e05](https://github.com/oorabona/db-semantic-planner/commit/9c64e05b62b72bc752bc72571c97d951f8a9abdb))
+* **adapter-pgsql:** Ledger recovery outcomes are explicit, attempt-bound, and session-safe ([#548](https://github.com/oorabona/db-semantic-planner/issues/548)) ([0bab857](https://github.com/oorabona/db-semantic-planner/commit/0bab857d2434f88234ce07cb105fdcb7852202e1))
+* **core:** The typed path infers the row type and IndexMethod matches the runtime allowlist ([#622](https://github.com/oorabona/db-semantic-planner/issues/622)) ([72b8878](https://github.com/oorabona/db-semantic-planner/commit/72b8878657f9da8e338cd10a79ae5125e7220cd5))
+
 ## [3.4.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.3.0...types-v3.4.0) (2026-07-31)
 
 
