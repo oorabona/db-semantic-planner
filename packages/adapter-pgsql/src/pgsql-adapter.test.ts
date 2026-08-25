@@ -240,6 +240,58 @@ describe('PgsqlAdapter', () => {
 			).toThrow('replayInvalidatedPlans: expected a boolean.');
 		});
 
+		it('honors replayInvalidatedPlans on a callable options container', () => {
+			const pool = createMockPool();
+			const options = Object.assign(() => {}, {
+				preparedStatements: true as const,
+				replayInvalidatedPlans: true as const,
+			});
+
+			const adapter = createPgsqlAdapter(pool, options);
+
+			expect((adapter as any).replayInvalidatedPlans).toBe(true);
+		});
+
+		it('rejects a non-boolean replayInvalidatedPlans on a callable options container', () => {
+			const pool = createMockPool();
+			const options = Object.assign(() => {}, {
+				preparedStatements: true as const,
+				replayInvalidatedPlans: 'true',
+			});
+
+			expect(() => createPgsqlAdapter(pool, options as any)).toThrow(
+				'replayInvalidatedPlans: expected a boolean.',
+			);
+		});
+
+		it('honors borrowedClient on a callable options container', () => {
+			const client = Object.assign(createMockPool(), {
+				release: vi.fn(),
+			}) as unknown as PoolClient;
+			const options = Object.assign(() => {}, {
+				borrowedClient: true as const,
+			});
+
+			const adapter = createPgsqlAdapter(client, options);
+
+			expect(adapter.getPoolInstance()).toBe(client);
+		});
+
+		it('refuses a callable Proxy options container', () => {
+			const pool = createMockPool();
+			const options = new Proxy(
+				Object.assign(() => {}, {
+					preparedStatements: true as const,
+					replayInvalidatedPlans: true as const,
+				}),
+				{},
+			);
+
+			expect(() => createPgsqlAdapter(pool, options)).toThrow(
+				'replayInvalidatedPlans: expected a boolean.',
+			);
+		});
+
 		it.each([
 			{
 				label: 'throwing descriptor trap',

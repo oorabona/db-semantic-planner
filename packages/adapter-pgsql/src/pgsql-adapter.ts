@@ -2628,12 +2628,18 @@ type PgsqlAdapterInternalConstructionOverrides =
 		readonly preparedStatementRegistry?: PreparedStatementRegistry;
 	};
 
+function isPropertyContainer(value: unknown): value is object {
+	return (
+		value !== null && (typeof value === 'object' || typeof value === 'function')
+	);
+}
+
 function isPgsqlAdapterInternalOptions(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): options is PgsqlAdapterInternalOptions {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		pgsqlAdapterInternalOptionsKey in options &&
 		options[pgsqlAdapterInternalOptionsKey] === true
 	);
@@ -2643,8 +2649,8 @@ function hasBorrowedClientOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): options is PgsqlBorrowedClientAdapterOptions | PgsqlAdapterInternalOptions {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		'borrowedClient' in options &&
 		options.borrowedClient === true
 	);
@@ -2654,8 +2660,8 @@ function hasManagedTransactionsOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): boolean {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
+		isPropertyContainer(options) &&
+		!isProxy(options) &&
 		'managedTransactions' in options &&
 		options.managedTransactions === true
 	);
@@ -2668,8 +2674,7 @@ type ReplayInvalidatedPlansOption =
 function readReplayInvalidatedPlansOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): ReplayInvalidatedPlansOption {
-	if (typeof options !== 'object' || options === null)
-		return { present: false };
+	if (!isPropertyContainer(options)) return { present: false };
 	if (isProxy(options)) {
 		throw new Error('replayInvalidatedPlans: expected a boolean.');
 	}
