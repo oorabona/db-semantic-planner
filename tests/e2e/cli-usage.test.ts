@@ -38,7 +38,7 @@ afterEach(async () => {
 	await pool.query('RESET search_path');
 });
 
-describe.sequential('OBL-CLI5 executable CLI usage guide', () => {
+describe('OBL-CLI5 executable CLI usage guide', { concurrent: false }, () => {
 	it('executes every managed-workflow example as written', async () => {
 		const databaseUrl = process.env.DATABASE_URL;
 		if (!databaseUrl) throw new Error('DATABASE_URL is required for CLI E2E');
