@@ -203,6 +203,7 @@ describe('Mutation Compiler', () => {
 				where: [
 					{
 						type: '=',
+						operator: '=',
 						column: 'id',
 						value: 123,
 						table: 'posts',
@@ -308,6 +309,7 @@ describe('Mutation Compiler', () => {
 				where: [
 					{
 						type: '=',
+						operator: '=',
 						column: 'id',
 						value: 456,
 						table: 'posts',
@@ -330,12 +332,14 @@ describe('Mutation Compiler', () => {
 				where: [
 					{
 						type: '=',
+						operator: '=',
 						column: 'published',
 						value: false,
 						table: 'posts',
 					} as Decision,
 					{
 						type: '=',
+						operator: '=',
 						column: 'archived',
 						value: true,
 						table: 'posts',
@@ -393,7 +397,9 @@ describe('Mutation Compiler', () => {
 				type: 'update',
 				table: 'users',
 				set: [{ column: 'name', value: 'Updated' }],
-				conditions: [{ type: '=', column: 'id', value: 1, table: 'users' }],
+				conditions: [
+					{ type: '=', operator: '=', column: 'id', value: 1, table: 'users' },
+				],
 			};
 
 			const result = compileMutation(decision, ctx, state);
@@ -408,7 +414,15 @@ describe('Mutation Compiler', () => {
 			const decision: Decision = {
 				type: 'delete',
 				table: 'posts',
-				conditions: [{ type: '=', column: 'id', value: 999, table: 'posts' }],
+				conditions: [
+					{
+						type: '=',
+						operator: '=',
+						column: 'id',
+						value: 999,
+						table: 'posts',
+					},
+				],
 			};
 
 			const result = compileMutation(decision, ctx, state);

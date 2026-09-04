@@ -19,6 +19,7 @@ import {
 } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
+import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
 export class UnknownSelectExpressionKindError extends Error {
@@ -799,6 +800,16 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const operator = cond.operator as string;
 	const subquery = cond.subquery as QueryIntent | undefined;
 	if (!subquery || !field) return null;
+	const opMap: Record<string, string> = {
+		eq: '=',
+		neq: '!=',
+		isDistinctFrom: 'isDistinctFrom',
+		gt: '>',
+		gte: '>=',
+		lt: '<',
+		lte: '<=',
+	};
+	const subqueryOperator = resolveWhereOperator(operator, opMap);
 
 	// Early validation at lowering time (defense-in-depth before emission chokepoint).
 	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
@@ -853,21 +864,13 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		| readonly { field: string; direction?: string }[]
 		| undefined;
 
-	const opMap: Record<string, string> = {
-		eq: '=',
-		neq: '!=',
-		gt: '>',
-		gte: '>=',
-		lt: '<',
-		lte: '<=',
-	};
 	return {
 		type: 'where',
 		column: field,
 		operator: 'scalarSubquery',
 		targetTable,
 		selectColumn,
-		subqueryOperator: opMap[operator] ?? '=',
+		subqueryOperator,
 		// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
 		subqueryIntent: subquery,
 		...(aggregate && { aggregate }),
@@ -992,7 +995,9 @@ export function convertWhereCondition(
 				operator: 'expression',
 				expressionIntent: cond.expr,
 				value: cond.value,
-				subqueryOperator: cond.operator as string,
+				...(cond.operator !== undefined && {
+					subqueryOperator: cond.operator as string,
+				}),
 				table: rootTable,
 			};
 		default:

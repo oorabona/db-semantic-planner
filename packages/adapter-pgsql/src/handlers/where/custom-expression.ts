@@ -8,7 +8,7 @@
 
 import type { ExpressionIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import { binaryExpr } from '../../ast-helpers.js';
+import { binaryExpr, distinctExpr } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import { compileExpressionIntent } from '../expression/custom.js';
@@ -19,6 +19,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 
 /**
  * Maps comparison operator names to SQL operators.
@@ -26,6 +27,7 @@ import type {
 const OP_MAP: Record<string, string> = {
 	eq: '=',
 	neq: '!=',
+	isDistinctFrom: '=',
 	gt: '>',
 	gte: '>=',
 	lt: '<',
@@ -52,6 +54,12 @@ export const customExpressionWhereHandler: WhereHandler = {
 		_dispatch: WhereDispatcher,
 	): Node {
 		const exprIntent = decision.expressionIntent as ExpressionIntent;
+		const hasSubqueryOperator = Object.hasOwn(decision, 'subqueryOperator');
+		const isStandalone = decision.value === undefined && !hasSubqueryOperator;
+		const rawOp = decision.subqueryOperator;
+		const sqlOp = isStandalone
+			? undefined
+			: resolveWhereOperator(rawOp, OP_MAP);
 
 		// Left side: compile the custom expression
 		const leftNode = compileExpressionIntent(exprIntent, ctx, state);
@@ -60,7 +68,7 @@ export const customExpressionWhereHandler: WhereHandler = {
 		// directly to .where() — no right-side value or comparison operator.
 		// decision.operator === 'expression' is the WHERE handler discriminant (not a SQL op).
 		// A standalone expression has no subqueryOperator and no scalar value to bind.
-		if (decision.value === undefined && !decision.subqueryOperator) {
+		if (isStandalone) {
 			return leftNode;
 		}
 
@@ -69,15 +77,8 @@ export const customExpressionWhereHandler: WhereHandler = {
 		state.parameters.push(unwrapParamIntent(decision.value));
 		const rightNode = createParamRef(idx);
 
-		// Map comparison operator
-		const rawOp = decision.subqueryOperator ?? decision.operator ?? '=';
-		const sqlOp = OP_MAP[rawOp];
-		if (!sqlOp) {
-			throw new Error(
-				`customExpressionWhereHandler: unsupported comparison operator: ${rawOp}`,
-			);
-		}
-
-		return binaryExpr(sqlOp, leftNode, rightNode);
+		return rawOp === 'isDistinctFrom'
+			? distinctExpr(leftNode, rightNode)
+			: binaryExpr(sqlOp!, leftNode, rightNode);
 	},
 };

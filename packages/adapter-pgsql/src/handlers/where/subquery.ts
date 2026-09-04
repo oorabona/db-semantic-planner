@@ -11,7 +11,7 @@
  */
 
 import type { A_Expr, A_Expr_Kind, Node, SubLink } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import { columnRef, distinctExpr } from '../../ast-helpers.js';
 import { buildPredicateSubquerySelect } from '../../subquery-emission.js';
 import type {
 	CompilerContext,
@@ -20,6 +20,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 
 // ============================================================================
 // Map comparison operators to their PostgreSQL equivalents
@@ -32,6 +33,7 @@ const PG_OPERATOR_MAP: Record<string, string> = {
 	'<=': '<=',
 	'>': '>',
 	'>=': '>=',
+	isDistinctFrom: '=',
 };
 
 // ============================================================================
@@ -47,8 +49,9 @@ const PG_OPERATOR_MAP: Record<string, string> = {
  */
 function createScalarSubLink(
 	subquery: Node,
-	operator: string,
+	operator: string | undefined,
 	leftOperand: Node,
+	sqlOp: string = resolveWhereOperator(operator, PG_OPERATOR_MAP),
 ): Node {
 	// Wrap subquery in SubLink node for EXPR_SUBLINK
 	const subLink: SubLink = {
@@ -57,9 +60,13 @@ function createScalarSubLink(
 	};
 
 	// Build A_Expr: column OP (subquery)
+	if (operator === 'isDistinctFrom') {
+		return distinctExpr(leftOperand, { SubLink: subLink });
+	}
+
 	const expr: A_Expr = {
 		kind: 'AEXPR_OP' as A_Expr_Kind,
-		name: [{ String: { sval: PG_OPERATOR_MAP[operator] ?? operator } }],
+		name: [{ String: { sval: sqlOp } }],
 		lexpr: leftOperand,
 		rexpr: { SubLink: subLink },
 	};
@@ -211,7 +218,8 @@ export const scalarSubqueryHandler: WhereHandler = {
 		dispatch: WhereDispatcher,
 	): Node {
 		const column = decision.column;
-		const operator = decision.subqueryOperator ?? '=';
+		const operator = decision.subqueryOperator;
+		const sqlOp = resolveWhereOperator(operator, PG_OPERATOR_MAP);
 
 		if (!column) {
 			throw new Error('Scalar subquery requires column');
@@ -227,7 +235,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 			dispatch,
 		);
 
-		return createScalarSubLink(subquery, operator, leftOperand);
+		return createScalarSubLink(subquery, operator, leftOperand, sqlOp);
 	},
 };
 

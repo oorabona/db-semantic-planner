@@ -341,6 +341,7 @@ export interface IncludeResult {
 export const COMPARISON_OPERATORS = {
 	EQ: '=',
 	NEQ: '!=',
+	IS_DISTINCT_FROM: 'isDistinctFrom',
 	LT: '<',
 	LTE: '<=',
 	GT: '>',
@@ -348,6 +349,7 @@ export const COMPARISON_OPERATORS = {
 	// Aliases
 	eq: '=',
 	ne: '!=',
+	isDistinctFrom: 'isDistinctFrom',
 	lt: '<',
 	lte: '<=',
 	gt: '>',

@@ -19,6 +19,7 @@ import type {
 } from './types.js';
 import { isSelectWithFields } from './types.js';
 import { registerAllWhereHandlers } from './where/index.js';
+import { resolveWhereOperator } from './where/operator-resolver.js';
 
 // Re-export types
 export * from './types.js';
@@ -163,6 +164,7 @@ const OPERATOR_ALIASES: Record<string, string> = {
 	eq: '=',
 	ne: '!=',
 	neq: '!=',
+	isDistinctFrom: 'isDistinctFrom',
 	lt: '<',
 	lte: '<=',
 	gt: '>',
@@ -207,16 +209,27 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 	// If it already has `column`, it's already a Decision.
 	// BUT: if jsonPath is present, reroute to jsonComparison handler
 	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
-	if (input.column !== undefined) {
+	const inputColumn = input.column;
+	if (inputColumn !== undefined) {
 		const raw = input as RawDecisionInput;
-		if (raw.jsonPath && raw.jsonPath.length > 0) {
+		const jsonPath = raw.jsonPath;
+		if (jsonPath && jsonPath.length > 0) {
+			const operator = input.operator;
+			const subqueryOperator = input.subqueryOperator;
+			const value = input.value;
+			const jsonMode = raw.jsonMode;
+			const comparisonOperator =
+				operator === 'jsonComparison' ? subqueryOperator : operator;
 			return {
 				type: 'where',
-				column: input.column,
+				column: inputColumn,
 				operator: 'jsonComparison',
-				value: input.value,
-				jsonPath: raw.jsonPath,
-				jsonMode: raw.jsonMode ?? 'text',
+				...(comparisonOperator !== undefined && {
+					subqueryOperator: comparisonOperator,
+				}),
+				value,
+				jsonPath,
+				jsonMode: jsonMode ?? 'text',
 			};
 		}
 		return input;
@@ -259,6 +272,7 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 					type: 'where',
 					column: raw.field as string,
 					operator: 'jsonComparison',
+					subqueryOperator: raw.operator as string,
 					value: raw.value,
 					jsonPath: raw.jsonPath as readonly unknown[],
 					jsonMode: (raw.jsonMode as 'json' | 'text') ?? 'text',
@@ -439,8 +453,16 @@ export function createWhereDispatcher(): WhereDispatcher {
 	): Node => {
 		ensureHandlersRegistered();
 		const normalized = normalizeToDecision(decision, ctx);
-		const rawOperator = normalized.operator ?? '=';
-		const operator = OPERATOR_ALIASES[rawOperator] ?? rawOperator;
+		const rawOperator = normalized.operator;
+		const operator = resolveWhereOperator(rawOperator, {
+			...Object.fromEntries(
+				Array.from(whereHandlers.keys(), (registeredOperator) => [
+					registeredOperator,
+					registeredOperator,
+				]),
+			),
+			...OPERATOR_ALIASES,
+		});
 		const handler = getWhereHandler(operator);
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =

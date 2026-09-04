@@ -205,6 +205,7 @@ function mapToHandlerDecision(
 		defaultPk,
 		deriveFk,
 	);
+	const subqueryOperator = pd.subqueryOperator;
 	return {
 		type: pd.type,
 		table: pd.table,
@@ -256,7 +257,9 @@ function mapToHandlerDecision(
 		jsonPath: pd.jsonPath,
 		jsonMode: pd.jsonMode,
 		expressionIntent: pd.expressionIntent,
-		subqueryOperator: pd.subqueryOperator,
+		...(subqueryOperator !== undefined && {
+			subqueryOperator,
+		}),
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
 		aggregateDistinct: pd.aggregateDistinct,

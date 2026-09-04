@@ -41,21 +41,21 @@ describe('customExpressionWhereHandler — operator validation', () => {
 	it('throws for an unmapped operator (injection attempt)', () => {
 		const expr = { kind: 'ref', column: 'price' };
 		expect(() => compileWhereExpr(expr, 'LIKE')).toThrow(
-			'customExpressionWhereHandler: unsupported comparison operator: LIKE',
+			'No WHERE handler registered for operator: LIKE',
 		);
 	});
 
 	it('throws for a completely unknown operator', () => {
 		const expr = { kind: 'ref', column: 'score' };
 		expect(() => compileWhereExpr(expr, '??')).toThrow(
-			'customExpressionWhereHandler: unsupported comparison operator: ??',
+			'No WHERE handler registered for operator: ??',
 		);
 	});
 
 	it('throws for an empty string operator', () => {
 		const expr = { kind: 'ref', column: 'score' };
 		expect(() => compileWhereExpr(expr, '')).toThrow(
-			'customExpressionWhereHandler: unsupported comparison operator: ',
+			'No WHERE handler registered for operator: ',
 		);
 	});
 

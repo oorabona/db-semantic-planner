@@ -17,6 +17,7 @@ import {
 	countDistinct,
 	countStar,
 	deleteStmt,
+	distinctExpr,
 	eqExpr,
 	floatNode,
 	funcCall,
@@ -181,6 +182,18 @@ describe('Binary Expressions', () => {
 	it('creates not-equal expression', () => {
 		const node = neExpr(columnRef('status'), stringNode('deleted'));
 		expect(node).toHaveProperty('A_Expr');
+	});
+
+	it('creates an IS DISTINCT FROM expression', () => {
+		const node = distinctExpr(columnRef('status'), stringNode('deleted'));
+		expect(node).toEqual({
+			A_Expr: {
+				kind: 'AEXPR_DISTINCT',
+				name: [{ String: { sval: '=' } }],
+				lexpr: columnRef('status'),
+				rexpr: stringNode('deleted'),
+			},
+		});
 	});
 
 	it('creates comparison expressions', () => {
