@@ -37,6 +37,7 @@ import {
 import { comparisonHandler } from '../handlers/where/comparison.js';
 import { customExpressionWhereHandler } from '../handlers/where/custom-expression.js';
 import { jsonComparisonHandler } from '../handlers/where/json.js';
+import { scalarSubqueryHandler } from '../handlers/where/subquery.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -297,6 +298,23 @@ describe('#462 isDistinctFrom', () => {
 		).toThrow('No WHERE handler registered for operator: undefined');
 	});
 
+	it('refuses a scalar subquery operator before subquery validation', () => {
+		expect(() =>
+			convertWhereCondition(
+				{
+					kind: 'subquery',
+					field: 'c',
+					operator: 'unknownComparison',
+					subquery: {
+						from: 't',
+						groupBy: ['c'],
+					},
+				} as unknown as WhereIntent,
+				't',
+			),
+		).toThrow('No WHERE handler registered for operator: unknownComparison');
+	});
+
 	it('leaves no bound parameters after a refusal', () => {
 		const ctx = whereCtx();
 		expect(() =>
@@ -315,6 +333,110 @@ describe('#462 isDistinctFrom', () => {
 		const valid = compileWhereIntent(eq('c', 3), ctx);
 		expect(deparseWhere(valid)).toBe('t.c = $1');
 		expect(ctx.paramState.parameters).toEqual([3]);
+	});
+
+	it('does not inherit an expression comparison operator from Object.prototype', () => {
+		const original = Object.getOwnPropertyDescriptor(
+			Object.prototype,
+			'operator',
+		);
+		Object.defineProperty(Object.prototype, 'operator', {
+			configurable: true,
+			writable: true,
+			value: 'isDistinctFrom',
+		});
+		try {
+			const node = compileWhereIntent(
+				{
+					kind: 'expression',
+					expr: { kind: 'ref', column: 'active' },
+				} as unknown as WhereIntent,
+				whereCtx(),
+			);
+			expect(deparseWhere(node)).toBe('active');
+		} finally {
+			if (original) {
+				Object.defineProperty(Object.prototype, 'operator', original);
+			} else {
+				delete (Object.prototype as { operator?: unknown }).operator;
+			}
+		}
+	});
+
+	it('refuses absent and empty comparison operators in direct handlers', () => {
+		const handlerCtx = {
+			naming: identityNaming,
+			rootTable: 't',
+			maxRecursiveDepth: 100,
+		};
+		const dispatch = createWhereDispatcher();
+
+		for (const subqueryOperator of [undefined, '']) {
+			const operatorProperty =
+				subqueryOperator === undefined ? {} : { subqueryOperator };
+			const expected = `No WHERE handler registered for operator: ${subqueryOperator}`;
+
+			expect(() =>
+				jsonComparisonHandler.compile(
+					{
+						type: 'where',
+						column: 'meta',
+						operator: 'jsonComparison',
+						jsonPath: ['kind'],
+						value: 'x',
+						...operatorProperty,
+					} as Decision,
+					handlerCtx,
+					createCompilerState(),
+					dispatch,
+				),
+			).toThrow(expected);
+
+			expect(() =>
+				scalarSubqueryHandler.compile(
+					{
+						type: 'where',
+						column: 'c',
+						operator: 'scalarSubquery',
+						targetTable: 't',
+						selectColumn: 'c',
+						...operatorProperty,
+					} as Decision,
+					handlerCtx,
+					createCompilerState(),
+					dispatch,
+				),
+			).toThrow(expected);
+		}
+
+		expect(() =>
+			customExpressionWhereHandler.compile(
+				{
+					type: 'where',
+					operator: 'expression',
+					expressionIntent: { kind: 'literal', value: 1 },
+					value: 2,
+				} as Decision,
+				handlerCtx,
+				createCompilerState(),
+				dispatch,
+			),
+		).toThrow('No WHERE handler registered for operator: undefined');
+
+		expect(() =>
+			customExpressionWhereHandler.compile(
+				{
+					type: 'where',
+					operator: 'expression',
+					subqueryOperator: '',
+					expressionIntent: { kind: 'literal', value: 1 },
+					value: undefined,
+				} as Decision,
+				handlerCtx,
+				createCompilerState(),
+				dispatch,
+			),
+		).toThrow('No WHERE handler registered for operator: ');
 	});
 
 	it('keeps neq and isDistinctFrom parameter parity across comparison routes', () => {
@@ -428,6 +550,39 @@ describe('#462 isDistinctFrom', () => {
 		expect(deparse(node)).toBe(deparseWhere(node));
 	});
 
+	it('preserves a normalized JSON decision comparison operator through compilePlan', () => {
+		const result = compilePlan({
+			rootTable: 't',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'meta',
+					operator: 'jsonComparison',
+					subqueryOperator: 'isDistinctFrom',
+					jsonPath: ['kind'],
+					jsonMode: 'text',
+					value: 'x',
+				},
+			],
+		});
+		expect(result.sql).toBe(
+			'SELECT * FROM t WHERE (t.meta ->> $1) IS DISTINCT FROM $2',
+		);
+		expect(result.parameters).toEqual(['kind', 'x']);
+	});
+
+	it('lowers a standalone custom expression without a comparison-operator property', () => {
+		const decision = convertWhereCondition(
+			{
+				kind: 'expression',
+				expr: { kind: 'ref', column: 'active' },
+			} as unknown as WhereIntent,
+			't',
+		);
+		expect(Object.hasOwn(decision!, 'subqueryOperator')).toBe(false);
+	});
+
 	it('refuses unsupported legacy custom-expression decisions through compilePlan', () => {
 		const decision = convertWhereCondition(
 			{
@@ -529,5 +684,66 @@ describe('#462 isDistinctFrom', () => {
 		expect(distinctResult.sql).toBe(
 			'WITH RECURSIVE tree AS (SELECT __n.id AS id, 1 AS __depth, ARRAY[__n.id] AS __visited FROM t AS __n WHERE __n.c IS DISTINCT FROM $1 UNION ALL SELECT __n.id AS id, tree.__depth + 1 AS __depth, tree.__visited || __n.id AS __visited FROM tree JOIN edges AS __e ON __e.from_id = tree.id JOIN t AS __n ON __n.id = __e.to_id WHERE tree.__depth < 2 AND __n.id <> ALL (tree.__visited)) SELECT tree.id AS id FROM tree',
 		);
+	});
+
+	it('refuses a recursive-anchor operator before naming the field', () => {
+		const naming = Object.assign(Object.create(identityNaming), {
+			toDatabase: () => {
+				throw new Error('naming plugin should not run');
+			},
+		}) as typeof identityNaming;
+		expect(() =>
+			compileRecursive(
+				{
+					rootTable: 't',
+					decisions: [],
+					warnings: [],
+					ctes: [],
+					intent: {
+						type: 'recursive',
+						cteName: 'tree',
+						start: {
+							from: 't',
+							nodeIdExpr: { kind: 'column', name: 'id' },
+							select: [],
+							where: {
+								kind: 'comparison',
+								field: 'c',
+								operator: 'unknownComparison',
+								value: 6,
+							},
+						},
+						traversal: {
+							kind: 'edge-table',
+							nodeTable: 't',
+							nodeId: 'id',
+							edgeTable: 'edges',
+							edgeFrom: 'from_id',
+							edgeTo: 'to_id',
+							direction: 'out',
+						},
+						maxDepth: 2,
+					},
+					metadata: {
+						planningTimeMs: 0,
+						relationsAnalyzed: 0,
+						isAmbiguous: false,
+						isRecursive: true,
+						traversalKind: 'edge-table',
+						usesBidirectional: false,
+						dedupeStrategy: 'none',
+					},
+				} as unknown as RecursivePlanReport,
+				testSchema.model,
+				undefined,
+				{
+					naming,
+					schemaName: undefined,
+					model: undefined,
+					defaultPk: 'id',
+					deriveFk: (relation: string) => `${relation}_id`,
+				},
+			),
+		).toThrow('No WHERE handler registered for operator: unknownComparison');
 	});
 });

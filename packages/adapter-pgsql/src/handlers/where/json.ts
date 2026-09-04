@@ -134,11 +134,7 @@ export const jsonComparisonHandler: WhereHandler = {
 		}
 
 		// Now apply the comparison operator
-		const operator =
-			decision.subqueryOperator ??
-			(decision.operator === 'jsonComparison' || decision.operator === undefined
-				? 'eq'
-				: decision.operator);
+		const operator = decision.subqueryOperator;
 		const sqlOp = resolveWhereOperator(operator, JSON_COMPARISON_OPERATOR_MAP);
 		// Build chained JSON access: col->'a'->'b'->>'c'
 		let node: Node = buildColumnRef(column, ctx);

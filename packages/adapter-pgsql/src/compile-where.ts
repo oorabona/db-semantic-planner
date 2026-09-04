@@ -98,7 +98,7 @@ const OP_MAP: Record<string, string> = {
 };
 
 function compileMappedComparison(
-	operator: string,
+	operator: string | undefined,
 ): (left: Node, right: Node) => Node {
 	const sqlOp = resolveWhereOperator(operator, OP_MAP);
 	return operator === 'isDistinctFrom'
@@ -452,7 +452,7 @@ function handleExpressionIntent(
 	handlerCtx: CompilerContext,
 ): Node {
 	const exprIntent = intent as WhereExpressionIntent;
-	if (!('operator' in exprIntent)) {
+	if (!Object.hasOwn(exprIntent, 'operator')) {
 		return compileExpressionIntent(exprIntent.expr, handlerCtx, ctx.paramState);
 	}
 

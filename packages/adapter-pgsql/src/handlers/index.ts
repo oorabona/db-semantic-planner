@@ -209,20 +209,27 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 	// If it already has `column`, it's already a Decision.
 	// BUT: if jsonPath is present, reroute to jsonComparison handler
 	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
-	if (input.column !== undefined) {
+	const inputColumn = input.column;
+	if (inputColumn !== undefined) {
 		const raw = input as RawDecisionInput;
-		if (raw.jsonPath && raw.jsonPath.length > 0) {
-			const inputOperator = input.operator;
+		const jsonPath = raw.jsonPath;
+		if (jsonPath && jsonPath.length > 0) {
+			const operator = input.operator;
+			const subqueryOperator = input.subqueryOperator;
+			const value = input.value;
+			const jsonMode = raw.jsonMode;
+			const comparisonOperator =
+				operator === 'jsonComparison' ? subqueryOperator : operator;
 			return {
 				type: 'where',
-				column: input.column,
+				column: inputColumn,
 				operator: 'jsonComparison',
-				...(inputOperator !== undefined && {
-					subqueryOperator: inputOperator,
+				...(comparisonOperator !== undefined && {
+					subqueryOperator: comparisonOperator,
 				}),
-				value: input.value,
-				jsonPath: raw.jsonPath,
-				jsonMode: raw.jsonMode ?? 'text',
+				value,
+				jsonPath,
+				jsonMode: jsonMode ?? 'text',
 			};
 		}
 		return input;
@@ -446,12 +453,16 @@ export function createWhereDispatcher(): WhereDispatcher {
 	): Node => {
 		ensureHandlersRegistered();
 		const normalized = normalizeToDecision(decision, ctx);
-		const rawOperator = normalized.operator ?? '=';
-		const operator = resolveWhereOperator(
-			rawOperator,
-			OPERATOR_ALIASES,
-			rawOperator,
-		);
+		const rawOperator = normalized.operator;
+		const operator = resolveWhereOperator(rawOperator, {
+			...Object.fromEntries(
+				Array.from(whereHandlers.keys(), (registeredOperator) => [
+					registeredOperator,
+					registeredOperator,
+				]),
+			),
+			...OPERATOR_ALIASES,
+		});
 		const handler = getWhereHandler(operator);
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =

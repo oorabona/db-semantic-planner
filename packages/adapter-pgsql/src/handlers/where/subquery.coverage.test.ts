@@ -74,6 +74,7 @@ describe('scalarSubqueryHandler', () => {
 		const decision = {
 			type: 'where',
 			operator: 'scalarSubquery',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 		} as Decision;
@@ -88,6 +89,7 @@ describe('scalarSubqueryHandler', () => {
 		const decision = {
 			type: 'where',
 			operator: 'scalarSubquery',
+			subqueryOperator: '=',
 			column: 'price',
 			selectColumn: 'price',
 		} as Decision;
@@ -97,7 +99,7 @@ describe('scalarSubqueryHandler', () => {
 		).toThrow('Subquery handler requires targetTable');
 	});
 
-	it('defaults to = operator when subqueryOperator not provided', () => {
+	it('refuses an absent comparison operator', () => {
 		const state = createCompilerState();
 		const decision = {
 			type: 'where',
@@ -107,15 +109,9 @@ describe('scalarSubqueryHandler', () => {
 			selectColumn: 'price',
 		} as Decision;
 
-		const node = scalarSubqueryHandler.compile(
-			decision,
-			ctx,
-			state,
-			mockDispatch,
-		);
-
-		const expr = node.A_Expr;
-		expect(expr?.name?.[0]?.String?.sval).toBe('=');
+		expect(() =>
+			scalarSubqueryHandler.compile(decision, ctx, state, mockDispatch),
+		).toThrow('No WHERE handler registered for operator: undefined');
 	});
 
 	it('supports all comparison operators', () => {
@@ -175,6 +171,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'comment_count',
+			subqueryOperator: '=',
 			targetTable: 'comments',
 			selectColumn: '*',
 			aggregate: 'COUNT',
@@ -196,6 +193,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'avg_rating',
+			subqueryOperator: '=',
 			targetTable: 'reviews',
 			selectColumn: 'rating',
 			aggregate: 'AVG',
@@ -217,6 +215,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'author_id',
+			subqueryOperator: '=',
 			targetTable: 'users',
 			selectColumn: 'id',
 		} as Decision;
@@ -237,6 +236,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			conditions: [
@@ -265,6 +265,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			conditions: [
@@ -311,6 +312,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			conditions: [
@@ -341,6 +343,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'latest_price',
+			subqueryOperator: '=',
 			targetTable: 'prices',
 			selectColumn: 'amount',
 			orderBy: [{ column: 'created_at', direction: 'DESC' as const }],
@@ -362,6 +365,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'top_price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: 1,
@@ -383,6 +387,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'top_price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: { paramIndex: 5 },
@@ -404,6 +409,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'top_price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 			limit: { paramIndex: 'invalid' },
@@ -420,6 +426,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'price',
+			subqueryOperator: '=',
 			targetTable: 'products',
 			selectColumn: 'price',
 		} as Decision;
@@ -427,6 +434,7 @@ describe('scalarSubqueryHandler', () => {
 			type: 'where',
 			operator: 'scalarSubquery',
 			column: 'rating',
+			subqueryOperator: '=',
 			targetTable: 'reviews',
 			selectColumn: 'rating',
 		} as Decision;

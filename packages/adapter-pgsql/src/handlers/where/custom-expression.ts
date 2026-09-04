@@ -54,9 +54,9 @@ export const customExpressionWhereHandler: WhereHandler = {
 		_dispatch: WhereDispatcher,
 	): Node {
 		const exprIntent = decision.expressionIntent as ExpressionIntent;
-		const isStandalone =
-			decision.value === undefined && !decision.subqueryOperator;
-		const rawOp = decision.subqueryOperator ?? decision.operator ?? '=';
+		const hasSubqueryOperator = Object.hasOwn(decision, 'subqueryOperator');
+		const isStandalone = decision.value === undefined && !hasSubqueryOperator;
+		const rawOp = decision.subqueryOperator;
 		const sqlOp = isStandalone
 			? undefined
 			: resolveWhereOperator(rawOp, OP_MAP);

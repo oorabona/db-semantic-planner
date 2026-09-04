@@ -42,6 +42,7 @@ describe('#462 IS DISTINCT FROM', () => {
 		const distinctFromSix = await orm
 			.select('distinct_values')
 			.where(isDistinctFrom('v', 6))
+			.orderBy('id')
 			.columns(['id'])
 			.execute();
 		expect(distinctFromSix.map((row) => row.id)).toEqual([1, 3]);
@@ -49,6 +50,7 @@ describe('#462 IS DISTINCT FROM', () => {
 		const notEqualSix = await orm
 			.select('distinct_values')
 			.where(neq('v', 6))
+			.orderBy('id')
 			.columns(['id'])
 			.execute();
 		expect(notEqualSix.map((row) => row.id)).toEqual([3]);
@@ -56,6 +58,7 @@ describe('#462 IS DISTINCT FROM', () => {
 		const distinctFromNull = await orm
 			.select('distinct_values')
 			.where(isDistinctFrom('v', null))
+			.orderBy('id')
 			.columns(['id'])
 			.execute();
 		expect(distinctFromNull.map((row) => row.id)).toEqual([2, 3]);

@@ -819,6 +819,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				type: 'where',
 				column: 'props',
 				operator: 'jsonComparison',
+				subqueryOperator: 'eq',
 				jsonPath: ['status'],
 				jsonMode: 'text',
 				value: 'active',
@@ -840,6 +841,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				type: 'where',
 				column: 'data',
 				operator: 'jsonComparison',
+				subqueryOperator: 'eq',
 				jsonPath: ['nested'],
 				jsonMode: 'json',
 				value: '{"x":1}',
@@ -862,6 +864,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				type: 'where',
 				column: 'config',
 				operator: 'jsonComparison',
+				subqueryOperator: 'eq',
 				jsonPath: ['section', 'key'],
 				jsonMode: 'text',
 				value: 'enabled',
@@ -890,7 +893,8 @@ describe('jsonComparisonHandler — branch coverage', () => {
 				{
 					type: 'where',
 					column: 'meta',
-					operator: op as 'jsonComparison',
+					operator: 'jsonComparison',
+					subqueryOperator: op,
 					jsonPath: ['val'],
 					jsonMode: 'text',
 					value: 42,
@@ -925,25 +929,24 @@ describe('jsonComparisonHandler — branch coverage', () => {
 		).toThrow('No WHERE handler registered for operator: unknown_op');
 	});
 
-	it('falls back to = when operator is undefined (uses opMap default eq)', () => {
+	it('refuses an absent comparison operator', () => {
 		const ctx = makeHandlerCtx();
 		const state = makeState();
-		const node = jsonComparisonHandler.compile(
-			{
-				type: 'where',
-				column: 'meta',
-				operator: 'jsonComparison',
-				jsonPath: ['x'],
-				jsonMode: 'text',
-				value: 1,
-			} as unknown as Decision,
-			ctx,
-			state,
-			createWhereDispatcher(),
-		);
-		const sql = deparseNode(node);
-		// operator ?? 'eq' -> 'eq' -> '='
-		expect(sql).toEqual('(items.meta ->> $1) = $2');
+		expect(() =>
+			jsonComparisonHandler.compile(
+				{
+					type: 'where',
+					column: 'meta',
+					operator: 'jsonComparison',
+					jsonPath: ['x'],
+					jsonMode: 'text',
+					value: 1,
+				} as unknown as Decision,
+				ctx,
+				state,
+				createWhereDispatcher(),
+			),
+		).toThrow('No WHERE handler registered for operator: undefined');
 	});
 });
 

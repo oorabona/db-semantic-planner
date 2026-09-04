@@ -49,7 +49,7 @@ const PG_OPERATOR_MAP: Record<string, string> = {
  */
 function createScalarSubLink(
 	subquery: Node,
-	operator: string,
+	operator: string | undefined,
 	leftOperand: Node,
 	sqlOp: string = resolveWhereOperator(operator, PG_OPERATOR_MAP),
 ): Node {
@@ -218,7 +218,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 		dispatch: WhereDispatcher,
 	): Node {
 		const column = decision.column;
-		const operator = decision.subqueryOperator ?? '=';
+		const operator = decision.subqueryOperator;
 		const sqlOp = resolveWhereOperator(operator, PG_OPERATOR_MAP);
 
 		if (!column) {

@@ -952,6 +952,8 @@ function buildRecursiveAnchorWhere(
 
 	switch (w.kind) {
 		case 'comparison': {
+			const operator = w.operator as string;
+			const op = mapComparisonOperator(operator);
 			const dbCol = deps.naming.toDatabase(w.field as string);
 			const left: Node = {
 				ColumnRef: {
@@ -961,8 +963,6 @@ function buildRecursiveAnchorWhere(
 					],
 				},
 			};
-			const operator = w.operator as string;
-			const op = mapComparisonOperator(operator);
 			const right: Node = compileValue(w.value, state, undefined, true);
 			if (operator === 'isDistinctFrom') {
 				return distinctExpr(left, right);
