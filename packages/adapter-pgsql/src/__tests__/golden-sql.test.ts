@@ -7,8 +7,8 @@
  * Test strategy:
  * 1. Build AST using helpers
  * 2. Deparse to SQL
- * 3. Compare with expected SQL (normalized)
- * 4. Roundtrip: parse expected SQL, compare AST structures
+ * 3. Compare with expected SQL byte for byte
+ * 4. Roundtrip: parse expected SQL, then deparse it exactly
  */
 
 import { deparseSync } from 'pgsql-deparser';
@@ -29,53 +29,23 @@ import {
 	integerNode,
 	leftJoin,
 	ltExpr,
-	normalizeSQL,
 	orExpr,
 	rangeVar,
 	selectStmt,
 	sortBy,
 	starTarget,
-	stringNode,
 	updateStmt,
 } from '../ast-helpers.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createParamRef } from '../param-ref.js';
 
 /**
- * Assert that two SQL strings are semantically equivalent
- * by parsing both and comparing key structural elements
+ * A golden asserts the SQL the deparser emits, byte for byte. A tolerant comparison is what let a
+ * projection change pass unnoticed; a whitespace-collapsing one would equate a string literal
+ * containing two spaces with one containing a single space.
  */
-function assertSQLEquivalent(actual: string, expected: string): void {
-	const normalizedActual = normalizeSQL(actual);
-	const normalizedExpected = normalizeSQL(expected);
-
-	// First, simple string comparison
-	if (normalizedActual === normalizedExpected) {
-		return; // Exact match
-	}
-
-	// If not exact, parse both and compare parse success
-	// (deparser may produce slightly different formatting)
-	try {
-		const parsedActual = parseSync(actual);
-		const parsedExpected = parseSync(expected);
-		const actualStmts = parsedActual.stmts;
-		const expectedStmts = parsedExpected.stmts;
-		if (!actualStmts || !expectedStmts) {
-			throw new Error('PostgreSQL parser returned no statements');
-		}
-
-		// Both should parse without error
-		expect(actualStmts).toHaveLength(expectedStmts.length);
-
-		// Compare statement types
-		const actualStmtType = Object.keys(actualStmts[0]?.stmt ?? {})[0];
-		const expectedStmtType = Object.keys(expectedStmts[0]?.stmt ?? {})[0];
-		expect(actualStmtType).toBe(expectedStmtType);
-	} catch {
-		// If parsing fails, fall back to normalized string comparison
-		expect(normalizedActual).toBe(normalizedExpected);
-	}
+function assertSQLGolden(actual: string, expected: string): void {
+	expect(actual).toBe(expected);
 }
 
 describe('Golden SQL: SELECT queries', () => {
@@ -86,7 +56,11 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		assertSQLEquivalent(sql, 'SELECT * FROM users');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM users`,
+		);
 	});
 
 	it('SELECT columns FROM table', () => {
@@ -100,7 +74,14 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		assertSQLEquivalent(sql, 'SELECT id, name, email FROM users');
+		assertSQLGolden(
+			sql,
+			`SELECT
+  id,
+  name,
+  email
+FROM users`,
+		);
 	});
 
 	it('SELECT with WHERE clause', () => {
@@ -113,8 +94,13 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('where');
-		expect(normalizeSQL(sql)).toContain('active');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM users
+WHERE
+  active = true`,
+		);
 	});
 
 	it('SELECT with parameterized WHERE', () => {
@@ -125,7 +111,13 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		assertSQLEquivalent(sql, 'SELECT * FROM users WHERE id = $1');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM users
+WHERE
+  id = $1`,
+		);
 	});
 
 	it('SELECT with AND/OR conditions', () => {
@@ -137,16 +129,24 @@ describe('Golden SQL: SELECT queries', () => {
 					A_Const: { boolval: { boolval: true } },
 				}),
 				orExpr(
-					eqExpr(columnRef('role'), stringNode('admin')),
-					eqExpr(columnRef('role'), stringNode('moderator')),
+					eqExpr(columnRef('role'), { A_Const: { sval: { sval: 'admin' } } }),
+					eqExpr(columnRef('role'), {
+						A_Const: { sval: { sval: 'moderator' } },
+					}),
 				),
 			),
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('and');
-		expect(normalized).toContain('or');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM users
+WHERE
+  active = true
+  AND (role = 'admin'
+  OR role = 'moderator')`,
+		);
 	});
 
 	it('SELECT with ORDER BY', () => {
@@ -157,8 +157,13 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('order by');
-		expect(normalizeSQL(sql)).toContain('desc');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM users
+ORDER BY
+  created_at DESC`,
+		);
 	});
 
 	it('SELECT with LIMIT and OFFSET params', () => {
@@ -170,10 +175,13 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
-		expect(normalizeSQL(sql)).toContain('limit');
-		expect(normalizeSQL(sql)).toContain('offset');
+		assertSQLGolden(
+			sql,
+			`SELECT *
+FROM products
+LIMIT $1
+OFFSET $2`,
+		);
 	});
 
 	it('SELECT with INNER JOIN', () => {
@@ -192,10 +200,14 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('join');
-		expect(normalized).toContain('u.name');
-		expect(normalized).toContain('p.title');
+		assertSQLGolden(
+			sql,
+			`SELECT
+  u.name,
+  p.title
+FROM users AS u
+JOIN posts AS p ON u.id = p.author_id`,
+		);
 	});
 
 	it('SELECT with LEFT JOIN', () => {
@@ -212,10 +224,16 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('left');
-		expect(normalized).toContain('join');
-		expect(normalized).toContain('group by');
+		assertSQLGolden(
+			sql,
+			`SELECT
+  u.*,
+  count(*)
+FROM users AS u
+LEFT JOIN orders AS o ON u.id = o.user_id
+GROUP BY
+  u.id`,
+		);
 	});
 
 	it('SELECT with aggregate and GROUP BY', () => {
@@ -227,10 +245,17 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('group by');
-		expect(normalized).toContain('having');
-		expect(normalized).toContain('count');
+		assertSQLGolden(
+			sql,
+			`SELECT
+  category,
+  count(*)
+FROM products
+GROUP BY
+  category
+HAVING
+  count(*) > 5`,
+		);
 	});
 
 	it('SELECT DISTINCT', () => {
@@ -241,7 +266,11 @@ describe('Golden SQL: SELECT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('distinct');
+		assertSQLGolden(
+			sql,
+			`SELECT DISTINCT category
+FROM products`,
+		);
 	});
 });
 
@@ -254,11 +283,14 @@ describe('Golden SQL: INSERT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('insert into');
-		expect(normalized).toContain('users');
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
+		assertSQLGolden(
+			sql,
+			`INSERT INTO users (
+  name,
+  email
+) VALUES
+  ($1, $2)`,
+		);
 	});
 
 	it('INSERT with schema', () => {
@@ -270,7 +302,13 @@ describe('Golden SQL: INSERT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('public.users');
+		assertSQLGolden(
+			sql,
+			`INSERT INTO public.users (
+  name
+) VALUES
+  ($1)`,
+		);
 	});
 
 	it('INSERT with RETURNING', () => {
@@ -282,7 +320,14 @@ describe('Golden SQL: INSERT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('returning');
+		assertSQLGolden(
+			sql,
+			`INSERT INTO users (
+  name,
+  email
+) VALUES
+  ($1, $2) RETURNING id, created_at`,
+		);
 	});
 
 	it('INSERT with naming convention', () => {
@@ -295,11 +340,15 @@ describe('Golden SQL: INSERT queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('user_accounts');
-		expect(normalized).toContain('first_name');
-		expect(normalized).toContain('last_name');
-		expect(normalized).toContain('created_at');
+		assertSQLGolden(
+			sql,
+			`INSERT INTO user_accounts (
+  first_name,
+  last_name,
+  created_at
+) VALUES
+  ($1, $2, now())`,
+		);
 	});
 });
 
@@ -315,24 +364,27 @@ describe('Golden SQL: UPDATE queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('update');
-		expect(normalized).toContain('set');
-		expect(normalized).toContain('where');
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
+		assertSQLGolden(
+			sql,
+			`UPDATE users SET name = $1,updated_at = now() WHERE id = $2`,
+		);
 	});
 
 	it('UPDATE with RETURNING', () => {
 		const ast = updateStmt({
 			table: 'users',
-			set: [{ column: 'status', value: stringNode('active') }],
+			set: [
+				{ column: 'status', value: { A_Const: { sval: { sval: 'active' } } } },
+			],
 			where: eqExpr(columnRef('id'), createParamRef(1)),
 			returning: [starTarget()],
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('returning');
+		assertSQLGolden(
+			sql,
+			`UPDATE users SET status = 'active' WHERE id = $1 RETURNING *`,
+		);
 	});
 
 	it('UPDATE with naming convention', () => {
@@ -343,15 +395,18 @@ describe('Golden SQL: UPDATE queries', () => {
 				{ column: 'displayName', value: createParamRef(1) },
 				{ column: 'updatedAt', value: funcCall('now') },
 			],
-			where: eqExpr(columnRef('userId'), createParamRef(2)),
+			where: eqExpr(
+				columnRef('userId', undefined, undefined, naming),
+				createParamRef(2),
+			),
 			naming,
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('user_profiles');
-		expect(normalized).toContain('display_name');
-		expect(normalized).toContain('updated_at');
+		assertSQLGolden(
+			sql,
+			`UPDATE user_profiles SET display_name = $1,updated_at = now() WHERE user_id = $2`,
+		);
 	});
 });
 
@@ -363,10 +418,7 @@ describe('Golden SQL: DELETE queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-		expect(normalized).toContain('delete from');
-		expect(normalized).toContain('sessions');
-		expect(normalized).toContain('where');
+		assertSQLGolden(sql, `DELETE FROM sessions WHERE expires_at < now()`);
 	});
 
 	it('DELETE with RETURNING', () => {
@@ -377,57 +429,80 @@ describe('Golden SQL: DELETE queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('returning');
+		assertSQLGolden(sql, `DELETE FROM users WHERE id = $1 RETURNING id, email`);
 	});
 
 	it('DELETE with naming convention', () => {
 		const naming = new CamelCaseNamingPlugin();
 		const ast = deleteStmt({
 			table: 'userSessions',
-			where: eqExpr(columnRef('userId'), createParamRef(1)),
+			where: eqExpr(
+				columnRef('userId', undefined, undefined, naming),
+				createParamRef(1),
+			),
 			naming,
 		});
 
 		const sql = deparseSync(ast);
-		expect(normalizeSQL(sql)).toContain('user_sessions');
+		assertSQLGolden(sql, `DELETE FROM user_sessions WHERE user_id = $1`);
 	});
 });
 
 describe('Golden SQL: Roundtrip verification', () => {
 	const testCases = [
-		'SELECT * FROM users',
-		'SELECT id, name FROM users WHERE active = true',
-		'SELECT * FROM users WHERE id = $1',
-		'SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
-		'INSERT INTO users (name, email) VALUES ($1, $2)',
-		'UPDATE users SET name = $1 WHERE id = $2',
-		'DELETE FROM sessions WHERE expires_at < now()',
+		{
+			input: 'SELECT * FROM users',
+			expected: `SELECT *
+FROM users`,
+		},
+		{
+			input: 'SELECT id, name FROM users WHERE active = true',
+			expected: `SELECT
+  id,
+  name
+FROM users
+WHERE
+  active = true`,
+		},
+		{
+			input: 'SELECT * FROM users WHERE id = $1',
+			expected: `SELECT *
+FROM users
+WHERE
+  id = $1`,
+		},
+		{
+			input: 'SELECT * FROM users ORDER BY created_at DESC LIMIT $1 OFFSET $2',
+			expected: `SELECT *
+FROM users
+ORDER BY
+  created_at DESC
+LIMIT $1
+OFFSET $2`,
+		},
+		{
+			input: 'INSERT INTO users (name, email) VALUES ($1, $2)',
+			expected: `INSERT INTO users (
+  name,
+  email
+) VALUES
+  ($1, $2)`,
+		},
+		{
+			input: 'UPDATE users SET name = $1 WHERE id = $2',
+			expected: `UPDATE users SET name = $1 WHERE id = $2`,
+		},
+		{
+			input: 'DELETE FROM sessions WHERE expires_at < now()',
+			expected: `DELETE FROM sessions WHERE expires_at < now()`,
+		},
 	];
 
-	for (const expectedSQL of testCases) {
-		it(`roundtrip: ${expectedSQL.substring(0, 50)}...`, () => {
-			// Parse expected SQL
-			const parsed = parseSync(expectedSQL);
-			const parsedStmts = parsed.stmts;
-			if (!parsedStmts)
-				throw new Error('PostgreSQL parser returned no statements');
-			expect(parsedStmts).toHaveLength(1);
-
-			// Deparse back to SQL
-			const reparsedSQL = deparseSync(parsed);
-
-			// Parse again and verify structure matches
-			const reparsed = parseSync(reparsedSQL);
-			const reparsedStmts = reparsed.stmts;
-			if (!reparsedStmts) {
-				throw new Error('PostgreSQL parser returned no statements');
-			}
-			expect(reparsedStmts).toHaveLength(1);
-
-			// Statement types should match
-			const originalType = Object.keys(parsedStmts[0]?.stmt ?? {})[0];
-			const reparsedType = Object.keys(reparsedStmts[0]?.stmt ?? {})[0];
-			expect(reparsedType).toBe(originalType);
+	for (const { input, expected } of testCases) {
+		it(`roundtrip: ${input.substring(0, 50)}...`, () => {
+			const emitted = deparseSync(parseSync(input));
+			assertSQLGolden(emitted, expected);
+			assertSQLGolden(deparseSync(parseSync(emitted)), expected);
 		});
 	}
 });
@@ -473,21 +548,23 @@ describe('Golden SQL: Complex queries', () => {
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-
-		expect(normalized).toContain('left');
-		expect(normalized).toContain('join');
-		expect(normalized).toContain('where');
-		expect(normalized).toContain('group by');
-		expect(normalized).toContain('having');
-		expect(normalized).toContain('order by');
-		expect(normalized).toContain('desc');
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
-
-		// Verify it parses correctly
-		const parsed = parseSync(sql);
-		expect(parsed.stmts).toHaveLength(1);
+		assertSQLGolden(
+			sql,
+			`SELECT
+  u.*,
+  count(o.id) AS order_count
+FROM users AS u
+LEFT JOIN orders AS o ON u.id = o.user_id
+WHERE
+  u.active = true
+GROUP BY
+  u.id
+HAVING
+  count(o.id) > $1
+ORDER BY
+  order_count DESC
+LIMIT $2`,
+		);
 	});
 
 	it('INSERT with multiple rows (batch)', () => {
@@ -495,20 +572,35 @@ describe('Golden SQL: Complex queries', () => {
 			table: 'logs',
 			columns: ['level', 'message', 'timestamp'],
 			values: [
-				[stringNode('info'), createParamRef(1), funcCall('now')],
-				[stringNode('warn'), createParamRef(2), funcCall('now')],
-				[stringNode('error'), createParamRef(3), funcCall('now')],
+				[
+					{ A_Const: { sval: { sval: 'info' } } },
+					createParamRef(1),
+					funcCall('now'),
+				],
+				[
+					{ A_Const: { sval: { sval: 'warn' } } },
+					createParamRef(2),
+					funcCall('now'),
+				],
+				[
+					{ A_Const: { sval: { sval: 'error' } } },
+					createParamRef(3),
+					funcCall('now'),
+				],
 			],
 		});
 
 		const sql = deparseSync(ast);
-		const normalized = normalizeSQL(sql);
-
-		expect(normalized).toContain('insert into');
-		expect(normalized).toContain('values');
-		// Each row creates a VALUES entry
-		expect(sql).toContain('$1');
-		expect(sql).toContain('$2');
-		expect(sql).toContain('$3');
+		assertSQLGolden(
+			sql,
+			`INSERT INTO logs (
+  level,
+  message,
+  "timestamp"
+) VALUES
+  ('info', $1, now()),
+  ('warn', $2, now()),
+  ('error', $3, now())`,
+		);
 	});
 });
