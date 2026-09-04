@@ -2,6 +2,7 @@ import { createOrm, isDistinctFrom, neq, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
+	createSchema,
 	dropSchema,
 	execInSchema,
 	getTestAdapter,
@@ -18,6 +19,7 @@ const distinctSchema = schema({
 
 beforeAll(async () => {
 	await dropSchema(SCHEMA);
+	await createSchema(SCHEMA);
 	await execInSchema(
 		SCHEMA,
 		`CREATE TABLE distinct_values (id integer PRIMARY KEY, v integer);
