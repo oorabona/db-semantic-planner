@@ -261,6 +261,8 @@ export interface WhereHandler {
 
 /**
  * Dispatcher for recursive WHERE compilation.
+ * The same function object may be passed to every level of a recursive compilation, so it is an opaque callback.
+ * Handlers must not use its identity to distinguish frames or carry frame-local state.
  */
 export type WhereDispatcher = (
 	decision: Decision,

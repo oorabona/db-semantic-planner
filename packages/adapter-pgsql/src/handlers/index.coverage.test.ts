@@ -55,6 +55,60 @@ function ensureRegistered() {
 
 describe('handlers/index - Coverage Tests', () => {
 	describe('createWhereDispatcher (triggers lazy init)', () => {
+		it('shares the dispatcher across recursive compilation', () => {
+			const operator = '__dispatcher_identity_probe__';
+			const receivedDispatchers: unknown[] = [];
+			const handler = {
+				operators: [operator],
+				compile: (decision, ctx, state, dispatch) => {
+					receivedDispatchers.push(dispatch);
+					if (decision.value === 'outer') {
+						return dispatch(
+							{
+								type: 'where',
+								column: 'nested',
+								operator,
+								value: 'nested',
+							},
+							ctx,
+							state,
+						);
+					}
+					return {};
+				},
+			};
+
+			clearHandlers();
+			try {
+				registerWhereHandler(handler as any);
+				const dispatch = createWhereDispatcher();
+				const state = createCompilerState();
+				const ctx = {
+					naming: { toDatabase: (s) => s, toModel: (s) => s },
+					rootTable: 'users',
+					maxRecursiveDepth: 100,
+				};
+
+				dispatch(
+					{
+						type: 'where',
+						column: 'outer',
+						operator,
+						value: 'outer',
+					},
+					ctx as any,
+					state,
+				);
+
+				expect(receivedDispatchers).toHaveLength(2);
+				expect(receivedDispatchers[0]).toBe(receivedDispatchers[1]);
+				expect(receivedDispatchers[0]).toBe(dispatch);
+			} finally {
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
 		it('dispatches a simple comparison', () => {
 			const dispatch = createWhereDispatcher();
 			const state = createCompilerState();

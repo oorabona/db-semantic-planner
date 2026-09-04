@@ -194,7 +194,8 @@ const allExpressionHandlers = [
 
 /**
  * Register all expression handlers.
- * Should be called once at module initialization.
+ * The compiler calls this through ensureExpressionHandlersRegistered on first use; calling it
+ * directly leaves that gate unset, so the compiler registers the same handlers again and throws.
  */
 export function registerAllExpressionHandlers(): void {
 	for (const handler of allExpressionHandlers) {

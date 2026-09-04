@@ -28,7 +28,7 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from '../compile-where.js';
-import { compilePlan } from '../compiler.js';
+import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
 import {
 	createCompilerState,
 	createWhereDispatcher,
@@ -76,6 +76,80 @@ function deparseWhere(node: Node): string {
 }
 
 describe('#462 isDistinctFrom', () => {
+	const scalarSubqueryPlan = (
+		subqueryOperator: string,
+		conditions?: readonly unknown[],
+	): SimplifiedPlanReport =>
+		({
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator,
+					targetTable: 'products',
+					selectColumn: 'price',
+					conditions,
+				},
+			],
+		}) as SimplifiedPlanReport;
+
+	it('compiles scalar-subquery equality through compilePlan', () => {
+		const result = compilePlan(scalarSubqueryPlan('='));
+		expect(result.sql).toBe(
+			'SELECT * FROM orders WHERE orders.total = (SELECT products_subq_0.price FROM products AS products_subq_0)',
+		);
+		expect(result.parameters).toEqual([]);
+	});
+
+	it('compiles scalar-subquery not-equal through compilePlan', () => {
+		const result = compilePlan(scalarSubqueryPlan('!='));
+		expect(result.sql).toBe(
+			'SELECT * FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0)',
+		);
+		expect(result.parameters).toEqual([]);
+	});
+
+	it('compiles scalar-subquery isDistinctFrom through compilePlan', () => {
+		const result = compilePlan(scalarSubqueryPlan('isDistinctFrom'));
+		expect(result.sql).toBe(
+			'SELECT * FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0)',
+		);
+		expect(result.parameters).toEqual([]);
+	});
+
+	it('preserves scalar-subquery not-equal bindings through compilePlan', () => {
+		const result = compilePlan(
+			scalarSubqueryPlan('!=', [
+				{ type: 'where', column: 'category', operator: '=', value: 'tools' },
+			]),
+		);
+		expect(result.sql).toBe(
+			'SELECT * FROM orders WHERE orders.total <> (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
+		);
+		expect(result.parameters).toEqual(['tools']);
+	});
+
+	it('preserves scalar-subquery isDistinctFrom bindings through compilePlan', () => {
+		const result = compilePlan(
+			scalarSubqueryPlan('isDistinctFrom', [
+				{ type: 'where', column: 'category', operator: '=', value: 'tools' },
+			]),
+		);
+		expect(result.sql).toBe(
+			'SELECT * FROM orders WHERE orders.total IS DISTINCT FROM (SELECT products_subq_0.price FROM products AS products_subq_0 WHERE products_subq_0.category = $1)',
+		);
+		expect(result.parameters).toEqual(['tools']);
+	});
+
+	it('refuses an unknown scalar-subquery operator through compilePlan', () => {
+		expect(() => compilePlan(scalarSubqueryPlan('notAnOperator'))).toThrow(
+			'No WHERE handler registered for operator: notAnOperator',
+		);
+	});
+
 	it('compiles select, update, and nested comparisons with the same bindings as neq', () => {
 		const orm = buildOrm();
 		const selectBuilder = orm.select('t').where(isDistinctFrom('c', 6));
