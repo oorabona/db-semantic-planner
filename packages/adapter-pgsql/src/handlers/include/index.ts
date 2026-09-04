@@ -29,7 +29,8 @@ const allIncludeHandlers = [
 
 /**
  * Register all include handlers.
- * Should be called once at module initialization.
+ * The compiler calls this through ensureIncludeHandlersRegistered on first use; calling it directly
+ * leaves that gate unset, so the compiler registers the same handlers again and throws.
  */
 export function registerAllIncludeHandlers(): void {
 	for (const handler of allIncludeHandlers) {

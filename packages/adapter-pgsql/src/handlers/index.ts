@@ -2,7 +2,7 @@
  * Handler Registry for adapter-pgsql
  *
  * Central registry for WHERE, EXPRESSION, and INCLUDE handlers.
- * Handlers are registered at module initialization and looked up by operator/type.
+ * Each family's built-in handlers are registered lazily on that family's first use and looked up by operator/type.
  */
 
 import type { ColumnListInput } from '@dbsp/types';
@@ -446,7 +446,7 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
  * Create a WHERE dispatcher that looks up handlers from the registry.
  */
 export function createWhereDispatcher(): WhereDispatcher {
-	return (
+	const dispatch: WhereDispatcher = (
 		decision: Decision,
 		ctx: CompilerContext,
 		state: CompilerState,
@@ -454,21 +454,18 @@ export function createWhereDispatcher(): WhereDispatcher {
 		ensureHandlersRegistered();
 		const normalized = normalizeToDecision(decision, ctx);
 		const rawOperator = normalized.operator;
-		const operator = resolveWhereOperator(rawOperator, {
-			...Object.fromEntries(
-				Array.from(whereHandlers.keys(), (registeredOperator) => [
-					registeredOperator,
-					registeredOperator,
-				]),
-			),
-			...OPERATOR_ALIASES,
-		});
+		const operator = resolveWhereOperator(
+			rawOperator,
+			OPERATOR_ALIASES,
+			whereHandlers,
+		);
 		const handler = getWhereHandler(operator);
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =
 			operator !== rawOperator ? { ...normalized, operator } : normalized;
-		return handler.compile(resolved, ctx, state, createWhereDispatcher());
+		return handler.compile(resolved, ctx, state, dispatch);
 	};
+	return dispatch;
 }
 
 // ============================================================================

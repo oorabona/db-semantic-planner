@@ -108,7 +108,9 @@ const allWhereHandlers = [...simpleWhereHandlers, ...complexWhereHandlers];
 
 /**
  * Register all simple WHERE handlers.
- * Should be called once at module initialization.
+ * Nothing in the package calls this; the first WHERE dispatch registers the full set instead.
+ * Calling it on a populated registry throws, and calling it on an empty one suppresses that
+ * lazy registration, leaving the complex handlers uninstalled.
  */
 export function registerSimpleWhereHandlers(): void {
 	for (const handler of simpleWhereHandlers) {
@@ -118,7 +120,8 @@ export function registerSimpleWhereHandlers(): void {
 
 /**
  * Register all WHERE handlers (simple + complex).
- * Should be called once at module initialization.
+ * The first WHERE dispatch calls this through ensureHandlersRegistered; calling it again once the
+ * handlers are registered throws.
  */
 export function registerAllWhereHandlers(): void {
 	for (const handler of allWhereHandlers) {
