@@ -86,8 +86,8 @@ catalog:
   # reason in the code — a consumer excluded from the range is a consumer
   # forced into a second copy. Raising the major is a breaking change.
   pg: ^8.21.0
-  pgsql-deparser: 17.18.3
-  pgsql-parser: 17.9.15
+  pgsql-deparser: 17.18.5
+  pgsql-parser: 17.9.17
   radix-ui: ^1.6.1
   react: ^19.2.7
   react-dom: ^19.2.7
