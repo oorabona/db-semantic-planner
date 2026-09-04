@@ -8,7 +8,7 @@
 
 import type { ExpressionIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import { binaryExpr } from '../../ast-helpers.js';
+import { binaryExpr, distinctExpr } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import { compileExpressionIntent } from '../expression/custom.js';
@@ -26,6 +26,7 @@ import type {
 const OP_MAP: Record<string, string> = {
 	eq: '=',
 	neq: '!=',
+	isDistinctFrom: '=',
 	gt: '>',
 	gte: '>=',
 	lt: '<',
@@ -78,6 +79,8 @@ export const customExpressionWhereHandler: WhereHandler = {
 			);
 		}
 
-		return binaryExpr(sqlOp, leftNode, rightNode);
+		return rawOp === 'isDistinctFrom'
+			? distinctExpr(leftNode, rightNode)
+			: binaryExpr(sqlOp, leftNode, rightNode);
 	},
 };

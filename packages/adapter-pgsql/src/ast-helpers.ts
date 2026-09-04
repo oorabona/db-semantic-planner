@@ -292,6 +292,13 @@ export function neExpr(left: Node, right: Node): Node {
 }
 
 /**
+ * Create a null-safe inequality expression (col IS DISTINCT FROM value).
+ */
+export function distinctExpr(left: Node, right: Node): Node {
+	return binaryExpr('=', left, right, 'AEXPR_DISTINCT');
+}
+
+/**
  * Create comparison expressions
  */
 export function ltExpr(left: Node, right: Node): Node {

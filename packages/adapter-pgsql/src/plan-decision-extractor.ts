@@ -194,7 +194,11 @@ export function mapComparisonOperator(op: string): string {
 		ilike: 'ILIKE',
 		isDistinctFrom: 'IS DISTINCT FROM',
 	};
-	return map[op] ?? '=';
+	const sqlOperator = map[op];
+	if (sqlOperator === undefined) {
+		throw new Error(`No WHERE handler registered for operator: ${op}`);
+	}
+	return sqlOperator;
 }
 
 /**

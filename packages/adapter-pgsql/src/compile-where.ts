@@ -31,6 +31,7 @@ import {
 	andExpr,
 	binaryExpr,
 	columnRef,
+	distinctExpr,
 	funcCall,
 	notExpr,
 	orExpr,
@@ -81,6 +82,7 @@ import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 const OP_MAP: Record<string, string> = {
 	eq: '=',
 	neq: '!=',
+	isDistinctFrom: '=',
 	gt: '>',
 	gte: '>=',
 	lt: '<',
@@ -92,6 +94,20 @@ const OP_MAP: Record<string, string> = {
 	'<': '<',
 	'<=': '<=',
 };
+
+function compileMappedComparison(
+	operator: string,
+	left: Node,
+	right: Node,
+): Node {
+	const sqlOp = OP_MAP[operator];
+	if (sqlOp === undefined) {
+		throw new Error(`No WHERE handler registered for operator: ${operator}`);
+	}
+	return operator === 'isDistinctFrom'
+		? distinctExpr(left, right)
+		: binaryExpr(sqlOp, left, right);
+}
 
 // ============================================================================
 // Public: WhereCompilerCtx
@@ -457,8 +473,7 @@ function handleExpressionIntent(
 	const idx = ++ctx.paramState.paramIndex;
 	ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
 	const rightNode = createParamRef(idx);
-	const sqlOp = OP_MAP[exprIntent.operator] ?? '=';
-	return binaryExpr(sqlOp, leftNode, rightNode);
+	return compileMappedComparison(exprIntent.operator, leftNode, rightNode);
 }
 
 /**
@@ -504,13 +519,12 @@ function handleSubqueryIntent(
 	ctx.paramState.paramIndex += paramCount;
 
 	const leftOperand = columnRef(field, ctx.rootTable, undefined, ctx.naming);
-	const sqlOp = OP_MAP[operator] ?? '=';
 
 	const subLink: SubLink = {
 		subLinkType: 'EXPR_SUBLINK',
 		subselect: subqueryNode,
 	};
-	return binaryExpr(sqlOp, leftOperand, { SubLink: subLink });
+	return compileMappedComparison(operator, leftOperand, { SubLink: subLink });
 }
 
 /**
@@ -903,8 +917,7 @@ function handleComparisonWithExprRef(
 			handlerCtx,
 			ctx.paramState,
 		);
-		const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
-		return binaryExpr(sqlOp, leftNode, rightNode);
+		return compileMappedComparison(cmpIntent.operator, leftNode, rightNode);
 	}
 
 	// RefDefinition path: the public ref() from @dbsp/core (schema DSL) returns
@@ -922,8 +935,7 @@ function handleComparisonWithExprRef(
 			handlerCtx,
 			ctx.paramState,
 		);
-		const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
-		return binaryExpr(sqlOp, leftNode, rightNode);
+		return compileMappedComparison(cmpIntent.operator, leftNode, rightNode);
 	}
 
 	return null;

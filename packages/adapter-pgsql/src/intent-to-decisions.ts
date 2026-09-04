@@ -856,18 +856,23 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const opMap: Record<string, string> = {
 		eq: '=',
 		neq: '!=',
+		isDistinctFrom: 'isDistinctFrom',
 		gt: '>',
 		gte: '>=',
 		lt: '<',
 		lte: '<=',
 	};
+	const subqueryOperator = opMap[operator];
+	if (subqueryOperator === undefined) {
+		throw new Error(`No WHERE handler registered for operator: ${operator}`);
+	}
 	return {
 		type: 'where',
 		column: field,
 		operator: 'scalarSubquery',
 		targetTable,
 		selectColumn,
-		subqueryOperator: opMap[operator] ?? '=',
+		subqueryOperator,
 		// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
 		subqueryIntent: subquery,
 		...(aggregate && { aggregate }),

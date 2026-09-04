@@ -4,6 +4,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { distinctExpr } from '../../ast-helpers.js';
 import { assertDialectCapability } from '../../dialect-capabilities.js';
 import type {
 	CompilerContext,
@@ -129,19 +130,39 @@ export const jsonComparisonHandler: WhereHandler = {
 		}
 
 		// Now apply the comparison operator
-		const operator = decision.operator;
+		const operator =
+			decision.subqueryOperator ??
+			(decision.operator === 'jsonComparison' || decision.operator === undefined
+				? 'eq'
+				: decision.operator);
 		const right = compileValue(decision.value, state);
 
 		// Map the intent operator to SQL
 		const opMap: Record<string, string> = {
 			eq: '=',
 			ne: '!=',
+			neq: '!=',
+			isDistinctFrom: '=',
+			'=': '=',
+			'!=': '!=',
+			'<>': '!=',
+			'<': '<',
+			'<=': '<=',
+			'>': '>',
+			'>=': '>=',
 			lt: '<',
 			lte: '<=',
 			gt: '>',
 			gte: '>=',
 		};
-		const sqlOp = opMap[operator ?? 'eq'] ?? '=';
+		const sqlOp = opMap[operator];
+		if (sqlOp === undefined) {
+			throw new Error(`No WHERE handler registered for operator: ${operator}`);
+		}
+
+		if (operator === 'isDistinctFrom') {
+			return distinctExpr(node, right);
+		}
 
 		return {
 			A_Expr: {

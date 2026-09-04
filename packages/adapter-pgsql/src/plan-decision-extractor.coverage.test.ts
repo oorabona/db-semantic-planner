@@ -208,10 +208,13 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(mapComparisonOperator('lte')).toBe('<=');
 			expect(mapComparisonOperator('like')).toBe('LIKE');
 			expect(mapComparisonOperator('ilike')).toBe('ILIKE');
+			expect(mapComparisonOperator('isDistinctFrom')).toBe('IS DISTINCT FROM');
 		});
 
-		it('defaults to = for unknown operator', () => {
-			expect(mapComparisonOperator('unknownOp')).toBe('=');
+		it('refuses unknown operators', () => {
+			expect(() => mapComparisonOperator('unknownOp')).toThrow(
+				'No WHERE handler registered for operator: unknownOp',
+			);
 		});
 	});
 

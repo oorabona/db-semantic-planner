@@ -6,6 +6,7 @@
 
 import type { Node } from '@pgsql/types';
 import {
+	distinctExpr,
 	eqExpr,
 	gtExpr,
 	gteExpr,
@@ -33,6 +34,7 @@ export const comparisonHandler: WhereHandler = {
 	operators: [
 		COMPARISON_OPERATORS.EQ,
 		COMPARISON_OPERATORS.NEQ,
+		COMPARISON_OPERATORS.IS_DISTINCT_FROM,
 		COMPARISON_OPERATORS.LT,
 		COMPARISON_OPERATORS.LTE,
 		COMPARISON_OPERATORS.GT,
@@ -44,7 +46,7 @@ export const comparisonHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
-		const operator = decision.operator ?? '=';
+		const operator = decision.operator;
 		const column = decision.column;
 		const value = decision.value;
 
@@ -57,6 +59,7 @@ export const comparisonHandler: WhereHandler = {
 		const right = compileValueOrFieldRef(value, ctx, state, columnType);
 
 		switch (operator) {
+			case undefined:
 			case COMPARISON_OPERATORS.EQ:
 			case '=':
 				return eqExpr(left, right);
@@ -65,6 +68,9 @@ export const comparisonHandler: WhereHandler = {
 			case '!=':
 			case '<>':
 				return neExpr(left, right);
+
+			case COMPARISON_OPERATORS.IS_DISTINCT_FROM:
+				return distinctExpr(left, right);
 
 			case COMPARISON_OPERATORS.LT:
 			case '<':
@@ -83,7 +89,9 @@ export const comparisonHandler: WhereHandler = {
 				return gteExpr(left, right);
 
 			default:
-				throw new Error(`Unknown comparison operator: ${operator}`);
+				throw new Error(
+					`No WHERE handler registered for operator: ${operator}`,
+				);
 		}
 	},
 };

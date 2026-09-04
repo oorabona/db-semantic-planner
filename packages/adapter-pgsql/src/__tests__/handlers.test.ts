@@ -237,6 +237,7 @@ describe('Handler Infrastructure', () => {
 		it('has comparison operators', () => {
 			expect(COMPARISON_OPERATORS.EQ).toBe('=');
 			expect(COMPARISON_OPERATORS.NEQ).toBe('!=');
+			expect(COMPARISON_OPERATORS.IS_DISTINCT_FROM).toBe('isDistinctFrom');
 			expect(COMPARISON_OPERATORS.LT).toBe('<');
 			expect(COMPARISON_OPERATORS.LTE).toBe('<=');
 			expect(COMPARISON_OPERATORS.GT).toBe('>');

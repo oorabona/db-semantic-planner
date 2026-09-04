@@ -904,24 +904,25 @@ describe('jsonComparisonHandler — branch coverage', () => {
 		}
 	});
 
-	it('falls back to = for unknown operator (via opMap default)', () => {
+	it('refuses unknown operators', () => {
 		const ctx = makeHandlerCtx();
 		const state = makeState();
-		const node = jsonComparisonHandler.compile(
-			{
-				type: 'where',
-				column: 'meta',
-				operator: 'unknown_op',
-				jsonPath: ['x'],
-				jsonMode: 'text',
-				value: 1,
-			} as unknown as Decision,
-			ctx,
-			state,
-			createWhereDispatcher(),
-		);
-		const sql = deparseNode(node);
-		expect(sql).toEqual('(items.meta ->> $1) = $2');
+		expect(() =>
+			jsonComparisonHandler.compile(
+				{
+					type: 'where',
+					column: 'meta',
+					operator: 'jsonComparison',
+					subqueryOperator: 'unknown_op',
+					jsonPath: ['x'],
+					jsonMode: 'text',
+					value: 1,
+				} as unknown as Decision,
+				ctx,
+				state,
+				createWhereDispatcher(),
+			),
+		).toThrow('No WHERE handler registered for operator: unknown_op');
 	});
 
 	it('falls back to = when operator is undefined (uses opMap default eq)', () => {
@@ -931,7 +932,7 @@ describe('jsonComparisonHandler — branch coverage', () => {
 			{
 				type: 'where',
 				column: 'meta',
-				operator: undefined,
+				operator: 'jsonComparison',
 				jsonPath: ['x'],
 				jsonMode: 'text',
 				value: 1,

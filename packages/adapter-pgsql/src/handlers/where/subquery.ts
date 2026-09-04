@@ -11,7 +11,7 @@
  */
 
 import type { A_Expr, A_Expr_Kind, Node, SubLink } from '@pgsql/types';
-import { columnRef } from '../../ast-helpers.js';
+import { columnRef, distinctExpr } from '../../ast-helpers.js';
 import { buildPredicateSubquerySelect } from '../../subquery-emission.js';
 import type {
 	CompilerContext,
@@ -32,6 +32,7 @@ const PG_OPERATOR_MAP: Record<string, string> = {
 	'<=': '<=',
 	'>': '>',
 	'>=': '>=',
+	isDistinctFrom: '=',
 };
 
 // ============================================================================
@@ -57,9 +58,18 @@ function createScalarSubLink(
 	};
 
 	// Build A_Expr: column OP (subquery)
+	const sqlOp = PG_OPERATOR_MAP[operator];
+	if (sqlOp === undefined) {
+		throw new Error(`No WHERE handler registered for operator: ${operator}`);
+	}
+
+	if (operator === 'isDistinctFrom') {
+		return distinctExpr(leftOperand, { SubLink: subLink });
+	}
+
 	const expr: A_Expr = {
 		kind: 'AEXPR_OP' as A_Expr_Kind,
-		name: [{ String: { sval: PG_OPERATOR_MAP[operator] ?? operator } }],
+		name: [{ String: { sval: sqlOp } }],
 		lexpr: leftOperand,
 		rexpr: { SubLink: subLink },
 	};

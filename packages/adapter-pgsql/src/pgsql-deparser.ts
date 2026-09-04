@@ -475,6 +475,12 @@ function deparseAExpr(node: A_Expr): string {
 		return `${left} ${op} ALL (${right})`;
 	}
 
+	if (kind === 'AEXPR_DISTINCT') {
+		const left = node.lexpr ? deparse(node.lexpr) : '';
+		const right = node.rexpr ? deparse(node.rexpr) : '';
+		return `${left} IS DISTINCT FROM ${right}`;
+	}
+
 	if (kind === 'AEXPR_BETWEEN' || kind === 'AEXPR_NOT_BETWEEN') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const listRec = node.rexpr as Record<string, unknown>;

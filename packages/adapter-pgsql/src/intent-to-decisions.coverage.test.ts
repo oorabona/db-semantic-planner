@@ -1371,7 +1371,7 @@ describe('intentToDecisions - coverage', () => {
 			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
 		});
 
-		it('maps unknown operator to = as default', () => {
+		it('refuses unknown operators', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
@@ -1382,9 +1382,9 @@ describe('intentToDecisions - coverage', () => {
 					subquery: { type: 'select' as const, from: 't' },
 				},
 			};
-			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.subqueryOperator).toBe('=');
+			expect(() => intentToDecisions(intent, 'users')).toThrow(
+				'No WHERE handler registered for operator: unknownOp',
+			);
 		});
 
 		it('maps neq operator to !=', () => {

@@ -20,6 +20,7 @@ import {
 	columnRef,
 	columnRefStar,
 	deleteStmt,
+	distinctExpr,
 	eqExpr,
 	funcCall,
 	gtExpr,
@@ -181,6 +182,10 @@ describe('A_Expr binary', () => {
 
 	it('<> not equal', () => {
 		compare(neExpr(columnRef('status'), createParamRef(1)));
+	});
+
+	it('IS DISTINCT FROM', () => {
+		compare(distinctExpr(columnRef('status'), createParamRef(1)));
 	});
 
 	it('< less than', () => {
