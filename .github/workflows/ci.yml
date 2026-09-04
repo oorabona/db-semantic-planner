@@ -43,6 +43,29 @@ jobs:
         # behind a path filter for relevant changes only.
         run: pnpm test:docs
 
+  rust-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/gui/src-tauri
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            libdbus-1-dev \
+            librsvg2-dev \
+            patchelf
+      - name: Check Rust dependencies
+        working-directory: packages/gui/src-tauri
+        run: cargo check --locked
+
   e2e:
     needs: test
     runs-on: ubuntu-latest
