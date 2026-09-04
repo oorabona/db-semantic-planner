@@ -43,8 +43,8 @@ catalogs:
       specifier: ^4.7.0
       version: 4.7.0
     '@oclif/table':
-      specifier: ^0.5.9
-      version: 0.5.9
+      specifier: ^1.0.0
+      version: 1.0.0
     '@pgsql/types':
       specifier: 17.6.2
       version: 17.6.2
@@ -340,7 +340,7 @@ importers:
         version: link:../types
       '@oclif/table':
         specifier: 'catalog:'
-        version: 0.5.9
+        version: 1.0.0
       commander:
         specifier: 'catalog:'
         version: 15.0.0
@@ -1672,9 +1672,9 @@ packages:
     os: [linux]
     libc: [glibc]
 
-  '@oclif/table@0.5.9':
-    resolution: {integrity: sha512-/bvSRF38rrZ8O3hsChEKb98bEpmY7GAMeMU5hRkt73RCEoAo1UuRKX4IO0zlkD6UooSs30LfEMJeSU2NZOkndA==}
-    engines: {node: '>=18.0.0'}
+  '@oclif/table@1.0.0':
+    resolution: {integrity: sha512-+Mggw/KHkdH0NxLFS4y0E5gZyy6CmDlOHh/wkwkF+RYnOEvneZ6E5BAJ+VqXXDZmRHNw6Mei7L19VHEQYgKooQ==}
+    engines: {node: '>=22.0.0'}
 
   '@oxc-project/types@0.148.0':
     resolution: {integrity: sha512-Nm4s/jB+4FpFsPhWGEC4h7rzksesmtnMXomo6rCMcg/b8zLQuOziRgkCS1fxDCXOlJB/6Q8oABOZ/OP6RIPj9A==}
@@ -6884,7 +6884,7 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@oclif/table@0.5.9':
+  '@oclif/table@1.0.0':
     dependencies:
       '@types/react': 18.3.31
       change-case: 5.4.4

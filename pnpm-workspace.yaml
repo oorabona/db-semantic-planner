@@ -47,7 +47,7 @@ catalog:
   '@lezer/highlight': ^1.2.3
   '@modelcontextprotocol/sdk': ^1.29.0
   '@monaco-editor/react': ^4.7.0
-  '@oclif/table': ^0.5.9
+  '@oclif/table': ^1.0.0
   '@pgsql/types': 17.6.2
   '@tailwindcss/vite': ^4.3.2
   '@tanstack/react-table': ^8.21.3
