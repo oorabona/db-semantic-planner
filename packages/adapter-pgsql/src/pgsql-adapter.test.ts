@@ -1390,8 +1390,10 @@ describe('PgsqlAdapter', () => {
 				await expect(pinned.execute(query)).resolves.toEqual([{ id: 7 }]);
 			});
 
+			const namedQuery = vi.mocked(client.query).mock.calls[1]?.[0];
+			expect(namedQuery).toBeDefined();
 			const namedValues = (
-				vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+				namedQuery as unknown as {
 					readonly values: unknown[];
 				}
 			).values;
@@ -1922,9 +1924,11 @@ describe('PgsqlAdapter', () => {
 								.mocked(client.query)
 								.mock.calls.filter(([statement]) => statement === sql),
 						).toHaveLength(1);
+						const secondQuery = vi.mocked(client.query).mock.calls[1]?.[0];
+						expect(secondQuery).toBeDefined();
 						expect(
 							(
-								vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+								secondQuery as unknown as {
 									readonly values: unknown[];
 								}
 							).values[0],
@@ -2008,9 +2012,11 @@ describe('PgsqlAdapter', () => {
 				}
 				expect(bufferFrom).not.toHaveBeenCalled();
 				expect(client.query).toHaveBeenCalledTimes(2);
+				const secondQuery = vi.mocked(client.query).mock.calls[1]?.[0];
+				expect(secondQuery).toBeDefined();
 				expect(
 					(
-						vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+						secondQuery as unknown as {
 							readonly values: unknown[];
 						}
 					).values[0],
@@ -2043,9 +2049,11 @@ describe('PgsqlAdapter', () => {
 				true,
 				false,
 			);
+			const secondPoolQuery = vi.mocked(pool.query).mock.calls[1]?.[0];
+			expect(secondPoolQuery).toBeDefined();
 			expect(
 				(
-					vi.mocked(pool.query).mock.calls[1]?.[0] as unknown as {
+					secondPoolQuery as unknown as {
 						values: unknown[];
 					}
 				).values[0],
@@ -2077,9 +2085,11 @@ describe('PgsqlAdapter', () => {
 				true,
 				false,
 			);
+			const secondClientQuery = vi.mocked(client.query).mock.calls[1]?.[0];
+			expect(secondClientQuery).toBeDefined();
 			expect(
 				(
-					vi.mocked(client.query).mock.calls[1]?.[0] as unknown as {
+					secondClientQuery as unknown as {
 						values: unknown[];
 					}
 				).values[0],

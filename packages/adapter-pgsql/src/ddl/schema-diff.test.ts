@@ -3708,7 +3708,7 @@ describe('Sequences', () => {
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toContain('create_sequence');
 		const change = diff.changes.find((c) => c.kind === 'create_sequence');
-		expect((change?.meta?.sequence as SequenceIR).name).toBe('order_seq');
+		expect(change?.meta?.sequence).toMatchObject({ name: 'order_seq' });
 		expect(change?.destructive).toBe(false);
 	});
 
@@ -3791,7 +3791,7 @@ describe('Sequences', () => {
 		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
-		expect((change?.meta?.previousSequence as SequenceIR).incrementBy).toBe(1);
+		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: 1 });
 	});
 });
 

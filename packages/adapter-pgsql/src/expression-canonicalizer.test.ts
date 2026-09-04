@@ -957,10 +957,17 @@ describe('canonicalizeCheckConstraints', () => {
 					change.kind === 'add_check_constraint' ||
 					change.kind === 'drop_check_constraint',
 			)
-			.map(
-				(change) =>
-					`${change.kind}:${(change.meta?.check as { name: string }).name}`,
-			);
+			.map((change) => {
+				const check = change.meta?.check;
+				const checkName =
+					typeof check === 'object' &&
+					check !== null &&
+					'name' in check &&
+					typeof check.name === 'string'
+						? check.name
+						: '__missing_check__';
+				return `${change.kind}:${checkName}`;
+			});
 		expect(checkChanges).toEqual(['add_check_constraint:jobs_status_check']);
 	});
 
