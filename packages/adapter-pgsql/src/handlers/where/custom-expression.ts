@@ -19,6 +19,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 
 /**
  * Maps comparison operator names to SQL operators.
@@ -53,6 +54,12 @@ export const customExpressionWhereHandler: WhereHandler = {
 		_dispatch: WhereDispatcher,
 	): Node {
 		const exprIntent = decision.expressionIntent as ExpressionIntent;
+		const isStandalone =
+			decision.value === undefined && !decision.subqueryOperator;
+		const rawOp = decision.subqueryOperator ?? decision.operator ?? '=';
+		const sqlOp = isStandalone
+			? undefined
+			: resolveWhereOperator(rawOp, OP_MAP);
 
 		// Left side: compile the custom expression
 		const leftNode = compileExpressionIntent(exprIntent, ctx, state);
@@ -61,7 +68,7 @@ export const customExpressionWhereHandler: WhereHandler = {
 		// directly to .where() — no right-side value or comparison operator.
 		// decision.operator === 'expression' is the WHERE handler discriminant (not a SQL op).
 		// A standalone expression has no subqueryOperator and no scalar value to bind.
-		if (decision.value === undefined && !decision.subqueryOperator) {
+		if (isStandalone) {
 			return leftNode;
 		}
 
@@ -70,17 +77,8 @@ export const customExpressionWhereHandler: WhereHandler = {
 		state.parameters.push(unwrapParamIntent(decision.value));
 		const rightNode = createParamRef(idx);
 
-		// Map comparison operator
-		const rawOp = decision.subqueryOperator ?? decision.operator ?? '=';
-		const sqlOp = OP_MAP[rawOp];
-		if (!sqlOp) {
-			throw new Error(
-				`customExpressionWhereHandler: unsupported comparison operator: ${rawOp}`,
-			);
-		}
-
 		return rawOp === 'isDistinctFrom'
 			? distinctExpr(leftNode, rightNode)
-			: binaryExpr(sqlOp, leftNode, rightNode);
+			: binaryExpr(sqlOp!, leftNode, rightNode);
 	},
 };

@@ -12,7 +12,26 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 import { buildColumnRef, compileValue } from './utils.js';
+
+const JSON_COMPARISON_OPERATOR_MAP: Record<string, string> = {
+	eq: '=',
+	ne: '!=',
+	neq: '!=',
+	isDistinctFrom: '=',
+	'=': '=',
+	'!=': '!=',
+	'<>': '!=',
+	'<': '<',
+	'<=': '<=',
+	'>': '>',
+	'>=': '>=',
+	lt: '<',
+	lte: '<=',
+	gt: '>',
+	gte: '>=',
+};
 
 /**
  * JSON containment: col @> $1 or col <@ $1
@@ -114,6 +133,13 @@ export const jsonComparisonHandler: WhereHandler = {
 			throw new Error('JSON comparison handler requires jsonPath');
 		}
 
+		// Now apply the comparison operator
+		const operator =
+			decision.subqueryOperator ??
+			(decision.operator === 'jsonComparison' || decision.operator === undefined
+				? 'eq'
+				: decision.operator);
+		const sqlOp = resolveWhereOperator(operator, JSON_COMPARISON_OPERATOR_MAP);
 		// Build chained JSON access: col->'a'->'b'->>'c'
 		let node: Node = buildColumnRef(column, ctx);
 		for (let i = 0; i < jsonPath.length; i++) {
@@ -129,36 +155,7 @@ export const jsonComparisonHandler: WhereHandler = {
 			};
 		}
 
-		// Now apply the comparison operator
-		const operator =
-			decision.subqueryOperator ??
-			(decision.operator === 'jsonComparison' || decision.operator === undefined
-				? 'eq'
-				: decision.operator);
 		const right = compileValue(decision.value, state);
-
-		// Map the intent operator to SQL
-		const opMap: Record<string, string> = {
-			eq: '=',
-			ne: '!=',
-			neq: '!=',
-			isDistinctFrom: '=',
-			'=': '=',
-			'!=': '!=',
-			'<>': '!=',
-			'<': '<',
-			'<=': '<=',
-			'>': '>',
-			'>=': '>=',
-			lt: '<',
-			lte: '<=',
-			gt: '>',
-			gte: '>=',
-		};
-		const sqlOp = opMap[operator];
-		if (sqlOp === undefined) {
-			throw new Error(`No WHERE handler registered for operator: ${operator}`);
-		}
 
 		if (operator === 'isDistinctFrom') {
 			return distinctExpr(node, right);

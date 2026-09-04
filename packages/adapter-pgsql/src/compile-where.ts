@@ -61,6 +61,7 @@ import type {
 	Decision,
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
+import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { buildColumnRef } from './handlers/where/utils.js';
 // Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
 // chokepoint for rawExists / scalar-direct predicate subqueries).
@@ -97,16 +98,11 @@ const OP_MAP: Record<string, string> = {
 
 function compileMappedComparison(
 	operator: string,
-	left: Node,
-	right: Node,
-): Node {
-	const sqlOp = OP_MAP[operator];
-	if (sqlOp === undefined) {
-		throw new Error(`No WHERE handler registered for operator: ${operator}`);
-	}
+): (left: Node, right: Node) => Node {
+	const sqlOp = resolveWhereOperator(operator, OP_MAP);
 	return operator === 'isDistinctFrom'
-		? distinctExpr(left, right)
-		: binaryExpr(sqlOp, left, right);
+		? distinctExpr
+		: (left, right) => binaryExpr(sqlOp, left, right);
 }
 
 // ============================================================================
@@ -459,6 +455,7 @@ function handleExpressionIntent(
 		value?: unknown;
 		operator: string;
 	};
+	const compileComparison = compileMappedComparison(exprIntent.operator);
 
 	const leftNode = compileExpressionIntent(
 		exprIntent.expr,
@@ -473,7 +470,7 @@ function handleExpressionIntent(
 	const idx = ++ctx.paramState.paramIndex;
 	ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
 	const rightNode = createParamRef(idx);
-	return compileMappedComparison(exprIntent.operator, leftNode, rightNode);
+	return compileComparison(leftNode, rightNode);
 }
 
 /**
@@ -490,6 +487,7 @@ function handleSubqueryIntent(
 		operator: string;
 		subquery: Parameters<WhereCompilerCtx['compileSubquery']>[0];
 	};
+	const compileComparison = compileMappedComparison(operator);
 
 	// Guard: reject scalar subqueries with modifiers that the direct path does not
 	// faithfully emit (LIMIT, ORDER BY, GROUP BY, etc.). This runs BEFORE the
@@ -524,7 +522,7 @@ function handleSubqueryIntent(
 		subLinkType: 'EXPR_SUBLINK',
 		subselect: subqueryNode,
 	};
-	return compileMappedComparison(operator, leftOperand, { SubLink: subLink });
+	return compileComparison(leftOperand, { SubLink: subLink });
 }
 
 /**
@@ -909,6 +907,7 @@ function handleComparisonWithExprRef(
 	// ExpressionRef path: already has a compiled ExpressionIntent — delegate directly.
 	// ExpressionRef implements the `ExpressionSpec` duck type: __expr === true.
 	if (rec.__expr === true) {
+		const compileComparison = compileMappedComparison(cmpIntent.operator);
 		const exprRef = v as { intent: ExpressionIntent };
 		// buildColumnRef handles dotted field names like 'table.col' by splitting them.
 		const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
@@ -917,7 +916,7 @@ function handleComparisonWithExprRef(
 			handlerCtx,
 			ctx.paramState,
 		);
-		return compileMappedComparison(cmpIntent.operator, leftNode, rightNode);
+		return compileComparison(leftNode, rightNode);
 	}
 
 	// RefDefinition path: the public ref() from @dbsp/core (schema DSL) returns
@@ -926,6 +925,7 @@ function handleComparisonWithExprRef(
 	// reference (table.column or just column) — compile it via RefExpressionIntent
 	// so it produces "alias"."col" instead of being parameterised as a literal.
 	if (rec.__brand === 'ref' && typeof rec.target === 'string') {
+		const compileComparison = compileMappedComparison(cmpIntent.operator);
 		// buildColumnRef handles dotted field names like 'table.col' by splitting them.
 		const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
 		// Reuse the existing 'ref' kind handler via RefExpressionIntent.
@@ -935,7 +935,7 @@ function handleComparisonWithExprRef(
 			handlerCtx,
 			ctx.paramState,
 		);
-		return compileMappedComparison(cmpIntent.operator, leftNode, rightNode);
+		return compileComparison(leftNode, rightNode);
 	}
 
 	return null;

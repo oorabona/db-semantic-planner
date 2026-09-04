@@ -21,11 +21,23 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 import {
 	buildColumnRef,
 	compileValueOrFieldRef,
 	resolveColumnPgType,
 } from './utils.js';
+
+const COMPARISON_OPERATOR_MAP: Record<string, string> = {
+	'=': '=',
+	'!=': '!=',
+	'<>': '!=',
+	isDistinctFrom: 'isDistinctFrom',
+	'<': '<',
+	'<=': '<=',
+	'>': '>',
+	'>=': '>=',
+};
 
 /**
  * Comparison operators handler
@@ -47,6 +59,10 @@ export const comparisonHandler: WhereHandler = {
 		state: CompilerState,
 	): Node {
 		const operator = decision.operator;
+		const resolvedOperator = resolveWhereOperator(
+			operator,
+			COMPARISON_OPERATOR_MAP,
+		);
 		const column = decision.column;
 		const value = decision.value;
 
@@ -58,33 +74,25 @@ export const comparisonHandler: WhereHandler = {
 		const columnType = resolveColumnPgType(column, ctx);
 		const right = compileValueOrFieldRef(value, ctx, state, columnType);
 
-		switch (operator) {
-			case undefined:
-			case COMPARISON_OPERATORS.EQ:
+		switch (resolvedOperator) {
 			case '=':
 				return eqExpr(left, right);
 
-			case COMPARISON_OPERATORS.NEQ:
 			case '!=':
-			case '<>':
 				return neExpr(left, right);
 
-			case COMPARISON_OPERATORS.IS_DISTINCT_FROM:
+			case 'isDistinctFrom':
 				return distinctExpr(left, right);
 
-			case COMPARISON_OPERATORS.LT:
 			case '<':
 				return ltExpr(left, right);
 
-			case COMPARISON_OPERATORS.LTE:
 			case '<=':
 				return lteExpr(left, right);
 
-			case COMPARISON_OPERATORS.GT:
 			case '>':
 				return gtExpr(left, right);
 
-			case COMPARISON_OPERATORS.GTE:
 			case '>=':
 				return gteExpr(left, right);
 

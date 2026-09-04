@@ -996,9 +996,7 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 				state,
 				createWhereDispatcher(),
 			),
-		).toThrow(
-			'customExpressionWhereHandler: unsupported comparison operator: unsupported_op',
-		);
+		).toThrow('No WHERE handler registered for operator: unsupported_op');
 	});
 
 	it('uses subqueryOperator over decision.operator for SQL op mapping', () => {

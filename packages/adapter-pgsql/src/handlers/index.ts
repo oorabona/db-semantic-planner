@@ -19,6 +19,7 @@ import type {
 } from './types.js';
 import { isSelectWithFields } from './types.js';
 import { registerAllWhereHandlers } from './where/index.js';
+import { resolveWhereOperator } from './where/operator-resolver.js';
 
 // Re-export types
 export * from './types.js';
@@ -211,12 +212,13 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 	if (input.column !== undefined) {
 		const raw = input as RawDecisionInput;
 		if (raw.jsonPath && raw.jsonPath.length > 0) {
+			const inputOperator = input.operator;
 			return {
 				type: 'where',
 				column: input.column,
 				operator: 'jsonComparison',
-				...(input.operator !== undefined && {
-					subqueryOperator: input.operator,
+				...(inputOperator !== undefined && {
+					subqueryOperator: inputOperator,
 				}),
 				value: input.value,
 				jsonPath: raw.jsonPath,
@@ -445,7 +447,11 @@ export function createWhereDispatcher(): WhereDispatcher {
 		ensureHandlersRegistered();
 		const normalized = normalizeToDecision(decision, ctx);
 		const rawOperator = normalized.operator ?? '=';
-		const operator = OPERATOR_ALIASES[rawOperator] ?? rawOperator;
+		const operator = resolveWhereOperator(
+			rawOperator,
+			OPERATOR_ALIASES,
+			rawOperator,
+		);
 		const handler = getWhereHandler(operator);
 		// Pass normalized decision with resolved operator so handler's switch matches
 		const resolved =

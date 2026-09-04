@@ -20,6 +20,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { resolveWhereOperator } from './operator-resolver.js';
 
 // ============================================================================
 // Map comparison operators to their PostgreSQL equivalents
@@ -50,6 +51,7 @@ function createScalarSubLink(
 	subquery: Node,
 	operator: string,
 	leftOperand: Node,
+	sqlOp: string = resolveWhereOperator(operator, PG_OPERATOR_MAP),
 ): Node {
 	// Wrap subquery in SubLink node for EXPR_SUBLINK
 	const subLink: SubLink = {
@@ -58,11 +60,6 @@ function createScalarSubLink(
 	};
 
 	// Build A_Expr: column OP (subquery)
-	const sqlOp = PG_OPERATOR_MAP[operator];
-	if (sqlOp === undefined) {
-		throw new Error(`No WHERE handler registered for operator: ${operator}`);
-	}
-
 	if (operator === 'isDistinctFrom') {
 		return distinctExpr(leftOperand, { SubLink: subLink });
 	}
@@ -222,6 +219,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 	): Node {
 		const column = decision.column;
 		const operator = decision.subqueryOperator ?? '=';
+		const sqlOp = resolveWhereOperator(operator, PG_OPERATOR_MAP);
 
 		if (!column) {
 			throw new Error('Scalar subquery requires column');
@@ -237,7 +235,7 @@ export const scalarSubqueryHandler: WhereHandler = {
 			dispatch,
 		);
 
-		return createScalarSubLink(subquery, operator, leftOperand);
+		return createScalarSubLink(subquery, operator, leftOperand, sqlOp);
 	},
 };
 

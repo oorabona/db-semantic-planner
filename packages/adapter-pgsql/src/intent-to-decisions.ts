@@ -19,6 +19,7 @@ import {
 } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
+import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
 export class UnknownSelectExpressionKindError extends Error {
@@ -862,10 +863,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		lt: '<',
 		lte: '<=',
 	};
-	const subqueryOperator = opMap[operator];
-	if (subqueryOperator === undefined) {
-		throw new Error(`No WHERE handler registered for operator: ${operator}`);
-	}
+	const subqueryOperator = resolveWhereOperator(operator, opMap);
 	return {
 		type: 'where',
 		column: field,

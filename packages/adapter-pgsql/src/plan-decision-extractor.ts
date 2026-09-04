@@ -18,6 +18,7 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
+import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { convertWhereCondition } from './intent-to-decisions.js';
 
 // ============================================================================
@@ -194,11 +195,7 @@ export function mapComparisonOperator(op: string): string {
 		ilike: 'ILIKE',
 		isDistinctFrom: 'IS DISTINCT FROM',
 	};
-	const sqlOperator = map[op];
-	if (sqlOperator === undefined) {
-		throw new Error(`No WHERE handler registered for operator: ${op}`);
-	}
-	return sqlOperator;
+	return resolveWhereOperator(op, map);
 }
 
 /**
