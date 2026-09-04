@@ -16,6 +16,7 @@ import type {
 	RefExpressionIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
+	WhereExpressionIntent,
 	WhereIntent,
 	WhereLikeIntent,
 	WhereNotIntent,
@@ -450,11 +451,11 @@ function handleExpressionIntent(
 	ctx: WhereCompilerCtx,
 	handlerCtx: CompilerContext,
 ): Node {
-	const exprIntent = intent as {
-		expr: ExpressionIntent;
-		value?: unknown;
-		operator: string;
-	};
+	const exprIntent = intent as WhereExpressionIntent;
+	if (!('operator' in exprIntent)) {
+		return compileExpressionIntent(exprIntent.expr, handlerCtx, ctx.paramState);
+	}
+
 	const compileComparison = compileMappedComparison(exprIntent.operator);
 
 	const leftNode = compileExpressionIntent(
@@ -462,10 +463,6 @@ function handleExpressionIntent(
 		handlerCtx,
 		ctx.paramState,
 	);
-
-	if (exprIntent.value === undefined) {
-		return leftNode;
-	}
 
 	const idx = ++ctx.paramState.paramIndex;
 	ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));

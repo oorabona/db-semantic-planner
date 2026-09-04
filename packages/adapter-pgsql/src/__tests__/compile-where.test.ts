@@ -386,16 +386,25 @@ describe('compileWhereIntent', () => {
 	});
 
 	describe('expression', () => {
-		it('standalone boolean expression (no value)', () => {
+		it('standalone boolean expression (no comparison properties)', () => {
 			// Build a simple ref expression: exprRef('active')
 			const { sql } = compile({
 				kind: 'expression',
 				expr: { kind: 'ref', column: 'active' },
-				operator: 'eq',
-				value: undefined as unknown as boolean,
 			});
 			// Should compile the expression as-is (column reference), no $N
 			expect(sql).toContain('active');
+		});
+
+		it('binds undefined for isDistinctFrom comparisons', () => {
+			const { sql, params } = compile({
+				kind: 'expression',
+				expr: { kind: 'literal', value: false },
+				operator: 'isDistinctFrom',
+				value: undefined,
+			});
+			expect(sql).toContain('IS DISTINCT FROM $1');
+			expect(params).toEqual([undefined]);
 		});
 
 		it('expression compared to value (eq)', () => {
