@@ -226,7 +226,9 @@ afterEach(async () => {
 	schemas.splice(0);
 });
 
-describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
+describe('managed ledger outcome recovery (SC-33…39)', {
+	concurrent: false,
+}, () => {
 	it.each([
 		[
 			'transactional completion',

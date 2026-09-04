@@ -188,7 +188,9 @@ afterEach(async () => {
 	schemas.splice(0);
 });
 
-describe.sequential('managed ledger outcome protocol (SC-32, SC-40…42)', () => {
+describe('managed ledger outcome protocol (SC-32, SC-40…42)', {
+	concurrent: false,
+}, () => {
 	it('extends one address through two completed execution-scoped lifecycles', async () => {
 		const { pool, schema } = await fixture();
 		const value = address(schema, 'twice_mutated');

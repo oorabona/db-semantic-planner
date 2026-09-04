@@ -389,7 +389,9 @@ afterAll(async () => {
 	while (schemas.length) await dropSchema(schemas.pop()!);
 });
 
-describe.sequential('unit 12 re-address recovery (SC-53…58)', () => {
+describe('unit 12 re-address recovery (SC-53…58)', {
+	concurrent: false,
+}, () => {
 	it('OBL-LOCK3: severing a paired recovery append acknowledgement reports ambiguity and leaves the durable refusals inspectable', async () => {
 		const { schema, database: databaseId } = await fixture();
 		const pool = await getTestPool();

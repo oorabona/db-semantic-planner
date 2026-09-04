@@ -105,7 +105,7 @@ afterEach(async () => {
 	await resetDbspMeta();
 });
 
-describe.sequential('OBL checkpoint windows', () => {
+describe('OBL checkpoint windows', { concurrent: false }, () => {
 	it('OBL-AUTH5: the transactional post-lock-integrity-to-append checkpoint is IPC-armed', async () => {
 		const schema = schemaName('auth5');
 		await provision(schema);

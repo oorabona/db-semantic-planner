@@ -183,7 +183,9 @@ describe('generated deferred kinds recording pool hygiene', () => {
 	);
 });
 
-describe.sequential('generated deferred kinds on real PostgreSQL', () => {
+describe('generated deferred kinds on real PostgreSQL', {
+	concurrent: false,
+}, () => {
 	afterEach(async () => {
 		const pool = await getTestPool();
 		for (const schema of schemas.splice(0).reverse()) await dropSchema(schema);

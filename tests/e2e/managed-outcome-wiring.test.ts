@@ -774,8 +774,8 @@ afterEach(async () => {
 	await resetDbspMeta();
 });
 
-describe.sequential('SC-43 #481 managed-outcome wiring', () => {
-	describe.sequential('transactional managed outcomes', () => {
+describe('SC-43 #481 managed-outcome wiring', { concurrent: false }, () => {
+	describe('transactional managed outcomes', { concurrent: false }, () => {
 		it('OBL-RUN1: public apply refuses an intact durable plan when the reviewed digest is wrong before authorization or DDL', async () => {
 			const schema = testSchema('run_wrong_review_digest');
 			await provision(schema);
@@ -1085,7 +1085,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		});
 	});
 
-	describe.sequential('non-transactional managed outcomes', () => {
+	describe('non-transactional managed outcomes', { concurrent: false }, () => {
 		it('commits claim then executing before the first concurrent-index statement', async () => {
 			const schema = testSchema('nontransactional');
 			await provision(schema);
@@ -1123,7 +1123,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		});
 	});
 
-	describe.sequential('run-scoped reconciliation', () => {
+	describe('run-scoped reconciliation', { concurrent: false }, () => {
 		it('requires recovery for only the killed run at the committed executing-to-send gate and leaves a concurrent claim open', async () => {
 			const schema = testSchema('reconcile');
 			await provision(schema);
@@ -1302,7 +1302,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		});
 	});
 
-	describe.sequential('OBL-REC12 corrupted ledger storage', () => {
+	describe('OBL-REC12 corrupted ledger storage', { concurrent: false }, () => {
 		/**
 		 * The normal ledger constraints make these three states impossible.  Each
 		 * construction deliberately relaxes only the constraint that prevents the
@@ -1521,7 +1521,9 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		);
 	});
 
-	describe.sequential('OBL-REC3 public reconcile diagnostic causes', () => {
+	describe('OBL-REC3 public reconcile diagnostic causes', {
+		concurrent: false,
+	}, () => {
 		it.each([
 			[
 				'authentication',
@@ -1604,7 +1606,7 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		);
 	});
 
-	describe.sequential('non-current marker refusal', () => {
+	describe('non-current marker refusal', { concurrent: false }, () => {
 		const markerAttacks = [
 			[
 				'older',
@@ -1771,7 +1773,9 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		);
 	});
 
-	describe.sequential('OBL-CLI1 spawned JSON success envelopes', () => {
+	describe('OBL-CLI1 spawned JSON success envelopes', {
+		concurrent: false,
+	}, () => {
 		async function plannedEnumRun(label: string) {
 			const schema = testSchema(`cli1_${label}`);
 			await provision(schema);
@@ -1927,7 +1931,9 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		});
 	});
 
-	describe.sequential('OBL-REC3/REC5 spawned reconcile evidence', () => {
+	describe('OBL-REC3/REC5 spawned reconcile evidence', {
+		concurrent: false,
+	}, () => {
 		async function openedCliReconcile(label: string) {
 			const schema = testSchema(`cli_reconcile_${label}`);
 			await provision(schema);
@@ -2045,7 +2051,9 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			});
 		});
 
-		describe.sequential('OBL-CLI2 PostgreSQL control-byte exception payloads', () => {
+		describe('OBL-CLI2 PostgreSQL control-byte exception payloads', {
+			concurrent: false,
+		}, () => {
 			it('OBL-CLI2 apply: escapes a PostgreSQL trigger payload on its command exception path', async () => {
 				const { planned, schema } = await openedCliReconcile('cli2_apply');
 				const payload = controlPayload();

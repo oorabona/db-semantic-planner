@@ -326,7 +326,9 @@ afterAll(async () => {
 	while (schemaFiles.length) await unlink(schemaFiles.pop()!).catch(() => {});
 });
 
-describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…62)', () => {
+describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
+	concurrent: false,
+}, () => {
 	it.each([
 		[
 			'older',

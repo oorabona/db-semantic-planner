@@ -335,7 +335,9 @@ afterAll(async () => {
 	while (schemaFiles.length) await unlink(schemaFiles.pop()!).catch(() => {});
 });
 
-describe.sequential('unit 11 destructive generator authority (SC-46…52)', () => {
+describe('unit 11 destructive generator authority (SC-46…52)', {
+	concurrent: false,
+}, () => {
 	it('SC-46: parent-accounted extension members do not gain per-member reservations', () => {
 		const root = tableAddress('public', 'db', 'extension-root');
 		const closure = classifyRemovalEffectsClosure({
