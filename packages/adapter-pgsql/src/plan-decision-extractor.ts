@@ -17,6 +17,7 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
+import { stringConstNode } from './ast-helpers.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
 import { resolveWhereOperator } from './handlers/where/operator-resolver.js';
 import { convertWhereCondition } from './intent-to-decisions.js';
@@ -203,7 +204,7 @@ export function mapComparisonOperator(op: string): string {
  */
 export function valueToNode(value: unknown): Node {
 	if (typeof value === 'string') {
-		return { A_Const: { sval: { sval: value } } };
+		return stringConstNode(value);
 	}
 	if (typeof value === 'number') {
 		if (Number.isInteger(value)) {
@@ -218,7 +219,7 @@ export function valueToNode(value: unknown): Node {
 		return { A_Const: { isnull: true } };
 	}
 	// Fallback: string representation
-	return { A_Const: { sval: { sval: String(value) } } };
+	return stringConstNode(String(value));
 }
 
 // ============================================================================

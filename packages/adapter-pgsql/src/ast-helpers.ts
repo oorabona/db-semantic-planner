@@ -61,7 +61,8 @@ function applyReturningClause(
 // ============================================================================
 
 /**
- * Create a String node (for identifiers, operators, etc.)
+ * Create an identifier node for a column, table, function, type, or operator name.
+ * For a SQL string value, use stringConstNode.
  */
 export function stringNode(value: string): Node {
 	return { String: { sval: value } };
@@ -90,6 +91,22 @@ export function booleanConstNode(value: boolean): Node {
 			boolval: { boolval: value },
 		},
 	};
+}
+
+/**
+ * Create a string constant node. This is a SQL value: it deparses to a quoted literal.
+ * For an identifier — a column, table, function, type or operator name — use stringNode.
+ */
+export function stringConstNode(value: string): Node {
+	return { A_Const: { sval: { sval: value } } };
+}
+
+/**
+ * Create the empty JSON array constant, `'[]'::json`, used as the COALESCE fallback of a
+ * json_agg over a relation that matched no rows.
+ */
+export function emptyJsonArrayNode(): Node {
+	return typeCast(stringConstNode('[]'), 'json');
 }
 
 /**
@@ -463,13 +480,6 @@ export function countStar(): Node {
  */
 export function countDistinct(col: Node): Node {
 	return funcCall('count', [col], { distinct: true });
-}
-
-/**
- * Create a COALESCE function call
- */
-export function coalesce(...args: Node[]): Node {
-	return funcCall('coalesce', args);
 }
 
 // ============================================================================
@@ -966,7 +976,7 @@ export function jsonAggSubquery(
 		// Column projection: jsonb_build_object('col1', __t__."col1", 'col2', __t__."col2", ...)
 		const projArgs: Node[] = [];
 		for (const col of cols) {
-			projArgs.push({ A_Const: { sval: { sval: naming.toDatabase(col) } } });
+			projArgs.push(stringConstNode(naming.toDatabase(col)));
 			projArgs.push(
 				options?.columnValueOverrides?.get(col) ??
 					columnRef(col, targetAlias, undefined, naming),
@@ -999,7 +1009,7 @@ export function jsonAggSubquery(
 	if (options?.childNodes && options.childNodes.length > 0) {
 		const buildObjectArgs: Node[] = [];
 		for (const child of options.childNodes) {
-			buildObjectArgs.push({ A_Const: { sval: { sval: child.key } } });
+			buildObjectArgs.push(stringConstNode(child.key));
 			buildObjectArgs.push(child.node);
 		}
 
@@ -1070,15 +1080,7 @@ export function jsonAggSubquery(
 	};
 
 	// Build: '[]'::json (empty array default)
-	const emptyArrayDefault: Node = {
-		TypeCast: {
-			arg: { A_Const: { sval: { sval: '[]' } } },
-			typeName: {
-				names: [stringNode('json')],
-				typemod: -1,
-			} as TypeName,
-		} as TypeCast,
-	};
+	const emptyArrayDefault = emptyJsonArrayNode();
 
 	// Build: COALESCE(subquery, '[]'::json)
 	const coalesceNode = coalesceExpr([subLink, emptyArrayDefault]);

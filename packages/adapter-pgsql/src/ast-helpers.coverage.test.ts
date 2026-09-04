@@ -5,7 +5,6 @@ import {
 	binaryExpr,
 	boolExpr,
 	booleanConstNode,
-	coalesce,
 	coalesceExpr,
 	columnRef,
 	columnRefStar,
@@ -309,12 +308,6 @@ describe('ast-helpers coverage tests', () => {
 			const result = coalesceExpr([columnRef('email'), stringNode('N/A')]);
 			expect(result.CoalesceExpr).toBeDefined();
 			expect(result.CoalesceExpr.args).toHaveLength(2);
-		});
-
-		it('coalesce function call', () => {
-			const result = coalesce(columnRef('email'), stringNode('N/A'));
-			expect(result.FuncCall.funcname[0].String.sval).toBe('coalesce');
-			expect(result.FuncCall.args).toHaveLength(2);
 		});
 	});
 

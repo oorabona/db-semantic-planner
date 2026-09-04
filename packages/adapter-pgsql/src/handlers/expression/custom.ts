@@ -29,6 +29,7 @@ import {
 	integerNode,
 	nullConstNode,
 	sortBy,
+	stringConstNode,
 	typeCast,
 } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
@@ -287,9 +288,7 @@ export function compileExpressionIntent(
 				return floatNode(String(i.value));
 			}
 			if (typeof i.value === 'string') {
-				return {
-					A_Const: { sval: { sval: i.value } },
-				};
+				return stringConstNode(i.value);
 			}
 			// Reject all other types (objects, arrays, bigint, Symbol, etc.) —
 			// String() coercion is not safe for SQL emission.

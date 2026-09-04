@@ -12,6 +12,7 @@
 
 import { emitWarning } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import { stringConstNode } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
@@ -166,10 +167,10 @@ export const literalHandler: ExpressionHandler = {
 		}
 
 		if (typeof value === 'string') {
-			return { A_Const: { sval: { sval: value } } };
+			return stringConstNode(value);
 		}
 
 		// For other types, stringify
-		return { A_Const: { sval: { sval: String(value) } } };
+		return stringConstNode(String(value));
 	},
 };

@@ -2,11 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../naming-plugin.js';
-import {
-	buildRecursiveCte,
-	buildRecursiveScalarSubquery,
-	MAX_DEPTH_LIMIT,
-} from './cte-compiler.js';
+import { buildRecursiveCte, MAX_DEPTH_LIMIT } from './cte-compiler.js';
 
 // ============================================================================
 // Test Helpers
@@ -363,58 +359,6 @@ describe('buildRecursiveCte - edge-table mode', () => {
 		expect(result.extraCtes).toBeDefined();
 		expect(result.extraCtes).toHaveLength(1);
 		expect(result.cte.CommonTableExpr).toHaveProperty('cycle_clause');
-	});
-});
-
-// ============================================================================
-// Scalar Subquery Tests
-// ============================================================================
-
-describe('buildRecursiveScalarSubquery', () => {
-	it('should build scalar subquery with json_agg', () => {
-		const result = buildRecursiveScalarSubquery(makeConfig(), 'id');
-
-		expect(result).toBeDefined();
-		expect(result).toHaveProperty('SubLink');
-		expect(result.SubLink).toHaveProperty('subLinkType', 'EXPR_SUBLINK');
-		expect(result.SubLink).toHaveProperty('subselect');
-	});
-
-	it('should wrap recursive CTE with json_agg for ancestors', () => {
-		const result = buildRecursiveScalarSubquery(
-			makeConfig({ isAncestors: true }),
-			'name',
-		);
-
-		expect(result).toBeDefined();
-		expect(result).toHaveProperty('SubLink');
-		expect(result.SubLink.subselect).toHaveProperty('SelectStmt');
-	});
-
-	it('should wrap recursive CTE with json_agg for descendants', () => {
-		const result = buildRecursiveScalarSubquery(
-			makeConfig({ isAncestors: false }),
-			'name',
-		);
-
-		expect(result).toBeDefined();
-		expect(result).toHaveProperty('SubLink');
-		expect(result.SubLink.subselect).toHaveProperty('SelectStmt');
-	});
-
-	it('should include withClause with recursive CTE', () => {
-		const result = buildRecursiveScalarSubquery(makeConfig(), 'id');
-
-		expect(result).toBeDefined();
-		expect(result.SubLink.subselect.SelectStmt).toHaveProperty('withClause');
-		expect(result.SubLink.subselect.SelectStmt.withClause).toHaveProperty(
-			'recursive',
-			true,
-		);
-		expect(result.SubLink.subselect.SelectStmt.withClause).toHaveProperty(
-			'ctes',
-		);
-		expect(result.SubLink.subselect.SelectStmt.withClause.ctes).toHaveLength(1);
 	});
 });
 

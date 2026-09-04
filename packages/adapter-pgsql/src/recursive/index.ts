@@ -12,7 +12,6 @@
 
 export {
 	buildRecursiveCte,
-	buildRecursiveScalarSubquery,
 	type RecursiveCteConfig,
 } from './cte-compiler.js';
 export {

@@ -22,6 +22,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { stringConstNode } from './ast-helpers.js';
 
 // ---------------------------------------------------------------------------
 // Tokeniser
@@ -283,11 +284,7 @@ class Parser {
 
 		if (tok.kind === 'STRING') {
 			this.consume();
-			return {
-				A_Const: {
-					sval: { sval: tok.value },
-				},
-			} as unknown as Node;
+			return stringConstNode(tok.value);
 		}
 
 		if (tok.kind === 'LPAREN') {

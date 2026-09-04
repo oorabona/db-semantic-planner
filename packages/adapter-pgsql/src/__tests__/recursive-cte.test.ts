@@ -14,7 +14,6 @@ import {
 } from '../recursive/cycle-detection.js';
 import {
 	buildRecursiveCte,
-	buildRecursiveScalarSubquery,
 	type RecursiveCteConfig,
 } from '../recursive/index.js';
 import {
@@ -119,22 +118,6 @@ describe('Recursive CTE Compiler', () => {
 			);
 			expect(visitedTarget).toBeDefined();
 			expect(cteNode.cycle_clause).toBeUndefined();
-		});
-	});
-
-	describe('buildRecursiveScalarSubquery', () => {
-		it('should produce a SubLink for scalar subquery', () => {
-			const result = buildRecursiveScalarSubquery(baseConfig, 'name');
-
-			expect(result).toHaveProperty('SubLink');
-			const subLink = (result as any).SubLink;
-			expect(subLink.subLinkType).toBe('EXPR_SUBLINK');
-			expect(subLink.subselect).toHaveProperty('SelectStmt');
-
-			// Should have WITH clause
-			const selectStmt = subLink.subselect.SelectStmt;
-			expect(selectStmt.withClause).toBeDefined();
-			expect(selectStmt.withClause.recursive).toBe(true);
 		});
 	});
 });
