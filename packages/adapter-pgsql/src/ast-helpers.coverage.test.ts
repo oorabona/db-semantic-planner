@@ -1,4 +1,5 @@
 // @ts-nocheck — coverage test: runtime assertions on AST nodes
+import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import {
 	andExpr,
@@ -39,12 +40,22 @@ import {
 	selectStmt,
 	sortBy,
 	starTarget,
+	stringConstNode,
 	stringNode,
 	typeCast,
 	updateStmt,
 	windowFuncCall,
 } from './ast-helpers.js';
 import { identityNaming } from './naming-plugin.js';
+
+function deparseSelect(node) {
+	return deparseSync(
+		selectStmt({
+			targetList: [resTarget(node)],
+			from: [rangeVar('t')],
+		}),
+	);
+}
 
 describe('ast-helpers coverage tests', () => {
 	describe('Basic Value Nodes', () => {
@@ -230,20 +241,24 @@ describe('ast-helpers coverage tests', () => {
 
 	describe('Type Casts', () => {
 		it('typeCast without array', () => {
-			const arg = stringNode('42');
+			const arg = stringConstNode('42');
 			const result = typeCast(arg, 'integer');
 			expect(result.TypeCast).toBeDefined();
 			expect(result.TypeCast.arg).toBe(arg);
 			expect(result.TypeCast.typeName.names[0].String.sval).toBe('integer');
 			expect(result.TypeCast.typeName.arrayBounds).toBeUndefined();
+			expect(deparseSelect(result)).toBe("SELECT '42'::integer\nFROM t");
 		});
 
 		it('typeCast with array', () => {
-			const arg = stringNode('{1,2,3}');
+			const arg = stringConstNode('{1,2,3}');
 			const result = typeCast(arg, 'integer', true);
 			expect(result.TypeCast.typeName.names[0].String.sval).toBe('integer');
 			expect(result.TypeCast.typeName.arrayBounds).toBeDefined();
 			expect(result.TypeCast.typeName.arrayBounds).toHaveLength(1);
+			expect(deparseSelect(result)).toBe(
+				"SELECT CAST('{1,2,3}' AS integer[])\nFROM t",
+			);
 		});
 	});
 
@@ -256,13 +271,17 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('funcCall with args', () => {
-			const result = funcCall('upper', [stringNode('hello')]);
+			const result = funcCall('upper', [stringConstNode('hello')]);
 			expect(result.FuncCall.funcname[0].String.sval).toBe('upper');
 			expect(result.FuncCall.args).toHaveLength(1);
+			expect(deparseSelect(result)).toBe("SELECT upper('hello')\nFROM t");
 		});
 
 		it('funcCall with schema prefix', () => {
-			const result = funcCall(['pg_catalog', 'upper'], [stringNode('hello')]);
+			const result = funcCall(
+				['pg_catalog', 'upper'],
+				[stringConstNode('hello')],
+			);
 			expect(result.FuncCall.funcname).toHaveLength(2);
 			expect(result.FuncCall.funcname[0].String.sval).toBe('pg_catalog');
 			expect(result.FuncCall.funcname[1].String.sval).toBe('upper');
@@ -305,9 +324,12 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('coalesceExpr with multiple args', () => {
-			const result = coalesceExpr([columnRef('email'), stringNode('N/A')]);
+			const result = coalesceExpr([columnRef('email'), stringConstNode('N/A')]);
 			expect(result.CoalesceExpr).toBeDefined();
 			expect(result.CoalesceExpr.args).toHaveLength(2);
+			expect(deparseSelect(result)).toBe(
+				"SELECT\n  COALESCE(email, 'N/A')\nFROM t",
+			);
 		});
 	});
 
@@ -416,20 +438,31 @@ describe('ast-helpers coverage tests', () => {
 		});
 
 		it('likeExpr creates LIKE', () => {
-			const result = likeExpr(columnRef('name'), stringNode('%john%'));
+			const result = likeExpr(columnRef('name'), stringConstNode('%john%'));
 			expect(result.A_Expr.kind).toBe('AEXPR_LIKE');
 			expect(result.A_Expr.name[0].String.sval).toBe('~~');
+			expect(deparseSelect(result)).toBe(
+				"SELECT\n  name LIKE '%john%'\nFROM t",
+			);
 		});
 
 		it('ilikeExpr creates ILIKE', () => {
-			const result = ilikeExpr(columnRef('name'), stringNode('%john%'));
+			const result = ilikeExpr(columnRef('name'), stringConstNode('%john%'));
 			expect(result.A_Expr.kind).toBe('AEXPR_ILIKE');
 			expect(result.A_Expr.name[0].String.sval).toBe('~~*');
+			expect(deparseSelect(result)).toBe(
+				"SELECT\n  name ILIKE '%john%'\nFROM t",
+			);
 		});
 
 		it('binaryExpr with custom operator', () => {
-			const result = binaryExpr('@@', columnRef('doc'), stringNode('search'));
+			const result = binaryExpr(
+				'@@',
+				columnRef('doc'),
+				stringConstNode('search'),
+			);
 			expect(result.A_Expr.name[0].String.sval).toBe('@@');
+			expect(deparseSelect(result)).toBe("SELECT\n  doc @@ 'search'\nFROM t");
 		});
 
 		it('fkCorrelation builds correlation expression', () => {
@@ -674,11 +707,14 @@ describe('ast-helpers coverage tests', () => {
 			const result = insertStmt({
 				table: 'users',
 				columns: ['name'],
-				values: [[stringNode('Alice')]],
+				values: [[stringConstNode('Alice')]],
 			});
 			expect(result.InsertStmt.selectStmt.SelectStmt).toBeDefined();
 			expect(result.InsertStmt.selectStmt.SelectStmt.valuesLists).toHaveLength(
 				1,
+			);
+			expect(deparseSync(result)).toBe(
+				"INSERT INTO users (\n  name\n) VALUES\n  ('Alice')",
 			);
 		});
 
@@ -715,19 +751,20 @@ describe('ast-helpers coverage tests', () => {
 		it('updateStmt with basic set', () => {
 			const result = updateStmt({
 				table: 'users',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 			});
 			expect(result.UpdateStmt).toBeDefined();
 			expect(result.UpdateStmt.relation.relname).toBe('users');
 			expect(result.UpdateStmt.targetList).toHaveLength(1);
 			expect(result.UpdateStmt.targetList[0].ResTarget.name).toBe('name');
+			expect(deparseSync(result)).toBe("UPDATE users SET name = 'Bob'");
 		});
 
 		it('updateStmt with schema', () => {
 			const result = updateStmt({
 				table: 'users',
 				schema: 'public',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 			});
 			expect(result.UpdateStmt.relation.schemaname).toBe('public');
 		});
@@ -736,7 +773,7 @@ describe('ast-helpers coverage tests', () => {
 			const where = eqExpr(columnRef('id'), integerNode(1));
 			const result = updateStmt({
 				table: 'users',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 				where,
 			});
 			expect(result.UpdateStmt.whereClause).toBe(where);
@@ -746,7 +783,7 @@ describe('ast-helpers coverage tests', () => {
 			const from = [rangeVar('posts')];
 			const result = updateStmt({
 				table: 'users',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 				from,
 			});
 			expect(result.UpdateStmt.fromClause).toBe(from);
@@ -756,7 +793,7 @@ describe('ast-helpers coverage tests', () => {
 			const returning = [resTarget(columnRef('id'))];
 			const result = updateStmt({
 				table: 'users',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 				returning,
 			});
 			expect(result.UpdateStmt.returningClause?.exprs).toBe(returning);
@@ -765,7 +802,7 @@ describe('ast-helpers coverage tests', () => {
 		it('updateStmt with naming plugin', () => {
 			const result = updateStmt({
 				table: 'users',
-				set: [{ column: 'name', value: stringNode('Bob') }],
+				set: [{ column: 'name', value: stringConstNode('Bob') }],
 				naming: identityNaming,
 			});
 			expect(result.UpdateStmt.relation.relname).toBe('users');

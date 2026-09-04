@@ -40,6 +40,7 @@ import {
 	selectStmt,
 	sortBy,
 	starTarget,
+	stringConstNode,
 	stringNode,
 	typeCast,
 	updateStmt,
@@ -180,18 +181,26 @@ describe('Binary Expressions', () => {
 	});
 
 	it('creates not-equal expression', () => {
-		const node = neExpr(columnRef('status'), stringNode('deleted'));
+		const node = neExpr(columnRef('status'), stringConstNode('deleted'));
 		expect(node).toHaveProperty('A_Expr');
+		expect(
+			deparseSync(
+				selectStmt({
+					targetList: [resTarget(node)],
+					from: [rangeVar('t')],
+				}),
+			),
+		).toBe("SELECT\n  status <> 'deleted'\nFROM t");
 	});
 
 	it('creates an IS DISTINCT FROM expression', () => {
-		const node = distinctExpr(columnRef('status'), stringNode('deleted'));
+		const node = distinctExpr(columnRef('status'), stringConstNode('deleted'));
 		expect(node).toEqual({
 			A_Expr: {
 				kind: 'AEXPR_DISTINCT',
 				name: [{ String: { sval: '=' } }],
 				lexpr: columnRef('status'),
-				rexpr: stringNode('deleted'),
+				rexpr: stringConstNode('deleted'),
 			},
 		});
 	});
@@ -204,12 +213,12 @@ describe('Binary Expressions', () => {
 	});
 
 	it('creates LIKE expression', () => {
-		const node = likeExpr(columnRef('name'), stringNode('%test%'));
+		const node = likeExpr(columnRef('name'), stringConstNode('%test%'));
 		expect(node).toHaveProperty('A_Expr');
 	});
 
 	it('creates ILIKE expression', () => {
-		const node = ilikeExpr(columnRef('name'), stringNode('%test%'));
+		const node = ilikeExpr(columnRef('name'), stringConstNode('%test%'));
 		expect(node).toHaveProperty('A_Expr');
 	});
 });
@@ -225,8 +234,8 @@ describe('Boolean Expressions', () => {
 
 	it('creates OR expression', () => {
 		const node = orExpr(
-			eqExpr(columnRef('role'), stringNode('admin')),
-			eqExpr(columnRef('role'), stringNode('super')),
+			eqExpr(columnRef('role'), stringConstNode('admin')),
+			eqExpr(columnRef('role'), stringConstNode('super')),
 		);
 		expect(node).toHaveProperty('BoolExpr');
 	});
@@ -388,7 +397,7 @@ describe('INSERT Statement', () => {
 		const node = insertStmt({
 			table: 'users',
 			columns: ['name', 'email'],
-			values: [[stringNode('John'), stringNode('john@example.com')]],
+			values: [[stringConstNode('John'), stringConstNode('john@example.com')]],
 		});
 
 		const sql = deparseSync(node);
@@ -468,13 +477,16 @@ describe('UPDATE Statement', () => {
 	it('creates UPDATE with RETURNING', () => {
 		const node = updateStmt({
 			table: 'users',
-			set: [{ column: 'status', value: stringNode('active') }],
+			set: [{ column: 'status', value: stringConstNode('active') }],
 			where: eqExpr(columnRef('id'), createParamRef(1)),
 			returning: [starTarget()],
 		});
 
 		const sql = deparseSync(node);
 		expect(sql.toLowerCase()).toContain('returning');
+		expect(sql).toBe(
+			"UPDATE users SET status = 'active' WHERE id = $1 RETURNING *",
+		);
 	});
 });
 
