@@ -9,12 +9,7 @@ catalogMode: strict
 # Which dependency build scripts may run. A name absent from this map is
 # undecided, and pnpm reports it on every install until someone decides.
 #
-# Both entries are deliberate refusals, not oversights:
-#   sharp             a transitive of vitepress-plugin-og-image, itself a docs
-#                     devDependency. It ships prebuilt binaries as optional
-#                     dependencies and its install script is only the
-#                     build-from-source fallback, which no supported platform
-#                     here needs.
+# The refusal is deliberate, not an oversight:
 #   simple-git-hooks  its postinstall writes .git/hooks. The root `prepare`
 #                     script already runs the same tool explicitly, so the
 #                     postinstall is redundant — and it follows symlinks, so on
@@ -28,7 +23,6 @@ allowBuilds:
   cpu-features: true
   esbuild: true
   protobufjs: true
-  sharp: false
   simple-git-hooks: false
   ssh2: true
 
@@ -81,7 +75,6 @@ catalog:
   cmdk: ^1.1.1
   commander: ^15.0.0
   happy-dom: ^20.10.6
-  hono: ^4.12.25
   ink: ^7.1.0
   ink-table: ^3.1.0
   jsdom: ^29.1.1
@@ -118,7 +111,6 @@ catalog:
   vitepress: ^1.6.4
   vitepress-plugin-llms: ^1.13.2
   vitepress-plugin-mermaid: ^2.0.17
-  vitepress-plugin-og-image: ^0.1.1
   vitest: ^4.1.9
   vue: ^3.5.39
   yaml: ^2.9.0
