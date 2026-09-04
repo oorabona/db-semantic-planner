@@ -11,15 +11,7 @@
  */
 
 import type { CommonTableExpr, Node, SelectStmt } from '@pgsql/types';
-import {
-	binaryExpr,
-	coalesce,
-	eqExpr,
-	funcCall,
-	integerNode,
-	stringNode,
-	typeCast,
-} from '../ast-helpers.js';
+import { binaryExpr, eqExpr, integerNode } from '../ast-helpers.js';
 import type { CompilerContext } from '../handlers/types.js';
 import {
 	buildCycleDetection,
@@ -868,70 +860,4 @@ function buildEdgeTableRecursiveCte(config: RecursiveCteConfig): {
 		result.extraCtes = extraCtes;
 	}
 	return result;
-}
-
-// ============================================================================
-// Scalar Subquery Builder
-// ============================================================================
-
-/**
- * Build a scalar subquery that wraps a recursive CTE.
- *
- * Produces:
- * ```sql
- * (WITH RECURSIVE cteAlias AS (...)
- *  SELECT COALESCE(json_agg(col ORDER BY __depth), '[]'::json)
- *  FROM cteAlias)
- * ```
- */
-export function buildRecursiveScalarSubquery(
-	config: RecursiveCteConfig,
-	aggregateColumn: string,
-): Node {
-	const { cte } = buildRecursiveCte(config);
-	const cteAlias = config.cteAlias;
-	const dbCol = config.ctx.naming.toDatabase(aggregateColumn);
-
-	// Build final SELECT with json_agg
-	const finalSelect: SelectStmt = {
-		targetList: [
-			{
-				ResTarget: {
-					val: coalesce(
-						funcCall('json_agg', [
-							{
-								ColumnRef: {
-									fields: [
-										{ String: { sval: cteAlias } },
-										{ String: { sval: dbCol } },
-									],
-								},
-							},
-						]),
-						typeCast(stringNode('[]'), 'json'),
-					),
-				},
-			},
-		],
-		fromClause: [
-			{
-				RangeVar: {
-					relname: cteAlias,
-					inh: true,
-					relpersistence: 'p',
-				},
-			},
-		],
-		withClause: {
-			ctes: [cte],
-			recursive: true,
-		},
-	};
-
-	return {
-		SubLink: {
-			subLinkType: 'EXPR_SUBLINK',
-			subselect: { SelectStmt: finalSelect },
-		},
-	};
 }

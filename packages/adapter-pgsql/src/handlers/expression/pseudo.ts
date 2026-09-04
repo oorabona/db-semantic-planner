@@ -13,11 +13,11 @@ import { requiredColumn } from '../../assert-field.js';
 import {
 	binaryExpr,
 	coalesceExpr,
+	emptyJsonArrayNode,
 	eqExpr,
 	funcCall,
 	integerNode,
 	sortBy,
-	typeCast,
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
@@ -405,7 +405,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 							},
 						),
 						// Empty array fallback: '[]'::json
-						typeCast({ A_Const: { sval: { sval: '[]' } } }, 'json'),
+						emptyJsonArrayNode(),
 					]),
 				},
 			},

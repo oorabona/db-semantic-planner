@@ -10,7 +10,7 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { binaryExpr, typeCast } from '../ast-helpers.js';
+import { binaryExpr, stringConstNode, typeCast } from '../ast-helpers.js';
 
 /**
  * Build initial path column for anchor SELECT.
@@ -153,11 +153,7 @@ export function buildPathString(cteAlias: string, separator = '/'): Node {
 								],
 							},
 						},
-						{
-							A_Const: {
-								sval: { sval: separator },
-							},
-						},
+						stringConstNode(separator),
 					],
 				},
 			},

@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	andExpr,
 	booleanConstNode,
-	coalesce,
+	coalesceExpr,
 	columnRef,
 	columnRefStar,
 	columnTarget,
@@ -269,10 +269,13 @@ describe('Function Calls', () => {
 		expect(fc.agg_distinct).toBe(true);
 	});
 
-	it('creates COALESCE', () => {
-		const node = coalesce(columnRef('nickname'), columnRef('name'));
-		const fc = (node as { FuncCall: { args?: unknown[] } }).FuncCall;
-		expect(fc.args).toHaveLength(2);
+	it('deparses COALESCE expression', () => {
+		const node = selectStmt({
+			targetList: [
+				resTarget(coalesceExpr([columnRef('nickname'), columnRef('name')])),
+			],
+		});
+		expect(deparseSync(node)).toContain('COALESCE(nickname, name)');
 	});
 });
 
