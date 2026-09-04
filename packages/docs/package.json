@@ -27,7 +27,6 @@
 		"vitepress": "catalog:",
 		"vitepress-plugin-llms": "catalog:",
 		"vitepress-plugin-mermaid": "catalog:",
-		"vitepress-plugin-og-image": "catalog:",
 		"vitest": "catalog:",
 		"vue": "catalog:"
 	}
