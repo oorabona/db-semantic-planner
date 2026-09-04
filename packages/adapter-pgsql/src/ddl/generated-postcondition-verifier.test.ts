@@ -820,21 +820,24 @@ describe('generated postcondition verifier', () => {
 				opclass: { missing: 'int4_ops' },
 			},
 		],
-	] as const)('refuses %s before any catalogue proof', (_label, kind, declaration) => {
-		expect(() =>
-			decodeGeneratedPostcondition({
-				postconditionVersion: 3,
-				targetBinding: v3Binding,
-				declaration: {
-					canonicalFormVersion: 1,
-					kind,
-					...(kind === 'constraint'
-						? { constraint: declaration }
-						: { index: declaration }),
-				},
-			}),
-		).toThrow(GeneratedPostconditionReplanRequiredError);
-	});
+	] as const)(
+		'refuses %s before any catalogue proof',
+		(_label, kind, declaration) => {
+			expect(() =>
+				decodeGeneratedPostcondition({
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: {
+						canonicalFormVersion: 1,
+						kind,
+						...(kind === 'constraint'
+							? { constraint: declaration }
+							: { index: declaration }),
+					},
+				}),
+			).toThrow(GeneratedPostconditionReplanRequiredError);
+		},
+	);
 
 	it.each([
 		[
@@ -966,15 +969,18 @@ describe('generated postcondition verifier', () => {
 				},
 			},
 		],
-	] as const)('decodes impossible %s as zero-query REPLAN_REQUIRED', (_label, declaration) => {
-		expect(() =>
-			decodeGeneratedPostcondition({
-				postconditionVersion: 3,
-				targetBinding: v3Binding,
-				declaration: { canonicalFormVersion: 1, ...declaration },
-			}),
-		).toThrow(GeneratedPostconditionReplanRequiredError);
-	});
+	] as const)(
+		'decodes impossible %s as zero-query REPLAN_REQUIRED',
+		(_label, declaration) => {
+			expect(() =>
+				decodeGeneratedPostcondition({
+					postconditionVersion: 3,
+					targetBinding: v3Binding,
+					declaration: { canonicalFormVersion: 1, ...declaration },
+				}),
+			).toThrow(GeneratedPostconditionReplanRequiredError);
+		},
+	);
 
 	it('retains the canonical-SQL validator failure in the REPLAN cause chain', () => {
 		try {
@@ -1204,19 +1210,22 @@ describe('generated postcondition verifier', () => {
 			'exemption',
 			{ postconditionVersion: 2, kind: 'exempt', reason: 'manual' },
 		],
-	] as const)('folds every v2 shape family into REPLAN_REQUIRED without a subset reader: %s', (_family, value) => {
-		const stepIdentity = 'generator:legacy-family';
-		try {
-			decodeGeneratedPostcondition(value, stepIdentity);
-			throw new Error('expected REPLAN_REQUIRED');
-		} catch (error) {
-			expect(error).toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
-			expect(error).toMatchObject({
-				code: 'REPLAN_REQUIRED',
-				diagnostic: { versionSeen: 2, stepIdentity },
-			});
-		}
-	});
+	] as const)(
+		'folds every v2 shape family into REPLAN_REQUIRED without a subset reader: %s',
+		(_family, value) => {
+			const stepIdentity = 'generator:legacy-family';
+			try {
+				decodeGeneratedPostcondition(value, stepIdentity);
+				throw new Error('expected REPLAN_REQUIRED');
+			} catch (error) {
+				expect(error).toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+				expect(error).toMatchObject({
+					code: 'REPLAN_REQUIRED',
+					diagnostic: { versionSeen: 2, stepIdentity },
+				});
+			}
+		},
+	);
 
 	it('folds v1 into REPLAN_REQUIRED with its diagnostic', () => {
 		expect(() =>
@@ -1278,15 +1287,18 @@ describe('generated postcondition verifier', () => {
 					kind: 'extension',
 				}),
 		],
-	] as const)('refuses v1 %s before the proof bracket can issue a query', async (_kind, verify) => {
-		const query = vi.fn(async () => {
-			throw new Error('database must not be queried');
-		});
-		await expect(
-			verify(mintGeneratedPostconditionSession({ query })),
-		).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
-		expect(query).not.toHaveBeenCalled();
-	});
+	] as const)(
+		'refuses v1 %s before the proof bracket can issue a query',
+		async (_kind, verify) => {
+			const query = vi.fn(async () => {
+				throw new Error('database must not be queried');
+			});
+			await expect(
+				verify(mintGeneratedPostconditionSession({ query })),
+			).rejects.toBeInstanceOf(GeneratedPostconditionReplanRequiredError);
+			expect(query).not.toHaveBeenCalled();
+		},
+	);
 
 	// The removed v2 verifier tests are restated above as one refusal per shape
 	// family; a legacy payload never reaches catalogue, scratch, or subset proof.
@@ -1562,33 +1574,33 @@ describe('generated postcondition verifier', () => {
 	// Restored v3 ports of the session and structural guarantees that used to be
 	// covered only by the removed v2 suite.  The declarations are deliberately
 	// address-free; every fixture crosses the v3 binding resolver first.
-	it.each([
-		'public checkout',
-		'pinned protocol',
-	] as const)('deactivates a retained capability after the %s bracket', async (bracket) => {
-		let retained: GeneratedPostconditionSession | undefined;
-		const query = vi.fn(async () => ({ rows: [] }));
-		const release = vi.fn();
-		if (bracket === 'public checkout')
-			await withGeneratedPostconditionSession(
-				{ connect: async () => ({ query, release }) },
-				async (session) => {
-					retained = session;
-				},
+	it.each(['public checkout', 'pinned protocol'] as const)(
+		'deactivates a retained capability after the %s bracket',
+		async (bracket) => {
+			let retained: GeneratedPostconditionSession | undefined;
+			const query = vi.fn(async () => ({ rows: [] }));
+			const release = vi.fn();
+			if (bracket === 'public checkout')
+				await withGeneratedPostconditionSession(
+					{ connect: async () => ({ query, release }) },
+					async (session) => {
+						retained = session;
+					},
+				);
+			else
+				await withPinnedGeneratedPostconditionSession(
+					{ query },
+					async (session) => {
+						retained = session;
+					},
+				);
+			if (!retained) throw new Error('expected retained capability');
+			await expect(retained.query('SELECT 1')).rejects.toBeInstanceOf(
+				GeneratedPostconditionSessionDeactivatedError,
 			);
-		else
-			await withPinnedGeneratedPostconditionSession(
-				{ query },
-				async (session) => {
-					retained = session;
-				},
-			);
-		if (!retained) throw new Error('expected retained capability');
-		await expect(retained.query('SELECT 1')).rejects.toBeInstanceOf(
-			GeneratedPostconditionSessionDeactivatedError,
-		);
-		if (bracket === 'public checkout') expect(release).toHaveBeenCalledWith();
-	});
+			if (bracket === 'public checkout') expect(release).toHaveBeenCalledWith();
+		},
+	);
 
 	it('refuses a successful bracket with raw capability work in flight', async () => {
 		for (const pinned of [false, true]) {
@@ -1760,21 +1772,24 @@ describe('generated postcondition verifier', () => {
 		['zero', 0],
 		['empty string', ''],
 		['NaN', Number.NaN],
-	] as const)('evicts a contaminated checkout for falsy primitive %s', async (_label, failure) => {
-		const release = vi.fn();
-		await expect(
-			withGeneratedPostconditionSession(
-				{ connect: async () => ({ query: vi.fn(), release }) },
-				async (session) => {
-					await session.query('BEGIN');
-					throw failure;
-				},
-			),
-		).rejects.toBe(failure);
-		expect(release).toHaveBeenCalledWith(
-			expect.objectContaining({ cause: failure }),
-		);
-	});
+	] as const)(
+		'evicts a contaminated checkout for falsy primitive %s',
+		async (_label, failure) => {
+			const release = vi.fn();
+			await expect(
+				withGeneratedPostconditionSession(
+					{ connect: async () => ({ query: vi.fn(), release }) },
+					async (session) => {
+						await session.query('BEGIN');
+						throw failure;
+					},
+				),
+			).rejects.toBe(failure);
+			expect(release).toHaveBeenCalledWith(
+				expect.objectContaining({ cause: failure }),
+			);
+		},
+	);
 
 	it('covers previous-checkout, scratch-mismatch, and cleanup eviction branches', async () => {
 		const safeThenOpenedTransactionRelease = vi.fn();

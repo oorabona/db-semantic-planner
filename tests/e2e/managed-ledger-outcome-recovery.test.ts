@@ -247,54 +247,59 @@ describe.sequential('managed ledger outcome recovery (SC-33…39)', () => {
 			3,
 			['intent', 'executing', 'observed'],
 		] as const,
-	] as const)('OBL-LOCK3: severing the %s COMMIT acknowledgement never reports success and leaves durable truth inspectable', async (_path, mode, severAt, durableKinds) => {
-		const { pool, schema } = await fixture();
-		const input = makeClaim(
-			schema,
-			`ambiguous_${mode}_${severAt}`,
-			`ambiguous-${mode}-${severAt}-claim`,
-		);
-		let acknowledgements = 0;
-		const observer = (point: string) => {
-			if (point !== 'commit-acknowledged') return;
-			acknowledgements += 1;
-			if (acknowledgements === severAt)
-				throw new Error('simulated lost COMMIT acknowledgement');
-		};
-		if (mode === 'claim') {
-			await expect(
-				openPgOutcomeClaim(pool, { ...input, observer }),
-			).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
-		} else {
-			const request = {
-				...input,
-				resolution: {
-					eventId: `ambiguous-${mode}-observed`,
-					eventKind: 'observed' as const,
-				},
-				vacancy: async () => ({ kind: 'vacant' as const }),
-				observer,
-				...(mode === 'non-transactional'
-					? { executingEventId: `ambiguous-${mode}-executing` }
-					: {}),
-			};
-			await expect(runPersistedOutcome(pool, request)).resolves.toMatchObject(
-				_path === 'non-transactional terminal'
-					? {
-							// The terminal COMMIT was already sent after executing committed,
-							// so its open claim propagates as recovery-required.
-							kind: 'outcome-recovery-required',
-							claimId: input.plan.claimId,
-						}
-					: { kind: 'outcome-transport-ambiguous' },
+	] as const)(
+		'OBL-LOCK3: severing the %s COMMIT acknowledgement never reports success and leaves durable truth inspectable',
+		async (_path, mode, severAt, durableKinds) => {
+			const { pool, schema } = await fixture();
+			const input = makeClaim(
+				schema,
+				`ambiguous_${mode}_${severAt}`,
+				`ambiguous-${mode}-${severAt}-claim`,
 			);
-		}
-		const events = await pool.query<{ event_kind: string }>(
-			`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 ORDER BY recorded_at, event_id`,
-			[input.plan.address.name],
-		);
-		expect(events.rows.map((event) => event.event_kind)).toEqual(durableKinds);
-	});
+			let acknowledgements = 0;
+			const observer = (point: string) => {
+				if (point !== 'commit-acknowledged') return;
+				acknowledgements += 1;
+				if (acknowledgements === severAt)
+					throw new Error('simulated lost COMMIT acknowledgement');
+			};
+			if (mode === 'claim') {
+				await expect(
+					openPgOutcomeClaim(pool, { ...input, observer }),
+				).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+			} else {
+				const request = {
+					...input,
+					resolution: {
+						eventId: `ambiguous-${mode}-observed`,
+						eventKind: 'observed' as const,
+					},
+					vacancy: async () => ({ kind: 'vacant' as const }),
+					observer,
+					...(mode === 'non-transactional'
+						? { executingEventId: `ambiguous-${mode}-executing` }
+						: {}),
+				};
+				await expect(runPersistedOutcome(pool, request)).resolves.toMatchObject(
+					_path === 'non-transactional terminal'
+						? {
+								// The terminal COMMIT was already sent after executing committed,
+								// so its open claim propagates as recovery-required.
+								kind: 'outcome-recovery-required',
+								claimId: input.plan.claimId,
+							}
+						: { kind: 'outcome-transport-ambiguous' },
+				);
+			}
+			const events = await pool.query<{ event_kind: string }>(
+				`SELECT event_kind FROM ${quoteIdent(schema)}."dbsp_ledger_event" WHERE address_name = $1 ORDER BY recorded_at, event_id`,
+				[input.plan.address.name],
+			);
+			expect(events.rows.map((event) => event.event_kind)).toEqual(
+				durableKinds,
+			);
+		},
+	);
 
 	it('OBL-LOCK3: severing a single recovery append acknowledgement reports ambiguity, then inspection sees the durable refusal', async () => {
 		const { pool, schema } = await fixture();

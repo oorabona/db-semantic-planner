@@ -159,28 +159,27 @@ describe('generate command casing wiring', () => {
 });
 
 describe('generate: a refused target never runs the user schema', () => {
-	it.each([
-		'manifest',
-		'kysely',
-		'typo',
-	])('rejects %s without loading the schema', async (target) => {
-		loadSchema.mockClear();
-		const exit = vi
-			.spyOn(process, 'exit')
-			.mockImplementation((() => undefined) as never);
-		const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+	it.each(['manifest', 'kysely', 'typo'])(
+		'rejects %s without loading the schema',
+		async (target) => {
+			loadSchema.mockClear();
+			const exit = vi
+				.spyOn(process, 'exit')
+				.mockImplementation((() => undefined) as never);
+			const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-		await generateCommand.parseAsync(['node', 'dbsp', target]);
+			await generateCommand.parseAsync(['node', 'dbsp', target]);
 
-		expect(loadSchema).not.toHaveBeenCalled();
-		expect(stderr).toHaveBeenCalledWith(
-			expect.stringContaining(
-				target === 'typo' ? 'Unknown target' : 'has been removed',
-			),
-		);
-		exit.mockRestore();
-		stderr.mockRestore();
-	});
+			expect(loadSchema).not.toHaveBeenCalled();
+			expect(stderr).toHaveBeenCalledWith(
+				expect.stringContaining(
+					target === 'typo' ? 'Unknown target' : 'has been removed',
+				),
+			);
+			exit.mockRestore();
+			stderr.mockRestore();
+		},
+	);
 });
 
 describe('generate: the command options reach the generator', () => {
@@ -201,23 +200,22 @@ describe('generate: the command options reach the generator', () => {
 		expect(capturedLog()).not.toContain('DROP TABLE IF EXISTS');
 	});
 
-	it.each([
-		'mysql',
-		'sqlite',
-		'mssql',
-	])('warns that %s is unsupported and carries on with postgresql', async (dialect) => {
-		loadSchema.mockResolvedValue(makeLoadedSchema());
+	it.each(['mysql', 'sqlite', 'mssql'])(
+		'warns that %s is unsupported and carries on with postgresql',
+		async (dialect) => {
+			loadSchema.mockResolvedValue(makeLoadedSchema());
 
-		await generateCommand.parseAsync(
-			['ddl', '--schema', 'dbsp.schema.ts', '--dialect', dialect],
-			{ from: 'user' },
-		);
+			await generateCommand.parseAsync(
+				['ddl', '--schema', 'dbsp.schema.ts', '--dialect', dialect],
+				{ from: 'user' },
+			);
 
-		expect(console.error).toHaveBeenCalledWith(
-			expect.stringContaining("Only 'postgresql' dialect"),
-		);
-		expect(capturedLog()).toContain('CREATE TABLE "user_profiles"');
-	});
+			expect(console.error).toHaveBeenCalledWith(
+				expect.stringContaining("Only 'postgresql' dialect"),
+			);
+			expect(capturedLog()).toContain('CREATE TABLE "user_profiles"');
+		},
+	);
 
 	it('says nothing about the dialect when it is postgresql', async () => {
 		loadSchema.mockResolvedValue(makeLoadedSchema());
@@ -283,33 +281,31 @@ describe('generate: the command options reach the generator', () => {
 		expect(capturedLog()).toBe(expected);
 	});
 
-	it.each([
-		'garbage',
-		'140005',
-		'14.100',
-		'9',
-	])('rejects PostgreSQL version spelling %s as a usage error before loading the schema', async (postgresqlVersion) => {
-		const exit = vi
-			.spyOn(process, 'exit')
-			.mockImplementation((() => undefined) as never);
+	it.each(['garbage', '140005', '14.100', '9'])(
+		'rejects PostgreSQL version spelling %s as a usage error before loading the schema',
+		async (postgresqlVersion) => {
+			const exit = vi
+				.spyOn(process, 'exit')
+				.mockImplementation((() => undefined) as never);
 
-		await generateCommand.parseAsync(
-			[
-				'ddl',
-				'--schema',
-				'dbsp.schema.ts',
-				'--postgresql-version',
-				postgresqlVersion,
-			],
-			{ from: 'user' },
-		);
+			await generateCommand.parseAsync(
+				[
+					'ddl',
+					'--schema',
+					'dbsp.schema.ts',
+					'--postgresql-version',
+					postgresqlVersion,
+				],
+				{ from: 'user' },
+			);
 
-		expect(loadSchema).not.toHaveBeenCalled();
-		expect(console.error).toHaveBeenCalledWith(
-			expect.stringContaining(
-				`Invalid --postgresql-version "${postgresqlVersion}": expected a PostgreSQL major version or dotted release version`,
-			),
-		);
-		expect(exit).toHaveBeenCalledWith(1);
-	});
+			expect(loadSchema).not.toHaveBeenCalled();
+			expect(console.error).toHaveBeenCalledWith(
+				expect.stringContaining(
+					`Invalid --postgresql-version "${postgresqlVersion}": expected a PostgreSQL major version or dotted release version`,
+				),
+			);
+			expect(exit).toHaveBeenCalledWith(1);
+		},
+	);
 });

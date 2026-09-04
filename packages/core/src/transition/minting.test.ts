@@ -146,20 +146,20 @@ describe('transition plan minting', () => {
 	// `stableJson`, which walks `0 .. length - 1`, emits nothing for it. Testing a
 	// canonical integer key rather than a word is the point — a check that only
 	// asked "does this parse as a non-negative integer?" would accept it.
-	it.each([
-		'4294967295',
-		'4294967296',
-	])('rejects an array index past the serialized range (%s)', (key) => {
-		const shape = planShape();
-		Object.defineProperty(shape.observations, key, {
-			value: 'DROP TABLE important',
-			enumerable: true,
-		});
+	it.each(['4294967295', '4294967296'])(
+		'rejects an array index past the serialized range (%s)',
+		(key) => {
+			const shape = planShape();
+			Object.defineProperty(shape.observations, key, {
+				value: 'DROP TABLE important',
+				enumerable: true,
+			});
 
-		expect(() => mintInProcessPlan(shape)).toThrow(
-			new RegExp(`found named array property.*\\.observations\\[${key}\\]`),
-		);
-	});
+			expect(() => mintInProcessPlan(shape)).toThrow(
+				new RegExp(`found named array property.*\\.observations\\[${key}\\]`),
+			);
+		},
+	);
 
 	it('accepts an ordinary plain array', () => {
 		const plan = mintInProcessPlan(planShape());

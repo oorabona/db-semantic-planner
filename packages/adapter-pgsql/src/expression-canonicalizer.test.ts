@@ -377,30 +377,33 @@ describe('canonicalizeCheckConstraints', () => {
 		['single-quoted', "state = 'pending'"],
 		['dollar-quoted', 'state = $$pending$$'],
 		['tagged dollar-quoted', 'state = $lit$pending$lit$'],
-	])('canonicalizes an authored CHECK with a %s enum-value spelling', async (_kind, expression) => {
-		const client = new FakePgClient();
-		client.canonicalExpressions.set(
-			'_dbsp_check_canon_0_0',
-			"CHECK (((state)::text = 'pending'::text))",
-		);
-		const desired = makeModel([
-			makeTable({
-				name: 'orders',
-				columns: [makeCol('state', { type: 'string' })],
-				checkConstraints: [{ name: 'orders_state_check', expression }],
-			}),
-		]);
+	])(
+		'canonicalizes an authored CHECK with a %s enum-value spelling',
+		async (_kind, expression) => {
+			const client = new FakePgClient();
+			client.canonicalExpressions.set(
+				'_dbsp_check_canon_0_0',
+				"CHECK (((state)::text = 'pending'::text))",
+			);
+			const desired = makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol('state', { type: 'string' })],
+					checkConstraints: [{ name: 'orders_state_check', expression }],
+				}),
+			]);
 
-		const canonical = await canonicalizeWithScratch(
-			adapterForPool(new FakePgPool(client)),
-			desired,
-			makeModel([]),
-		);
+			const canonical = await canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				makeModel([]),
+			);
 
-		expect(
-			canonical.tables.get('orders')?.checkConstraints?.[0]?.expression,
-		).toBe("CHECK (((state)::text = 'pending'::text))");
-	});
+			expect(
+				canonical.tables.get('orders')?.checkConstraints?.[0]?.expression,
+			).toBe("CHECK (((state)::text = 'pending'::text))");
+		},
+	);
 
 	it('creates a desired-only enum before canonicalizing its default and CHECK in strict mode', async () => {
 		const client = new FakePgClient();
@@ -3076,53 +3079,56 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 	it.each([
 		['bare', "nextval('counter_seq'::regclass)"],
 		['target-qualified', "nextval('tenant.counter_seq'::regclass)"],
-	] as const)('stages a planned sequence before canonicalizing a %s default reference', async (_reference, defaultSql) => {
-		const client = new FakePgClient();
-		const desired = makeModel(
-			[
+	] as const)(
+		'stages a planned sequence before canonicalizing a %s default reference',
+		async (_reference, defaultSql) => {
+			const client = new FakePgClient();
+			const desired = makeModel(
+				[
+					makeTable({
+						name: 'jobs',
+						columns: [
+							makeCol('id'),
+							makeCol('counter', { default: { sql: defaultSql } }),
+						],
+					}),
+				],
+				undefined,
+				undefined,
+				[{ name: 'counter_seq' }],
+			);
+			const database = makeModel([
 				makeTable({
 					name: 'jobs',
 					columns: [
 						makeCol('id'),
-						makeCol('counter', { default: { sql: defaultSql } }),
+						makeCol('counter', { default: { sql: 'old counter default' } }),
 					],
 				}),
-			],
-			undefined,
-			undefined,
-			[{ name: 'counter_seq' }],
-		);
-		const database = makeModel([
-			makeTable({
-				name: 'jobs',
-				columns: [
-					makeCol('id'),
-					makeCol('counter', { default: { sql: 'old counter default' } }),
-				],
-			}),
-		]);
+			]);
 
-		const canonical = await adapterForPool(
-			new FakePgPool(client),
-		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, database, {
-				schemaName: 'tenant',
-			}),
-		);
+			const canonical = await adapterForPool(
+				new FakePgPool(client),
+			).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(scratch, desired, database, {
+					schemaName: 'tenant',
+				}),
+			);
 
-		const statements = client.queries.map((query) => normalizeSql(query.sql));
-		const sequence = statements.indexOf(
-			'CREATE SEQUENCE "tenant"."counter_seq";',
-		);
-		const defaultStatement = statements.findIndex((statement) =>
-			statement.includes(`SET DEFAULT ${defaultSql}`),
-		);
-		expect(sequence).toBeGreaterThanOrEqual(0);
-		expect(defaultStatement).toBeGreaterThan(sequence);
-		expect(canonical.defaultOutcomes).toContainEqual(
-			expect.objectContaining({ status: 'canonicalised', column: 'counter' }),
-		);
-	});
+			const statements = client.queries.map((query) => normalizeSql(query.sql));
+			const sequence = statements.indexOf(
+				'CREATE SEQUENCE "tenant"."counter_seq";',
+			);
+			const defaultStatement = statements.findIndex((statement) =>
+				statement.includes(`SET DEFAULT ${defaultSql}`),
+			);
+			expect(sequence).toBeGreaterThanOrEqual(0);
+			expect(defaultStatement).toBeGreaterThan(sequence);
+			expect(canonical.defaultOutcomes).toContainEqual(
+				expect.objectContaining({ status: 'canonicalised', column: 'counter' }),
+			);
+		},
+	);
 
 	it('does not stage an unused missing sequence when the migration excludes sequence DDL', async () => {
 		const client = new FakePgClient();
@@ -3617,51 +3623,54 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 	it.each([
 		['a frozen Error', Object.freeze(new Error('deparse failed'))],
 		['a non-Error value', 'deparse failed'],
-	] as const)('preserves %s and a search_path restore failure without mutating the original rejection', async (_description, deparseError) => {
-		const client = new FakePgClient();
-		const restoreError = new Error('search_path restore failed');
-		const query = client.query.bind(client);
-		let catalogOnlyPathWasSet = false;
-		vi.spyOn(client, 'query').mockImplementation(async (sql, parameters) => {
-			const normalized = normalizeSql(sql);
-			if (normalized === 'SET LOCAL search_path TO pg_catalog') {
-				catalogOnlyPathWasSet = true;
-			}
-			if (normalized.startsWith('SELECT conname AS name,')) {
-				throw deparseError;
-			}
-			if (
-				catalogOnlyPathWasSet &&
-				normalized === "SELECT pg_catalog.set_config('search_path', $1, true)"
-			) {
-				throw restoreError;
-			}
-			return query(sql, parameters);
-		});
-		const desired = makeModel([
-			makeTable({
-				name: 'jobs',
-				checkConstraints: [{ name: 'jobs_id_check', expression: 'id > 0' }],
-			}),
-		]);
+	] as const)(
+		'preserves %s and a search_path restore failure without mutating the original rejection',
+		async (_description, deparseError) => {
+			const client = new FakePgClient();
+			const restoreError = new Error('search_path restore failed');
+			const query = client.query.bind(client);
+			let catalogOnlyPathWasSet = false;
+			vi.spyOn(client, 'query').mockImplementation(async (sql, parameters) => {
+				const normalized = normalizeSql(sql);
+				if (normalized === 'SET LOCAL search_path TO pg_catalog') {
+					catalogOnlyPathWasSet = true;
+				}
+				if (normalized.startsWith('SELECT conname AS name,')) {
+					throw deparseError;
+				}
+				if (
+					catalogOnlyPathWasSet &&
+					normalized === "SELECT pg_catalog.set_config('search_path', $1, true)"
+				) {
+					throw restoreError;
+				}
+				return query(sql, parameters);
+			});
+			const desired = makeModel([
+				makeTable({
+					name: 'jobs',
+					checkConstraints: [{ name: 'jobs_id_check', expression: 'id > 0' }],
+				}),
+			]);
 
-		let caught: unknown;
-		try {
-			await canonicalizeWithScratch(
-				adapterForPool(new FakePgPool(client)),
-				desired,
-				makeModel([makeTable({ name: 'jobs' })]),
-			);
-		} catch (error) {
-			caught = error;
-		}
+			let caught: unknown;
+			try {
+				await canonicalizeWithScratch(
+					adapterForPool(new FakePgPool(client)),
+					desired,
+					makeModel([makeTable({ name: 'jobs' })]),
+				);
+			} catch (error) {
+				caught = error;
+			}
 
-		expect(caught).toBeInstanceOf(CheckConstraintCanonicalizationError);
-		const cause = (caught as CheckConstraintCanonicalizationError).cause;
-		expect(cause).toBeInstanceOf(AggregateError);
-		expect((cause as AggregateError).errors).toEqual([
-			deparseError,
-			restoreError,
-		]);
-	});
+			expect(caught).toBeInstanceOf(CheckConstraintCanonicalizationError);
+			const cause = (caught as CheckConstraintCanonicalizationError).cause;
+			expect(cause).toBeInstanceOf(AggregateError);
+			expect((cause as AggregateError).errors).toEqual([
+				deparseError,
+				restoreError,
+			]);
+		},
+	);
 });

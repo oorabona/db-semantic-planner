@@ -22,9 +22,12 @@ describe('createPgTransitionLessor', () => {
 		[{ code: '57P03' }, true],
 		[{ code: '40001', message: 'could not serialize access' }, false],
 		[{ code: '23505', message: 'duplicate key value' }, false],
-	])('classifies dead PostgreSQL connections conservatively: %o', (error, dead) => {
-		expect(isDeadPgConnectionError(error)).toBe(dead);
-	});
+	])(
+		'classifies dead PostgreSQL connections conservatively: %o',
+		(error, dead) => {
+			expect(isDeadPgConnectionError(error)).toBe(dead);
+		},
+	);
 
 	it('uses the pool acquisition function through the core-minted lessor', async () => {
 		const client = {
@@ -884,49 +887,50 @@ describe('withPgTransitionRunLock cleanup', () => {
 				throw new Error('unlock transport failed');
 			},
 		},
-	])('mutation: returning the lock-owning client after pg_advisory_unlock $name lets the pool hand out a live lock', async ({
-		unlock,
-	}) => {
-		const first = {
-			query: vi.fn(async (sql: string) => {
-				if (sql === 'SHOW client_encoding')
-					return { rows: [{ client_encoding: 'UTF8' }] };
-				if (sql.includes('pg_try_advisory_lock'))
-					return { rows: [{ locked: true }] };
-				if (sql.includes('FROM pg_catalog.pg_locks'))
-					return {
-						rows: [
-							{
-								run_lock_held: true,
-								session_user: 'dbsp',
-								current_user: 'dbsp',
-								standard_conforming_strings: 'on',
-								search_path: '"$user", public',
-								client_encoding: 'UTF8',
-								time_zone: 'Etc/UTC',
-							},
-						],
-					};
-				if (sql.includes('pg_advisory_unlock')) return unlock();
-				return { rows: [] };
-			}),
-			release: vi.fn(),
-		};
-		const replacement = { query: vi.fn(), release: vi.fn() };
-		let destroyed = false;
-		const pool = {
-			connect: vi.fn(async () => (destroyed ? replacement : first)),
-		} as unknown as Pool;
-		first.release.mockImplementation((error?: unknown) => {
-			destroyed = Boolean(error);
-		});
+	])(
+		'mutation: returning the lock-owning client after pg_advisory_unlock $name lets the pool hand out a live lock',
+		async ({ unlock }) => {
+			const first = {
+				query: vi.fn(async (sql: string) => {
+					if (sql === 'SHOW client_encoding')
+						return { rows: [{ client_encoding: 'UTF8' }] };
+					if (sql.includes('pg_try_advisory_lock'))
+						return { rows: [{ locked: true }] };
+					if (sql.includes('FROM pg_catalog.pg_locks'))
+						return {
+							rows: [
+								{
+									run_lock_held: true,
+									session_user: 'dbsp',
+									current_user: 'dbsp',
+									standard_conforming_strings: 'on',
+									search_path: '"$user", public',
+									client_encoding: 'UTF8',
+									time_zone: 'Etc/UTC',
+								},
+							],
+						};
+					if (sql.includes('pg_advisory_unlock')) return unlock();
+					return { rows: [] };
+				}),
+				release: vi.fn(),
+			};
+			const replacement = { query: vi.fn(), release: vi.fn() };
+			let destroyed = false;
+			const pool = {
+				connect: vi.fn(async () => (destroyed ? replacement : first)),
+			} as unknown as Pool;
+			first.release.mockImplementation((error?: unknown) => {
+				destroyed = Boolean(error);
+			});
 
-		await expect(
-			withPgTransitionRunLock(pool, 'run:cleanup', async () => 'done'),
-		).rejects.toThrow('lock cleanup failed');
-		expect(first.release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
-		expect(await pool.connect()).toBe(replacement);
-	});
+			await expect(
+				withPgTransitionRunLock(pool, 'run:cleanup', async () => 'done'),
+			).rejects.toThrow('lock cleanup failed');
+			expect(first.release.mock.calls[0]?.[0]).toBeInstanceOf(Error);
+			expect(await pool.connect()).toBe(replacement);
+		},
+	);
 });
 
 describe('withPgTransitionRunLock statement origin', () => {
@@ -1153,35 +1157,35 @@ describe('withPgTransitionRunLock statement origin', () => {
 		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
-	it.each([
-		"SET NAMES 'LATIN1'",
-		"SET client_encoding TO 'LATIN1'",
-	])('mutation: a plan operation using %s violates the encoding invariant and closes the run', async (statement) => {
-		const { client, pool } = lockedPool();
-		let failure: unknown;
+	it.each(["SET NAMES 'LATIN1'", "SET client_encoding TO 'LATIN1'"])(
+		'mutation: a plan operation using %s violates the encoding invariant and closes the run',
+		async (statement) => {
+			const { client, pool } = lockedPool();
+			let failure: unknown;
 
-		await withPgTransitionRunLock(
-			pool,
-			'run:plan-encoding-spelling',
-			async (target) => {
-				const lease = await acquireExclusiveTransitionLease(target);
-				try {
-					await planOperationSession(lease.session).query(statement);
-				} catch (error) {
-					failure = error;
-				} finally {
-					await lease.release();
-				}
-				return undefined;
-			},
-		);
+			await withPgTransitionRunLock(
+				pool,
+				'run:plan-encoding-spelling',
+				async (target) => {
+					const lease = await acquireExclusiveTransitionLease(target);
+					try {
+						await planOperationSession(lease.session).query(statement);
+					} catch (error) {
+						failure = error;
+					} finally {
+						await lease.release();
+					}
+					return undefined;
+				},
+			);
 
-		expect(failure).toBeInstanceOf(Error);
-		expect((failure as Error).message).toBe(
-			'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
-		);
-		expect(client.release).toHaveBeenCalledWith(expect.any(Error));
-	});
+			expect(failure).toBeInstanceOf(Error);
+			expect((failure as Error).message).toBe(
+				'durable plan operation may not release the run lock, change effective authority, or change execution-contract session settings',
+			);
+			expect(client.release).toHaveBeenCalledWith(expect.any(Error));
+		},
+	);
 
 	it('mutation: a pre-query invariant violation must discard the session even when cleanup unlocks', async () => {
 		const { client, pool } = lockedPool();

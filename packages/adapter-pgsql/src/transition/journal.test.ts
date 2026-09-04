@@ -389,20 +389,23 @@ describe('transition journal primitive', () => {
 				}),
 			),
 		],
-	] as const)('is reflexive for a persisted %s managed plan', async (kind, value) => {
-		const executor = new FakeJournalExecutor();
-		const metadata = {
-			...run(),
-			runId: `run:reflexive:${kind}`,
-			planDigest: transitionPlanDigest(value),
-		};
-		await createPgTransitionRunPersister(asPool(executor)).persist(
-			metadata,
-			value,
-		);
-		const loaded = await readTransitionJournal(executor, metadata.runId);
-		expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
-	});
+	] as const)(
+		'is reflexive for a persisted %s managed plan',
+		async (kind, value) => {
+			const executor = new FakeJournalExecutor();
+			const metadata = {
+				...run(),
+				runId: `run:reflexive:${kind}`,
+				planDigest: transitionPlanDigest(value),
+			};
+			await createPgTransitionRunPersister(asPool(executor)).persist(
+				metadata,
+				value,
+			);
+			const loaded = await readTransitionJournal(executor, metadata.runId);
+			expect(transitionPlanDigest(loaded.plan)).toBe(metadata.planDigest);
+		},
+	);
 
 	it('SC-22: keeps the declaration digest stable across the jsonb plan round trip', async () => {
 		const executor = new FakeJournalExecutor();
@@ -498,23 +501,28 @@ describe('transition journal primitive', () => {
 		['policy scalar', 'policy', 'approval'],
 		['grants object', 'grants', {}],
 		['grants malformed parser text', 'grants', '{not-json'],
-	] as const)('mutation: coercing a %s authorization value to an empty list accepts a damaged approval row', async (_name, field, malformedValue) => {
-		const executor = new FakeJournalExecutor();
-		const metadata = run();
-		await persistRun(executor, metadata);
-		executor.authorizations.push({
-			run_id: metadata.runId,
-			policy: field === 'policy' ? malformedValue : [],
-			grants: field === 'grants' ? malformedValue : [],
-			digest: 'approval-digest',
-			actor: 'operator',
-			authorized_at: '2026-07-17 00:00:00+00',
-		});
+	] as const)(
+		'mutation: coercing a %s authorization value to an empty list accepts a damaged approval row',
+		async (_name, field, malformedValue) => {
+			const executor = new FakeJournalExecutor();
+			const metadata = run();
+			await persistRun(executor, metadata);
+			executor.authorizations.push({
+				run_id: metadata.runId,
+				policy: field === 'policy' ? malformedValue : [],
+				grants: field === 'grants' ? malformedValue : [],
+				digest: 'approval-digest',
+				actor: 'operator',
+				authorized_at: '2026-07-17 00:00:00+00',
+			});
 
-		await expect(
-			readTransitionJournal(executor, metadata.runId),
-		).rejects.toThrow(new RegExp(`authorization row has an invalid ${field}`));
-	});
+			await expect(
+				readTransitionJournal(executor, metadata.runId),
+			).rejects.toThrow(
+				new RegExp(`authorization row has an invalid ${field}`),
+			);
+		},
+	);
 
 	it('appends and reads intent, completion, and observed rows with run metadata', async () => {
 		const executor = new FakeJournalExecutor();
@@ -736,31 +744,31 @@ describe('transition journal primitive', () => {
 		).rejects.toThrow('invalid replayability');
 	});
 
-	it.each([
-		{},
-		{ observations: [] },
-	])('refuses a corrupt plan row before it can be resumed', async (corruptPlan) => {
-		const executor = new FakeJournalExecutor();
-		const metadata = run();
-		executor.runs.set(metadata.runId, {
-			run_id: metadata.runId,
-			plan_digest: metadata.planDigest,
-			target_context_digest: metadata.targetContextDigest,
-			database_id: metadata.databaseId,
-			core_version: metadata.coreVersion,
-			replayability: 'replayable',
-			started_at: metadata.startedAt,
-		});
-		executor.plans.set(metadata.runId, {
-			run_id: metadata.runId,
-			bound_run_id: metadata.runId,
-			plan: corruptPlan,
-		});
+	it.each([{}, { observations: [] }])(
+		'refuses a corrupt plan row before it can be resumed',
+		async (corruptPlan) => {
+			const executor = new FakeJournalExecutor();
+			const metadata = run();
+			executor.runs.set(metadata.runId, {
+				run_id: metadata.runId,
+				plan_digest: metadata.planDigest,
+				target_context_digest: metadata.targetContextDigest,
+				database_id: metadata.databaseId,
+				core_version: metadata.coreVersion,
+				replayability: 'replayable',
+				started_at: metadata.startedAt,
+			});
+			executor.plans.set(metadata.runId, {
+				run_id: metadata.runId,
+				bound_run_id: metadata.runId,
+				plan: corruptPlan,
+			});
 
-		await expect(
-			readTransitionJournal(executor, metadata.runId),
-		).rejects.toThrow(/invalid and non-resumable/);
-	});
+			await expect(
+				readTransitionJournal(executor, metadata.runId),
+			).rejects.toThrow(/invalid and non-resumable/);
+		},
+	);
 
 	it('allocates journal seq while holding the run row lock shared with authorization', async () => {
 		const executor = new FakeJournalExecutor();

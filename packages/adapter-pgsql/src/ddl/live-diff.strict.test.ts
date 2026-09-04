@@ -450,22 +450,25 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 		['desired', 'absent column', 'users', 'new_state'],
 		['database', 'database-only default', 'users', 'old_state'],
 		['database', 'catalog default disappeared', 'users', 'state'],
-	] as const)('refuses strict defaults that are unavailable on the correct side: %s', async (side, _case, table, column) => {
-		const desired = makeModel([makeTable({ name: 'users' })]);
-		const dbModel = makeModel([makeTable({ name: 'users' })]);
-		mockCanonicalizeExpressionSurfaces.mockResolvedValue({
-			desired,
-			database: dbModel,
-			defaultOutcomes: [{ side, table, column, status: 'unavailable' }],
-		});
-		await expect(
-			comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
-				requireExpressionCanonicalization: true,
-			}),
-		).rejects.toMatchObject({
-			surfaces: [`${side}.${table}.${column}.DEFAULT`],
-		});
-	});
+	] as const)(
+		'refuses strict defaults that are unavailable on the correct side: %s',
+		async (side, _case, table, column) => {
+			const desired = makeModel([makeTable({ name: 'users' })]);
+			const dbModel = makeModel([makeTable({ name: 'users' })]);
+			mockCanonicalizeExpressionSurfaces.mockResolvedValue({
+				desired,
+				database: dbModel,
+				defaultOutcomes: [{ side, table, column, status: 'unavailable' }],
+			});
+			await expect(
+				comparePgsqlDatabaseSchema(makeAdapter(dbModel), desired, {
+					requireExpressionCanonicalization: true,
+				}),
+			).rejects.toMatchObject({
+				surfaces: [`${side}.${table}.${column}.DEFAULT`],
+			});
+		},
+	);
 
 	it('refuses strict raw comparison for a column default when live canonicalization is disabled', async () => {
 		const desired = makeModel([
@@ -700,12 +703,12 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			code: '3B001',
 			message: 'savepoint "dbsp_savepoint" does not exist',
 		},
-	])('propagates pure SQLSTATE $code instead of falling back in non-strict mode', async ({
-		code,
-		message,
-	}) => {
-		await expectNonStrictScratchFailureToThrow(pgError(code, message));
-	});
+	])(
+		'propagates pure SQLSTATE $code instead of falling back in non-strict mode',
+		async ({ code, message }) => {
+			await expectNonStrictScratchFailureToThrow(pgError(code, message));
+		},
+	);
 
 	it('propagates read_only_sql_transaction instead of falling back in non-strict mode', async () => {
 		await expectNonStrictScratchFailureToThrow(

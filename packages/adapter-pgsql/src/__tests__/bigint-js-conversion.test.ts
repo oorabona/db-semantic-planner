@@ -213,17 +213,14 @@ describe('bigint js read conversion rules', () => {
 		);
 	});
 
-	it.each([
-		Number.NaN,
-		Number.POSITIVE_INFINITY,
-		'1.25',
-		true,
-		{ value: '1' },
-	])('rejects invalid js:bigint input %p', (value) => {
-		expect(() => convertBigintJsReadValue(value, 'bigint', ctx)).toThrow(
-			RangeError,
-		);
-	});
+	it.each([Number.NaN, Number.POSITIVE_INFINITY, '1.25', true, { value: '1' }])(
+		'rejects invalid js:bigint input %p',
+		(value) => {
+			expect(() => convertBigintJsReadValue(value, 'bigint', ctx)).toThrow(
+				RangeError,
+			);
+		},
+	);
 
 	it('names the column, output key, and value on overflow', () => {
 		expect(() =>

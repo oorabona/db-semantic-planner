@@ -435,23 +435,26 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 					{ sql: "'desired-secret\\nforged log'" },
 				),
 		],
-	] as const)('redacts %s from non-convergence diagnostics', (_surface, makeDiff) => {
-		const diff = makeDiff();
-		let caught: unknown;
-		try {
-			assertNoRepeatedExpressionSurfaceDrift(diff, diff);
-		} catch (error) {
-			caught = error;
-		}
+	] as const)(
+		'redacts %s from non-convergence diagnostics',
+		(_surface, makeDiff) => {
+			const diff = makeDiff();
+			let caught: unknown;
+			try {
+				assertNoRepeatedExpressionSurfaceDrift(diff, diff);
+			} catch (error) {
+				caught = error;
+			}
 
-		expect(caught).toBeInstanceOf(NonConvergentSchemaDiffError);
-		expect((caught as Error).message).not.toContain('secret');
-		expect((caught as Error).message).not.toContain('forged log');
-		expect(caught).toMatchObject({
-			desiredExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-			databaseExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
-		});
-	});
+			expect(caught).toBeInstanceOf(NonConvergentSchemaDiffError);
+			expect((caught as Error).message).not.toContain('secret');
+			expect((caught as Error).message).not.toContain('forged log');
+			expect(caught).toMatchObject({
+				desiredExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+				databaseExpressionHash: expect.stringMatching(/^[a-f0-9]{64}$/u),
+			});
+		},
+	);
 });
 
 describe('comparePgsqlDatabaseSchema', () => {

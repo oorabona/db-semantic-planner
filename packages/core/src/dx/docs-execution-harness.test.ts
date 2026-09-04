@@ -19,19 +19,17 @@ const executionHarnesses = [
 ] as const;
 
 describe('documentation execution harnesses', () => {
-	it.each(
-		executionHarnesses,
-	)('$adapter declares execution availability after replacing executeWithMeta', ({
-		file,
-		adapter,
-	}) => {
-		const source = readFileSync(file, 'utf8');
-		const escapedAdapter = adapter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		const declaration = new RegExp(
-			`Object\\.defineProperty\\(${escapedAdapter}, ['"]connectionAvailability['"], \\{\\s*value: \\{ status: ['"]available['"] \\},\\s*configurable: true,?\\s*\\}\\);`,
-			's',
-		);
+	it.each(executionHarnesses)(
+		'$adapter declares execution availability after replacing executeWithMeta',
+		({ file, adapter }) => {
+			const source = readFileSync(file, 'utf8');
+			const escapedAdapter = adapter.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const declaration = new RegExp(
+				`Object\\.defineProperty\\(${escapedAdapter}, ['"]connectionAvailability['"], \\{\\s*value: \\{ status: ['"]available['"] \\},\\s*configurable: true,?\\s*\\}\\);`,
+				's',
+			);
 
-		expect(source).toMatch(declaration);
-	});
+			expect(source).toMatch(declaration);
+		},
+	);
 });

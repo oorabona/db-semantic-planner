@@ -161,51 +161,54 @@ describe('no-argument apply pipeline', () => {
 			outcome: 'transport-ambiguous' as const,
 			detail: 'generator commit acknowledgement lost',
 		},
-	] as const)('keeps unresolved generator fields native through no-argument JSON and text output', async (execution) => {
-		runPlan.mockResolvedValue(provenPlan);
-		const execute: typeof runApply = async () => {
-			switch (execution.outcome) {
-				case 'recovery-required':
-					return {
-						outcome: execution.outcome,
-						runId: 'run-1',
-						result: execution,
-					};
-				case 'transport-ambiguous':
-					return {
-						outcome: execution.outcome,
-						runId: 'run-1',
-						result: execution,
-					};
-			}
-		};
-		const result = await runNoArgumentApply(
-			{ db: 'postgres://test', schemaFile: 'schema.ts', yes: true },
-			async () => true,
-			execute,
-		);
-		if (!('result' in result)) throw new Error('expected apply result');
-		const document = JSON.parse(
-			serializeCliJson({
-				outcome: result.outcome,
-				runId: result.runId,
-				planDigest: result.planDigest,
-				apply: result.result,
-			}),
-		) as { readonly apply: { readonly result: Record<string, unknown> } };
-		expect(document.apply.result).toMatchObject(execution);
-		expect(document.apply.result).not.toHaveProperty('assessment');
-		expect(formatApplyHuman(result.result)).toContain(
-			`detail: ${execution.detail}`,
-		);
-		expect(formatApplyHuman(result.result)).toContain(
-			'resolving command: dbsp reconcile --db <database> run-1',
-		);
-		if (execution.outcome === 'recovery-required')
-			expect(formatApplyHuman(result.result)).toContain(
-				`claim: ${execution.claimId}`,
+	] as const)(
+		'keeps unresolved generator fields native through no-argument JSON and text output',
+		async (execution) => {
+			runPlan.mockResolvedValue(provenPlan);
+			const execute: typeof runApply = async () => {
+				switch (execution.outcome) {
+					case 'recovery-required':
+						return {
+							outcome: execution.outcome,
+							runId: 'run-1',
+							result: execution,
+						};
+					case 'transport-ambiguous':
+						return {
+							outcome: execution.outcome,
+							runId: 'run-1',
+							result: execution,
+						};
+				}
+			};
+			const result = await runNoArgumentApply(
+				{ db: 'postgres://test', schemaFile: 'schema.ts', yes: true },
+				async () => true,
+				execute,
 			);
-	});
+			if (!('result' in result)) throw new Error('expected apply result');
+			const document = JSON.parse(
+				serializeCliJson({
+					outcome: result.outcome,
+					runId: result.runId,
+					planDigest: result.planDigest,
+					apply: result.result,
+				}),
+			) as { readonly apply: { readonly result: Record<string, unknown> } };
+			expect(document.apply.result).toMatchObject(execution);
+			expect(document.apply.result).not.toHaveProperty('assessment');
+			expect(formatApplyHuman(result.result)).toContain(
+				`detail: ${execution.detail}`,
+			);
+			expect(formatApplyHuman(result.result)).toContain(
+				'resolving command: dbsp reconcile --db <database> run-1',
+			);
+			if (execution.outcome === 'recovery-required')
+				expect(formatApplyHuman(result.result)).toContain(
+					`claim: ${execution.claimId}`,
+				);
+		},
+	);
 
 	it('does not send a blocked capability refusal to the generator planner', async () => {
 		const capabilityBlocked = {

@@ -474,26 +474,31 @@ describe('transition lease release', () => {
 				},
 			}),
 		],
-	])('keeps its local revocation latch authoritative over a forged %s capability', async (_label, revocation) => {
-		const query = vi.fn(async () => ({ rows: [] }));
-		const release = vi.fn();
-		const forged = {
-			acquire: vi.fn(async () => ({ query, release })),
-		};
-		Object.defineProperty(forged, Symbol.for('dbsp.transition.lessor'), {
-			value: Object.freeze({ protocolVersion: 2, revocation }),
-		});
+	])(
+		'keeps its local revocation latch authoritative over a forged %s capability',
+		async (_label, revocation) => {
+			const query = vi.fn(async () => ({ rows: [] }));
+			const release = vi.fn();
+			const forged = {
+				acquire: vi.fn(async () => ({ query, release })),
+			};
+			Object.defineProperty(forged, Symbol.for('dbsp.transition.lessor'), {
+				value: Object.freeze({ protocolVersion: 2, revocation }),
+			});
 
-		const lease = await acquireTransitionLease(forged as never);
-		expect(() => markTransitionClientCompromised(lease.session)).not.toThrow();
-		await expect(lease.session.query('SELECT forged brand')).rejects.toThrow(
-			'transition execution marked its leased client compromised',
-		);
-		await lease.release();
+			const lease = await acquireTransitionLease(forged as never);
+			expect(() =>
+				markTransitionClientCompromised(lease.session),
+			).not.toThrow();
+			await expect(lease.session.query('SELECT forged brand')).rejects.toThrow(
+				'transition execution marked its leased client compromised',
+			);
+			await lease.release();
 
-		expect(query).not.toHaveBeenCalled();
-		expect(release).toHaveBeenCalledWith(expect.any(Error));
-	});
+			expect(query).not.toHaveBeenCalled();
+			expect(release).toHaveBeenCalledWith(expect.any(Error));
+		},
+	);
 
 	it('does not let a throwing forged peer block a clean query or release', async () => {
 		const query = vi.fn(async () => ({ rows: [] }));
@@ -597,23 +602,26 @@ describe('transition lease release', () => {
 		['an empty string', ''],
 		['zero', 0],
 		['false', false],
-	])('carries a failure of %s in a truthy error so the session is destroyed', async (_label, thrown) => {
-		// pg decides between destroying a session and pooling it by testing this
-		// argument for truthiness, not for presence. A falsy value released as-is
-		// returns a poisoned session to the pool for reuse.
-		const release = vi.fn();
-		const lease = await acquireTransitionLease(
-			createTransitionLessor(async () => ({ query: vi.fn(), release })),
-		);
+	])(
+		'carries a failure of %s in a truthy error so the session is destroyed',
+		async (_label, thrown) => {
+			// pg decides between destroying a session and pooling it by testing this
+			// argument for truthiness, not for presence. A falsy value released as-is
+			// returns a poisoned session to the pool for reuse.
+			const release = vi.fn();
+			const lease = await acquireTransitionLease(
+				createTransitionLessor(async () => ({ query: vi.fn(), release })),
+			);
 
-		await lease.release({ error: thrown });
+			await lease.release({ error: thrown });
 
-		const [argument] = release.mock.calls[0] ?? [];
-		expect(release).toHaveBeenCalledOnce();
-		expect(argument).toBeTruthy();
-		expect(argument).toBeInstanceOf(Error);
-		expect((argument as Error).cause).toBe(thrown);
-	});
+			const [argument] = release.mock.calls[0] ?? [];
+			expect(release).toHaveBeenCalledOnce();
+			expect(argument).toBeTruthy();
+			expect(argument).toBeInstanceOf(Error);
+			expect((argument as Error).cause).toBe(thrown);
+		},
+	);
 
 	it('releases without an argument when there is no failure', async () => {
 		const release = vi.fn();

@@ -117,34 +117,37 @@ describe('PostgreSQL release admission', () => {
 	it.each([
 		['pending', { phase: 'claimed' }],
 		['blocked', { phase: 'indeterminate' }],
-	] as const)('refuses a %s address without appending release', async (_word, openClaim) => {
-		currentManaged();
-		mocks.project.mockReturnValue({
-			kind: 'projected-ledger-chain',
-			stableState: 'unknown',
-			openClaim,
-		});
-		const client = executor();
-		await expect(
-			releasePgManagedAddress({
-				executor: client,
-				home: { scope: 'schema', schema: 'tenant' },
+	] as const)(
+		'refuses a %s address without appending release',
+		async (_word, openClaim) => {
+			currentManaged();
+			mocks.project.mockReturnValue({
+				kind: 'projected-ledger-chain',
+				stableState: 'unknown',
+				openClaim,
+			});
+			const client = executor();
+			await expect(
+				releasePgManagedAddress({
+					executor: client,
+					home: { scope: 'schema', schema: 'tenant' },
+					address,
+				}),
+			).resolves.toMatchObject({
+				outcome: 'release-refused',
 				address,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'release-refused',
-			address,
-			refusal: {
-				code: 'ERR-08',
-				state: 'unknown',
-				withheldAuthority: 'managed mutation authority',
-				resolvingCommand: 'dbsp inspect',
-			},
-		});
-		expect(mocks.appendRelease).not.toHaveBeenCalled();
-		expect(client.query).not.toHaveBeenCalledWith('BEGIN');
-		expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
-	});
+				refusal: {
+					code: 'ERR-08',
+					state: 'unknown',
+					withheldAuthority: 'managed mutation authority',
+					resolvingCommand: 'dbsp inspect',
+				},
+			});
+			expect(mocks.appendRelease).not.toHaveBeenCalled();
+			expect(client.query).not.toHaveBeenCalledWith('BEGIN');
+			expect(client.query).not.toHaveBeenCalledWith('ROLLBACK');
+		},
+	);
 
 	it('classifies a null-prototype relation-lock rejection without rethrowing it', async () => {
 		currentManaged();
@@ -305,21 +308,24 @@ describe('PostgreSQL release admission', () => {
 		['spaces', 'order items', '"order items"'],
 		['embedded double quotes', 'order"items', '"order""items"'],
 		['hyphens', 'order-items', '"order-items"'],
-	] as const)('locks an adopted relation name with %s', async (_label, name, rendered) => {
-		const adopted = { ...address, name };
-		currentManaged('owner', '10', adopted);
-		const client = executor();
-		await expect(
-			releasePgManagedAddress({
-				executor: client,
-				home: { scope: 'schema', schema: 'tenant' },
-				address: adopted,
-			}),
-		).resolves.toEqual({ outcome: 'released' });
-		expect(client.query).toHaveBeenCalledWith(
-			`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
-		);
-	});
+	] as const)(
+		'locks an adopted relation name with %s',
+		async (_label, name, rendered) => {
+			const adopted = { ...address, name };
+			currentManaged('owner', '10', adopted);
+			const client = executor();
+			await expect(
+				releasePgManagedAddress({
+					executor: client,
+					home: { scope: 'schema', schema: 'tenant' },
+					address: adopted,
+				}),
+			).resolves.toEqual({ outcome: 'released' });
+			expect(client.query).toHaveBeenCalledWith(
+				`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
+			);
+		},
+	);
 
 	it('refuses a NUL-bearing adopted relation name before its lock query', async () => {
 		const adopted = { ...address, name: 'order\0items' };
@@ -400,45 +406,45 @@ describe('PostgreSQL release admission', () => {
 		expect(mocks.appendRelease).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		'column',
-		'policy',
-	] as const)('locks the parent table for a %s release using the child schema', async (kind) => {
-		const child = {
-			...address,
-			kind,
-			name: kind === 'column' ? 'status' : 'accounts_policy',
-			parent: { ...address, schema: 'stale_parent_schema' },
-		};
-		const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
-		currentManaged('owner', '10', child as never);
-		const client = executor();
-		await expect(
-			releasePgManagedAddress({
-				executor: client,
-				home: { scope: 'schema', schema: 'tenant' },
-				address: child as never,
-			}),
-		).resolves.toEqual({ outcome: 'released' });
-		expect(client.query).toHaveBeenCalledWith(
-			'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-		);
-		const relationLockOrder = client.query.mock.invocationCallOrder.find(
-			(_order, index) =>
-				client.query.mock.calls[index]?.[0] ===
+	it.each(['column', 'policy'] as const)(
+		'locks the parent table for a %s release using the child schema',
+		async (kind) => {
+			const child = {
+				...address,
+				kind,
+				name: kind === 'column' ? 'status' : 'accounts_policy',
+				parent: { ...address, schema: 'stale_parent_schema' },
+			};
+			const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+			currentManaged('owner', '10', child as never);
+			const client = executor();
+			await expect(
+				releasePgManagedAddress({
+					executor: client,
+					home: { scope: 'schema', schema: 'tenant' },
+					address: child as never,
+				}),
+			).resolves.toEqual({ outcome: 'released' });
+			expect(client.query).toHaveBeenCalledWith(
 				'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
-		);
-		expect(mocks.readIdentity.mock.invocationCallOrder[0]).toBeLessThan(
-			relationLockOrder!,
-		);
-		expect(relationLockOrder).toBeLessThan(
-			mocks.readIdentity.mock.invocationCallOrder[1]!,
-		);
-		expect(warning).toHaveBeenCalledWith(
-			expect.stringContaining('ignores mismatched parent schema'),
-		);
-		warning.mockRestore();
-	});
+			);
+			const relationLockOrder = client.query.mock.invocationCallOrder.find(
+				(_order, index) =>
+					client.query.mock.calls[index]?.[0] ===
+					'LOCK TABLE ONLY "tenant"."accounts" IN SHARE UPDATE EXCLUSIVE MODE',
+			);
+			expect(mocks.readIdentity.mock.invocationCallOrder[0]).toBeLessThan(
+				relationLockOrder!,
+			);
+			expect(relationLockOrder).toBeLessThan(
+				mocks.readIdentity.mock.invocationCallOrder[1]!,
+			);
+			expect(warning).toHaveBeenCalledWith(
+				expect.stringContaining('ignores mismatched parent schema'),
+			);
+			warning.mockRestore();
+		},
+	);
 
 	it.each([
 		['absent', undefined, 'ERR-05'],
@@ -454,21 +460,24 @@ describe('PostgreSQL release admission', () => {
 			},
 			'ERR-05',
 		],
-	] as const)('refuses a live %s before appending release', async (_label, live, code) => {
-		currentManaged();
-		mocks.readIdentity.mockResolvedValue(live);
-		await expect(
-			releasePgManagedAddress({
-				executor: executor(),
-				home: { scope: 'schema', schema: 'tenant' },
-				address,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'release-refused',
-			refusal: expect.objectContaining({ code, state: 'managed' }),
-		});
-		expect(mocks.appendRelease).not.toHaveBeenCalled();
-	});
+	] as const)(
+		'refuses a live %s before appending release',
+		async (_label, live, code) => {
+			currentManaged();
+			mocks.readIdentity.mockResolvedValue(live);
+			await expect(
+				releasePgManagedAddress({
+					executor: executor(),
+					home: { scope: 'schema', schema: 'tenant' },
+					address,
+				}),
+			).resolves.toMatchObject({
+				outcome: 'release-refused',
+				refusal: expect.objectContaining({ code, state: 'managed' }),
+			});
+			expect(mocks.appendRelease).not.toHaveBeenCalled();
+		},
+	);
 
 	it('refuses a managed terminal without a recorded identity', async () => {
 		currentManaged();

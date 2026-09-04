@@ -141,43 +141,46 @@ describe('generated deferred kinds recording pool hygiene', () => {
 		['success', 'promise'],
 		['verifier failure', 'callback'],
 		['release failure', 'promise'],
-	] as const)('restores the original query after %s through the %s release path', async (outcome, releasePath) => {
-		const originalQuery = vi.fn(async (sql: string) => {
-			if (outcome === 'verifier failure' && sql.includes('verifier_failure'))
-				throw new Error('verifier failed');
-			return { rows: [] };
-		});
-		const release = vi.fn(() => {
-			if (outcome === 'release failure') throw new Error('release failed');
-		});
-		const client = { query: originalQuery, release } as unknown as PoolClient;
-		const pool = {
-			connect: vi.fn(async () => client),
-		} as unknown as Pool;
-		const { pool: recording } = recordingPoolFor(pool);
-		if (releasePath === 'promise') {
-			const checkedOut = await recording.connect();
-			await checkedOut.query('SELECT success');
-			if (outcome === 'release failure')
-				expect(() => checkedOut.release()).toThrow('release failed');
-			else checkedOut.release();
-		} else {
-			await new Promise<void>((resolve, reject) => {
-				recording.connect((error, checkedOut, done) => {
-					if (error || !checkedOut) return reject(error);
-					void checkedOut.query('SELECT verifier_failure').then(
-						() => reject(new Error('expected verifier failure')),
-						() => {
-							done(new Error('verifier failed'));
-							resolve();
-						},
-					);
-				});
+	] as const)(
+		'restores the original query after %s through the %s release path',
+		async (outcome, releasePath) => {
+			const originalQuery = vi.fn(async (sql: string) => {
+				if (outcome === 'verifier failure' && sql.includes('verifier_failure'))
+					throw new Error('verifier failed');
+				return { rows: [] };
 			});
-		}
-		const later = await pool.connect();
-		expect(later.query).toBe(originalQuery);
-	});
+			const release = vi.fn(() => {
+				if (outcome === 'release failure') throw new Error('release failed');
+			});
+			const client = { query: originalQuery, release } as unknown as PoolClient;
+			const pool = {
+				connect: vi.fn(async () => client),
+			} as unknown as Pool;
+			const { pool: recording } = recordingPoolFor(pool);
+			if (releasePath === 'promise') {
+				const checkedOut = await recording.connect();
+				await checkedOut.query('SELECT success');
+				if (outcome === 'release failure')
+					expect(() => checkedOut.release()).toThrow('release failed');
+				else checkedOut.release();
+			} else {
+				await new Promise<void>((resolve, reject) => {
+					recording.connect((error, checkedOut, done) => {
+						if (error || !checkedOut) return reject(error);
+						void checkedOut.query('SELECT verifier_failure').then(
+							() => reject(new Error('expected verifier failure')),
+							() => {
+								done(new Error('verifier failed'));
+								resolve();
+							},
+						);
+					});
+				});
+			}
+			const later = await pool.connect();
+			expect(later.query).toBe(originalQuery);
+		},
+	);
 });
 
 describe.sequential('generated deferred kinds on real PostgreSQL', () => {

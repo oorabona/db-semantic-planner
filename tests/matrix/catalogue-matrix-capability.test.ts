@@ -16,13 +16,12 @@ describe('catalogue matrix capability probe', () => {
 		expect(requireCatalogueColumnCapability([{ exists: false }])).toBe(false);
 	});
 
-	it.each(
-		malformedReads,
-	)('throws instead of classifying malformed reads as an older version: $label', ({
-		rows,
-	}) => {
-		expect(() => requireCatalogueColumnCapability(rows)).toThrow(
-			'invalid catalogue capability read',
-		);
-	});
+	it.each(malformedReads)(
+		'throws instead of classifying malformed reads as an older version: $label',
+		({ rows }) => {
+			expect(() => requireCatalogueColumnCapability(rows)).toThrow(
+				'invalid catalogue capability read',
+			);
+		},
+	);
 });

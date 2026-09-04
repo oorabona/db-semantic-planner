@@ -386,9 +386,12 @@ describe('managed ledger storage', () => {
 			'42703',
 			{ kind: 'validator-abi-failure', sqlstate: '42703' },
 		],
-	])('classifies validator SQLSTATE %s into the closed outcome', (_name, code, expected) => {
-		expect(classifyPgLedgerShapeError({ code })).toEqual(expected);
-	});
+	])(
+		'classifies validator SQLSTATE %s into the closed outcome',
+		(_name, code, expected) => {
+			expect(classifyPgLedgerShapeError({ code })).toEqual(expected);
+		},
+	);
 
 	it('surfaces an erroring discovery candidate rather than silently skipping it', async () => {
 		const discoveryRows = ['counterfeit', 'unreadable'].flatMap((schema) =>
@@ -749,51 +752,54 @@ describe('managed ledger storage', () => {
 	it.each([
 		{ scope: 'schema' as const, schema: 'tenant_shape' },
 		{ scope: 'database' as const },
-	])('does not validate a ledger when the current major has no captured fixture for $scope scope', async (ledger) => {
-		const query = vi.fn(async (sql: string) => {
-			if (sql === 'SHOW server_version_num')
-				return { rows: [{ server_version_num: '180000' }] };
-			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
-				return {
-					rows: createdLedgerImmutabilityTriggerRows(),
-				};
-			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
-				return { rows: createdLedgerDefaultRows() };
-			if (
-				sql.includes(
-					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+	])(
+		'does not validate a ledger when the current major has no captured fixture for $scope scope',
+		async (ledger) => {
+			const query = vi.fn(async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '180000' }] };
+				if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
+					return {
+						rows: createdLedgerImmutabilityTriggerRows(),
+					};
+				if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
+					return { rows: createdLedgerDefaultRows() };
+				if (
+					sql.includes(
+						'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+					)
 				)
-			)
-				return { rows: createdLedgerTableRows() };
-			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
-				return { rows: createdLedgerColumnRows() };
-			if (sql.includes('FROM pg_catalog.pg_constraint'))
-				return {
-					rows: [
-						...createdLedgerInvariantConstraintRows(),
-						...createdLedgerColumnRows()
-							.filter((row) => row.is_not_null)
-							.map(({ table_name, column_name }) => ({
-								table_name,
-								contype: 'n',
-								key_columns: [column_name],
-							})),
-					],
-				};
-			if (sql.includes('FROM pg_catalog.pg_index'))
-				return { rows: createdLedgerTerminalIndexRows() };
-			return { rows: [] };
-		});
-		await ensurePgLedger({ query }, ledger, { writeMarker: false });
-		await expect(
-			validatePgLedgerPhysicalShape({ query }, ledger),
-		).rejects.toMatchObject({
-			outcome: { kind: 'unsupported-major', major: undefined },
-		});
-		expect(query).toHaveBeenCalledWith(
-			expect.stringContaining('CREATE TABLE IF NOT EXISTS'),
-		);
-	});
+					return { rows: createdLedgerTableRows() };
+				if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+					return { rows: createdLedgerColumnRows() };
+				if (sql.includes('FROM pg_catalog.pg_constraint'))
+					return {
+						rows: [
+							...createdLedgerInvariantConstraintRows(),
+							...createdLedgerColumnRows()
+								.filter((row) => row.is_not_null)
+								.map(({ table_name, column_name }) => ({
+									table_name,
+									contype: 'n',
+									key_columns: [column_name],
+								})),
+						],
+					};
+				if (sql.includes('FROM pg_catalog.pg_index'))
+					return { rows: createdLedgerTerminalIndexRows() };
+				return { rows: [] };
+			});
+			await ensurePgLedger({ query }, ledger, { writeMarker: false });
+			await expect(
+				validatePgLedgerPhysicalShape({ query }, ledger),
+			).rejects.toMatchObject({
+				outcome: { kind: 'unsupported-major', major: undefined },
+			});
+			expect(query).toHaveBeenCalledWith(
+				expect.stringContaining('CREATE TABLE IF NOT EXISTS'),
+			);
+		},
+	);
 
 	it.each([
 		{

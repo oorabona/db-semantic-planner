@@ -169,29 +169,32 @@ describe('SC-64 inspect refusal rendering', () => {
 	it.each([
 		['intent', 'unknown'],
 		['retire-intent', 'managed'],
-	] as const)('renders a terminal %s refusal with the four actionable fields', (claimKind, state) => {
-		const refusal = inspectRefusal(refusalProjection(claimKind));
-		if (!refusal) throw new Error('expected terminal refusal');
-		expect(refusal).toEqual({
-			code: 'ERR-05',
-			cause: 'recorded identity differs from the live object',
-			address,
-			state,
-			withheldAuthority: 'managed mutation authority',
-			resolvingCommand: 'dbsp apply',
-		});
-		// Text and --format json use the same serializer boundary.
-		expect(
-			JSON.parse(
-				renderInspectHuman({
-					ledger: { scope: 'schema', schema: 'public' },
-					marker: { kind: 'current' },
-					refusal,
-					live: { kind: 'not-requested' },
-				}),
-			),
-		).toMatchObject({ refusal });
-	});
+	] as const)(
+		'renders a terminal %s refusal with the four actionable fields',
+		(claimKind, state) => {
+			const refusal = inspectRefusal(refusalProjection(claimKind));
+			if (!refusal) throw new Error('expected terminal refusal');
+			expect(refusal).toEqual({
+				code: 'ERR-05',
+				cause: 'recorded identity differs from the live object',
+				address,
+				state,
+				withheldAuthority: 'managed mutation authority',
+				resolvingCommand: 'dbsp apply',
+			});
+			// Text and --format json use the same serializer boundary.
+			expect(
+				JSON.parse(
+					renderInspectHuman({
+						ledger: { scope: 'schema', schema: 'public' },
+						marker: { kind: 'current' },
+						refusal,
+						live: { kind: 'not-requested' },
+					}),
+				),
+			).toMatchObject({ refusal });
+		},
+	);
 
 	it('keeps ERR-02 as the prescribed unknown state, not a refusal', () => {
 		const projection = projectLedgerChain({

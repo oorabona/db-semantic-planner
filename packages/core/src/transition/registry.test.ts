@@ -38,19 +38,19 @@ describe('isOperationRuntime', () => {
 		).toBe(true);
 	});
 
-	it.each([
-		'checkout',
-		'release',
-	])('refuses a pack still declaring the retired %s member', (retired) => {
-		// Core owns acquisition and release now. A pack declaring either was
-		// built against a contract that no longer holds: core would never call
-		// it, and the pack would believe it manages a connection nobody hands it.
-		const legacy = { ...completeRuntime(), [retired]: vi.fn() };
+	it.each(['checkout', 'release'])(
+		'refuses a pack still declaring the retired %s member',
+		(retired) => {
+			// Core owns acquisition and release now. A pack declaring either was
+			// built against a contract that no longer holds: core would never call
+			// it, and the pack would believe it manages a connection nobody hands it.
+			const legacy = { ...completeRuntime(), [retired]: vi.fn() };
 
-		expect(
-			isOperationRuntime(legacy as unknown as RegisteredOperationSemantics),
-		).toBe(false);
-	});
+			expect(
+				isOperationRuntime(legacy as unknown as RegisteredOperationSemantics),
+			).toBe(false);
+		},
+	);
 
 	it.each(RUNTIME_MEMBERS)('refuses a pack missing %s', (missing) => {
 		const partial = completeRuntime();
@@ -63,30 +63,30 @@ describe('isOperationRuntime', () => {
 });
 
 describe('PackRegistry execution coordinator compatibility', () => {
-	it.each([
-		'checkout',
-		'release',
-	])('refuses a legacy coordinator declaring %s', (retired) => {
-		const coordinator = {
-			transactionDomain: 'mock',
-			begin: vi.fn(),
-			setLockTimeout: vi.fn(),
-			commit: vi.fn(),
-			rollback: vi.fn(),
-			isLockTimeout: vi.fn(),
-			[retired]: vi.fn(),
-		};
+	it.each(['checkout', 'release'])(
+		'refuses a legacy coordinator declaring %s',
+		(retired) => {
+			const coordinator = {
+				transactionDomain: 'mock',
+				begin: vi.fn(),
+				setLockTimeout: vi.fn(),
+				commit: vi.fn(),
+				rollback: vi.fn(),
+				isLockTimeout: vi.fn(),
+				[retired]: vi.fn(),
+			};
 
-		expect(() =>
-			createPackRegistry([
-				{
-					rules: [],
-					operationSemantics: [],
-					issuer: { artifact, execute: vi.fn() },
-					executionCoordinator: coordinator as never,
-					transactionDomain: 'mock',
-				},
-			]),
-		).toThrow(retired);
-	});
+			expect(() =>
+				createPackRegistry([
+					{
+						rules: [],
+						operationSemantics: [],
+						issuer: { artifact, execute: vi.fn() },
+						executionCoordinator: coordinator as never,
+						transactionDomain: 'mock',
+					},
+				]),
+			).toThrow(retired);
+		},
+	);
 });

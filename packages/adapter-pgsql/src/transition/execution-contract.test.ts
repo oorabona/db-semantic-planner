@@ -95,33 +95,36 @@ describe('PostgreSQL execution contract evaluator', () => {
 				logicalId: 'logical.table.users',
 			},
 		],
-	] as const)('mutation: contract construction cannot make ineligible %s executable', (operationName, operationKind, ref, payload) => {
-		const plan = {
-			steps: [
-				{
-					stepId: `step:${operationName}`,
-					operation: { ref, operationKind, payload },
-				},
-			],
-		} as unknown as ProvenPlanShape;
-		expect(() =>
-			createPgExecutionContract(
-				plan,
-				{
-					systemIdentifier: 'system-1',
-					databaseOid: '5',
-					namespaces: [{ name: 'public', oid: '2200' }],
-				},
-				{
-					search_path: 'public',
-					client_encoding: 'UTF8',
-					TimeZone: 'UTC',
-				},
-			),
-		).toThrow(
-			new RegExp(`\\(${operationName}\\).*no derivable execution contract`),
-		);
-	});
+	] as const)(
+		'mutation: contract construction cannot make ineligible %s executable',
+		(operationName, operationKind, ref, payload) => {
+			const plan = {
+				steps: [
+					{
+						stepId: `step:${operationName}`,
+						operation: { ref, operationKind, payload },
+					},
+				],
+			} as unknown as ProvenPlanShape;
+			expect(() =>
+				createPgExecutionContract(
+					plan,
+					{
+						systemIdentifier: 'system-1',
+						databaseOid: '5',
+						namespaces: [{ name: 'public', oid: '2200' }],
+					},
+					{
+						search_path: 'public',
+						client_encoding: 'UTF8',
+						TimeZone: 'UTC',
+					},
+				),
+			).toThrow(
+				new RegExp(`\\(${operationName}\\).*no derivable execution contract`),
+			);
+		},
+	);
 
 	it('mutation: a new operation cannot fall through to a default PostgreSQL engine floor', () => {
 		expect(
@@ -206,26 +209,26 @@ describe('PostgreSQL execution contract evaluator', () => {
 		}
 	});
 
-	it.each([
-		'LATIN1',
-		'SQL_ASCII',
-	] as const)('mutation: observing non-ASCII labels on %s without pinning UTF-8 can confirm different bytes', async (initialEncoding) => {
-		const query = vi.fn(async (sql: string) => {
-			if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
-			if (sql === 'SHOW client_encoding')
-				return { rows: [{ client_encoding: 'UTF8' }] };
-			throw new Error(`unexpected query ${sql}`);
-		});
-		await forcePgUtf8Session({ query } as unknown as TransitionSessionClient);
-		expect(initialEncoding).not.toBe('UTF8');
-		expect(query.mock.calls.map(([sql]) => sql)).toEqual([
-			"SET client_encoding TO 'UTF8'",
-			'SHOW client_encoding',
-		]);
-		// The label makes this a byte-provenance regression, not an ASCII-only
-		// setting test: node-postgres would otherwise send C3 A9 for é.
-		expect('é').toBe('é');
-	});
+	it.each(['LATIN1', 'SQL_ASCII'] as const)(
+		'mutation: observing non-ASCII labels on %s without pinning UTF-8 can confirm different bytes',
+		async (initialEncoding) => {
+			const query = vi.fn(async (sql: string) => {
+				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+				if (sql === 'SHOW client_encoding')
+					return { rows: [{ client_encoding: 'UTF8' }] };
+				throw new Error(`unexpected query ${sql}`);
+			});
+			await forcePgUtf8Session({ query } as unknown as TransitionSessionClient);
+			expect(initialEncoding).not.toBe('UTF8');
+			expect(query.mock.calls.map(([sql]) => sql)).toEqual([
+				"SET client_encoding TO 'UTF8'",
+				'SHOW client_encoding',
+			]);
+			// The label makes this a byte-provenance regression, not an ASCII-only
+			// setting test: node-postgres would otherwise send C3 A9 for é.
+			expect('é').toBe('é');
+		},
+	);
 
 	it('mutation: a physical-target-only contract is valid JSON but does not derive from its plan', () => {
 		const plan = {

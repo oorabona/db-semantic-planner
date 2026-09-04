@@ -575,34 +575,34 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it.each([
-		'DEALLOCATE ALL',
-		'DISCARD ALL',
-	])('quarantines %s-cleared server plans after the failed call', async (reset) => {
-		const { client, close } = await getIsolatedClient();
-		try {
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-			});
-			const sql = 'SELECT $1::int AS value';
-			const query = compiled<{ value: number }>(sql, [9]);
+	it.each(['DEALLOCATE ALL', 'DISCARD ALL'])(
+		'quarantines %s-cleared server plans after the failed call',
+		async (reset) => {
+			const { client, close } = await getIsolatedClient();
+			try {
+				const adapter = createPgsqlAdapter(client, {
+					borrowedClient: true,
+					preparedStatements: true,
+				});
+				const sql = 'SELECT $1::int AS value';
+				const query = compiled<{ value: number }>(sql, [9]);
 
-			await adapter.execute(query);
-			await adapter.execute(query);
-			expect(await preparedCount(client, sql)).toBe(1);
-			await adapter.executeRaw(reset);
+				await adapter.execute(query);
+				await adapter.execute(query);
+				expect(await preparedCount(client, sql)).toBe(1);
+				await adapter.executeRaw(reset);
 
-			await expect(adapter.execute(query)).rejects.toMatchObject({
-				code: '26000',
-				routine: 'FetchPreparedStatement',
-			});
-			await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
-			expect(await preparedCount(client, sql)).toBe(0);
-		} finally {
-			await close();
-		}
-	});
+				await expect(adapter.execute(query)).rejects.toMatchObject({
+					code: '26000',
+					routine: 'FetchPreparedStatement',
+				});
+				await expect(adapter.execute(query)).resolves.toEqual([{ value: 9 }]);
+				expect(await preparedCount(client, sql)).toBe(0);
+			} finally {
+				await close();
+			}
+		},
+	);
 
 	it('runs every admitted SQL unnamed after one verified client-wide reset failure', async () => {
 		const { client, close } = await getIsolatedClient();
@@ -637,25 +637,23 @@ describe('adapter prepared statements', () => {
 		}
 	});
 
-	it.each([
-		'0A000',
-		'26000',
-		'42P05',
-	])('keeps naming after PL/pgSQL raises spoofable SQLSTATE %s exactly once', async (code) => {
-		const { client, close } = await getIsolatedClient();
-		try {
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				preparedStatements: true,
-			});
-			const suffix = code.toLowerCase();
-			const sequence = `"${SCHEMA}".no_replay_sequence_${suffix}`;
-			const fn = `"${SCHEMA}".raise_${suffix}_after_nextval`;
-			const sql = `SELECT ${fn}($1, $2) AS value`;
-			const query = compiled<{ value: number }>(sql, [0, code]);
+	it.each(['0A000', '26000', '42P05'])(
+		'keeps naming after PL/pgSQL raises spoofable SQLSTATE %s exactly once',
+		async (code) => {
+			const { client, close } = await getIsolatedClient();
+			try {
+				const adapter = createPgsqlAdapter(client, {
+					borrowedClient: true,
+					preparedStatements: true,
+				});
+				const suffix = code.toLowerCase();
+				const sequence = `"${SCHEMA}".no_replay_sequence_${suffix}`;
+				const fn = `"${SCHEMA}".raise_${suffix}_after_nextval`;
+				const sql = `SELECT ${fn}($1, $2) AS value`;
+				const query = compiled<{ value: number }>(sql, [0, code]);
 
-			await adapter.executeDDL(`CREATE SEQUENCE ${sequence}`);
-			await adapter.executeDDL(`
+				await adapter.executeDDL(`CREATE SEQUENCE ${sequence}`);
+				await adapter.executeDDL(`
 				CREATE FUNCTION ${fn}(should_fail integer, error_code text) RETURNS integer
 				LANGUAGE plpgsql AS $$
 				BEGIN
@@ -667,30 +665,31 @@ describe('adapter prepared statements', () => {
 				END;
 				$$`);
 
-			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
-			await expect(
-				adapter.execute(compiled<{ value: number }>(sql, [1, code])),
-			).rejects.toMatchObject({ code, routine: 'exec_stmt_raise' });
-			expect(
-				(
-					await client.query<{ last_value: string; is_called: boolean }>(
-						`SELECT last_value::text, is_called FROM ${sequence}`,
-					)
-				).rows,
-			).toEqual([{ last_value: '1', is_called: true }]);
-			const querySpy = vi.spyOn(client, 'query');
-			await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
-			expect(querySpy).toHaveBeenCalledWith({
-				name: `dbsp_ps_${createHash('sha256').update(sql).digest('hex').slice(0, 32)}`,
-				text: sql,
-				values: [0, code],
-			});
-			querySpy.mockRestore();
-			expect(await preparedCount(client, sql)).toBe(1);
-		} finally {
-			await close();
-		}
-	});
+				await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
+				await expect(
+					adapter.execute(compiled<{ value: number }>(sql, [1, code])),
+				).rejects.toMatchObject({ code, routine: 'exec_stmt_raise' });
+				expect(
+					(
+						await client.query<{ last_value: string; is_called: boolean }>(
+							`SELECT last_value::text, is_called FROM ${sequence}`,
+						)
+					).rows,
+				).toEqual([{ last_value: '1', is_called: true }]);
+				const querySpy = vi.spyOn(client, 'query');
+				await expect(adapter.execute(query)).resolves.toEqual([{ value: 0 }]);
+				expect(querySpy).toHaveBeenCalledWith({
+					name: `dbsp_ps_${createHash('sha256').update(sql).digest('hex').slice(0, 32)}`,
+					text: sql,
+					values: [0, code],
+				});
+				querySpy.mockRestore();
+				expect(await preparedCount(client, sql)).toBe(1);
+			} finally {
+				await close();
+			}
+		},
+	);
 
 	it('does not replay a nested missing prepared statement after an effectful function call', async () => {
 		const pool = new Pool({

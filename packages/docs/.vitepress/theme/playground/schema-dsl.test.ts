@@ -612,20 +612,17 @@ describe('requirement #8: type validation + alias normalization', () => {
 		expect(findColumn(parsed, 't', 'v').type).toBe('integer');
 	});
 
-	it.each([
-		'vector',
-		'bytea',
-		'binary',
-		'blob',
-		'nonsense',
-	])('throws SchemaDslError for the unsupported/unknown type %s', (badType) => {
-		expect(() => parseSchemaDsl(`table t { v: ${badType} }`)).toThrow(
-			SchemaDslError,
-		);
-		expect(() => parseSchemaDsl(`table t { v: ${badType} }`)).toThrow(
-			new RegExp(`Unknown type '${badType}'`),
-		);
-	});
+	it.each(['vector', 'bytea', 'binary', 'blob', 'nonsense'])(
+		'throws SchemaDslError for the unsupported/unknown type %s',
+		(badType) => {
+			expect(() => parseSchemaDsl(`table t { v: ${badType} }`)).toThrow(
+				SchemaDslError,
+			);
+			expect(() => parseSchemaDsl(`table t { v: ${badType} }`)).toThrow(
+				new RegExp(`Unknown type '${badType}'`),
+			);
+		},
+	);
 
 	it('the unknown-type error message lists supported canonical types and aliases', () => {
 		try {
@@ -730,17 +727,17 @@ describe('gate fix: prototype-pollution-safe identifiers', () => {
 		).toThrow(SchemaDslError);
 	});
 
-	it.each([
-		'constructor',
-		'prototype',
-	])('also rejects %s as a table or column name', (bad) => {
-		expect(() => parseSchemaDsl(`table ${bad} { id: uuid pk }`)).toThrow(
-			SchemaDslError,
-		);
-		expect(() => parseSchemaDsl(`table t { ${bad}: string }`)).toThrow(
-			SchemaDslError,
-		);
-	});
+	it.each(['constructor', 'prototype'])(
+		'also rejects %s as a table or column name',
+		(bad) => {
+			expect(() => parseSchemaDsl(`table ${bad} { id: uuid pk }`)).toThrow(
+				SchemaDslError,
+			);
+			expect(() => parseSchemaDsl(`table t { ${bad}: string }`)).toThrow(
+				SchemaDslError,
+			);
+		},
+	);
 
 	it('rejects __proto__ as a FK target table name and as a non-id reference column', () => {
 		expect(() =>

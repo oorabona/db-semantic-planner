@@ -571,57 +571,60 @@ describe('SC-03 #481 non-transactional durable admission', () => {
 		['omitted', 'omitted'],
 		['policy narrowed after review', 'narrowed'],
 		['extra acceptance for an absent assumption', 'extra'],
-	] as const)('OBL-RUN4 refuses %s non-transactional acceptance without a durable append', async (_construction, policyKind) => {
-		await inScenario('obl_run4_refusal', async (scenario) => {
-			await createUsers(scenario.schema, 10);
-			const plan = await planConcurrentIndex(scenario.schema, scenario);
-			const pool = await getTestPool();
-			const accepts = plan.plan.assumptions
-				.map((assumption) => assumption.class)
-				.filter((entry) => entry !== 'non-transactional-segment');
-			const temporary = await mkdtemp(join(tmpdir(), 'dbsp-run4-policy-'));
-			try {
-				const policy = join(temporary, 'narrowed-policy.json');
-				if (policyKind === 'narrowed') {
-					await writeFile(
-						policy,
-						JSON.stringify([
-							{
-								class: 'non-transactional-segment',
-								withinScope: [{ schema: 'not-the-planned-schema' }],
-							},
-						]),
+	] as const)(
+		'OBL-RUN4 refuses %s non-transactional acceptance without a durable append',
+		async (_construction, policyKind) => {
+			await inScenario('obl_run4_refusal', async (scenario) => {
+				await createUsers(scenario.schema, 10);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
+				const pool = await getTestPool();
+				const accepts = plan.plan.assumptions
+					.map((assumption) => assumption.class)
+					.filter((entry) => entry !== 'non-transactional-segment');
+				const temporary = await mkdtemp(join(tmpdir(), 'dbsp-run4-policy-'));
+				try {
+					const policy = join(temporary, 'narrowed-policy.json');
+					if (policyKind === 'narrowed') {
+						await writeFile(
+							policy,
+							JSON.stringify([
+								{
+									class: 'non-transactional-segment',
+									withinScope: [{ schema: 'not-the-planned-schema' }],
+								},
+							]),
+						);
+					}
+					const result = await runApply(
+						plan.runId,
+						{
+							db: plan.db,
+							planDigest: plan.planDigest,
+							accept:
+								policyKind === 'extra'
+									? [...accepts, 'not-carried-by-this-plan']
+									: accepts,
+							...(policyKind === 'narrowed' ? { acceptPolicy: policy } : {}),
+						},
+						pool,
 					);
+					expect(result.outcome).toBe('transactional-only-refusal');
+					expect(exitCodeForApplyOutcome(result.outcome)).toBe(17);
+				} finally {
+					await rm(temporary, { recursive: true, force: true });
 				}
-				const result = await runApply(
-					plan.runId,
-					{
-						db: plan.db,
-						planDigest: plan.planDigest,
-						accept:
-							policyKind === 'extra'
-								? [...accepts, 'not-carried-by-this-plan']
-								: accepts,
-						...(policyKind === 'narrowed' ? { acceptPolicy: policy } : {}),
-					},
-					pool,
+				const journal = await pool.query<{ count: string }>(
+					'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
+					[plan.runId],
 				);
-				expect(result.outcome).toBe('transactional-only-refusal');
-				expect(exitCodeForApplyOutcome(result.outcome)).toBe(17);
-			} finally {
-				await rm(temporary, { recursive: true, force: true });
-			}
-			const journal = await pool.query<{ count: string }>(
-				'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
-				[plan.runId],
-			);
-			expect(journal.rows[0]?.count).toBe('0');
-			const ledger = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(scenario.schema)}.${quoteIdent('dbsp_ledger_event')}`,
-			);
-			expect(ledger.rows[0]?.count).toBe('0');
-		});
-	});
+				expect(journal.rows[0]?.count).toBe('0');
+				const ledger = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(scenario.schema)}.${quoteIdent('dbsp_ledger_event')}`,
+				);
+				expect(ledger.rows[0]?.count).toBe('0');
+			});
+		},
+	);
 
 	it('OBL-RUN4 admits an accepted non-transactional assumption', async () => {
 		await inScenario('obl_run4_accepted', async (scenario) => {
@@ -647,58 +650,61 @@ describe('SC-03 #481 non-transactional durable admission', () => {
 		['omitted', 'omitted'],
 		['policy narrowed after review', 'narrowed'],
 		['extra acceptance for an absent assumption', 'extra'],
-	] as const)('OBL-RUN4 refuses %s external-ddl-exclusion acceptance without a durable append', async (_construction, policyKind) => {
-		await inScenario('obl_run4_ext_refusal', async (scenario) => {
-			await createUsers(scenario.schema, 10);
-			const plan = await planConcurrentIndex(scenario.schema, scenario);
-			const pool = await getTestPool();
-			const accepts = plan.plan.assumptions
-				.map((assumption) => assumption.class)
-				.filter((entry) => entry !== 'external-ddl-exclusion');
-			const temporary = await mkdtemp(join(tmpdir(), 'dbsp-run4-external-'));
-			try {
-				const policy = join(temporary, 'narrowed-policy.json');
-				if (policyKind === 'narrowed') {
-					await writeFile(
-						policy,
-						JSON.stringify([
-							{
-								class: 'external-ddl-exclusion',
-								withinScope: [{ schema: 'not-the-planned-schema' }],
-							},
-						]),
+	] as const)(
+		'OBL-RUN4 refuses %s external-ddl-exclusion acceptance without a durable append',
+		async (_construction, policyKind) => {
+			await inScenario('obl_run4_ext_refusal', async (scenario) => {
+				await createUsers(scenario.schema, 10);
+				const plan = await planConcurrentIndex(scenario.schema, scenario);
+				const pool = await getTestPool();
+				const accepts = plan.plan.assumptions
+					.map((assumption) => assumption.class)
+					.filter((entry) => entry !== 'external-ddl-exclusion');
+				const temporary = await mkdtemp(join(tmpdir(), 'dbsp-run4-external-'));
+				try {
+					const policy = join(temporary, 'narrowed-policy.json');
+					if (policyKind === 'narrowed') {
+						await writeFile(
+							policy,
+							JSON.stringify([
+								{
+									class: 'external-ddl-exclusion',
+									withinScope: [{ schema: 'not-the-planned-schema' }],
+								},
+							]),
+						);
+					}
+					const result = await runApply(
+						plan.runId,
+						{
+							db: plan.db,
+							planDigest: plan.planDigest,
+							accept:
+								policyKind === 'extra'
+									? [...accepts, 'not-carried-by-this-plan']
+									: accepts,
+							...(policyKind === 'narrowed' ? { acceptPolicy: policy } : {}),
+						},
+						pool,
 					);
+					expect(result.outcome).toBe('assumption-not-accepted');
+				} finally {
+					await rm(temporary, { recursive: true, force: true });
 				}
-				const result = await runApply(
-					plan.runId,
-					{
-						db: plan.db,
-						planDigest: plan.planDigest,
-						accept:
-							policyKind === 'extra'
-								? [...accepts, 'not-carried-by-this-plan']
-								: accepts,
-						...(policyKind === 'narrowed' ? { acceptPolicy: policy } : {}),
-					},
-					pool,
-				);
-				expect(result.outcome).toBe('assumption-not-accepted');
-			} finally {
-				await rm(temporary, { recursive: true, force: true });
-			}
-			const [journal, ledger] = await Promise.all([
-				pool.query<{ count: string }>(
-					'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
-					[plan.runId],
-				),
-				pool.query<{ count: string }>(
-					`SELECT count(*)::text AS count FROM ${quoteIdent(scenario.schema)}.${quoteIdent('dbsp_ledger_event')}`,
-				),
-			]);
-			expect(journal.rows[0]?.count).toBe('0');
-			expect(ledger.rows[0]?.count).toBe('0');
-		});
-	});
+				const [journal, ledger] = await Promise.all([
+					pool.query<{ count: string }>(
+						'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_journal WHERE run_id = $1',
+						[plan.runId],
+					),
+					pool.query<{ count: string }>(
+						`SELECT count(*)::text AS count FROM ${quoteIdent(scenario.schema)}.${quoteIdent('dbsp_ledger_event')}`,
+					),
+				]);
+				expect(journal.rows[0]?.count).toBe('0');
+				expect(ledger.rows[0]?.count).toBe('0');
+			});
+		},
+	);
 
 	it('OBL-RUN4 admits an accepted external-ddl-exclusion assumption', async () => {
 		await inScenario('obl_run4_ext_accepted', async (scenario) => {

@@ -225,23 +225,26 @@ describe('declared PostgreSQL adoption admission', () => {
 				},
 			}),
 		],
-	] as const)('C02 validates %s before a no-op-capable preflight', async (_label, mutate) => {
-		const result = await executePgDeclaredAdoption({
-			executor,
-			...mutate(persisted()),
-			home: { scope: 'schema', schema: 'tenant' },
-			address,
-			declaration,
-			expectedCatalogueIdentity: identity,
-			shapeMatches: async () => true,
-		});
-		expect(result).toMatchObject({
-			outcome: 'execution-failed',
-			detail: expect.stringContaining('adoption step adoption:accounts'),
-		});
-		expect(mocks.readChain).not.toHaveBeenCalled();
-		expect(mocks.readIdentity).not.toHaveBeenCalled();
-	});
+	] as const)(
+		'C02 validates %s before a no-op-capable preflight',
+		async (_label, mutate) => {
+			const result = await executePgDeclaredAdoption({
+				executor,
+				...mutate(persisted()),
+				home: { scope: 'schema', schema: 'tenant' },
+				address,
+				declaration,
+				expectedCatalogueIdentity: identity,
+				shapeMatches: async () => true,
+			});
+			expect(result).toMatchObject({
+				outcome: 'execution-failed',
+				detail: expect.stringContaining('adoption step adoption:accounts'),
+			});
+			expect(mocks.readChain).not.toHaveBeenCalled();
+			expect(mocks.readIdentity).not.toHaveBeenCalled();
+		},
+	);
 
 	it('re-reads a completed adoption when the token gate reports a concurrent close', async () => {
 		mocks.readChain
@@ -335,23 +338,26 @@ describe('declared PostgreSQL adoption admission', () => {
 			{ kind: 'outcome-transport-ambiguous', reason: 'commit unknown' },
 			{ outcome: 'transport-ambiguous', detail: 'commit unknown' },
 		],
-	] as const)('preserves admitted unresolved outcome %s', async (admitted, expected) => {
-		unmanaged();
-		mocks.readIdentity.mockResolvedValue({
-			...address,
-			catalogueIdentity: identity,
-		});
-		mocks.executeAdmitted.mockResolvedValue(admitted);
-		await expect(
-			executePgDeclaredAdoption({
-				executor,
-				...persisted(),
-				home: { scope: 'schema', schema: 'tenant' },
-				address,
-				declaration,
-				expectedCatalogueIdentity: identity,
-				shapeMatches: async () => true,
-			}),
-		).resolves.toEqual(expected);
-	});
+	] as const)(
+		'preserves admitted unresolved outcome %s',
+		async (admitted, expected) => {
+			unmanaged();
+			mocks.readIdentity.mockResolvedValue({
+				...address,
+				catalogueIdentity: identity,
+			});
+			mocks.executeAdmitted.mockResolvedValue(admitted);
+			await expect(
+				executePgDeclaredAdoption({
+					executor,
+					...persisted(),
+					home: { scope: 'schema', schema: 'tenant' },
+					address,
+					declaration,
+					expectedCatalogueIdentity: identity,
+					shapeMatches: async () => true,
+				}),
+			).resolves.toEqual(expected);
+		},
+	);
 });

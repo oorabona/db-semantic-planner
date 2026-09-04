@@ -148,34 +148,37 @@ describe.sequential('OBL checkpoint windows', () => {
 				'ddl-completed-before-read-back',
 			] as const,
 		] as const,
-	] as const)('OBL-AUTH5: every uncovered %s refuses every mutated ledger artefact before its append', async (_path, mode, prefix) => {
-		for (const [artefact, mutate] of ledgerArtefactDrifts) {
-			const schema = schemaName(`auth5_${artefact}`);
-			await provision(schema);
-			const child = spawn(mode, schema, 'integrity-refusal');
-			try {
-				await acknowledgeThrough(child, prefix);
-				await waitFor(
-					'post-lock integrity checkpoint',
-					child.waitForCheckpoint('post-lock-integrity-before-append'),
-				);
-				const pool = await getTestPool();
-				await pool.query(mutate(schema));
-				await child.acknowledge('post-lock-integrity-before-append');
-				const expectedExitCode =
-					_path === 'non-transactional terminal append' ? 1 : 0;
-				expect(
-					await waitFor('integrity-refusal child exit', child.exited),
-				).toMatchObject({
-					// Only the terminal checkpoint follows the committed executing append;
-					// its drift is outcome-recovery-required, not a refusal.
-					code: expectedExitCode,
-				});
-			} finally {
-				await child.terminate('SIGKILL');
+	] as const)(
+		'OBL-AUTH5: every uncovered %s refuses every mutated ledger artefact before its append',
+		async (_path, mode, prefix) => {
+			for (const [artefact, mutate] of ledgerArtefactDrifts) {
+				const schema = schemaName(`auth5_${artefact}`);
+				await provision(schema);
+				const child = spawn(mode, schema, 'integrity-refusal');
+				try {
+					await acknowledgeThrough(child, prefix);
+					await waitFor(
+						'post-lock integrity checkpoint',
+						child.waitForCheckpoint('post-lock-integrity-before-append'),
+					);
+					const pool = await getTestPool();
+					await pool.query(mutate(schema));
+					await child.acknowledge('post-lock-integrity-before-append');
+					const expectedExitCode =
+						_path === 'non-transactional terminal append' ? 1 : 0;
+					expect(
+						await waitFor('integrity-refusal child exit', child.exited),
+					).toMatchObject({
+						// Only the terminal checkpoint follows the committed executing append;
+						// its drift is outcome-recovery-required, not a refusal.
+						code: expectedExitCode,
+					});
+				} finally {
+					await child.terminate('SIGKILL');
+				}
 			}
-		}
-	});
+		},
+	);
 
 	it.each([
 		[
@@ -209,18 +212,23 @@ describe.sequential('OBL checkpoint windows', () => {
 				'commit-acknowledged',
 			] as const,
 		],
-	] as const)('OBL-READ3: killing after executing at the %s stage leaves no unverified refused terminal', async (_stage, prefix) => {
-		const schema = schemaName('read3');
-		await provision(schema);
-		const child = spawn('non-transactional', schema);
-		try {
-			await acknowledgeThrough(child, prefix.slice(0, -1));
-			const last = prefix[prefix.length - 1]!;
-			await waitFor(`checkpoint ${last}`, child.waitForCheckpoint(last));
-			expect(await child.kill('SIGKILL')).toMatchObject({ signal: 'SIGKILL' });
-			expect(await eventKinds(schema)).not.toContain('refused');
-		} finally {
-			await child.terminate('SIGKILL');
-		}
-	});
+	] as const)(
+		'OBL-READ3: killing after executing at the %s stage leaves no unverified refused terminal',
+		async (_stage, prefix) => {
+			const schema = schemaName('read3');
+			await provision(schema);
+			const child = spawn('non-transactional', schema);
+			try {
+				await acknowledgeThrough(child, prefix.slice(0, -1));
+				const last = prefix[prefix.length - 1]!;
+				await waitFor(`checkpoint ${last}`, child.waitForCheckpoint(last));
+				expect(await child.kill('SIGKILL')).toMatchObject({
+					signal: 'SIGKILL',
+				});
+				expect(await eventKinds(schema)).not.toContain('refused');
+			} finally {
+				await child.terminate('SIGKILL');
+			}
+		},
+	);
 });

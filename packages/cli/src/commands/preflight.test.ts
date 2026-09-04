@@ -67,20 +67,23 @@ describe('preflight adoption output', () => {
 				'schema.ts',
 			],
 		],
-	] as const)('OBL-CLI8 refuses usage when %s is omitted before it opens a database', (missing, args) => {
-		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
-		const repositoryRoot = fileURLToPath(
-			new URL('../../../../', import.meta.url),
-		);
-		const completed = spawnSync(
-			process.execPath,
-			['--import', 'tsx', cliPath, 'preflight', ...args],
-			{ cwd: repositoryRoot, encoding: 'utf8' },
-		);
-		expect(completed.status).toBe(1);
-		expect(completed.stdout).toBe('');
-		expect(completed.stderr).toContain(`required option '${missing}`);
-	});
+	] as const)(
+		'OBL-CLI8 refuses usage when %s is omitted before it opens a database',
+		(missing, args) => {
+			const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+			const repositoryRoot = fileURLToPath(
+				new URL('../../../../', import.meta.url),
+			);
+			const completed = spawnSync(
+				process.execPath,
+				['--import', 'tsx', cliPath, 'preflight', ...args],
+				{ cwd: repositoryRoot, encoding: 'utf8' },
+			);
+			expect(completed.status).toBe(1);
+			expect(completed.stdout).toBe('');
+			expect(completed.stderr).toContain(`required option '${missing}`);
+		},
+	);
 
 	it('OBL-CLI3 atomically replaces an existing adoption destination with a restrictive artifact', async () => {
 		const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-test-'));

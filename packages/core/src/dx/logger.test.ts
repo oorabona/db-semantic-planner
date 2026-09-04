@@ -165,20 +165,18 @@ describe('Logger', () => {
 		});
 
 		describe('env flag parsing — DBSP_SUPPRESS_DX_WARNINGS (#159 finding 2)', () => {
-			it.each([
-				'0',
-				'false',
-				'FALSE',
-				'False',
-			])('value %j does NOT suppress — the warning still fires', (value) => {
-				const warnSpy = vi.fn();
-				setLogger({ warn: warnSpy });
-				process.env[ENV_KEY] = value;
+			it.each(['0', 'false', 'FALSE', 'False'])(
+				'value %j does NOT suppress — the warning still fires',
+				(value) => {
+					const warnSpy = vi.fn();
+					setLogger({ warn: warnSpy });
+					process.env[ENV_KEY] = value;
 
-				emitWarning('dx message', 'dx');
+					emitWarning('dx message', 'dx');
 
-				expect(warnSpy).toHaveBeenCalledWith('dx message');
-			});
+					expect(warnSpy).toHaveBeenCalledWith('dx message');
+				},
+			);
 
 			it.each(['1', 'true', 'TRUE', 'yes'])('value %j suppresses', (value) => {
 				const warnSpy = vi.fn();

@@ -437,25 +437,28 @@ describe('generator execution fixture shim', () => {
 				},
 			},
 		],
-	] as const)('routes a v3 %s postcondition through its binding-aware verifier', async (_kind, value, address, verify, result) => {
-		vi.clearAllMocks();
-		verify.mockResolvedValue(result);
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: { value, digest: 'v3-postcondition' },
-		} as unknown as NormalizedManagedStep;
+	] as const)(
+		'routes a v3 %s postcondition through its binding-aware verifier',
+		async (_kind, value, address, verify, result) => {
+			vi.clearAllMocks();
+			verify.mockResolvedValue(result);
+			const step = {
+				...dataDestructiveStep,
+				address,
+				expectedDeclaration: { value, digest: 'v3-postcondition' },
+			} as unknown as NormalizedManagedStep;
 
-		await readTestGeneratedPostcondition(
-			{ query: vi.fn() },
-			step,
-			address as LedgerAddress,
-		);
+			await readTestGeneratedPostcondition(
+				{ query: vi.fn() },
+				step,
+				address as LedgerAddress,
+			);
 
-		expect(verify).toHaveBeenCalledWith(
-			expect.objectContaining({ postcondition: value, address }),
-		);
-	});
+			expect(verify).toHaveBeenCalledWith(
+				expect.objectContaining({ postcondition: value, address }),
+			);
+		},
+	);
 
 	it('refuses a malformed v3 binding address before verifier dispatch', async () => {
 		const address: LedgerAddress = {
@@ -611,28 +614,31 @@ describe('generator execution fixture shim', () => {
 			undefined,
 			undefined,
 		],
-	] as const)('records an identity-only observation for every deferred v3 %s kind', async (_label, value, address, _verify, _result) => {
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: { value, digest: 'v3-postcondition' },
-		} as unknown as NormalizedManagedStep;
-		await readTestGeneratedPostcondition(
-			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
-			step,
-			address as LedgerAddress,
-		);
-		const observed = await readTestGeneratedPostcondition(
-			{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
-			step,
-			address as LedgerAddress,
-		);
-		expect(observed.value).toMatchObject({
-			kind: 'identity-observed',
-			observedKind: address.kind,
-			structuralSemantics: 'unverified',
-		});
-	});
+	] as const)(
+		'records an identity-only observation for every deferred v3 %s kind',
+		async (_label, value, address, _verify, _result) => {
+			const step = {
+				...dataDestructiveStep,
+				address,
+				expectedDeclaration: { value, digest: 'v3-postcondition' },
+			} as unknown as NormalizedManagedStep;
+			await readTestGeneratedPostcondition(
+				{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+				step,
+				address as LedgerAddress,
+			);
+			const observed = await readTestGeneratedPostcondition(
+				{ query: vi.fn(async () => ({ rows: [{ oid: '401' }] })) },
+				step,
+				address as LedgerAddress,
+			);
+			expect(observed.value).toMatchObject({
+				kind: 'identity-observed',
+				observedKind: address.kind,
+				structuralSemantics: 'unverified',
+			});
+		},
+	);
 
 	it('binds adoption and re-address claims to the recorded attempt namespace', async () => {
 		const attempts: string[] = [];
@@ -734,64 +740,74 @@ describe('generator execution fixture shim', () => {
 				},
 			],
 		],
-	] as const)('refuses a present-but-unmutated generated %s rather than recording observed', async (step, rows) => {
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query: vi.fn().mockResolvedValue({ rows }) },
-				step as unknown as NormalizedManagedStep,
-				step.address! as never,
-			),
-		).rejects.toThrow('generated column id type postcondition differs');
-	});
+	] as const)(
+		'refuses a present-but-unmutated generated %s rather than recording observed',
+		async (step, rows) => {
+			await expect(
+				readTestGeneratedPostcondition(
+					{ query: vi.fn().mockResolvedValue({ rows }) },
+					step as unknown as NormalizedManagedStep,
+					step.address! as never,
+				),
+			).rejects.toThrow('generated column id type postcondition differs');
+		},
+	);
 
 	it.each([
 		['string nullability', { is_not_null: 't' }],
 		['unknown identity', { identity_kind: 'x' }],
-	])('refuses an incomplete generated column projection with %s', async (_label, override) => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'column' as const,
-			name: 'id',
-			parent: dataDestructiveStep.address!,
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: v3({
-					kind: 'column',
-					column: {
-						type: 'integer',
-						nullable: false,
-						default: { defaultKind: 'none', hasDefault: false, identity: null },
-					},
-				}),
-				digest: 'column-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		await expect(
-			readTestGeneratedPostcondition(
-				{
-					query: vi.fn().mockResolvedValue({
-						rows: [
-							{
-								relation_kind: 'r',
-								column_name: 'id',
-								column_type: 'integer',
-								is_not_null: true,
-								column_default: null,
-								collation_name: null,
-								identity_kind: '',
-								...override,
-							},
-						],
-					}),
-				},
-				step,
+	])(
+		'refuses an incomplete generated column projection with %s',
+		async (_label, override) => {
+			const address = {
+				...dataDestructiveStep.address,
+				kind: 'column' as const,
+				name: 'id',
+				parent: dataDestructiveStep.address!,
+			} as LedgerAddress;
+			const step = {
+				...dataDestructiveStep,
 				address,
-			),
-		).rejects.toThrow('generated column id has an incomplete projection');
-	});
+				expectedDeclaration: {
+					value: v3({
+						kind: 'column',
+						column: {
+							type: 'integer',
+							nullable: false,
+							default: {
+								defaultKind: 'none',
+								hasDefault: false,
+								identity: null,
+							},
+						},
+					}),
+					digest: 'column-postcondition',
+				},
+			} as unknown as NormalizedManagedStep;
+			await expect(
+				readTestGeneratedPostcondition(
+					{
+						query: vi.fn().mockResolvedValue({
+							rows: [
+								{
+									relation_kind: 'r',
+									column_name: 'id',
+									column_type: 'integer',
+									is_not_null: true,
+									column_default: null,
+									collation_name: null,
+									identity_kind: '',
+									...override,
+								},
+							],
+						}),
+					},
+					step,
+					address,
+				),
+			).rejects.toThrow('generated column id has an incomplete projection');
+		},
+	);
 
 	it.each([
 		[
@@ -805,56 +821,67 @@ describe('generator execution fixture shim', () => {
 			'generated column id projection names another column',
 		],
 		['no projected column', undefined, 'generated column id is absent'],
-	] as const)('refuses generated column binding or proof for %s', async (_case, row, message) => {
-		const address = {
-			...dataDestructiveStep.address,
-			kind: 'column' as const,
-			name: 'id',
-			parent: dataDestructiveStep.address!,
-		} as LedgerAddress;
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: v3({
-					kind: 'column',
-					column: { type: 'integer', nullable: false },
-				}),
-				digest: 'column-postcondition',
-			},
-		} as unknown as NormalizedManagedStep;
-		const query = vi.fn(async (sql: string) => ({
-			rows: sql.startsWith('LOCK TABLE ONLY')
-				? []
-				: row === undefined
+	] as const)(
+		'refuses generated column binding or proof for %s',
+		async (_case, row, message) => {
+			const address = {
+				...dataDestructiveStep.address,
+				kind: 'column' as const,
+				name: 'id',
+				parent: dataDestructiveStep.address!,
+			} as LedgerAddress;
+			const step = {
+				...dataDestructiveStep,
+				address,
+				expectedDeclaration: {
+					value: v3({
+						kind: 'column',
+						column: { type: 'integer', nullable: false },
+					}),
+					digest: 'column-postcondition',
+				},
+			} as unknown as NormalizedManagedStep;
+			const query = vi.fn(async (sql: string) => ({
+				rows: sql.startsWith('LOCK TABLE ONLY')
 					? []
-					: [
-							sql.includes('relation.relkind AS relation_kind') ||
-							row.relation_kind !== 'v'
-								? row
-								: Object.fromEntries(
-										Object.entries(row).filter(
-											([key]) => key !== 'relation_kind',
+					: row === undefined
+						? []
+						: [
+								sql.includes('relation.relkind AS relation_kind') ||
+								row.relation_kind !== 'v'
+									? row
+									: Object.fromEntries(
+											Object.entries(row).filter(
+												([key]) => key !== 'relation_kind',
+											),
 										),
-									),
-						],
-		}));
-		await expect(
-			readTestGeneratedPostcondition({ query }, step, address as LedgerAddress),
-		).rejects.toThrow(
-			row === undefined || row.column_name !== 'id' || row.relation_kind === 'v'
-				? 'generated postcondition binding did not resolve'
-				: message,
-		);
-		if (row?.relation_kind === 'v') {
-			const bindingQuery = query.mock.calls.find(
-				([sql]) =>
-					typeof sql === 'string' &&
-					sql.includes('relation.relkind AS relation_kind'),
+							],
+			}));
+			await expect(
+				readTestGeneratedPostcondition(
+					{ query },
+					step,
+					address as LedgerAddress,
+				),
+			).rejects.toThrow(
+				row === undefined ||
+					row.column_name !== 'id' ||
+					row.relation_kind === 'v'
+					? 'generated postcondition binding did not resolve'
+					: message,
 			);
-			expect(bindingQuery?.[0]).toContain('relation.relkind AS relation_kind');
-		}
-	});
+			if (row?.relation_kind === 'v') {
+				const bindingQuery = query.mock.calls.find(
+					([sql]) =>
+						typeof sql === 'string' &&
+						sql.includes('relation.relkind AS relation_kind'),
+				);
+				expect(bindingQuery?.[0]).toContain(
+					'relation.relkind AS relation_kind',
+				);
+			}
+		},
+	);
 
 	it('canonicalizes PostgreSQL default collation for generated column read-back', async () => {
 		const address = {
@@ -1161,47 +1188,52 @@ describe('generator execution fixture shim', () => {
 		['invalid', { is_valid: false }],
 		['not ready', { is_ready: false }],
 		['not live', { is_live: false }],
-	] as const)('refuses a present but unusable generated index when it is %s', async (_state, unavailable) => {
-		const step = {
-			...dataDestructiveStep,
-			expectedDeclaration: {
-				value: v3({
-					kind: 'index',
-					index: {
-						method: 'btree',
-						unique: false,
-						valid: true,
-						ready: true,
-						live: true,
-						columns: ['id'],
-						nullsNotDistinct: false,
-					},
-				}),
-				digest: 'index-postcondition',
-			},
-			address: {
-				...dataDestructiveStep.address,
-				kind: 'index' as const,
-				name: 'accounts_id_idx',
-				parent: dataDestructiveStep.address,
-			},
-		} as const;
-		const { query } = indexReadbackExecutor({ live: unavailable });
+	] as const)(
+		'refuses a present but unusable generated index when it is %s',
+		async (_state, unavailable) => {
+			const step = {
+				...dataDestructiveStep,
+				expectedDeclaration: {
+					value: v3({
+						kind: 'index',
+						index: {
+							method: 'btree',
+							unique: false,
+							valid: true,
+							ready: true,
+							live: true,
+							columns: ['id'],
+							nullsNotDistinct: false,
+						},
+					}),
+					digest: 'index-postcondition',
+				},
+				address: {
+					...dataDestructiveStep.address,
+					kind: 'index' as const,
+					name: 'accounts_id_idx',
+					parent: dataDestructiveStep.address,
+				},
+			} as const;
+			const { query } = indexReadbackExecutor({ live: unavailable });
 
-		await expect(
-			readTestGeneratedPostcondition(
-				{ query },
-				step as unknown as NormalizedManagedStep,
-				step.address as never,
-			),
-		).rejects.toThrow('generated index accounts_id_idx postcondition differs');
-		const projectionSql = query.mock.calls
-			.map(([sql]) => sql)
-			.find((sql) => sql.includes('index_meta.indisvalid'));
-		expect(projectionSql).toContain('index_meta.indisvalid');
-		expect(projectionSql).toContain('index_meta.indisready');
-		expect(projectionSql).toContain('index_meta.indislive');
-	});
+			await expect(
+				readTestGeneratedPostcondition(
+					{ query },
+					step as unknown as NormalizedManagedStep,
+					step.address as never,
+				),
+			).rejects.toThrow(
+				'generated index accounts_id_idx postcondition differs',
+			);
+			const projectionSql = query.mock.calls
+				.map(([sql]) => sql)
+				.find((sql) => sql.includes('index_meta.indisvalid'));
+			expect(projectionSql).toContain('index_meta.indisvalid');
+			expect(projectionSql).toContain('index_meta.indisready');
+			expect(projectionSql).toContain('index_meta.indislive');
+		},
+	);
 
 	it('records an observed generated index only when it is valid, ready, and live', async () => {
 		const step = {

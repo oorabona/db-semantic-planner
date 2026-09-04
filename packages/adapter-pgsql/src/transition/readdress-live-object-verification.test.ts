@@ -626,46 +626,50 @@ describe('re-address live-object verification', () => {
 	it.each([
 		['identity mismatch', { ...identity, value: { oid: '99' } }, identity],
 		['missing recorded identity', identity, undefined],
-	] as const)('refuses target-only no-op with %s', async (_label, liveIdentity, recordedIdentity) => {
-		setupTargetOnlyNoOp();
-		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
-			address.name === target.name
-				? { ...target, catalogueIdentity: liveIdentity }
-				: undefined,
-		);
-		mocks.readChain.mockImplementation(
-			async (_session: unknown, _home, address) =>
-				address.name === source.name
-					? {
-							marker: 'source',
-							terminalMember: { eventKind: 'readdressed-to', pairId: 'pair' },
-						}
-					: {
-							marker: 'target',
-							terminalMember: {
-								eventKind: 'readdressed-from',
-								pairId: 'pair',
-								catalogueIdentity: recordedIdentity,
+	] as const)(
+		'refuses target-only no-op with %s',
+		async (_label, liveIdentity, recordedIdentity) => {
+			setupTargetOnlyNoOp();
+			mocks.readIdentity.mockImplementation(
+				async (_session: unknown, address) =>
+					address.name === target.name
+						? { ...target, catalogueIdentity: liveIdentity }
+						: undefined,
+			);
+			mocks.readChain.mockImplementation(
+				async (_session: unknown, _home, address) =>
+					address.name === source.name
+						? {
+								marker: 'source',
+								terminalMember: { eventKind: 'readdressed-to', pairId: 'pair' },
+							}
+						: {
+								marker: 'target',
+								terminalMember: {
+									eventKind: 'readdressed-from',
+									pairId: 'pair',
+									catalogueIdentity: recordedIdentity,
+								},
 							},
-						},
-		);
-		await expect(
-			executePgPersistedTableReaddress({
-				executor: executor(),
-				run: {} as never,
-				manifest: {} as never,
-				recomputedPlanDigest: 'plan',
-				approval: { approvals: [] },
-				executionId: 'attempt',
-				step: step(),
-				database: source.database,
-				targetSchema: source.schema,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'readdress-refused',
-			detail: expect.stringContaining('target identity mismatch'),
-		});
-	});
+			);
+			await expect(
+				executePgPersistedTableReaddress({
+					executor: executor(),
+					run: {} as never,
+					manifest: {} as never,
+					recomputedPlanDigest: 'plan',
+					approval: { approvals: [] },
+					executionId: 'attempt',
+					step: step(),
+					database: source.database,
+					targetSchema: source.schema,
+				}),
+			).resolves.toMatchObject({
+				outcome: 'readdress-refused',
+				detail: expect.stringContaining('target identity mismatch'),
+			});
+		},
+	);
 
 	it('reaches a target-only no-op for a versionless adopted target whose provenance differs from the reviewed declaration', async () => {
 		setupTargetOnlyNoOp();
@@ -791,26 +795,29 @@ describe('re-address live-object verification', () => {
 		['v1', { postconditionVersion: 1 }],
 		['v2', { postconditionVersion: 2 }],
 		['unknown version', { postconditionVersion: 77 }],
-	] as const)('refuses a version-carrying %s target before structural proof', async (_label, value) => {
-		setupTargetOnlyNoOp({ value, digest: 'legacy-versioned' });
-		await expect(
-			executePgPersistedTableReaddress({
-				executor: executor(),
-				run: {} as never,
-				manifest: {} as never,
-				recomputedPlanDigest: 'plan',
-				approval: { approvals: [] },
-				executionId: 'attempt',
-				step: step(),
-				database: source.database,
-				targetSchema: source.schema,
-			}),
-		).resolves.toMatchObject({
-			outcome: 'readdress-refused',
-			detail: expect.stringContaining('declaration is not decodable'),
-		});
-		expect(mocks.verifyTable).not.toHaveBeenCalled();
-	});
+	] as const)(
+		'refuses a version-carrying %s target before structural proof',
+		async (_label, value) => {
+			setupTargetOnlyNoOp({ value, digest: 'legacy-versioned' });
+			await expect(
+				executePgPersistedTableReaddress({
+					executor: executor(),
+					run: {} as never,
+					manifest: {} as never,
+					recomputedPlanDigest: 'plan',
+					approval: { approvals: [] },
+					executionId: 'attempt',
+					step: step(),
+					database: source.database,
+					targetSchema: source.schema,
+				}),
+			).resolves.toMatchObject({
+				outcome: 'readdress-refused',
+				detail: expect.stringContaining('declaration is not decodable'),
+			});
+			expect(mocks.verifyTable).not.toHaveBeenCalled();
+		},
+	);
 
 	it('refuses a target-only no-op whose declaration differs from the recorded source transfer', async () => {
 		setupTargetOnlyNoOp({
@@ -841,61 +848,65 @@ describe('re-address live-object verification', () => {
 		['spaces', 'order items', '"order items"'],
 		['embedded double quotes', 'order"items', '"order""items"'],
 		['hyphens', 'order-items', '"order-items"'],
-	] as const)('locks a target-only no-op relation name with %s', async (_label, name, rendered) => {
-		const namedTarget = { ...target, name };
-		setupTargetOnlyNoOp(rekeyDeclaration(undefined, namedTarget));
-		mocks.readIdentity.mockImplementation(async (_session: unknown, address) =>
-			address.name === namedTarget.name
-				? { ...namedTarget, catalogueIdentity: identity }
-				: undefined,
-		);
-		mocks.readChain.mockImplementation(
-			async (_session: unknown, _home, address) =>
-				address.name === source.name
-					? {
-							marker: 'source',
-							terminalMember: { eventKind: 'readdressed-to', pairId: 'pair' },
-						}
-					: {
-							marker: 'target',
-							terminalMember: {
-								eventKind: 'readdressed-from',
-								pairId: 'pair',
-								catalogueIdentity: identity,
+	] as const)(
+		'locks a target-only no-op relation name with %s',
+		async (_label, name, rendered) => {
+			const namedTarget = { ...target, name };
+			setupTargetOnlyNoOp(rekeyDeclaration(undefined, namedTarget));
+			mocks.readIdentity.mockImplementation(
+				async (_session: unknown, address) =>
+					address.name === namedTarget.name
+						? { ...namedTarget, catalogueIdentity: identity }
+						: undefined,
+			);
+			mocks.readChain.mockImplementation(
+				async (_session: unknown, _home, address) =>
+					address.name === source.name
+						? {
+								marker: 'source',
+								terminalMember: { eventKind: 'readdressed-to', pairId: 'pair' },
+							}
+						: {
+								marker: 'target',
+								terminalMember: {
+									eventKind: 'readdressed-from',
+									pairId: 'pair',
+									catalogueIdentity: identity,
+								},
 							},
+			);
+			mocks.project.mockImplementation((chain) =>
+				chain.marker === 'source'
+					? { kind: 'projected-ledger-chain', stableState: 'unknown' }
+					: {
+							kind: 'projected-ledger-chain',
+							stableState: 'managed',
+							declaration: rekeyDeclaration(undefined, namedTarget),
 						},
-		);
-		mocks.project.mockImplementation((chain) =>
-			chain.marker === 'source'
-				? { kind: 'projected-ledger-chain', stableState: 'unknown' }
-				: {
-						kind: 'projected-ledger-chain',
-						stableState: 'managed',
-						declaration: rekeyDeclaration(undefined, namedTarget),
-					},
-		);
-		mocks.verifyTable.mockResolvedValue({
-			kind: 'table',
-			projection: { columns: [] },
-		});
-		const client = executor();
-		await expect(
-			executePgPersistedTableReaddress({
-				executor: client,
-				run: {} as never,
-				manifest: {} as never,
-				recomputedPlanDigest: 'plan',
-				approval: { approvals: [] },
-				executionId: 'attempt',
-				step: stepForTarget(name),
-				database: source.database,
-				targetSchema: source.schema,
-			}),
-		).resolves.toEqual({ outcome: 'no-op' });
-		expect(client.query).toHaveBeenCalledWith(
-			`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
-		);
-	});
+			);
+			mocks.verifyTable.mockResolvedValue({
+				kind: 'table',
+				projection: { columns: [] },
+			});
+			const client = executor();
+			await expect(
+				executePgPersistedTableReaddress({
+					executor: client,
+					run: {} as never,
+					manifest: {} as never,
+					recomputedPlanDigest: 'plan',
+					approval: { approvals: [] },
+					executionId: 'attempt',
+					step: stepForTarget(name),
+					database: source.database,
+					targetSchema: source.schema,
+				}),
+			).resolves.toEqual({ outcome: 'no-op' });
+			expect(client.query).toHaveBeenCalledWith(
+				`LOCK TABLE ONLY "tenant".${rendered} IN SHARE UPDATE EXCLUSIVE MODE`,
+			);
+		},
+	);
 
 	it('refuses a NUL-bearing target-only no-op relation name before its lock query', async () => {
 		const nulTarget = { ...target, name: 'order\0items' };

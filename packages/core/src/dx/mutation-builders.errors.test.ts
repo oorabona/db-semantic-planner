@@ -396,16 +396,14 @@ describe('UpsertBuilder — error paths', () => {
 		);
 	});
 
-	it.each([
-		null,
-		0,
-		false,
-		'',
-	])('doUpdate rejects explicit invalid payload %j instead of selecting auto-update', (set) => {
-		expect(() => orm.upsert('users').doUpdate(set as never)).toThrow(
-			InvalidOperationError,
-		);
-	});
+	it.each([null, 0, false, ''])(
+		'doUpdate rejects explicit invalid payload %j instead of selecting auto-update',
+		(set) => {
+			expect(() => orm.upsert('users').doUpdate(set as never)).toThrow(
+				InvalidOperationError,
+			);
+		},
+	);
 
 	it('should throw ExecutionError on dump() without adapter', () => {
 		const builder = new UpsertBuilder({

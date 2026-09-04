@@ -81,14 +81,17 @@ describe('re-address declaration re-keying', () => {
 		['v2', { postconditionVersion: 2, kind: 'table', columns: [] }],
 		['unknown version', { postconditionVersion: 77 }],
 		['malformed v3 root', { postconditionVersion: 3 }],
-	] as const)('refuses a %s generated root instead of re-keying it', (_label, value) => {
-		expect(() =>
-			rekeyDeclaration(
-				{ value, digest: 'legacy-postcondition-digest' },
-				{ ...source, name: 'target_table' },
-			),
-		).toThrow('REPLAN_REQUIRED');
-	});
+	] as const)(
+		'refuses a %s generated root instead of re-keying it',
+		(_label, value) => {
+			expect(() =>
+				rekeyDeclaration(
+					{ value, digest: 'legacy-postcondition-digest' },
+					{ ...source, name: 'target_table' },
+				),
+			).toThrow('REPLAN_REQUIRED');
+		},
+	);
 
 	it('adds the target name to a legacy declaration as before', () => {
 		expect(
@@ -227,25 +230,24 @@ describe('re-address declaration bounds', () => {
 });
 
 describe('re-address closure occupancy', () => {
-	it.each([
-		'sequence',
-		'index',
-		'constraint',
-	] as const)('allows a same-identity physical %s at its re-keyed target address', (kind) => {
-		const sourceMember = {
-			kind,
-			catalogueIdentity: {
-				engine: 'postgresql',
-				format: 1,
-				value: { oid: '42' },
-			},
-		};
-		expect(
-			isPgReaddressSelfOccupancy(sourceMember, {
-				...sourceMember,
-			}),
-		).toBe(true);
-	});
+	it.each(['sequence', 'index', 'constraint'] as const)(
+		'allows a same-identity physical %s at its re-keyed target address',
+		(kind) => {
+			const sourceMember = {
+				kind,
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
+			};
+			expect(
+				isPgReaddressSelfOccupancy(sourceMember, {
+					...sourceMember,
+				}),
+			).toBe(true);
+		},
+	);
 
 	it('keeps a different target identity occupied', () => {
 		expect(

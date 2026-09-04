@@ -166,24 +166,27 @@ describe('PostgreSQL transition observation issuer', () => {
 			'a context read',
 			(lessor: never) => readPgObservationContextFromLessor(lessor, 'tenant'),
 		],
-	])('rejects a branded malformed acquisition for %s', async (_label, invoke) => {
-		const release = vi.fn();
-		const lessor = { acquire: vi.fn(async () => ({ release })) };
-		Object.defineProperty(lessor, Symbol.for('dbsp.transition.lessor'), {
-			value: Object.freeze({
-				protocolVersion: 2,
-				revocation: Object.freeze({
-					compromise: () => undefined,
-					isCompromised: () => false,
+	])(
+		'rejects a branded malformed acquisition for %s',
+		async (_label, invoke) => {
+			const release = vi.fn();
+			const lessor = { acquire: vi.fn(async () => ({ release })) };
+			Object.defineProperty(lessor, Symbol.for('dbsp.transition.lessor'), {
+				value: Object.freeze({
+					protocolVersion: 2,
+					revocation: Object.freeze({
+						compromise: () => undefined,
+						isCompromised: () => false,
+					}),
 				}),
-			}),
-		});
+			});
 
-		await expect(invoke(lessor as never)).rejects.toThrow(
-			'must acquire a lease exposing query() and release()',
-		);
-		expect(release).toHaveBeenCalledOnce();
-	});
+			await expect(invoke(lessor as never)).rejects.toThrow(
+				'must acquire a lease exposing query() and release()',
+			);
+			expect(release).toHaveBeenCalledOnce();
+		},
+	);
 
 	it('fails closed before trusting logical identity rows from an unmanaged side table', async () => {
 		const issuer = createPgObservationIssuer();

@@ -113,9 +113,12 @@ describe('dbsp apply contract and policy', () => {
 		['guard-failed', 'planned', 'guard-failed'],
 		['guard-timeout', 'planned', 'guard-timeout'],
 		['context-mismatch', 'planned', 'context-mismatch'],
-	] as const)('mutation: remapping core %s loses its stable CLI outcome', (_name, lifecycle, code) => {
-		expect(outcomeForApplyResult(result(lifecycle, code))).toBe(code);
-	});
+	] as const)(
+		'mutation: remapping core %s loses its stable CLI outcome',
+		(_name, lifecycle, code) => {
+			expect(outcomeForApplyResult(result(lifecycle, code))).toBe(code);
+		},
+	);
 
 	it.each([
 		[
@@ -132,20 +135,23 @@ describe('dbsp apply contract and policy', () => {
 			'transport-ambiguous',
 			'detail: commit acknowledgement lost',
 		],
-	] as const)('preserves core unresolved managed outcome %s', (unresolvedOutcome, outcome, text) => {
-		const applyResult = {
-			...result('outcome-unknown', 'unknown-step-result'),
-			durableOutcome: outcome,
-			unresolvedOutcome,
-		} as ApplyResult;
-		expect(outcomeForApplyResult(applyResult)).toBe(outcome);
-		expect(
-			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
-		).toContain(text);
-		expect(
-			formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
-		).toContain('resolving command: dbsp reconcile --db <database> run-1');
-	});
+	] as const)(
+		'preserves core unresolved managed outcome %s',
+		(unresolvedOutcome, outcome, text) => {
+			const applyResult = {
+				...result('outcome-unknown', 'unknown-step-result'),
+				durableOutcome: outcome,
+				unresolvedOutcome,
+			} as ApplyResult;
+			expect(outcomeForApplyResult(applyResult)).toBe(outcome);
+			expect(
+				formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+			).toContain(text);
+			expect(
+				formatApplyHuman({ outcome, runId: 'run-1', result: applyResult }),
+			).toContain('resolving command: dbsp reconcile --db <database> run-1');
+		},
+	);
 
 	it.each([
 		[
@@ -165,17 +171,20 @@ describe('dbsp apply contract and policy', () => {
 			'transport-ambiguous',
 			['detail: generator commit acknowledgement lost'],
 		],
-	] as const)('renders generator-shaped unresolved %s for human apply output', (execution, outcome, lines) => {
-		const text = formatApplyHuman({
-			outcome,
-			runId: 'generator-run-1',
-			result: execution,
-		});
-		for (const line of lines) expect(text).toContain(line);
-		expect(text).toContain(
-			'resolving command: dbsp reconcile --db <database> generator-run-1',
-		);
-	});
+	] as const)(
+		'renders generator-shaped unresolved %s for human apply output',
+		(execution, outcome, lines) => {
+			const text = formatApplyHuman({
+				outcome,
+				runId: 'generator-run-1',
+				result: execution,
+			});
+			for (const line of lines) expect(text).toContain(line);
+			expect(text).toContain(
+				'resolving command: dbsp reconcile --db <database> generator-run-1',
+			);
+		},
+	);
 
 	it('escapes the human heading and plan-digest detail without adding diagnostic lines', () => {
 		const runId = 'run-1\n\u001b[31m';
@@ -227,22 +236,25 @@ describe('dbsp apply contract and policy', () => {
 			outcome: 'transport-ambiguous' as const,
 			detail: 'generator commit acknowledgement lost',
 		},
-	] as const)('serializes generator unresolved output without core assessment fields', (execution) => {
-		const document = JSON.parse(
-			serializeCliJson({
+	] as const)(
+		'serializes generator unresolved output without core assessment fields',
+		(execution) => {
+			const document = JSON.parse(
+				serializeCliJson({
+					outcome: execution.outcome,
+					runId: 'generator-run-1',
+					result: execution,
+				}),
+			) as { readonly result: Record<string, unknown> };
+			expect(document).toMatchObject({
 				outcome: execution.outcome,
 				runId: 'generator-run-1',
 				result: execution,
-			}),
-		) as { readonly result: Record<string, unknown> };
-		expect(document).toMatchObject({
-			outcome: execution.outcome,
-			runId: 'generator-run-1',
-			result: execution,
-		});
-		expect(document.result).not.toHaveProperty('assessment');
-		expect(document.result).not.toHaveProperty('unresolvedOutcome');
-	});
+			});
+			expect(document.result).not.toHaveProperty('assessment');
+			expect(document.result).not.toHaveProperty('unresolvedOutcome');
+		},
+	);
 
 	it('gives unresolvedOutcome precedence over an otherwise completed durable outcome', () => {
 		const applyResult = {
@@ -262,11 +274,14 @@ describe('dbsp apply contract and policy', () => {
 		'guard-timeout',
 		'context-mismatch',
 		'operation-failed-not-applied',
-	] as const)('mutation: reporting a later %s hides an earlier committed segment', (code) => {
-		expect(outcomeForApplyResult(result('partially-applied', code))).toBe(
-			'partially-applied',
-		);
-	});
+	] as const)(
+		'mutation: reporting a later %s hides an earlier committed segment',
+		(code) => {
+			expect(outcomeForApplyResult(result('partially-applied', code))).toBe(
+				'partially-applied',
+			);
+		},
+	);
 
 	it('mutation: accepting a misspelled trust-root field is rejected with its entry path', () => {
 		expect(() =>
@@ -305,9 +320,12 @@ describe('dbsp apply contract and policy', () => {
 			'an extra top-level acceptance key',
 			{ class: 'manual-proof', attacker: true },
 		],
-	] as const)('OBL-CLI4 rejects %s in --accept and --accept-policy input', (_attack, value) => {
-		expect(() => validateAssumptionAcceptance(value)).toThrow();
-	});
+	] as const)(
+		'OBL-CLI4 rejects %s in --accept and --accept-policy input',
+		(_attack, value) => {
+			expect(() => validateAssumptionAcceptance(value)).toThrow();
+		},
+	);
 
 	it('accepts an opaque versioned catalogue identity envelope without interpreting its payload', () => {
 		expect(() =>
@@ -529,42 +547,45 @@ describe('dbsp apply contract and policy', () => {
 			'authorization time',
 			{ runId: 'run-reviewed', authorizedAt: '2026-07-30T00:00:00.000Z' },
 		],
-	] as const)('OBL-CLI4 refuses a reused durable authorization with one changed %s binding', (_field, changed) => {
-		const policy = [{ class: 'manual-proof' }] as const;
-		const grants = [{ assumptionId: 'assumption:1', grant: 0 }] as const;
-		const variant = changed as Partial<{
-			runId: string;
-			planDigest: string;
-			policy: typeof policy;
-			grants: typeof grants;
-			actor: string;
-			authorizedAt: string;
-		}>;
-		const record = {
-			policy,
-			grants,
-			actor: 'operator',
-			authorizedAt: '2026-07-29T00:00:00.000Z',
-			digest: authorizationDigest(
-				'run-reviewed',
-				'plan-digest',
+	] as const)(
+		'OBL-CLI4 refuses a reused durable authorization with one changed %s binding',
+		(_field, changed) => {
+			const policy = [{ class: 'manual-proof' }] as const;
+			const grants = [{ assumptionId: 'assumption:1', grant: 0 }] as const;
+			const variant = changed as Partial<{
+				runId: string;
+				planDigest: string;
+				policy: typeof policy;
+				grants: typeof grants;
+				actor: string;
+				authorizedAt: string;
+			}>;
+			const record = {
 				policy,
 				grants,
-				'operator',
-				'2026-07-29T00:00:00.000Z',
-			),
-		};
-		const candidate = { ...record, ...variant };
-		expect(
-			hasReusableAuthorization(
-				[candidate],
-				variant.runId ?? 'run-reviewed',
-				variant.planDigest ?? 'plan-digest',
-				variant.policy ?? policy,
-				variant.grants ?? grants,
-			),
-		).toBe(false);
-	});
+				actor: 'operator',
+				authorizedAt: '2026-07-29T00:00:00.000Z',
+				digest: authorizationDigest(
+					'run-reviewed',
+					'plan-digest',
+					policy,
+					grants,
+					'operator',
+					'2026-07-29T00:00:00.000Z',
+				),
+			};
+			const candidate = { ...record, ...variant };
+			expect(
+				hasReusableAuthorization(
+					[candidate],
+					variant.runId ?? 'run-reviewed',
+					variant.planDigest ?? 'plan-digest',
+					variant.policy ?? policy,
+					variant.grants ?? grants,
+				),
+			).toBe(false);
+		},
+	);
 
 	it('mutation: rejecting a matching authorization breaks a retry before any step intent', () => {
 		const policy = [{ class: 'manual-proof' }] as const;

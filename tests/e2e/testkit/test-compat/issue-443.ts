@@ -12,5 +12,4 @@ type QueryExecution = ReturnType<OrdersQuery['execute']>;
 type CompatibilityCanary = AssertAssignable<
 	// @ts-expect-error #443: public row inference exposes DB keys, not ORM-hydrated keys.
 	QueryExecution,
-	Promise<HydratedRow[]>
->;
+	Promise<HydratedRow[]>>;

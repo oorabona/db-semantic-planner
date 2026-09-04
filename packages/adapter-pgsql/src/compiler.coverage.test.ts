@@ -1107,21 +1107,22 @@ describe('PlanCompiler - Coverage Tests', () => {
 			).toThrow(/missing complete junction proof/);
 		});
 
-		it.each([
-			undefined,
-		] as const)('throws before SQL construction for cardinality many with relationType %s', (relationType) => {
-			const compiler = new PlanCompiler();
+		it.each([undefined] as const)(
+			'throws before SQL construction for cardinality many with relationType %s',
+			(relationType) => {
+				const compiler = new PlanCompiler();
 
-			expect(() =>
-				compiler.compile(
-					bindingRelationColumnPlan({
-						cardinality: 'many',
-						relationType,
-						targetTable: 'posts;drop',
-					}),
-				),
-			).toThrow(/only hasMany or manyToMany can be aggregated \(ref-#192\)/);
-		});
+				expect(() =>
+					compiler.compile(
+						bindingRelationColumnPlan({
+							cardinality: 'many',
+							relationType,
+							targetTable: 'posts;drop',
+						}),
+					),
+				).toThrow(/only hasMany or manyToMany can be aggregated \(ref-#192\)/);
+			},
+		);
 	});
 
 	describe('selectPseudoColumn', () => {

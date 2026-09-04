@@ -412,30 +412,33 @@ describe.sequential('unit 11 destructive generator authority (SC-46…52)', () =
 			},
 			'destructive ledger lineage authority',
 		],
-	] as const)('OBL-AUTH8 %s: public generated removal refuses with the withheld-authority tuple', async (_axis, arrange, withheldAuthority) => {
-		const { schema, database: databaseId } = await fixture();
-		const pool = await getTestPool();
-		const name = `auth8_${randomUUID().replaceAll('-', '')}`;
-		const address = tableAddress(schema, databaseId, name);
-		await pool.query(
-			`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer)`,
-		);
-		await arrange(pool, address);
-		await expect(
-			executeDrop({
-				schema,
-				database: databaseId,
-				name,
-				accepts: ['accept'],
-			}),
-		).resolves.toMatchObject({
-			outcome: 'destructive-authority-refused',
-			refusal: { withheldAuthority },
-		});
-		await expect(
-			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
-		).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
-	});
+	] as const)(
+		'OBL-AUTH8 %s: public generated removal refuses with the withheld-authority tuple',
+		async (_axis, arrange, withheldAuthority) => {
+			const { schema, database: databaseId } = await fixture();
+			const pool = await getTestPool();
+			const name = `auth8_${randomUUID().replaceAll('-', '')}`;
+			const address = tableAddress(schema, databaseId, name);
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer)`,
+			);
+			await arrange(pool, address);
+			await expect(
+				executeDrop({
+					schema,
+					database: databaseId,
+					name,
+					accepts: ['accept'],
+				}),
+			).resolves.toMatchObject({
+				outcome: 'destructive-authority-refused',
+				refusal: { withheldAuthority },
+			});
+			await expect(
+				pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
+			).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
+		},
+	);
 
 	it('SC-48: an unmanaged escaping dependent refuses the whole removal before its statement', () => {
 		const root = tableAddress('public', 'db', 'orders');

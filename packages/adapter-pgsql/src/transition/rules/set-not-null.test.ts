@@ -763,25 +763,28 @@ describe('postgresql.column.set-not-null rule', () => {
 			{ status: 'active', limits: [1, null, { ok: true }] },
 		],
 		['null-prototype object', nullPrototypeDefault(), { status: 'active' }],
-	])('keeps JSON-safe authored %s defaults portable', (_label, value, expectedAst) => {
-		const shape = expectedColumnShapeFor(
-			column(false, { default: value }),
-			'age',
-		);
+	])(
+		'keeps JSON-safe authored %s defaults portable',
+		(_label, value, expectedAst) => {
+			const shape = expectedColumnShapeFor(
+				column(false, { default: value }),
+				'age',
+			);
 
-		expect(shape.default).toEqual({
-			kind: 'portable',
-			ast: expectedAst,
-		});
-		expect(
-			compareSetNotNullColumnShape(
-				shape,
-				columnShapeFromColumn(column(true, { default: value }), 'age'),
-				createPgEquivalenceCapability(),
-				{ engine: 'postgresql' },
-			).kind,
-		).toBe('equivalent');
-	});
+			expect(shape.default).toEqual({
+				kind: 'portable',
+				ast: expectedAst,
+			});
+			expect(
+				compareSetNotNullColumnShape(
+					shape,
+					columnShapeFromColumn(column(true, { default: value }), 'age'),
+					createPgEquivalenceCapability(),
+					{ engine: 'postgresql' },
+				).kind,
+			).toBe('equivalent');
+		},
+	);
 
 	it.each([
 		['bigint', () => 10n],
@@ -791,72 +794,84 @@ describe('postgresql.column.set-not-null rule', () => {
 		['Map', () => new Map([['value', 1]])],
 		['circular object', circularDefault],
 		['explicit undefined', () => undefined],
-	])('classifies non-JSON-safe authored %s defaults as unresolvable', (_label, makeDefault) => {
-		const shape = expectedColumnShapeFor(
-			column(false, { default: makeDefault() }),
-			'age',
-		);
+	])(
+		'classifies non-JSON-safe authored %s defaults as unresolvable',
+		(_label, makeDefault) => {
+			const shape = expectedColumnShapeFor(
+				column(false, { default: makeDefault() }),
+				'age',
+			);
 
-		expect(shape.default).toMatchObject({
-			kind: 'unresolvable',
-			category: 'scalar',
-			source: 'authored-column-default',
-		});
-	});
+			expect(shape.default).toMatchObject({
+				kind: 'unresolvable',
+				category: 'scalar',
+				source: 'authored-column-default',
+			});
+		},
+	);
 
 	it.each([
 		['Date', () => new Date('2026-01-01T00:00:00.000Z')],
 		['Map', () => new Map([['value', 1]])],
 		['circular object', circularDefault],
-	])('treats non-JSON-safe authored %s default comparisons as unknown', (_label, makeDefault) => {
-		const desiredColumn = column(false, { default: makeDefault() });
-		const currentColumn = column(true, { default: makeDefault() });
+	])(
+		'treats non-JSON-safe authored %s default comparisons as unknown',
+		(_label, makeDefault) => {
+			const desiredColumn = column(false, { default: makeDefault() });
+			const currentColumn = column(true, { default: makeDefault() });
 
-		expect(() =>
-			compareSetNotNullColumnShape(
+			expect(() =>
+				compareSetNotNullColumnShape(
+					expectedColumnShapeFor(desiredColumn, 'age'),
+					columnShapeFromColumn(currentColumn, 'age'),
+					createPgEquivalenceCapability(),
+					{ engine: 'postgresql' },
+				),
+			).not.toThrow();
+
+			const comparison = compareSetNotNullColumnShape(
 				expectedColumnShapeFor(desiredColumn, 'age'),
 				columnShapeFromColumn(currentColumn, 'age'),
 				createPgEquivalenceCapability(),
 				{ engine: 'postgresql' },
-			),
-		).not.toThrow();
-
-		const comparison = compareSetNotNullColumnShape(
-			expectedColumnShapeFor(desiredColumn, 'age'),
-			columnShapeFromColumn(currentColumn, 'age'),
-			createPgEquivalenceCapability(),
-			{ engine: 'postgresql' },
-		);
-		expect(comparison.kind).toBe('unknown');
-		if (comparison.kind === 'unknown') {
-			expect(comparison.field).toBe('default');
-		}
-	});
+			);
+			expect(comparison.kind).toBe('unknown');
+			if (comparison.kind === 'unknown') {
+				expect(comparison.field).toBe('default');
+			}
+		},
+	);
 
 	it.each([
 		['NaN', Number.NaN],
 		['Infinity', Number.POSITIVE_INFINITY],
-	])('treats authored %s default as unknown instead of lossy null', (_label, value) => {
-		const desiredColumn = column(false, { default: value });
-		const currentColumn = column(true, { default: null });
-		const comparison = compareSetNotNullColumnShape(
-			expectedColumnShapeFor(desiredColumn, 'age'),
-			columnShapeFromColumn(currentColumn, 'age'),
-			createPgEquivalenceCapability(),
-			{ engine: 'postgresql' },
-		);
+	])(
+		'treats authored %s default as unknown instead of lossy null',
+		(_label, value) => {
+			const desiredColumn = column(false, { default: value });
+			const currentColumn = column(true, { default: null });
+			const comparison = compareSetNotNullColumnShape(
+				expectedColumnShapeFor(desiredColumn, 'age'),
+				columnShapeFromColumn(currentColumn, 'age'),
+				createPgEquivalenceCapability(),
+				{ engine: 'postgresql' },
+			);
 
-		expect(comparison.kind).toBe('unknown');
-		if (comparison.kind === 'unknown') {
-			expect(comparison.field).toBe('default');
-		}
+			expect(comparison.kind).toBe('unknown');
+			if (comparison.kind === 'unknown') {
+				expect(comparison.field).toBe('default');
+			}
 
-		const compare = createComparator(
-			createPackRegistry([createPgTransitionPack()]),
-		).compare(model(false, { default: value }), model(true, { default: null }));
+			const compare = createComparator(
+				createPackRegistry([createPgTransitionPack()]),
+			).compare(
+				model(false, { default: value }),
+				model(true, { default: null }),
+			);
 
-		expect(compare.kind).toBe('unknown');
-	});
+			expect(compare.kind).toBe('unknown');
+		},
+	);
 
 	it('blocks SET NOT NULL proof for an authored bigint default instead of crashing', async () => {
 		const registry = registryWithColumnObservation({
@@ -1184,29 +1199,32 @@ describe('postgresql.column.set-not-null rule', () => {
 		['int4', 'integer', 'integer'],
 		['varchar(42)', 'character varying(42)', 'string'],
 		['pg_catalog.int4', 'integer', 'integer'],
-	])('recognizes pure nullability when %s and %s are equivalent type spellings', (desiredType, currentType, columnType) => {
-		const compare = createComparator(
-			createPackRegistry([createPgTransitionPack()]),
-		).compare(
-			model(false, {
-				type: columnType as ColumnIR['type'],
-				originalDbType: desiredType,
-			}),
-			model(true, {
-				type: columnType as ColumnIR['type'],
-				originalDbType: currentType,
-			}),
-		);
+	])(
+		'recognizes pure nullability when %s and %s are equivalent type spellings',
+		(desiredType, currentType, columnType) => {
+			const compare = createComparator(
+				createPackRegistry([createPgTransitionPack()]),
+			).compare(
+				model(false, {
+					type: columnType as ColumnIR['type'],
+					originalDbType: desiredType,
+				}),
+				model(true, {
+					type: columnType as ColumnIR['type'],
+					originalDbType: currentType,
+				}),
+			);
 
-		expect(compare.kind).toBe('transitions');
-		if (compare.kind !== 'transitions') {
-			return;
-		}
-		expect(compare.candidates).toHaveLength(1);
-		expect(compare.candidates[0]?.claimDrafts?.[0]?.semantics).toEqual(
-			PG_EQUIVALENCE_ARTIFACT,
-		);
-	});
+			expect(compare.kind).toBe('transitions');
+			if (compare.kind !== 'transitions') {
+				return;
+			}
+			expect(compare.candidates).toHaveLength(1);
+			expect(compare.candidates[0]?.claimDrafts?.[0]?.semantics).toEqual(
+				PG_EQUIVALENCE_ARTIFACT,
+			);
+		},
+	);
 
 	it('recognizes target-scoped custom type identity relative to the current target schema', () => {
 		const desiredColumn = column(false, {
