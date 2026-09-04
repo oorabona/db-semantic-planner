@@ -48,19 +48,6 @@
 		"test:docs:generate": "pnpm tsx tests/docs-verification/generate-tests.ts",
 		"test:docs": "pnpm test:docs:generate && pnpm vitest run --config tests/docs-verification/vitest.config.docs.ts"
 	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"esbuild",
-			"cpu-features",
-			"ssh2",
-			"protobufjs"
-		],
-		"overrides": {
-			"lodash@>=4.0.0 <4.17.23": ">=4.17.23",
-			"dompurify": ">=3.3.2",
-			"ws@>=8.0.0 <8.20.1": ">=8.20.1"
-		}
-	},
 	"devDependencies": {
 		"@biomejs/biome": "catalog:",
 		"@commitlint/cli": "catalog:",

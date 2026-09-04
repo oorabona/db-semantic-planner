@@ -20,9 +20,24 @@ catalogMode: strict
 #                     postinstall is redundant — and it follows symlinks, so on
 #                     a checkout whose hooks are symlinked out of the repository
 #                     it overwrites the link target instead of the hook.
+#
+# The four `true` entries are the build scripts this workspace runs: esbuild
+# validates its platform binary, cpu-features and ssh2 compile the native
+# crypto testcontainers can use, protobufjs generates its bundle.
 allowBuilds:
+  cpu-features: true
+  esbuild: true
+  protobufjs: true
   sharp: false
   simple-git-hooks: false
+  ssh2: true
+
+# Security floors on transitive dependencies. Each names the advisory-fixed
+# version; a resolution already above the floor is left alone.
+overrides:
+  'lodash@>=4.0.0 <4.17.23': '>=4.17.23'
+  dompurify: '>=3.3.2'
+  'ws@>=8.0.0 <8.20.1': '>=8.20.1'
 
 catalog:
   '@biomejs/biome': ^2.5.2
@@ -72,7 +87,7 @@ catalog:
   jsdom: ^29.1.1
   lucide-react: ^1.23.0
   mermaid: ^11.16.0
-  monaco-editor: ^0.55.1
+  monaco-editor: ^0.56.0
   # Also the published peer range of @dbsp/cli: 8.21 is where pg records
   # _txStatus, which the adapter reads. Do not raise this floor without a
   # reason in the code — a consumer excluded from the range is a consumer
