@@ -139,11 +139,11 @@ catalogs:
       specifier: ^8.21.0
       version: 8.23.0
     pgsql-deparser:
-      specifier: 17.18.3
-      version: 17.18.3
+      specifier: 17.18.5
+      version: 17.18.5
     pgsql-parser:
-      specifier: 17.9.15
-      version: 17.9.15
+      specifier: 17.9.17
+      version: 17.9.17
     radix-ui:
       specifier: ^1.6.1
       version: 1.6.7
@@ -310,10 +310,10 @@ importers:
         version: 8.23.1
       pgsql-deparser:
         specifier: 'catalog:'
-        version: 17.18.3
+        version: 17.18.5
       pgsql-parser:
         specifier: 'catalog:'
-        version: 17.9.15
+        version: 17.9.17
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(tsx@4.23.13)(typescript@6.0.3)(yaml@2.9.0)
@@ -4949,11 +4949,11 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
-  pgsql-deparser@17.18.3:
-    resolution: {integrity: sha512-lD8kPWgw9KAbUbKbQKgzDGzVdtEmp25N+7qZl62I7v8Uu9Wqy7+M0EOeU96++OgPD9S1pyp9MKNGzZzPJF2C4Q==}
+  pgsql-deparser@17.18.5:
+    resolution: {integrity: sha512-C23etz+aWjp5d09SQwrByisCIV0Zy1dPI0IdBPBaRiMRrDQ2MH8O9txvqpxPyWiXEGRU+MMvZqk48UHxWWbODg==}
 
-  pgsql-parser@17.9.15:
-    resolution: {integrity: sha512-6+k0EtTn0CEQTR5v2APARu9En4vm46TpmpdMSfKDHkZwWZuEc08B7SeVg32VxNQ2HD5xk+dQ9TD0k9m+S+vFgg==}
+  pgsql-parser@17.9.17:
+    resolution: {integrity: sha512-xfKV3hAXtc5wGnsa9mq7ZLwBlFIZCWS17t+QGRm5H5Lj/BLNrI8j8nWFbSAOHemEgTrnav1pUmHP5hDVXf1EUA==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -10292,16 +10292,16 @@ snapshots:
     dependencies:
       split2: 4.2.0
 
-  pgsql-deparser@17.18.3:
+  pgsql-deparser@17.18.5:
     dependencies:
       '@pgsql/quotes': 17.1.0
       '@pgsql/types': 17.6.2
 
-  pgsql-parser@17.9.15:
+  pgsql-parser@17.9.17:
     dependencies:
       '@pgsql/types': 17.6.2
       libpg-query: 17.7.3
-      pgsql-deparser: 17.18.3
+      pgsql-deparser: 17.18.5
 
   picocolors@1.1.1: {}
 
