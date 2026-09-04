@@ -257,20 +257,21 @@ describe('inverse relation exists() mutation FK resolution', () => {
 		expectInverseCorrelation(sql);
 	});
 
-	it.each(
-		mutationWhereEntryPoints,
-	)('%s resolves single-column exists() relation metadata', (entryPoint) => {
-		const adapter = buildAdapter();
+	it.each(mutationWhereEntryPoints)(
+		'%s resolves single-column exists() relation metadata',
+		(entryPoint) => {
+			const adapter = buildAdapter();
 
-		const sql = compileMutationWhere(
-			adapter,
-			entryPoint,
-			'symbols',
-			exists('calleeCalls'),
-		);
+			const sql = compileMutationWhere(
+				adapter,
+				entryPoint,
+				'symbols',
+				exists('calleeCalls'),
+			);
 
-		expectInverseCorrelation(sql);
-	});
+			expectInverseCorrelation(sql);
+		},
+	);
 });
 
 describe('composite FK exists() mutation correlation', () => {
@@ -319,22 +320,21 @@ describe('composite FK exists() mutation correlation', () => {
 		expectCompositeCorrelation(sql);
 	});
 
-	it.each([
-		'compileInsertFrom',
-		'compileBatchUpdate',
-		'compileUpsertFrom',
-	])('%s WHERE exists(composite relation) correlates on the full key', (entryPoint) => {
-		const adapter = buildCompositeFkAdapter();
+	it.each(['compileInsertFrom', 'compileBatchUpdate', 'compileUpsertFrom'])(
+		'%s WHERE exists(composite relation) correlates on the full key',
+		(entryPoint) => {
+			const adapter = buildCompositeFkAdapter();
 
-		const sql = compileMutationWhere(
-			adapter,
-			entryPoint,
-			'orders',
-			exists('items'),
-		);
+			const sql = compileMutationWhere(
+				adapter,
+				entryPoint,
+				'orders',
+				exists('items'),
+			);
 
-		expectCompositeCorrelation(sql);
-	});
+			expectCompositeCorrelation(sql);
+		},
+	);
 
 	it('nested exists().where composite relation correlates on the full key', () => {
 		const adapter = buildCompositeFkAdapter();

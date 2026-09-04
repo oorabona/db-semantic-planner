@@ -310,64 +310,67 @@ describe('compareSchemata', () => {
 			['varbit(8)', 'bit varying(8)'],
 			['numeric(10,2)', 'numeric(10,2)'],
 			['numeric(10, 2)', 'numeric(10,2)'],
-		])('does not false-diff equivalent originalDbType spellings (%s vs %s)', (authored, introspected) => {
-			const schema = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({ name: 'c', type: 'string', originalDbType: authored }),
-					],
-				}),
-			]);
-			const db = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({
-							name: 'c',
-							type: 'string',
-							originalDbType: introspected,
-						}),
-					],
-				}),
-			]);
+		])(
+			'does not false-diff equivalent originalDbType spellings (%s vs %s)',
+			(authored, introspected) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({ name: 'c', type: 'string', originalDbType: authored }),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({
+								name: 'c',
+								type: 'string',
+								originalDbType: introspected,
+							}),
+						],
+					}),
+				]);
 
-			expect(compareSchemata(schema, db).changes).toHaveLength(0);
-		});
+				expect(compareSchemata(schema, db).changes).toHaveLength(0);
+			},
+		);
 
-		it.each([
-			'status',
-			'status[]',
-		])('does not false-diff target-scoped custom originalDbType identity (%s)', (originalDbType) => {
-			const schema = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({
-							name: 'c',
-							type: 'string',
-							originalDbType,
-						}),
-					],
-				}),
-			]);
-			const db = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({
-							name: 'c',
-							type: 'string',
-							originalDbType,
-							originalDbTypeSchema: 'tenant_1',
-							originalDbTypeSchemaScope: 'target',
-						}),
-					],
-				}),
-			]);
+		it.each(['status', 'status[]'])(
+			'does not false-diff target-scoped custom originalDbType identity (%s)',
+			(originalDbType) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({
+								name: 'c',
+								type: 'string',
+								originalDbType,
+							}),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({
+								name: 'c',
+								type: 'string',
+								originalDbType,
+								originalDbTypeSchema: 'tenant_1',
+								originalDbTypeSchemaScope: 'target',
+							}),
+						],
+					}),
+				]);
 
-			expect(compareSchemata(schema, db).changes).toHaveLength(0);
-		});
+				expect(compareSchemata(schema, db).changes).toHaveLength(0);
+			},
+		);
 
 		it('does not false-diff authored custom types against introspected absolute public identity', () => {
 			const schema = makeModel([
@@ -491,32 +494,35 @@ describe('compareSchemata', () => {
 			['varchar(200)', 'character varying(120)'],
 			['public.status', 'tenant_1.status'],
 			['vector(768)', 'tenant_1.vector(1024)'],
-		])('detects a real modifier change in originalDbType (%s vs %s)', (authored, introspected) => {
-			const schema = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({ name: 'c', type: 'string', originalDbType: authored }),
-					],
-				}),
-			]);
-			const db = makeModel([
-				makeTable({
-					name: 'users',
-					columns: [
-						makeCol({
-							name: 'c',
-							type: 'string',
-							originalDbType: introspected,
-						}),
-					],
-				}),
-			]);
+		])(
+			'detects a real modifier change in originalDbType (%s vs %s)',
+			(authored, introspected) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({ name: 'c', type: 'string', originalDbType: authored }),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({
+								name: 'c',
+								type: 'string',
+								originalDbType: introspected,
+							}),
+						],
+					}),
+				]);
 
-			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
-				'alter_column_type',
-			);
-		});
+				expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+					'alter_column_type',
+				);
+			},
+		);
 
 		it('should detect nullable changes', () => {
 			const schema = makeModel([
@@ -3702,7 +3708,7 @@ describe('Sequences', () => {
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toContain('create_sequence');
 		const change = diff.changes.find((c) => c.kind === 'create_sequence');
-		expect((change?.meta?.sequence as SequenceIR).name).toBe('order_seq');
+		expect(change?.meta?.sequence).toMatchObject({ name: 'order_seq' });
 		expect(change?.destructive).toBe(false);
 	});
 
@@ -3785,7 +3791,7 @@ describe('Sequences', () => {
 		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
-		expect((change?.meta?.previousSequence as SequenceIR).incrementBy).toBe(1);
+		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: 1 });
 	});
 });
 

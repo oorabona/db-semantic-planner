@@ -626,21 +626,21 @@ describe('resumeTransitionRun', () => {
 		).resolves.toMatchObject({ ok: false, code: 'plan-digest-mismatch' });
 	});
 
-	it.each([
-		{},
-		{ observations: [], claims: [], assumptions: [] },
-	])('blocks a corrupt loaded plan instead of throwing', async (corruptPlan) => {
-		const runMetadata = run(corruptPlan as unknown as ProvenPlanShape);
+	it.each([{}, { observations: [], claims: [], assumptions: [] }])(
+		'blocks a corrupt loaded plan instead of throwing',
+		async (corruptPlan) => {
+			const runMetadata = run(corruptPlan as unknown as ProvenPlanShape);
 
-		await expect(
-			loadVerifiedRecoveryJournal(
-				runMetadata.runId,
-				transitionPlanDigest(corruptPlan as unknown as ProvenPlanShape),
-				async () =>
-					({ run: runMetadata, plan: corruptPlan, events: [] }) as never,
-			),
-		).resolves.toMatchObject({ ok: false, code: 'plan-invalid' });
-	});
+			await expect(
+				loadVerifiedRecoveryJournal(
+					runMetadata.runId,
+					transitionPlanDigest(corruptPlan as unknown as ProvenPlanShape),
+					async () =>
+						({ run: runMetadata, plan: corruptPlan, events: [] }) as never,
+				),
+			).resolves.toMatchObject({ ok: false, code: 'plan-invalid' });
+		},
+	);
 
 	it('uses an immutable snapshot when a loader-owned plan mutates after loading', async () => {
 		const mutablePlan = planShape();

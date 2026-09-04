@@ -312,23 +312,26 @@ describe('outcome-protocol recovery classification (SC-33…39)', () => {
 		['statement-bundle digest', { persistedBundleDigest: 'other-bundle' }],
 		['planDigest', { planDigest: 'other-plan' }],
 		['address', { address: { ...address, name: 'other_accounts' } }],
-	] as const)('OBL-REC2 refuses indeterminate recovery evidence with one mismatched %s before catalogue read', async (_field, evidenceMutation) => {
-		const result = await recover(
-			openClaim('intent', 'indeterminate'),
-			present,
-			{
-				resolve: true,
-				evidence: true,
-				effect: 'applied',
-				evidenceMutation,
-			},
-		);
-		expect(result).toMatchObject({
-			kind: 'outcome-recovery-blocked',
-			reason:
-				'indeterminate claim refuses a missing or mismatched admission envelope',
-		});
-	});
+	] as const)(
+		'OBL-REC2 refuses indeterminate recovery evidence with one mismatched %s before catalogue read',
+		async (_field, evidenceMutation) => {
+			const result = await recover(
+				openClaim('intent', 'indeterminate'),
+				present,
+				{
+					resolve: true,
+					evidence: true,
+					effect: 'applied',
+					evidenceMutation,
+				},
+			);
+			expect(result).toMatchObject({
+				kind: 'outcome-recovery-blocked',
+				reason:
+					'indeterminate claim refuses a missing or mismatched admission envelope',
+			});
+		},
+	);
 
 	it('returns pending and no append when the catalogue is unavailable', async () => {
 		expect(

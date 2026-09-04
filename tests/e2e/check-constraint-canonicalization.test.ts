@@ -1859,14 +1859,17 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			['single-quoted', "state = 'pending'"],
 			['dollar-quoted', 'state = $$pending$$'],
 			['tagged dollar-quoted', 'state = $lit$pending$lit$'],
-		])('refuses a %s reference to the added enum value', async (_kind, expr) => {
-			await expect(
-				comparePgsqlDatabaseSchema(adapter, desiredWithPendingValue(expr), {
-					schema: SCHEMA,
-					ignoreUnmanagedExtensions: true,
-				}),
-			).rejects.toThrow(CheckConstraintNewEnumValueError);
-		});
+		])(
+			'refuses a %s reference to the added enum value',
+			async (_kind, expr) => {
+				await expect(
+					comparePgsqlDatabaseSchema(adapter, desiredWithPendingValue(expr), {
+						schema: SCHEMA,
+						ignoreUnmanagedExtensions: true,
+					}),
+				).rejects.toThrow(CheckConstraintNewEnumValueError);
+			},
+		);
 
 		it('names the added enum values as candidates, without asserting a cause', async () => {
 			const error = await comparePgsqlDatabaseSchema(

@@ -57,28 +57,31 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		'9223372036854775808',
 		'-9223372036854775809',
 		9223372036854775808n,
-	])('refuses sequence source %o consistently before SQL or manifest recording', (startWith) => {
-		const sequence = { name: 'orders_id_seq', startWith };
-		expect(() =>
-			buildSequenceClause(
-				'CREATE SEQUENCE',
-				'"orders_id_seq"',
-				sequence as never,
-			),
-		).toThrow();
-		expect(() =>
-			generatedPostconditionForChange({
-				change: {
-					kind: 'create_sequence',
-					table: '',
-					destructive: false,
-					details: 'unsafe numeric source',
-					meta: { sequence },
-				},
-				schema: 'tenant',
-			}),
-		).toThrow();
-	});
+	])(
+		'refuses sequence source %o consistently before SQL or manifest recording',
+		(startWith) => {
+			const sequence = { name: 'orders_id_seq', startWith };
+			expect(() =>
+				buildSequenceClause(
+					'CREATE SEQUENCE',
+					'"orders_id_seq"',
+					sequence as never,
+				),
+			).toThrow();
+			expect(() =>
+				generatedPostconditionForChange({
+					change: {
+						kind: 'create_sequence',
+						table: '',
+						destructive: false,
+						details: 'unsafe numeric source',
+						meta: { sequence },
+					},
+					schema: 'tenant',
+				}),
+			).toThrow();
+		},
+	);
 
 	it('rejects non-boolean sequence flags instead of applying truthiness', () => {
 		expect(() =>
@@ -226,40 +229,42 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		{ kind: 'sequence', cycle: 'yes' },
 		{ kind: 'column', column: { type: 42 } },
 		{ kind: 'not-a-v3-kind' },
-	] as const)('refuses reader-divergence declaration %o in both parser and decoder', (declaration) => {
-		expect(() =>
-			parseGeneratedPostconditionV3Declaration({
-				canonicalFormVersion: 1,
-				...declaration,
-			}),
-		).toThrow(GeneratedPostconditionV3DeclarationError);
-		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
-			'REPLAN_REQUIRED',
-		);
-	});
+	] as const)(
+		'refuses reader-divergence declaration %o in both parser and decoder',
+		(declaration) => {
+			expect(() =>
+				parseGeneratedPostconditionV3Declaration({
+					canonicalFormVersion: 1,
+					...declaration,
+				}),
+			).toThrow(GeneratedPostconditionV3DeclarationError);
+			expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+				'REPLAN_REQUIRED',
+			);
+		},
+	);
 
-	it.each([
-		'valid',
-		'ready',
-		'live',
-	] as const)('refuses index %s=false at the zero-query decoder boundary', (flag) => {
-		const declaration = {
-			kind: 'index',
-			index: {
-				method: 'btree',
-				unique: false,
-				valid: true,
-				ready: true,
-				live: true,
-				columns: ['id'],
-				nullsNotDistinct: false,
-				[flag]: false,
-			},
-		};
-		expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
-			'REPLAN_REQUIRED',
-		);
-	});
+	it.each(['valid', 'ready', 'live'] as const)(
+		'refuses index %s=false at the zero-query decoder boundary',
+		(flag) => {
+			const declaration = {
+				kind: 'index',
+				index: {
+					method: 'btree',
+					unique: false,
+					valid: true,
+					ready: true,
+					live: true,
+					columns: ['id'],
+					nullsNotDistinct: false,
+					[flag]: false,
+				},
+			};
+			expect(() => decodeGeneratedPostcondition(v3(declaration))).toThrow(
+				'REPLAN_REQUIRED',
+			);
+		},
+	);
 
 	it('refuses aliases and cycles before declaration shape decoding', () => {
 		const shared = { type: 'BIGINT' };
@@ -334,18 +339,18 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		}
 	});
 
-	it.each([
-		'9223372036854775808',
-		'-9223372036854775809',
-	])('refuses out-of-range persisted v3 sequence integers before decoding', (value) => {
-		expect(() =>
-			parseGeneratedPostconditionV3Declaration({
-				canonicalFormVersion: 1,
-				kind: 'sequence',
-				startValue: value,
-			}),
-		).toThrow(GeneratedPostconditionV3DeclarationError);
-	});
+	it.each(['9223372036854775808', '-9223372036854775809'])(
+		'refuses out-of-range persisted v3 sequence integers before decoding',
+		(value) => {
+			expect(() =>
+				parseGeneratedPostconditionV3Declaration({
+					canonicalFormVersion: 1,
+					kind: 'sequence',
+					startValue: value,
+				}),
+			).toThrow(GeneratedPostconditionV3DeclarationError);
+		},
+	);
 
 	it('refuses an enormous integer lexically before BigInt construction', () => {
 		expect(() =>
@@ -371,16 +376,16 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		);
 	});
 
-	it.each([
-		'4294967295',
-		'4294967296',
-	])('refuses the out-of-range array property %s', (name) => {
-		const value: unknown[] = [];
-		Object.defineProperty(value, name, { value: 'hidden', enumerable: true });
-		expect(() => snapshotGeneratedPostconditionJson(value)).toThrow(
-			'out-of-range index member',
-		);
-	});
+	it.each(['4294967295', '4294967296'])(
+		'refuses the out-of-range array property %s',
+		(name) => {
+			const value: unknown[] = [];
+			Object.defineProperty(value, name, { value: 'hidden', enumerable: true });
+			expect(() => snapshotGeneratedPostconditionJson(value)).toThrow(
+				'out-of-range index member',
+			);
+		},
+	);
 
 	it('stores an immutable postcondition snapshot despite later caller mutation', () => {
 		const change = {
@@ -643,28 +648,29 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		expect(ledgerAddressKey(step.address!)).toBe(ledgerAddressKey(inspectSide));
 	});
 
-	it.each([
-		{ columns: [] },
-		{ columns: [''] },
-		{ columns: ['   '] },
-	])('E01 refuses an empty generated column list: %j', ({ columns }) => {
-		expect(() =>
-			createPgsqlGeneratedManagedStep({
-				change: {
-					kind: 'create_index',
-					table: 'orders',
-					destructive: false,
-					details: 'create index',
-					meta: { index: { columns } },
-				},
-				database: 'app',
-				schema: 'public',
-				stepKey: 'generator:empty-columns',
-				order: 0,
-				statements: ['CREATE INDEX ignored ON orders (id)'],
-			}),
-		).toThrow('generator planning refuses create_index: missing typed columns');
-	});
+	it.each([{ columns: [] }, { columns: [''] }, { columns: ['   '] }])(
+		'E01 refuses an empty generated column list: %j',
+		({ columns }) => {
+			expect(() =>
+				createPgsqlGeneratedManagedStep({
+					change: {
+						kind: 'create_index',
+						table: 'orders',
+						destructive: false,
+						details: 'create index',
+						meta: { index: { columns } },
+					},
+					database: 'app',
+					schema: 'public',
+					stepKey: 'generator:empty-columns',
+					order: 0,
+					statements: ['CREATE INDEX ignored ON orders (id)'],
+				}),
+			).toThrow(
+				'generator planning refuses create_index: missing typed columns',
+			);
+		},
+	);
 
 	const keyListValidationCases = [
 		{
@@ -759,39 +765,37 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		]),
 	] as const;
 
-	it.each(
-		keyListValidationCases,
-	)('E02 refuses an unusable $keyList for $kind at the builder boundary', ({
-		change,
-	}) => {
-		for (const columns of [[], ['   ']] as const) {
-			expect(() =>
-				createPgsqlGeneratedManagedStep({
-					change: change(columns),
-					database: 'app',
-					schema: 'public',
-					stepKey: 'generator:key-list-validation',
-					order: 0,
-					statements: ['SELECT 1'],
-				}),
-			).toThrow('missing typed columns');
-		}
-	});
+	it.each(keyListValidationCases)(
+		'E02 refuses an unusable $keyList for $kind at the builder boundary',
+		({ change }) => {
+			for (const columns of [[], ['   ']] as const) {
+				expect(() =>
+					createPgsqlGeneratedManagedStep({
+						change: change(columns),
+						database: 'app',
+						schema: 'public',
+						stepKey: 'generator:key-list-validation',
+						order: 0,
+						statements: ['SELECT 1'],
+					}),
+				).toThrow('missing typed columns');
+			}
+		},
+	);
 
-	it.each(
-		keyListValidationCases,
-	)('E03 refuses an unusable $keyList from the exported postcondition constructor', ({
-		change,
-	}) => {
-		for (const columns of [[], ['   ']] as const) {
-			expect(() =>
-				generatedPostconditionForChange({
-					change: change(columns),
-					schema: 'public',
-				}),
-			).toThrow('missing typed columns');
-		}
-	});
+	it.each(keyListValidationCases)(
+		'E03 refuses an unusable $keyList from the exported postcondition constructor',
+		({ change }) => {
+			for (const columns of [[], ['   ']] as const) {
+				expect(() =>
+					generatedPostconditionForChange({
+						change: change(columns),
+						schema: 'public',
+					}),
+				).toThrow('missing typed columns');
+			}
+		},
+	);
 
 	it('keeps scalar primary keys as valid normalized key material', () => {
 		expect(
@@ -948,17 +952,17 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				},
 			},
 		},
-	] as const)('refuses $rule at the producer boundary before digesting', ({
-		rule,
-		change,
-	}) => {
-		expect(() =>
-			generatedPostconditionForChange({
-				change: change as import('./schema-diff.js').SchemaChange,
-				schema: 'public',
-			}),
-		).toThrow(rule);
-	});
+	] as const)(
+		'refuses $rule at the producer boundary before digesting',
+		({ rule, change }) => {
+			expect(() =>
+				generatedPostconditionForChange({
+					change: change as import('./schema-diff.js').SchemaChange,
+					schema: 'public',
+				}),
+			).toThrow(rule);
+		},
+	);
 
 	it('refuses a null CHECK before it can derive a foreign-key address', () => {
 		const change = {
@@ -1035,26 +1039,29 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		'drop_policy',
 		'add_comment',
 		'drop_comment',
-	] as const)('OBL-RUN9 refuses non-declarable %s before any manifest address exists', (kind) => {
-		expect(() => assertDeclarableChangeKind(kind)).toThrow(
-			'diagnostic-only and non-declarable',
-		);
-		expect(() =>
-			createPgsqlGeneratedManagedStep({
-				change: {
-					kind,
-					table: 'orders',
-					destructive: false,
-					details: 'diagnostic only',
-				},
-				database: 'app',
-				schema: 'public',
-				stepKey: 'generator:forbidden',
-				order: 0,
-				statements: ['SELECT 1'],
-			}),
-		).toThrow('diagnostic-only and non-declarable');
-	});
+	] as const)(
+		'OBL-RUN9 refuses non-declarable %s before any manifest address exists',
+		(kind) => {
+			expect(() => assertDeclarableChangeKind(kind)).toThrow(
+				'diagnostic-only and non-declarable',
+			);
+			expect(() =>
+				createPgsqlGeneratedManagedStep({
+					change: {
+						kind,
+						table: 'orders',
+						destructive: false,
+						details: 'diagnostic only',
+					},
+					database: 'app',
+					schema: 'public',
+					stepKey: 'generator:forbidden',
+					order: 0,
+					statements: ['SELECT 1'],
+				}),
+			).toThrow('diagnostic-only and non-declarable');
+		},
+	);
 
 	it('models a unique addition as constraint creation with a vacancy claim', () => {
 		const step = createPgsqlGeneratedManagedStep({

@@ -1728,53 +1728,52 @@ active_users | select id | limit posts 5`.dump();
 			},
 			"tail relation 'comments' include node carries unsupported option 'futureOption'",
 		],
-	] satisfies readonly (readonly [
-		string,
-		IncludeIntent,
-		string,
-	])[])('rejects binding-final include option %s with ref-#192 fail-loud message', async (_option, include, reason) => {
-		const db = schema({
-			users: {
-				id: { type: 'integer', dbType: 'integer' },
-				name: 'string',
-			},
-		} as const);
+	] satisfies readonly (readonly [string, IncludeIntent, string])[])(
+		'rejects binding-final include option %s with ref-#192 fail-loud message',
+		async (_option, include, reason) => {
+			const db = schema({
+				users: {
+					id: { type: 'integer', dbType: 'integer' },
+					name: 'string',
+				},
+			} as const);
 
-		vi.resetModules();
-		vi.doMock('@dbsp/nql', async () => {
-			const actual =
-				await vi.importActual<typeof import('@dbsp/nql')>('@dbsp/nql');
-			return {
-				...actual,
-				compile: vi.fn(() => ({
-					success: true,
-					ast: createBindingFinalBundle(include),
-				})),
-			};
-		});
-
-		try {
-			const { createNqlTag: createMockedNqlTag } = await import('../nql.js');
-			const nql = createMockedNqlTag(db.definition, db.model);
-			let thrown: unknown;
+			vi.resetModules();
+			vi.doMock('@dbsp/nql', async () => {
+				const actual =
+					await vi.importActual<typeof import('@dbsp/nql')>('@dbsp/nql');
+				return {
+					...actual,
+					compile: vi.fn(() => ({
+						success: true,
+						ast: createBindingFinalBundle(include),
+					})),
+				};
+			});
 
 			try {
-				nql<{ id: number }>`active_users | select id`.dump();
-			} catch (err) {
-				thrown = err;
-			}
+				const { createNqlTag: createMockedNqlTag } = await import('../nql.js');
+				const nql = createMockedNqlTag(db.definition, db.model);
+				let thrown: unknown;
 
-			expect(thrown).toBeInstanceOf(Error);
-			expect((thrown as Error).message).toContain(
-				"NQL binding-final query 'active_users' cannot use relation include",
-			);
-			expect((thrown as Error).message).toContain('(ref-#192)');
-			expect((thrown as Error).message).toContain(reason);
-		} finally {
-			vi.doUnmock('@dbsp/nql');
-			vi.resetModules();
-		}
-	});
+				try {
+					nql<{ id: number }>`active_users | select id`.dump();
+				} catch (err) {
+					thrown = err;
+				}
+
+				expect(thrown).toBeInstanceOf(Error);
+				expect((thrown as Error).message).toContain(
+					"NQL binding-final query 'active_users' cannot use relation include",
+				);
+				expect((thrown as Error).message).toContain('(ref-#192)');
+				expect((thrown as Error).message).toContain(reason);
+			} finally {
+				vi.doUnmock('@dbsp/nql');
+				vi.resetModules();
+			}
+		},
+	);
 
 	it('executes referenced query-final read-only bindings through the NQL bundle', async () => {
 		const rows = [{ id: 1 }];
@@ -2257,13 +2256,16 @@ posts | where authorId in (touched) | select authorId`.all();
 		['snake_case', 'author_id', 'author_id'],
 		['preserve', 'authorId', 'authorId'],
 		['preserve', 'author_id', 'authorId'],
-	] as const)('materializes %s mutation binding projected as %s through canonical CTE column %s', async (dbCasing, projectedColumn, expectedCteColumn) => {
-		await expectAuthorBindingProjectionMaterializes(
-			dbCasing,
-			projectedColumn,
-			expectedCteColumn,
-		);
-	});
+	] as const)(
+		'materializes %s mutation binding projected as %s through canonical CTE column %s',
+		async (dbCasing, projectedColumn, expectedCteColumn) => {
+			await expectAuthorBindingProjectionMaterializes(
+				dbCasing,
+				projectedColumn,
+				expectedCteColumn,
+			);
+		},
+	);
 
 	it('fails loud when a mutation RETURNING row lacks the projected logical column', async () => {
 		const execute = vi.fn().mockResolvedValueOnce([{ title: 'Touched' }]);

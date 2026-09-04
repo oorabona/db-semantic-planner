@@ -675,70 +675,73 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		'vacancy flag',
 		'statement ordinal',
 		'statement SQL one-byte edit',
-	] as const)('OBL-AUTH4 refuses a manifest mutation of %s before any token or DDL', (mutation) => {
-		const plan = request(`manifest-${mutation}`).plan;
-		const step = {
-			stepKey: 'manifest-step',
-			order: 0,
-			segmentId: 'manifest-segment',
-			dependencyOrder: [],
-			address: plan.address,
-			claimKind: plan.claimKind,
-			plannedClaimKeys: [plan.plannedClaimKey ?? ''],
-			statementBundle: plan.statementBundle,
-			classification: 'non-destructive' as const,
-			requiresVacancy: false,
-			replayPolicy: 'recorded' as const,
-		};
-		const mutated = {
-			...step,
-			...(mutation === 'claim key'
-				? { plannedClaimKeys: ['attacker-key'] }
-				: mutation === 'address'
-					? { address: { ...address, name: 'attacker_accounts' } }
-					: mutation === 'claim kind'
-						? { claimKind: 'retire-intent' as const }
-						: mutation === 'classification'
-							? { classification: 'data-destructive' as const }
-							: mutation === 'vacancy flag'
-								? { requiresVacancy: true }
-								: mutation === 'statement ordinal'
-									? {
-											statementBundle: {
-												statements: [
-													{
-														...plan.statementBundle.statements[0]!,
-														ordinal: 1,
-													},
-												],
-											},
-										}
-									: {
-											statementBundle: {
-												statements: [
-													{
-														...plan.statementBundle.statements[0]!,
-														sql: `${plan.statementBundle.statements[0]!.sql} `,
-													},
-												],
-											},
-										}),
-		};
-		const validation = validateNormalizedManagedStepManifest([
-			mutated as never,
-		]);
-		if (!validation.ok) {
-			expect(validation.detail).toBeTruthy();
-			return;
-		}
-		expect(
-			checkValidatedManifest({
-				manifest: validation.manifest,
-				expectedPlans: [plan],
-				expectedClassification: 'non-destructive',
-			}),
-		).toMatchObject({ kind: 'outcome-protocol-refused' });
-	});
+	] as const)(
+		'OBL-AUTH4 refuses a manifest mutation of %s before any token or DDL',
+		(mutation) => {
+			const plan = request(`manifest-${mutation}`).plan;
+			const step = {
+				stepKey: 'manifest-step',
+				order: 0,
+				segmentId: 'manifest-segment',
+				dependencyOrder: [],
+				address: plan.address,
+				claimKind: plan.claimKind,
+				plannedClaimKeys: [plan.plannedClaimKey ?? ''],
+				statementBundle: plan.statementBundle,
+				classification: 'non-destructive' as const,
+				requiresVacancy: false,
+				replayPolicy: 'recorded' as const,
+			};
+			const mutated = {
+				...step,
+				...(mutation === 'claim key'
+					? { plannedClaimKeys: ['attacker-key'] }
+					: mutation === 'address'
+						? { address: { ...address, name: 'attacker_accounts' } }
+						: mutation === 'claim kind'
+							? { claimKind: 'retire-intent' as const }
+							: mutation === 'classification'
+								? { classification: 'data-destructive' as const }
+								: mutation === 'vacancy flag'
+									? { requiresVacancy: true }
+									: mutation === 'statement ordinal'
+										? {
+												statementBundle: {
+													statements: [
+														{
+															...plan.statementBundle.statements[0]!,
+															ordinal: 1,
+														},
+													],
+												},
+											}
+										: {
+												statementBundle: {
+													statements: [
+														{
+															...plan.statementBundle.statements[0]!,
+															sql: `${plan.statementBundle.statements[0]!.sql} `,
+														},
+													],
+												},
+											}),
+			};
+			const validation = validateNormalizedManagedStepManifest([
+				mutated as never,
+			]);
+			if (!validation.ok) {
+				expect(validation.detail).toBeTruthy();
+				return;
+			}
+			expect(
+				checkValidatedManifest({
+					manifest: validation.manifest,
+					expectedPlans: [plan],
+					expectedClassification: 'non-destructive',
+				}),
+			).toMatchObject({ kind: 'outcome-protocol-refused' });
+		},
+	);
 
 	it('OBL-AUTH4 refuses a closure member whose species is not cascade-covered before any token or DDL', () => {
 		const root = request('closure-species-root').plan;
@@ -1007,38 +1010,41 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			'a missing trust root where one was declared',
 			{ class: 'destructive-plan-accepted:grant-bound-plan' },
 		],
-	] as const)('OBL-AUTH9 refuses a captured destructive grant replayed against %s', (_attack, grant) => {
-		const planDigest = 'grant-bound-plan';
-		const operation = {
-			kind: 'destructive-outcome' as const,
-			request: { ...request('grant-bound-claim'), members: [] } as never,
-			readBackAndResolve: async () => ({
-				rootClaimId: 'grant-bound-claim',
-				members: [],
-				reservations: [],
-			}),
-		};
-		const requiresRoot =
-			_attack === 'a missing trust root where one was declared';
-		expect(
-			checkApprovalScope({
-				run: lockedRun('grant-bound-run', planDigest),
-				approval: {
-					approvals: [grant],
-					...(requiresRoot
-						? { declaredTrustRoot: { kind: 'policy', policyId: 'reviewed' } }
-						: {}),
-				},
-				operation,
-			}),
-		).toMatchObject({
-			kind: 'outcome-protocol-refused',
-			reason:
-				_attack === 'a different plan digest'
-					? 'operator acceptance is absent'
-					: 'admitted operation refuses destructive approval outside its scope or trust root',
-		});
-	});
+	] as const)(
+		'OBL-AUTH9 refuses a captured destructive grant replayed against %s',
+		(_attack, grant) => {
+			const planDigest = 'grant-bound-plan';
+			const operation = {
+				kind: 'destructive-outcome' as const,
+				request: { ...request('grant-bound-claim'), members: [] } as never,
+				readBackAndResolve: async () => ({
+					rootClaimId: 'grant-bound-claim',
+					members: [],
+					reservations: [],
+				}),
+			};
+			const requiresRoot =
+				_attack === 'a missing trust root where one was declared';
+			expect(
+				checkApprovalScope({
+					run: lockedRun('grant-bound-run', planDigest),
+					approval: {
+						approvals: [grant],
+						...(requiresRoot
+							? { declaredTrustRoot: { kind: 'policy', policyId: 'reviewed' } }
+							: {}),
+					},
+					operation,
+				}),
+			).toMatchObject({
+				kind: 'outcome-protocol-refused',
+				reason:
+					_attack === 'a different plan digest'
+						? 'operator acceptance is absent'
+						: 'admitted operation refuses destructive approval outside its scope or trust root',
+			});
+		},
+	);
 
 	/* Compatibility-path permit test retired with the synthesized-run bridge. */
 	/* it('does not let a table A approval-scope verdict mint a permit for table B', async () => {

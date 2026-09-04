@@ -46,14 +46,17 @@ describe('predicate-branded expression primitives', () => {
 		'&&',
 		'<@',
 		'@>',
-	] as const)('round-trips predicate operator %s through dump()', (operator) => {
-		const query = orm
-			.select('documents')
-			.where(op(operator, ref('a'), ref('b')))
-			.dump();
+	] as const)(
+		'round-trips predicate operator %s through dump()',
+		(operator) => {
+			const query = orm
+				.select('documents')
+				.where(op(operator, ref('a'), ref('b')))
+				.dump();
 
-		expect(query.sql).toContain(operator);
-	});
+			expect(query.sql).toContain(operator);
+		},
+	);
 
 	it('compiles op(!=) through where() as a column comparison', () => {
 		const query = orm
@@ -260,9 +263,14 @@ describe('predicate-branded expression primitives', () => {
 		{ kind: 'column', column: 'a' },
 		{ kind: 'aggregate', function: 'count', field: 'a' },
 		{ kind: 'window', function: 'rank', alias: 'rank', over: {} },
-	] as const)('rejects unsupported standalone WHERE expression kind $kind', (intent) => {
-		expect(() => unsafeAsPredicate(new ExpressionRef(intent as never))).toThrow(
-			`Invalid unsafeAsPredicate: unsupported standalone WHERE expression kind '${intent.kind}'`,
-		);
-	});
+	] as const)(
+		'rejects unsupported standalone WHERE expression kind $kind',
+		(intent) => {
+			expect(() =>
+				unsafeAsPredicate(new ExpressionRef(intent as never)),
+			).toThrow(
+				`Invalid unsafeAsPredicate: unsupported standalone WHERE expression kind '${intent.kind}'`,
+			);
+		},
+	);
 });

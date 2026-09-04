@@ -574,16 +574,19 @@ active_users | select id`,
 			'WITH outer query',
 			'with passthrough as (users | select id) active_users | select id',
 		],
-	])('accepts read binding references across mutation inside %s', (_label, finalStatement) => {
-		const result = compile(
-			`users | select id | bind active_users
+	])(
+		'accepts read binding references across mutation inside %s',
+		(_label, finalStatement) => {
+			const result = compile(
+				`users | select id | bind active_users
 insert into users set name = 'Alice' | select id | bind created_user
 ${finalStatement}`,
-			schema,
-		);
+				schema,
+			);
 
-		expect(result.success).toBe(true);
-	});
+			expect(result.success).toBe(true);
+		},
+	);
 
 	it('accepts IN subqueries over real tables from a final query that reads a bind source', () => {
 		const result = compile(
@@ -817,64 +820,65 @@ ${finalStatement}`,
 		expect(result.errors[0]?.message).toMatch(/ANY/i);
 	});
 
-	it.each([
-		'some',
-		'none',
-		'every',
-	] as const)('allows binding-final %s(author) when the binding projects the source FK (ref #182)', (mode) => {
-		const result = compile(
-			`posts | select id, authorId | bind projected_posts
+	it.each(['some', 'none', 'every'] as const)(
+		'allows binding-final %s(author) when the binding projects the source FK (ref #182)',
+		(mode) => {
+			const result = compile(
+				`posts | select id, authorId | bind projected_posts
 projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`,
-			schema,
-		);
+				schema,
+			);
 
-		expect(result.success).toBe(true);
-		expect(result.ast?.query?.where).toMatchObject({
-			kind: 'relationFilter',
-			relation: ['author'],
-			mode,
-			targetTable: 'users',
-			sourceColumn: ['authorId'],
-			targetColumn: ['id'],
-		});
-		expect(hasNqlTrustedRelationFilterProof(result.ast?.query?.where)).toBe(
-			true,
-		);
-		const payload = getTrustedNqlRelationFilterFields(result.ast?.query?.where);
-		expect(payload).toEqual({
-			relation: 'author',
-			targetTable: 'users',
-			sourceColumn: ['authorId'],
-			targetColumn: ['id'],
-			hops: [],
-			cardinality: 'one',
-		});
-		expect(Object.isFrozen(payload)).toBe(true);
-		expect(Object.isFrozen(payload?.sourceColumn)).toBe(true);
-		expect(Object.isFrozen(payload?.targetColumn)).toBe(true);
-		try {
-			if (payload) {
-				(payload as { targetTable: string }).targetTable = 'forged_users';
-			}
-		} catch {
-			// Frozen payloads throw in strict mode; either way, mutation must not stick.
-		}
-		expect(payload?.targetTable).toBe('users');
-		expect(
-			result.ast?.bindingOutputSchemas?.get('projected_posts')?.relationFilters
-				?.relations,
-		).toEqual([
-			{
+			expect(result.success).toBe(true);
+			expect(result.ast?.query?.where).toMatchObject({
+				kind: 'relationFilter',
+				relation: ['author'],
+				mode,
+				targetTable: 'users',
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
+			});
+			expect(hasNqlTrustedRelationFilterProof(result.ast?.query?.where)).toBe(
+				true,
+			);
+			const payload = getTrustedNqlRelationFilterFields(
+				result.ast?.query?.where,
+			);
+			expect(payload).toEqual({
 				relation: 'author',
-				sourceTable: 'posts',
 				targetTable: 'users',
 				sourceColumn: ['authorId'],
 				targetColumn: ['id'],
 				hops: [],
 				cardinality: 'one',
-			},
-		]);
-	});
+			});
+			expect(Object.isFrozen(payload)).toBe(true);
+			expect(Object.isFrozen(payload?.sourceColumn)).toBe(true);
+			expect(Object.isFrozen(payload?.targetColumn)).toBe(true);
+			try {
+				if (payload) {
+					(payload as { targetTable: string }).targetTable = 'forged_users';
+				}
+			} catch {
+				// Frozen payloads throw in strict mode; either way, mutation must not stick.
+			}
+			expect(payload?.targetTable).toBe('users');
+			expect(
+				result.ast?.bindingOutputSchemas?.get('projected_posts')
+					?.relationFilters?.relations,
+			).toEqual([
+				{
+					relation: 'author',
+					sourceTable: 'posts',
+					targetTable: 'users',
+					sourceColumn: ['authorId'],
+					targetColumn: ['id'],
+					hops: [],
+					cardinality: 'one',
+				},
+			]);
+		},
+	);
 
 	it('allows binding-final belongsTo scalar relation columns with a frozen trusted proof', () => {
 		const result = compile(
@@ -1596,34 +1600,40 @@ projected_users | select posts.missing.*`,
 	it.each([
 		['missing projected FK', 'id, title'],
 		['fabricated FK alias', 'id, 1 as authorId'],
-	] as const)('rejects binding-final belongsTo relation columns with %s', (_label, projection) => {
-		const result = compile(
-			`posts | select ${projection} | bind projected_posts
+	] as const)(
+		'rejects binding-final belongsTo relation columns with %s',
+		(_label, projection) => {
+			const result = compile(
+				`posts | select ${projection} | bind projected_posts
 projected_posts | select author.name`,
-			schema,
-		);
+				schema,
+			);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/ref-#182/);
-		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
-		expect(result.errors[0]?.message).toMatch(/direct source-column/);
-	});
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.message).toMatch(/ref-#182/);
+			expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+			expect(result.errors[0]?.message).toMatch(/direct source-column/);
+		},
+	);
 
 	it.each([
 		['missing projected FK', 'id, title'],
 		['fabricated FK alias', 'id, 1 as authorId'],
-	] as const)('rejects binding-final belongsTo relationStar includes with %s', (_label, projection) => {
-		const result = compile(
-			`posts | select ${projection} | bind projected_posts
+	] as const)(
+		'rejects binding-final belongsTo relationStar includes with %s',
+		(_label, projection) => {
+			const result = compile(
+				`posts | select ${projection} | bind projected_posts
 projected_posts | select author.*`,
-			schema,
-		);
+				schema,
+			);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/ref-#192/);
-		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
-		expect(result.errors[0]?.message).toMatch(/direct source-column/);
-	});
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.message).toMatch(/ref-#192/);
+			expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+			expect(result.errors[0]?.message).toMatch(/direct source-column/);
+		},
+	);
 
 	it('allows binding-final relation columns for fully projected composite FK relations', () => {
 		const compositeSchema = {
@@ -2030,18 +2040,21 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 	it.each([
 		['literal alias', '1 as authorId'],
 		['arithmetic alias', 'authorId + 0 as authorId'],
-	] as const)('rejects binding-final relation filters when the FK output is a fabricated %s (ref #182)', (_label, projection) => {
-		const result = compile(
-			`posts | select id, ${projection} | bind projected_posts
+	] as const)(
+		'rejects binding-final relation filters when the FK output is a fabricated %s (ref #182)',
+		(_label, projection) => {
+			const result = compile(
+				`posts | select id, ${projection} | bind projected_posts
 projected_posts | where some(author).email = 'alice@example.com' | select id`,
-			schema,
-		);
+				schema,
+			);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/ref-#182/);
-		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
-		expect(result.errors[0]?.message).toMatch(/direct source-column/);
-	});
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.message).toMatch(/ref-#182/);
+			expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+			expect(result.errors[0]?.message).toMatch(/direct source-column/);
+		},
+	);
 
 	it('rejects binding-final relation filters from aggregate bindings (ref #182)', () => {
 		const result = compile(

@@ -23,19 +23,19 @@ describe('SC-01 #481 e2e capability gates', () => {
 		expect(result.rows[0]?.ready).toBe(1);
 	});
 
-	it.each([
-		'container-exec',
-		'standby-topology',
-	] as const)('fails rather than skips when %s is requested from an external DATABASE_URL', async (capability) => {
-		await expect(
-			requireE2eCapabilities([capability], {
-				environment: EXTERNAL_ENVIRONMENT,
-			}),
-		).rejects.toMatchObject({
-			name: 'E2eCapabilityError',
-			capability,
-		});
-	});
+	it.each(['container-exec', 'standby-topology'] as const)(
+		'fails rather than skips when %s is requested from an external DATABASE_URL',
+		async (capability) => {
+			await expect(
+				requireE2eCapabilities([capability], {
+					environment: EXTERNAL_ENVIRONMENT,
+				}),
+			).rejects.toMatchObject({
+				name: 'E2eCapabilityError',
+				capability,
+			});
+		},
+	);
 
 	it('fails rather than skips when role administration is unavailable', async () => {
 		await expect(

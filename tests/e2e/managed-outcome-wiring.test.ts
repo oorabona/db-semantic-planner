@@ -896,43 +896,49 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 				'DELETE FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
 				'recovery-authorization-missing',
 			],
-		] as const)('OBL-RUN8: public recover refuses a %s persisted authorization without another ledger append', async (_variant, corruption, expectedOutcome) => {
-			const schema = testSchema('run_auth_corrupt');
-			await provision(schema);
-			const pool = await getTestPool();
-			await pool.query(
-				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
-			);
-			const planned = await planEnumAdd(schema);
-			await expect(
-				runApply(
-					planned.runId,
-					{
-						db: planned.db,
-						planDigest: planned.planDigest,
-						accept: planned.plan.assumptions.map(
-							(assumption) => assumption.class,
-						),
-					},
-					pool,
-				),
-			).resolves.toMatchObject({ outcome: 'completed' });
-			const before = await ledgerChain(
-				schema,
-				onlyManagedClaim(planned.plan).address.name,
-			);
-			await pool.query(corruption, [planned.runId]);
-			await expect(
-				runRecover(
-					planned.runId,
-					{ db: planned.db, planDigest: planned.planDigest },
-					pool,
-				),
-			).resolves.toMatchObject({ outcome: expectedOutcome });
-			expect(
-				await ledgerChain(schema, onlyManagedClaim(planned.plan).address.name),
-			).toEqual(before);
-		});
+		] as const)(
+			'OBL-RUN8: public recover refuses a %s persisted authorization without another ledger append',
+			async (_variant, corruption, expectedOutcome) => {
+				const schema = testSchema('run_auth_corrupt');
+				await provision(schema);
+				const pool = await getTestPool();
+				await pool.query(
+					`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+				);
+				const planned = await planEnumAdd(schema);
+				await expect(
+					runApply(
+						planned.runId,
+						{
+							db: planned.db,
+							planDigest: planned.planDigest,
+							accept: planned.plan.assumptions.map(
+								(assumption) => assumption.class,
+							),
+						},
+						pool,
+					),
+				).resolves.toMatchObject({ outcome: 'completed' });
+				const before = await ledgerChain(
+					schema,
+					onlyManagedClaim(planned.plan).address.name,
+				);
+				await pool.query(corruption, [planned.runId]);
+				await expect(
+					runRecover(
+						planned.runId,
+						{ db: planned.db, planDigest: planned.planDigest },
+						pool,
+					),
+				).resolves.toMatchObject({ outcome: expectedOutcome });
+				expect(
+					await ledgerChain(
+						schema,
+						onlyManagedClaim(planned.plan).address.name,
+					),
+				).toEqual(before);
+			},
+		);
 
 		it('OBL-RUN3: a persisted durable run with an unsupported execution epoch is refused by public apply before DDL', async () => {
 			const schema = testSchema('run_epoch_tamper');
@@ -976,48 +982,51 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 		it.each([
 			['copied', false],
 			['renamed', true],
-		] as const)('OBL-RUN3: public apply refuses a %s durable run row before authorization or DDL', async (variant, removeSource) => {
-			const schema = testSchema(`run_identity_${variant}`);
-			await provision(schema);
-			const pool = await getTestPool();
-			await pool.query(
-				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
-			);
-			const planned = await planEnumAdd(schema);
-			const copiedRunId = `${planned.runId}:${variant}`;
-			await copyPersistedRun(planned.runId, copiedRunId, removeSource);
+		] as const)(
+			'OBL-RUN3: public apply refuses a %s durable run row before authorization or DDL',
+			async (variant, removeSource) => {
+				const schema = testSchema(`run_identity_${variant}`);
+				await provision(schema);
+				const pool = await getTestPool();
+				await pool.query(
+					`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+				);
+				const planned = await planEnumAdd(schema);
+				const copiedRunId = `${planned.runId}:${variant}`;
+				await copyPersistedRun(planned.runId, copiedRunId, removeSource);
 
-			await expect(
-				runApply(
-					copiedRunId,
-					{ db: planned.db, planDigest: planned.planDigest },
-					pool,
-				),
-			).resolves.toMatchObject({
-				outcome: 'run-id-mismatch',
-				result: {
-					assessment: {
-						reasons: [
-							expect.objectContaining({
-								detail: expect.stringContaining('bound id'),
-							}),
-						],
+				await expect(
+					runApply(
+						copiedRunId,
+						{ db: planned.db, planDigest: planned.planDigest },
+						pool,
+					),
+				).resolves.toMatchObject({
+					outcome: 'run-id-mismatch',
+					result: {
+						assessment: {
+							reasons: [
+								expect.objectContaining({
+									detail: expect.stringContaining('bound id'),
+								}),
+							],
+						},
 					},
-				},
-			});
-			await expect(
-				pool.query(
-					'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
-					[copiedRunId],
-				),
-			).resolves.toMatchObject({ rows: [{ count: '0' }] });
-			await expect(
-				pool.query(
-					`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
-					[schema],
-				),
-			).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
-		});
+				});
+				await expect(
+					pool.query(
+						'SELECT count(*)::text AS count FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',
+						[copiedRunId],
+					),
+				).resolves.toMatchObject({ rows: [{ count: '0' }] });
+				await expect(
+					pool.query(
+						`SELECT enumlabel FROM pg_catalog.pg_enum e JOIN pg_catalog.pg_type t ON t.oid = e.enumtypid JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace WHERE n.nspname = $1 AND t.typname = 'status' ORDER BY enumsortorder`,
+						[schema],
+					),
+				).resolves.toMatchObject({ rows: [{ enumlabel: 'active' }] });
+			},
+		);
 
 		it('keeps one applied enum run ledger-complete while its delivery-1 journal stays on that run', async () => {
 			const schema = testSchema('transactional');
@@ -1394,107 +1403,122 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			['unknown kind', 'unknown-kind'],
 			['broken predecessor', 'broken-predecessor'],
 			['divergent resolution payload', 'divergent-resolution'],
-		] as const)('OBL-REC12 reconcile: %s refuses selection and appends no recovery event', async (_name, corruption) => {
-			const { planned } = await corruptedRun(corruption);
-			const pool = await getTestPool();
-			const before = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			await expect(
-				runReconcile(planned.runId, { db: planned.db }, pool),
-			).resolves.toMatchObject({
-				outcome: 'reconcile-claim-selection-unavailable',
-			});
-			const after = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			expect(after.rows).toEqual(before.rows);
-		});
+		] as const)(
+			'OBL-REC12 reconcile: %s refuses selection and appends no recovery event',
+			async (_name, corruption) => {
+				const { planned } = await corruptedRun(corruption);
+				const pool = await getTestPool();
+				const before = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				await expect(
+					runReconcile(planned.runId, { db: planned.db }, pool),
+				).resolves.toMatchObject({
+					outcome: 'reconcile-claim-selection-unavailable',
+				});
+				const after = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(planned.plan.steps[0]!.managedClaim!.address.schema!)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				expect(after.rows).toEqual(before.rows);
+			},
+		);
 
 		it.each([
 			['unknown kind', 'unknown-kind'],
 			['broken predecessor', 'broken-predecessor'],
 			['divergent resolution payload', 'divergent-resolution'],
-		] as const)('OBL-REC12 inspect: %s stays readable as a typed malformed projection', async (_name, corruption) => {
-			const { planned, schema } = await corruptedRun(corruption);
-			await expect(
-				runInspect('enum:status', { db: planned.db, schema }),
-			).resolves.toMatchObject({
-				projection: { kind: 'unprojectable-ledger-chain' },
-			});
-		});
+		] as const)(
+			'OBL-REC12 inspect: %s stays readable as a typed malformed projection',
+			async (_name, corruption) => {
+				const { planned, schema } = await corruptedRun(corruption);
+				await expect(
+					runInspect('enum:status', { db: planned.db, schema }),
+				).resolves.toMatchObject({
+					projection: { kind: 'unprojectable-ledger-chain' },
+				});
+			},
+		);
 
 		it.each([
 			['unknown kind', 'unknown-kind'],
 			['broken predecessor', 'broken-predecessor'],
 			['divergent resolution payload', 'divergent-resolution'],
-		] as const)('OBL-REC12 release: %s refuses without a release append', async (_name, corruption) => {
-			const { planned, schema } = await corruptedRun(corruption);
-			const pool = await getTestPool();
-			const before = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			await expect(
-				runRelease('enum:status', { db: planned.db, schema }),
-			).resolves.toMatchObject({
-				outcome: 'release-refused',
-				refusal: { code: 'ERR-08' },
-			});
-			const after = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			expect(after.rows).toEqual(before.rows);
-		});
+		] as const)(
+			'OBL-REC12 release: %s refuses without a release append',
+			async (_name, corruption) => {
+				const { planned, schema } = await corruptedRun(corruption);
+				const pool = await getTestPool();
+				const before = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				await expect(
+					runRelease('enum:status', { db: planned.db, schema }),
+				).resolves.toMatchObject({
+					outcome: 'release-refused',
+					refusal: { code: 'ERR-08' },
+				});
+				const after = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				expect(after.rows).toEqual(before.rows);
+			},
+		);
 
 		it.each([
 			['unknown kind', 'unknown-kind'],
 			['broken predecessor', 'broken-predecessor'],
 			['divergent resolution payload', 'divergent-resolution'],
-		] as const)('OBL-REC12 apply: %s refuses before a new lifecycle append', async (_name, corruption) => {
-			const { planned, schema } = await corruptedRun(corruption);
-			const pool = await getTestPool();
-			const before = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			const result = await runApply(
-				planned.runId,
-				{
-					db: planned.db,
-					planDigest: planned.planDigest,
-					accept: planned.plan.assumptions.map(
-						(assumption) => assumption.class,
-					),
-				},
-				pool,
-			);
-			expect(result.outcome).not.toBe('applied');
-			const after = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			expect(after.rows).toEqual(before.rows);
-		});
+		] as const)(
+			'OBL-REC12 apply: %s refuses before a new lifecycle append',
+			async (_name, corruption) => {
+				const { planned, schema } = await corruptedRun(corruption);
+				const pool = await getTestPool();
+				const before = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				const result = await runApply(
+					planned.runId,
+					{
+						db: planned.db,
+						planDigest: planned.planDigest,
+						accept: planned.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					pool,
+				);
+				expect(result.outcome).not.toBe('applied');
+				const after = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				expect(after.rows).toEqual(before.rows);
+			},
+		);
 
 		it.each([
 			['unknown kind', 'unknown-kind'],
 			['broken predecessor', 'broken-predecessor'],
 			['divergent resolution payload', 'divergent-resolution'],
-		] as const)('OBL-REC12 recover: %s refuses before recovery append', async (_name, corruption) => {
-			const { planned, schema } = await corruptedRun(corruption);
-			const pool = await getTestPool();
-			const before = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			const result = await runRecover(
-				planned.runId,
-				{ db: planned.db, planDigest: planned.planDigest },
-				pool,
-			);
-			expect(result.outcome).not.toBe('completed');
-			const after = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			expect(after.rows).toEqual(before.rows);
-		});
+		] as const)(
+			'OBL-REC12 recover: %s refuses before recovery append',
+			async (_name, corruption) => {
+				const { planned, schema } = await corruptedRun(corruption);
+				const pool = await getTestPool();
+				const before = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				const result = await runRecover(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
+					pool,
+				);
+				expect(result.outcome).not.toBe('completed');
+				const after = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				expect(after.rows).toEqual(before.rows);
+			},
+		);
 	});
 
 	describe.sequential('OBL-REC3 public reconcile diagnostic causes', () => {
@@ -1569,12 +1593,15 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 					return runReconcile(planned.runId, { db: planned.db }, pool);
 				},
 			],
-		] as const)('OBL-REC3: public reconcile preserves the %s cause from its real failing stage', async (cause, invoke) => {
-			await expect(invoke()).resolves.toMatchObject({
-				outcome: 'reconcile-run-unavailable',
-				failureCause: cause,
-			});
-		});
+		] as const)(
+			'OBL-REC3: public reconcile preserves the %s cause from its real failing stage',
+			async (cause, invoke) => {
+				await expect(invoke()).resolves.toMatchObject({
+					outcome: 'reconcile-run-unavailable',
+					failureCause: cause,
+				});
+			},
+		);
 	});
 
 	describe.sequential('non-current marker refusal', () => {
@@ -1634,112 +1661,114 @@ describe.sequential('SC-43 #481 managed-outcome wiring', () => {
 			],
 		] as const;
 
-		it.each(
-			markerAttacks,
-		)('OBL-CLI10: recover refuses a %s marker before recovery selection or append', async (kind, corruptMarker) => {
-			const schema = testSchema(`recover_marker_${kind}`);
-			await provision(schema);
-			const pool = await getTestPool();
-			await pool.query(
-				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
-			);
-			const planned = await planEnumAdd(schema);
-			await corruptMarker(schema);
-			const eventCount = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-
-			const recovered = await runRecover(
-				planned.runId,
-				{ db: planned.db, planDigest: planned.planDigest },
-				pool,
-			);
-			expect(recovered).toMatchObject({
-				outcome: 'recovery-context-mismatch',
-				detail: expect.stringContaining(`ledger marker ${kind}`),
-				refusal: {
-					address: onlyManagedClaim(planned.plan).address,
-					refusal: {
-						code: 'ERR-03',
-						resolvingCommand: 'dbsp preflight --reinitialize',
-					},
-				},
-			});
-			expect(JSON.parse(JSON.stringify(recovered))).toMatchObject({
-				refusal: { refusal: { code: 'ERR-03' } },
-			});
-			await expect(
-				pool.query<{ count: string }>(
+		it.each(markerAttacks)(
+			'OBL-CLI10: recover refuses a %s marker before recovery selection or append',
+			async (kind, corruptMarker) => {
+				const schema = testSchema(`recover_marker_${kind}`);
+				await provision(schema);
+				const pool = await getTestPool();
+				await pool.query(
+					`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+				);
+				const planned = await planEnumAdd(schema);
+				await corruptMarker(schema);
+				const eventCount = await pool.query<{ count: string }>(
 					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-				),
-			).resolves.toEqual(eventCount);
-		});
+				);
 
-		it.each(
-			markerAttacks,
-		)('OBL-CLI10: apply and reconcile refuse a %s marker before ledger append', async (kind, corruptMarker) => {
-			const schema = testSchema(`ar_marker_${kind}`);
-			await provision(schema);
-			const pool = await getTestPool();
-			await pool.query(
-				`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
-			);
-			const reconcileRun = await planEnumAdd(schema);
-			const reconcileClaim = executionClaim(
-				onlyManagedClaim(reconcileRun.plan),
-				reconcileRun.runId,
-			);
-			const admitted = await openPgOutcomeClaim(pool, {
-				plan: reconcileClaim,
-				reservations: [reservation(reconcileClaim, reconcileRun.runId)],
-			});
-			expect(admitted.kind).toBe('admitted-outcome-claim');
-			const applyRun = await planEnumAdd(schema);
-			await corruptMarker(schema);
-			const before = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			const applied = await runApply(
-				applyRun.runId,
-				{
-					db: applyRun.db,
-					planDigest: applyRun.planDigest,
-					accept: applyRun.plan.assumptions.map(
-						(assumption) => assumption.class,
-					),
-				},
-				pool,
-			);
-			expect(applied.outcome).not.toBe('completed');
-			expect(JSON.stringify(applied)).toContain(`ledger marker ${kind}`);
-			expect(JSON.stringify(applied)).toContain(
-				'run dbsp preflight --reinitialize',
-			);
-			const reconciled = await runReconcile(reconcileRun.runId, {
-				db: reconcileRun.db,
-			});
-			expect(reconciled).toMatchObject({
-				outcome: 'reconcile-unresolved',
-				detail: expect.stringContaining('run dbsp preflight --reinitialize'),
-				recovery: [expect.objectContaining({ outcome: 'blocked' })],
-			});
-			const after = await pool.query<{ count: string }>(
-				`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
-			);
-			expect(after.rows).toEqual(before.rows);
-			expect(
-				await readPgLedgerReservationsForExecution(
+				const recovered = await runRecover(
+					planned.runId,
+					{ db: planned.db, planDigest: planned.planDigest },
 					pool,
-					{ scope: 'schema', schema },
+				);
+				expect(recovered).toMatchObject({
+					outcome: 'recovery-context-mismatch',
+					detail: expect.stringContaining(`ledger marker ${kind}`),
+					refusal: {
+						address: onlyManagedClaim(planned.plan).address,
+						refusal: {
+							code: 'ERR-03',
+							resolvingCommand: 'dbsp preflight --reinitialize',
+						},
+					},
+				});
+				expect(JSON.parse(JSON.stringify(recovered))).toMatchObject({
+					refusal: { refusal: { code: 'ERR-03' } },
+				});
+				await expect(
+					pool.query<{ count: string }>(
+						`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+					),
+				).resolves.toEqual(eventCount);
+			},
+		);
+
+		it.each(markerAttacks)(
+			'OBL-CLI10: apply and reconcile refuse a %s marker before ledger append',
+			async (kind, corruptMarker) => {
+				const schema = testSchema(`ar_marker_${kind}`);
+				await provision(schema);
+				const pool = await getTestPool();
+				await pool.query(
+					`CREATE TYPE ${quoteIdent(schema)}.${quoteIdent('status')} AS ENUM ('active')`,
+				);
+				const reconcileRun = await planEnumAdd(schema);
+				const reconcileClaim = executionClaim(
+					onlyManagedClaim(reconcileRun.plan),
 					reconcileRun.runId,
-				),
-			).toHaveLength(1);
-			expect(
-				(await ledgerChain(schema, reconcileClaim.address.name)).map(
-					(member) => member.eventKind,
-				),
-			).toEqual(['intent']);
-		});
+				);
+				const admitted = await openPgOutcomeClaim(pool, {
+					plan: reconcileClaim,
+					reservations: [reservation(reconcileClaim, reconcileRun.runId)],
+				});
+				expect(admitted.kind).toBe('admitted-outcome-claim');
+				const applyRun = await planEnumAdd(schema);
+				await corruptMarker(schema);
+				const before = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				const applied = await runApply(
+					applyRun.runId,
+					{
+						db: applyRun.db,
+						planDigest: applyRun.planDigest,
+						accept: applyRun.plan.assumptions.map(
+							(assumption) => assumption.class,
+						),
+					},
+					pool,
+				);
+				expect(applied.outcome).not.toBe('completed');
+				expect(JSON.stringify(applied)).toContain(`ledger marker ${kind}`);
+				expect(JSON.stringify(applied)).toContain(
+					'run dbsp preflight --reinitialize',
+				);
+				const reconciled = await runReconcile(reconcileRun.runId, {
+					db: reconcileRun.db,
+				});
+				expect(reconciled).toMatchObject({
+					outcome: 'reconcile-unresolved',
+					detail: expect.stringContaining('run dbsp preflight --reinitialize'),
+					recovery: [expect.objectContaining({ outcome: 'blocked' })],
+				});
+				const after = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+				);
+				expect(after.rows).toEqual(before.rows);
+				expect(
+					await readPgLedgerReservationsForExecution(
+						pool,
+						{ scope: 'schema', schema },
+						reconcileRun.runId,
+					),
+				).toHaveLength(1);
+				expect(
+					(await ledgerChain(schema, reconcileClaim.address.name)).map(
+						(member) => member.eventKind,
+					),
+				).toEqual(['intent']);
+			},
+		);
 	});
 
 	describe.sequential('OBL-CLI1 spawned JSON success envelopes', () => {

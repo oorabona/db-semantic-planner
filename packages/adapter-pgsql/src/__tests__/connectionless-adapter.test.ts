@@ -163,20 +163,26 @@ describe('connectionless execution refusal', () => {
 	it.each([
 		['all', () => connectionlessCteQuery().all()],
 		['execute', () => connectionlessCteQuery().execute()],
-	] as const)('withCte().%s(): refuses uniformly through the execution funnel', async (_, run) => {
-		await expect(run()).rejects.toThrow(
-			ormConnectionlessMessage('withCte().all()'),
-		);
-	});
+	] as const)(
+		'withCte().%s(): refuses uniformly through the execution funnel',
+		async (_, run) => {
+			await expect(run()).rejects.toThrow(
+				ormConnectionlessMessage('withCte().all()'),
+			);
+		},
+	);
 
 	it.each([
 		['all', () => connectionlessRawCteQuery().all()],
 		['execute', () => connectionlessRawCteQuery().execute()],
-	] as const)('recursive().%s(): refuses uniformly through the execution funnel', async (_, run) => {
-		await expect(run()).rejects.toThrow(
-			ormConnectionlessMessage('recursive().all()'),
-		);
-	});
+	] as const)(
+		'recursive().%s(): refuses uniformly through the execution funnel',
+		async (_, run) => {
+			await expect(run()).rejects.toThrow(
+				ormConnectionlessMessage('recursive().all()'),
+			);
+		},
+	);
 
 	it('stream: refuses on first iteration, not construction', async () => {
 		const adapter = createPgsqlCompileOnlyAdapter();

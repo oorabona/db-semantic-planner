@@ -3433,32 +3433,35 @@ describe('createProver', () => {
 			'engineVersion',
 			(ctx: ObservationContext) => ({ ...ctx, engineVersion: '19' }),
 		],
-	] as const)('fails closed when multi-candidate context nucleus differs at %s', async (_field, mutate) => {
-		const {
-			registry: customRegistry,
-			ruleA,
-			ruleB,
-		} = versionedCompositionRegistry({
-			contextFor: (opRef, ctx) =>
-				opRef === 'op:b'
-					? {
-							...mutate(ctx),
-							privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
-						}
-					: {
-							...ctx,
-							privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
-						},
-		});
+	] as const)(
+		'fails closed when multi-candidate context nucleus differs at %s',
+		async (_field, mutate) => {
+			const {
+				registry: customRegistry,
+				ruleA,
+				ruleB,
+			} = versionedCompositionRegistry({
+				contextFor: (opRef, ctx) =>
+					opRef === 'op:b'
+						? {
+								...mutate(ctx),
+								privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
+							}
+						: {
+								...ctx,
+								privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
+							},
+			});
 
-		const outcome = await createProver(customRegistry).prove(
-			compositionCompare(ruleA, ruleB),
-			proofTarget(),
-			context,
-		);
+			const outcome = await createProver(customRegistry).prove(
+				compositionCompare(ruleA, ruleB),
+				proofTarget(),
+				context,
+			);
 
-		expectBlockedReason(outcome, 'context-mismatch');
-	});
+			expectBlockedReason(outcome, 'context-mismatch');
+		},
+	);
 
 	it('fails closed when the issuer reports a privilege merge contradiction', async () => {
 		const {
@@ -4042,39 +4045,46 @@ describe('createProver', () => {
 			'effectiveRole',
 			(ctx: ObservationContext) => ({ ...ctx, effectiveRole: 'other_role' }),
 		],
-	] as const)('refuses evidence issued under a different %s', async (_field, mutate) => {
-		const proofContext = {
-			...context,
-			targetSchema: 'tenant',
-			effectiveRole: 'tenant_owner',
-		};
-		const badContextIssuer: ObservationIssuer = {
-			artifact: issuerArtifact,
-			execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
-				role: 'evidence',
-				id: evidenceId(`mock.evidence.bad-context.${request.kind}`),
-				issuer: issuerArtifact,
-				request,
-				result: {
-					value: {
-						claims: [jsonClaim(request, true)],
+	] as const)(
+		'refuses evidence issued under a different %s',
+		async (_field, mutate) => {
+			const proofContext = {
+				...context,
+				targetSchema: 'tenant',
+				effectiveRole: 'tenant_owner',
+			};
+			const badContextIssuer: ObservationIssuer = {
+				artifact: issuerArtifact,
+				execute: async (
+					request,
+					_target,
+					ctx,
+				): Promise<EvidenceObservation> => ({
+					role: 'evidence',
+					id: evidenceId(`mock.evidence.bad-context.${request.kind}`),
+					issuer: issuerArtifact,
+					request,
+					result: {
+						value: {
+							claims: [jsonClaim(request, true)],
+						},
 					},
-				},
-				context: mutate(ctx),
-				stability: 'externally-mutable',
-				takenAt: new Date().toISOString(),
-				scope: request.scope,
-				source: 'system-catalog',
-				validity: { invalidatedBy: [] },
-			}),
-		};
+					context: mutate(ctx),
+					stability: 'externally-mutable',
+					takenAt: new Date().toISOString(),
+					scope: request.scope,
+					source: 'system-catalog',
+					validity: { invalidatedBy: [] },
+				}),
+			};
 
-		const outcome = await createProver(
-			registry({ issuer: badContextIssuer }),
-		).prove(validCompare(), proofTarget(), proofContext);
+			const outcome = await createProver(
+				registry({ issuer: badContextIssuer }),
+			).prove(validCompare(), proofTarget(), proofContext);
 
-		expectBlockedReason(outcome, 'context-mismatch');
-	});
+			expectBlockedReason(outcome, 'context-mismatch');
+		},
+	);
 
 	it.each([
 		[
@@ -4092,37 +4102,46 @@ describe('createProver', () => {
 			[columnResource('height')],
 			{ table: 'users', column: 'height' },
 		],
-	] as const)('refuses evidence whose claim proposition targets a different %s', async (_field, claimScope, claimDetail) => {
-		const badIssuer: ObservationIssuer = {
-			artifact: issuerArtifact,
-			execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
-				role: 'evidence',
-				id: evidenceId(`mock.evidence.bad-claim.${request.kind}`),
-				issuer: issuerArtifact,
-				request,
-				result: {
-					value: {
-						claims: [jsonClaim(request, true, claimScope, claimDetail)],
+	] as const)(
+		'refuses evidence whose claim proposition targets a different %s',
+		async (_field, claimScope, claimDetail) => {
+			const badIssuer: ObservationIssuer = {
+				artifact: issuerArtifact,
+				execute: async (
+					request,
+					_target,
+					ctx,
+				): Promise<EvidenceObservation> => ({
+					role: 'evidence',
+					id: evidenceId(`mock.evidence.bad-claim.${request.kind}`),
+					issuer: issuerArtifact,
+					request,
+					result: {
+						value: {
+							claims: [jsonClaim(request, true, claimScope, claimDetail)],
+						},
 					},
-				},
-				context: ctx,
-				stability: 'externally-mutable',
-				takenAt: new Date().toISOString(),
-				scope: request.scope,
-				source: 'system-catalog',
-				validity: { invalidatedBy: [] },
-			}),
-		};
-		const outcome = await createProver(registry({ issuer: badIssuer })).prove(
-			validCompare(),
-			proofTarget(),
-			context,
-		);
-		expect(outcome.kind).toBe('blocked');
-		if (outcome.kind === 'blocked') {
-			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
-		}
-	});
+					context: ctx,
+					stability: 'externally-mutable',
+					takenAt: new Date().toISOString(),
+					scope: request.scope,
+					source: 'system-catalog',
+					validity: { invalidatedBy: [] },
+				}),
+			};
+			const outcome = await createProver(registry({ issuer: badIssuer })).prove(
+				validCompare(),
+				proofTarget(),
+				context,
+			);
+			expect(outcome.kind).toBe('blocked');
+			if (outcome.kind === 'blocked') {
+				expect(outcome.assessment.reasons[0]?.code).toBe(
+					'insufficient-evidence',
+				);
+			}
+		},
+	);
 
 	it('refuses a stamped proposition when the observation request has empty target identity', async () => {
 		const targetRequest = obligation().dischargeableBy?.[0];
@@ -4435,36 +4454,39 @@ describe('createProver', () => {
 			claimWithConclusion('established', [operationAssumption().id]),
 			/must not assume/,
 		],
-	] as const)('refuses a forged %s claim at the fragment mint boundary', (_label, forgedClaim, expectedDetail) => {
-		const fragment = baseFragment({ obligations: [], assumptions: [] });
-		const result = validateTransitionRelationalInvariants({
-			kind: 'fragment',
-			fragment: {
-				...fragment,
-				guards: [
-					{
-						...fragment.guards[0]!,
-						protocol: {
-							kind: 'lock-and-check',
-							onFailureLeaves: [],
-							binding: {
-								kind: 'stable-identity',
-								bound: [columnResource()],
-								identityClaim: forgedClaim.id,
+	] as const)(
+		'refuses a forged %s claim at the fragment mint boundary',
+		(_label, forgedClaim, expectedDetail) => {
+			const fragment = baseFragment({ obligations: [], assumptions: [] });
+			const result = validateTransitionRelationalInvariants({
+				kind: 'fragment',
+				fragment: {
+					...fragment,
+					guards: [
+						{
+							...fragment.guards[0]!,
+							protocol: {
+								kind: 'lock-and-check',
+								onFailureLeaves: [],
+								binding: {
+									kind: 'stable-identity',
+									bound: [columnResource()],
+									identityClaim: forgedClaim.id,
+								},
 							},
 						},
-					},
-				],
-			},
-			claims: [forgedClaim],
-			assumptions: [operationAssumption(), externalAssumption()],
-		});
+					],
+				},
+				claims: [forgedClaim],
+				assumptions: [operationAssumption(), externalAssumption()],
+			});
 
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.detail).toMatch(expectedDetail);
-		}
-	});
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.detail).toMatch(expectedDetail);
+			}
+		},
+	);
 
 	it('fails closed before duplicate operation refs in a multi-candidate composition', async () => {
 		const compare = validCompare();

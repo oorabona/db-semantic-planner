@@ -88,12 +88,13 @@ describe('FEAT-134 named parameters — grammar and AST', () => {
 		['upsert-from limit', 'upsert into users on id from incoming limit :limit'],
 	] as const;
 
-	it.each(
-		acceptedValuePositions,
-	)('accepts NamedParam in %s', (_label, input) => {
-		const result = parseCst(input);
-		expect(result.errors).toHaveLength(0);
-	});
+	it.each(acceptedValuePositions)(
+		'accepts NamedParam in %s',
+		(_label, input) => {
+			const result = parseCst(input);
+			expect(result.errors).toHaveLength(0);
+		},
+	);
 
 	it.each([
 		['table name', ':table | select id'],

@@ -475,33 +475,36 @@ describe('PostgreSQL transition equivalence', () => {
 			'transaction',
 			(ctx: ObservationContext) => ({ ...ctx, transaction: 'tx:other' }),
 		],
-	] as const)('does not consume deparse evidence from a different %s', (_field, mutate) => {
-		const equivalence = createPgEquivalenceCapability();
-		const left = portable('active');
-		const right = sqlExpression("'active'::text");
-		const mismatchedProofContext = mutate(proofObservationContext);
-		const request = columnDeparseRequest(left, right);
+	] as const)(
+		'does not consume deparse evidence from a different %s',
+		(_field, mutate) => {
+			const equivalence = createPgEquivalenceCapability();
+			const left = portable('active');
+			const right = sqlExpression("'active'::text");
+			const mismatchedProofContext = mutate(proofObservationContext);
+			const request = columnDeparseRequest(left, right);
 
-		const result = equivalence.compareExpression(
-			left,
-			right,
-			'scalar',
-			withDeparseRequest(
-				{
-					...proofEquivalenceContext,
-					proofObservationContext: mismatchedProofContext,
-				},
-				request,
-			),
-			evidenceView([
-				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+			const result = equivalence.compareExpression(
+				left,
+				right,
+				'scalar',
+				withDeparseRequest(
+					{
+						...proofEquivalenceContext,
+						proofObservationContext: mismatchedProofContext,
+					},
 					request,
-				}),
-			]),
-		);
+				),
+				evidenceView([
+					deparseEvidence(left, right, "'active'::text", "'active'::text", {
+						request,
+					}),
+				]),
+			);
 
-		expect(result.kind).toBe('unknown');
-	});
+			expect(result.kind).toBe('unknown');
+		},
+	);
 
 	it('does not use sibling column deparse evidence for a bound comparison target', () => {
 		const equivalence = createPgEquivalenceCapability();

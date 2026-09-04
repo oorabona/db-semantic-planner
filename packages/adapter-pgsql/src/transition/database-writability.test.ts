@@ -27,16 +27,19 @@ describe('PostgreSQL database writability classification', () => {
 				transaction_read_only: 'on',
 			},
 		],
-	] as const)('%s has the single database-read-only outcome', async (_name, row) => {
-		await expect(
-			classifyPgDatabaseWritability(executor(row)),
-		).resolves.toMatchObject({
-			kind: 'database-read-only',
-		});
-		await expect(assertPgDatabaseWritable(executor(row))).rejects.toSatisfy(
-			isPgDatabaseReadOnlyError,
-		);
-	});
+	] as const)(
+		'%s has the single database-read-only outcome',
+		async (_name, row) => {
+			await expect(
+				classifyPgDatabaseWritability(executor(row)),
+			).resolves.toMatchObject({
+				kind: 'database-read-only',
+			});
+			await expect(assertPgDatabaseWritable(executor(row))).rejects.toSatisfy(
+				isPgDatabaseReadOnlyError,
+			);
+		},
+	);
 
 	it('fails closed when PostgreSQL does not provide a readable writability fact', async () => {
 		await expect(

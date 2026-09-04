@@ -2763,39 +2763,39 @@ describe('createApplier', () => {
 		expect(observed).toEqual([]);
 	});
 
-	it.each([
-		'refuted',
-		'undischarged',
-	] as const)('diagnoses a minted plan with a %s required claim before acquiring a lease', async (conclusion) => {
-		const rt = runtime(() => undefined);
-		const registry = createPackRegistry([
-			{
-				rules: [],
-				operationSemantics: [rt],
-				issuer: {
-					artifact: operationArtifact,
-					execute: async () => evidence(),
+	it.each(['refuted', 'undischarged'] as const)(
+		'diagnoses a minted plan with a %s required claim before acquiring a lease',
+		async (conclusion) => {
+			const rt = runtime(() => undefined);
+			const registry = createPackRegistry([
+				{
+					rules: [],
+					operationSemantics: [rt],
+					issuer: {
+						artifact: operationArtifact,
+						execute: async () => evidence(),
+					},
 				},
-			},
-		]);
-		const forgedClaim = claimWithConclusion(conclusion);
-		const tampered = planWithStep(
-			{ requiredClaims: [forgedClaim.id] },
-			{ claims: [forgedClaim] },
-		);
+			]);
+			const forgedClaim = claimWithConclusion(conclusion);
+			const tampered = planWithStep(
+				{ requiredClaims: [forgedClaim.id] },
+				{ claims: [forgedClaim] },
+			);
 
-		await expect(
-			createApplier(registry, persister).apply(
-				{ plan: tampered, assessment: assessment() },
-				acceptsOperationPolicy(),
-				executionTarget(),
-			),
-		).rejects.toThrow(
-			/internal error: minted proven plan violated relational invariants/,
-		);
+			await expect(
+				createApplier(registry, persister).apply(
+					{ plan: tampered, assessment: assessment() },
+					acceptsOperationPolicy(),
+					executionTarget(),
+				),
+			).rejects.toThrow(
+				/internal error: minted proven plan violated relational invariants/,
+			);
 
-		expect(acquisitions).toBe(0);
-	});
+			expect(acquisitions).toBe(0);
+		},
+	);
 
 	it.each([
 		[
@@ -2808,33 +2808,36 @@ describe('createApplier', () => {
 			claimWithConclusion('established', [operationAssumption().id]),
 			/must not assume/,
 		],
-	] as const)('diagnoses a minted plan with a malformed %s required claim before acquiring a lease', async (_label, forgedClaim, expectedDetail) => {
-		const rt = runtime(() => undefined);
-		const registry = createPackRegistry([
-			{
-				rules: [],
-				operationSemantics: [rt],
-				issuer: {
-					artifact: operationArtifact,
-					execute: async () => evidence(),
+	] as const)(
+		'diagnoses a minted plan with a malformed %s required claim before acquiring a lease',
+		async (_label, forgedClaim, expectedDetail) => {
+			const rt = runtime(() => undefined);
+			const registry = createPackRegistry([
+				{
+					rules: [],
+					operationSemantics: [rt],
+					issuer: {
+						artifact: operationArtifact,
+						execute: async () => evidence(),
+					},
 				},
-			},
-		]);
-		const tampered = planWithStep(
-			{ requiredClaims: [forgedClaim.id] },
-			{ claims: [forgedClaim] },
-		);
+			]);
+			const tampered = planWithStep(
+				{ requiredClaims: [forgedClaim.id] },
+				{ claims: [forgedClaim] },
+			);
 
-		await expect(
-			createApplier(registry, persister).apply(
-				{ plan: tampered, assessment: assessment() },
-				acceptsOperationPolicy(),
-				executionTarget(),
-			),
-		).rejects.toThrow(expectedDetail);
+			await expect(
+				createApplier(registry, persister).apply(
+					{ plan: tampered, assessment: assessment() },
+					acceptsOperationPolicy(),
+					executionTarget(),
+				),
+			).rejects.toThrow(expectedDetail);
 
-		expect(acquisitions).toBe(0);
-	});
+			expect(acquisitions).toBe(0);
+		},
+	);
 
 	it('diagnoses a minted plan with a claim citing a missing observation before acquiring a lease', async () => {
 		const rt = runtime(() => undefined);

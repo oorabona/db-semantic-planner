@@ -381,26 +381,29 @@ describe.sequential('unit 13 adoption, release, replacement, and drift (SC-59…
 				);
 			},
 		],
-	] as const)('OBL-CLI10: release refuses a %s marker without touching the managed object', async (_kind, corruptMarker) => {
-		const { pool, database: databaseId, schemas: names } = await fixture();
-		const schema = names[0]!;
-		const name = unique('release_marker');
-		await pool.query(
-			`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer PRIMARY KEY)`,
-		);
-		await adopt(address(schema, databaseId, name));
-		await corruptMarker(schema);
-		await expect(
-			runRelease(name, { db: process.env.DATABASE_URL!, schema }),
-		).resolves.toMatchObject({
-			outcome: 'release-refused',
-			address: address(schema, databaseId, name),
-			refusal: { code: 'ERR-06' },
-		});
-		await expect(
-			pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
-		).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
-	});
+	] as const)(
+		'OBL-CLI10: release refuses a %s marker without touching the managed object',
+		async (_kind, corruptMarker) => {
+			const { pool, database: databaseId, schemas: names } = await fixture();
+			const schema = names[0]!;
+			const name = unique('release_marker');
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(name)} (id integer PRIMARY KEY)`,
+			);
+			await adopt(address(schema, databaseId, name));
+			await corruptMarker(schema);
+			await expect(
+				runRelease(name, { db: process.env.DATABASE_URL!, schema }),
+			).resolves.toMatchObject({
+				outcome: 'release-refused',
+				address: address(schema, databaseId, name),
+				refusal: { code: 'ERR-06' },
+			});
+			await expect(
+				pool.query('SELECT to_regclass($1) AS object', [`${schema}.${name}`]),
+			).resolves.toMatchObject({ rows: [{ object: `${schema}.${name}` }] });
+		},
+	);
 
 	it('OBL-LIFE2: apply refuses substituted and absent persisted adoption material', async () => {
 		for (const [table, mutation] of [

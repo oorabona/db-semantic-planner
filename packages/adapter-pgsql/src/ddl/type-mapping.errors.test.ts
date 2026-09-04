@@ -95,25 +95,27 @@ describe('mapColumnType', () => {
 			['PG_CATALOG.int4', 'SERIAL'],
 			['Pg_Catalog.int8', 'BIGSERIAL'],
 			['"pg_catalog"."int4"', 'SERIAL'],
-		])('recognizes the PostgreSQL integer-family spelling %s', (originalDbType, sql) => {
-			expect(
-				mapColumnType(
-					col({ type: 'integer', originalDbType, autoIncrement: true }),
-				),
-			).toBe(sql);
-		});
+		])(
+			'recognizes the PostgreSQL integer-family spelling %s',
+			(originalDbType, sql) => {
+				expect(
+					mapColumnType(
+						col({ type: 'integer', originalDbType, autoIncrement: true }),
+					),
+				).toBe(sql);
+			},
+		);
 
-		it.each([
-			'"PG_CATALOG".int4',
-			'pg_catalog.integer',
-			'"integer"',
-		])('refuses the non-physical integer-family spelling %s', (originalDbType) => {
-			expect(() =>
-				mapColumnType(
-					col({ type: 'integer', originalDbType, autoIncrement: true }),
-				),
-			).toThrow(AutoIncrementColumnTypeError);
-		});
+		it.each(['"PG_CATALOG".int4', 'pg_catalog.integer', '"integer"'])(
+			'refuses the non-physical integer-family spelling %s',
+			(originalDbType) => {
+				expect(() =>
+					mapColumnType(
+						col({ type: 'integer', originalDbType, autoIncrement: true }),
+					),
+				).toThrow(AutoIncrementColumnTypeError);
+			},
+		);
 
 		it('keeps a tenant integer custom and refuses nullable SERIAL candidates', () => {
 			expect(() =>

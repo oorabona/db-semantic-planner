@@ -213,46 +213,49 @@ describe('SC-15 #481 reinitialize-preflight marker refusals', () => {
 			[PG_LEDGER_SHAPE_VERSION - 1, PG_LEDGER_SHAPE_VERSION + 1],
 		],
 		['unreadable', 'text', ['not-a-version']],
-	] as const)('%s marker refuses without changing its schema', async (_kind, type, versions) => {
-		const schema = uniqueName('reinitialize_marker');
-		schemas.push(schema);
-		await createPreflightSchema(schema);
-		const pool = await getTestPool();
-		await pool.query(
-			`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} (version ${type} NOT NULL)`,
-		);
-		for (const version of versions) {
+	] as const)(
+		'%s marker refuses without changing its schema',
+		async (_kind, type, versions) => {
+			const schema = uniqueName('reinitialize_marker');
+			schemas.push(schema);
+			await createPreflightSchema(schema);
+			const pool = await getTestPool();
 			await pool.query(
-				`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} (version) VALUES ($1)`,
-				[version],
+				`CREATE TABLE ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} (version ${type} NOT NULL)`,
 			);
-		}
+			for (const version of versions) {
+				await pool.query(
+					`INSERT INTO ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} (version) VALUES ($1)`,
+					[version],
+				);
+			}
 
-		const report = await runPreflight([schema]);
-		const refused = report.scopes.find(
-			(scope) => scope.ledger.schema === schema,
-		);
-		expect(refused).toMatchObject({
-			outcome: 'failed',
-			marker: { kind: _kind },
-			refusal: {
-				code: 'reinitialize-preflight-marker-not-current',
-			},
-		});
-		expect(refused?.refusal?.detail).toContain('reinitialize-preflight');
+			const report = await runPreflight([schema]);
+			const refused = report.scopes.find(
+				(scope) => scope.ledger.schema === schema,
+			);
+			expect(refused).toMatchObject({
+				outcome: 'failed',
+				marker: { kind: _kind },
+				refusal: {
+					code: 'reinitialize-preflight-marker-not-current',
+				},
+			});
+			expect(refused?.refusal?.detail).toContain('reinitialize-preflight');
 
-		const unchanged = await pool.query<{ version: string }>(
-			`SELECT version::text AS version FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} ORDER BY version`,
-		);
-		expect(unchanged.rows.map((row) => row.version)).toEqual(
-			versions.map(String).sort(),
-		);
-		const ledger = await pool.query<{ exists: boolean }>(
-			'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
-			[`${quoteIdent(schema)}.${quoteIdent('dbsp_ledger_event')}`],
-		);
-		expect(ledger.rows[0]?.exists).toBe(false);
-	});
+			const unchanged = await pool.query<{ version: string }>(
+				`SELECT version::text AS version FROM ${quoteIdent(schema)}.${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} ORDER BY version`,
+			);
+			expect(unchanged.rows.map((row) => row.version)).toEqual(
+				versions.map(String).sort(),
+			);
+			const ledger = await pool.query<{ exists: boolean }>(
+				'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+				[`${quoteIdent(schema)}.${quoteIdent('dbsp_ledger_event')}`],
+			);
+			expect(ledger.rows[0]?.exists).toBe(false);
+		},
+	);
 });
 
 describe('SC-15a #481 pre-existing ledger-shape admission', () => {
@@ -519,51 +522,49 @@ describe('SC-17 #481 reinitialize-preflight interruption matrix', () => {
 		expect(exit).toEqual({ code: 0, signal: null });
 	}
 
-	it.each([
-		'archive',
-		'create',
-		'grants',
-		'marker',
-		'output',
-	] as const)('keeps a current marker and recovers after kill at %s', async (checkpoint) => {
-		const schema = uniqueName(`reinitialize_kill_${checkpoint}`);
-		schemas.push(schema);
-		await prepareInterruptedLedger(schema);
-		const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-kill-'));
-		directories.push(directory);
-		const out = join(directory, 'adoption.json');
-		const child = spawnCheckpointChild(
-			fileURLToPath(
-				new URL(
-					'./transition-reinitialize-preflight-child.ts',
-					import.meta.url,
+	it.each(['archive', 'create', 'grants', 'marker', 'output'] as const)(
+		'keeps a current marker and recovers after kill at %s',
+		async (checkpoint) => {
+			const schema = uniqueName(`reinitialize_kill_${checkpoint}`);
+			schemas.push(schema);
+			await prepareInterruptedLedger(schema);
+			const directory = await mkdtemp(join(tmpdir(), 'dbsp-preflight-kill-'));
+			directories.push(directory);
+			const out = join(directory, 'adoption.json');
+			const child = spawnCheckpointChild(
+				fileURLToPath(
+					new URL(
+						'./transition-reinitialize-preflight-child.ts',
+						import.meta.url,
+					),
 				),
-			),
-			{ args: [schema, out], env: process.env },
-		);
+				{ args: [schema, out], env: process.env },
+			);
 
-		await killAt(child, checkpoint);
-		if (child.process.pid === undefined)
-			throw new Error('checkpoint child has no pid');
-		await terminateReinitializePreflightChildBackends(child.process.pid);
-		await expect(stat(out)).rejects.toMatchObject({ code: 'ENOENT' });
-		expect(await markerVersions(schema)).toEqual([1]);
+			await killAt(child, checkpoint);
+			if (child.process.pid === undefined)
+				throw new Error('checkpoint child has no pid');
+			await terminateReinitializePreflightChildBackends(child.process.pid);
+			await expect(stat(out)).rejects.toMatchObject({ code: 'ENOENT' });
+			expect(await markerVersions(schema)).toEqual([1]);
 
-		const rerun = spawnCheckpointChild(
-			fileURLToPath(
-				new URL(
-					'./transition-reinitialize-preflight-child.ts',
-					import.meta.url,
+			const rerun = spawnCheckpointChild(
+				fileURLToPath(
+					new URL(
+						'./transition-reinitialize-preflight-child.ts',
+						import.meta.url,
+					),
 				),
-			),
-			{ args: [schema, out], env: process.env },
-		);
-		await complete(rerun, checkpoint === 'output' ? ['output'] : checkpoints);
-		expect(await markerVersions(schema)).toEqual([1]);
-		expect(JSON.parse(await readFile(out, 'utf8'))).toMatchObject({
-			adoptions: [],
-		});
-	}, 90_000);
+				{ args: [schema, out], env: process.env },
+			);
+			await complete(rerun, checkpoint === 'output' ? ['output'] : checkpoints);
+			expect(await markerVersions(schema)).toEqual([1]);
+			expect(JSON.parse(await readFile(out, 'utf8'))).toMatchObject({
+				adoptions: [],
+			});
+		},
+		90_000,
+	);
 });
 
 describe('SC-18 #481 greenfield reinitialize-preflight', () => {

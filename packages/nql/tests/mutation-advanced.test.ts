@@ -718,13 +718,16 @@ describe('F17: read binding references across mutations', () => {
 			'aliased/computed/aggregate columns',
 			'users | select sum(id) as total | bind sums\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (sums) | select id',
 		],
-	])('rejects unsupported read-binding snapshot shape: %s (#186)', (_label, bindName, reason, input) => {
-		expect(() => compileNql(input, snapshotSchema)).toThrow(
-			new RegExp(
-				`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
-			),
-		);
-	});
+	])(
+		'rejects unsupported read-binding snapshot shape: %s (#186)',
+		(_label, bindName, reason, input) => {
+			expect(() => compileNql(input, snapshotSchema)).toThrow(
+				new RegExp(
+					`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
+				),
+			);
+		},
+	);
 
 	it('snapshots a count(*) aggregate-column read binding after an intervening mutation (#213 B3)', () => {
 		const result = compile(

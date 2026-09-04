@@ -56,16 +56,19 @@ describe('resolveOutputReadHandling', () => {
 				aggregate: 'json_agg',
 			} satisfies OutputValueShape,
 		],
-	])('emits nestedTransform for %s model columns with js read handling', (_name, shape) => {
-		expect(
-			resolveOutputReadHandling(descriptor(modelColumn('bigint'), shape)),
-		).toEqual({
-			kind: 'nestedTransform',
-			table: 'users',
-			column: 'id',
-			js: 'bigint',
-		});
-	});
+	])(
+		'emits nestedTransform for %s model columns with js read handling',
+		(_name, shape) => {
+			expect(
+				resolveOutputReadHandling(descriptor(modelColumn('bigint'), shape)),
+			).toEqual({
+				kind: 'nestedTransform',
+				table: 'users',
+				column: 'id',
+				js: 'bigint',
+			});
+		},
+	);
 
 	it.each([
 		[
@@ -117,39 +120,39 @@ describe('resolveOutputReadHandling', () => {
 		).toEqual({ kind: 'none' });
 	});
 
-	it.each([
-		'number',
-		'string',
-	] as const)('carries js:%s on scalarConvert', (js) => {
-		expect(
-			resolveOutputReadHandling(
-				descriptor(modelColumn(js), { kind: 'scalar', cardinality: 'one' }),
-			),
-		).toEqual({
-			kind: 'scalarConvert',
-			table: 'users',
-			column: 'id',
-			js,
-		});
-	});
+	it.each(['number', 'string'] as const)(
+		'carries js:%s on scalarConvert',
+		(js) => {
+			expect(
+				resolveOutputReadHandling(
+					descriptor(modelColumn(js), { kind: 'scalar', cardinality: 'one' }),
+				),
+			).toEqual({
+				kind: 'scalarConvert',
+				table: 'users',
+				column: 'id',
+				js,
+			});
+		},
+	);
 
-	it.each([
-		'number',
-		'string',
-	] as const)('carries js:%s on nestedTransform', (js) => {
-		expect(
-			resolveOutputReadHandling(
-				descriptor(modelColumn(js), {
-					kind: 'array',
-					cardinality: 'many',
-					aggregate: 'array_agg',
-				}),
-			),
-		).toEqual({
-			kind: 'nestedTransform',
-			table: 'users',
-			column: 'id',
-			js,
-		});
-	});
+	it.each(['number', 'string'] as const)(
+		'carries js:%s on nestedTransform',
+		(js) => {
+			expect(
+				resolveOutputReadHandling(
+					descriptor(modelColumn(js), {
+						kind: 'array',
+						cardinality: 'many',
+						aggregate: 'array_agg',
+					}),
+				),
+			).toEqual({
+				kind: 'nestedTransform',
+				table: 'users',
+				column: 'id',
+				js,
+			});
+		},
+	);
 });

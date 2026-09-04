@@ -175,26 +175,26 @@ describe('reconcile durable outcome ordering', () => {
 		expect(classifyReconcileFailure(error, stage)).toBe(cause);
 	});
 
-	it.each([
-		'transport-ambiguous',
-		'no-open-claim',
-	] as const)('never treats %s as completed recovery', (outcome) => {
-		expect(
-			unresolvedRecoveryDetail([
-				{
-					address: {
-						scope: 'schema',
-						engine: 'postgresql',
-						database: 'app',
-						schema: 'tenant',
-						kind: 'table',
-						name: 'accounts',
+	it.each(['transport-ambiguous', 'no-open-claim'] as const)(
+		'never treats %s as completed recovery',
+		(outcome) => {
+			expect(
+				unresolvedRecoveryDetail([
+					{
+						address: {
+							scope: 'schema',
+							engine: 'postgresql',
+							database: 'app',
+							schema: 'tenant',
+							kind: 'table',
+							name: 'accounts',
+						},
+						outcome,
 					},
-					outcome,
-				},
-			]),
-		).toContain(outcome);
-	});
+				]),
+			).toContain(outcome);
+		},
+	);
 
 	it('keeps documented generator scopes and adds every durable attempt', () => {
 		const executionId = 'dbsp.generator.execution.attempt-2';
@@ -245,38 +245,41 @@ describe('reconcile durable outcome ordering', () => {
 	it.each([
 		'appended-outcome-resolution',
 		'already-appended-outcome-resolution',
-	] as const)('keeps an %s indeterminate resolution unresolved', async (appendKind) => {
-		resetFixture();
-		fixture.recovery.mockResolvedValue({
-			kind: 'outcome-recovery-appended',
-			classification: {
-				resolution: {
-					eventKind: 'indeterminate',
-					reason: 'live state remains unknown',
+	] as const)(
+		'keeps an %s indeterminate resolution unresolved',
+		async (appendKind) => {
+			resetFixture();
+			fixture.recovery.mockResolvedValue({
+				kind: 'outcome-recovery-appended',
+				classification: {
+					resolution: {
+						eventKind: 'indeterminate',
+						reason: 'live state remains unknown',
+					},
 				},
-			},
-			append: { kind: appendKind },
-		});
-		const result = await runReconcile(
-			'run:generator',
-			{ db: 'postgres://fixture' },
-			{} as never,
-		);
-		expect(result).toMatchObject({
-			outcome: 'reconcile-unresolved',
-			recovery: [
-				{
-					address: { name: 'interrupted_generator' },
-					outcome: 'indeterminate-appended',
-					reason: 'live state remains unknown',
-				},
-			],
-		});
-		expect(result.outcome === 'reconcile-completed' ? 0 : 1).toBe(1);
-		expect(formatReconcileHuman(result)).toContain(
-			'interrupted_generator: indeterminate-appended: live state remains unknown',
-		);
-	});
+				append: { kind: appendKind },
+			});
+			const result = await runReconcile(
+				'run:generator',
+				{ db: 'postgres://fixture' },
+				{} as never,
+			);
+			expect(result).toMatchObject({
+				outcome: 'reconcile-unresolved',
+				recovery: [
+					{
+						address: { name: 'interrupted_generator' },
+						outcome: 'indeterminate-appended',
+						reason: 'live state remains unknown',
+					},
+				],
+			});
+			expect(result.outcome === 'reconcile-completed' ? 0 : 1).toBe(1);
+			expect(formatReconcileHuman(result)).toContain(
+				'interrupted_generator: indeterminate-appended: live state remains unknown',
+			);
+		},
+	);
 
 	it.each([
 		[
@@ -342,20 +345,27 @@ describe('reconcile durable outcome ordering', () => {
 				} as never),
 			'ledger marker future',
 		],
-	] as const)('OBL-REC1: reconcile refuses a %s group before recovery append', async (_name, arrange, detail) => {
-		resetFixture();
-		arrange();
-		await expect(
-			runReconcile('run:generator', { db: 'postgres://fixture' }, {} as never),
-		).resolves.toMatchObject({
-			outcome:
-				_name === 'stale ledger home'
-					? 'reconcile-unresolved'
-					: 'reconcile-claim-selection-unavailable',
-			detail: expect.stringContaining(detail),
-		});
-		expect(fixture.recovery).not.toHaveBeenCalled();
-	});
+	] as const)(
+		'OBL-REC1: reconcile refuses a %s group before recovery append',
+		async (_name, arrange, detail) => {
+			resetFixture();
+			arrange();
+			await expect(
+				runReconcile(
+					'run:generator',
+					{ db: 'postgres://fixture' },
+					{} as never,
+				),
+			).resolves.toMatchObject({
+				outcome:
+					_name === 'stale ledger home'
+						? 'reconcile-unresolved'
+						: 'reconcile-claim-selection-unavailable',
+				detail: expect.stringContaining(detail),
+			});
+			expect(fixture.recovery).not.toHaveBeenCalled();
+		},
+	);
 
 	it('OBL-CLI10: recover returns the typed read-only refusal before marker selection', async () => {
 		resetFixture();

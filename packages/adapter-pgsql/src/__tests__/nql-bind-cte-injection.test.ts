@@ -1249,39 +1249,39 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql ?? '').not.toContain(payload);
 	});
 
-	it.each([
-		'boolean or true',
-		'text UNION SELECT',
-	])('rejects runtime binding cast type "%s" via the adapter db-type validator', (payload) => {
-		const bundle: CompiledNqlQuery = {
-			query: {
-				type: 'select',
-				from: 'ids',
-				select: {
-					type: 'fields',
-					fields: ['id'],
-				},
-			},
-			runtimeBindings: new Map([
-				[
-					'ids',
-					{
-						columns: ['id'],
-						rows: [{ id: 1 }],
+	it.each(['boolean or true', 'text UNION SELECT'])(
+		'rejects runtime binding cast type "%s" via the adapter db-type validator',
+		(payload) => {
+			const bundle: CompiledNqlQuery = {
+				query: {
+					type: 'select',
+					from: 'ids',
+					select: {
+						type: 'fields',
+						fields: ['id'],
 					},
-				],
-			]),
-			mutationBindings: new Map([['ids', idsMutation]]),
-		};
+				},
+				runtimeBindings: new Map([
+					[
+						'ids',
+						{
+							columns: ['id'],
+							rows: [{ id: 1 }],
+						},
+					],
+				]),
+				mutationBindings: new Map([['ids', idsMutation]]),
+			};
 
-		const { error, sql } = withOriginalDbType('items', 'id', payload, () =>
-			tryCompileNqlBundle(bundle),
-		);
+			const { error, sql } = withOriginalDbType('items', 'id', payload, () =>
+				tryCompileNqlBundle(bundle),
+			);
 
-		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('Unsafe database type name');
-		expect(sql ?? '').not.toContain(payload);
-	});
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain('Unsafe database type name');
+			expect(sql ?? '').not.toContain(payload);
+		},
+	);
 
 	it.each([
 		['double precision', 1.5, 'double precision'],
@@ -1293,39 +1293,42 @@ describe('NQL bind CTE identifier injection defense', () => {
 			'timestamp with time zone',
 		],
 		['integer[]', [1, 2, 3], 'integer[]'],
-	])('accepts legitimate runtime binding cast type "%s"', (typeName, value, castType) => {
-		const bundle: CompiledNqlQuery = {
-			query: {
-				type: 'select',
-				from: 'ids',
-				select: {
-					type: 'fields',
-					fields: ['id'],
-				},
-			},
-			runtimeBindings: new Map([
-				[
-					'ids',
-					{
-						columns: ['id'],
-						rows: [{ id: value }],
+	])(
+		'accepts legitimate runtime binding cast type "%s"',
+		(typeName, value, castType) => {
+			const bundle: CompiledNqlQuery = {
+				query: {
+					type: 'select',
+					from: 'ids',
+					select: {
+						type: 'fields',
+						fields: ['id'],
 					},
-				],
-			]),
-			mutationBindings: new Map([['ids', idsMutation]]),
-		};
+				},
+				runtimeBindings: new Map([
+					[
+						'ids',
+						{
+							columns: ['id'],
+							rows: [{ id: value }],
+						},
+					],
+				]),
+				mutationBindings: new Map([['ids', idsMutation]]),
+			};
 
-		const { error, params, sql } = withOriginalDbType(
-			'items',
-			'id',
-			typeName,
-			() => tryCompileNqlBundle(bundle),
-		);
+			const { error, params, sql } = withOriginalDbType(
+				'items',
+				'id',
+				typeName,
+				() => tryCompileNqlBundle(bundle),
+			);
 
-		expect(error).toBeUndefined();
-		expect(sql).toContain(`$1::${castType}`);
-		expect(params).toEqual([value]);
-	});
+			expect(error).toBeUndefined();
+			expect(sql).toContain(`$1::${castType}`);
+			expect(params).toEqual([value]);
+		},
+	);
 
 	it('fails loud before emitting over-cap runtime binding VALUES parameters', () => {
 		const rows = Array.from({ length: 32_001 }, (_, id) => ({ id }));

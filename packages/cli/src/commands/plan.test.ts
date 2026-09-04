@@ -251,18 +251,21 @@ describe('dbsp plan outcomes', () => {
 				},
 			},
 		],
-	] as const)('%s is non-persistent and reports a typed refusal', async (_name, compare, prove) => {
-		const { deps, result } = await run(compare, prove);
-		expect(result.persisted).toBe(false);
-		expect(result.runId).toBeNull();
-		expect(result.planDigest).toBeNull();
-		expect(deps.persist).not.toHaveBeenCalled();
-		expect(['blocked', 'inapplicable']).toContain(result.proveKind);
-		expect(exitCodeForPlanResult(result)).toBe(1);
-		expect(formatPlanHuman(result, false)).toContain(
-			'No durable plan was created.',
-		);
-	});
+	] as const)(
+		'%s is non-persistent and reports a typed refusal',
+		async (_name, compare, prove) => {
+			const { deps, result } = await run(compare, prove);
+			expect(result.persisted).toBe(false);
+			expect(result.runId).toBeNull();
+			expect(result.planDigest).toBeNull();
+			expect(deps.persist).not.toHaveBeenCalled();
+			expect(['blocked', 'inapplicable']).toContain(result.proveKind);
+			expect(exitCodeForPlanResult(result)).toBe(1);
+			expect(formatPlanHuman(result, false)).toContain(
+				'No durable plan was created.',
+			);
+		},
+	);
 
 	it('no-drift exits without a run or plan row and says nothing was persisted', async () => {
 		const { deps, result } = await run(
@@ -484,74 +487,77 @@ describe('dbsp plan outcomes', () => {
 			{ schema: 'public', table: 'users', logicalId: 'logical.table.users' },
 			true,
 		],
-	] as const)('mutation: resolving an ineligible %s namespace before the typed contract refusal makes plan fail uncaught (dry-run: %s)', async (operationName, operationRef, operationKind, payload, dryRun) => {
-		const plan = provenPlan({
-			ref: operationRef,
-			name: operationName,
-			operationKind,
-			payload,
-		});
-		const deps = dependencies(
-			{ kind: 'transitions', candidates: [], obligations: [] },
-			{ kind: 'proven', plan, assessment: applicable },
-		);
-		const release = vi.fn();
-		const client = {
-			release,
-			query: vi.fn(async (sql: string) => {
-				if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
-				if (sql === 'SHOW client_encoding')
-					return { rows: [{ client_encoding: 'UTF8' }] };
-				if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
-					return { rows: [{ system_identifier: 'test-system' }] };
-				if (sql.startsWith('SELECT d.oid::text'))
-					return { rows: [{ database_oid: '1' }] };
-				if (sql.startsWith('SELECT n.nspname'))
-					return { rows: [{ name: 'public', oid: '2200' }] };
-				if (sql.startsWith("SELECT current_setting('search_path')"))
-					return {
-						rows: [
-							{
-								search_path: 'public',
-								client_encoding: 'UTF8',
-								timezone: 'UTC',
-							},
-						],
-					};
-				throw new Error(`unexpected query ${sql}`);
-			}),
-		};
-		const pool = { connect: vi.fn().mockResolvedValue(client) };
-		deps.createDbConnection.mockResolvedValue({
-			pool: pool as never,
-			release: vi.fn().mockResolvedValue(undefined),
-		});
-		deps.buildExecutionContract.mockImplementation(buildPgExecutionContract);
-		const result = await runPlan(
-			{
-				db: 'postgres://localhost/test',
-				schemaFile: 'schema.ts',
-				dryRun,
-			},
-			deps,
-		);
+	] as const)(
+		'mutation: resolving an ineligible %s namespace before the typed contract refusal makes plan fail uncaught (dry-run: %s)',
+		async (operationName, operationRef, operationKind, payload, dryRun) => {
+			const plan = provenPlan({
+				ref: operationRef,
+				name: operationName,
+				operationKind,
+				payload,
+			});
+			const deps = dependencies(
+				{ kind: 'transitions', candidates: [], obligations: [] },
+				{ kind: 'proven', plan, assessment: applicable },
+			);
+			const release = vi.fn();
+			const client = {
+				release,
+				query: vi.fn(async (sql: string) => {
+					if (sql === "SET client_encoding TO 'UTF8'") return { rows: [] };
+					if (sql === 'SHOW client_encoding')
+						return { rows: [{ client_encoding: 'UTF8' }] };
+					if (sql.startsWith('SELECT (pg_catalog.pg_control_system())'))
+						return { rows: [{ system_identifier: 'test-system' }] };
+					if (sql.startsWith('SELECT d.oid::text'))
+						return { rows: [{ database_oid: '1' }] };
+					if (sql.startsWith('SELECT n.nspname'))
+						return { rows: [{ name: 'public', oid: '2200' }] };
+					if (sql.startsWith("SELECT current_setting('search_path')"))
+						return {
+							rows: [
+								{
+									search_path: 'public',
+									client_encoding: 'UTF8',
+									timezone: 'UTC',
+								},
+							],
+						};
+					throw new Error(`unexpected query ${sql}`);
+				}),
+			};
+			const pool = { connect: vi.fn().mockResolvedValue(client) };
+			deps.createDbConnection.mockResolvedValue({
+				pool: pool as never,
+				release: vi.fn().mockResolvedValue(undefined),
+			});
+			deps.buildExecutionContract.mockImplementation(buildPgExecutionContract);
+			const result = await runPlan(
+				{
+					db: 'postgres://localhost/test',
+					schemaFile: 'schema.ts',
+					dryRun,
+				},
+				deps,
+			);
 
-		expect(result).toMatchObject({
-			proveKind: 'blocked',
-			persisted: false,
-			runId: null,
-			planDigest: null,
-		});
-		expect(result.assessment.reasons[0]).toMatchObject({
-			code: 'unsupported-transition',
-			detail: expect.stringContaining(operationName),
-		});
-		expect(formatPlanHuman(result, dryRun)).toContain(operationName);
-		expect(exitCodeForPlanResult(result)).toBe(1);
-		expect(deps.planner.render).not.toHaveBeenCalled();
-		expect(deps.persist).not.toHaveBeenCalled();
-		expect(release).toHaveBeenCalledOnce();
-	});
+			expect(result).toMatchObject({
+				proveKind: 'blocked',
+				persisted: false,
+				runId: null,
+				planDigest: null,
+			});
+			expect(result.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+				detail: expect.stringContaining(operationName),
+			});
+			expect(formatPlanHuman(result, dryRun)).toContain(operationName);
+			expect(exitCodeForPlanResult(result)).toBe(1);
+			expect(deps.planner.render).not.toHaveBeenCalled();
+			expect(deps.persist).not.toHaveBeenCalled();
+			expect(release).toHaveBeenCalledOnce();
+		},
+	);
 
 	it('a rendering failure happens before persistence and leaves no run behind', async () => {
 		const deps = dependencies(

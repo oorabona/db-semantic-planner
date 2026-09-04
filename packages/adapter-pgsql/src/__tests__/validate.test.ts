@@ -103,15 +103,15 @@ describe('validateCheckExpression', () => {
 		).not.toThrow();
 	});
 
-	it.each([
-		'U',
-		'u',
-	])('rejects %s& Unicode-escape string literals after scanning their inert contents', (prefix) => {
-		const sql = String.raw`CHECK (note = ${prefix}&'a;--\005C')`;
-		expect(() => validateCheckExpression(sql, 'test check')).toThrow(
-			`Unsafe SQL expression in test check: contains a Unicode-escape string literal (U&'...'), which PostgreSQL accepts only when standard_conforming_strings is enabled; use an ordinary single-quoted literal or E'...' instead. Value: "${sql}"`,
-		);
-	});
+	it.each(['U', 'u'])(
+		'rejects %s& Unicode-escape string literals after scanning their inert contents',
+		(prefix) => {
+			const sql = String.raw`CHECK (note = ${prefix}&'a;--\005C')`;
+			expect(() => validateCheckExpression(sql, 'test check')).toThrow(
+				`Unsafe SQL expression in test check: contains a Unicode-escape string literal (U&'...'), which PostgreSQL accepts only when standard_conforming_strings is enabled; use an ordinary single-quoted literal or E'...' instead. Value: "${sql}"`,
+			);
+		},
+	);
 
 	it('accepts escape string literals with doubled quotes', () => {
 		expect(() =>
