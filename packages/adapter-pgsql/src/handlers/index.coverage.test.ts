@@ -12,7 +12,8 @@
  * - clearHandlers
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { compilePlan } from '../compiler.js';
 import {
 	clearHandlers,
 	createCompilerState,
@@ -31,6 +32,7 @@ import {
 	registerIncludeHandler,
 	registerWhereHandler,
 } from './index.js';
+import * as whereHandlerModule from './where/index.js';
 
 // Force handler registration upfront by triggering a dispatch
 // (lazy init in the module won't populate until first dispatch)
@@ -712,6 +714,95 @@ describe('handlers/index - Coverage Tests', () => {
 			ensureRegistered();
 			// WHERE handlers should be re-populated
 			expect(getRegistryStats().where).toBeGreaterThan(0);
+		});
+
+		it('re-registers expression handlers through compilePlan after clearing', () => {
+			const plan = {
+				rootTable: 'orders',
+				decisions: [
+					{
+						type: 'selectFunction',
+						function: 'count',
+						column: '*',
+						alias: 'total',
+					},
+				],
+			};
+
+			clearHandlers();
+			try {
+				compilePlan(plan);
+				clearHandlers();
+				expect(() => compilePlan(plan)).not.toThrow();
+			} finally {
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
+		it('re-registers include handlers through compilePlan after clearing', () => {
+			const plan = {
+				rootTable: 'posts',
+				decisions: [
+					{ type: 'select', column: '*', table: 'posts' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'author',
+						targetTable: 'authors',
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						columns: ['id', 'name'],
+					},
+				],
+			};
+
+			clearHandlers();
+			try {
+				compilePlan(plan);
+				clearHandlers();
+				expect(() => compilePlan(plan)).not.toThrow();
+			} finally {
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
+		it('rolls back failed WHERE initialization and retries it', () => {
+			const plan = {
+				rootTable: 'users',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{ type: 'where', column: 'active', operator: '=', value: true },
+				],
+			};
+			const partiallyRegisteredHandler = {
+				operators: ['__partial_where_registration__'],
+				compile: () => ({}),
+			};
+
+			clearHandlers();
+			try {
+				const beforeAttempt = getRegisteredOperators();
+				vi.spyOn(
+					whereHandlerModule,
+					'registerAllWhereHandlers',
+				).mockImplementationOnce(() => {
+					registerWhereHandler(partiallyRegisteredHandler as any);
+					throw new Error('simulated WHERE initialization failure');
+				});
+
+				expect(() => compilePlan(plan)).toThrow(
+					/simulated WHERE initialization failure/,
+				);
+				expect(getRegisteredOperators()).toEqual(beforeAttempt);
+				expect(() => compilePlan(plan)).not.toThrow();
+			} finally {
+				vi.restoreAllMocks();
+				clearHandlers();
+				ensureRegistered();
+			}
 		});
 	});
 

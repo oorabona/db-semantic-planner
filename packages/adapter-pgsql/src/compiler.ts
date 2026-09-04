@@ -65,14 +65,14 @@ import {
 	compileExpressionIntent,
 	registerWhereDispatcherFactory,
 } from './handlers/expression/custom.js';
-import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { bindParameter } from './handlers/expression/param-value.js';
 import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
-import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
 import {
 	createWhereDispatcher,
+	ensureExpressionHandlersRegistered,
+	ensureIncludeHandlersRegistered,
 	getExpressionHandler,
 	getIncludeHandler,
 	getNqlSafeExpressionHandler,
@@ -736,23 +736,6 @@ export interface CompilerOptions {
 	readonly model?: import('@dbsp/types').ModelIR;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
-}
-
-/**
- * Compile a PlanReport to SQL via PostgreSQL AST
- */
-let includeHandlersInitialized = false;
-function ensureIncludeHandlersRegistered(): void {
-	if (includeHandlersInitialized) return;
-	includeHandlersInitialized = true;
-	registerAllIncludeHandlers();
-}
-
-let expressionHandlersInitialized = false;
-function ensureExpressionHandlersRegistered(): void {
-	if (expressionHandlersInitialized) return;
-	expressionHandlersInitialized = true;
-	registerAllExpressionHandlers();
 }
 
 export class PlanCompiler {
