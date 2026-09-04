@@ -55,7 +55,7 @@ import { createTypeCastParamRef } from '../param-ref.js';
  * Build RETURNING clause AST nodes from column names.
  * Shared across INSERT, UPDATE, DELETE, UPSERT, and INSERT FROM.
  */
-export function buildReturningList(
+export function buildReturningExprs(
 	columns: readonly string[] | undefined,
 	tableRef: string,
 	ctx: CompilerContext,
@@ -233,7 +233,7 @@ export function compileInsert(
 	);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
 		ctx,
@@ -249,7 +249,7 @@ export function compileInsert(
 		naming,
 	};
 	if (ctx.schema) options.schema = ctx.schema;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return insertStmt(options);
 }
@@ -330,7 +330,7 @@ export function compileUnnestInsert(
 	};
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
 		ctx,
@@ -345,7 +345,7 @@ export function compileUnnestInsert(
 		naming,
 	};
 	if (ctx.schema) options.schema = ctx.schema;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return insertStmt(options);
 }
@@ -396,7 +396,7 @@ export function compileUpdate(
 	}
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		tableAlias,
 		ctx,
@@ -411,7 +411,7 @@ export function compileUpdate(
 	};
 	if (ctx.schema) options.schema = ctx.schema;
 	if (whereClause) options.where = whereClause;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return updateStmt(options);
 }
@@ -537,7 +537,7 @@ export function compileUnnestUpdate(
 		: matchWhere;
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
 		ctx,
@@ -553,7 +553,7 @@ export function compileUnnestUpdate(
 		where: whereClause,
 	};
 	if (ctx.schema) options.schema = ctx.schema;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return updateStmt(options);
 }
@@ -588,7 +588,7 @@ export function compileDelete(
 	}
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		tableAlias,
 		ctx,
@@ -602,7 +602,7 @@ export function compileDelete(
 	};
 	if (ctx.schema) options.schema = ctx.schema;
 	if (whereClause) options.where = whereClause;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return deleteStmt(options);
 }
@@ -703,7 +703,7 @@ export function compileInsertFrom(
 	};
 
 	// Build RETURNING clause for INSERT if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		config.targetTable,
 		ctx,
@@ -720,7 +720,7 @@ export function compileInsertFrom(
 	};
 	if (dbColumns) options.columns = dbColumns;
 	if (ctx.schema) options.schema = ctx.schema;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	return insertStmt(options);
 }
@@ -821,7 +821,7 @@ export function compileUpsertFrom(
 	};
 
 	// Build RETURNING clause
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		config.targetTable,
 		ctx,
@@ -867,7 +867,7 @@ export function compileUpsertFrom(
 	};
 	if (dbColumns) options.columns = dbColumns;
 	if (ctx.schema) options.schema = ctx.schema;
-	if (returningList) options.returning = returningList;
+	if (returningExprs) options.returning = returningExprs;
 
 	// Get base InsertStmt and add onConflictClause manually
 	const node = insertStmt(options);

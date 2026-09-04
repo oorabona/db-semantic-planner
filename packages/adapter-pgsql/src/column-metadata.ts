@@ -429,15 +429,15 @@ function finalizeProjections(
 function targetListForAst(ast: Node): readonly unknown[] | undefined {
 	const record = ast as {
 		SelectStmt?: { targetList?: unknown };
-		InsertStmt?: { returningList?: unknown };
-		UpdateStmt?: { returningList?: unknown };
-		DeleteStmt?: { returningList?: unknown };
+		InsertStmt?: { returningClause?: { exprs?: unknown } };
+		UpdateStmt?: { returningClause?: { exprs?: unknown } };
+		DeleteStmt?: { returningClause?: { exprs?: unknown } };
 	};
 	const targetList =
 		record.SelectStmt?.targetList ??
-		record.InsertStmt?.returningList ??
-		record.UpdateStmt?.returningList ??
-		record.DeleteStmt?.returningList;
+		record.InsertStmt?.returningClause?.exprs ??
+		record.UpdateStmt?.returningClause?.exprs ??
+		record.DeleteStmt?.returningClause?.exprs;
 	return Array.isArray(targetList) ? targetList : undefined;
 }
 

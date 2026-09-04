@@ -706,7 +706,7 @@ describe('ast-helpers coverage tests', () => {
 				table: 'users',
 				returning,
 			});
-			expect(result.InsertStmt.returningList).toBe(returning);
+			expect(result.InsertStmt.returningClause?.exprs).toBe(returning);
 		});
 
 		it('insertStmt with naming plugin', () => {
@@ -766,7 +766,7 @@ describe('ast-helpers coverage tests', () => {
 				set: [{ column: 'name', value: stringNode('Bob') }],
 				returning,
 			});
-			expect(result.UpdateStmt.returningList).toBe(returning);
+			expect(result.UpdateStmt.returningClause?.exprs).toBe(returning);
 		});
 
 		it('updateStmt with naming plugin', () => {
@@ -815,7 +815,7 @@ describe('ast-helpers coverage tests', () => {
 				table: 'users',
 				returning,
 			});
-			expect(result.DeleteStmt.returningList).toBe(returning);
+			expect(result.DeleteStmt.returningClause?.exprs).toBe(returning);
 		});
 
 		it('deleteStmt with naming plugin', () => {

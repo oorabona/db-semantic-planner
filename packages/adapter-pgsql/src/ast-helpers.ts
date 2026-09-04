@@ -47,12 +47,12 @@ export { normalizeSQL } from '@dbsp/core';
 // Internal Helpers
 // ============================================================================
 
-function applyReturningList(
-	stmt: { returningList?: Node[] },
+function applyReturningClause(
+	stmt: { returningClause?: { exprs?: Node[] } },
 	returning: Node[] | undefined,
 ): void {
 	if (returning && returning.length > 0) {
-		stmt.returningList = returning;
+		stmt.returningClause = { exprs: returning };
 	}
 }
 
@@ -734,7 +734,7 @@ export function insertStmt(options: InsertOptions): Node {
 		};
 	}
 
-	applyReturningList(stmt, options.returning);
+	applyReturningClause(stmt, options.returning);
 
 	// ON CONFLICT handling would go here (complex, defer for now)
 
@@ -790,7 +790,7 @@ export function updateStmt(options: UpdateOptions): Node {
 		stmt.fromClause = options.from;
 	}
 
-	applyReturningList(stmt, options.returning);
+	applyReturningClause(stmt, options.returning);
 
 	return { UpdateStmt: stmt };
 }
@@ -837,7 +837,7 @@ export function deleteStmt(options: DeleteOptions): Node {
 		stmt.usingClause = options.using;
 	}
 
-	applyReturningList(stmt, options.returning);
+	applyReturningClause(stmt, options.returning);
 
 	return { DeleteStmt: stmt };
 }

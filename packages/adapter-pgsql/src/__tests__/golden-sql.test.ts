@@ -59,15 +59,18 @@ function assertSQLEquivalent(actual: string, expected: string): void {
 	try {
 		const parsedActual = parseSync(actual);
 		const parsedExpected = parseSync(expected);
+		const actualStmts = parsedActual.stmts;
+		const expectedStmts = parsedExpected.stmts;
+		if (!actualStmts || !expectedStmts) {
+			throw new Error('PostgreSQL parser returned no statements');
+		}
 
 		// Both should parse without error
-		expect(parsedActual.stmts).toHaveLength(parsedExpected.stmts.length);
+		expect(actualStmts).toHaveLength(expectedStmts.length);
 
 		// Compare statement types
-		const actualStmtType = Object.keys(parsedActual.stmts[0]?.stmt ?? {})[0];
-		const expectedStmtType = Object.keys(
-			parsedExpected.stmts[0]?.stmt ?? {},
-		)[0];
+		const actualStmtType = Object.keys(actualStmts[0]?.stmt ?? {})[0];
+		const expectedStmtType = Object.keys(expectedStmts[0]?.stmt ?? {})[0];
 		expect(actualStmtType).toBe(expectedStmtType);
 	} catch {
 		// If parsing fails, fall back to normalized string comparison
@@ -405,18 +408,25 @@ describe('Golden SQL: Roundtrip verification', () => {
 		it(`roundtrip: ${expectedSQL.substring(0, 50)}...`, () => {
 			// Parse expected SQL
 			const parsed = parseSync(expectedSQL);
-			expect(parsed.stmts).toHaveLength(1);
+			const parsedStmts = parsed.stmts;
+			if (!parsedStmts)
+				throw new Error('PostgreSQL parser returned no statements');
+			expect(parsedStmts).toHaveLength(1);
 
 			// Deparse back to SQL
 			const reparsedSQL = deparseSync(parsed);
 
 			// Parse again and verify structure matches
 			const reparsed = parseSync(reparsedSQL);
-			expect(reparsed.stmts).toHaveLength(1);
+			const reparsedStmts = reparsed.stmts;
+			if (!reparsedStmts) {
+				throw new Error('PostgreSQL parser returned no statements');
+			}
+			expect(reparsedStmts).toHaveLength(1);
 
 			// Statement types should match
-			const originalType = Object.keys(parsed.stmts[0]?.stmt ?? {})[0];
-			const reparsedType = Object.keys(reparsed.stmts[0]?.stmt ?? {})[0];
+			const originalType = Object.keys(parsedStmts[0]?.stmt ?? {})[0];
+			const reparsedType = Object.keys(reparsedStmts[0]?.stmt ?? {})[0];
 			expect(reparsedType).toBe(originalType);
 		});
 	}

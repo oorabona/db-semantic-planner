@@ -25,6 +25,9 @@ import { parseExpression } from '../raw-expression-parser.js';
  */
 function parseViaLibpg(sql: string): Node {
 	const parsed = parseSync(`SELECT ${sql}`);
+	if (!parsed.stmts) {
+		throw new Error('PostgreSQL parser returned no statements');
+	}
 	const val = (
 		parsed.stmts[0]!.stmt as {
 			SelectStmt: {

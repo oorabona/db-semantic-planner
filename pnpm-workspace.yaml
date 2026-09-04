@@ -48,7 +48,7 @@ catalog:
   '@modelcontextprotocol/sdk': ^1.29.0
   '@monaco-editor/react': ^4.7.0
   '@oclif/table': ^1.0.0
-  '@pgsql/types': 17.6.2
+  '@pgsql/types': 18.0.0
   '@tailwindcss/vite': ^4.3.2
   '@tanstack/react-table': ^8.21.3
   '@tanstack/react-virtual': ^3.14.5
@@ -86,8 +86,8 @@ catalog:
   # reason in the code — a consumer excluded from the range is a consumer
   # forced into a second copy. Raising the major is a breaking change.
   pg: ^8.21.0
-  pgsql-deparser: 17.18.5
-  pgsql-parser: 17.9.17
+  pgsql-deparser: 18.3.6
+  pgsql-parser: 18.2.6
   radix-ui: ^1.6.1
   react: ^19.2.7
   react-dom: ^19.2.7

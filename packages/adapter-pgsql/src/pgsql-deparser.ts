@@ -1093,9 +1093,9 @@ function deparseInsertStmt(node: InsertStmt): string {
 		parts.push(`ON CONFLICT ${deparseOnConflictClause(node.onConflictClause)}`);
 	}
 
-	const returningList = node.returningList ?? [];
-	if (returningList.length > 0) {
-		parts.push(`RETURNING ${returningList.map(nodeToStr).join(', ')}`);
+	const returningExprs = node.returningClause?.exprs ?? [];
+	if (returningExprs.length > 0) {
+		parts.push(`RETURNING ${returningExprs.map(nodeToStr).join(', ')}`);
 	}
 
 	return parts.join(' ');
@@ -1131,9 +1131,9 @@ function deparseUpdateStmt(node: UpdateStmt): string {
 		parts.push(`WHERE ${deparse(node.whereClause)}`);
 	}
 
-	const returningList = node.returningList ?? [];
-	if (returningList.length > 0) {
-		parts.push(`RETURNING ${returningList.map(nodeToStr).join(', ')}`);
+	const returningExprs = node.returningClause?.exprs ?? [];
+	if (returningExprs.length > 0) {
+		parts.push(`RETURNING ${returningExprs.map(nodeToStr).join(', ')}`);
 	}
 
 	return parts.join(' ');
@@ -1160,9 +1160,9 @@ function deparseDeleteStmt(node: DeleteStmt): string {
 		parts.push(`WHERE ${deparse(node.whereClause)}`);
 	}
 
-	const returningList = node.returningList ?? [];
-	if (returningList.length > 0) {
-		parts.push(`RETURNING ${returningList.map(nodeToStr).join(', ')}`);
+	const returningExprs = node.returningClause?.exprs ?? [];
+	if (returningExprs.length > 0) {
+		parts.push(`RETURNING ${returningExprs.map(nodeToStr).join(', ')}`);
 	}
 
 	return parts.join(' ');
