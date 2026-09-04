@@ -7,7 +7,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import {
-	buildReturningList,
+	buildReturningExprs,
 	compileDelete,
 	compileInsert,
 	compileInsertFrom,
@@ -43,23 +43,23 @@ describe('mutation-compiler - coverage', () => {
 		});
 	});
 
-	describe('buildReturningList', () => {
+	describe('buildReturningExprs', () => {
 		it('returns undefined for empty columns', () => {
-			expect(buildReturningList([], 'users', ctx)).toBeUndefined();
+			expect(buildReturningExprs([], 'users', ctx)).toBeUndefined();
 		});
 
 		it('returns undefined for undefined columns', () => {
-			expect(buildReturningList(undefined, 'users', ctx)).toBeUndefined();
+			expect(buildReturningExprs(undefined, 'users', ctx)).toBeUndefined();
 		});
 
 		it('builds returning list for single column', () => {
-			const result = buildReturningList(['id'], 'users', ctx);
+			const result = buildReturningExprs(['id'], 'users', ctx);
 			expect(result).toHaveLength(1);
 			expect(result[0].ResTarget).toBeDefined();
 		});
 
 		it('builds RETURNING * as a bare star target', () => {
-			const result = buildReturningList(['*'], 'users', ctx);
+			const result = buildReturningExprs(['*'], 'users', ctx);
 			expect(result).toHaveLength(1);
 			const target = result![0]!.ResTarget;
 			expect(target.name).toBeUndefined();
@@ -67,20 +67,20 @@ describe('mutation-compiler - coverage', () => {
 		});
 
 		it('builds returning list for multiple columns', () => {
-			const result = buildReturningList(['id', 'name', 'email'], 'users', ctx);
+			const result = buildReturningExprs(['id', 'name', 'email'], 'users', ctx);
 			expect(result).toHaveLength(3);
 		});
 
 		it('rejects star RETURNING carrying alias-aware returning items', () => {
 			expect(() =>
-				buildReturningList(['*'], 'users', ctx, [
+				buildReturningExprs(['*'], 'users', ctx, [
 					{ source: 'id', output: '*' },
 				]),
 			).toThrow(/star RETURNING cannot carry alias-aware returningItems/);
 		});
 
 		it('uses source for alias-aware returning items and output for aliases', () => {
-			const result = buildReturningList(['contact'], 'users', ctx, [
+			const result = buildReturningExprs(['contact'], 'users', ctx, [
 				{ source: 'email', output: 'contact' },
 			]);
 			expect(result).toHaveLength(1);
@@ -94,7 +94,7 @@ describe('mutation-compiler - coverage', () => {
 
 		it('rejects desynced returningItems length', () => {
 			expect(() =>
-				buildReturningList(['contact'], 'users', ctx, [
+				buildReturningExprs(['contact'], 'users', ctx, [
 					{ source: 'email', output: 'contact' },
 					{ source: 'name', output: 'display' },
 				]),
@@ -103,7 +103,7 @@ describe('mutation-compiler - coverage', () => {
 
 		it('rejects desynced returningItems output order', () => {
 			expect(() =>
-				buildReturningList(['contact'], 'users', ctx, [
+				buildReturningExprs(['contact'], 'users', ctx, [
 					{ source: 'email', output: 'who' },
 				]),
 			).toThrow(/returningItems\[0\]\.output/);
@@ -111,7 +111,7 @@ describe('mutation-compiler - coverage', () => {
 
 		it('rejects post-naming duplicate output aliases', () => {
 			expect(() =>
-				buildReturningList(['userId', 'user_id'], 'users', ctx, [
+				buildReturningExprs(['userId', 'user_id'], 'users', ctx, [
 					{ source: 'id', output: 'userId' },
 					{ source: 'email', output: 'user_id' },
 				]),
@@ -162,8 +162,8 @@ describe('mutation-compiler - coverage', () => {
 				returning: ['id', 'name'],
 			};
 			const node = compileInsert(config, ctx, state);
-			expect(node.InsertStmt.returningList).toBeDefined();
-			expect(node.InsertStmt.returningList).toHaveLength(2);
+			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
+			expect(node.InsertStmt.returningClause?.exprs).toHaveLength(2);
 		});
 
 		it('compiles INSERT with NULL values', () => {
@@ -279,8 +279,8 @@ describe('mutation-compiler - coverage', () => {
 				returning: ['id', 'name', 'updated_at'],
 			};
 			const node = compileUpdate(config, ctx, state);
-			expect(node.UpdateStmt.returningList).toBeDefined();
-			expect(node.UpdateStmt.returningList).toHaveLength(3);
+			expect(node.UpdateStmt.returningClause?.exprs).toBeDefined();
+			expect(node.UpdateStmt.returningClause?.exprs).toHaveLength(3);
 		});
 
 		it('compiles UPDATE with schema', () => {
@@ -388,8 +388,8 @@ describe('mutation-compiler - coverage', () => {
 				returning: ['id', 'name'],
 			};
 			const node = compileDelete(config, ctx, state);
-			expect(node.DeleteStmt.returningList).toBeDefined();
-			expect(node.DeleteStmt.returningList).toHaveLength(2);
+			expect(node.DeleteStmt.returningClause?.exprs).toBeDefined();
+			expect(node.DeleteStmt.returningClause?.exprs).toHaveLength(2);
 		});
 
 		it('compiles DELETE with schema', () => {
@@ -499,7 +499,7 @@ describe('mutation-compiler - coverage', () => {
 				returning: ['id'],
 			};
 			const node = compileInsertFrom(config, ctx, state);
-			expect(node.InsertStmt.returningList).toBeDefined();
+			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
 		});
 
 		it('compiles INSERT FROM with schema', () => {
@@ -590,7 +590,7 @@ describe('mutation-compiler - coverage', () => {
 				returning: ['id', 'email'],
 			};
 			const node = compileUpsertFrom(config, ctx, state);
-			expect(node.InsertStmt.returningList).toBeDefined();
+			expect(node.InsertStmt.returningClause?.exprs).toBeDefined();
 		});
 
 		it('compiles UPSERT FROM with schema', () => {

@@ -104,8 +104,8 @@ describe('Mutation Compiler', () => {
 			const result = compileInsert(config, ctx, state);
 			const stmt = (result as any).InsertStmt;
 
-			expect(stmt.returningList).toBeDefined();
-			expect(stmt.returningList).toHaveLength(2);
+			expect(stmt.returningClause?.exprs).toBeDefined();
+			expect(stmt.returningClause?.exprs).toHaveLength(2);
 		});
 
 		it('should handle schema when provided', () => {
@@ -247,8 +247,8 @@ describe('Mutation Compiler', () => {
 			const result = compileUpdate(config, ctx, state);
 			const stmt = (result as any).UpdateStmt;
 
-			expect(stmt.returningList).toBeDefined();
-			expect(stmt.returningList).toHaveLength(3);
+			expect(stmt.returningClause?.exprs).toBeDefined();
+			expect(stmt.returningClause?.exprs).toHaveLength(3);
 		});
 
 		it('should emit TypeCast for range type columns in SET', () => {
@@ -363,8 +363,8 @@ describe('Mutation Compiler', () => {
 			const result = compileDelete(config, ctx, state);
 			const stmt = (result as any).DeleteStmt;
 
-			expect(stmt.returningList).toBeDefined();
-			expect(stmt.returningList).toHaveLength(1);
+			expect(stmt.returningClause?.exprs).toBeDefined();
+			expect(stmt.returningClause?.exprs).toHaveLength(1);
 		});
 	});
 
@@ -606,8 +606,8 @@ describe('UPSERT Compiler', () => {
 			const result = compileUpsert(config, ctx, state);
 			const stmt = (result as any).InsertStmt;
 
-			expect(stmt.returningList).toBeDefined();
-			expect(stmt.returningList).toHaveLength(2);
+			expect(stmt.returningClause?.exprs).toBeDefined();
+			expect(stmt.returningClause?.exprs).toHaveLength(2);
 		});
 
 		it('should handle multiple rows', () => {

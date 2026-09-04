@@ -27,7 +27,7 @@ import type {
 } from '../handlers/types.js';
 import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
-import { buildReturningList } from './mutation-compiler.js';
+import { buildReturningExprs } from './mutation-compiler.js';
 
 // ============================================================================
 // Types
@@ -254,7 +254,7 @@ export function compileUpsert(
 	const onConflict = buildOnConflictClause(config, ctx, state);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
 		ctx,
@@ -277,7 +277,7 @@ export function compileUpsert(
 				},
 			},
 			onConflictClause: onConflict,
-			...(returningList && { returningList }),
+			...(returningExprs && { returningClause: { exprs: returningExprs } }),
 			override: 'OVERRIDING_NOT_SET',
 		},
 	};
@@ -350,7 +350,7 @@ export function compileUnnestUpsert(
 	const onConflict = buildOnConflictClause(config, ctx, state);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(
+	const returningExprs = buildReturningExprs(
 		config.returning,
 		dbTable,
 		ctx,
@@ -371,7 +371,7 @@ export function compileUnnestUpsert(
 			})),
 			selectStmt: selectQuery,
 			onConflictClause: onConflict,
-			...(returningList && { returningList }),
+			...(returningExprs && { returningClause: { exprs: returningExprs } }),
 			override: 'OVERRIDING_NOT_SET',
 		},
 	};
