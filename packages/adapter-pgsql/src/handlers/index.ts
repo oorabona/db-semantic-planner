@@ -8,6 +8,8 @@
 import type { ColumnListInput } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
+import { registerAllExpressionHandlers } from './expression/index.js';
+import { registerAllIncludeHandlers } from './include/index.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -173,14 +175,51 @@ const OPERATOR_ALIASES: Record<string, string> = {
 
 let handlersInitialized = false;
 
+let includeHandlersInitialized = false;
+export function ensureIncludeHandlersRegistered(): void {
+	if (includeHandlersInitialized) return;
+	const snapshot = new Map(includeHandlers);
+	try {
+		registerAllIncludeHandlers();
+	} catch (error) {
+		includeHandlers.clear();
+		for (const [key, handler] of snapshot) includeHandlers.set(key, handler);
+		throw error;
+	}
+	includeHandlersInitialized = true;
+}
+
+let expressionHandlersInitialized = false;
+export function ensureExpressionHandlersRegistered(): void {
+	if (expressionHandlersInitialized) return;
+	const snapshot = new Map(expressionHandlers);
+	try {
+		registerAllExpressionHandlers();
+	} catch (error) {
+		expressionHandlers.clear();
+		for (const [key, handler] of snapshot) expressionHandlers.set(key, handler);
+		throw error;
+	}
+	expressionHandlersInitialized = true;
+}
+
 /**
  * Ensure all WHERE handlers are registered (lazy initialization).
  * Called on first dispatch to avoid circular import issues.
  */
 function ensureHandlersRegistered(): void {
+	// A caller that installs handlers before first dispatch keeps the registry it built;
+	// where-handlers.test.ts and three sibling files rely on this. Issue #711 tracks an explicit replacement API.
 	if (handlersInitialized || whereHandlers.size > 0) return;
+	const snapshot = new Map(whereHandlers);
+	try {
+		registerAllWhereHandlers();
+	} catch (error) {
+		whereHandlers.clear();
+		for (const [key, handler] of snapshot) whereHandlers.set(key, handler);
+		throw error;
+	}
 	handlersInitialized = true;
-	registerAllWhereHandlers();
 }
 
 /**
@@ -510,6 +549,8 @@ export function clearHandlers(): void {
 	expressionHandlers.clear();
 	includeHandlers.clear();
 	handlersInitialized = false;
+	includeHandlersInitialized = false;
+	expressionHandlersInitialized = false;
 }
 
 // ============================================================================
