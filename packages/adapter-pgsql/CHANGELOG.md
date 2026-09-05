@@ -1,5 +1,24 @@
 # Changelog
 
+## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v4.0.0...adapter-pgsql-v5.0.0) (2026-09-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** compileInsert, compileUpdate, compileDelete, compileMutation and compileUpsert return PostgreSQL 18 AST nodes: a RETURNING projection is now `returningClause.exprs` instead of `returningList`, and the published @pgsql/types dependency is the 18 major. Emitted SQL is unchanged; code that reads the returned nodes must read returningClause.exprs.
+
+### Features
+
+* **adapter-pgsql:** PostgreSQL 18 grammar via pgsql-parser 18 ([#700](https://github.com/oorabona/db-semantic-planner/issues/700)) ([6d72dc3](https://github.com/oorabona/db-semantic-planner/commit/6d72dc39a864af4f593fcb2facb16a3c6cf014ff))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A handler family is initialized once its handlers are installed ([#719](https://github.com/oorabona/db-semantic-planner/issues/719)) ([061f46b](https://github.com/oorabona/db-semantic-planner/commit/061f46bdb8632c66c0af4b5e65f73de6d20611e5)), closes [#711](https://github.com/oorabona/db-semantic-planner/issues/711)
+* **adapter-pgsql:** One builder for a string constant, and none for the dead recursive path ([#716](https://github.com/oorabona/db-semantic-planner/issues/716)) ([9882a5d](https://github.com/oorabona/db-semantic-planner/commit/9882a5da7442cb3400dc5174cce85b71c5591691)), closes [#713](https://github.com/oorabona/db-semantic-planner/issues/713)
+* **adapter-pgsql:** One operator resolver decides every comparison, and no handler defaults to equality ([#704](https://github.com/oorabona/db-semantic-planner/issues/704)) ([a9c1ab7](https://github.com/oorabona/db-semantic-planner/commit/a9c1ab77abc9a05873ee1ecefcadbc3923114484))
+* **adapter-pgsql:** Resolve an operator without building a registry map ([#712](https://github.com/oorabona/db-semantic-planner/issues/712)) ([f93681f](https://github.com/oorabona/db-semantic-planner/commit/f93681f81937341533f8fd07ca1fc213fbf4158c)), closes [#703](https://github.com/oorabona/db-semantic-planner/issues/703) [#702](https://github.com/oorabona/db-semantic-planner/issues/702)
+
 ## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v3.4.0...adapter-pgsql-v4.0.0) (2026-08-25)
 
 
