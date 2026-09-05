@@ -106,20 +106,20 @@ Use this pattern for WHERE operators and expression types expected to grow over 
 
 ### Intent
 
-Provide a chainable, type-safe API for constructing query and mutation intents without mutating shared state. Every method call returns a new builder instance with updated state — the original is unchanged. The builder only materializes to SQL/execution at the terminal call (`.all()`, `.one()`, `.execute()`, `.dump()`).
+Provide a chainable, type-safe API for constructing query and mutation intents without mutating shared state. Every method call returns a new builder instance with updated state — the original is unchanged. The builder materializes to SQL or execution only through its terminal methods (listed exhaustively below for each builder).
 
 ### Structure
 
 | Builder | File | Terminal methods |
 |---------|------|-----------------|
-| `QueryBuilderImpl` | `packages/core/src/dx/query-builder.ts` | `.all()`, `.one()`, `.count()`, `.exists()`, `.dump()` |
-| `InsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.execute()`, `.dump()` |
-| `UpdateBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.execute()`, `.dump()` |
-| `DeleteBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.execute()`, `.dump()` |
-| `UpsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.execute()`, `.dump()` |
-| `CteQueryBuilder` | `packages/core/src/dx/cte-builder.ts` | `.all()`, `.dump()` |
-| `RecursiveQueryBuilder` | `packages/core/src/dx/recursive-query-builder.ts` | `.all()`, `.dump()` |
-| `SetOperationBuilder` | `packages/core/src/dx/set-operation-builder.ts` | `.all()`, `.dump()` |
+| `QueryBuilderImpl` | `packages/core/src/dx/query-builder.ts` | `.dump()`, `.exists()`, `.existsDump()`, `.execute()`, `.all()`, `.first()`, `.firstOrThrow()`, `.stream()`, `.paginate()`, `.cursorPaginate()`, `.byId()`, `.byIdOrThrow()`, `.byIds()` |
+| `InsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
+| `UpdateBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
+| `DeleteBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
+| `UpsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
+| `CteQueryBuilder` | `packages/core/src/dx/cte-builder.ts` | `.dump()`, `.all()`, `.execute()` |
+| `RecursiveQueryBuilder` | `packages/core/src/dx/recursive-query-builder.ts` | `.dump()`, `.execute()` |
+| `SetOperationBuilder` | `packages/core/src/dx/set-operation-builder.ts` | `.dump()`, `.all()`, `.first()` |
 
 Public interface: `QueryBuilder` (in `query-builder-types.ts`). The `Impl` class is internal.
 
@@ -150,7 +150,7 @@ const inserted = await orm
 
 - Every fluent method returns `this constructor type` (not `this`) — enables subclass chaining
 - Builder state is passed through constructor options (`MutationBaseOpts`, etc.), never via property mutation
-- `buildIntent()` is `protected` — called only by terminal methods
+- `MutationBuilderBase` declares `buildIntent()` as `protected abstract`; `QueryBuilderImpl.buildIntent()` is internal/package-visible so `CteQueryBuilder` can read query intent without executing
 - `dump()` is always available without an adapter; execution methods require an adapter
 
 ### When to use
@@ -234,10 +234,10 @@ The planner must choose how to fetch related data for each `IncludeIntent` witho
 | Role | Location |
 |------|----------|
 | Strategy type | `packages/types/src/model-ir.ts` — `IncludeStrategy` |
-| Strategy inference | `packages/core/src/planner.ts` — `validateStrategy()` |
+| Strategy selection and capability validation | `packages/core/src/planner.ts` — `determineIncludeStrategy()` and `selectSmartStrategy()`; its private `validateStrategy()` closure validates an already-selected strategy |
 | Handler dispatch | `packages/adapter-pgsql/src/handlers/index.ts` — `getIncludeHandler()` |
-| Concrete handlers | `packages/adapter-pgsql/src/handlers/include/lateral.ts`, `join.ts`, `json-agg.ts`, `subquery.ts`, `cte.ts` |
-| Dialect capabilities | `packages/types/src/adapter.ts` — `DialectCapabilities` |
+| Concrete handlers | `packages/adapter-pgsql/src/handlers/include/cte.ts`, `join.ts`, `json-agg.ts`, `lateral.ts` (`shared.ts` supplies shared utilities) |
+| Dialect capabilities | `packages/types/src/dialects.ts` — `DialectCapabilities` |
 
 Strategies:
 
@@ -262,22 +262,24 @@ const plan = orm.select('users').include('posts', { limit: 10 }).plan();
 Auto-resolution (planner, `planner.ts`):
 
 ```
-cardinality='one'  → 'join'
-cardinality='many' → dialect.supportsJsonAgg ? 'json_agg'
-                   → dialect.supportsLateral  ? 'lateral'
-                   → 'join' (fallback)
+recursive → capabilities.supportsRecursiveCTE !== false ? 'cte' : 'subquery'
+otherwise → capabilities.supportsJsonAgg && !excludeNested ? 'json_agg'
+          → hasLimit && capabilities.supportsLateralJoin ? 'lateral'
+          → 'join' (fallback)
 ```
+
+`selectSmartStrategy()` does not inspect relation cardinality: its `_relation` parameter is unused. Both to-one and to-many relations therefore take the same non-recursive path above.
 
 ### Convention
 
 - `'auto'` is always resolved to a concrete strategy before `PlanReport` is emitted — it never reaches the compiler
-- Adapter handlers match the strategy name exactly (file name = strategy name)
-- New strategies require: a new literal in `IncludeStrategy`, a capability flag in `DialectCapabilities`, a handler in `include/`, and a planner rule
+- The adapter dispatch keys are `join`, `lateral`, `json_agg`, and `cte`; `mapToHandlerDecision()` remaps the `subquery` strategy to `json_agg` before handler lookup
+- INCLUDE dispatch is closed: a new dispatchable handler strategy requires coordinated updates to `INCLUDE_STRATEGIES` and `allIncludeHandlers`. `subquery` shows why `IncludeStrategy` literals, capability flags, handler files, and planner rules are not a one-to-one set.
 - Query-level include options such as `join` and `limit` influence strategy resolution; the planner validates the resolved strategy against `DialectCapabilities`
 
 ### When to use
 
-Use the strategy pattern for any decision that has multiple valid implementations and where the choice is delegated to the planner (core) while the implementation lives in the adapter. Never add an `if (strategy === 'json_agg')` branch inside the planner.
+Use the strategy pattern for any decision that has multiple valid implementations and where the choice is delegated to the planner (core) while the implementation lives in the adapter. The planner may inspect strategy values to select and validate them against dialect capabilities; SQL emission belongs in adapter handlers.
 
 ---
 
@@ -300,14 +302,19 @@ Adapter interface hierarchy (composition via extends):
 ```
 BaseAdapter
   └─ CompilingAdapter    (compile, compileWithIncludes, compileInsert, ...)
-  └─ ExecutingAdapter    (execute, createDump)
+  └─ ExecutingAdapter    (execute, executeWithMeta?, executeOne, executeOneOrThrow)
   └─ StreamingAdapter    (stream)
   └─ IntrospectingAdapter (introspect)
   └─ TransactionalAdapter (transaction, withSchema)
-  └─ RawSqlAdapter       (raw)
-  └─ DDLGeneratingAdapter (generateDDL, compareSchemata, ...)
-  └─ TableDDLGeneratorAdapter (truncate, vacuum, alterColumn, ...)
-       └─ Adapter<DB>    ← full capability union
+  └─ RawSqlAdapter       (executeRaw, streamRaw?)
+  └─ DDLGeneratingAdapter (generateDDL)
+
+TableDDLGeneratorAdapter (does not extend BaseAdapter)
+  └─ generateTruncate?, generateVacuum?, generateAlterColumn?, generateCreateIndex,
+     generateDropIndex?, listIndexes?, indexExists?, storageSize?
+
+Adapter<DB> extends the BaseAdapter-derived interfaces and TableDDLGeneratorAdapter
+  ← full capability union
 ```
 
 Injection:
@@ -348,7 +355,7 @@ Any new capability that requires database interaction must be expressed as a met
 
 ### Intent
 
-Separate concerns across three distinct AST representations, each adding a layer of resolution. User-facing syntax (NQL string or fluent builder) is never directly compiled to SQL — it passes through two normalizing layers first, making each layer independently testable and substitutable.
+Separate concerns across three distinct AST representations for queries, each adding a layer of resolution. NQL input passes through the NQL AST and IntentAST before planning and compilation; the fluent query builder emits IntentAST directly. Fluent mutation builders also emit IntentAST directly, then compile it through the adapter without a planner layer.
 
 ### Structure
 
@@ -389,7 +396,7 @@ Layer 1 is produced only when NQL is used. The fluent builder API emits Layer 2 
 
 ### Example
 
-Observability — `dump()` exposes all layers:
+Observability — query `dump()` exposes the compiled output and, when present, the plan:
 
 ```typescript
 const { plan, sql, params } = await orm.select('users').where(eq('active', true)).dump();
@@ -397,6 +404,8 @@ const { plan, sql, params } = await orm.select('users').where(eq('active', true)
 // sql            — final parameterized SQL
 // params         — bound parameter values
 ```
+
+`Dump` carries `{ plan?, sql, params, meta?, sequence? }`; it does not carry the NQL AST or IntentAST. `MutationDump` carries `{ sql, parameters, intent, meta?, sequence? }` and has no `plan` field.
 
 ### Convention
 
@@ -512,7 +521,7 @@ protected abstract compileIntent(
 
 Concrete methods shared by all subclasses (on base):
 
-- `dump()` — compiles without executing, returns `{ sql, params, intent }`
+- `dump()` — compiles without executing, returns `{ sql, parameters, intent, meta? }` (and may include `sequence`)
 - `execute()` — compiles then executes via adapter, returns `T`
 
 ### Example
@@ -529,7 +538,7 @@ protected buildIntent(): InsertIntent {
 }
 
 protected compileIntent(adapter: Adapter, intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-  return adapter.compileInsert(intent, options);
+  return compileMutationIntent(adapter, intent, options);
 }
 ```
 
@@ -539,8 +548,8 @@ Adding a new mutation type (e.g., `MergeBuilder`) requires only implementing `bu
 
 - All state for a mutation builder is stored in `readonly` properties set via the constructor
 - `baseOpts` (spread pattern) is used to propagate existing state into new instances from fluent methods
-- `compileIntent` calls the corresponding `adapter.compileXxx()` method — one-to-one mapping
-- `MutationDump` is the common return type for all `dump()` calls — `{ sql, params, intent }`
+- Every subclass's `compileIntent` calls shared `compileMutationIntent(adapter, intent, options)`, which dispatches by `intent.type` to the corresponding `adapter.compileXxx()` method
+- `MutationDump` is the common return type for all `dump()` calls — `{ sql, parameters, intent, meta?, sequence? }`
 - Mutations do NOT go through the planner — there is no `PlanReport` for mutations
 
 ### When to use
@@ -569,9 +578,17 @@ SQL + Parameters
 
 User fluent API
   │  Immutable Fluent Builder (Pattern 2) — select/where/orderBy chain
+  ▼
+Query IntentAST → (same pipeline from IntentAST above)
+
+User fluent mutation API
   │  MutationBuilderBase (Pattern 8) — insert/update/delete/upsert template
   ▼
-IntentAST → (same pipeline from IntentAST above)
+MutationIntentAST
+  │  compileMutationIntent() → adapter.compileInsert/compileInsertFrom/
+  │  compileUpdate/compileBatchUpdate/compileDelete/compileUpsert/compileUpsertFrom
+  ▼
+SQL + Parameters
 
 All layers: 3-Layer AST Pipeline (Pattern 6) governs how layers relate
 ```
