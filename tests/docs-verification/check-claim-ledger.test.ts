@@ -56,13 +56,12 @@ function fixture(contents: Record<string, string> = {}) {
 		writeFileSync(file, contents[source] ?? '');
 	}
 	mkdirSync(join(dir, 'tests/docs-verification'), { recursive: true });
-	const generated = run(dir, '--write-baseline', '--write-inventory');
+	const generated = run(dir, '--write-baseline');
 	assert.equal(generated.code, 0, generated.output);
 	return {
 		dir,
 		file: (relative: string) => join(dir, relative),
 		baseline: join(dir, 'tests/docs-verification/bypass-ledger-baseline.json'),
-		inventory: join(dir, 'tests/docs-verification/claim-inventory.json'),
 		cleanup() {
 			if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 		},
@@ -162,89 +161,21 @@ test('reports one baseline schema diagnostic and continues reporting', () => {
 	}
 });
 
-test('does not rewrite either artifact when a write run fails', () => {
+test('does not rewrite the baseline when a write run fails', () => {
 	const subject = fixture({ [PATTERNS]: SKIP });
 	try {
 		writeFileSync(
 			subject.baseline,
 			`${readFileSync(subject.baseline, 'utf8')}\n`,
 		);
-		writeFileSync(
-			subject.inventory,
-			`${readFileSync(subject.inventory, 'utf8')}\n`,
-		);
 		const baseline = readFileSync(subject.baseline);
-		const inventory = readFileSync(subject.inventory);
 		writeFileSync(
 			subject.file(PATTERNS),
 			SKIP.replace(' — illustrative signature', ''),
 		);
-		const result = run(subject.dir, '--write-baseline', '--write-inventory');
+		const result = run(subject.dir, '--write-baseline');
 		assert.equal(result.code, 1, result.output);
 		assert.deepEqual(readFileSync(subject.baseline), baseline);
-		assert.deepEqual(readFileSync(subject.inventory), inventory);
-	} finally {
-		subject.cleanup();
-	}
-});
-
-test('records TypeScript path line ranges apart from repository paths', () => {
-	const file = 'packages/docs/guide/locking.md';
-	const tick = String.fromCharCode(96);
-	const subject = fixture({
-		[file]:
-			'All four are defined in ' +
-			tick +
-			'packages/core/src/dx/query-builder-types.ts:372-381' +
-			tick +
-			'.\n',
-	});
-	try {
-		const parsed = JSON.parse(readFileSync(subject.inventory, 'utf8'));
-		const entry = parsed.files.find(
-			(item: { file: string }) => item.file === file,
-		);
-		assert.deepEqual(entry.claims['typescript-path'], [
-			{
-				path: 'packages/core/src/dx/query-builder-types.ts',
-				lineRange: '372-381',
-				line: 1,
-			},
-		]);
-	} finally {
-		subject.cleanup();
-	}
-});
-
-test('normalizes argument-bearing dbsp calls while preserving raw spans', () => {
-	const file = 'packages/docs/guide/migrating-from-prisma.md';
-	const tick = String.fromCharCode(96);
-	const subject = fixture({
-		[file]:
-			tick +
-			".include('posts')" +
-			tick +
-			' and ' +
-			tick +
-			'orm.transaction(async () => {})' +
-			tick +
-			' and ' +
-			tick +
-			"orm.select('users').all()" +
-			tick +
-			'.\n',
-	});
-	try {
-		const parsed = JSON.parse(readFileSync(subject.inventory, 'utf8'));
-		const entry = parsed.files.find(
-			(item: { file: string }) => item.file === file,
-		);
-		assert.deepEqual(entry.claims['method-mention'], [
-			{ token: '.include()', raw: ".include('posts')", line: 1 },
-			{ token: '.transaction()', raw: '.transaction(async () => {})', line: 1 },
-			{ token: '.select()', raw: ".select('users')", line: 1 },
-			{ token: '.all()', raw: '.all()', line: 1 },
-		]);
 	} finally {
 		subject.cleanup();
 	}

@@ -2,12 +2,7 @@
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import {
-	BYPASS_KINDS,
-	type BypassCounts,
-	inventory,
-	scanDocs,
-} from './claim-ledger.js';
+import { BYPASS_KINDS, type BypassCounts, scanDocs } from './claim-ledger.js';
 
 const arguments_ = process.argv.slice(2);
 const rootArgument = arguments_.find((argument) => !argument.startsWith('--'));
@@ -18,9 +13,7 @@ const BASELINE = resolve(
 	ROOT,
 	'tests/docs-verification/bypass-ledger-baseline.json',
 );
-const INVENTORY = resolve(ROOT, 'tests/docs-verification/claim-inventory.json');
 const writeBaseline = arguments_.includes('--write-baseline');
-const writeInventory = arguments_.includes('--write-inventory');
 const failures: string[] = [];
 
 let ledger: ReturnType<typeof scanDocs>['ledger'];
@@ -33,7 +26,6 @@ try {
 	console.error(`docs ledger: ${cause}`);
 	process.exit(1);
 }
-const renderedInventory = `${JSON.stringify(inventory(ledger), null, '\t')}\n`;
 
 function writeAtomically(destination: string, contents: string): void {
 	const temporary = resolve(
@@ -133,22 +125,8 @@ if (!writeBaseline) {
 	}
 }
 
-if (!writeInventory) {
-	try {
-		if (readFileSync(INVENTORY, 'utf8') !== renderedInventory) {
-			failures.push(
-				`claim inventory differs from ${INVENTORY}; run pnpm generate:docs-claim-inventory`,
-			);
-		}
-	} catch (error) {
-		failures.push(
-			`cannot read claim inventory ${INVENTORY}: ${error instanceof Error ? error.message : String(error)}`,
-		);
-	}
-}
-
-// A failed scan, malformed baseline, or stale inventory must never rewrite a
-// committed artifact. Replacement happens only after every guard has run.
+// A failed scan or malformed baseline must never rewrite the committed artifact.
+// Replacement happens only after every guard has run.
 if (failures.length === 0) {
 	if (writeBaseline) {
 		const files = Object.fromEntries(
@@ -159,7 +137,6 @@ if (failures.length === 0) {
 			`${JSON.stringify({ version: 1, files }, null, '\t')}\n`,
 		);
 	}
-	if (writeInventory) writeAtomically(INVENTORY, renderedInventory);
 }
 
 for (const entry of ledger.files) {
@@ -171,10 +148,6 @@ for (const entry of ledger.files) {
 }
 console.log(
 	`docs ledger: ${ledger.files.length} files, ${ledger.totals.fences} fences; explicit-skip=${ledger.totals['explicit-skip']}, heuristic-fragment=${ledger.totals['heuristic-fragment']}, deferred real-db-only=${ledger.totals['real-db-only']}.`,
-);
-const claims = inventory(ledger).totals;
-console.log(
-	`claim inventory: ${claims['typescript-path']} typescript-path tokens and ${claims['method-mention']} method-mention tokens in ${INVENTORY}. Claims are recorded, not resolved.`,
 );
 
 if (failures.length > 0) {
