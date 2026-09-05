@@ -1,5 +1,5 @@
 #!/usr/bin/env tsx
-import { readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BYPASS_KINDS, type BypassCounts, scanDocs } from './claim-ledger.js';
@@ -32,8 +32,20 @@ function writeAtomically(destination: string, contents: string): void {
 		dirname(destination),
 		`.${basename(destination)}.${process.pid}.${Date.now()}.tmp`,
 	);
-	writeFileSync(temporary, contents);
-	renameSync(temporary, destination);
+	let operation = 'write temporary file';
+	try {
+		writeFileSync(temporary, contents);
+		operation = 'rename temporary file';
+		renameSync(temporary, destination);
+	} catch (error) {
+		try {
+			rmSync(temporary, { force: true });
+		} catch {
+			// Preserve the write failure as the actionable diagnostic.
+		}
+		const cause = error instanceof Error ? error.message : String(error);
+		throw new Error(`cannot ${operation} for ${destination}: ${cause}`);
+	}
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -132,10 +144,14 @@ if (failures.length === 0) {
 		const files = Object.fromEntries(
 			ledger.files.map(({ file, bypasses }) => [file, bypasses]),
 		);
-		writeAtomically(
-			BASELINE,
-			`${JSON.stringify({ version: 1, files }, null, '\t')}\n`,
-		);
+		try {
+			writeAtomically(
+				BASELINE,
+				`${JSON.stringify({ version: 1, files }, null, '\t')}\n`,
+			);
+		} catch (error) {
+			failures.push(error instanceof Error ? error.message : String(error));
+		}
 	}
 }
 

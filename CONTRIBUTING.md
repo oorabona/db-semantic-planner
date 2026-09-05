@@ -105,9 +105,11 @@ misconfiguration immediately visible.
 
 ### Docs verification (doctest)
 
-Every `typescript` / `ts` code block in the docs is extracted and executed
-by the framework in `tests/docs-verification/` on every CI run. A block
-that no longer compiles or throws at runtime fails CI.
+Every `typescript` / `ts` code block in the docs is extracted by the framework
+in `tests/docs-verification/`. Blocks that are not skipped, deferred to the
+real-DB workflow, or rejected as fragments are parsed, dynamically imported,
+and executed. A parse error, import failure, or runtime throw fails CI; the
+harness does not type-check code blocks.
 
 Run locally:
 
@@ -120,11 +122,8 @@ pnpm test:docs:generate        # just regenerate __generated__/ test files
 
 | Annotation | Effect |
 |------------|--------|
-| `// doctest: skip — <reason>` | Skip the block; reason shown in CI summary |
-| `// doctest: dry-run` | Import only, do not assert |
-| `// doctest: real-db-only` | Skip in compile-only mode; run in real-DB mode (CI job `test-docs-real-db` with `DBSP_DOCTEST_REAL_DB=1`) |
-| `// expected sql: SELECT …` | Strict match of the compiled SQL from `.dump()` |
-| `// expected params: [1, "a"]` | Strict match of the params array |
+| `// doctest: skip — <reason>` | Skip the block. The ledger requires a reason and `pnpm check:docs-ledger` reports its count. |
+| `// doctest: real-db-only` | Skip in compile-only mode; the real-DB workflow runs it unless the fragment heuristic rejects it. |
 
 `// doctest: real-db-only` is the correct annotation for blocks that call `.all()`, `.execute()`, `.stream()`, `.transaction()`, or DDL helpers (`.truncate()`, `.vacuum()`, `.indexes.create()`, etc.) — any block that requires a live PostgreSQL connection. Use `// doctest: skip` only for blocks that cannot execute even with a real DB (pseudo-code, API-signature fragments, or blocks referencing tables not in the default schema).
 

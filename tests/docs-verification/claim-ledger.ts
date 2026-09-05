@@ -60,8 +60,9 @@ export function scanDocs(root: string): {
 		const blocks = extractBlocks(absolute);
 		for (const block of blocks) {
 			const markers: Array<{ kind: BypassKind; line: number }> = [];
-			for (const [lineIndex, line] of block.code.split('\n').entries()) {
-				const marker = line.match(MARKER);
+			for (const [lineIndex, rawLine] of block.code.split('\n').entries()) {
+				// Keep marker recognition aligned with parseAnnotations(), including CRLF.
+				const marker = rawLine.trim().match(MARKER);
 				if (!marker) continue;
 				const kind = marker[1].toLowerCase() as 'skip' | 'real-db-only';
 				const bypassKind = kind === 'skip' ? 'explicit-skip' : kind;
@@ -80,10 +81,18 @@ export function scanDocs(root: string): {
 				markerConflicts.push(
 					`${file}:${markers[0].line} has conflicting control markers: ${[...markerKinds].join(', ')}`,
 				);
-			} else {
-				for (const kind of markerKinds) bypasses[kind] += 1;
+				continue;
 			}
-			if (markers.length === 0 && looksLikeFragment(block.code)) {
+
+			// extractBlocks has already made the generator's marker decision.
+			if (block.annotations.skip) {
+				bypasses['explicit-skip'] += 1;
+			} else if (
+				block.annotations.realDbOnly &&
+				!looksLikeFragment(block.code)
+			) {
+				bypasses['real-db-only'] += 1;
+			} else if (looksLikeFragment(block.code)) {
 				bypasses['heuristic-fragment'] += 1;
 			}
 		}

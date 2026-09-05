@@ -4,12 +4,13 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	rmSync,
 	writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { doctestSourceFiles } from './doc-sources.js';
@@ -255,6 +256,81 @@ test('does not classify dry-run as a bypass', () => {
 		const result = run(subject.dir);
 		assert.equal(result.code, 0, result.output);
 		assert.doesNotMatch(result.output, /dry-run=/);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('recognizes CRLF control markers as the extractor does', () => {
+	const subject = fixture({
+		[PATTERNS]: `${FENCE}typescript\r\n// doctest: skip — CRLF marker\r\nconst x = 1;\r\n${FENCE}\r\n`,
+	});
+	try {
+		const result = run(subject.dir);
+		assert.equal(result.code, 0, result.output);
+		assert.match(
+			result.output,
+			/packages\/docs\/patterns\.md: fences=1; explicit-skip=1, deferred real-db-only=0, heuristic-fragment=0/,
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('requires a reason for a CRLF control marker', () => {
+	const subject = fixture();
+	try {
+		writeFileSync(
+			subject.file(PATTERNS),
+			`${FENCE}typescript\r\n// doctest: skip\r\nconst x = 1;\r\n${FENCE}\r\n`,
+		);
+		const result = run(subject.dir);
+		assert.equal(result.code, 1, result.output);
+		assert.match(
+			result.output,
+			/bypass marker has no reason after an em dash at packages\/docs\/patterns\.md:2 \(explicit-skip\)/,
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('classifies marked real-db fragments as fragments, not deferred blocks', () => {
+	const subject = fixture({
+		[PATTERNS]: `${FENCE}typescript\n.method()\n// doctest: real-db-only — fragment remains a fragment in real-db mode\n${FENCE}\n`,
+	});
+	try {
+		const result = run(subject.dir);
+		assert.equal(result.code, 0, result.output);
+		assert.match(
+			result.output,
+			/packages\/docs\/patterns\.md: fences=1; explicit-skip=0, deferred real-db-only=0, heuristic-fragment=1/,
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('reports an atomic-write failure without leaving a temporary file', () => {
+	const subject = fixture({ [PATTERNS]: SKIP });
+	try {
+		rmSync(subject.baseline);
+		mkdirSync(subject.baseline);
+		const result = run(subject.dir, '--write-baseline');
+		assert.equal(result.code, 1, result.output);
+		assert.match(
+			result.output,
+			new RegExp(
+				`docs ledger: cannot rename temporary file for ${subject.baseline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:`,
+			),
+		);
+		assert.doesNotMatch(result.output, /Error:/);
+		assert.equal(
+			readdirSync(dirname(subject.baseline)).filter((file) =>
+				file.startsWith(`.${basename(subject.baseline)}.`),
+			).length,
+			0,
+		);
 	} finally {
 		subject.cleanup();
 	}
