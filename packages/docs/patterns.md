@@ -42,7 +42,7 @@ Three independent registries exist, one per handler family:
 ```
 WhereHandler      { readonly operators: readonly string[]; compile(decision, ctx, state, dispatch): Node }
 ExpressionHandler { readonly types: readonly string[]; compile(decision, ctx, state): Node }
-IncludeHandler    { readonly strategy: IncludeStrategy; compile(decision, ctx, state): IncludeResult }
+IncludeHandler    { readonly strategy: IncludeHandlerStrategy; compile(decision, ctx, state): IncludeResult }
 ```
 
 Registration:
@@ -53,7 +53,7 @@ registerWhereHandler(handler: WhereHandler): void   // throws on duplicate
 registerExpressionHandler(handler: ExpressionHandler): void
 ```
 
-`registerIncludeHandler` is not an extension surface: strategies outside `INCLUDE_STRATEGIES` are invalid, and the initializer already installs every allowed strategy. Extend INCLUDE by changing `INCLUDE_STRATEGIES` and `allIncludeHandlers` together.
+INCLUDE is not an extension surface: strategies outside `INCLUDE_STRATEGIES` are invalid, and the initializer already installs every allowed strategy. Extend INCLUDE by changing `INCLUDE_STRATEGIES` and `allIncludeHandlers` together.
 
 Lookup (throws if missing):
 
@@ -61,7 +61,7 @@ Lookup (throws if missing):
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
 getWhereHandler(operator: string): WhereHandler
 getExpressionHandler(type: string): ExpressionHandler
-getIncludeHandler(strategy: IncludeStrategy): IncludeHandler
+getIncludeHandler(strategy: IncludeHandlerStrategy): IncludeHandler
 ```
 
 ### Example

@@ -17,7 +17,7 @@ import type {
 	Decision,
 	ExpressionHandler,
 	IncludeHandler,
-	IncludeStrategy,
+	IncludeHandlerStrategy,
 	WhereDispatcher,
 	WhereHandler,
 } from './types.js';
@@ -227,13 +227,6 @@ export function registerExpressionHandler(handler: ExpressionHandler): void {
 	addHandlerKeys(expressionHandlers, types, handler, 'EXPRESSION', 'type');
 }
 
-/** Register an INCLUDE handler for a built-in strategy; it refuses invalid strategies and valid strategies that are already registered. */
-export function registerIncludeHandler(handler: IncludeHandler): void {
-	const strategy = validateIncludeHandler(handler);
-	ensureIncludeHandlersRegistered();
-	addHandlerKeys(includeHandlers, [strategy], handler, 'INCLUDE', 'strategy');
-}
-
 // ============================================================================
 // Lookup Functions
 // ============================================================================
@@ -279,7 +272,9 @@ export function getNqlSafeExpressionHandler(
  * Get INCLUDE handler for a strategy.
  * @throws Error if no handler registered
  */
-export function getIncludeHandler(strategy: IncludeStrategy): IncludeHandler {
+export function getIncludeHandler(
+	strategy: IncludeHandlerStrategy,
+): IncludeHandler {
 	const handler = includeHandlers.get(strategy);
 	if (!handler) {
 		throw new Error(`No INCLUDE handler registered for strategy: ${strategy}`);
@@ -304,7 +299,7 @@ export function hasExpressionHandler(type: string): boolean {
 /**
  * Check if an INCLUDE handler exists for a strategy.
  */
-export function hasIncludeHandler(strategy: IncludeStrategy): boolean {
+export function hasIncludeHandler(strategy: IncludeHandlerStrategy): boolean {
 	return includeHandlers.has(strategy);
 }
 

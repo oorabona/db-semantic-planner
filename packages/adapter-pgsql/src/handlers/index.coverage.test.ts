@@ -28,7 +28,6 @@ import {
 	hasIncludeHandler,
 	hasWhereHandler,
 	registerExpressionHandler,
-	registerIncludeHandler,
 	registerWhereHandler,
 } from './index.js';
 import * as whereHandlerModule from './where/index.js';
@@ -1227,30 +1226,6 @@ describe('handlers/index - Coverage Tests', () => {
 			expect(getRegisteredOperators().expression).toEqual([]);
 		});
 
-		it('refuses empty INCLUDE strategies without registration', () => {
-			clearHandlers();
-			expect(() =>
-				registerIncludeHandler({ strategy: '', compile } as any),
-			).toThrow(/cannot be empty/);
-			expect(getRegisteredOperators().include).toEqual([]);
-		});
-
-		it('refuses blank INCLUDE strategies without registration', () => {
-			clearHandlers();
-			expect(() =>
-				registerIncludeHandler({ strategy: ' \t', compile } as any),
-			).toThrow(/cannot be blank.*\\t/);
-			expect(getRegisteredOperators().include).toEqual([]);
-		});
-
-		it('refuses non-string INCLUDE strategies without registration', () => {
-			clearHandlers();
-			expect(() =>
-				registerIncludeHandler({ strategy: 1, compile } as any),
-			).toThrow(/expected a string, received number/);
-			expect(getRegisteredOperators().include).toEqual([]);
-		});
-
 		it('refuses malformed handlers with diagnostics instead of property TypeErrors', () => {
 			clearHandlers();
 			expect(() => registerWhereHandler(null as any)).toThrow(
@@ -1301,35 +1276,6 @@ describe('handlers/index - Coverage Tests', () => {
 					compile: () => ({}),
 				};
 				expect(() => registerExpressionHandler(handler as any)).toThrow(
-					/already registered/,
-				);
-			}
-		});
-
-		it('throws on duplicate INCLUDE strategy registration', () => {
-			compilePlan({
-				rootTable: 'posts',
-				decisions: [
-					{ type: 'select', column: '*', table: 'posts' },
-					{
-						type: 'includeStrategy',
-						choice: 'join',
-						relationName: 'author',
-						targetTable: 'authors',
-						relationType: 'belongsTo',
-						foreignKey: 'author_id',
-						parentKey: 'id',
-						columns: ['id', 'name'],
-					},
-				],
-			});
-			const ops = getRegisteredOperators();
-			if (ops.include.length > 0) {
-				const handler = {
-					strategy: ops.include[0],
-					compile: () => ({}),
-				};
-				expect(() => registerIncludeHandler(handler as any)).toThrow(
 					/already registered/,
 				);
 			}

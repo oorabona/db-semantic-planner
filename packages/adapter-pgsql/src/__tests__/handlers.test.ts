@@ -2,8 +2,9 @@
  * Tests for Handler Infrastructure (Block 1)
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { compilePlan } from '../compiler.js';
+import * as includeHandlerModule from '../handlers/include/index.js';
 import {
 	ALL_OPERATORS,
 	COLLECTION_OPERATORS,
@@ -28,13 +29,13 @@ import {
 	NULL_OPERATORS,
 	PATTERN_OPERATORS,
 	registerExpressionHandler,
-	registerIncludeHandler,
 	registerWhereHandler,
 	type WhereHandler,
 } from '../handlers/index.js';
 
 describe('Handler Infrastructure', () => {
 	beforeEach(() => {
+		vi.restoreAllMocks();
 		// Clear handlers before each test
 		clearHandlers();
 	});
@@ -153,62 +154,74 @@ describe('Handler Infrastructure', () => {
 
 	describe('INCLUDE Handler Registry', () => {
 		const compile: IncludeHandler['compile'] = () => ({ targets: [] });
+		const compileIncludePlan = () =>
+			compilePlan({
+				rootTable: 'posts',
+				decisions: [
+					{ type: 'select', column: '*', table: 'posts' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'author',
+						targetTable: 'authors',
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						columns: ['id', 'name'],
+					},
+				],
+			});
 
 		it('freezes the built-in strategy set at runtime', () => {
 			expect(() =>
 				(INCLUDE_STRATEGIES as unknown as string[]).push('custom'),
 			).toThrow(TypeError);
-			expect(() =>
-				registerIncludeHandler({ strategy: 'custom', compile } as any),
-			).toThrow(/custom is not one of/);
 		});
 
-		it('refuses a strategy outside the built-in set without mutating the registry', () => {
-			const invalidHandler = {
-				strategy: '__nope__',
-				compile,
-			} as unknown as IncludeHandler;
+		it('refuses an injected strategy outside the built-in set, rolls back, then initializes normally', () => {
+			vi.spyOn(
+				includeHandlerModule,
+				'allIncludeHandlers',
+				'get',
+			).mockReturnValueOnce([
+				{ strategy: '__nope__', compile } as unknown as IncludeHandler,
+			]);
 
-			expect(() => registerIncludeHandler(invalidHandler)).toThrow(
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
 				`Invalid INCLUDE handler strategy: __nope__ is not one of ${INCLUDE_STRATEGIES.join(', ')}`,
 			);
-			expect(getRegisteredOperators().include).not.toContain('__nope__');
-			expect(() => getIncludeHandler('cte')).toThrow(
-				'No INCLUDE handler registered for strategy: cte',
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => compileIncludePlan()).not.toThrow();
+			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
+		});
+
+		it('refuses injected non-string, empty, and blank strategies without mutating the registry', () => {
+			vi.spyOn(includeHandlerModule, 'allIncludeHandlers', 'get')
+				.mockReturnValueOnce([{ strategy: 1, compile }] as any)
+				.mockReturnValueOnce([{ strategy: '', compile }] as any)
+				.mockReturnValueOnce([{ strategy: ' \t', compile }] as any);
+
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				'Invalid INCLUDE handler strategy: expected a string, received number',
 			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				'Invalid INCLUDE handler strategy: cannot be empty (received )',
+			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				/Invalid INCLUDE handler strategy: cannot be blank/,
+			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => compileIncludePlan()).not.toThrow();
+			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
 		});
 
-		it('refuses a valid strategy already registered by lazy initialization', () => {
-			expect(() =>
-				registerIncludeHandler({ strategy: 'json_agg', compile }),
-			).toThrow('INCLUDE handler already registered for strategy: json_agg');
-		});
-
-		it('installs every built-in strategy for include compilation before refusing duplicate registration', () => {
-			expect(() =>
-				compilePlan({
-					rootTable: 'posts',
-					decisions: [
-						{ type: 'select', column: '*', table: 'posts' },
-						{
-							type: 'includeStrategy',
-							choice: 'join',
-							relationName: 'author',
-							targetTable: 'authors',
-							relationType: 'belongsTo',
-							foreignKey: 'author_id',
-							parentKey: 'id',
-							columns: ['id', 'name'],
-						},
-					],
-				}),
-			).not.toThrow();
+		it('installs every built-in strategy for ordinary include compilation', () => {
+			expect(() => compileIncludePlan()).not.toThrow();
 			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
 			expect(hasIncludeHandler('lateral')).toBe(true);
 			expect(getIncludeHandler('json_agg').strategy).toBe('json_agg');
-			expect(() =>
-				registerIncludeHandler({ strategy: 'join', compile }),
-			).toThrow('INCLUDE handler already registered for strategy: join');
 		});
 	});
 
