@@ -10,12 +10,18 @@ import { join } from 'node:path';
 export function collectDir(root: string, rel: string): string[] {
 	const abs = join(root, rel);
 	try {
-		return readdirSync(abs)
-			.filter((file) => file.endsWith('.md'))
-			.filter((file) => statSync(join(abs, file)).isFile())
-			.map((file) => join(rel, file));
-	} catch {
-		return [];
+		return (
+			readdirSync(abs)
+				.sort((left, right) => left.localeCompare(right))
+				.filter((file) => file.endsWith('.md'))
+				.filter((file) => statSync(join(abs, file)).isFile())
+				// These are artifact identities, not filesystem paths. Keep them stable
+				// across Windows and POSIX while using native paths for filesystem access.
+				.map((file) => `${rel}/${file}`)
+		);
+	} catch (error) {
+		const cause = error instanceof Error ? error.message : String(error);
+		throw new Error(`cannot discover markdown files in ${abs}: ${cause}`);
 	}
 }
 
