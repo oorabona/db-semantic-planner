@@ -2,14 +2,19 @@
  * Tests for Handler Infrastructure (Block 1)
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { compilePlan } from '../compiler.js';
+import * as includeHandlerModule from '../handlers/include/index.js';
 import {
 	ALL_OPERATORS,
 	COLLECTION_OPERATORS,
 	COMPARISON_OPERATORS,
 	clearHandlers,
 	createCompilerState,
+	createWhereDispatcher,
 	type ExpressionHandler,
+	ensureExpressionHandlersRegistered,
+	ensureIncludeHandlersRegistered,
 	getExpressionHandler,
 	getIncludeHandler,
 	getRegisteredOperators,
@@ -18,18 +23,19 @@ import {
 	hasExpressionHandler,
 	hasIncludeHandler,
 	hasWhereHandler,
+	INCLUDE_STRATEGIES,
 	type IncludeHandler,
 	LOGICAL_OPERATORS,
 	NULL_OPERATORS,
 	PATTERN_OPERATORS,
 	registerExpressionHandler,
-	registerIncludeHandler,
 	registerWhereHandler,
 	type WhereHandler,
 } from '../handlers/index.js';
 
 describe('Handler Infrastructure', () => {
 	beforeEach(() => {
+		vi.restoreAllMocks();
 		// Clear handlers before each test
 		clearHandlers();
 	});
@@ -105,7 +111,7 @@ describe('Handler Infrastructure', () => {
 
 	describe('EXPRESSION Handler Registry', () => {
 		const mockExprHandler: ExpressionHandler = {
-			types: ['column', 'alias'],
+			types: ['__test_column__', '__test_alias__'],
 			compile: (_decision, _ctx, _state) => {
 				return { A_Const: { sval: { sval: 'expr' } } };
 			},
@@ -114,15 +120,15 @@ describe('Handler Infrastructure', () => {
 		it('registers handler for multiple types', () => {
 			registerExpressionHandler(mockExprHandler);
 
-			expect(hasExpressionHandler('column')).toBe(true);
-			expect(hasExpressionHandler('alias')).toBe(true);
+			expect(hasExpressionHandler('__test_column__')).toBe(true);
+			expect(hasExpressionHandler('__test_alias__')).toBe(true);
 			expect(hasExpressionHandler('unknown')).toBe(false);
 		});
 
 		it('retrieves registered handler', () => {
 			registerExpressionHandler(mockExprHandler);
 
-			const handler = getExpressionHandler('column');
+			const handler = getExpressionHandler('__test_column__');
 			expect(handler).toBe(mockExprHandler);
 		});
 
@@ -130,12 +136,12 @@ describe('Handler Infrastructure', () => {
 			registerExpressionHandler(mockExprHandler);
 
 			const duplicate: ExpressionHandler = {
-				types: ['column'],
+				types: ['__test_column__'],
 				compile: () => ({ A_Const: { sval: { sval: 'dup' } } }),
 			};
 
 			expect(() => registerExpressionHandler(duplicate)).toThrow(
-				'EXPRESSION handler already registered for type: column',
+				'EXPRESSION handler already registered for type: __test_column__',
 			);
 		});
 
@@ -147,44 +153,75 @@ describe('Handler Infrastructure', () => {
 	});
 
 	describe('INCLUDE Handler Registry', () => {
-		const mockIncludeHandler: IncludeHandler = {
-			strategy: 'json_agg',
-			compile: (_decision, _ctx, _state) => {
-				return { targets: [] };
-			},
-		};
+		const compile: IncludeHandler['compile'] = () => ({ targets: [] });
+		const compileIncludePlan = () =>
+			compilePlan({
+				rootTable: 'posts',
+				decisions: [
+					{ type: 'select', column: '*', table: 'posts' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'author',
+						targetTable: 'authors',
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						columns: ['id', 'name'],
+					},
+				],
+			});
 
-		it('registers handler for strategy', () => {
-			registerIncludeHandler(mockIncludeHandler);
-
-			expect(hasIncludeHandler('json_agg')).toBe(true);
-			expect(hasIncludeHandler('lateral')).toBe(false);
+		it('freezes the built-in strategy set at runtime', () => {
+			expect(() =>
+				(INCLUDE_STRATEGIES as unknown as string[]).push('custom'),
+			).toThrow(TypeError);
 		});
 
-		it('retrieves registered handler', () => {
-			registerIncludeHandler(mockIncludeHandler);
+		it('refuses an injected strategy outside the built-in set, rolls back, then initializes normally', () => {
+			vi.spyOn(
+				includeHandlerModule,
+				'allIncludeHandlers',
+				'get',
+			).mockReturnValueOnce([
+				{ strategy: '__nope__', compile } as unknown as IncludeHandler,
+			]);
 
-			const handler = getIncludeHandler('json_agg');
-			expect(handler).toBe(mockIncludeHandler);
-		});
-
-		it('throws on duplicate strategy registration', () => {
-			registerIncludeHandler(mockIncludeHandler);
-
-			const duplicate: IncludeHandler = {
-				strategy: 'json_agg',
-				compile: () => ({}),
-			};
-
-			expect(() => registerIncludeHandler(duplicate)).toThrow(
-				'INCLUDE handler already registered for strategy: json_agg',
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				`Invalid INCLUDE handler strategy: __nope__ is not one of ${INCLUDE_STRATEGIES.join(', ')}`,
 			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => compileIncludePlan()).not.toThrow();
+			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
 		});
 
-		it('throws when getting unregistered strategy', () => {
-			expect(() => getIncludeHandler('cte')).toThrow(
-				'No INCLUDE handler registered for strategy: cte',
+		it('refuses injected non-string, empty, and blank strategies without mutating the registry', () => {
+			vi.spyOn(includeHandlerModule, 'allIncludeHandlers', 'get')
+				.mockReturnValueOnce([{ strategy: 1, compile }] as any)
+				.mockReturnValueOnce([{ strategy: '', compile }] as any)
+				.mockReturnValueOnce([{ strategy: ' \t', compile }] as any);
+
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				'Invalid INCLUDE handler strategy: expected a string, received number',
 			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				'Invalid INCLUDE handler strategy: cannot be empty (received )',
+			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => ensureIncludeHandlersRegistered()).toThrow(
+				/Invalid INCLUDE handler strategy: cannot be blank/,
+			);
+			expect(getRegisteredOperators().include).toEqual([]);
+			expect(() => compileIncludePlan()).not.toThrow();
+			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
+		});
+
+		it('installs every built-in strategy for ordinary include compilation', () => {
+			expect(() => compileIncludePlan()).not.toThrow();
+			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
+			expect(hasIncludeHandler('lateral')).toBe(true);
+			expect(getIncludeHandler('json_agg').strategy).toBe('json_agg');
 		});
 	});
 
@@ -198,38 +235,50 @@ describe('Handler Infrastructure', () => {
 		});
 
 		it('returns correct counts after registration', () => {
+			const whereOperator = '__handlers_test_where__';
+			const expressionType = '__handlers_test_expression__';
+			createWhereDispatcher()(
+				{ type: 'where', column: 'id', operator: '=', value: 1 },
+				{
+					naming: {
+						toDatabase: (value: string) => value,
+						toModel: (value: string) => value,
+					},
+					rootTable: 'test',
+					maxRecursiveDepth: 100,
+				} as any,
+				createCompilerState(),
+			);
+			ensureExpressionHandlersRegistered();
+			ensureIncludeHandlersRegistered();
+			const before = getRegistryStats();
 			registerWhereHandler({
-				operators: ['eq', 'neq'],
+				operators: [whereOperator],
 				compile: () => ({ A_Const: { sval: { sval: '' } } }),
 			});
 			registerExpressionHandler({
-				types: ['column'],
+				types: [expressionType],
 				compile: () => ({ A_Const: { sval: { sval: '' } } }),
 			});
-			registerIncludeHandler({
-				strategy: 'join',
-				compile: () => ({}),
-			});
+			const after = getRegistryStats();
 
-			const stats = getRegistryStats();
-
-			expect(stats.where).toBe(2); // eq and neq
-			expect(stats.expression).toBe(1);
-			expect(stats.include).toBe(1);
+			expect(after.where).toBe(before.where + 1);
+			expect(after.expression).toBe(before.expression + 1);
+			expect(after.include).toBe(before.include);
 		});
 	});
 
 	describe('Registered Operators', () => {
 		it('returns registered operator names', () => {
+			const whereOperator = '__handlers_test_registered_operator__';
 			registerWhereHandler({
-				operators: ['eq', 'neq'],
+				operators: [whereOperator],
 				compile: () => ({ A_Const: { sval: { sval: '' } } }),
 			});
 
 			const operators = getRegisteredOperators();
 
-			expect(operators.where).toContain('eq');
-			expect(operators.where).toContain('neq');
+			expect(operators.where).toContain(whereOperator);
 		});
 	});
 

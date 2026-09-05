@@ -127,39 +127,52 @@ The compiler uses a **handler registry** pattern for extensibility:
 
 ```typescript
 // Registration
-registerWhereHandler('=', equalityHandler);
-registerExpressionHandler('count', countHandler);
-registerIncludeHandler('json_agg', jsonAggHandler);
+const equalityHandler: WhereHandler = {
+  operators: ['='],
+  compile(decision, ctx, state, dispatch) { /* ... */ },
+};
+const countHandler: ExpressionHandler = {
+  types: ['count'],
+  compile(decision, ctx, state) { /* ... */ },
+};
+registerWhereHandler(equalityHandler);
+registerExpressionHandler(countHandler);
+
+// INCLUDE is a closed collection: extend it by changing
+// INCLUDE_STRATEGIES and allIncludeHandlers together.
 
 // Dispatch
-const handler = getWhereHandler(operator);
-const node = handler(column, value, ctx, state);
+const whereHandler = getWhereHandler(operator);
+const whereNode = whereHandler.compile(decision, ctx, state, dispatch);
+const expressionHandler = getExpressionHandler(type);
+const expressionNode = expressionHandler.compile(decision, ctx, state);
+const includeHandler = getIncludeHandler(strategy);
+const includeResult = includeHandler.compile(decision, ctx, state);
 ```
 
 ### Handler Interface
 
 ```typescript
 interface WhereHandler {
-  (
-    column: string,
-    value: unknown,
-    operator: string,
+  readonly operators: readonly string[];
+  compile(
+    decision: Decision,
     ctx: CompilerContext,
-    state: CompilerState
+    state: CompilerState,
+    dispatch: WhereDispatcher
   ): Node;
 }
 
 interface ExpressionHandler {
-  (
-    expr: ExpressionIntent,
-    ctx: CompilerContext,
-    state: CompilerState
-  ): Node;
+  readonly types: readonly string[];
+  readonly nqlSafe?: boolean;
+  compile(decision: Decision, ctx: CompilerContext, state: CompilerState): Node;
 }
 
 interface IncludeHandler {
-  (
-    include: IncludeDecision,
+  readonly strategy: IncludeHandlerStrategy;
+  compile(
+    decision: Decision,
     ctx: CompilerContext,
     state: CompilerState
   ): IncludeResult;

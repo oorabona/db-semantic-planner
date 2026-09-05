@@ -11,10 +11,6 @@ import {
 	createWhereDispatcher,
 	type Decision,
 } from '../handlers/index.js';
-import {
-	registerAllWhereHandlers,
-	registerSimpleWhereHandlers,
-} from '../handlers/where/index.js';
 import { identityNaming } from '../naming-plugin.js';
 
 // Helper to compile a decision to SQL
@@ -41,7 +37,6 @@ function compileToSql(
 describe('WHERE Handlers', () => {
 	beforeEach(() => {
 		clearHandlers();
-		registerSimpleWhereHandlers();
 	});
 
 	describe('Comparison Operators', () => {
@@ -351,7 +346,6 @@ describe('WHERE Handlers', () => {
 describe('Complex WHERE Handlers (EXISTS)', () => {
 	beforeEach(() => {
 		clearHandlers();
-		registerAllWhereHandlers();
 	});
 
 	describe('EXISTS operator', () => {
@@ -479,7 +473,6 @@ describe('Complex WHERE Handlers (EXISTS)', () => {
 	describe('E05 Regression: Scalar Subquery', () => {
 		beforeEach(() => {
 			clearHandlers();
-			registerAllWhereHandlers();
 		});
 
 		it('compiles scalar subquery with aggregate (price > AVG)', () => {

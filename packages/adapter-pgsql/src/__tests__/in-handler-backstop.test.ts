@@ -34,10 +34,7 @@ import {
 	type Decision,
 } from '../handlers/index.js';
 import type { CompilerContext } from '../handlers/types.js';
-import {
-	inHandler,
-	registerSimpleWhereHandlers,
-} from '../handlers/where/index.js';
+import { inHandler } from '../handlers/where/index.js';
 import { identityNaming } from '../naming-plugin.js';
 
 const ctx: CompilerContext = {
@@ -57,7 +54,6 @@ function compileDecision(decision: Decision) {
 
 beforeEach(() => {
 	clearHandlers();
-	registerSimpleWhereHandlers();
 });
 
 describe('inHandler backstop: non-array value → throws (DEFECT 3)', () => {

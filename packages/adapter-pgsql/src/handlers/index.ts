@@ -8,19 +8,21 @@
 import type { ColumnListInput } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
-import { registerAllExpressionHandlers } from './expression/index.js';
-import { registerAllIncludeHandlers } from './include/index.js';
+import { escapeDiagnosticText } from '../validate.js';
+import { allExpressionHandlers } from './expression/index.js';
+import { allIncludeHandlers } from './include/index.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 	IncludeHandler,
+	IncludeHandlerStrategy,
 	WhereDispatcher,
 	WhereHandler,
 } from './types.js';
-import { isSelectWithFields } from './types.js';
-import { registerAllWhereHandlers } from './where/index.js';
+import { INCLUDE_STRATEGIES, isSelectWithFields } from './types.js';
+import { allWhereHandlers } from './where/index.js';
 import { resolveWhereOperator } from './where/operator-resolver.js';
 
 // Re-export types
@@ -34,46 +36,195 @@ const whereHandlers = new Map<string, WhereHandler>();
 const expressionHandlers = new Map<string, ExpressionHandler>();
 const includeHandlers = new Map<string, IncludeHandler>();
 
+/**
+ * Normalize symbolic operator names (from IntentAST) to SQL operator symbols.
+ * IntentAST uses 'eq', 'ne', 'lt', etc. but handlers register for '=', '!=', '<', etc.
+ */
+const OPERATOR_ALIASES: Record<string, string> = {
+	eq: '=',
+	ne: '!=',
+	neq: '!=',
+	lt: '<',
+	lte: '<=',
+	gt: '>',
+	gte: '>=',
+};
+
 // ============================================================================
 // Registration Functions
 // ============================================================================
 
-/**
- * Register a WHERE handler for one or more operators.
- */
-export function registerWhereHandler(handler: WhereHandler): void {
-	for (const op of handler.operators) {
-		if (whereHandlers.has(op)) {
-			throw new Error(`WHERE handler already registered for operator: ${op}`);
-		}
-		whereHandlers.set(op, handler);
-	}
+function describeDiagnosticValue(value: unknown): string {
+	return typeof value === 'string'
+		? escapeDiagnosticText(value)
+		: String(value);
 }
 
-/**
- * Register an EXPRESSION handler for one or more types.
- */
-export function registerExpressionHandler(handler: ExpressionHandler): void {
-	for (const type of handler.types) {
-		if (expressionHandlers.has(type)) {
-			throw new Error(
-				`EXPRESSION handler already registered for type: ${type}`,
-			);
-		}
-		expressionHandlers.set(type, handler);
-	}
-}
-
-/**
- * Register an INCLUDE handler for a strategy.
- */
-export function registerIncludeHandler(handler: IncludeHandler): void {
-	if (includeHandlers.has(handler.strategy)) {
+function requireHandlerObject(
+	handler: unknown,
+	family: 'WHERE' | 'EXPRESSION' | 'INCLUDE',
+): Record<string, unknown> {
+	if (
+		typeof handler !== 'object' ||
+		handler === null ||
+		Array.isArray(handler)
+	) {
 		throw new Error(
-			`INCLUDE handler already registered for strategy: ${handler.strategy}`,
+			`Invalid ${family} handler: expected an object, received ${handler === null ? 'null' : typeof handler}`,
 		);
 	}
-	includeHandlers.set(handler.strategy, handler);
+	return handler as Record<string, unknown>;
+}
+
+function validateHandlerKeys(
+	handler: unknown,
+	family: 'WHERE' | 'EXPRESSION',
+	keyProperty: 'operators' | 'types',
+): readonly string[] {
+	const candidate = requireHandlerObject(handler, family);
+	const keys = candidate[keyProperty];
+	if (!Array.isArray(keys)) {
+		throw new Error(
+			`Invalid ${family} handler ${keyProperty}: expected an array, received ${typeof keys}`,
+		);
+	}
+	if (typeof candidate.compile !== 'function') {
+		throw new Error(
+			`Invalid ${family} handler compile: expected a function, received ${typeof candidate.compile}`,
+		);
+	}
+	const copiedKeys = [...keys];
+	if (copiedKeys.length === 0) {
+		throw new Error(
+			`Invalid ${family} handler ${keyProperty}: cannot be empty`,
+		);
+	}
+	const seen = new Set<string>();
+	for (const key of copiedKeys) {
+		if (typeof key !== 'string') {
+			throw new Error(
+				`Invalid ${family} handler key: expected a string, received ${typeof key}`,
+			);
+		}
+		if (key.length === 0) {
+			throw new Error(
+				`Invalid ${family} handler key: cannot be empty (received ${describeDiagnosticValue(key)})`,
+			);
+		}
+		if (key.trim().length === 0) {
+			throw new Error(
+				`Invalid ${family} handler key: cannot be blank (received ${describeDiagnosticValue(key)})`,
+			);
+		}
+		if (seen.has(key)) {
+			throw new Error(
+				`Invalid ${family} handler key: duplicate ${describeDiagnosticValue(key)} in one registration`,
+			);
+		}
+		if (
+			family === 'WHERE' &&
+			Object.hasOwn(OPERATOR_ALIASES, key) &&
+			OPERATOR_ALIASES[key] !== key
+		) {
+			throw new Error(
+				`Invalid WHERE handler operator: ${describeDiagnosticValue(key)} is an alias for ${describeDiagnosticValue(OPERATOR_ALIASES[key])}; register the canonical operator instead`,
+			);
+		}
+		seen.add(key);
+	}
+	return copiedKeys;
+}
+
+function validateIncludeHandler(handler: unknown): string {
+	const candidate = requireHandlerObject(handler, 'INCLUDE');
+	const strategy = candidate.strategy;
+	if (typeof strategy !== 'string') {
+		throw new Error(
+			`Invalid INCLUDE handler strategy: expected a string, received ${typeof strategy}`,
+		);
+	}
+	if (strategy.length === 0) {
+		throw new Error(
+			`Invalid INCLUDE handler strategy: cannot be empty (received ${describeDiagnosticValue(strategy)})`,
+		);
+	}
+	if (strategy.trim().length === 0) {
+		throw new Error(
+			`Invalid INCLUDE handler strategy: cannot be blank (received ${describeDiagnosticValue(strategy)})`,
+		);
+	}
+	if (!INCLUDE_STRATEGIES.some((accepted) => accepted === strategy)) {
+		throw new Error(
+			`Invalid INCLUDE handler strategy: ${describeDiagnosticValue(strategy)} is not one of ${INCLUDE_STRATEGIES.map(describeDiagnosticValue).join(', ')}`,
+		);
+	}
+	if (typeof candidate.compile !== 'function') {
+		throw new Error(
+			`Invalid INCLUDE handler compile: expected a function, received ${typeof candidate.compile}`,
+		);
+	}
+	return strategy;
+}
+
+function addHandlerKeys<Handler>(
+	registry: Map<string, Handler>,
+	keys: readonly string[],
+	handler: Handler,
+	family: 'WHERE' | 'EXPRESSION' | 'INCLUDE',
+	keyName: 'operator' | 'type' | 'strategy',
+): void {
+	for (const key of keys) {
+		if (registry.has(key)) {
+			throw new Error(
+				`${family} handler already registered for ${keyName}: ${describeDiagnosticValue(key)}`,
+			);
+		}
+	}
+	for (const key of keys) registry.set(key, handler);
+}
+
+function installWhereHandler(handler: WhereHandler): void {
+	addHandlerKeys(
+		whereHandlers,
+		validateHandlerKeys(handler, 'WHERE', 'operators'),
+		handler,
+		'WHERE',
+		'operator',
+	);
+}
+
+function installExpressionHandler(handler: ExpressionHandler): void {
+	addHandlerKeys(
+		expressionHandlers,
+		validateHandlerKeys(handler, 'EXPRESSION', 'types'),
+		handler,
+		'EXPRESSION',
+		'type',
+	);
+}
+
+function installIncludeHandler(handler: IncludeHandler): void {
+	addHandlerKeys(
+		includeHandlers,
+		[validateIncludeHandler(handler)],
+		handler,
+		'INCLUDE',
+		'strategy',
+	);
+}
+
+/** Register a WHERE handler for one or more canonical operators. */
+export function registerWhereHandler(handler: WhereHandler): void {
+	const operators = validateHandlerKeys(handler, 'WHERE', 'operators');
+	ensureHandlersRegistered();
+	addHandlerKeys(whereHandlers, operators, handler, 'WHERE', 'operator');
+}
+
+/** Register an EXPRESSION handler for one or more types. */
+export function registerExpressionHandler(handler: ExpressionHandler): void {
+	const types = validateHandlerKeys(handler, 'EXPRESSION', 'types');
+	ensureExpressionHandlersRegistered();
+	addHandlerKeys(expressionHandlers, types, handler, 'EXPRESSION', 'type');
 }
 
 // ============================================================================
@@ -122,7 +273,7 @@ export function getNqlSafeExpressionHandler(
  * @throws Error if no handler registered
  */
 export function getIncludeHandler(
-	strategy: 'join' | 'lateral' | 'json_agg' | 'cte',
+	strategy: IncludeHandlerStrategy,
 ): IncludeHandler {
 	const handler = includeHandlers.get(strategy);
 	if (!handler) {
@@ -148,9 +299,7 @@ export function hasExpressionHandler(type: string): boolean {
 /**
  * Check if an INCLUDE handler exists for a strategy.
  */
-export function hasIncludeHandler(
-	strategy: 'join' | 'lateral' | 'json_agg' | 'cte',
-): boolean {
+export function hasIncludeHandler(strategy: IncludeHandlerStrategy): boolean {
 	return includeHandlers.has(strategy);
 }
 
@@ -158,49 +307,58 @@ export function hasIncludeHandler(
 // Dispatcher (for recursive WHERE compilation)
 // ============================================================================
 
-/**
- * Normalize symbolic operator names (from IntentAST) to SQL operator symbols.
- * IntentAST uses 'eq', 'ne', 'lt', etc. but handlers register for '=', '!=', '<', etc.
- */
-const OPERATOR_ALIASES: Record<string, string> = {
-	eq: '=',
-	ne: '!=',
-	neq: '!=',
-	isDistinctFrom: 'isDistinctFrom',
-	lt: '<',
-	lte: '<=',
-	gt: '>',
-	gte: '>=',
-};
+type HandlerRegistrationState =
+	| 'uninitialized'
+	| 'initializing'
+	| 'initialized';
 
-let handlersInitialized = false;
+function refuseReentrantHandlerRegistryUse(
+	families: readonly ('WHERE' | 'EXPRESSION' | 'INCLUDE')[],
+): never {
+	const diagnosticFamilies = families
+		.map((family) => describeDiagnosticValue(family))
+		.join(', ');
+	throw new Error(
+		`Cannot use ${diagnosticFamilies} handler registry reentrantly while ${diagnosticFamilies} handlers are initializing`,
+	);
+}
 
-let includeHandlersInitialized = false;
+let whereHandlersState: HandlerRegistrationState = 'uninitialized';
+let includeHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureIncludeHandlersRegistered(): void {
-	if (includeHandlersInitialized) return;
+	if (includeHandlersState === 'initialized') return;
+	if (includeHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse(['INCLUDE']);
 	const snapshot = new Map(includeHandlers);
+	includeHandlersState = 'initializing';
 	try {
-		registerAllIncludeHandlers();
+		for (const handler of allIncludeHandlers) installIncludeHandler(handler);
 	} catch (error) {
 		includeHandlers.clear();
 		for (const [key, handler] of snapshot) includeHandlers.set(key, handler);
+		includeHandlersState = 'uninitialized';
 		throw error;
 	}
-	includeHandlersInitialized = true;
+	includeHandlersState = 'initialized';
 }
 
-let expressionHandlersInitialized = false;
+let expressionHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureExpressionHandlersRegistered(): void {
-	if (expressionHandlersInitialized) return;
+	if (expressionHandlersState === 'initialized') return;
+	if (expressionHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse(['EXPRESSION']);
 	const snapshot = new Map(expressionHandlers);
+	expressionHandlersState = 'initializing';
 	try {
-		registerAllExpressionHandlers();
+		for (const handler of allExpressionHandlers)
+			installExpressionHandler(handler);
 	} catch (error) {
 		expressionHandlers.clear();
 		for (const [key, handler] of snapshot) expressionHandlers.set(key, handler);
+		expressionHandlersState = 'uninitialized';
 		throw error;
 	}
-	expressionHandlersInitialized = true;
+	expressionHandlersState = 'initialized';
 }
 
 /**
@@ -208,18 +366,20 @@ export function ensureExpressionHandlersRegistered(): void {
  * Called on first dispatch to avoid circular import issues.
  */
 function ensureHandlersRegistered(): void {
-	// A caller that installs handlers before first dispatch keeps the registry it built;
-	// where-handlers.test.ts and three sibling files rely on this. Issue #711 tracks an explicit replacement API.
-	if (handlersInitialized || whereHandlers.size > 0) return;
+	if (whereHandlersState === 'initialized') return;
+	if (whereHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse(['WHERE']);
 	const snapshot = new Map(whereHandlers);
+	whereHandlersState = 'initializing';
 	try {
-		registerAllWhereHandlers();
+		for (const handler of allWhereHandlers) installWhereHandler(handler);
 	} catch (error) {
 		whereHandlers.clear();
 		for (const [key, handler] of snapshot) whereHandlers.set(key, handler);
+		whereHandlersState = 'uninitialized';
 		throw error;
 	}
-	handlersInitialized = true;
+	whereHandlersState = 'initialized';
 }
 
 /**
@@ -542,15 +702,25 @@ export function getRegisteredOperators(): {
 }
 
 /**
- * Clear all handlers (for testing only).
+ * Reset all handler registries. Each family's next registrar or compilation path restores that family's built-ins independently.
  */
 export function clearHandlers(): void {
+	const initializingFamilies = [
+		...(whereHandlersState === 'initializing' ? ['WHERE' as const] : []),
+		...(expressionHandlersState === 'initializing'
+			? ['EXPRESSION' as const]
+			: []),
+		...(includeHandlersState === 'initializing' ? ['INCLUDE' as const] : []),
+	];
+	if (initializingFamilies.length > 0)
+		refuseReentrantHandlerRegistryUse(initializingFamilies);
+
 	whereHandlers.clear();
 	expressionHandlers.clear();
 	includeHandlers.clear();
-	handlersInitialized = false;
-	includeHandlersInitialized = false;
-	expressionHandlersInitialized = false;
+	whereHandlersState = 'uninitialized';
+	includeHandlersState = 'uninitialized';
+	expressionHandlersState = 'uninitialized';
 }
 
 // ============================================================================
@@ -578,6 +748,5 @@ export {
 	nullHandler,
 	orHandler,
 	rangeHandler,
-	registerSimpleWhereHandlers,
 	simpleWhereHandlers,
 } from './where/index.js';
