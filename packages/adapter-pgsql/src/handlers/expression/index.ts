@@ -1,10 +1,9 @@
 /**
  * EXPRESSION Handlers Registration
  *
- * Exports all expression handlers and provides registration functions.
+ * Exports all expression handlers as immutable collections.
  */
 
-import { registerExpressionHandler } from '../index.js';
 import {
 	avgHandler,
 	countDistinctHandler,
@@ -179,7 +178,7 @@ const relationExpressionHandlers = [
 /**
  * All expression handlers
  */
-const allExpressionHandlers = [
+export const allExpressionHandlers = Object.freeze([
 	...columnExpressionHandlers,
 	...aggregateExpressionHandlers,
 	...conditionalExpressionHandlers,
@@ -190,15 +189,4 @@ const allExpressionHandlers = [
 	...jsonExpressionHandlers,
 	arithmeticHandler,
 	customExpressionHandler,
-];
-
-/**
- * Register all expression handlers.
- * The compiler calls this through ensureExpressionHandlersRegistered on first use; calling it
- * directly leaves that gate unset, so the compiler registers the same handlers again and throws.
- */
-export function registerAllExpressionHandlers(): void {
-	for (const handler of allExpressionHandlers) {
-		registerExpressionHandler(handler);
-	}
-}
+]);

@@ -26,7 +26,6 @@ import {
 import { anyHandler } from '../handlers/where/any.js';
 import { betweenHandler } from '../handlers/where/between.js';
 import { customExpressionWhereHandler } from '../handlers/where/custom-expression.js';
-import { registerAllWhereHandlers } from '../handlers/where/index.js';
 import {
 	jsonComparisonHandler,
 	jsonContainsHandler,
@@ -37,8 +36,6 @@ import { identityNaming } from '../naming-plugin.js';
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
-
-registerAllWhereHandlers();
 
 function makeCtx(overrides?: Partial<WhereCompilerCtx>): WhereCompilerCtx {
 	const paramState = createCompilerState();

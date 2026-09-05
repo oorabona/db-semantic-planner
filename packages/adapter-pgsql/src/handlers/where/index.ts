@@ -1,10 +1,9 @@
 /**
  * WHERE Handlers Registration
  *
- * Exports all WHERE handlers and provides a function to register them all.
+ * Exports all WHERE handlers as immutable collections.
  */
 
-import { registerWhereHandler } from '../index.js';
 import { anyHandler } from './any.js';
 // Handler imports - simple
 import { betweenHandler } from './between.js';
@@ -65,7 +64,7 @@ export {
 /**
  * All simple WHERE handlers
  */
-export const simpleWhereHandlers = [
+export const simpleWhereHandlers = Object.freeze([
 	customExpressionWhereHandler,
 	comparisonHandler,
 	likeHandler,
@@ -80,12 +79,12 @@ export const simpleWhereHandlers = [
 	jsonContainsHandler,
 	jsonExistsHandler,
 	jsonComparisonHandler,
-];
+]);
 
 /**
  * Complex WHERE handlers (relation filtering, subqueries)
  */
-const complexWhereHandlers = [
+const complexWhereHandlers = Object.freeze([
 	// EXISTS-based
 	existsHandler,
 	notExistsHandler,
@@ -99,32 +98,12 @@ const complexWhereHandlers = [
 	relationFilterHandler,
 	hasRelationHandler,
 	hasNoRelationHandler,
-];
+]);
 
 /**
  * All WHERE handlers
  */
-const allWhereHandlers = [...simpleWhereHandlers, ...complexWhereHandlers];
-
-/**
- * Register all simple WHERE handlers.
- * Nothing in the package calls this; the first WHERE dispatch registers the full set instead.
- * Calling it on a populated registry throws, and calling it on an empty one suppresses that
- * lazy registration, leaving the complex handlers uninstalled.
- */
-export function registerSimpleWhereHandlers(): void {
-	for (const handler of simpleWhereHandlers) {
-		registerWhereHandler(handler);
-	}
-}
-
-/**
- * Register all WHERE handlers (simple + complex).
- * The first WHERE dispatch calls this through ensureHandlersRegistered; calling it again once the
- * handlers are registered throws.
- */
-export function registerAllWhereHandlers(): void {
-	for (const handler of allWhereHandlers) {
-		registerWhereHandler(handler);
-	}
-}
+export const allWhereHandlers = Object.freeze([
+	...simpleWhereHandlers,
+	...complexWhereHandlers,
+]);

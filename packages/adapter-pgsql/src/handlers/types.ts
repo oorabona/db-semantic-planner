@@ -17,6 +17,16 @@ import type { FkColumnDerivation } from '../assert-field.js';
 import type { BindingNameRegistry } from '../binding-registry.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 
+/** Built-in include strategies, shared by the runtime registry and public types. */
+export const INCLUDE_STRATEGIES = [
+	'join',
+	'lateral',
+	'json_agg',
+	'cte',
+] as const;
+
+export type IncludeStrategy = (typeof INCLUDE_STRATEGIES)[number];
+
 // ============================================================================
 // Compiler Context (immutable, passed to all handlers)
 // ============================================================================
@@ -156,7 +166,7 @@ export interface Decision {
 	readonly limit?: number | ParamIntent | { paramIndex: number };
 	readonly offset?: number | ParamIntent | { paramIndex: number };
 	// Include-specific
-	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
+	readonly strategy?: IncludeStrategy;
 	readonly relation?: string;
 	readonly relationName?: string;
 	readonly relationPath?: string;
@@ -301,7 +311,7 @@ export interface ExpressionHandler {
  */
 export interface IncludeHandler {
 	/** Strategy this handler implements */
-	readonly strategy: 'join' | 'lateral' | 'json_agg' | 'cte';
+	readonly strategy: IncludeStrategy;
 
 	/**
 	 * Compile an include to AST.

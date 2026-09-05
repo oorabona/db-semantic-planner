@@ -15,13 +15,12 @@ import { and, exists, ModelIRImpl, ref, schema } from '@dbsp/core';
 import type { TableIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
-import { registerAllWhereHandlers } from '../handlers/where/index.js';
 import {
 	buildOnConflictClause,
 	type UpsertConfig,
@@ -29,10 +28,6 @@ import {
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { validateSqlExpression } from '../validate.js';
-
-beforeAll(() => {
-	registerAllWhereHandlers();
-});
 
 const naming = new CamelCaseNamingPlugin();
 

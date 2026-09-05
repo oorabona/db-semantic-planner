@@ -4,13 +4,12 @@
 
 import { exists, notExists } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
-import { registerAllWhereHandlers } from '../handlers/where/index.js';
 import {
 	buildOnConflictClause,
 	compileDelete,
@@ -27,11 +26,6 @@ import {
 } from '../mutations/index.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
-
-// Register WHERE handlers before tests
-beforeAll(() => {
-	registerAllWhereHandlers();
-});
 
 describe('Mutation Compiler', () => {
 	const naming = new CamelCaseNamingPlugin();

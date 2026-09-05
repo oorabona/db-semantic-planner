@@ -12,6 +12,7 @@
  * - clearHandlers
  */
 
+import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it, vi } from 'vitest';
 import { compilePlan } from '../compiler.js';
 import {
@@ -26,16 +27,12 @@ import {
 	hasExpressionHandler,
 	hasIncludeHandler,
 	hasWhereHandler,
-	registerAllExpressionHandlers,
-	registerAllIncludeHandlers,
 	registerExpressionHandler,
 	registerIncludeHandler,
 	registerWhereHandler,
 } from './index.js';
 import * as whereHandlerModule from './where/index.js';
 
-// Force handler registration upfront by triggering a dispatch
-// (lazy init in the module won't populate until first dispatch)
 function ensureRegistered() {
 	const dispatch = createWhereDispatcher();
 	const state = createCompilerState();
@@ -44,15 +41,46 @@ function ensureRegistered() {
 		rootTable: 'test',
 		maxRecursiveDepth: 100,
 	};
-	try {
-		dispatch(
-			{ type: 'where', column: 'x', operator: '=', value: 1 },
-			ctx as any,
-			state,
-		);
-	} catch {
-		// ignore
-	}
+	dispatch(
+		{ type: 'where', column: 'x', operator: '=', value: 1 },
+		ctx as any,
+		state,
+	);
+}
+
+function restoreAllHandlerFamilies() {
+	ensureRegistered();
+	compilePlan({
+		rootTable: 'orders',
+		decisions: [
+			{
+				type: 'selectFunction',
+				function: 'count',
+				column: '*',
+				alias: 'total',
+			},
+		],
+	});
+	compilePlan({
+		rootTable: 'posts',
+		decisions: [
+			{ type: 'select', column: '*', table: 'posts' },
+			{
+				type: 'includeStrategy',
+				choice: 'join',
+				relationName: 'author',
+				targetTable: 'authors',
+				relationType: 'belongsTo',
+				foreignKey: 'author_id',
+				parentKey: 'id',
+				columns: ['id', 'name'],
+			},
+		],
+	});
+	const operators = getRegisteredOperators();
+	expect(operators.where).toContain('=');
+	expect(operators.expression).toContain('count');
+	expect(operators.include).toContain('join');
 }
 
 describe('handlers/index - Coverage Tests', () => {
@@ -736,7 +764,7 @@ describe('handlers/index - Coverage Tests', () => {
 				expect(() => compilePlan(plan)).not.toThrow();
 			} finally {
 				clearHandlers();
-				ensureRegistered();
+				restoreAllHandlerFamilies();
 			}
 		});
 
@@ -765,7 +793,7 @@ describe('handlers/index - Coverage Tests', () => {
 				expect(() => compilePlan(plan)).not.toThrow();
 			} finally {
 				clearHandlers();
-				ensureRegistered();
+				restoreAllHandlerFamilies();
 			}
 		});
 
@@ -781,17 +809,24 @@ describe('handlers/index - Coverage Tests', () => {
 				operators: ['__partial_where_registration__'],
 				compile: () => ({}),
 			};
+			const failingHandler = {
+				get operators() {
+					throw new Error('simulated WHERE initialization failure');
+				},
+				compile: () => ({}),
+			};
 
 			clearHandlers();
 			try {
 				const beforeAttempt = getRegisteredOperators();
 				vi.spyOn(
 					whereHandlerModule,
-					'registerAllWhereHandlers',
-				).mockImplementationOnce(() => {
-					registerWhereHandler(partiallyRegisteredHandler as any);
-					throw new Error('simulated WHERE initialization failure');
-				});
+					'allWhereHandlers',
+					'get',
+				).mockReturnValueOnce([
+					partiallyRegisteredHandler,
+					failingHandler,
+				] as any);
 
 				expect(() => compilePlan(plan)).toThrow(
 					/simulated WHERE initialization failure/,
@@ -803,6 +838,212 @@ describe('handlers/index - Coverage Tests', () => {
 				clearHandlers();
 				ensureRegistered();
 			}
+		});
+	});
+
+	describe('registration contract', () => {
+		const compile = () => ({});
+
+		it('installs WHERE built-ins after a custom registration before dispatch', () => {
+			clearHandlers();
+			const customHandler = { operators: ['__custom__', '@>'], compile };
+			registerWhereHandler(customHandler as any);
+
+			const dispatch = createWhereDispatcher();
+			const state = createCompilerState();
+			const node = dispatch(
+				{ type: 'where', column: 'id', operator: '=', value: 42 },
+				{
+					naming: { toDatabase: (value) => value, toModel: (value) => value },
+					rootTable: 'users',
+					maxRecursiveDepth: 100,
+				} as any,
+				state,
+			);
+			const sql = deparseSync([{ SelectStmt: { whereClause: node } }])
+				.replace(/^SELECT\s+WHERE\s+/i, '')
+				.trim();
+
+			expect(sql).toBe('users.id = $1');
+			expect(hasWhereHandler('__custom__')).toBe(true);
+			expect(hasWhereHandler('@>')).toBe(true);
+			expect(
+				getRegisteredOperators().where.every((key) => typeof key === 'string'),
+			).toBe(true);
+		});
+
+		it('uses a copied WHERE key list for validation and application', () => {
+			clearHandlers();
+			let reads = 0;
+			const operators = ['__copied_key__'];
+			Object.defineProperty(operators, 0, {
+				get: () => (reads++ === 0 ? '__copied_key__' : '__changed_key__'),
+			});
+
+			registerWhereHandler({ operators, compile } as any);
+
+			expect(hasWhereHandler('__copied_key__')).toBe(true);
+			expect(hasWhereHandler('__changed_key__')).toBe(false);
+		});
+
+		it('refuses WHERE aliases without registering the requested key', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({ operators: ['eq'], compile } as any),
+			).toThrow(/eq is an alias for =/);
+			expect(getRegisteredOperators().where).not.toContain('eq');
+		});
+
+		it('does not treat isDistinctFrom as an alias and dispatches it canonically', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({ operators: ['isDistinctFrom'], compile } as any),
+			).toThrow(/already registered/);
+
+			const state = createCompilerState();
+			const node = createWhereDispatcher()(
+				{
+					type: 'where',
+					column: 'left_value',
+					operator: 'isDistinctFrom',
+					value: 42,
+				},
+				{
+					naming: { toDatabase: (value) => value, toModel: (value) => value },
+					rootTable: 'users',
+					maxRecursiveDepth: 100,
+				} as any,
+				state,
+			);
+			const sql = deparseSync([{ SelectStmt: { whereClause: node } }]);
+
+			expect(sql).toContain('IS DISTINCT FROM');
+		});
+
+		it('checks every requested WHERE collision before adding any requested key', () => {
+			clearHandlers();
+			const firstHandler = { operators: ['__existing__'], compile };
+			const secondHandler = { operators: ['__new__', '__existing__'], compile };
+			registerWhereHandler(firstHandler as any);
+
+			expect(() => registerWhereHandler(secondHandler as any)).toThrow(
+				/__existing__/,
+			);
+			expect(hasWhereHandler('__new__')).toBe(false);
+			expect(getWhereHandler('__existing__')).toBe(firstHandler);
+		});
+
+		it('refuses empty WHERE key lists without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({ operators: [], compile } as any),
+			).toThrow(/cannot be empty/);
+			expect(getRegisteredOperators().where).toEqual([]);
+		});
+
+		it('refuses blank WHERE keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({ operators: [' \t'], compile } as any),
+			).toThrow(/cannot be blank.*\\t/);
+			expect(getRegisteredOperators().where).toEqual([]);
+		});
+
+		it('refuses non-string WHERE keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({ operators: [1], compile } as unknown as any),
+			).toThrow(/expected a string, received number/);
+			expect(hasWhereHandler(1 as any)).toBe(false);
+			expect(hasWhereHandler('1')).toBe(false);
+		});
+
+		it('refuses duplicate WHERE keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerWhereHandler({
+					operators: ['__dup__', '__dup__'],
+					compile,
+				} as any),
+			).toThrow(/duplicate __dup__/);
+			expect(hasWhereHandler('__dup__')).toBe(false);
+		});
+
+		it('refuses empty EXPRESSION key lists without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerExpressionHandler({ types: [], compile } as any),
+			).toThrow(/cannot be empty/);
+			expect(getRegisteredOperators().expression).toEqual([]);
+		});
+
+		it('refuses empty EXPRESSION keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerExpressionHandler({ types: [''], compile } as any),
+			).toThrow(/cannot be empty/);
+			expect(getRegisteredOperators().expression).toEqual([]);
+		});
+
+		it('refuses non-string EXPRESSION keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerExpressionHandler({ types: [1], compile } as any),
+			).toThrow(/expected a string, received number/);
+			expect(getRegisteredOperators().expression).toEqual([]);
+		});
+
+		it('refuses duplicate EXPRESSION keys without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerExpressionHandler({
+					types: ['__d__', '__d__'],
+					compile,
+				} as any),
+			).toThrow(/duplicate __d__/);
+			expect(getRegisteredOperators().expression).toEqual([]);
+		});
+
+		it('refuses empty INCLUDE strategies without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerIncludeHandler({ strategy: '', compile } as any),
+			).toThrow(/cannot be empty/);
+			expect(getRegisteredOperators().include).toEqual([]);
+		});
+
+		it('refuses blank INCLUDE strategies without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerIncludeHandler({ strategy: ' \t', compile } as any),
+			).toThrow(/cannot be blank.*\\t/);
+			expect(getRegisteredOperators().include).toEqual([]);
+		});
+
+		it('refuses non-string INCLUDE strategies without registration', () => {
+			clearHandlers();
+			expect(() =>
+				registerIncludeHandler({ strategy: 1, compile } as any),
+			).toThrow(/expected a string, received number/);
+			expect(getRegisteredOperators().include).toEqual([]);
+		});
+
+		it('refuses malformed handlers with diagnostics instead of property TypeErrors', () => {
+			clearHandlers();
+			expect(() => registerWhereHandler(null as any)).toThrow(
+				/expected an object, received null/,
+			);
+			expect(() =>
+				registerWhereHandler({ operators: 'nope', compile } as any),
+			).toThrow(/operators: expected an array, received string/);
+			expect(() =>
+				registerWhereHandler({ operators: ['x'], compile: 'no' } as any),
+			).toThrow(/compile: expected a function, received string/);
+		});
+
+		it('reinitializes all handler families through compilation after clearHandlers', () => {
+			clearHandlers();
+			restoreAllHandlerFamilies();
 		});
 	});
 
@@ -819,12 +1060,17 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('throws on duplicate EXPRESSION type registration', () => {
-			// First ensure expression handlers are registered
-			try {
-				registerAllExpressionHandlers();
-			} catch {
-				// already registered
-			}
+			compilePlan({
+				rootTable: 'orders',
+				decisions: [
+					{
+						type: 'selectFunction',
+						function: 'count',
+						column: '*',
+						alias: 'total',
+					},
+				],
+			});
 			const ops = getRegisteredOperators();
 			if (ops.expression.length > 0) {
 				const handler = {
@@ -838,12 +1084,22 @@ describe('handlers/index - Coverage Tests', () => {
 		});
 
 		it('throws on duplicate INCLUDE strategy registration', () => {
-			// First ensure include handlers are registered
-			try {
-				registerAllIncludeHandlers();
-			} catch {
-				// already registered
-			}
+			compilePlan({
+				rootTable: 'posts',
+				decisions: [
+					{ type: 'select', column: '*', table: 'posts' },
+					{
+						type: 'includeStrategy',
+						choice: 'join',
+						relationName: 'author',
+						targetTable: 'authors',
+						relationType: 'belongsTo',
+						foreignKey: 'author_id',
+						parentKey: 'id',
+						columns: ['id', 'name'],
+					},
+				],
+			});
 			const ops = getRegisteredOperators();
 			if (ops.include.length > 0) {
 				const handler = {
