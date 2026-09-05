@@ -318,11 +318,13 @@ type HandlerRegistrationState =
 	| 'initialized';
 
 function refuseReentrantHandlerRegistryUse(
-	family: 'WHERE' | 'EXPRESSION' | 'INCLUDE',
+	families: readonly ('WHERE' | 'EXPRESSION' | 'INCLUDE')[],
 ): never {
-	const diagnosticFamily = describeDiagnosticValue(family);
+	const diagnosticFamilies = families
+		.map((family) => describeDiagnosticValue(family))
+		.join(', ');
 	throw new Error(
-		`Cannot use ${diagnosticFamily} handler registry reentrantly while ${diagnosticFamily} handlers are initializing`,
+		`Cannot use ${diagnosticFamilies} handler registry reentrantly while ${diagnosticFamilies} handlers are initializing`,
 	);
 }
 
@@ -331,7 +333,7 @@ let includeHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureIncludeHandlersRegistered(): void {
 	if (includeHandlersState === 'initialized') return;
 	if (includeHandlersState === 'initializing')
-		refuseReentrantHandlerRegistryUse('INCLUDE');
+		refuseReentrantHandlerRegistryUse(['INCLUDE']);
 	const snapshot = new Map(includeHandlers);
 	includeHandlersState = 'initializing';
 	try {
@@ -349,7 +351,7 @@ let expressionHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureExpressionHandlersRegistered(): void {
 	if (expressionHandlersState === 'initialized') return;
 	if (expressionHandlersState === 'initializing')
-		refuseReentrantHandlerRegistryUse('EXPRESSION');
+		refuseReentrantHandlerRegistryUse(['EXPRESSION']);
 	const snapshot = new Map(expressionHandlers);
 	expressionHandlersState = 'initializing';
 	try {
@@ -371,7 +373,7 @@ export function ensureExpressionHandlersRegistered(): void {
 function ensureHandlersRegistered(): void {
 	if (whereHandlersState === 'initialized') return;
 	if (whereHandlersState === 'initializing')
-		refuseReentrantHandlerRegistryUse('WHERE');
+		refuseReentrantHandlerRegistryUse(['WHERE']);
 	const snapshot = new Map(whereHandlers);
 	whereHandlersState = 'initializing';
 	try {
@@ -708,6 +710,16 @@ export function getRegisteredOperators(): {
  * Reset all handler registries. Each family's next registrar or compilation path restores that family's built-ins independently.
  */
 export function clearHandlers(): void {
+	const initializingFamilies = [
+		...(whereHandlersState === 'initializing' ? ['WHERE' as const] : []),
+		...(expressionHandlersState === 'initializing'
+			? ['EXPRESSION' as const]
+			: []),
+		...(includeHandlersState === 'initializing' ? ['INCLUDE' as const] : []),
+	];
+	if (initializingFamilies.length > 0)
+		refuseReentrantHandlerRegistryUse(initializingFamilies);
+
 	whereHandlers.clear();
 	expressionHandlers.clear();
 	includeHandlers.clear();

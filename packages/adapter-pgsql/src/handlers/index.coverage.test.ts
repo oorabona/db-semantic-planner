@@ -730,7 +730,7 @@ describe('handlers/index - Coverage Tests', () => {
 
 	describe('clearHandlers and re-init', () => {
 		it('clears all handlers and stats return 0', () => {
-			clearHandlers();
+			expect(() => clearHandlers()).not.toThrow();
 			const stats = getRegistryStats();
 			expect(stats.where).toBe(0);
 			expect(stats.expression).toBe(0);
@@ -891,6 +891,116 @@ describe('handlers/index - Coverage Tests', () => {
 					),
 				).not.toThrow();
 				expect(hasWhereHandler('=')).toBe(true);
+			} finally {
+				vi.restoreAllMocks();
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
+		it('refuses a reset during WHERE initialization and retries coherently', () => {
+			const outerOperator = '__reset_during_initialization__';
+			const operators = [outerOperator];
+			Object.defineProperty(operators, 0, {
+				configurable: true,
+				get() {
+					clearHandlers();
+					return outerOperator;
+				},
+			});
+			const resetHandler = { operators, compile: () => ({}) };
+			const dispatch = createWhereDispatcher();
+			const state = createCompilerState();
+			const ctx = {
+				naming: { toDatabase: (value) => value, toModel: (value) => value },
+				rootTable: 'users',
+				maxRecursiveDepth: 100,
+			};
+
+			clearHandlers();
+			try {
+				const beforeAttempt = getRegisteredOperators();
+				vi.spyOn(
+					whereHandlerModule,
+					'allWhereHandlers',
+					'get',
+				).mockReturnValueOnce([resetHandler] as any);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).toThrow(
+					'Cannot use WHERE handler registry reentrantly while WHERE handlers are initializing',
+				);
+				expect(getRegisteredOperators()).toEqual(beforeAttempt);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).not.toThrow();
+				expect(hasWhereHandler('=')).toBe(true);
+			} finally {
+				vi.restoreAllMocks();
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
+		it('refuses a reset without erasing a WHERE initialization prefix', () => {
+			const originalHandlers = whereHandlerModule.allWhereHandlers;
+			const outerOperator = '__reset_during_initialization__';
+			let resetError: unknown;
+			const operators = [outerOperator];
+			Object.defineProperty(operators, 0, {
+				configurable: true,
+				get() {
+					try {
+						clearHandlers();
+					} catch (error) {
+						resetError = error;
+					}
+					return outerOperator;
+				},
+			});
+			const resetHandler = { operators, compile: () => ({}) };
+			const dispatch = createWhereDispatcher();
+			const state = createCompilerState();
+			const ctx = {
+				naming: { toDatabase: (value) => value, toModel: (value) => value },
+				rootTable: 'users',
+				maxRecursiveDepth: 100,
+			};
+
+			clearHandlers();
+			try {
+				vi.spyOn(
+					whereHandlerModule,
+					'allWhereHandlers',
+					'get',
+				).mockReturnValueOnce([
+					...originalHandlers.slice(0, 2),
+					resetHandler,
+					...originalHandlers.slice(2),
+				] as any);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).not.toThrow();
+				expect(hasWhereHandler('=')).toBe(true);
+				expect(resetError).toHaveProperty(
+					'message',
+					'Cannot use WHERE handler registry reentrantly while WHERE handlers are initializing',
+				);
 			} finally {
 				vi.restoreAllMocks();
 				clearHandlers();

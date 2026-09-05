@@ -25,7 +25,7 @@ This document catalogues the recurring design patterns used in db-semantic-plann
 
 ### Intent
 
-Decouple the SQL compiler from the logic of each individual operator or expression kind. Each operator registers a handler object; the compiler looks up and dispatches to the correct handler at compile time. Adding a new operator never touches the compiler core.
+Decouple the SQL compiler from the logic of each individual WHERE operator or expression kind. A dispatch key belongs to a handler object; the compiler looks up and dispatches to the correct handler at compile time. Adding a WHERE operator or expression type normally does not touch the compiler core; INCLUDE strategies are a closed collection.
 
 ### Structure
 
@@ -40,9 +40,9 @@ Decouple the SQL compiler from the logic of each individual operator or expressi
 Three independent registries exist, one per handler family:
 
 ```
-WhereHandler    { operators: string[]; compile(decision, ctx, state, dispatch): Node }
-ExpressionHandler { operators: string[]; compile(decision, ctx, state): Node }
-IncludeHandler  { operators: string[]; compile(decision, ctx, state): IncludeResult }
+WhereHandler      { readonly operators: readonly string[]; compile(decision, ctx, state, dispatch): Node }
+ExpressionHandler { readonly types: readonly string[]; compile(decision, ctx, state): Node }
+IncludeHandler    { readonly strategy: IncludeStrategy; compile(decision, ctx, state): IncludeResult }
 ```
 
 Registration:
@@ -51,53 +51,54 @@ Registration:
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
 registerWhereHandler(handler: WhereHandler): void   // throws on duplicate
 registerExpressionHandler(handler: ExpressionHandler): void
-registerIncludeHandler(handler: IncludeHandler): void
 ```
+
+`registerIncludeHandler` is not an extension surface: strategies outside `INCLUDE_STRATEGIES` are invalid, and the initializer already installs every allowed strategy. Extend INCLUDE by changing `INCLUDE_STRATEGIES` and `allIncludeHandlers` together.
 
 Lookup (throws if missing):
 
 ```typescript
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
 getWhereHandler(operator: string): WhereHandler
-getExpressionHandler(operator: string): ExpressionHandler
+getExpressionHandler(type: string): ExpressionHandler
 getIncludeHandler(strategy: IncludeStrategy): IncludeHandler
 ```
 
 ### Example
 
-Adding a WHERE handler for `ILIKE`:
+Adding a WHERE handler for a new, unregistered operator:
 
 ```typescript
 // doctest: skip — illustrative fragment (registerWhereHandler is an internal adapter-pgsql API, not in doctest preamble)
 // packages/adapter-pgsql/src/handlers/where/pattern.ts
-const ilikeHandler: WhereHandler = {
-  operators: ['ilike', 'not_ilike'],
+const matchesHandler: WhereHandler = {
+  operators: ['matches'],
   compile(decision, ctx, state, dispatch) {
     // return PostgreSQL AST node
   },
 };
 
 // packages/adapter-pgsql/src/handlers/where/index.ts
-export const allWhereHandlers = Object.freeze([
+export const simpleWhereHandlers = Object.freeze([
   // existing handlers
-  ilikeHandler,
+  matchesHandler,
 ]);
 ```
 
-The central WHERE family initializer in `handlers/index.ts` installs `allWhereHandlers` lazily. The compiler calls `getWhereHandler(decision.operator).compile(...)` — no switch statements.
+The central WHERE family initializer in `handlers/index.ts` installs `allWhereHandlers` lazily. The WHERE dispatcher resolves aliases, then calls `getWhereHandler(operator).compile(...)` — no switch statements.
 
 ### Convention
 
 - Handler files live in `handlers/{where,expression,include}/`
-- Each file exports one handler object (not a class)
-- Each sub-directory `index.ts` adds handler objects to its frozen collection; the matching family initializer in `handlers/index.ts` installs that collection lazily
+- Handler modules export handler objects, not classes
+- Each sub-directory `index.ts` exports its top-level `all*Handlers` collection frozen; the matching family initializer in `handlers/index.ts` installs it lazily
 - Direct bulk registration was removed so the central initializer can install each family transactionally and recover from failures
 - Handler interfaces are in `handlers/types.ts` — never inline types in handler files
-- `ensureHandlersRegistered()` in `handlers/index.ts` is called lazily before first use
+- WHERE dispatch calls `ensureHandlersRegistered()` before lookup; expression and INCLUDE compilation call their matching `ensure*Registered()` functions before lookup
 
 ### When to use
 
-Use this pattern whenever the compiler must dispatch over a closed set of operator/kind names that is expected to grow over time. Do NOT use a switch statement in the compiler itself.
+Use this pattern for WHERE operators and expression types expected to grow over time. INCLUDE strategies use the same dispatch shape but are deliberately closed; add one only by updating both `INCLUDE_STRATEGIES` and `allIncludeHandlers`. Do NOT use a switch statement in the compiler itself.
 
 ---
 
