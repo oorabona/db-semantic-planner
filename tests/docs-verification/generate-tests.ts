@@ -9,9 +9,10 @@
  *
  * Run: `pnpm tsx tests/docs-verification/generate-tests.ts`
  */
-import { mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { doctestSources, looksLikeFragment } from './doc-sources.js';
 import { extractBlocks } from './doctest.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -21,55 +22,7 @@ const GENERATED = join(__dirname, '__generated__');
 /** When true, blocks annotated with `// doctest: real-db-only` are included as runnable tests. */
 const REAL_DB = process.env.DBSP_DOCTEST_REAL_DB === '1';
 
-const SOURCES: Record<string, string[]> = {
-	readme: ['README.md'],
-	'package-readmes': [
-		'packages/types/README.md',
-		'packages/nql/README.md',
-		'packages/core/README.md',
-		'packages/adapter-pgsql/README.md',
-		'packages/cli/README.md',
-		'packages/mcp-server/README.md',
-	],
-	'site-index': [
-		'packages/docs/index.md',
-		'packages/docs/patterns.md',
-		'packages/docs/comparison.md',
-		'packages/docs/roadmap.md',
-	],
-	'site-guides': collectDir('packages/docs/guide'),
-	'site-api': collectDir('packages/docs/api'),
-	'site-nql': collectDir('packages/docs/nql'),
-};
-
-function collectDir(rel: string): string[] {
-	const abs = join(ROOT, rel);
-	try {
-		return readdirSync(abs)
-			.filter((f) => f.endsWith('.md'))
-			.filter((f) => statSync(join(abs, f)).isFile())
-			.map((f) => join(rel, f));
-	} catch {
-		return [];
-	}
-}
-
-/**
- * Heuristic fragment detection — blocks that can't possibly execute on their
- * own because they're incomplete syntax. Docs authors can mark explicit
- * fragments with `// doctest: skip`; this catches obvious ones automatically.
- */
-function looksLikeFragment(code: string): boolean {
-	const trimmed = code.trim();
-	if (!trimmed) return true;
-	// Starts with a method chain — pipe continuation
-	if (/^\.\w/.test(trimmed)) return true;
-	// Starts with a binary operator — continuation
-	if (/^(\||&&|\|\||\?|,)/.test(trimmed)) return true;
-	// Only a destructuring/spread fragment
-	if (/^(\.{3}|\{\s*\.{3})/.test(trimmed)) return true;
-	return false;
-}
+const SOURCES = doctestSources(ROOT);
 
 mkdirSync(GENERATED, { recursive: true });
 

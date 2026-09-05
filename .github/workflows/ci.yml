@@ -40,6 +40,8 @@ jobs:
       # scripts/ live. The glob is deliberate: a new guard's tests run here
       # without anyone remembering to add a line.
       - run: pnpm test:scripts
+      - run: pnpm check:docs-ledger
+      - run: pnpm test:docs-ledger
       - name: Verify documentation examples (compile-only)
         # Compile-only doctest path — fast, runs unconditionally.
         # The slower real-DB variant lives in .github/workflows/doctest-real-db.yml

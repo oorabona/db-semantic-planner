@@ -1,8 +1,12 @@
 # Docs verification (doctest)
 
-Validates every TypeScript code block in project documentation against the real
-`@dbsp/*` API surface, so users copy-pasting from docs get code that actually
-compiles and executes.
+For the markdown sources listed below, runnable TypeScript blocks are parsed,
+imported, and executed; a parse error, import failure, or runtime throw fails
+the suite. Blocks marked `real-db-only` run in the separate real-database
+workflow, not the compile-only run. Blocks marked `skip`, and blocks rejected
+as fragment continuations by the heuristic, are not executed; `pnpm
+check:docs-ledger` counts them and nothing more. This harness does not
+type-check blocks.
 
 ## Scope
 
@@ -15,13 +19,13 @@ Scanned markdown sources (see `generate-tests.ts`):
 - `packages/docs/api/*.md`
 - `packages/docs/nql/*.md`
 
-Total: 28 files, ~260 code blocks at the time of writing.
+Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 ## How it works
 
 1. `doctest.ts` parses markdown and extracts every `\`\`\`typescript` / `\`\`\`ts`
    block, capturing file path, line number, block index, and optional
-   annotations (`// expected sql:`, `// expected params:`, `// doctest: skip`).
+   annotations (`// doctest: skip — <reason>`, `// doctest: real-db-only — <reason>`).
 
 2. `generate-tests.ts` emits one `*.test.ts` per source bucket into
    `__generated__/` (gitignored). Each block becomes an `it(...)` so a single
@@ -29,8 +33,8 @@ Total: 28 files, ~260 code blocks at the time of writing.
 
 3. `runner.ts` evaluates a block by writing it to a scratch file inside
    `__generated__/.tmp/`, wrapping it in an async IIFE with every public
-   `@dbsp` symbol pre-imported, then dynamic-importing it. Any parse error,
-   type error, or runtime throw becomes a test failure with the original
+	`@dbsp` symbol pre-imported, then dynamic-importing it. Any parse error,
+	import failure, or runtime throw becomes a test failure with the original
    markdown file and line.
 
 The runner mocks `pg.Pool` so blocks that allocate a Pool never open a real
@@ -48,14 +52,11 @@ pnpm vitest run tests/docs-verification/__generated__/  # run the generated suit
 
 ## Annotations
 
-Add these as comments inside a block to control how it's tested:
+Add these comments inside a block to control whether it runs:
 
 ```typescript
-// doctest: skip                              — skip this block entirely
-// doctest: dry-run                           — compile/import only, no SQL assertion
-// doctest: real-db-only                      — skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
-// expected sql: SELECT "u".* FROM "users"…  — strict SQL match
-// expected params: [1, "alice"]             — strict params match
+// doctest: skip — <reason>                   // skip this block entirely
+// doctest: real-db-only — <reason>           // skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
 ```
 
 Blocks that start with a `.methodName(...)` or a binary operator are auto-
@@ -85,7 +86,7 @@ Two kinds of fixes:
    API. This is the common case and the whole point of this framework.
 
 2. **Doc block depends on a live database** — annotate the block with
-   `// doctest: real-db-only` (if it uses standard schema tables) so it runs
-   in the `test-docs-real-db` CI job. Use `// doctest: skip` only for blocks
-   that genuinely cannot execute even with a real DB (pseudo-code, non-standard
-   tables, feature gaps).
+   `// doctest: real-db-only — <reason>` (if it uses standard schema tables) so
+   it runs in the `test-docs-real-db` CI job. Use `// doctest: skip — <reason>`
+   only for blocks that genuinely cannot execute even with a real DB
+   (pseudo-code, non-standard tables, feature gaps).

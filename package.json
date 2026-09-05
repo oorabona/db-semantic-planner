@@ -38,6 +38,8 @@
 		"pretest:e2e": "pnpm run clean:artifacts",
 		"test:e2e": "pnpm --filter @dbsp/adapter-pgsql... build && pnpm vitest run --config tests/e2e/vitest.config.e2e.ts",
 		"check:catalog": "node scripts/check-catalog.mjs",
+		"check:docs-ledger": "pnpm tsx tests/docs-verification/check-claim-ledger.ts",
+		"test:docs-ledger": "pnpm tsx --test tests/docs-verification/check-claim-ledger.test.ts",
 		"lint": "pnpm biome check .",
 		"lint:fix": "pnpm biome check --write .",
 		"typecheck": "pnpm -r typecheck",

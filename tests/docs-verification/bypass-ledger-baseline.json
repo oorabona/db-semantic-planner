@@ -1,0 +1,250 @@
+{
+	"version": 1,
+	"files": {
+		"README.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 1
+		},
+		"packages/types/README.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/nql/README.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/core/README.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/adapter-pgsql/README.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/cli/README.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/mcp-server/README.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/index.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/patterns.md": {
+			"explicit-skip": 11,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/comparison.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/roadmap.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/batch-values.md": {
+			"explicit-skip": 4,
+			"real-db-only": 2,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/case-expressions.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/cli-usage.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/ddl-helpers.md": {
+			"explicit-skip": 10,
+			"real-db-only": 2,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/ddl-provisioning.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/exists-vs-rawexists.md": {
+			"explicit-skip": 3,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/expression-primitives.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/extensions.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/full-text-search.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/getting-started.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/includes.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/joins.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/jsonb.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/locking.md": {
+			"explicit-skip": 4,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/migrating-from-drizzle.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/migrating-from-kysely.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/migrating-from-prisma.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/multi-tenant.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/mutations.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/observability.md": {
+			"explicit-skip": 5,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/pagination.md": {
+			"explicit-skip": 9,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/production.md": {
+			"explicit-skip": 10,
+			"real-db-only": 4,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/queries.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/range-operators.md": {
+			"explicit-skip": 3,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/raw-sql.md": {
+			"explicit-skip": 1,
+			"real-db-only": 1,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/recursive-cte.md": {
+			"explicit-skip": 1,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/result-hydration.md": {
+			"explicit-skip": 7,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/rls-policies.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/schema-versioning.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/schema.md": {
+			"explicit-skip": 5,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/set-operations.md": {
+			"explicit-skip": 3,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/subqueries.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/transactions.md": {
+			"explicit-skip": 1,
+			"real-db-only": 6,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/why-dbsp.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/guide/window-functions.md": {
+			"explicit-skip": 7,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/api/index.md": {
+			"explicit-skip": 0,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/api/orm-api.md": {
+			"explicit-skip": 17,
+			"real-db-only": 7,
+			"heuristic-fragment": 0
+		},
+		"packages/docs/nql/index.md": {
+			"explicit-skip": 2,
+			"real-db-only": 0,
+			"heuristic-fragment": 0
+		}
+	}
+}
