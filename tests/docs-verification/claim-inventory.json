@@ -1,0 +1,1575 @@
+{
+	"version": 1,
+	"description": "Direct documentation claim tokens. This inventory does not resolve, verify, or judge any claim.",
+	"totals": {
+		"typescript-path": 118,
+		"method-mention": 176
+	},
+	"files": [
+		{
+			"file": "README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 218
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/types/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/nql/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 96
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/core/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/adapter-pgsql/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/cli/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/mcp-server/README.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/index.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/patterns.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/adapter-pgsql/src/handlers/types.ts",
+						"line": 34
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/index.ts",
+						"line": 35
+					},
+					{
+						"token": "handlers/index.ts",
+						"line": 88
+					},
+					{
+						"token": "index.ts",
+						"line": 94
+					},
+					{
+						"token": "handlers/index.ts",
+						"line": 94
+					},
+					{
+						"token": "handlers/types.ts",
+						"line": 96
+					},
+					{
+						"token": "packages/core/src/dx/query-builder.ts",
+						"line": 115
+					},
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 116
+					},
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 117
+					},
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 118
+					},
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 119
+					},
+					{
+						"token": "packages/core/src/dx/cte-builder.ts",
+						"line": 120
+					},
+					{
+						"token": "packages/core/src/dx/recursive-query-builder.ts",
+						"line": 121
+					},
+					{
+						"token": "packages/core/src/dx/set-operation-builder.ts",
+						"line": 122
+					},
+					{
+						"token": "query-builder-types.ts",
+						"line": 124
+					},
+					{
+						"token": "visit-*.ts",
+						"line": 166
+					},
+					{
+						"token": "packages/nql/src/semantic/visitor.ts",
+						"line": 172
+					},
+					{
+						"token": "packages/nql/src/semantic/visit-query.ts",
+						"line": 173
+					},
+					{
+						"token": "visit-expression.ts",
+						"line": 173
+					},
+					{
+						"token": "visit-literal.ts",
+						"line": 173
+					},
+					{
+						"token": "visit-mutation.ts",
+						"line": 173
+					},
+					{
+						"token": "visit-cte.ts",
+						"line": 173
+					},
+					{
+						"token": "visit-having.ts",
+						"line": 208
+					},
+					{
+						"token": "visitor.ts",
+						"line": 209
+					},
+					{
+						"token": "visit-*.ts",
+						"line": 215
+					},
+					{
+						"token": "visit-*.ts",
+						"line": 222
+					},
+					{
+						"token": "visitor.ts",
+						"line": 222
+					},
+					{
+						"token": "packages/types/src/model-ir.ts",
+						"line": 236
+					},
+					{
+						"token": "packages/core/src/planner.ts",
+						"line": 237
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/index.ts",
+						"line": 238
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/cte.ts",
+						"line": 239
+					},
+					{
+						"token": "join.ts",
+						"line": 239
+					},
+					{
+						"token": "json-agg.ts",
+						"line": 239
+					},
+					{
+						"token": "lateral.ts",
+						"line": 239
+					},
+					{
+						"token": "shared.ts",
+						"line": 239
+					},
+					{
+						"token": "packages/types/src/dialects.ts",
+						"line": 240
+					},
+					{
+						"token": "planner.ts",
+						"line": 262
+					},
+					{
+						"token": "packages/types/src/adapter.ts",
+						"line": 350
+					},
+					{
+						"token": "packages/nql/src/compiler/types.ts",
+						"line": 433
+					},
+					{
+						"token": "packages/nql/src/compiler/index.ts",
+						"line": 434
+					},
+					{
+						"token": "compile-query.ts",
+						"line": 435
+					},
+					{
+						"token": "compile-select.ts",
+						"line": 435
+					},
+					{
+						"token": "compile-expression.ts",
+						"line": 435
+					},
+					{
+						"token": "compile-mutation.ts",
+						"line": 435
+					},
+					{
+						"token": "compile-cte.ts",
+						"line": 435
+					},
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 499
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 115
+					},
+					{
+						"token": ".exists()",
+						"line": 115
+					},
+					{
+						"token": ".existsDump()",
+						"line": 115
+					},
+					{
+						"token": ".execute()",
+						"line": 115
+					},
+					{
+						"token": ".all()",
+						"line": 115
+					},
+					{
+						"token": ".first()",
+						"line": 115
+					},
+					{
+						"token": ".firstOrThrow()",
+						"line": 115
+					},
+					{
+						"token": ".stream()",
+						"line": 115
+					},
+					{
+						"token": ".paginate()",
+						"line": 115
+					},
+					{
+						"token": ".cursorPaginate()",
+						"line": 115
+					},
+					{
+						"token": ".byId()",
+						"line": 115
+					},
+					{
+						"token": ".byIdOrThrow()",
+						"line": 115
+					},
+					{
+						"token": ".byIds()",
+						"line": 115
+					},
+					{
+						"token": ".dump()",
+						"line": 116
+					},
+					{
+						"token": ".execute()",
+						"line": 116
+					},
+					{
+						"token": ".affectedRows()",
+						"line": 116
+					},
+					{
+						"token": ".dump()",
+						"line": 117
+					},
+					{
+						"token": ".execute()",
+						"line": 117
+					},
+					{
+						"token": ".affectedRows()",
+						"line": 117
+					},
+					{
+						"token": ".dump()",
+						"line": 118
+					},
+					{
+						"token": ".execute()",
+						"line": 118
+					},
+					{
+						"token": ".affectedRows()",
+						"line": 118
+					},
+					{
+						"token": ".dump()",
+						"line": 119
+					},
+					{
+						"token": ".execute()",
+						"line": 119
+					},
+					{
+						"token": ".affectedRows()",
+						"line": 119
+					},
+					{
+						"token": ".dump()",
+						"line": 120
+					},
+					{
+						"token": ".all()",
+						"line": 120
+					},
+					{
+						"token": ".execute()",
+						"line": 120
+					},
+					{
+						"token": ".dump()",
+						"line": 121
+					},
+					{
+						"token": ".execute()",
+						"line": 121
+					},
+					{
+						"token": ".dump()",
+						"line": 122
+					},
+					{
+						"token": ".all()",
+						"line": 122
+					},
+					{
+						"token": ".first()",
+						"line": 122
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/comparison.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 197
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/roadmap.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/batch-values.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/batch-values.ts",
+						"line": 245
+					},
+					{
+						"token": "packages/core/src/dx/orm-instance.ts",
+						"line": 246
+					},
+					{
+						"token": "packages/core/src/dx/query-builder.ts",
+						"line": 247
+					},
+					{
+						"token": "packages/adapter-pgsql/src/__tests__/batch-values.test.ts",
+						"line": 248
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/case-expressions.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/functions.ts",
+						"line": 21
+					},
+					{
+						"token": "packages/core/src/dx/case-when-builder.ts",
+						"line": 22
+					},
+					{
+						"token": "packages/core/src/dx/functions.ts",
+						"line": 203
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/expression/case.ts",
+						"line": 204
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".as()",
+						"line": 13
+					},
+					{
+						"token": ".when()",
+						"line": 43
+					},
+					{
+						"token": ".else()",
+						"line": 49
+					},
+					{
+						"token": ".when()",
+						"line": 210
+					},
+					{
+						"token": ".else()",
+						"line": 212
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/cli-usage.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/ddl-helpers.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/types/src/adapter.ts",
+						"line": 247
+					},
+					{
+						"token": "packages/core/src/dx/table-ddl-types.ts",
+						"line": 248
+					},
+					{
+						"token": "packages/core/src/dx/orm-instance.ts",
+						"line": 249
+					},
+					{
+						"token": "packages/adapter-pgsql/src/pgsql-adapter.ts",
+						"line": 250
+					},
+					{
+						"token": "packages/adapter-pgsql/src/ddl/index-operations.ts",
+						"line": 251
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/ddl-provisioning.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/exists-vs-rawexists.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/adapter-pgsql/src/__tests__/exists-vs-rawexists-comparison.test.ts",
+						"line": 219
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/expression-primitives.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/expressions.ts",
+						"line": 353
+					},
+					{
+						"token": "packages/core/src/dx/filters.ts",
+						"line": 354
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/pgvector.ts",
+						"line": 355
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/paradedb.ts",
+						"line": 356
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/pgsql-builtins.ts",
+						"line": 357
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".where()",
+						"line": 68
+					},
+					{
+						"token": ".where()",
+						"line": 83
+					},
+					{
+						"token": ".column()",
+						"line": 195
+					},
+					{
+						"token": ".where()",
+						"line": 235
+					},
+					{
+						"token": ".where()",
+						"line": 247
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/extensions.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/adapter-pgsql/src/extensions/index.ts",
+						"line": 249
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/pgvector.ts",
+						"line": 253
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/paradedb.ts",
+						"line": 254
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/index.ts",
+						"line": 255
+					},
+					{
+						"token": "packages/core/src/dx/expressions.ts",
+						"line": 256
+					},
+					{
+						"token": "packages/core/src/dx/schema.ts",
+						"line": 257
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/full-text-search.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/full-text-search.ts",
+						"line": 315
+					},
+					{
+						"token": "packages/adapter-pgsql/src/__tests__/full-text-search.test.ts",
+						"line": 316
+					},
+					{
+						"token": "packages/adapter-pgsql/src/extensions/paradedb.ts",
+						"line": 317
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".columns()",
+						"line": 76
+					},
+					{
+						"token": ".orderBy()",
+						"line": 76
+					},
+					{
+						"token": ".columns()",
+						"line": 176
+					},
+					{
+						"token": ".orderBy()",
+						"line": 176
+					},
+					{
+						"token": ".where()",
+						"line": 215
+					},
+					{
+						"token": ".where()",
+						"line": 216
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/getting-started.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".all()",
+						"line": 168
+					},
+					{
+						"token": ".execute()",
+						"line": 220
+					},
+					{
+						"token": ".returning()",
+						"line": 220
+					},
+					{
+						"token": ".where()",
+						"line": 251
+					},
+					{
+						"token": ".execute()",
+						"line": 251
+					},
+					{
+						"token": ".dump()",
+						"line": 267
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/includes.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".include()",
+						"line": 39
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/joins.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/query-builder-types.ts",
+						"line": 385
+					},
+					{
+						"token": "packages/core/src/dx/query-builder.ts",
+						"line": 386
+					},
+					{
+						"token": "packages/types/src/intent/query-intent.ts",
+						"line": 387
+					},
+					{
+						"token": "packages/adapter-pgsql/src/adapter-compiler-select.ts",
+						"line": 388
+					},
+					{
+						"token": "packages/adapter-pgsql/src/__tests__/join-api.test.ts",
+						"line": 389
+					},
+					{
+						"token": "packages/core/src/dx/__tests__/join.test.ts",
+						"line": 390
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".join()",
+						"line": 7
+					},
+					{
+						"token": ".join()",
+						"line": 13
+					},
+					{
+						"token": ".join()",
+						"line": 15
+					},
+					{
+						"token": ".join()",
+						"line": 47
+					},
+					{
+						"token": ".join()",
+						"line": 48
+					},
+					{
+						"token": ".join()",
+						"line": 138
+					},
+					{
+						"token": ".where()",
+						"line": 138
+					},
+					{
+						"token": ".join()",
+						"line": 178
+					},
+					{
+						"token": ".join()",
+						"line": 339
+					},
+					{
+						"token": ".where()",
+						"line": 344
+					},
+					{
+						"token": ".join()",
+						"line": 396
+					},
+					{
+						"token": ".join()",
+						"line": 396
+					},
+					{
+						"token": ".join()",
+						"line": 398
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/jsonb.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/locking.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".forUpdate()",
+						"line": 22
+					},
+					{
+						"token": ".forNoKeyUpdate()",
+						"line": 23
+					},
+					{
+						"token": ".forShare()",
+						"line": 24
+					},
+					{
+						"token": ".forKeyShare()",
+						"line": 25
+					},
+					{
+						"token": ".forUpdate()",
+						"line": 27
+					},
+					{
+						"token": ".skipLocked()",
+						"line": 37
+					},
+					{
+						"token": ".noWait()",
+						"line": 38
+					},
+					{
+						"token": ".noWait()",
+						"line": 112
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/migrating-from-drizzle.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".toSQL()",
+						"line": 17
+					},
+					{
+						"token": ".dump()",
+						"line": 17
+					},
+					{
+						"token": ".toSQL()",
+						"line": 32
+					},
+					{
+						"token": ".dump()",
+						"line": 32
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/migrating-from-kysely.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".compile()",
+						"line": 17
+					},
+					{
+						"token": ".dump()",
+						"line": 17
+					},
+					{
+						"token": ".compile()",
+						"line": 32
+					},
+					{
+						"token": ".dump()",
+						"line": 32
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/migrating-from-prisma.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 17
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/multi-tenant.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/mutations.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/mutation-builders.ts",
+						"line": 221
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".execute()",
+						"line": 7
+					},
+					{
+						"token": ".dump()",
+						"line": 7
+					},
+					{
+						"token": ".values()",
+						"line": 27
+					},
+					{
+						"token": ".returning()",
+						"line": 40
+					},
+					{
+						"token": ".where()",
+						"line": 65
+					},
+					{
+						"token": ".where()",
+						"line": 101
+					},
+					{
+						"token": ".dump()",
+						"line": 120
+					},
+					{
+						"token": ".onConflict()",
+						"line": 225
+					},
+					{
+						"token": ".doUpdate()",
+						"line": 239
+					},
+					{
+						"token": ".doNothing()",
+						"line": 279
+					},
+					{
+						"token": ".doUpdate()",
+						"line": 280
+					},
+					{
+						"token": ".doNothing()",
+						"line": 284
+					},
+					{
+						"token": ".where()",
+						"line": 292
+					},
+					{
+						"token": ".where()",
+						"line": 293
+					},
+					{
+						"token": ".dump()",
+						"line": 304
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/observability.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/hooks.ts",
+						"line": 253
+					},
+					{
+						"token": "packages/core/src/dx/hooks.ts",
+						"line": 257
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 7
+					},
+					{
+						"token": ".dump()",
+						"line": 13
+					},
+					{
+						"token": ".include()",
+						"line": 77
+					},
+					{
+						"token": ".dump()",
+						"line": 103
+					},
+					{
+						"token": ".dump()",
+						"line": 148
+					},
+					{
+						"token": ".all()",
+						"line": 148
+					},
+					{
+						"token": ".all()",
+						"line": 312
+					},
+					{
+						"token": ".run()",
+						"line": 312
+					},
+					{
+						"token": ".dump()",
+						"line": 312
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/pagination.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".where()",
+						"line": 8
+					},
+					{
+						"token": ".limit()",
+						"line": 8
+					},
+					{
+						"token": ".offset()",
+						"line": 8
+					},
+					{
+						"token": ".all()",
+						"line": 8
+					},
+					{
+						"token": ".offset()",
+						"line": 34
+					},
+					{
+						"token": ".paginate()",
+						"line": 67
+					},
+					{
+						"token": ".stream()",
+						"line": 203
+					},
+					{
+						"token": ".cursorPaginate()",
+						"line": 265
+					},
+					{
+						"token": ".paginate()",
+						"line": 269
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/production.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/queries.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".columns()",
+						"line": 89
+					},
+					{
+						"token": ".paginate()",
+						"line": 129
+					},
+					{
+						"token": ".cursorPaginate()",
+						"line": 129
+					},
+					{
+						"token": ".columns()",
+						"line": 183
+					},
+					{
+						"token": ".include()",
+						"line": 183
+					},
+					{
+						"token": ".withPlanOptions()",
+						"line": 183
+					},
+					{
+						"token": ".dump()",
+						"line": 183
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/range-operators.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".where()",
+						"line": 26
+					},
+					{
+						"token": ".where()",
+						"line": 30
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/raw-sql.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/adapter-pgsql/src/pgsql-adapter.ts",
+						"line": 104
+					},
+					{
+						"token": "tests/e2e/raw-sql-transaction-savepoint.test.ts",
+						"line": 105
+					},
+					{
+						"token": "tests/e2e/borrowed-client-ownership.test.ts",
+						"line": 106
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/recursive-cte.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/raw-cte-builder.ts",
+						"line": 200
+					},
+					{
+						"token": "packages/core/src/dx/orm-instance.ts",
+						"line": 201
+					},
+					{
+						"token": "packages/core/src/dx/orm-instance-types.ts",
+						"line": 202
+					},
+					{
+						"token": "packages/types/src/intent/cte-intent.ts",
+						"line": 203
+					},
+					{
+						"token": "packages/adapter-pgsql/src/adapter-compiler-recursive.ts",
+						"line": 204
+					},
+					{
+						"token": "packages/adapter-pgsql/src/__tests__/raw-cte.test.ts",
+						"line": 205
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".all()",
+						"line": 46
+					},
+					{
+						"token": ".execute()",
+						"line": 47
+					},
+					{
+						"token": ".all()",
+						"line": 47
+					},
+					{
+						"token": ".dump()",
+						"line": 48
+					},
+					{
+						"token": ".buildIntent()",
+						"line": 49
+					},
+					{
+						"token": ".where()",
+						"line": 138
+					},
+					{
+						"token": ".dump()",
+						"line": 179
+					},
+					{
+						"token": ".where()",
+						"line": 212
+					},
+					{
+						"token": ".dump()",
+						"line": 215
+					},
+					{
+						"token": ".all()",
+						"line": 215
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/result-hydration.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/json-agg.ts",
+						"line": 91
+					},
+					{
+						"token": "packages/core/src/dx/hydration-utils.ts",
+						"line": 92
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/join.ts",
+						"line": 134
+					},
+					{
+						"token": "packages/core/src/dx/result-hydrator.ts",
+						"line": 135
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/lateral.ts",
+						"line": 164
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/cte.ts",
+						"line": 189
+					},
+					{
+						"token": "packages/adapter-pgsql/src/adapter-compiler-includes.ts",
+						"line": 221
+					},
+					{
+						"token": "packages/adapter-pgsql/src/pgsql-adapter.ts",
+						"line": 222
+					},
+					{
+						"token": "packages/core/src/dx/result-hydrator.ts",
+						"line": 223
+					},
+					{
+						"token": "join.ts",
+						"line": 234
+					},
+					{
+						"token": "lateral.ts",
+						"line": 234
+					},
+					{
+						"token": "packages/core/src/dx/result-hydrator.ts",
+						"line": 383
+					},
+					{
+						"token": "packages/core/src/dx/hydration-utils.ts",
+						"line": 384
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/json-agg.ts",
+						"line": 385
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/join.ts",
+						"line": 386
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/lateral.ts",
+						"line": 387
+					},
+					{
+						"token": "packages/adapter-pgsql/src/handlers/include/cte.ts",
+						"line": 388
+					},
+					{
+						"token": "packages/adapter-pgsql/src/adapter-compiler-includes.ts",
+						"line": 389
+					},
+					{
+						"token": "packages/types/src/adapter.ts",
+						"line": 390
+					},
+					{
+						"token": "packages/types/src/planner.ts",
+						"line": 391
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 335
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/rls-policies.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/types/src/model-ir.ts",
+						"line": 78
+					},
+					{
+						"token": "packages/adapter-pgsql/src/ddl/ddl-generator.ts",
+						"line": 79
+					},
+					{
+						"token": "packages/adapter-pgsql/src/ddl/schema-diff.ts",
+						"line": 80
+					},
+					{
+						"token": "packages/adapter-pgsql/src/introspection.ts",
+						"line": 81
+					}
+				],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/schema-versioning.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/guide/schema.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".include()",
+						"line": 139
+					},
+					{
+						"token": ".columns()",
+						"line": 199
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/set-operations.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/set-operation-builder.ts",
+						"line": 18
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".include()",
+						"line": 12
+					},
+					{
+						"token": ".all()",
+						"line": 29
+					},
+					{
+						"token": ".first()",
+						"line": 29
+					},
+					{
+						"token": ".dump()",
+						"line": 29
+					},
+					{
+						"token": ".unionAll()",
+						"line": 58
+					},
+					{
+						"token": ".union()",
+						"line": 58
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/subqueries.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".asExpr()",
+						"line": 8
+					},
+					{
+						"token": ".select()",
+						"line": 18
+					},
+					{
+						"token": ".where()",
+						"line": 18
+					},
+					{
+						"token": ".all()",
+						"line": 160
+					},
+					{
+						"token": ".execute()",
+						"line": 160
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/transactions.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 443
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/why-dbsp.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 17
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/guide/window-functions.md",
+			"claims": {
+				"typescript-path": [
+					{
+						"token": "packages/core/src/dx/window-functions.ts",
+						"line": 52
+					}
+				],
+				"method-mention": [
+					{
+						"token": ".partitionBy()",
+						"line": 136
+					},
+					{
+						"token": ".orderBy()",
+						"line": 203
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/api/index.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": []
+			}
+		},
+		{
+			"file": "packages/docs/api/orm-api.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".withoutDefaultFilters()",
+						"line": 318
+					},
+					{
+						"token": ".asExpr()",
+						"line": 833
+					},
+					{
+						"token": ".asExpr()",
+						"line": 838
+					},
+					{
+						"token": ".unionAll()",
+						"line": 854
+					},
+					{
+						"token": ".all()",
+						"line": 881
+					},
+					{
+						"token": ".first()",
+						"line": 881
+					},
+					{
+						"token": ".dump()",
+						"line": 881
+					},
+					{
+						"token": ".dump()",
+						"line": 1321
+					},
+					{
+						"token": ".run()",
+						"line": 1321
+					},
+					{
+						"token": ".all()",
+						"line": 1321
+					}
+				]
+			}
+		},
+		{
+			"file": "packages/docs/nql/index.md",
+			"claims": {
+				"typescript-path": [],
+				"method-mention": [
+					{
+						"token": ".dump()",
+						"line": 1708
+					},
+					{
+						"token": ".run()",
+						"line": 1709
+					},
+					{
+						"token": ".all()",
+						"line": 1710
+					},
+					{
+						"token": ".dump()",
+						"line": 1712
+					},
+					{
+						"token": ".dump()",
+						"line": 1745
+					},
+					{
+						"token": ".dump()",
+						"line": 1745
+					},
+					{
+						"token": ".dump()",
+						"line": 2292
+					}
+				]
+			}
+		}
+	]
+}

@@ -15,7 +15,7 @@ Scanned markdown sources (see `generate-tests.ts`):
 - `packages/docs/api/*.md`
 - `packages/docs/nql/*.md`
 
-Total: 28 files, ~260 code blocks at the time of writing.
+Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 ## How it works
 
@@ -29,8 +29,8 @@ Total: 28 files, ~260 code blocks at the time of writing.
 
 3. `runner.ts` evaluates a block by writing it to a scratch file inside
    `__generated__/.tmp/`, wrapping it in an async IIFE with every public
-   `@dbsp` symbol pre-imported, then dynamic-importing it. Any parse error,
-   type error, or runtime throw becomes a test failure with the original
+	`@dbsp` symbol pre-imported, then dynamic-importing it. Any parse error,
+	import failure, or runtime throw becomes a test failure with the original
    markdown file and line.
 
 The runner mocks `pg.Pool` so blocks that allocate a Pool never open a real
