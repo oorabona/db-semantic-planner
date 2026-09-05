@@ -1,8 +1,12 @@
 # Docs verification (doctest)
 
-Validates every TypeScript code block in project documentation against the real
-`@dbsp/*` API surface, so users copy-pasting from docs get code that actually
-compiles and executes.
+For the markdown sources listed below, runnable TypeScript blocks are parsed,
+imported, and executed; a parse error, import failure, or runtime throw fails
+the suite. Blocks marked `real-db-only` run in the separate real-database
+workflow, not the compile-only run. Blocks marked `skip`, and blocks rejected
+as fragment continuations by the heuristic, are not executed; `pnpm
+check:docs-ledger` counts them and nothing more. This harness does not
+type-check blocks.
 
 ## Scope
 
@@ -21,7 +25,7 @@ Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 1. `doctest.ts` parses markdown and extracts every `\`\`\`typescript` / `\`\`\`ts`
    block, capturing file path, line number, block index, and optional
-   annotations (`// expected sql:`, `// expected params:`, `// doctest: skip`).
+   annotations (`// doctest: skip`, `// doctest: real-db-only`).
 
 2. `generate-tests.ts` emits one `*.test.ts` per source bucket into
    `__generated__/` (gitignored). Each block becomes an `it(...)` so a single
@@ -48,14 +52,11 @@ pnpm vitest run tests/docs-verification/__generated__/  # run the generated suit
 
 ## Annotations
 
-Add these as comments inside a block to control how it's tested:
+Add these comments inside a block to control whether it runs:
 
 ```typescript
 // doctest: skip                              — skip this block entirely
-// doctest: dry-run                           — compile/import only, no SQL assertion
 // doctest: real-db-only                      — skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
-// expected sql: SELECT "u".* FROM "users"…  — strict SQL match
-// expected params: [1, "alice"]             — strict params match
 ```
 
 Blocks that start with a `.methodName(...)` or a binary operator are auto-
