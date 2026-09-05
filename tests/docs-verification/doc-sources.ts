@@ -12,7 +12,7 @@ export function collectDir(root: string, rel: string): string[] {
 	try {
 		return (
 			readdirSync(abs)
-				.sort((left, right) => left.localeCompare(right))
+				.sort()
 				.filter((file) => file.endsWith('.md'))
 				.filter((file) => statSync(join(abs, file)).isFile())
 				// These are artifact identities, not filesystem paths. Keep them stable

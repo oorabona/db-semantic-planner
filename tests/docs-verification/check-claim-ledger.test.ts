@@ -95,6 +95,70 @@ test('refuses a decrease and allows its rebound only at the exact baseline', () 
 	}
 });
 
+test('refuses an increase above a per-file, per-kind baseline', () => {
+	const subject = fixture({ [PATTERNS]: SKIP });
+	try {
+		writeFileSync(
+			subject.file(PATTERNS),
+			SKIP + SKIP.replace('const x', 'const y'),
+		);
+		const increase = run(subject.dir);
+		assert.match(
+			increase.output,
+			/packages\/docs\/patterns\.md: explicit-skip baseline 1, actual 2/,
+		);
+		assert.equal(increase.code, 1, increase.output);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('refuses a redistribution across files even when the global total is unchanged', () => {
+	const comparison = 'packages/docs/comparison.md';
+	const subject = fixture({ [PATTERNS]: SKIP, [comparison]: SKIP });
+	try {
+		writeFileSync(
+			subject.file(PATTERNS),
+			SKIP + SKIP.replace('const x', 'const y'),
+		);
+		writeFileSync(subject.file(comparison), '');
+		const redistribution = run(subject.dir);
+		assert.match(
+			redistribution.output,
+			/packages\/docs\/patterns\.md: explicit-skip baseline 1, actual 2/,
+		);
+		assert.match(
+			redistribution.output,
+			/packages\/docs\/comparison\.md: explicit-skip baseline 1, actual 0/,
+		);
+		assert.equal(redistribution.code, 1, redistribution.output);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('refuses kind substitution within a file even when its total is unchanged', () => {
+	const subject = fixture({ [PATTERNS]: SKIP });
+	try {
+		writeFileSync(
+			subject.file(PATTERNS),
+			SKIP.replace('doctest: skip', 'doctest: real-db-only'),
+		);
+		const substitution = run(subject.dir);
+		assert.match(
+			substitution.output,
+			/packages\/docs\/patterns\.md: explicit-skip baseline 1, actual 0/,
+		);
+		assert.match(
+			substitution.output,
+			/packages\/docs\/patterns\.md: real-db-only baseline 0, actual 1/,
+		);
+		assert.equal(substitution.code, 1, substitution.output);
+	} finally {
+		subject.cleanup();
+	}
+});
+
 test('refuses default-ignorable-only reasons', () => {
 	for (const invisible of ['​', '‌', '⁠']) {
 		const subject = fixture({ [PATTERNS]: SKIP });
