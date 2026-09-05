@@ -38,12 +38,22 @@ function writeAtomically(destination: string, contents: string): void {
 		operation = 'rename temporary file';
 		renameSync(temporary, destination);
 	} catch (error) {
+		let cleanupFailure: unknown;
 		try {
 			rmSync(temporary, { force: true });
-		} catch {
-			// Preserve the write failure as the actionable diagnostic.
+		} catch (cleanupError) {
+			cleanupFailure = cleanupError;
 		}
 		const cause = error instanceof Error ? error.message : String(error);
+		if (cleanupFailure !== undefined) {
+			const cleanupCause =
+				cleanupFailure instanceof Error
+					? cleanupFailure.message
+					: String(cleanupFailure);
+			throw new Error(
+				`cannot ${operation} for ${destination}: ${cause}; temporary file left behind at ${temporary}: ${cleanupCause}`,
+			);
+		}
 		throw new Error(`cannot ${operation} for ${destination}: ${cause}`);
 	}
 }

@@ -123,16 +123,16 @@ pnpm test:docs:generate        # just regenerate __generated__/ test files
 | Annotation | Effect |
 |------------|--------|
 | `// doctest: skip — <reason>` | Skip the block. The ledger requires a reason and `pnpm check:docs-ledger` reports its count. |
-| `// doctest: real-db-only` | Skip in compile-only mode; the real-DB workflow runs it unless the fragment heuristic rejects it. |
+| `// doctest: real-db-only — <reason>` | Skip in compile-only mode; the real-DB workflow runs it unless the fragment heuristic rejects it. The ledger requires a reason. |
 
-`// doctest: real-db-only` is the correct annotation for blocks that call `.all()`, `.execute()`, `.stream()`, `.transaction()`, or DDL helpers (`.truncate()`, `.vacuum()`, `.indexes.create()`, etc.) — any block that requires a live PostgreSQL connection. Use `// doctest: skip` only for blocks that cannot execute even with a real DB (pseudo-code, API-signature fragments, or blocks referencing tables not in the default schema).
+`// doctest: real-db-only — <reason>` is the correct annotation for blocks that call `.all()`, `.execute()`, `.stream()`, `.transaction()`, or DDL helpers (`.truncate()`, `.vacuum()`, `.indexes.create()`, etc.) — any block that requires a live PostgreSQL connection. Use `// doctest: skip — <reason>` only for blocks that cannot execute even with a real DB (pseudo-code, API-signature fragments, or blocks referencing tables not in the default schema).
 
 **When to use `real-db-only`:**
 - Block calls `.all()`, `.execute()`, `.stream()`, `.transaction()`, or any DDL
   helper that requires a live PostgreSQL connection.
 - The block uses tables from the default schema (`users`, `posts`, `comments`,
   `categories`, `documents`). Blocks referencing other tables should use
-  `// doctest: skip` instead.
+  `// doctest: skip — <reason>` instead.
 
 **When to skip:**
 - Block is a type signature / pseudo-code / fragment that is not meant to

@@ -25,7 +25,7 @@ Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 1. `doctest.ts` parses markdown and extracts every `\`\`\`typescript` / `\`\`\`ts`
    block, capturing file path, line number, block index, and optional
-   annotations (`// doctest: skip`, `// doctest: real-db-only`).
+   annotations (`// doctest: skip — <reason>`, `// doctest: real-db-only — <reason>`).
 
 2. `generate-tests.ts` emits one `*.test.ts` per source bucket into
    `__generated__/` (gitignored). Each block becomes an `it(...)` so a single
@@ -55,8 +55,8 @@ pnpm vitest run tests/docs-verification/__generated__/  # run the generated suit
 Add these comments inside a block to control whether it runs:
 
 ```typescript
-// doctest: skip                              — skip this block entirely
-// doctest: real-db-only                      — skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
+// doctest: skip — <reason>                   // skip this block entirely
+// doctest: real-db-only — <reason>           // skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
 ```
 
 Blocks that start with a `.methodName(...)` or a binary operator are auto-
@@ -86,7 +86,7 @@ Two kinds of fixes:
    API. This is the common case and the whole point of this framework.
 
 2. **Doc block depends on a live database** — annotate the block with
-   `// doctest: real-db-only` (if it uses standard schema tables) so it runs
-   in the `test-docs-real-db` CI job. Use `// doctest: skip` only for blocks
-   that genuinely cannot execute even with a real DB (pseudo-code, non-standard
-   tables, feature gaps).
+   `// doctest: real-db-only — <reason>` (if it uses standard schema tables) so
+   it runs in the `test-docs-real-db` CI job. Use `// doctest: skip — <reason>`
+   only for blocks that genuinely cannot execute even with a real DB
+   (pseudo-code, non-standard tables, feature gaps).

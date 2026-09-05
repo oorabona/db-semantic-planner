@@ -60,8 +60,10 @@ export function scanDocs(root: string): {
 		const blocks = extractBlocks(absolute);
 		for (const block of blocks) {
 			const markers: Array<{ kind: BypassKind; line: number }> = [];
-			for (const [lineIndex, rawLine] of block.code.split('\n').entries()) {
-				// Keep marker recognition aligned with parseAnnotations(), including CRLF.
+			for (const [lineIndex, rawLine] of block.code
+				.split(/\r\n?|\n/)
+				.entries()) {
+				// Keep marker recognition aligned with parseAnnotations(), including all line endings.
 				const marker = rawLine.trim().match(MARKER);
 				if (!marker) continue;
 				const kind = marker[1].toLowerCase() as 'skip' | 'real-db-only';
