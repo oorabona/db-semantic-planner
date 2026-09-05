@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/cli",
-	"version": "3.0.0",
+	"version": "3.0.1",
 	"description": "CLI tools for db-semantic-planner — REPL, schema generation, DDL provisioning",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
