@@ -60,7 +60,7 @@ Lookup (throws if missing):
 // doctest: skip — API signature reference (TypeScript function signatures, not executable code)
 getWhereHandler(operator: string): WhereHandler
 getExpressionHandler(operator: string): ExpressionHandler
-getIncludeHandler(operator: string): IncludeHandler
+getIncludeHandler(strategy: IncludeStrategy): IncludeHandler
 ```
 
 ### Example
@@ -78,16 +78,20 @@ const ilikeHandler: WhereHandler = {
 };
 
 // packages/adapter-pgsql/src/handlers/where/index.ts
-registerWhereHandler(ilikeHandler);
+export const allWhereHandlers = Object.freeze([
+  // existing handlers
+  ilikeHandler,
+]);
 ```
 
-The compiler calls `getWhereHandler(decision.operator).compile(...)` — no switch statements.
+The central WHERE family initializer in `handlers/index.ts` installs `allWhereHandlers` lazily. The compiler calls `getWhereHandler(decision.operator).compile(...)` — no switch statements.
 
 ### Convention
 
 - Handler files live in `handlers/{where,expression,include}/`
 - Each file exports one handler object (not a class)
-- Handler registration happens in the `index.ts` of each sub-directory via `registerAllWhereHandlers()` / equivalent
+- Each sub-directory `index.ts` adds handler objects to its frozen collection; the matching family initializer in `handlers/index.ts` installs that collection lazily
+- Direct bulk registration was removed so the central initializer can install each family transactionally and recover from failures
 - Handler interfaces are in `handlers/types.ts` — never inline types in handler files
 - `ensureHandlersRegistered()` in `handlers/index.ts` is called lazily before first use
 

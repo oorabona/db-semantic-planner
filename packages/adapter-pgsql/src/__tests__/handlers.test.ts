@@ -154,6 +154,15 @@ describe('Handler Infrastructure', () => {
 	describe('INCLUDE Handler Registry', () => {
 		const compile: IncludeHandler['compile'] = () => ({ targets: [] });
 
+		it('freezes the built-in strategy set at runtime', () => {
+			expect(() =>
+				(INCLUDE_STRATEGIES as unknown as string[]).push('custom'),
+			).toThrow(TypeError);
+			expect(() =>
+				registerIncludeHandler({ strategy: 'custom', compile } as any),
+			).toThrow(/custom is not one of/);
+		});
+
 		it('refuses a strategy outside the built-in set without mutating the registry', () => {
 			const invalidHandler = {
 				strategy: '__nope__',

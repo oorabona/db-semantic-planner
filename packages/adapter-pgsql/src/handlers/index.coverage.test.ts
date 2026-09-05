@@ -839,6 +839,119 @@ describe('handlers/index - Coverage Tests', () => {
 				ensureRegistered();
 			}
 		});
+
+		it('refuses reentrant WHERE registration during initialization and retries coherently', () => {
+			const reentrantOperator = '__reentrant__';
+			const outerOperator = '__outer_initialization__';
+			const operators = [outerOperator];
+			Object.defineProperty(operators, 0, {
+				configurable: true,
+				get() {
+					registerWhereHandler({
+						operators: [reentrantOperator],
+						compile: () => ({}),
+					} as any);
+					return outerOperator;
+				},
+			});
+			const reentrantHandler = { operators, compile: () => ({}) };
+			const dispatch = createWhereDispatcher();
+			const state = createCompilerState();
+			const ctx = {
+				naming: { toDatabase: (value) => value, toModel: (value) => value },
+				rootTable: 'users',
+				maxRecursiveDepth: 100,
+			};
+
+			clearHandlers();
+			try {
+				const beforeAttempt = getRegisteredOperators();
+				vi.spyOn(
+					whereHandlerModule,
+					'allWhereHandlers',
+					'get',
+				).mockReturnValueOnce([reentrantHandler] as any);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).toThrow(
+					'Cannot use WHERE handler registry reentrantly while WHERE handlers are initializing',
+				);
+				expect(getRegisteredOperators()).toEqual(beforeAttempt);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).not.toThrow();
+				expect(hasWhereHandler('=')).toBe(true);
+			} finally {
+				vi.restoreAllMocks();
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
+
+		it('publishes WHERE initialization only after every built-in installs', () => {
+			const outerOperator = '__outer_initialization__';
+			const originalHandlers = whereHandlerModule.allWhereHandlers;
+			let reentrantError: unknown;
+			const operators = [outerOperator];
+			Object.defineProperty(operators, 0, {
+				configurable: true,
+				get() {
+					try {
+						registerWhereHandler({
+							operators: [outerOperator],
+							compile: () => ({}),
+						} as any);
+					} catch (error) {
+						reentrantError = error;
+					}
+					return outerOperator;
+				},
+			});
+			const reentrantHandler = { operators, compile: () => ({}) };
+			const dispatch = createWhereDispatcher();
+			const state = createCompilerState();
+			const ctx = {
+				naming: { toDatabase: (value) => value, toModel: (value) => value },
+				rootTable: 'users',
+				maxRecursiveDepth: 100,
+			};
+
+			clearHandlers();
+			try {
+				vi.spyOn(
+					whereHandlerModule,
+					'allWhereHandlers',
+					'get',
+				).mockReturnValueOnce([reentrantHandler, ...originalHandlers] as any);
+
+				expect(() =>
+					dispatch(
+						{ type: 'where', column: 'active', operator: '=', value: true },
+						ctx as any,
+						state,
+					),
+				).not.toThrow();
+				expect(reentrantError).toHaveProperty(
+					'message',
+					'Cannot use WHERE handler registry reentrantly while WHERE handlers are initializing',
+				);
+				expect(hasWhereHandler('=')).toBe(true);
+			} finally {
+				vi.restoreAllMocks();
+				clearHandlers();
+				ensureRegistered();
+			}
+		});
 	});
 
 	describe('registration contract', () => {

@@ -312,35 +312,56 @@ export function hasIncludeHandler(strategy: IncludeStrategy): boolean {
 // Dispatcher (for recursive WHERE compilation)
 // ============================================================================
 
-let handlersInitialized = false;
+type HandlerRegistrationState =
+	| 'uninitialized'
+	| 'initializing'
+	| 'initialized';
 
-let includeHandlersInitialized = false;
+function refuseReentrantHandlerRegistryUse(
+	family: 'WHERE' | 'EXPRESSION' | 'INCLUDE',
+): never {
+	const diagnosticFamily = describeDiagnosticValue(family);
+	throw new Error(
+		`Cannot use ${diagnosticFamily} handler registry reentrantly while ${diagnosticFamily} handlers are initializing`,
+	);
+}
+
+let whereHandlersState: HandlerRegistrationState = 'uninitialized';
+let includeHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureIncludeHandlersRegistered(): void {
-	if (includeHandlersInitialized) return;
+	if (includeHandlersState === 'initialized') return;
+	if (includeHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse('INCLUDE');
 	const snapshot = new Map(includeHandlers);
+	includeHandlersState = 'initializing';
 	try {
 		for (const handler of allIncludeHandlers) installIncludeHandler(handler);
 	} catch (error) {
 		includeHandlers.clear();
 		for (const [key, handler] of snapshot) includeHandlers.set(key, handler);
+		includeHandlersState = 'uninitialized';
 		throw error;
 	}
-	includeHandlersInitialized = true;
+	includeHandlersState = 'initialized';
 }
 
-let expressionHandlersInitialized = false;
+let expressionHandlersState: HandlerRegistrationState = 'uninitialized';
 export function ensureExpressionHandlersRegistered(): void {
-	if (expressionHandlersInitialized) return;
+	if (expressionHandlersState === 'initialized') return;
+	if (expressionHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse('EXPRESSION');
 	const snapshot = new Map(expressionHandlers);
+	expressionHandlersState = 'initializing';
 	try {
 		for (const handler of allExpressionHandlers)
 			installExpressionHandler(handler);
 	} catch (error) {
 		expressionHandlers.clear();
 		for (const [key, handler] of snapshot) expressionHandlers.set(key, handler);
+		expressionHandlersState = 'uninitialized';
 		throw error;
 	}
-	expressionHandlersInitialized = true;
+	expressionHandlersState = 'initialized';
 }
 
 /**
@@ -348,16 +369,20 @@ export function ensureExpressionHandlersRegistered(): void {
  * Called on first dispatch to avoid circular import issues.
  */
 function ensureHandlersRegistered(): void {
-	if (handlersInitialized) return;
+	if (whereHandlersState === 'initialized') return;
+	if (whereHandlersState === 'initializing')
+		refuseReentrantHandlerRegistryUse('WHERE');
 	const snapshot = new Map(whereHandlers);
+	whereHandlersState = 'initializing';
 	try {
 		for (const handler of allWhereHandlers) installWhereHandler(handler);
 	} catch (error) {
 		whereHandlers.clear();
 		for (const [key, handler] of snapshot) whereHandlers.set(key, handler);
+		whereHandlersState = 'uninitialized';
 		throw error;
 	}
-	handlersInitialized = true;
+	whereHandlersState = 'initialized';
 }
 
 /**
@@ -680,15 +705,15 @@ export function getRegisteredOperators(): {
 }
 
 /**
- * Reset all handler registries. The next public registration or dispatch restores built-ins.
+ * Reset all handler registries. Each family's next registrar or compilation path restores that family's built-ins independently.
  */
 export function clearHandlers(): void {
 	whereHandlers.clear();
 	expressionHandlers.clear();
 	includeHandlers.clear();
-	handlersInitialized = false;
-	includeHandlersInitialized = false;
-	expressionHandlersInitialized = false;
+	whereHandlersState = 'uninitialized';
+	includeHandlersState = 'uninitialized';
+	expressionHandlersState = 'uninitialized';
 }
 
 // ============================================================================

@@ -18,12 +18,12 @@ import type { BindingNameRegistry } from '../binding-registry.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 
 /** Built-in include strategies, shared by the runtime registry and public types. */
-export const INCLUDE_STRATEGIES = [
+export const INCLUDE_STRATEGIES = Object.freeze([
 	'join',
 	'lateral',
 	'json_agg',
 	'cte',
-] as const;
+] as const);
 
 export type IncludeStrategy = (typeof INCLUDE_STRATEGIES)[number];
 
