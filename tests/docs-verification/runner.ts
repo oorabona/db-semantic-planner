@@ -11,17 +11,20 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+	ensureOwnedGeneratedDirectory,
+	generatedSuitesRootDirectory,
+} from './generated-suite-path.js';
 
 /** When true, blocks tagged `real-db-only` run against a real PostgreSQL instance. */
 const REAL_DB = process.env.DBSP_DOCTEST_REAL_DB === '1';
 
-const TMP_ROOT = join(
+const TMP_ROOT = ensureOwnedGeneratedDirectory(
 	process.cwd(),
-	'tests/docs-verification/__generated__/.tmp',
+	join(generatedSuitesRootDirectory(), '.tmp'),
 );
-mkdirSync(TMP_ROOT, { recursive: true });
 
 /**
  * Shared __defaultDb schema literal injected into both PREAMBLE and REAL_DB_PREAMBLE.

@@ -7,6 +7,7 @@ import fs, {
 	readdirSync,
 	readFileSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -15,11 +16,15 @@ import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { doctestSourceFiles } from './doc-sources.js';
+import { generatedSuiteDirectory } from './generated-suite-path.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const CHECKER = join(ROOT, 'tests/docs-verification/check-claim-ledger.ts');
+const GENERATOR = join(ROOT, 'tests/docs-verification/generate-tests.ts');
 const TSX = process.env.DOCS_LEDGER_TSX ?? join(ROOT, 'node_modules/.bin/tsx');
 const PATTERNS = 'packages/docs/patterns.md';
+const COMPILE_ONLY_GENERATED = generatedSuiteDirectory('compile-only');
+const REAL_DB_GENERATED = generatedSuiteDirectory('real-db');
 const FENCE = String.fromCharCode(96).repeat(3);
 const SKIP =
 	FENCE +
@@ -47,6 +52,49 @@ function run(dir: string, ...args: string[]) {
 			code: failure.status ?? 1,
 			output: (failure.stdout ?? '') + (failure.stderr ?? ''),
 		};
+	}
+}
+
+function runGenerator(dir: string, realDb = false) {
+	const env = { ...process.env };
+	if (realDb) env.DBSP_DOCTEST_REAL_DB = '1';
+	else delete env.DBSP_DOCTEST_REAL_DB;
+	try {
+		return {
+			code: 0,
+			output: execFileSync(TSX, [GENERATOR, dir], {
+				cwd: ROOT,
+				env,
+				encoding: 'utf8',
+				stdio: ['ignore', 'pipe', 'pipe'],
+			}),
+		};
+	} catch (error) {
+		const failure = error as {
+			status?: number;
+			stdout?: string;
+			stderr?: string;
+		};
+		return {
+			code: failure.status ?? 1,
+			output: (failure.stdout ?? '') + (failure.stderr ?? ''),
+		};
+	}
+}
+
+function createDirectoryLink(
+	target: string,
+	path: string,
+	type: 'dir' | 'junction',
+	createLink: typeof symlinkSync = symlinkSync,
+): boolean {
+	try {
+		createLink(target, path, type);
+		return true;
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === 'EPERM' || code === 'EACCES') return false;
+		throw error;
 	}
 }
 
@@ -91,6 +139,232 @@ test('cleans up a temporary fixture when setup fails', () => {
 		/simulated fixture setup failure/,
 	);
 	assert.equal(existsSync(dir), false);
+});
+
+test('treats unavailable directory linking as a filesystem-capability fallback', () => {
+	const denied = () => {
+		const error = new Error(
+			'directory links unavailable',
+		) as NodeJS.ErrnoException;
+		error.code = 'EPERM';
+		throw error;
+	};
+	let capabilityAvailable: boolean | undefined;
+	assert.doesNotThrow(() => {
+		capabilityAvailable = createDirectoryLink(
+			'outside',
+			'mode-directory',
+			'dir',
+			denied,
+		);
+	}, 'EPERM is a filesystem-capability fallback');
+	assert.equal(capabilityAvailable, false);
+	assert.throws(
+		() =>
+			createDirectoryLink('outside', 'mode-directory', 'dir', () => {
+				const error = new Error(
+					'unexpected link failure',
+				) as NodeJS.ErrnoException;
+				error.code = 'EIO';
+				throw error;
+			}),
+		(error: NodeJS.ErrnoException) => error.code === 'EIO',
+	);
+});
+
+test('emits a failing generated case when a source cannot be read', () => {
+	const subject = fixture();
+	try {
+		rmSync(subject.file(PATTERNS));
+		const generated = runGenerator(subject.dir);
+		assert.equal(generated.code, 0, generated.output);
+		const suite = readFileSync(
+			join(subject.dir, COMPILE_ONLY_GENERATED, 'site-index.test.ts'),
+			'utf8',
+		);
+		assert.match(
+			suite,
+			/packages\/docs\/patterns\.md — cannot read documentation source: ENOENT:/,
+		);
+		assert.match(suite, /throw new Error\(/);
+		assert.doesNotMatch(suite, /it\.skip\(/);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('removes a stale generated suite when its bucket loses its last block', () => {
+	const subject = fixture();
+	const stale = join(subject.dir, COMPILE_ONLY_GENERATED, 'site-index.test.ts');
+	try {
+		mkdirSync(dirname(stale), { recursive: true });
+		writeFileSync(stale, '// stale generated suite\n');
+		const generated = runGenerator(subject.dir);
+		assert.equal(generated.code, 0, generated.output);
+		assert.equal(existsSync(stale), false);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('unlinks a stale generated-suite symlink without removing its target', () => {
+	const subject = fixture();
+	const generatedDirectory = join(subject.dir, COMPILE_ONLY_GENERATED);
+	const stale = join(generatedDirectory, 'retired.test.ts');
+	const target = join(subject.dir, 'retired-suite-target.test.ts');
+	try {
+		mkdirSync(generatedDirectory, { recursive: true });
+		writeFileSync(target, '// retained symlink target\n');
+		symlinkSync(target, stale);
+		const generated = runGenerator(subject.dir);
+		assert.equal(generated.code, 0, generated.output);
+		assert.equal(existsSync(stale), false);
+		assert.equal(existsSync(target), true);
+		assert.match(
+			generated.output,
+			/Removed stale generated suite: .*retired\.test\.ts/,
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('refuses a generated mode directory symlink before writing outside it', (t) => {
+	const subject = fixture({
+		[PATTERNS]: `${FENCE}typescript\nconst generatedOutside = true;\n${FENCE}\n`,
+	});
+	const generatedDirectory = join(subject.dir, COMPILE_ONLY_GENERATED);
+	const outside = mkdtempSync(join(tmpdir(), 'docs-generated-outside-'));
+	const retired = join(outside, 'retired.test.ts');
+	try {
+		mkdirSync(dirname(generatedDirectory), { recursive: true });
+		writeFileSync(retired, '// must survive a refused generation\n');
+		writeFileSync(join(outside, 'witness.txt'), 'must remain untouched\n');
+		if (
+			!createDirectoryLink(
+				outside,
+				generatedDirectory,
+				process.platform === 'win32' ? 'junction' : 'dir',
+			)
+		) {
+			t.skip('filesystem does not permit directory links or junctions');
+			return;
+		}
+
+		const generated = runGenerator(subject.dir);
+		assert.equal(existsSync(retired), true);
+		assert.deepEqual(readdirSync(outside).sort(), [
+			'retired.test.ts',
+			'witness.txt',
+		]);
+		assert.equal(generated.code, 1, generated.output);
+		assert.match(
+			generated.output,
+			/Generated directory component must not be a symbolic link:/,
+		);
+	} finally {
+		rmSync(outside, { recursive: true, force: true });
+		subject.cleanup();
+	}
+});
+
+test('refuses a subdirectory in the flat generated-suite directory', () => {
+	const subject = fixture();
+	const generatedDirectory = join(subject.dir, COMPILE_ONLY_GENERATED);
+	const stale = join(generatedDirectory, 'retired.test.ts');
+	try {
+		mkdirSync(generatedDirectory, { recursive: true });
+		writeFileSync(stale, '// must survive failed flatness validation\n');
+		mkdirSync(join(generatedDirectory, 'retired'), { recursive: true });
+		const generated = runGenerator(subject.dir);
+		assert.equal(existsSync(stale), true);
+		assert.equal(generated.code, 1, generated.output);
+		assert.match(
+			generated.output,
+			new RegExp(
+				`Generated suite directory must be flat; found subdirectory: ${join(generatedDirectory, 'retired').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+			),
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('accepts a readable source file with no fences', () => {
+	const subject = fixture({ [PATTERNS]: 'Narrative only.\n' });
+	try {
+		const generated = runGenerator(subject.dir);
+		assert.equal(generated.code, 0, generated.output);
+		assert.equal(
+			existsSync(
+				join(subject.dir, COMPILE_ONLY_GENERATED, 'site-index.test.ts'),
+			),
+			false,
+		);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('reconciles a suite for a bucket no longer in the source map', () => {
+	const subject = fixture();
+	const stale = join(
+		subject.dir,
+		COMPILE_ONLY_GENERATED,
+		'retired-bucket.test.ts',
+	);
+	try {
+		mkdirSync(dirname(stale), { recursive: true });
+		writeFileSync(stale, '// stale generated suite\n');
+		const generated = runGenerator(subject.dir);
+		assert.equal(generated.code, 0, generated.output);
+		assert.equal(existsSync(stale), false);
+	} finally {
+		subject.cleanup();
+	}
+});
+
+test('keeps generated suites separate for compile-only and real-db modes', () => {
+	const subject = fixture({
+		[PATTERNS]: `${FENCE}typescript\n// doctest: real-db-only — connection required\nconst x = 1;\n${FENCE}\n`,
+	});
+	const compileOnly = join(
+		subject.dir,
+		COMPILE_ONLY_GENERATED,
+		'site-index.test.ts',
+	);
+	const realDb = join(subject.dir, REAL_DB_GENERATED, 'site-index.test.ts');
+	const staleCompileOnly = join(
+		subject.dir,
+		COMPILE_ONLY_GENERATED,
+		'retired-bucket.test.ts',
+	);
+	const staleRealDb = join(
+		subject.dir,
+		REAL_DB_GENERATED,
+		'retired-bucket.test.ts',
+	);
+	try {
+		mkdirSync(dirname(staleCompileOnly), { recursive: true });
+		mkdirSync(dirname(staleRealDb), { recursive: true });
+		writeFileSync(staleCompileOnly, '// stale compile-only suite\n');
+		writeFileSync(staleRealDb, '// stale real-db suite\n');
+		assert.equal(runGenerator(subject.dir).code, 0);
+		assert.equal(existsSync(staleCompileOnly), false);
+		assert.equal(existsSync(staleRealDb), true);
+		assert.equal(runGenerator(subject.dir, true).code, 0);
+		assert.equal(existsSync(staleRealDb), false);
+		assert.equal(existsSync(compileOnly), true);
+		assert.equal(existsSync(realDb), true);
+		assert.match(readFileSync(compileOnly, 'utf8'), /it\.skip\(/);
+		assert.match(readFileSync(realDb, 'utf8'), /await runBlock\(/);
+		assert.match(
+			readFileSync(realDb, 'utf8'),
+			/Regenerate with: Set DBSP_DOCTEST_REAL_DB=1, then run pnpm test:docs:generate/,
+		);
+	} finally {
+		subject.cleanup();
+	}
 });
 
 test('accepts a file exactly at its per-kind baseline', () => {
