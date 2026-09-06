@@ -1,5 +1,13 @@
 # Changelog
 
+## [5.0.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v5.0.0...adapter-pgsql-v5.0.1) (2026-09-06)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A registration is dispatchable, or refused whole ([#722](https://github.com/oorabona/db-semantic-planner/issues/722)) ([9390704](https://github.com/oorabona/db-semantic-planner/commit/9390704b8a8ccca0a3fffb7b1d6c67c80e3b52de))
+* **adapter-pgsql:** Enforce noImplicitOverride like the other six packages ([#738](https://github.com/oorabona/db-semantic-planner/issues/738)) ([5886ec6](https://github.com/oorabona/db-semantic-planner/commit/5886ec609cf1373268ccaa666814a23020190220))
+
 ## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v4.0.0...adapter-pgsql-v5.0.0) (2026-09-05)
 
 
