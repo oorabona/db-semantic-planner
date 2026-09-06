@@ -2,19 +2,15 @@
  * Doctest framework for validating TypeScript code blocks in documentation.
  *
  * Extracts ```typescript and ```ts blocks from markdown files, compiles them
- * against the real @dbsp APIs, and validates SQL output either against
- * inline annotations (`// expected sql: ...`) or via vitest snapshots.
+ * against the real @dbsp APIs.
  *
- * Goal: prevent documentation drift from the API by making every code example
- * in every .md a real test that fails CI when the code goes stale.
+ * Goal: prevent documentation drift by transpiling and executing runnable
+ * TypeScript fences from configured sources without type-checking.
  */
 import { readFileSync } from 'node:fs';
 
 export interface Annotation {
-	sql?: string;
-	params?: string;
 	skip?: boolean;
-	dryRun?: boolean;
 	/** When true, the block is skipped in compile-only mode and runs only when DBSP_DOCTEST_REAL_DB=1. */
 	realDbOnly?: boolean;
 }
@@ -25,16 +21,13 @@ export interface ExtractedBlock {
 	index: number; // 1-based block counter within the file
 	language: string; // "typescript" | "ts" | "bash" | ...
 	code: string; // the raw block body (no backtick fences)
-	annotations: Annotation; // parsed from `// expected ...:` comments
+	annotations: Annotation; // parsed from `// doctest: skip` and `// doctest: real-db-only` markers
 }
 
 /**
  * Parse inline doctest annotations from block code.
  * Recognised forms (each on its own line, anywhere in the block):
- *   // expected sql: <single-line SQL>
- *   // expected params: <JSON array>
  *   // doctest: skip        — skip this block entirely
- *   // doctest: dry-run      — compile only, no snapshot/expect
  *   // doctest: real-db-only — runs only when DBSP_DOCTEST_REAL_DB=1
  */
 function parseAnnotations(code: string): Annotation {
@@ -42,20 +35,15 @@ function parseAnnotations(code: string): Annotation {
 	const ann: Annotation = {};
 	for (const raw of lines) {
 		const line = raw.trim();
-		const sqlMatch = line.match(/^\/\/\s*expected\s+sql:\s*(.+)$/i);
-		if (sqlMatch) ann.sql = sqlMatch[1].trim();
-		const paramsMatch = line.match(/^\/\/\s*expected\s+params:\s*(.+)$/i);
-		if (paramsMatch) ann.params = paramsMatch[1].trim();
 		if (/^\/\/\s*doctest:\s*skip\b/i.test(line)) ann.skip = true;
-		if (/^\/\/\s*doctest:\s*dry-run\b/i.test(line)) ann.dryRun = true;
 		if (/^\/\/\s*doctest:\s*real-db-only\b/i.test(line)) ann.realDbOnly = true;
 	}
 	return ann;
 }
 
 /**
- * Extract all typescript code blocks from a markdown file.
- * Skips blocks marked `doctest: skip` at parse time.
+ * Extract all typescript code blocks from a markdown file, recording annotations
+ * for callers to decide how to handle each block.
  */
 export function extractBlocks(mdFile: string): ExtractedBlock[] {
 	const text = readFileSync(mdFile, 'utf-8');
@@ -96,14 +84,4 @@ export function extractBlocks(mdFile: string): ExtractedBlock[] {
 	}
 
 	return out;
-}
-
-/**
- * Normalise SQL for comparison: collapse whitespace, strip optional newlines.
- * The compiled output typically uses tabs/spaces for readability; annotations
- * are free-form single-line. This makes them comparable without being strict
- * about exact whitespace.
- */
-export function normalizeSql(sql: string): string {
-	return sql.replace(/\s+/g, ' ').trim();
 }

@@ -78,7 +78,7 @@ const dump = (__existsOrm as any)
   .where(exists('files', { where: gt('lastParsed', outerRef('createdAt')) }))
   .dump();
 
-// expected sql: SELECT communities.* FROM communities WHERE EXISTS (SELECT 1 FROM files AS files_exists_0 WHERE communities.id = files_exists_0."communityId" AND files_exists_0."lastParsed" > communities."createdAt")
+expect(dump.sql).toBe('SELECT communities.* FROM communities WHERE EXISTS (SELECT 1 FROM files AS files_exists_0 WHERE communities.id = files_exists_0."communityId" AND files_exists_0."lastParsed" > communities."createdAt")');
 ```
 
 Key observations:
