@@ -10,9 +10,10 @@
  * us real parse errors with accurate line numbers from the TS compiler.
  */
 
-import { randomBytes } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {
 	ensureOwnedGeneratedDirectory,
 	generatedSuitesRootDirectory,
@@ -25,6 +26,21 @@ const TMP_ROOT = ensureOwnedGeneratedDirectory(
 	process.cwd(),
 	join(generatedSuitesRootDirectory(), '.tmp'),
 );
+
+const KEEP_FAILED_MODULES =
+	process.env.DBSP_DOCTEST_KEEP_FAILED_MODULES === '1';
+
+function describeThrownValue(value: unknown): string {
+	try {
+		if (value instanceof Error) {
+			const message = value.message;
+			if (typeof message === 'string') return message;
+		}
+		return String(value);
+	} catch {
+		return '<non-stringifiable thrown value>';
+	}
+}
 
 /**
  * Shared __defaultDb schema literal injected into both PREAMBLE and REAL_DB_PREAMBLE.
@@ -73,6 +89,8 @@ const __defaultDb = schema({
 `;
 
 const PREAMBLE = `
+import { expect } from 'vitest';
+
 // === Core DX surface ===
 import {
 \tschema,
@@ -196,6 +214,8 @@ const logger = {
  * primaryKey: true on every id column so FK references satisfy PostgreSQL's uniqueness check.
  */
 const REAL_DB_PREAMBLE = `
+import { expect } from 'vitest';
+
 // === Core DX surface ===
 import {
 \tschema,
@@ -419,43 +439,109 @@ function stripTopLevelExport(code: string): string {
 	);
 }
 
+export function renderBlockModule(
+	code: string,
+	isRealDbOnly: boolean,
+	file = '<unknown file>',
+	line = 0,
+): string {
+	// Strip imports (single-line and multi-line) then top-level `export` keywords
+	// so the code can safely execute inside the async IIFE wrapper.
+	const cleaned = stripTopLevelExport(stripImports(code));
+
+	if (isRealDbOnly) {
+		// Keep both the execution failure and a shutdown failure. The reset belongs
+		// inside the lifecycle so every outcome after Pool construction ends it.
+		const blockWithLifecycle = `async function __documentationBody() {
+${cleaned}
+}
+
+let __primaryValue: unknown;
+let __hasPrimaryValue = false;
+try {
+	await __resetSchema();
+	await __documentationBody();
+} catch (error) {
+	__primaryValue = error;
+	__hasPrimaryValue = true;
+} finally {
+	try {
+		await __pool.end();
+	} catch (error) {
+		if (__hasPrimaryValue) {
+			throw new AggregateError(
+				[__primaryValue, error],
+				${JSON.stringify(`${file}:${line} — documentation block and mandatory cleanup both failed`)},
+			);
+		}
+		throw error;
+	}
+}
+if (__hasPrimaryValue) throw __primaryValue;`;
+		return `${REAL_DB_PREAMBLE}\nasync function __main() {\n${blockWithLifecycle}\n}\nawait __main();\n`;
+	}
+
+	return `${PREAMBLE}\nasync function __main() {\n${cleaned}\n}\nawait __main();\n`;
+}
+
 export async function runBlock(
 	code: string,
 	file: string,
 	line: number,
 	options?: { realDbOnly?: boolean },
 ): Promise<void> {
-	// Strip imports (single-line and multi-line) then top-level `export` keywords
-	// so the code can safely execute inside the async IIFE wrapper.
-	const cleaned = stripTopLevelExport(stripImports(code));
-
 	// Use the pre-parsed annotation flag passed by the generator.
 	// Avoids dual-parsing risk (regex anchor vs trim-line mismatch).
 	const isRealDbOnly = REAL_DB && (options?.realDbOnly ?? false);
+	const body = renderBlockModule(code, isRealDbOnly, file, line);
+	const tmpFile = join(TMP_ROOT, `block-${process.pid}-${randomUUID()}.ts`);
 
-	let body: string;
-	if (isRealDbOnly) {
-		// Prepend schema reset; wrap block in try/finally so pool.end() always
-		// runs even if the block throws or returns early (prevents leaked Pools).
-		const blockWithReset = `await __resetSchema();
-try {
-${cleaned}
-} finally {
-  await __pool.end();
-}`;
-		body = `${REAL_DB_PREAMBLE}\nasync function __main() {\n${blockWithReset}\n}\nawait __main();\n`;
-	} else {
-		body = `${PREAMBLE}\nasync function __main() {\n${cleaned}\n}\nawait __main();\n`;
+	let primaryError: unknown;
+	let hasPrimaryError = false;
+	let retainFailedModule = false;
+	let cleanupError: unknown;
+	let hasCleanupError = false;
+	try {
+		writeFileSync(tmpFile, body);
+		try {
+			await import(pathToFileURL(tmpFile).href);
+		} catch (error) {
+			retainFailedModule = true;
+			throw error;
+		}
+	} catch (error) {
+		primaryError = error;
+		hasPrimaryError = true;
+	} finally {
+		if (!(retainFailedModule && KEEP_FAILED_MODULES)) {
+			try {
+				unlinkSync(tmpFile);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException | undefined)?.code !== 'ENOENT') {
+					cleanupError = error;
+					hasCleanupError = true;
+				}
+			}
+		}
 	}
 
-	const slug = randomBytes(4).toString('hex');
-	const tmpFile = join(TMP_ROOT, `block-${slug}.ts`);
-	writeFileSync(tmpFile, body);
-
-	try {
-		await import(tmpFile);
-	} catch (err) {
-		const msg = err instanceof Error ? err.message : String(err);
-		throw new Error(`${file}:${line} — ${msg}`);
+	if (hasPrimaryError) {
+		const prefix = `${file}:${line} — `;
+		const diagnostic = describeThrownValue(primaryError);
+		const message = diagnostic.startsWith(prefix)
+			? diagnostic
+			: `${prefix}${diagnostic}`;
+		if (hasCleanupError) {
+			throw new AggregateError(
+				[primaryError, cleanupError],
+				`${file}:${line} — documentation block and scratch cleanup both failed`,
+			);
+		}
+		throw new Error(message, { cause: primaryError });
+	}
+	if (hasCleanupError) {
+		throw new Error(`${file}:${line} — mandatory scratch cleanup failed`, {
+			cause: cleanupError,
+		});
 	}
 }

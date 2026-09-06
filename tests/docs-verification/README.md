@@ -43,10 +43,20 @@ protect against a concurrent process that can rename or replace a validated path
 entry between validation and any subsequent path-based `mkdir`, write, rename, temporary cleanup,
 or unlink operation.
 
-The runner mocks `pg.Pool` so blocks that allocate a Pool never open a real
-network connection. Query execution paths (`.all()`, `.execute()`) rely on the
-compile-only adapter throwing a clear error — doc authors should prefer
-`.dump()` in examples to illustrate the SQL the planner produces.
+In compile-only mode, the runner supplies a mocked `Pool` preamble binding, so
+an example using that binding creates no real PostgreSQL connection. Authors of
+compile-only examples must not load `pg` or another network-capable module at
+runtime: dynamic and other runtime module loading is not intercepted. Mark an
+example that needs a connection `real-db-only`. Query execution paths (`.all()`,
+`.execute()`) rely on the compile-only adapter throwing a clear error — doc
+authors should prefer `.dump()` in examples to illustrate the SQL the planner
+produces. Set `DBSP_DOCTEST_KEEP_FAILED_MODULES=1` to retain a failed block's
+scratch module for inspection.
+The runner unlinks each scratch module after its import settles; modules retained with `DBSP_DOCTEST_KEEP_FAILED_MODULES=1` are named `block-<pid>-<uuid>.ts` directly in `__generated__/.tmp/`. Run this command only when no docs-verification runner, docs test, or watch process is active in this checkout — otherwise it can delete a module between its write and its import:
+
+`find tests/docs-verification/__generated__/.tmp -mindepth 1 -delete`
+
+It clears retained modules and artifacts left by earlier runner versions, because `pnpm clean:artifacts` covers neither and only matches compiled `.js`/`.d.ts` siblings.
 
 ## Running
 
@@ -86,7 +96,7 @@ DBSP_DOCTEST_REAL_DB=1 DATABASE_URL=postgres://postgres:postgres@localhost:5432/
 ## When CI fails
 
 A failing doctest means the documentation example no longer matches the API.
-Two kinds of fixes:
+Typical fixes:
 
 1. **API changed, docs are stale** — update the doc block to use the current
    API. This is the common case and the whole point of this framework.
