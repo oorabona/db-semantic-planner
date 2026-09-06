@@ -58,7 +58,7 @@ test('a completed run leaves no scratch file for this process', async () => {
 	}
 });
 
-test('a real-db module imports expect after block imports are stripped', () => {
+test('a real-db module imports expect around an already-clean block', () => {
 	const body = renderBlockModule('expect(true).toBe(true);', true);
 
 	assert.match(

@@ -16,8 +16,9 @@ export interface Annotation {
 }
 
 export interface ExtractedBlock {
-	file: string; // relative path, e.g. "packages/docs/guide/joins.md"
+	file: string; // root-relative documentation source identity, e.g. "packages/docs/guide/joins.md"
 	line: number; // 1-based line where the block opens
+	codeStartLine: number; // 1-based line where the block's code begins
 	index: number; // 1-based block counter within the file
 	language: string; // "typescript" | "ts" | "bash" | ...
 	code: string; // the raw block body (no backtick fences)
@@ -45,8 +46,11 @@ function parseAnnotations(code: string): Annotation {
  * Extract all typescript code blocks from a markdown file, recording annotations
  * for callers to decide how to handle each block.
  */
-export function extractBlocks(mdFile: string): ExtractedBlock[] {
-	const text = readFileSync(mdFile, 'utf-8');
+export function extractBlocks(
+	markdownPath: string,
+	file = markdownPath,
+): ExtractedBlock[] {
+	const text = readFileSync(markdownPath, 'utf-8');
 	const lines = text.split('\n');
 	const out: ExtractedBlock[] = [];
 	let inBlock = false;
@@ -70,8 +74,9 @@ export function extractBlocks(mdFile: string): ExtractedBlock[] {
 				const code = buf.join('\n');
 				const annotations = parseAnnotations(code);
 				out.push({
-					file: mdFile,
+					file,
 					line: startLine,
+					codeStartLine: startLine + 1,
 					index: idx,
 					language: lang,
 					code,
