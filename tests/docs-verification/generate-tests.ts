@@ -19,6 +19,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cleanBlockSource } from './block-source.js';
 import { doctestSources, looksLikeFragment } from './doc-sources.js';
 import { extractBlocks } from './doctest.js';
 import {
@@ -59,7 +60,7 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 		const absMd = join(ROOT, mdFile);
 		let blocks: ReturnType<typeof extractBlocks>;
 		try {
-			blocks = extractBlocks(absMd);
+			blocks = extractBlocks(absMd, mdFile);
 		} catch (error) {
 			const cause = error instanceof Error ? error.message : String(error);
 			const failure = JSON.stringify(
@@ -96,10 +97,19 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 			}
 
 			runnableBlocks++;
-			// The block body is passed AS A STRING to runBlock, which wraps it
-			// in an async IIFE and evaluates via dynamic import. That way parse
-			// errors in one block don't abort other blocks' tests.
-			const encoded = JSON.stringify(block.code);
+			let cleaned: string;
+			try {
+				cleaned = cleanBlockSource(block.code, block.file, block.codeStartLine);
+			} catch (error) {
+				const cause = error instanceof Error ? error.message : String(error);
+				const failure = JSON.stringify(cause);
+				cases.push(`it(${label}, () => { throw new Error(${failure}); });`);
+				continue;
+			}
+
+			// The already-cleaned block body is passed as a string to runBlock,
+			// which wraps it in an async IIFE and evaluates via dynamic import.
+			const encoded = JSON.stringify(cleaned);
 			cases.push(
 				`it(${label}, async () => { await runBlock(${encoded}, ${JSON.stringify(block.file)}, ${block.line}, { realDbOnly: ${block.annotations.realDbOnly === true} }); });`,
 			);

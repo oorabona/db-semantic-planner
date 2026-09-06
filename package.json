@@ -40,7 +40,7 @@
 		"check:catalog": "node scripts/check-catalog.mjs",
 		"check:docs-ledger": "pnpm tsx tests/docs-verification/check-claim-ledger.ts",
 		"test:docs-ledger": "pnpm tsx --test tests/docs-verification/check-claim-ledger.test.ts",
-		"test:docs-runner": "pnpm tsx --test tests/docs-verification/runner.test.ts",
+		"test:docs-runner": "pnpm tsx --test tests/docs-verification/block-source.test.ts tests/docs-verification/runner.test.ts",
 		"lint": "pnpm biome check .",
 		"lint:fix": "pnpm biome check --write .",
 		"typecheck": "pnpm -r typecheck",
