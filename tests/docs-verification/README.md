@@ -23,19 +23,25 @@ Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 ## How it works
 
-1. `doctest.ts` parses markdown and extracts every `\`\`\`typescript` / `\`\`\`ts`
-   block, capturing file path, line number, block index, and optional
+1. `doctest.ts` extracts column-zero `\`\`\`typescript` / `\`\`\`ts` blocks,
+   capturing file path, line number, block index, and optional
    annotations (`// doctest: skip — <reason>`, `// doctest: real-db-only — <reason>`).
 
-2. `generate-tests.ts` emits one `*.test.ts` per source bucket into
-   `__generated__/` (gitignored). Each block becomes an `it(...)` so a single
-   broken block does not abort other tests in the same file.
+2. `generate-tests.ts` emits one `*.test.ts` per source bucket that produces at
+   least one test case into the active mode's flat `__generated__/compile-only/`
+   or `__generated__/real-db/` directory (gitignored). Each block becomes an
+   `it(...)` so a single broken block does not abort other tests in the same file.
 
 3. `runner.ts` evaluates a block by writing it to a scratch file inside
    `__generated__/.tmp/`, wrapping it in an async IIFE with every public
 	`@dbsp` symbol pre-imported, then dynamic-importing it. Any parse error,
 	import failure, or runtime throw becomes a test failure with the original
    markdown file and line.
+
+The generator rejects an already-invalid generated-path layout before mutation. It does not
+protect against a concurrent process that can rename or replace a validated path component or
+entry between validation and any subsequent path-based `mkdir`, write, rename, temporary cleanup,
+or unlink operation.
 
 The runner mocks `pg.Pool` so blocks that allocate a Pool never open a real
 network connection. Query execution paths (`.all()`, `.execute()`) rely on the
@@ -47,7 +53,7 @@ compile-only adapter throwing a clear error — doc authors should prefer
 ```bash
 pnpm test:docs                 # generate + run
 pnpm test:docs:generate        # just regenerate the *.test.ts files
-pnpm vitest run tests/docs-verification/__generated__/  # run the generated suite directly
+pnpm vitest run --config tests/docs-verification/vitest.config.docs.ts  # run the active mode directly
 ```
 
 ## Annotations
@@ -90,3 +96,6 @@ Two kinds of fixes:
    it runs in the `test-docs-real-db` CI job. Use `// doctest: skip — <reason>`
    only for blocks that genuinely cannot execute even with a real DB
    (pseudo-code, non-standard tables, feature gaps).
+
+3. **Expected documentation source cannot be read** — restore that source or
+   repair its accessibility, then regenerate the doctest suites.

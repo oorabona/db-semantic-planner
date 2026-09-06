@@ -1,6 +1,11 @@
 import { defineConfig } from 'vitest/config';
+import {
+	doctestMode,
+	generatedSuiteDirectory,
+} from './generated-suite-path.js';
 
-const realDb = process.env.DBSP_DOCTEST_REAL_DB === '1';
+const mode = doctestMode();
+const realDb = mode === 'real-db';
 
 export default defineConfig({
 	test: {
@@ -10,6 +15,6 @@ export default defineConfig({
 		// fileParallelism=false is the Vitest 4+ way (poolOptions was removed in v4).
 		fileParallelism: !realDb,
 		// Deterministic test discovery: only the generated doctest files.
-		include: ['tests/docs-verification/__generated__/**/*.test.ts'],
+		include: [`${generatedSuiteDirectory(mode)}/*.test.ts`],
 	},
 });
