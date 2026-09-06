@@ -212,7 +212,7 @@ type ExpressionStatement =
 class TaggedExpressionRejection extends Error {
 	constructor(
 		readonly statement: ExpressionStatement,
-		readonly cause: unknown,
+		override readonly cause: unknown,
 	) {
 		super(`PostgreSQL rejected expression while executing ${statement}`);
 		this.name = 'TaggedExpressionRejection';
@@ -220,7 +220,7 @@ class TaggedExpressionRejection extends Error {
 }
 
 class IndexPredicateCanonicalizationUnavailableError extends Error {
-	constructor(readonly cause: unknown) {
+	constructor(override readonly cause: unknown) {
 		super(
 			'PostgreSQL could not build the scratch relation for a partial-index predicate. ' +
 				`Reason: ${errorMessage(cause)}`,
@@ -233,7 +233,7 @@ class IndexPredicateCanonicalizationUnavailableError extends Error {
 export class PlannedSchemaStagingError extends Error {
 	constructor(
 		readonly statement: 'CREATE TYPE' | 'CREATE SEQUENCE',
-		readonly cause: unknown,
+		override readonly cause: unknown,
 	) {
 		super(
 			`PostgreSQL could not stage ${statement} for expression canonicalization. ` +
@@ -248,7 +248,7 @@ export class CheckConstraintCanonicalizationError extends Error {
 	constructor(
 		readonly table: string,
 		readonly constraints: readonly string[],
-		readonly cause: unknown,
+		override readonly cause: unknown,
 	) {
 		super(
 			`Could not canonicalize ${constraints.length} CHECK constraint expression(s). ` +
@@ -262,7 +262,7 @@ export class ColumnDefaultCanonicalizationError extends Error {
 	constructor(
 		readonly table: string,
 		readonly column: string,
-		readonly cause: unknown,
+		override readonly cause: unknown,
 	) {
 		super(
 			'Could not canonicalize one column default. Inspect the table and column fields for its identity.',
