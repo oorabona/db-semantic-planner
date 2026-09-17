@@ -90,11 +90,11 @@ export interface NqlBuilder<T> {
 	run(): Promise<void>;
 	/** Execute query and return first result or null */
 	first(): Promise<T | null>;
-	/** Get the IntentIR for debugging */
+	/** Get the IntentIR for debugging. Throws for CTE and set-operation queries. */
 	toIntentIR(): QueryIntent | MutationIntent;
-	/** Get the execution plan */
+	/** Get the execution plan. Throws for mutations and CTE and set-operation queries. */
 	plan(): PlanReport;
-	/** Get full dump. Mutations return MutationDump without a plan. */
+	/** Get full dump. Mutations return MutationDump without a plan; CTE and set-operation queries return Dump without a plan. */
 	dump(meta?: DumpMetaInput): Dump | MutationDump;
 }
 
@@ -2150,14 +2150,16 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	async all(): Promise<T[]> {
 		const adapter = this.adapter;
+		const compiledIntent = this.compile();
 		if (!adapter) {
 			throw new Error(
 				'Cannot execute query: no adapter configured. ' +
-					'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.',
+					(compiledIntent.kind === 'unplannedRead'
+						? 'Pass an adapter to createOrm() or use .dump() for debugging.'
+						: 'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.'),
 			);
 		}
 
-		const compiledIntent = this.compile();
 		if (
 			compiledIntent.kind === 'unplannedRead' &&
 			hasExecutableNqlProgramSequence(compiledIntent.bundle)

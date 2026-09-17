@@ -52,7 +52,7 @@ type Dump = {
 };
 ```
 
-> **Note:** `plan` is omitted for set-operation dumps (UNION / INTERSECT / EXCEPT) because those queries bypass the semantic planner. Use `dump.plan?.decisions` or guard with `if (dump.plan)` when writing observability hooks that need to be generic across all query types.
+> **Note:** `plan` is omitted for set-operation dumps (UNION / INTERSECT / EXCEPT) and for NQL `with` (CTE) and set-operation queries, because those queries bypass the semantic planner. Use `dump.plan?.decisions` or guard with `if (dump.plan)` when writing observability hooks that need to be generic across all query types.
 
 ---
 

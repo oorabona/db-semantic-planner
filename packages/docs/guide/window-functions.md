@@ -99,8 +99,8 @@ ranked.dump();
 // FROM "sales"
 ```
 
-For an executable top-N query, put the window calculation in an NQL CTE and
-filter it outside. This compile-only example uses its own `sales` schema:
+To keep only the top 3 per region, put the window calculation in an NQL CTE and
+filter it outside. This example compiles without a database; with a connected adapter, `.all()` runs it:
 
 ```typescript
 import { schema, createOrm } from '@dbsp/core';
