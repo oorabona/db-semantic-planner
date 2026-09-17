@@ -11,6 +11,7 @@ import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../../../ast-helpers.js';
 import { identityNaming } from '../../../naming-plugin.js';
+import { fromOutputDescriptors } from '../../../projection-envelope.js';
 import type { CompilerContext, Decision } from '../../types.js';
 import { createCompilerState } from '../../types.js';
 import { jsonAggIncludeHandler } from '../json-agg.js';
@@ -107,6 +108,150 @@ function targetsToSQL(targets: import('@pgsql/types').Node[]): string {
 }
 
 describe('json-agg handler', () => {
+	it('keeps extra projected outputs when the physical columns are also present', () => {
+		const model = makeModel({ posts: { columns: ['id', 'title'] } });
+		const projectedPosts = fromOutputDescriptors({
+			sql: 'SELECT id, title, id + 1 AS extra FROM posts',
+			parameters: [],
+			columns: ['id', 'title', 'extra'],
+			declaredOutputs: [
+				{
+					outputKey: 'id',
+					source: {
+						kind: 'modelColumn',
+						table: 'posts',
+						column: 'id',
+						js: 'bigint',
+					},
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+				{
+					outputKey: 'title',
+					source: { kind: 'modelColumn', table: 'posts', column: 'title' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+				{
+					outputKey: 'extra',
+					source: { kind: 'expression', reason: 'test computed output' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			],
+			naming: identityNaming,
+		});
+		const ctx = {
+			...makeCtx('users'),
+			model,
+			bindingNames: new Set(['posts']),
+			relationTargetProjections: new Map([['posts', projectedPosts]]),
+		} as CompilerContext;
+
+		const result = jsonAggIncludeHandler.compile(
+			buildDecision({
+				relationType: 'belongsTo',
+				foreignKey: 'author_id',
+				parentKey: 'id',
+			}),
+			ctx,
+			createCompilerState(),
+		);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain('jsonb_build_object');
+		expect(sql).toContain("'extra'");
+		expect(sql).toContain('__t__.extra');
+		expect(sql).toContain('__t__.id::text');
+	});
+
+	it('keeps the full physical projection shortcut', () => {
+		const model = makeModel({ posts: { columns: ['id', 'title'] } });
+		const projectedPosts = fromOutputDescriptors({
+			sql: 'SELECT id, title FROM posts',
+			parameters: [],
+			columns: ['id', 'title'],
+			declaredOutputs: [
+				{
+					outputKey: 'id',
+					source: { kind: 'modelColumn', table: 'posts', column: 'id' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+				{
+					outputKey: 'title',
+					source: { kind: 'modelColumn', table: 'posts', column: 'title' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			],
+			naming: identityNaming,
+		});
+		const ctx = {
+			...makeCtx('users'),
+			model,
+			bindingNames: new Set(['posts']),
+			relationTargetProjections: new Map([['posts', projectedPosts]]),
+		} as CompilerContext;
+
+		const sql = targetsToSQL(
+			jsonAggIncludeHandler.compile(
+				buildDecision({
+					relationType: 'belongsTo',
+					foreignKey: 'author_id',
+					parentKey: 'id',
+				}),
+				ctx,
+				createCompilerState(),
+			).targets!,
+		);
+
+		expect(sql).toBe(
+			"select coalesce((select json_agg(to_jsonb(__t__) order by __t__.id::text asc nulls last, __t__.title::text asc nulls last) from posts as __t__ where __t__.id = users.author_id), '[]'::json) as posts_json from dummy",
+		);
+	});
+
+	it('refuses an ambiguous output under a wildcard projection', () => {
+		const model = makeModel({ posts: { columns: ['id', 'title'] } });
+		const projectedPosts = fromOutputDescriptors({
+			sql: 'SELECT id, id, title FROM posts',
+			parameters: [],
+			columns: ['id', 'title'],
+			declaredOutputs: [
+				{
+					outputKey: 'id',
+					source: { kind: 'modelColumn', table: 'posts', column: 'id' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+				{
+					outputKey: 'id',
+					source: { kind: 'expression', reason: 'duplicate id output' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+				{
+					outputKey: 'title',
+					source: { kind: 'modelColumn', table: 'posts', column: 'title' },
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			],
+			naming: identityNaming,
+		});
+		const ctx = {
+			...makeCtx('users'),
+			model,
+			bindingNames: new Set(['posts']),
+			relationTargetProjections: new Map([['posts', projectedPosts]]),
+		} as CompilerContext;
+
+		expect(() =>
+			jsonAggIncludeHandler.compile(
+				buildDecision({
+					columns: ['*'],
+					relationType: 'belongsTo',
+					foreignKey: 'author_id',
+					parentKey: 'id',
+				}),
+				ctx,
+				createCompilerState(),
+			),
+		).toThrow(/projected column 'id' is ambiguous/);
+	});
+
 	it('produces single-level json_agg with to_jsonb', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();

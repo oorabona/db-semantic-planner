@@ -95,15 +95,16 @@ function resolveJsonAggProjection(
 		!(requested.length === 1 && requested[0] === '*');
 	const target = resolveRelationTarget(targetTable, ctx);
 	if (hasExplicitProjection) {
-		return requested.map(
-			(column) =>
-				requireRelationTargetColumn(
-					target,
-					column,
-					ctx,
-					'selected column',
-					decision.relation,
-				)?.outputKey ?? ctx.naming.toDatabase(column),
+		return requested.map((column) =>
+			column === '*'
+				? column
+				: (requireRelationTargetColumn(
+						target,
+						column,
+						ctx,
+						'selected column',
+						decision.relation,
+					)?.outputKey ?? ctx.naming.toDatabase(column)),
 		);
 	}
 	if (target.outputs !== undefined) {
@@ -111,9 +112,18 @@ function resolveJsonAggProjection(
 		// projection.  A reduced CTE must be explicit so PostgreSQL cannot expose
 		// columns the CTE did not produce.
 		const physical = ctx.model?.getTable(targetTable);
-		const isFullPhysicalProjection = physical?.columns.every((column) =>
-			target.outputs?.has(ctx.naming.toDatabase(column.name)),
+		const physicalKeys = new Set(
+			physical?.columns.map((column) => ctx.naming.toDatabase(column.name)),
 		);
+		const isFullPhysicalProjection =
+			physical !== undefined &&
+			target.outputs.size === physicalKeys.size &&
+			[...physicalKeys].every((column) => {
+				const descriptor = target.outputs?.get(column);
+				return (
+					descriptor !== undefined && descriptor.source.kind !== 'ambiguous'
+				);
+			});
 		if (!isFullPhysicalProjection) return [...target.outputs.keys()];
 	}
 
@@ -145,6 +155,7 @@ function buildJsonAggColumnValueOverrides(
 	if (target.outputs !== undefined) {
 		const overrides = new Map<string, Node>();
 		for (const columnName of columns) {
+			if (columnName === '*') continue;
 			// `columns` comes from the target projection here, so its keys are
 			// already emitted SQL identifiers rather than logical input names.
 			const emittedColumn = emittedColumnReference(columnName);

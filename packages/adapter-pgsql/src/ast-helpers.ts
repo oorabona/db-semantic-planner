@@ -156,9 +156,12 @@ export function columnRef(
 		validateIdentifier(dbTable, 'table');
 		fields.push(stringNode(dbTable));
 	}
-	const authority = table
-		? authorities?.get(naming.toDatabase(table))
-		: undefined;
+	const isWildcard =
+		typeof column === 'string' ? column === '*' : column.emittedName === '*';
+	const authority =
+		table && !isWildcard
+			? authorities?.get(naming.toDatabase(table))
+			: undefined;
 	const resolved =
 		typeof column === 'string'
 			? authority?.outputs?.has(column)

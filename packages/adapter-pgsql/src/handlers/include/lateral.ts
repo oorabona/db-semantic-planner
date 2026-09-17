@@ -167,10 +167,10 @@ function compileLateralCascade(
 		'join key',
 		decision.relation,
 	);
-	if (columns && !(columns.length === 1 && columns[0] === '*')) {
+	if (columns) {
 		requireRelationTargetColumns(
 			target,
-			columns,
+			columns.filter((column) => column !== '*'),
 			ctx,
 			'selected column',
 			decision.relation,
