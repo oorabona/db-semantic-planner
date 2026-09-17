@@ -9,6 +9,7 @@ import {
 	type ConnectionTransport,
 	transportLabel,
 } from '@/lib/connection-transport';
+import type { ListDatabasesResult, ListSchemasResult } from '@/lib/ipc';
 import type { DatabaseType, SslMode } from '@/stores/connection-store';
 
 export interface ConnectionFormData {
@@ -54,7 +55,7 @@ interface ConnectionDialogProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[]; transport: ConnectionTransport }>;
+	}) => Promise<ListDatabasesResult>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -62,7 +63,7 @@ interface ConnectionDialogProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[]; transport: ConnectionTransport }>;
+	}) => Promise<ListSchemasResult>;
 	initial?: Partial<ConnectionFormData>;
 	testing?: boolean;
 	connecting?: boolean;

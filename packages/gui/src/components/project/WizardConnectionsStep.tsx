@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { ConnectionTestResult } from '@/lib/connection-transport';
+import type { ListDatabasesResult, ListSchemasResult } from '@/lib/ipc';
 import type { SslMode } from '@/stores/connection-store';
 import type { WizardConnection } from './wizard-types';
 
@@ -29,7 +30,7 @@ interface WizardConnectionsStepProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[] }>;
+	}) => Promise<ListDatabasesResult>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -37,7 +38,7 @@ interface WizardConnectionsStepProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[] }>;
+	}) => Promise<ListSchemasResult>;
 	onTest: (data: ConnectionFormData) => void;
 	testing?: boolean;
 	testResult?: ConnectionTestResult | null;

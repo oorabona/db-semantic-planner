@@ -10,6 +10,7 @@ import {
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionTestResult } from '@/lib/connection-transport';
+import type { ListSchemasResult } from '@/lib/ipc';
 import { ConnectionDialog } from './ConnectionDialog';
 
 afterEach(cleanup);
@@ -23,8 +24,8 @@ function renderDialog(
 		onConnect: vi.fn(),
 		onTest: vi.fn(),
 		onSave: vi.fn(),
-		onDiscover: vi.fn().mockResolvedValue({ databases: [] }),
-		onListSchemas: vi.fn().mockResolvedValue({ schemas: [] }),
+		onDiscover: vi.fn().mockResolvedValue({ databases: [], transport: 'tls' }),
+		onListSchemas: vi.fn().mockResolvedValue({ schemas: [], transport: 'tls' }),
 		...overrides,
 	};
 	render(<ConnectionDialog {...props} />);
@@ -171,8 +172,14 @@ describe('ConnectionDialog SSL modes', () => {
 							onConnect={vi.fn()}
 							onTest={vi.fn()}
 							onSave={vi.fn()}
-							onDiscover={vi.fn().mockResolvedValue({ databases: [] })}
-							onListSchemas={vi.fn().mockResolvedValue({ schemas: [] })}
+							onDiscover={vi.fn().mockResolvedValue({
+								databases: [],
+								transport: 'tls',
+							})}
+							onListSchemas={vi.fn().mockResolvedValue({
+								schemas: [],
+								transport: 'tls',
+							})}
 							testResult={testResult}
 							onTestResultInvalidated={() => setTestResult(null)}
 						/>
@@ -194,12 +201,10 @@ describe('ConnectionDialog SSL modes', () => {
 	});
 
 	it('ignores a schema response that resolves after starting a test', async () => {
-		let resolveSchemas:
-			| ((value: { schemas: string[]; transport: 'tls' }) => void)
-			| undefined;
+		let resolveSchemas: ((value: ListSchemasResult) => void) | undefined;
 		const onListSchemas = vi.fn(
 			() =>
-				new Promise<{ schemas: string[]; transport: 'tls' }>((resolve) => {
+				new Promise<ListSchemasResult>((resolve) => {
 					resolveSchemas = resolve;
 				}),
 		);
