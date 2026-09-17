@@ -148,7 +148,10 @@ function createPlanReportForCteQuery(
 	) {
 		return createPlanReportForQuery(query);
 	}
-	if (deps.model === undefined) {
+	if (
+		deps.model === undefined ||
+		deps.model.getTable(query.from) === undefined
+	) {
 		if (queryContainsRelationPath(query)) {
 			throw new Error(
 				`PgsqlAdapter.compileCteQuery: ${queryDescription} contains a relation path and requires a model.`,

@@ -52,10 +52,10 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
-function relationQuery() {
+function relationQuery(from = 'employees') {
 	return {
 		type: 'select' as const,
-		from: 'employees',
+		from,
 		select: {
 			type: 'expressions' as const,
 			columns: [
@@ -77,6 +77,65 @@ function relationQuery() {
 // ---------------------------------------------------------------------------
 
 describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
+	it('keeps an undeclared recursive CTE root on the stub plan', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const result = adapter.compileCteQuery({
+			kind: 'cteQuery',
+			ctes: [
+				{
+					kind: 'rawCte',
+					name: 'employee_rows',
+					base: {
+						type: 'select',
+						from: 'unmodeled_employees',
+						select: { type: 'all' },
+					},
+					step: {
+						type: 'select',
+						from: 'employee_rows',
+						select: { type: 'all' },
+					},
+					unionAll: true,
+				},
+			],
+			query: { type: 'select', from: 'employee_rows', select: { type: 'all' } },
+		});
+
+		expect(ws(result.sql)).toBe(
+			'WITH RECURSIVE "employee_rows" AS (SELECT unmodeled_employees.* FROM unmodeled_employees UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
+		);
+	});
+
+	it('rejects a relation path over an undeclared recursive CTE root', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+
+		expect(() =>
+			adapter.compileCteQuery({
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'rawCte',
+						name: 'employee_rows',
+						base: relationQuery('unmodeled_employees'),
+						step: {
+							type: 'select',
+							from: 'employee_rows',
+							select: { type: 'all' },
+						},
+						unionAll: true,
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'employee_rows',
+					select: { type: 'all' },
+				},
+			}),
+		).toThrow(
+			'PgsqlAdapter.compileCteQuery: CTE "employee_rows" anchor contains a relation path and requires a model.',
+		);
+	});
+
 	it('plans relation paths in a recursive CTE anchor over a model table', () => {
 		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
 		const result = adapter.compileCteQuery({

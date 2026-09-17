@@ -130,28 +130,32 @@ posts
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
 
-		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
-			| select title, author.name as authorName
+		const topLevel = orm.nql<{ title: string; author_name: string }>`posts
+			| select title, author.name as author_name
 			| flat
 			| order by title`;
+		// #762: camelCase CTE aliases do not survive snake_case naming.
 		const cte = orm.nql<{
 			title: string;
-			authorName: string;
+			author_name: string;
 		}>`with enriched as (posts
-			| select title, author.name as authorName
+			| select title, author.name as author_name
 			| flat)
 enriched
-			| select title, authorName
+			| select title, author_name
 			| order by title`;
 
 		const cteRows = await cte.all();
 		expect(cteRows).toEqual(await topLevel.all());
 		expect(cteRows).toEqual([
-			{ title: 'Advanced TypeScript Patterns', authorName: 'Alice Johnson' },
-			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
-			{ title: 'Draft: React Best Practices', authorName: 'Alice Johnson' },
-			{ title: 'Getting Started with TypeScript', authorName: 'Alice Johnson' },
-			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
+			{ title: 'Advanced TypeScript Patterns', author_name: 'Alice Johnson' },
+			{ title: 'Draft: Database Optimization', author_name: 'Bob Smith' },
+			{ title: 'Draft: React Best Practices', author_name: 'Alice Johnson' },
+			{
+				title: 'Getting Started with TypeScript',
+				author_name: 'Alice Johnson',
+			},
+			{ title: 'Introduction to PostgreSQL', author_name: 'Bob Smith' },
 		]);
 	});
 
