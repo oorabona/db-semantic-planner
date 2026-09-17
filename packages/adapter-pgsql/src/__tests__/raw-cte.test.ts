@@ -5,7 +5,7 @@
  * No DB connection required.
  */
 
-import { createOrm, createRawCteBuilder, eq, schema } from '@dbsp/core';
+import { createOrm, createRawCteBuilder, eq, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -32,6 +32,14 @@ const testSchema = schema({
 	chain: {
 		id: { type: 'integer', primaryKey: true },
 	},
+	departments: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	employees: {
+		id: { type: 'integer', primaryKey: true },
+		departmentId: ref('departments', { inverse: 'employees' }),
+	},
 } as const);
 
 function buildOrm() {
@@ -44,11 +52,81 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
+function relationQuery() {
+	return {
+		type: 'select' as const,
+		from: 'employees',
+		select: {
+			type: 'expressions' as const,
+			columns: [
+				{ kind: 'column' as const, column: 'id' },
+				{
+					kind: 'relationColumn' as const,
+					relation: 'department',
+					column: 'name',
+					as: 'department.name',
+				},
+			],
+		},
+		include: [{ relation: 'department', strategy: 'flat' as const }],
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
+	it('plans relation paths in a recursive CTE anchor over a model table', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const result = adapter.compileCteQuery({
+			kind: 'cteQuery',
+			ctes: [
+				{
+					kind: 'rawCte',
+					name: 'employee_rows',
+					base: relationQuery(),
+					step: {
+						type: 'select',
+						from: 'employee_rows',
+						select: { type: 'all' },
+					},
+					unionAll: true,
+				},
+			],
+			query: { type: 'select', from: 'employee_rows', select: { type: 'all' } },
+		});
+
+		expect(ws(result.sql)).toBe(
+			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, department.name AS "department.name" FROM employees JOIN departments AS department ON employees."departmentId" = department.id UNION ALL SELECT employee_rows.* FROM employee_rows) SELECT employee_rows.* FROM employee_rows',
+		);
+	});
+
+	it('plans relation paths in a recursive CTE step over a model table', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const result = adapter.compileCteQuery({
+			kind: 'cteQuery',
+			ctes: [
+				{
+					kind: 'rawCte',
+					name: 'employee_rows',
+					base: {
+						type: 'select',
+						from: 'employees',
+						select: { type: 'fields', fields: ['id', 'departmentId'] },
+					},
+					step: relationQuery(),
+					unionAll: true,
+				},
+			],
+			query: { type: 'select', from: 'employee_rows', select: { type: 'all' } },
+		});
+
+		expect(ws(result.sql)).toBe(
+			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, employees."departmentId" FROM employees UNION ALL SELECT employees.id, department.name AS "department.name" FROM employees JOIN departments AS department ON employees."departmentId" = department.id) SELECT employee_rows.* FROM employee_rows',
+		);
+	});
+
 	it('T1: basic — base + step, no maxDepth, UNION ALL (default)', () => {
 		const orm = buildOrm() as any;
 

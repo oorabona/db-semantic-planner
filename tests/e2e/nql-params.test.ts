@@ -126,6 +126,35 @@ posts
 		expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
 	});
 
+	it('matches top-level relation columns when a CTE body reads a model table', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
+			| select title, author.name as authorName
+			| flat
+			| order by title`;
+		const cte = orm.nql<{
+			title: string;
+			authorName: string;
+		}>`with enriched as (posts
+			| select title, author.name as authorName
+			| flat)
+enriched
+			| select title, authorName
+			| order by title`;
+
+		const cteRows = await cte.all();
+		expect(cteRows).toEqual(await topLevel.all());
+		expect(cteRows).toEqual([
+			{ title: 'Advanced TypeScript Patterns', authorName: 'Alice Johnson' },
+			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
+			{ title: 'Draft: React Best Practices', authorName: 'Alice Johnson' },
+			{ title: 'Getting Started with TypeScript', authorName: 'Alice Johnson' },
+			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
+		]);
+	});
+
 	it('executes binding-final read-only queries through WITH CTEs', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

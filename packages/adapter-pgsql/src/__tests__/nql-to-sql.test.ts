@@ -1436,6 +1436,147 @@ function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
+function blogCteToSQL(nql: string): string {
+	const compiled = compile(nql, blogSchema.model);
+	if (!compiled.success || !compiled.ast?.cteQuery) {
+		throw new Error(
+			`NQL CTE compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	return normalizeSQL(
+		adapter.compileCteQuery(compiled.ast.cteQuery, { model: blogSchema.model })
+			.sql,
+	);
+}
+
+describe('CTE relation planning', () => {
+	it('plans relation paths in a simple CTE body', () => {
+		expect(
+			blogCteToSQL(
+				'with enriched as (posts | select title, author.name | flat) enriched | select *',
+			),
+		).toBe(
+			'with "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched',
+		);
+	});
+
+	it('plans relation paths in the outer model-table query', () => {
+		expect(
+			blogCteToSQL(
+				'with seed as (authors | select id) posts | select title, author.name | flat',
+			),
+		).toBe(
+			'with "seed" as (select authors.id from authors) select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id',
+		);
+	});
+
+	it('keeps a CTE that shadows a model table as the outer source', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: blogSchema.model });
+		const result = adapter.compileCteQuery({
+			kind: 'cteQuery',
+			ctes: [
+				{
+					kind: 'simpleCte',
+					name: 'authors',
+					query: {
+						type: 'select',
+						from: 'authors',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+			],
+			query: {
+				type: 'select',
+				from: 'authors',
+				select: { type: 'fields', fields: ['id'] },
+				where: {
+					kind: 'in',
+					field: 'id',
+					subquery: {
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['authorId'] },
+					},
+				},
+			},
+		});
+
+		expect(normalizeSQL(result.sql)).toBe(
+			'with "authors" as (select authors.id from authors) select authors.id from authors where authors.id = any (select posts_subq_0."authorid" from posts as posts_subq_0)',
+		);
+	});
+
+	it('refuses a relation target that conflicts with a visible CTE', () => {
+		expect(() =>
+			blogCteToSQL(
+				'with authors as (authors | select id), enriched as (posts | select author.name) enriched | select *',
+			),
+		).toThrow(
+			'relation target table "authors" in CTE "enriched" conflicts with visible CTE or binding "authors"',
+		);
+	});
+
+	it('keeps scalar CTE compilation working without a model', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileCteQuery({
+			kind: 'cteQuery',
+			ctes: [
+				{
+					kind: 'simpleCte',
+					name: 'scalar',
+					query: {
+						type: 'select',
+						from: 'users',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+			],
+			query: {
+				type: 'select',
+				from: 'scalar',
+				select: { type: 'fields', fields: ['id'] },
+			},
+		});
+
+		expect(normalizeSQL(result.sql)).toBe(
+			'with "scalar" as (select users.id from users) select scalar.id from scalar',
+		);
+	});
+
+	it('refuses a relation path in a CTE body without a model', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		expect(() =>
+			adapter.compileCteQuery({
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'enriched',
+						query: {
+							type: 'select',
+							from: 'posts',
+							select: {
+								type: 'expressions',
+								columns: [
+									{
+										kind: 'relationColumn',
+										relation: 'author',
+										column: 'name',
+										as: 'author.name',
+									},
+								],
+							},
+						},
+					},
+				],
+				query: { type: 'select', from: 'enriched', select: { type: 'all' } },
+			}),
+		).toThrow('CTE "enriched" contains a relation path and requires a model');
+	});
+});
+
 describe('Bug regressions', () => {
 	describe('some()/none()/every() relation filters', () => {
 		it('some() compiles to EXISTS with condition', () => {
