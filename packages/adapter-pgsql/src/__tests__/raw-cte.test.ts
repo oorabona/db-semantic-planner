@@ -66,6 +66,27 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		expect(dump.params).toEqual([1]);
 	});
 
+	it('keeps its recursive source unqualified under a schema scope', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.withSchema('tenant_x')
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('id', 1)),
+				step: orm.select('chain'),
+			})
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE "chain" AS (' +
+				'SELECT categories.* FROM tenant_x.categories WHERE categories.id = $1' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain' +
+				') SELECT chain.* FROM chain',
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
 	it('T2: UNION (dedup) instead of UNION ALL', () => {
 		const orm = buildOrm() as any;
 

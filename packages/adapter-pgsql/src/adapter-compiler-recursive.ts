@@ -659,12 +659,15 @@ export function compileCteQuery<T = unknown>(
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
 			const currentParamOffset = allCteParams.length;
-			const rawCte = buildRawCte(
-				cte,
-				visibleCteDeps,
-				options,
-				cteProjectionByName,
-			);
+			const rawCteDeps = {
+				...visibleCteDeps,
+				bindingNames: withBindingName(
+					visibleCteDeps.bindingNames,
+					cte.name,
+					visibleCteDeps.naming,
+				),
+			};
+			const rawCte = buildRawCte(cte, rawCteDeps, options, cteProjectionByName);
 			const renumberedRawCteSql =
 				currentParamOffset > 0
 					? rawCte.sql.replace(
