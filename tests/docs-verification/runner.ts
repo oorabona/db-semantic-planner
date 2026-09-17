@@ -181,14 +181,14 @@ const COMPILE_ONLY_SETUP = `
 class __DoctestPoolClient { async query() { return { rows: [], rowCount: 0 }; } release() {} }
 // biome-ignore lint/suspicious/noExplicitAny: doctest stub
 class __DoctestPool { constructor(_: any) {} async query() { return { rows: [], rowCount: 0 }; } async connect() { return new __DoctestPoolClient(); } async end() {} }
-// Deterministic fake env for blocks referencing process${'.'}env
+// Deterministic default DATABASE_URL for blocks that read the environment
 __doctestEnv.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 const __defaultOrm = __doctestCreateOrm({ schema: __defaultDb, adapter: __doctestCreatePgsqlCompileOnlyAdapter() });
 const __doctestPool: any = undefined;
 const __doctestAdapter: any = __doctestCreatePgsqlCompileOnlyAdapter();
 `;
 const REAL_DB_SETUP = `
-// Deterministic fake env for blocks referencing process${'.'}env
+// Deterministic default DATABASE_URL for blocks that read the environment
 __doctestEnv.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 // One Pool per block-module (each temp file is a fresh module).
 // Pool is ended at the bottom of __main() to avoid leaked connections.
