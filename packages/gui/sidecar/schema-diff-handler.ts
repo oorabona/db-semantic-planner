@@ -195,10 +195,14 @@ export async function handleSchemaDiff(
 	// the same canonical spelling as `dbsp push`.
 	const diff = await compare(connectionId, loaded.model, compareOptions);
 
-	const sqlOptions =
-		connectionSchema !== undefined && connectionSchema !== 'public'
+	const sqlOptions = {
+		...(connectionSchema !== undefined && connectionSchema !== 'public'
 			? { schemaName: connectionSchema }
-			: undefined;
+			: {}),
+		// Schema Apply is intentionally additive/non-destructive. The full diff,
+		// including excluded destructive changes, remains available in `changes`.
+		includeDestructive: false,
+	};
 
 	// 4. Generate UP and DOWN SQL
 	const upSQL =

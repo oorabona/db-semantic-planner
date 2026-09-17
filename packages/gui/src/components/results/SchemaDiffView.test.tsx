@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SchemaDiffChange, SchemaDiffResult } from '@/lib/ipc';
 
@@ -51,6 +57,7 @@ vi.mock('./ApplyConfirmDialog', () => ({
 		open,
 		onConfirm,
 		onCancel,
+		statements,
 		hasDestructive,
 		applying,
 	}: {
@@ -64,6 +71,7 @@ vi.mock('./ApplyConfirmDialog', () => ({
 		open ? (
 			<div data-testid="apply-confirm-dialog">
 				<span data-testid="dialog-destructive">{String(hasDestructive)}</span>
+				<span data-testid="dialog-statements">{statements.join('\n')}</span>
 				<span data-testid="dialog-applying">{String(applying)}</span>
 				<button type="button" data-testid="dialog-confirm" onClick={onConfirm}>
 					Confirm
@@ -107,6 +115,7 @@ vi.mock('@/lib/ipc', () => ({
 	},
 }));
 
+import { sidecarApi } from '@/lib/ipc';
 import { SchemaDiffView } from './SchemaDiffView';
 
 afterEach(() => {
@@ -117,6 +126,7 @@ afterEach(() => {
 	mockState.applying = false;
 	mockState.applyError = null;
 	mockState.appliedCount = null;
+	delete (window as unknown as Record<string, unknown>).__dbsp_connectionId;
 	vi.clearAllMocks();
 });
 
@@ -330,10 +340,10 @@ describe('SchemaDiffView', () => {
 		expect(screen.getByText('Add column "email" varchar(255)')).toBeDefined();
 	});
 
-	it('shows destructive label on destructive changes', () => {
+	it('labels destructive changes as not applied here', () => {
 		mockState.diff = mockDiff;
 		render(<SchemaDiffView />);
-		expect(screen.getByText('destructive')).toBeDefined();
+		expect(screen.getByText(/Destructive — not applied here/)).toBeDefined();
 	});
 
 	it('toggles group collapse on click', () => {
@@ -405,6 +415,50 @@ describe('SchemaDiffView', () => {
 
 		fireEvent.click(screen.getByTestId('apply-btn'));
 		expect(screen.getByTestId('dialog-destructive').textContent).toBe('true');
+	});
+
+	it('sends only the non-destructive Apply bundle', async () => {
+		mockState.diff = mockDiff;
+		(window as unknown as Record<string, unknown>).__dbsp_connectionId =
+			'test-connection';
+		vi.mocked(sidecarApi.schemaApply).mockResolvedValue({
+			success: true,
+			applied: mockDiff.upSQL.length,
+		});
+		render(<SchemaDiffView />);
+
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.getByTestId('dialog-statements').textContent).toBe(
+			mockDiff.upSQL.join('\n'),
+		);
+		fireEvent.click(screen.getByTestId('dialog-confirm'));
+
+		await waitFor(() =>
+			expect(sidecarApi.schemaApply).toHaveBeenCalledWith(
+				'test-connection',
+				mockDiff.upSQL,
+			),
+		);
+	});
+
+	it('offers no Apply action for a destructive-only diff', () => {
+		mockState.diff = {
+			...mockDiff,
+			changes: [
+				{
+					kind: 'drop_table',
+					table: 'legacy',
+					destructive: true,
+					details: 'Drop table "legacy"',
+				},
+			],
+			upSQL: [],
+			downSQL: [],
+		};
+		render(<SchemaDiffView />);
+
+		expect(screen.getByText(/Destructive — not applied here/)).toBeDefined();
+		expect(screen.queryByTestId('apply-btn')).toBeNull();
 	});
 
 	it('closes confirmation dialog on cancel', () => {
@@ -564,7 +618,7 @@ describe('SchemaDiffView', () => {
 		mockState.diff = mockDiff;
 		render(<SchemaDiffView />);
 		// drop_table is in the legacy group
-		const destructiveLabel = screen.getByText('destructive');
+		const destructiveLabel = screen.getByText(/Destructive — not applied here/);
 		expect(destructiveLabel.className).toContain('text-red-600');
 	});
 

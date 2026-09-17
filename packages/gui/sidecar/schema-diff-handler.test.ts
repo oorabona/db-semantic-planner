@@ -249,9 +249,11 @@ describe('handleSchemaDiff', () => {
 
 		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
 			schemaName: 'tenant_1',
+			includeDestructive: false,
 		});
 		expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
 			schemaName: 'tenant_1',
+			includeDestructive: false,
 		});
 		expect(result.upSQL).toEqual([
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
@@ -275,11 +277,41 @@ describe('handleSchemaDiff', () => {
 			comparisonReturning(diffWithChanges),
 		);
 
-		expect(generateMigrationSQL).toHaveBeenCalledWith(
-			diffWithChanges,
-			undefined,
+		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
+			includeDestructive: false,
+		});
+		expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
+			includeDestructive: false,
+		});
+	});
+
+	it('excludes destructive changes from the Apply bundle while preserving them in the diff', async () => {
+		givenLoadedSchema();
+		vi.mocked(generateMigrationSQL).mockReturnValue([
+			'ALTER TABLE "users" ADD COLUMN "email" text;',
+		]);
+		vi.mocked(generateDownSQL).mockReturnValue([]);
+
+		const result = await handleSchemaDiff(
+			{ connectionId: 'test-conn', schemaPath: '/project' },
+			comparisonReturning(diffWithChanges),
 		);
-		expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, undefined);
+
+		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
+			includeDestructive: false,
+		});
+		expect(result.upSQL).toEqual([
+			'ALTER TABLE "users" ADD COLUMN "email" text;',
+		]);
+		expect(result.upSQL.join('\n')).not.toContain('DROP COLUMN');
+		expect(result.changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: 'drop_column',
+					destructive: true,
+				}),
+			]),
+		);
 	});
 
 	it('preserves change metadata for the side-by-side diff', async () => {

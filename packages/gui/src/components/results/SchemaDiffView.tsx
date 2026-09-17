@@ -109,6 +109,7 @@ export function SchemaDiffView() {
 	);
 	const groups = groupChangesByTable(diff.changes);
 	const hasChanges = diff.changes.length > 0;
+	const hasApplicableStatements = diff.upSQL.length > 0;
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
@@ -157,16 +158,18 @@ export function SchemaDiffView() {
 						Diff
 					</button>
 					<div className="flex-1" />
-					<button
-						type="button"
-						className="flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-						onClick={() => setShowConfirm(true)}
-						disabled={applying}
-						data-testid="apply-btn"
-					>
-						<Play className="h-3 w-3" />
-						{applying ? 'Applying...' : 'Apply'}
-					</button>
+					{hasApplicableStatements && (
+						<button
+							type="button"
+							className="flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+							onClick={() => setShowConfirm(true)}
+							disabled={applying}
+							data-testid="apply-btn"
+						>
+							<Play className="h-3 w-3" />
+							{applying ? 'Applying...' : 'Apply'}
+						</button>
+					)}
 				</div>
 			)}
 
@@ -373,7 +376,7 @@ function ChangeRow({
 					<p className="text-muted-foreground">{change.details}</p>
 					{change.destructive && (
 						<span className="text-[11px] font-medium text-red-600 dark:text-red-400">
-							destructive
+							Destructive — not applied here
 						</span>
 					)}
 				</div>
