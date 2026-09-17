@@ -774,10 +774,10 @@ active_users | where name = ${'Ada'} | select id, name`
 				: orm.nql<unknown>`users | where active = ${true} | select id, name | union (users | where name = ${'Ada'} | select id, name)`;
 
 		expect(() => builder.plan()).toThrow(
-			'NQL CTE and set-operation queries do not have execution plans; use dump() for SQL and parameters.',
+			'NQL CTE and set-operation queries do not have execution plans.',
 		);
 		expect(() => builder.toIntentIR()).toThrow(
-			'NQL CTE and set-operation queries do not have IntentIR; use dump() for SQL and parameters.',
+			'NQL CTE and set-operation queries do not have IntentIR.',
 		);
 	});
 
@@ -846,7 +846,7 @@ active_users | select id, name | union (users | where name = ${'Ada'} | select i
 			orm.nql<unknown>`insert into archivedUsers set name = ${'Ada'} | select id | bind inserted
 with active_users as (users | select id, name) active_users | select id, name`.all(),
 		).rejects.toThrow(
-			'NQL CTE and set-operation queries cannot execute with program-sequence bindings.',
+			'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.',
 		);
 		expect(execute).not.toHaveBeenCalled();
 	});
@@ -862,7 +862,7 @@ with active_users as (users | select id, name) active_users | select id, name`.a
 			orm.nql<unknown>`insert into archivedUsers set name = ${'Ada'} | select id | bind inserted
 with active_users as (users | select id, name) active_users | select id, name`.dump(),
 		).toThrow(
-			'NQL CTE and set-operation queries cannot execute with program-sequence bindings.',
+			'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.',
 		);
 	});
 });

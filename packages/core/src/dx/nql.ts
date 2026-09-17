@@ -94,7 +94,7 @@ export interface NqlBuilder<T> {
 	toIntentIR(): QueryIntent | MutationIntent;
 	/** Get the execution plan. Throws for mutations and CTE and set-operation queries. */
 	plan(): PlanReport;
-	/** Get full dump. Mutations return MutationDump without a plan; CTE and set-operation queries return Dump without a plan. */
+	/** Get full dump. Mutations return MutationDump without a plan. */
 	dump(meta?: DumpMetaInput): Dump | MutationDump;
 }
 
@@ -173,13 +173,13 @@ type CompiledNqlIntent =
 	  };
 
 const UNPLANNED_NQL_READ_PLAN_ERROR =
-	'NQL CTE and set-operation queries do not have execution plans; use dump() for SQL and parameters.';
+	'NQL CTE and set-operation queries do not have execution plans.';
 
 const UNPLANNED_NQL_READ_INTENT_ERROR =
-	'NQL CTE and set-operation queries do not have IntentIR; use dump() for SQL and parameters.';
+	'NQL CTE and set-operation queries do not have IntentIR.';
 
 const UNPLANNED_NQL_READ_PROGRAM_ERROR =
-	'NQL CTE and set-operation queries cannot execute with program-sequence bindings.';
+	'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.';
 
 function hasNqlBindings(bundle: CompiledNqlQuery): boolean {
 	return (bundle.bindings?.size ?? 0) > 0;
@@ -2155,7 +2155,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error(
 				'Cannot execute query: no adapter configured. ' +
 					(compiledIntent.kind === 'unplannedRead'
-						? 'Pass an adapter to createOrm() or use .dump() for debugging.'
+						? 'Pass an adapter to createOrm().'
 						: 'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.'),
 			);
 		}
