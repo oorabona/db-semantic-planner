@@ -15,6 +15,7 @@ import { toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { rangeVar } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -92,7 +93,12 @@ function buildJoinFilter(
 	// Note: The left arg (larg) will be set by the compiler when constructing the full FROM clause
 	const joinExpr: JoinExpr = {
 		jointype: 'JOIN_INNER',
-		rarg: rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming),
+		rarg: rangeVar(
+			targetTable,
+			targetAlias,
+			schemaForFromName(ctx.schema, targetTable, ctx.bindingNames, ctx.naming),
+			ctx.naming,
+		),
 		quals: joinCondition,
 	};
 

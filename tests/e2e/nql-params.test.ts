@@ -126,6 +126,82 @@ posts
 		expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
 	});
 
+	it('matches top-level relation columns when a CTE body reads a model table', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
+			| select title, author.name as author_name
+			| flat
+			| order by title`;
+		// #762: camelCase CTE aliases do not survive snake_case naming.
+		const cte = orm.nql<{
+			title: string;
+			authorName: string;
+		}>`with enriched as (posts
+			| select title, author.name as author_name
+			| flat)
+enriched
+			| select title, author_name
+			| order by title`;
+
+		const cteRows = await cte.all();
+		expect(cteRows).toEqual(await topLevel.all());
+		expect(cteRows).toEqual([
+			{ title: 'Advanced TypeScript Patterns', authorName: 'Alice Johnson' },
+			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
+			{ title: 'Draft: React Best Practices', authorName: 'Alice Johnson' },
+			{
+				title: 'Getting Started with TypeScript',
+				authorName: 'Alice Johnson',
+			},
+			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
+		]);
+	});
+
+	it('matches top-level relation filters in CTE bodies and outer model queries', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat
+			| order by title`;
+		// #762: CTE output aliases must remain snake_case.
+		const cteBody = orm.nql<{
+			title: string;
+			authorName: string;
+		}>`with filtered_posts as (posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat)
+filtered_posts
+			| select title, author_name
+			| order by title`;
+		const outerModelQuery = orm.nql<{
+			title: string;
+			authorName: string;
+		}>`with seed as (authors | select id)
+posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat
+			| order by title`;
+
+		const expected = [
+			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
+			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
+		];
+		const topLevelRows = await topLevel.all();
+		const cteBodyRows = await cteBody.all();
+		const outerModelRows = await outerModelQuery.all();
+		expect(cteBodyRows).toEqual(topLevelRows);
+		expect(outerModelRows).toEqual(topLevelRows);
+		expect(cteBodyRows).toEqual(expected);
+		expect(outerModelRows).toEqual(expected);
+	});
+
 	it('executes binding-final read-only queries through WITH CTEs', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

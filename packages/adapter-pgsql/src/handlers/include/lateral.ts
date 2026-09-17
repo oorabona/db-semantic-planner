@@ -14,6 +14,7 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -76,7 +77,19 @@ function buildLateralSubquery(
 
 	const stmt: SelectStmt = {
 		targetList,
-		fromClause: [rangeVar(targetTable, innerAlias, ctx.schema, ctx.naming)],
+		fromClause: [
+			rangeVar(
+				targetTable,
+				innerAlias,
+				schemaForFromName(
+					ctx.schema,
+					targetTable,
+					ctx.bindingNames,
+					ctx.naming,
+				),
+				ctx.naming,
+			),
+		],
 		whereClause,
 		...(limit !== undefined && {
 			limitCount: { A_Const: { ival: { ival: limit } } },

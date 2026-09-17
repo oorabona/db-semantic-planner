@@ -6,6 +6,7 @@
  * @internal
  */
 
+import { plan as planFn } from '@dbsp/core';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -31,7 +32,11 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
-import { emittedBindName, withBindingName } from './binding-registry.js';
+import {
+	emittedBindName,
+	hasBindingName,
+	withBindingName,
+} from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -85,6 +90,30 @@ function createPlanReportForQuery(query: QueryIntent): PlanReport {
 			isAmbiguous: false,
 		},
 	};
+}
+
+function createPlanReportForCteQuery(
+	query: QueryIntent,
+	deps: AdapterCompilerDeps,
+	hasRegisteredSource = false,
+): PlanReport {
+	if (
+		hasRegisteredSource ||
+		hasBindingName(deps.bindingNames, query.from, deps.naming)
+	) {
+		return createPlanReportForQuery(query);
+	}
+	if (
+		deps.model === undefined ||
+		deps.model.getTable(query.from) === undefined
+	) {
+		return createPlanReportForQuery(query);
+	}
+	return planFn(query, deps.model, {
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
+	});
 }
 
 function dbOutputKey(name: string, deps: AdapterCompilerDeps): string {
@@ -332,12 +361,12 @@ function compileQueryEnvelope(
 	deps: AdapterCompilerDeps,
 	registry: CteProjectionRegistry,
 ): ProjectionEnvelope {
+	const registeredSource = getRegisteredProjection(registry, query.from, deps);
 	const compiled = compileSelectEnvelope(
-		createPlanReportForQuery(query),
+		createPlanReportForCteQuery(query, deps, registeredSource !== undefined),
 		options,
 		deps,
 	);
-	const registeredSource = getRegisteredProjection(registry, query.from, deps);
 	if (registeredSource) {
 		return projectCteQueryEnvelope(
 			registeredSource,
@@ -741,8 +770,17 @@ export function compileCteQuery<T = unknown>(
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
+	const outerRegisteredSource = getRegisteredProjection(
+		cteProjectionByName,
+		intent.query.from,
+		deps,
+	);
 	const outerCompiled = compileSelectEnvelope(
-		createPlanReportForQuery(intent.query),
+		createPlanReportForCteQuery(
+			intent.query,
+			visibleCteDeps,
+			outerRegisteredSource !== undefined,
+		),
 		options,
 		visibleCteDeps,
 	);
@@ -768,14 +806,9 @@ export function compileCteQuery<T = unknown>(
 			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
 			: renumberedOuterSql;
 	const parameters = [...allCteParams, ...outerCompiled.parameters];
-	const registeredSource = getRegisteredProjection(
-		cteProjectionByName,
-		intent.query.from,
-		deps,
-	);
-	const env = registeredSource
+	const env = outerRegisteredSource
 		? projectCteQueryEnvelope(
-				registeredSource,
+				outerRegisteredSource,
 				intent.query,
 				sql,
 				parameters,
@@ -898,7 +931,11 @@ function buildRawCte(
 	// Compile step (recursive) query
 	const stepQuery = cte.step as QueryIntent;
 	const rawStepCompiled = compileSelectEnvelope(
-		createPlanReportForQuery(stepQuery),
+		createPlanReportForCteQuery(
+			stepQuery,
+			stepDeps,
+			getRegisteredProjection(registry, stepQuery.from, stepDeps) !== undefined,
+		),
 		options,
 		stepDeps,
 	);
