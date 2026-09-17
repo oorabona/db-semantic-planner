@@ -139,10 +139,13 @@ describe('sslmode fallback', () => {
 				expect.objectContaining({ ssl: false }),
 			);
 			expect(mockEnd).toHaveBeenCalled();
-			if (operation === 'connect') {
-				expect(result).toEqual(
-					expect.objectContaining({ transport: 'fallback-plaintext' }),
-				);
+			expect(result).toEqual(
+				expect.objectContaining({ transport: 'fallback-plaintext' }),
+			);
+			if (operation === 'listDatabases') {
+				expect(result).toEqual(expect.objectContaining({ databases: [] }));
+			} else if (operation === 'listSchemas') {
+				expect(result).toEqual(expect.objectContaining({ schemas: [] }));
 			}
 		},
 	);

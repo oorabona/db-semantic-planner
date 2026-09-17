@@ -1,11 +1,12 @@
 import { Loader2, Search } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import {
 	type ConnectionTestResult,
+	type ConnectionTransport,
 	transportLabel,
 } from '@/lib/connection-transport';
 import type { DatabaseType, SslMode } from '@/stores/connection-store';
@@ -53,7 +54,7 @@ interface ConnectionDialogProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[] }>;
+	}) => Promise<{ databases: string[]; transport: ConnectionTransport }>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -61,7 +62,7 @@ interface ConnectionDialogProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[] }>;
+	}) => Promise<{ schemas: string[]; transport: ConnectionTransport }>;
 	initial?: Partial<ConnectionFormData>;
 	testing?: boolean;
 	connecting?: boolean;
@@ -95,19 +96,29 @@ export function ConnectionDialog({
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const [discoverError, setDiscoverError] = useState<string | null>(null);
 	const [discovered, setDiscovered] = useState(false);
+	const [discoveryTransport, setDiscoveryTransport] =
+		useState<ConnectionTransport | null>(null);
+	const discoveryGeneration = useRef(0);
 
 	if (!open) return null;
 
 	const update = <K extends keyof ConnectionFormData>(
 		field: K,
 		value: ConnectionFormData[K],
+		invalidateDiscovery = true,
 	) => {
+		if (form[field] === value) return false;
 		onTestResultInvalidated?.();
+		if (invalidateDiscovery) discoveryGeneration.current += 1;
+		setDiscoveryTransport(null);
 		setForm((prev) => ({ ...prev, [field]: value }));
+		return true;
 	};
 
 	const handleClose = () => {
 		onTestResultInvalidated?.();
+		discoveryGeneration.current += 1;
+		setDiscoveryTransport(null);
 		onClose();
 	};
 
@@ -121,6 +132,8 @@ export function ConnectionDialog({
 	const savedAllowMode = form.sslMode === 'allow';
 
 	const handleDiscover = async () => {
+		const generation = discoveryGeneration.current + 1;
+		discoveryGeneration.current = generation;
 		setDiscovering(true);
 		setDiscoverError(null);
 		setDatabases([]);
@@ -134,29 +147,36 @@ export function ConnectionDialog({
 				password: form.password,
 				sslMode: form.sslMode,
 			});
+			if (generation !== discoveryGeneration.current) return;
 			setDatabases(result.databases);
 			setDiscovered(true);
+			setDiscoveryTransport(result.transport);
 			// Auto-select first database if form.database is empty
 			const first = result.databases[0];
 			if (first != null && form.database.trim() === '') {
-				update('database', first);
+				update('database', first, false);
+				setDiscoveryTransport(result.transport);
 				// Auto-fetch schemas for the first database
-				fetchSchemas(first);
+				await fetchSchemas(first, generation);
 			} else if (
 				result.databases.length > 0 &&
 				result.databases.includes(form.database)
 			) {
 				// Current database is in the list, fetch schemas for it
-				fetchSchemas(form.database);
+				await fetchSchemas(form.database, generation);
 			}
 		} catch (err) {
-			setDiscoverError(err instanceof Error ? err.message : 'Discovery failed');
+			if (generation === discoveryGeneration.current) {
+				setDiscoverError(
+					err instanceof Error ? err.message : 'Discovery failed',
+				);
+			}
 		} finally {
-			setDiscovering(false);
+			if (generation === discoveryGeneration.current) setDiscovering(false);
 		}
 	};
 
-	const fetchSchemas = async (database: string) => {
+	const fetchSchemas = async (database: string, generation: number) => {
 		setLoadingSchemas(true);
 		setSchemas([]);
 		try {
@@ -168,30 +188,40 @@ export function ConnectionDialog({
 				sslMode: form.sslMode,
 				database,
 			});
+			if (generation !== discoveryGeneration.current) return;
 			setSchemas(result.schemas);
+			setDiscoveryTransport(result.transport);
 			// Auto-select 'public' if available
 			if (result.schemas.includes('public')) {
-				update('schema', 'public');
+				update('schema', 'public', false);
+				setDiscoveryTransport(result.transport);
 			} else {
 				const firstSchema = result.schemas[0];
 				if (firstSchema != null) {
-					update('schema', firstSchema);
+					update('schema', firstSchema, false);
+					setDiscoveryTransport(result.transport);
 				}
 			}
 		} catch (err) {
-			setDiscoverError(
-				err instanceof Error ? err.message : 'Schema discovery failed',
-			);
+			if (generation === discoveryGeneration.current) {
+				setDiscoverError(
+					err instanceof Error ? err.message : 'Schema discovery failed',
+				);
+			}
 		} finally {
-			setLoadingSchemas(false);
+			if (generation === discoveryGeneration.current) setLoadingSchemas(false);
 		}
 	};
 
 	const handleDatabaseChange = (database: string) => {
-		update('database', database);
-		if (discovered) {
-			fetchSchemas(database);
+		if (update('database', database) && discovered) {
+			fetchSchemas(database, discoveryGeneration.current);
 		}
+	};
+
+	const handleTest = () => {
+		discoveryGeneration.current += 1;
+		onTest(form);
 	};
 
 	return (
@@ -451,12 +481,21 @@ export function ConnectionDialog({
 					</div>
 				)}
 
+				{discoveryTransport === 'fallback-plaintext' &&
+					!(
+						testResult?.ok && testResult.transport === 'fallback-plaintext'
+					) && (
+						<div className="mt-3 rounded-md bg-yellow-50 p-2 text-sm text-yellow-700">
+							Warning: TLS was unavailable, so this connection is not encrypted.
+						</div>
+					)}
+
 				{/* ── Actions ─────────────────────────────────────── */}
 				<div className="mt-4 flex justify-between">
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => onTest(form)}
+						onClick={handleTest}
 						disabled={!isValid || savedAllowMode || testing || connecting}
 					>
 						{testing ? 'Testing...' : 'Test Connection'}

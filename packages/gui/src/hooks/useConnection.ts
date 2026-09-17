@@ -78,14 +78,21 @@ export function useConnection() {
 		setTestResult(null);
 		try {
 			const result = await sidecarApi.connect(params);
-			// Immediately disconnect the test connection
-			await sidecarApi.disconnect({
-				connectionId: result.connectionId,
-			});
+			let message = 'Connection successful!';
+			try {
+				// Immediately disconnect the test connection.
+				await sidecarApi.disconnect({
+					connectionId: result.connectionId,
+				});
+			} catch (err) {
+				const cleanupMessage =
+					err instanceof Error ? err.message : 'Connection cleanup failed';
+				message = `${message} Disconnect failed: ${cleanupMessage}`;
+			}
 			if (generation === testResultGeneration.current) {
 				setTestResult({
 					ok: true,
-					message: 'Connection successful!',
+					message,
 					transport: result.transport,
 				});
 			}

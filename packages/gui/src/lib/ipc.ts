@@ -151,6 +151,16 @@ export interface ListSchemasParams extends DiscoverParams {
 	database: string;
 }
 
+export interface ListDatabasesResult {
+	databases: string[];
+	transport: ConnectionTransport;
+}
+
+export interface ListSchemasResult {
+	schemas: string[];
+	transport: ConnectionTransport;
+}
+
 export interface SchemaDiffChange {
 	readonly kind: string;
 	readonly table: string;
@@ -296,11 +306,11 @@ export function createSidecarApi(client: IpcClient) {
 		},
 
 		listDatabases(params: DiscoverParams) {
-			return client.call<{ databases: string[] }>('listDatabases', params);
+			return client.call<ListDatabasesResult>('listDatabases', params);
 		},
 
 		listSchemas(params: ListSchemasParams) {
-			return client.call<{ schemas: string[] }>('listSchemas', params);
+			return client.call<ListSchemasResult>('listSchemas', params);
 		},
 
 		schemaDiff(connectionId: string, schemaPath?: string) {

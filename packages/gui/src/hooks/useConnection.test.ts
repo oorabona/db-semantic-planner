@@ -296,6 +296,36 @@ describe('useConnection', () => {
 			});
 		});
 
+		it('keeps a successful fallback result when disconnect cleanup fails', async () => {
+			vi.mocked(sidecarApi.connect).mockResolvedValue({
+				connectionId: 'test-conn-123',
+				database: 'testdb',
+				schema: 'public',
+				transport: 'fallback-plaintext',
+			});
+			vi.mocked(sidecarApi.disconnect).mockRejectedValue(
+				new Error('sidecar cleanup failed'),
+			);
+
+			const { result } = renderHook(() => useConnection());
+			await result.current.testConnection({
+				host: 'localhost',
+				port: 5432,
+				database: 'testdb',
+				user: 'testuser',
+				password: 'testpass',
+			});
+
+			await waitFor(() => {
+				expect(result.current.testResult).toEqual({
+					ok: true,
+					message:
+						'Connection successful! Disconnect failed: sidecar cleanup failed',
+					transport: 'fallback-plaintext',
+				});
+			});
+		});
+
 		it('sets testResult not ok with error message on failure', async () => {
 			const error = new Error('Authentication failed');
 			vi.mocked(sidecarApi.connect).mockRejectedValue(error);

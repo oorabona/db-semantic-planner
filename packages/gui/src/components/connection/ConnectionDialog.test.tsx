@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+	act,
+	cleanup,
+	fireEvent,
+	render,
+	screen,
+	waitFor,
+} from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectionTestResult } from '@/lib/connection-transport';
@@ -86,6 +93,27 @@ describe('ConnectionDialog SSL modes', () => {
 		).toBeTruthy();
 	});
 
+	it('shows the fallback warning after discovery uses plaintext', async () => {
+		renderDialog({
+			initial: { database: 'app' },
+			onDiscover: vi.fn().mockResolvedValue({
+				databases: ['app'],
+				transport: 'fallback-plaintext',
+			}),
+			onListSchemas: vi.fn().mockResolvedValue({
+				schemas: ['public'],
+				transport: 'fallback-plaintext',
+			}),
+		});
+
+		fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
+		expect(
+			await screen.findByText(
+				'Warning: TLS was unavailable, so this connection is not encrypted.',
+			),
+		).toBeTruthy();
+	});
+
 	it('starts fresh across two new opens, a new then edit, and edit then edit', () => {
 		const props = {
 			onClose: vi.fn(),
@@ -163,5 +191,88 @@ describe('ConnectionDialog SSL modes', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 		fireEvent.click(screen.getByRole('button', { name: 'Reopen' }));
 		expect(screen.queryByText('Transport: Plaintext fallback')).toBeNull();
+	});
+
+	it('ignores a schema response that resolves after starting a test', async () => {
+		let resolveSchemas:
+			| ((value: { schemas: string[]; transport: 'tls' }) => void)
+			| undefined;
+		const onListSchemas = vi.fn(
+			() =>
+				new Promise<{ schemas: string[]; transport: 'tls' }>((resolve) => {
+					resolveSchemas = resolve;
+				}),
+		);
+		function DialogHost() {
+			const [testResult, setTestResult] = useState<ConnectionTestResult | null>(
+				null,
+			);
+			return (
+				<ConnectionDialog
+					open
+					onClose={vi.fn()}
+					onConnect={vi.fn()}
+					onTest={() =>
+						setTestResult({
+							ok: true,
+							message: 'Connection successful!',
+							transport: 'fallback-plaintext',
+						})
+					}
+					onSave={vi.fn()}
+					onDiscover={vi.fn().mockResolvedValue({
+						databases: ['app'],
+						transport: 'tls',
+					})}
+					onListSchemas={onListSchemas}
+					initial={{ database: 'app', schema: 'before-test' }}
+					testResult={testResult}
+					onTestResultInvalidated={() => setTestResult(null)}
+				/>
+			);
+		}
+		render(<DialogHost />);
+
+		fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
+		await waitFor(() => expect(onListSchemas).toHaveBeenCalledOnce());
+		fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
+		await act(async () => {
+			resolveSchemas?.({ schemas: ['public'], transport: 'tls' });
+		});
+
+		await waitFor(() => {
+			expect(screen.getByText('Transport: Plaintext fallback')).toBeTruthy();
+			expect((screen.getByLabelText('Schema') as HTMLInputElement).value).toBe(
+				'before-test',
+			);
+		});
+	});
+
+	it('does not invalidate a result when re-selecting the current database', async () => {
+		const onTestResultInvalidated = vi.fn();
+		renderDialog({
+			initial: { database: 'app' },
+			testResult: {
+				ok: true,
+				message: 'Connection successful!',
+				transport: 'fallback-plaintext',
+			},
+			onDiscover: vi.fn().mockResolvedValue({
+				databases: ['app'],
+				transport: 'tls',
+			}),
+			onListSchemas: vi.fn().mockResolvedValue({
+				schemas: [],
+				transport: 'tls',
+			}),
+			onTestResultInvalidated,
+		});
+
+		fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
+		const database = await screen.findByLabelText('Database');
+		fireEvent.change(database, { target: { value: 'app' } });
+
+		expect(onTestResultInvalidated).not.toHaveBeenCalled();
+		expect(screen.getByText('Transport: Plaintext fallback')).toBeTruthy();
 	});
 });

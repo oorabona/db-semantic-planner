@@ -250,8 +250,8 @@ export interface ListSchemasParams extends DiscoverParams {
  */
 export async function listDatabases(
 	params: DiscoverParams,
-): Promise<{ databases: string[] }> {
-	const { pool } = await openPool({
+): Promise<{ databases: string[]; transport: ConnectionTransport }> {
+	const { pool, transport } = await openPool({
 		...params,
 		database: 'postgres',
 		max: 1,
@@ -260,7 +260,7 @@ export async function listDatabases(
 		const { rows } = await pool.query<{ datname: string }>(
 			'SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname',
 		);
-		return { databases: rows.map((r) => r.datname) };
+		return { databases: rows.map((r) => r.datname), transport };
 	} finally {
 		await pool.end();
 	}
@@ -272,8 +272,8 @@ export async function listDatabases(
  */
 export async function listSchemas(
 	params: ListSchemasParams,
-): Promise<{ schemas: string[] }> {
-	const { pool } = await openPool({
+): Promise<{ schemas: string[]; transport: ConnectionTransport }> {
+	const { pool, transport } = await openPool({
 		...params,
 		max: 1,
 	});
@@ -281,7 +281,7 @@ export async function listSchemas(
 		const { rows } = await pool.query<{ schema_name: string }>(
 			"SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast') ORDER BY schema_name",
 		);
-		return { schemas: rows.map((r) => r.schema_name) };
+		return { schemas: rows.map((r) => r.schema_name), transport };
 	} finally {
 		await pool.end();
 	}
