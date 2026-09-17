@@ -157,8 +157,8 @@ DBSP_DOCTEST_REAL_DB=1 DATABASE_URL=postgres://postgres:postgres@localhost:5432/
 podman stop dbsp-doctest && podman rm dbsp-doctest
 ```
 
-**When to un-skip:** a doctest's static `@dbsp/*` imports bind exactly as
-written; `pg` is hoisted only for real-DB blocks. Audit skips when a block's
+**When to un-skip:** a doctest's static `@dbsp/*` imports are hoisted to module
+scope; `pg` is hoisted only for real-DB blocks. Audit skips when a block's
 remaining runtime requirement becomes available.
 
 ### Architecture rule (strict)

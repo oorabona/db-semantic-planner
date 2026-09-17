@@ -57,8 +57,9 @@ function runtimeLocalNames(clause: ts.ImportClause): string[] {
 }
 
 /**
- * Returns a body with top-level export modifiers removed plus the supported
- * static imports to hoist; refuses unsupported or side-effect-only imports.
+ * Returns a body with top-level export modifiers removed plus the static
+ * `@dbsp/*` and `pg` imports to hoist; refuses `import 'x'`, import-equals
+ * declarations, and imports from any other module.
  *
  * Parser failures retain the markdown filename and point at the original
  * documentation line, rather than at generated test source.
