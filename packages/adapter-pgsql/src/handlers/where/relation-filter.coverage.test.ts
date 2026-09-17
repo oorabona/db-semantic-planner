@@ -461,6 +461,7 @@ describe('relationFilterHandler visible CTE target', () => {
 											targetList: [
 												{
 													ResTarget: {
+														name: 'id',
 														val: { A_Const: { ival: { ival: 1 } } },
 													},
 												},
@@ -492,7 +493,7 @@ describe('relationFilterHandler visible CTE target', () => {
 		);
 
 		expect(sql).toBe(
-			'with authors as (select 1) select posts.id from tenant_42.posts join authors as authors_rel_0 on posts.author_id = authors_rel_0.id where true',
+			'with authors as (select 1 as id) select posts.id from tenant_42.posts join authors as authors_rel_0 on posts.author_id = authors_rel_0.id where true',
 		);
 	});
 });

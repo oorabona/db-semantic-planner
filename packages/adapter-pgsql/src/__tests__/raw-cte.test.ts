@@ -52,7 +52,7 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
-function relationQuery(from = 'employees') {
+function relationQuery(from = 'employees', column = 'name') {
 	return {
 		type: 'select' as const,
 		from,
@@ -63,8 +63,8 @@ function relationQuery(from = 'employees') {
 				{
 					kind: 'relationColumn' as const,
 					relation: 'department',
-					column: 'name',
-					as: 'department.name',
+					column,
+					as: `department.${column}`,
 				},
 			],
 		},
@@ -144,7 +144,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 						from: 'employees',
 						select: { type: 'fields', fields: ['id', 'departmentId'] },
 					},
-					step: relationQuery(),
+					step: relationQuery('employees', 'id'),
 					unionAll: true,
 				},
 			],
@@ -152,7 +152,7 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 		});
 
 		expect(ws(result.sql)).toBe(
-			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, employees."departmentId" FROM employees UNION ALL SELECT employees.id, department.name AS "department.name" FROM employees JOIN departments AS department ON employees."departmentId" = department.id) SELECT employee_rows.* FROM employee_rows',
+			'WITH RECURSIVE "employee_rows" AS (SELECT employees.id, employees."departmentId" FROM employees UNION ALL SELECT employees.id, department.id AS "department.id" FROM employees JOIN departments AS department ON employees."departmentId" = department.id) SELECT employee_rows.* FROM employee_rows',
 		);
 	});
 
