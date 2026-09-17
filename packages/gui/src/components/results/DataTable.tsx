@@ -5,11 +5,16 @@
 
 import {
 	type ColumnDef,
-	flexRender,
-	getCoreRowModel,
-	getSortedRowModel,
+	columnSizingFeature,
+	columnVisibilityFeature,
+	createSortedRowModel,
+	rowSortingFeature,
 	type SortingState,
-	useReactTable,
+	sortFn_alphanumeric,
+	sortFn_datetime,
+	sortFn_text,
+	tableFeatures,
+	useTable,
 } from '@tanstack/react-table';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp } from 'lucide-react';
@@ -38,6 +43,18 @@ const CELL_PADDING = 24;
 const SAMPLE_SIZE = 50;
 /** Column count threshold above which column virtualization is enabled */
 const COL_VIRTUALIZE_THRESHOLD = 15;
+
+const features = tableFeatures({
+	columnSizingFeature,
+	columnVisibilityFeature,
+	rowSortingFeature,
+	sortedRowModel: createSortedRowModel(),
+	sortFns: {
+		alphanumeric: sortFn_alphanumeric,
+		datetime: sortFn_datetime,
+		text: sortFn_text,
+	},
+});
 
 // ── Auto-column sizing ───────────────────────────────────────────
 
@@ -102,24 +119,25 @@ export function DataTable({ columns, rows, onScrollNearEnd }: DataTableProps) {
 		[columns],
 	);
 
-	const columnDefs = useMemo<ColumnDef<Record<string, unknown>>[]>(
+	const columnDefs = useMemo<
+		ColumnDef<typeof features, Record<string, unknown>>[]
+	>(
 		() =>
 			columns.map((col, i) => ({
 				accessorKey: col,
 				header: col,
-				cell: ({ getValue }) => <CellRenderer value={getValue()} />,
+				cell: (cell) => <CellRenderer value={cell.getValue()} />,
 				size: columnWidths[i] ?? 150,
 			})),
 		[columns, columnWidths],
 	);
 
-	const table = useReactTable({
+	const table = useTable({
+		features,
 		data: rows as Record<string, unknown>[],
 		columns: columnDefs,
 		state: { sorting },
 		onSortingChange: setSorting,
-		getCoreRowModel: getCoreRowModel(),
-		getSortedRowModel: getSortedRowModel(),
 	});
 
 	const { rows: tableRows } = table.getRowModel();
@@ -201,10 +219,7 @@ export function DataTable({ columns, rows, onScrollNearEnd }: DataTableProps) {
 										onClick={header.column.getToggleSortingHandler()}
 									>
 										<span className="flex items-center gap-1">
-											{flexRender(
-												header.column.columnDef.header,
-												header.getContext(),
-											)}
+											<table.FlexRender header={header} />
 											{{
 												asc: <ArrowUp className="h-3 w-3" />,
 												desc: <ArrowDown className="h-3 w-3" />,
@@ -260,10 +275,7 @@ export function DataTable({ columns, rows, onScrollNearEnd }: DataTableProps) {
 											className="overflow-hidden text-ellipsis whitespace-nowrap px-3 py-1"
 											style={{ maxWidth: cell.column.getSize() }}
 										>
-											{flexRender(
-												cell.column.columnDef.cell,
-												cell.getContext(),
-											)}
+											<table.FlexRender cell={cell} />
 										</td>
 									);
 								})}
