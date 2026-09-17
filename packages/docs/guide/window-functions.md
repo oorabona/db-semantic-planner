@@ -75,12 +75,12 @@ Builder methods available on all of the above:
 
 ---
 
-## Pattern: top-N per group
+## Pattern: rank rows within each group
 
-Retrieve the top 3 sales records per region, ranked by amount descending.
+Rank each sale within its region by amount, descending. Keeping only the top 3 per region needs an outer query that filters on the rank, because PostgreSQL evaluates window functions after `WHERE`; this example stops at the ranking.
 
 ```typescript
-import { schema, createOrm, rank, gt } from '@dbsp/core';
+import { schema, createOrm, rank } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
@@ -88,14 +88,11 @@ const db = schema({
 } as const);
 const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
-// Step 1: add rank column
 const ranked = orm.select('sales').columns([
   'id', 'region', 'repName', 'amount',
   rank().partitionBy('region').orderBy('amount', 'desc').as('rnk'),
 ]);
 
-// Step 2: filter rows where rank <= 3
-// In PostgreSQL you'd wrap in a CTE or subquery; with dbsp use a CTE:
 ranked.dump();
 // SQL: SELECT "id", "region", "repName", "amount",
 //   RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rnk"
@@ -217,7 +214,6 @@ The actual restrictions are:
 // doctest: skip — illustrates CTE layering for pre-aggregation windows
 // Step 1 (CTE): aggregate per region
 // Step 2 (outer): apply window over aggregated rows
-// Use orm.with(...) to build the CTE layer.
 ```
 
 ### NULL ordering in `lag()` / `lead()`

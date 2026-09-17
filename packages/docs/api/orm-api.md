@@ -1402,6 +1402,7 @@ Both the primary key convention and the FK derivation function are configurable.
 
 ```typescript
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { singularize } from '@dbsp/core';
 
 const adapter = createPgsqlAdapter(pool, {
   // Default PK column name (default: 'id')
