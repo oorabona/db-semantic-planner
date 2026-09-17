@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { cleanBlockSource } from './block-source.js';
+import { extractBlocks } from './doctest.js';
 
 const OUTPUT_TAIL_BYTES = 16 * 1024;
 
@@ -55,7 +56,7 @@ test('module syntax removal leaves import-like template literal text intact', ()
 	const source = "const example = `\nimport x from 'pkg';\n`;";
 
 	assert.equal(
-		cleanBlockSource(source, 'template.md', 4),
+		cleanBlockSource(source, 'template.md', 4, true),
 		source,
 		'template contents must not be treated as module syntax',
 	);
@@ -64,13 +65,13 @@ test('module syntax removal leaves import-like template literal text intact', ()
 test('module syntax removal leaves export-like template literal text intact', () => {
 	const source = 'const example = `\nexport const y = 1;\n`;';
 
-	assert.equal(cleanBlockSource(source, 'template.md', 4), source);
+	assert.equal(cleanBlockSource(source, 'template.md', 4, true), source);
 });
 
 test('module syntax removal drops a multiline named import only', () => {
 	const source =
 		"import {\n\tfirst,\n\tsecond,\n} from 'pkg';\nconst value = first;";
-	const cleaned = cleanBlockSource(source, 'imports.md', 7);
+	const cleaned = cleanBlockSource(source, 'imports.md', 7, true);
 
 	assert.doesNotMatch(cleaned, /from 'pkg';/);
 	assert.match(cleaned, /const value = first;/);
@@ -79,7 +80,7 @@ test('module syntax removal drops a multiline named import only', () => {
 test('module syntax removal preserves every ECMAScript line terminator', () => {
 	const source =
 		"import /* first\r\nsecond\u2028third\u2029fourth */ { value } from 'pkg';\nconst after = value;";
-	const cleaned = cleanBlockSource(source, 'terminators.md', 8);
+	const cleaned = cleanBlockSource(source, 'terminators.md', 8, true);
 
 	assert.equal(
 		cleaned,
@@ -93,16 +94,93 @@ test('module syntax removal preserves async when removing export', () => {
 		'export async function f() {}',
 		'exports.md',
 		3,
+		true,
 	);
 
 	assert.match(cleaned, /async function f\(\) \{\}/);
 	assert.doesNotMatch(cleaned, /export async function f/);
 });
 
-test('parser diagnostics name the markdown file and original location', () => {
+function sourceLine(markdown: string, text: string): number {
+	const offset = markdown.indexOf(text);
+	assert.notEqual(offset, -1, `fixture must contain ${JSON.stringify(text)}`);
+	return markdown.slice(0, offset).split(/\r\n?|\n/).length;
+}
+
+function sourceColumn(markdown: string, text: string): number {
+	const line = sourceLine(markdown, text);
+	const column = markdown.split(/\r\n?|\n/)[line - 1].indexOf(text);
+	assert.notEqual(
+		column,
+		-1,
+		`fixture line must contain ${JSON.stringify(text)}`,
+	);
+	return column + 1;
+}
+
+function parserDiagnostic(markdown: string, file: string): () => string {
+	return () => {
+		const directory = mkdtempSync(join(tmpdir(), 'dbsp-block-source-'));
+		try {
+			const path = join(directory, 'fixture.md');
+			writeFileSync(path, markdown);
+			const [block] = extractBlocks(path, file);
+			assert.ok(block, 'fixture must extract one TypeScript block');
+			return cleanBlockSource(
+				block.code,
+				block.file,
+				block.codeStartLine,
+				block.sourceColumnReliable,
+			);
+		} finally {
+			rmSync(directory, { force: true, recursive: true });
+		}
+	};
+}
+
+test('parser diagnostics retain a reliable top-level source column', () => {
+	const broken = '=';
+	const source = ['```ts', 'const broken: = 1;', '```'].join('\n');
+	const file = 'fixtures/top-level.md';
+	const expectedLine = sourceLine(source, 'const broken: = 1;');
+	const expectedColumn = sourceColumn(source, broken);
+
 	assert.throws(
-		() => cleanBlockSource('import x "m";', 'guide/invalid.md', 28),
-		/guide\/invalid\.md:28:\d+ — /,
+		parserDiagnostic(source, file),
+		new RegExp(`${file}:${expectedLine}:${expectedColumn} — `),
+	);
+});
+
+test('parser diagnostics omit columns for blockquoted source', () => {
+	const source = ['> ```ts', '> const broken: = 1;', '> ```'].join('\n');
+	const file = 'fixtures/blockquote.md';
+	const expectedLine = sourceLine(source, '> const broken: = 1;');
+
+	assert.throws(
+		parserDiagnostic(source, file),
+		new RegExp(`${file}:${expectedLine} — `),
+	);
+});
+
+test('parser diagnostics omit columns for list-item source', () => {
+	const source = ['- ```ts', '  const broken: = 1;', '  ```'].join('\n');
+	const file = 'fixtures/list.md';
+	const expectedLine = sourceLine(source, '  const broken: = 1;');
+
+	assert.throws(
+		parserDiagnostic(source, file),
+		new RegExp(`${file}:${expectedLine} — `),
+	);
+});
+
+test('parser diagnostics omit columns for indented top-level source', () => {
+	const source = ['  ```ts', '  const broken: = 1;', '  ```'].join('\n');
+	const file = 'fixtures/indented.md';
+	const expectedLine = sourceLine(source, '  const broken: = 1;');
+
+	assert.throws(
+		parserDiagnostic(source, file),
+		new RegExp(`${file}:${expectedLine} — `),
 	);
 });
 

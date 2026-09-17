@@ -23,7 +23,7 @@ Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 
 ## How it works
 
-1. `doctest.ts` extracts column-zero `\`\`\`typescript` / `\`\`\`ts` blocks,
+1. `doctest.ts` extracts all backtick- or tilde-fenced `typescript` / `ts` blocks, including fences nested in blockquotes and lists,
    capturing file path, line number, block index, and optional
    annotations (`// doctest: skip — <reason>`, `// doctest: real-db-only — <reason>`).
 

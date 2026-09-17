@@ -242,7 +242,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/nql/index.md": {
-			"explicit-skip": 2,
+			"explicit-skip": 3,
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		}
