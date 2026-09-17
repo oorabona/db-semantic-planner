@@ -77,6 +77,7 @@ export function ConnectionQuickPick({
 							database={cfg?.database}
 							schema={cfg?.schema}
 							host={cfg?.host}
+							transport={active?.transport}
 							error={error}
 						/>
 					</button>

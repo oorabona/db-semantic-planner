@@ -3,7 +3,10 @@
  * Uses IpcClient from ipc-transport.ts.
  */
 import { useLogStore } from '@/stores/log-store';
+import type { ConnectionTransport } from './connection-transport.js';
 import { IpcClient } from './ipc-transport.js';
+
+export type { ConnectionTransport } from './connection-transport.js';
 
 // ── Sidecar method types ─────────────────────────────────────────
 
@@ -28,6 +31,7 @@ export interface ConnectResult {
 	connectionId: string;
 	database: string;
 	schema: string;
+	transport: ConnectionTransport;
 }
 
 export interface ExecuteSqlParams {
@@ -145,6 +149,16 @@ export interface DiscoverParams {
 
 export interface ListSchemasParams extends DiscoverParams {
 	database: string;
+}
+
+export interface ListDatabasesResult {
+	databases: string[];
+	transport: ConnectionTransport;
+}
+
+export interface ListSchemasResult {
+	schemas: string[];
+	transport: ConnectionTransport;
 }
 
 export interface SchemaDiffChange {
@@ -292,11 +306,11 @@ export function createSidecarApi(client: IpcClient) {
 		},
 
 		listDatabases(params: DiscoverParams) {
-			return client.call<{ databases: string[] }>('listDatabases', params);
+			return client.call<ListDatabasesResult>('listDatabases', params);
 		},
 
 		listSchemas(params: ListSchemasParams) {
-			return client.call<{ schemas: string[] }>('listSchemas', params);
+			return client.call<ListSchemasResult>('listSchemas', params);
 		},
 
 		schemaDiff(connectionId: string, schemaPath?: string) {

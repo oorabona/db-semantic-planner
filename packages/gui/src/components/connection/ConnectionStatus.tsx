@@ -1,4 +1,6 @@
 import { AlertCircle, Database, Loader2, Unplug } from 'lucide-react';
+import type { ConnectionTransport } from '@/lib/connection-transport';
+import { transportLabel } from '@/lib/connection-transport';
 import type { ConnectionStatus as Status } from '@/stores/connection-store';
 
 interface ConnectionStatusProps {
@@ -6,6 +8,7 @@ interface ConnectionStatusProps {
 	database?: string;
 	schema?: string;
 	host?: string;
+	transport?: ConnectionTransport;
 	error?: string | null;
 	onReconnect?: () => void;
 }
@@ -41,6 +44,7 @@ export function ConnectionStatus({
 	database,
 	schema,
 	host,
+	transport,
 	error,
 	onReconnect,
 }: ConnectionStatusProps) {
@@ -59,8 +63,20 @@ export function ConnectionStatus({
 					)}
 					{host && <span className="text-muted-foreground"> @ {host}</span>}
 				</span>
+			) : status === 'connected' ? (
+				<span className={config.className}>{config.label}</span>
 			) : (
 				<span className={config.className}>{config.label}</span>
+			)}
+			{status === 'connected' && transport && (
+				<span className="text-muted-foreground">
+					Transport: {transportLabel(transport)}
+				</span>
+			)}
+			{status === 'connected' && transport === 'fallback-plaintext' && (
+				<span className="text-yellow-600">
+					Warning: TLS was unavailable, so this connection is not encrypted.
+				</span>
 			)}
 			{status === 'error' && error && (
 				<span className="truncate text-red-500" title={error}>

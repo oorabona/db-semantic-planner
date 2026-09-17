@@ -122,6 +122,7 @@ describe('handleSchemaDiff', () => {
 			port: 5432,
 			user: 'app',
 			schema: 'tenant_1',
+			transport: 'tls',
 		});
 		const compare = comparisonReturning(emptyDiff);
 
@@ -234,6 +235,7 @@ describe('handleSchemaDiff', () => {
 			port: 5432,
 			user: 'app',
 			schema: 'tenant_1',
+			transport: 'tls',
 		});
 		vi.mocked(generateMigrationSQL).mockReturnValue([
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
@@ -272,6 +274,7 @@ describe('handleSchemaDiff', () => {
 			port: 5432,
 			user: 'app',
 			schema: 'public',
+			transport: 'tls',
 		});
 		vi.mocked(generateMigrationSQL).mockReturnValue([]);
 		vi.mocked(generateDownSQL).mockReturnValue([]);

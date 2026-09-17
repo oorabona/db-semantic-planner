@@ -6,6 +6,7 @@
  * is in-memory only (not persisted).
  */
 import { create } from 'zustand';
+import type { ConnectionTransport } from '@/lib/connection-transport';
 import type { ConnectionProfileRow } from '@/lib/project-db';
 import {
 	deleteConnectionProfile,
@@ -13,6 +14,8 @@ import {
 	touchConnectionProfile,
 	upsertConnectionProfile,
 } from '@/lib/project-db';
+
+export type { ConnectionTransport } from '@/lib/connection-transport';
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -72,6 +75,7 @@ interface ActiveConnection {
 	readonly profileId: string;
 	readonly database: string;
 	readonly schema: string;
+	readonly transport?: ConnectionTransport;
 	/** Original connect params — used to pre-populate wizard when no saved profile. */
 	readonly connectParams?: {
 		readonly host: string;

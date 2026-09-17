@@ -57,7 +57,11 @@ vi.mock('@/components/ui/dialog', () => ({
 
 const mockConnectionState = {
 	profiles: [] as ConnectionProfile[],
-	active: null as null | { profileId: string; connectionId: string },
+	active: null as null | {
+		profileId: string;
+		connectionId: string;
+		transport?: 'tls' | 'plaintext' | 'fallback-plaintext';
+	},
 	status: 'disconnected' as string,
 	error: null as string | null,
 };
@@ -184,6 +188,28 @@ describe('ConnectionQuickPick', () => {
 		mockConnectionState.status = 'connected';
 		render(<ConnectionQuickPick onNewConnection={onNewConnection} />);
 		expect(screen.getByText('Disconnect')).toBeTruthy();
+	});
+
+	it('shows a transport warning for a plaintext fallback', () => {
+		mockConnectionState.profiles = [
+			makeProfile({
+				config: { ...makeProfile().config, host: 'db.example.test' },
+			}),
+		];
+		mockConnectionState.active = {
+			profileId: 'p1',
+			connectionId: 'c1',
+			transport: 'fallback-plaintext',
+		};
+		mockConnectionState.status = 'connected';
+
+		render(<ConnectionQuickPick onNewConnection={onNewConnection} />);
+		expect(screen.getByText('Transport: Plaintext fallback')).toBeTruthy();
+		expect(
+			screen.getByText(
+				'Warning: TLS was unavailable, so this connection is not encrypted.',
+			),
+		).toBeTruthy();
 	});
 
 	it('hides Disconnect when disconnected', () => {

@@ -1,9 +1,15 @@
 import { Loader2, Search } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import {
+	type ConnectionTestResult,
+	type ConnectionTransport,
+	transportLabel,
+} from '@/lib/connection-transport';
+import type { ListDatabasesResult, ListSchemasResult } from '@/lib/ipc';
 import type { DatabaseType, SslMode } from '@/stores/connection-store';
 
 export interface ConnectionFormData {
@@ -49,7 +55,7 @@ interface ConnectionDialogProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[] }>;
+	}) => Promise<ListDatabasesResult>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -57,11 +63,12 @@ interface ConnectionDialogProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[] }>;
+	}) => Promise<ListSchemasResult>;
 	initial?: Partial<ConnectionFormData>;
 	testing?: boolean;
 	connecting?: boolean;
-	testResult?: { ok: boolean; message: string } | null;
+	testResult?: ConnectionTestResult | null;
+	onTestResultInvalidated?: () => void;
 }
 
 export function ConnectionDialog({
@@ -76,6 +83,7 @@ export function ConnectionDialog({
 	testing = false,
 	connecting = false,
 	testResult = null,
+	onTestResultInvalidated,
 }: ConnectionDialogProps) {
 	const [form, setForm] = useState<ConnectionFormData>({
 		...DEFAULT_FORM,
@@ -89,13 +97,36 @@ export function ConnectionDialog({
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const [discoverError, setDiscoverError] = useState<string | null>(null);
 	const [discovered, setDiscovered] = useState(false);
+	const [discoveryTransport, setDiscoveryTransport] =
+		useState<ConnectionTransport | null>(null);
+	const discoveryGeneration = useRef(0);
+	const invalidateDiscovery = () => {
+		discoveryGeneration.current += 1;
+		setDiscovering(false);
+		setLoadingSchemas(false);
+	};
 
 	if (!open) return null;
 
 	const update = <K extends keyof ConnectionFormData>(
 		field: K,
 		value: ConnectionFormData[K],
-	) => setForm((prev) => ({ ...prev, [field]: value }));
+		shouldInvalidateDiscovery = true,
+	) => {
+		if (form[field] === value) return false;
+		onTestResultInvalidated?.();
+		if (shouldInvalidateDiscovery) invalidateDiscovery();
+		setDiscoveryTransport(null);
+		setForm((prev) => ({ ...prev, [field]: value }));
+		return true;
+	};
+
+	const handleClose = () => {
+		onTestResultInvalidated?.();
+		invalidateDiscovery();
+		setDiscoveryTransport(null);
+		onClose();
+	};
 
 	const credentialsValid =
 		form.host.trim() !== '' &&
@@ -104,8 +135,11 @@ export function ConnectionDialog({
 		form.port <= 65535;
 
 	const isValid = credentialsValid && form.database.trim() !== '';
+	const savedAllowMode = form.sslMode === 'allow';
 
 	const handleDiscover = async () => {
+		invalidateDiscovery();
+		const generation = discoveryGeneration.current;
 		setDiscovering(true);
 		setDiscoverError(null);
 		setDatabases([]);
@@ -119,29 +153,36 @@ export function ConnectionDialog({
 				password: form.password,
 				sslMode: form.sslMode,
 			});
+			if (generation !== discoveryGeneration.current) return;
 			setDatabases(result.databases);
 			setDiscovered(true);
+			setDiscoveryTransport(result.transport);
 			// Auto-select first database if form.database is empty
 			const first = result.databases[0];
 			if (first != null && form.database.trim() === '') {
-				update('database', first);
+				update('database', first, false);
+				setDiscoveryTransport(result.transport);
 				// Auto-fetch schemas for the first database
-				fetchSchemas(first);
+				await fetchSchemas(first, generation);
 			} else if (
 				result.databases.length > 0 &&
 				result.databases.includes(form.database)
 			) {
 				// Current database is in the list, fetch schemas for it
-				fetchSchemas(form.database);
+				await fetchSchemas(form.database, generation);
 			}
 		} catch (err) {
-			setDiscoverError(err instanceof Error ? err.message : 'Discovery failed');
+			if (generation === discoveryGeneration.current) {
+				setDiscoverError(
+					err instanceof Error ? err.message : 'Discovery failed',
+				);
+			}
 		} finally {
-			setDiscovering(false);
+			if (generation === discoveryGeneration.current) setDiscovering(false);
 		}
 	};
 
-	const fetchSchemas = async (database: string) => {
+	const fetchSchemas = async (database: string, generation: number) => {
 		setLoadingSchemas(true);
 		setSchemas([]);
 		try {
@@ -153,28 +194,40 @@ export function ConnectionDialog({
 				sslMode: form.sslMode,
 				database,
 			});
+			if (generation !== discoveryGeneration.current) return;
 			setSchemas(result.schemas);
+			setDiscoveryTransport(result.transport);
 			// Auto-select 'public' if available
 			if (result.schemas.includes('public')) {
-				update('schema', 'public');
+				update('schema', 'public', false);
+				setDiscoveryTransport(result.transport);
 			} else {
 				const firstSchema = result.schemas[0];
 				if (firstSchema != null) {
-					update('schema', firstSchema);
+					update('schema', firstSchema, false);
+					setDiscoveryTransport(result.transport);
 				}
 			}
-		} catch {
-			// Schema fetch failed silently — user can still type manually
+		} catch (err) {
+			if (generation === discoveryGeneration.current) {
+				setDiscoverError(
+					err instanceof Error ? err.message : 'Schema discovery failed',
+				);
+			}
 		} finally {
-			setLoadingSchemas(false);
+			if (generation === discoveryGeneration.current) setLoadingSchemas(false);
 		}
 	};
 
 	const handleDatabaseChange = (database: string) => {
-		update('database', database);
-		if (discovered) {
-			fetchSchemas(database);
+		if (update('database', database) && discovered) {
+			fetchSchemas(database, discoveryGeneration.current);
 		}
+	};
+
+	const handleTest = () => {
+		invalidateDiscovery();
+		onTest(form);
 	};
 
 	return (
@@ -280,7 +333,6 @@ export function ConnectionDialog({
 								onChange={(e) => update('sslMode', e.target.value as SslMode)}
 							>
 								<option value="disable">Disable</option>
-								<option value="allow">Allow</option>
 								<option value="prefer">Prefer</option>
 								<option value="require">Require</option>
 								<option value="verify-full">Verify Full</option>
@@ -292,7 +344,7 @@ export function ConnectionDialog({
 								size="sm"
 								className="w-full"
 								onClick={handleDiscover}
-								disabled={!credentialsValid || discovering}
+								disabled={!credentialsValid || savedAllowMode || discovering}
 							>
 								{discovering ? (
 									<>
@@ -397,6 +449,19 @@ export function ConnectionDialog({
 					</div>
 				)}
 
+				{savedAllowMode && (
+					<div
+						className="mt-3 rounded-md p-2 text-sm"
+						style={{
+							backgroundColor: 'rgba(220, 38, 38, 0.1)',
+							color: '#dc2626',
+						}}
+					>
+						sslmode &quot;allow&quot; is not supported. Choose disable, prefer,
+						require, or verify-full, then save this profile.
+					</div>
+				)}
+
 				{testResult && (
 					<div
 						className="mt-3 rounded-md p-2 text-sm"
@@ -408,35 +473,66 @@ export function ConnectionDialog({
 						}}
 					>
 						{testResult.message}
+						{testResult.ok && (
+							<span className="block mt-1">
+								Transport: {transportLabel(testResult.transport)}
+							</span>
+						)}
+						{testResult.ok && testResult.transport === 'fallback-plaintext' && (
+							<span className="block mt-1 text-yellow-700">
+								Warning: TLS was unavailable, so this connection is not
+								encrypted.
+							</span>
+						)}
+						{testResult.ok && testResult.cleanupError && (
+							<span className="block mt-1 text-yellow-700">
+								Warning: {testResult.cleanupError}
+							</span>
+						)}
 					</div>
 				)}
+
+				{discoveryTransport === 'fallback-plaintext' &&
+					!(
+						testResult?.ok && testResult.transport === 'fallback-plaintext'
+					) && (
+						<div className="mt-3 rounded-md bg-yellow-50 p-2 text-sm text-yellow-700">
+							Warning: TLS was unavailable, so this connection is not encrypted.
+						</div>
+					)}
 
 				{/* ── Actions ─────────────────────────────────────── */}
 				<div className="mt-4 flex justify-between">
 					<Button
 						variant="outline"
 						size="sm"
-						onClick={() => onTest(form)}
-						disabled={!isValid || testing || connecting}
+						onClick={handleTest}
+						disabled={!isValid || savedAllowMode || testing || connecting}
 					>
 						{testing ? 'Testing...' : 'Test Connection'}
 					</Button>
 					<div className="flex gap-2">
-						<Button variant="ghost" size="sm" onClick={onClose}>
+						<Button variant="ghost" size="sm" onClick={handleClose}>
 							Cancel
 						</Button>
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => onSave(form)}
-							disabled={!isValid || form.name.trim() === ''}
+							onClick={() => {
+								onTestResultInvalidated?.();
+								onSave(form);
+							}}
+							disabled={!isValid || savedAllowMode || form.name.trim() === ''}
 						>
 							Save
 						</Button>
 						<Button
 							size="sm"
-							onClick={() => onConnect(form)}
-							disabled={!isValid || connecting}
+							onClick={() => {
+								onTestResultInvalidated?.();
+								onConnect(form);
+							}}
+							disabled={!isValid || savedAllowMode || connecting}
 						>
 							{connecting ? 'Connecting...' : 'Connect'}
 						</Button>

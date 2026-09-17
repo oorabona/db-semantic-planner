@@ -10,6 +10,8 @@ import { Check } from 'lucide-react';
 
 import type { ConnectionFormData } from '@/components/connection/ConnectionDialog';
 import { Button } from '@/components/ui/button';
+import type { ConnectionTestResult } from '@/lib/connection-transport';
+import type { ListDatabasesResult, ListSchemasResult } from '@/lib/ipc';
 import type { SslMode } from '@/stores/connection-store';
 import { useWizardState } from './useWizardState';
 import { WizardConnectionsStep } from './WizardConnectionsStep';
@@ -37,7 +39,7 @@ interface NewProjectWizardProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[] }>;
+	}) => Promise<ListDatabasesResult>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -45,10 +47,11 @@ interface NewProjectWizardProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[] }>;
+	}) => Promise<ListSchemasResult>;
 	onTestConnection: (data: ConnectionFormData) => void;
 	testing?: boolean;
-	testResult?: { ok: boolean; message: string } | null;
+	testResult?: ConnectionTestResult | null;
+	onTestResultInvalidated?: () => void;
 	creating?: boolean;
 }
 
@@ -64,6 +67,7 @@ export function NewProjectWizard({
 	onTestConnection,
 	testing = false,
 	testResult = null,
+	onTestResultInvalidated = () => {},
 	creating = false,
 }: NewProjectWizardProps) {
 	const wizard = useWizardState({ initialConnection });
@@ -108,6 +112,7 @@ export function NewProjectWizard({
 							onTest={onTestConnection}
 							testing={testing}
 							testResult={testResult}
+							onTestResultInvalidated={onTestResultInvalidated}
 						/>
 					</div>
 
@@ -245,6 +250,7 @@ function StepContent({
 	onTest,
 	testing,
 	testResult,
+	onTestResultInvalidated,
 }: {
 	step: WizardStep;
 	wizard: ReturnType<typeof useWizardState>;
@@ -252,7 +258,8 @@ function StepContent({
 	onListSchemas: NewProjectWizardProps['onListSchemas'];
 	onTest: (data: ConnectionFormData) => void;
 	testing: boolean;
-	testResult: { ok: boolean; message: string } | null;
+	testResult: ConnectionTestResult | null;
+	onTestResultInvalidated: () => void;
 }) {
 	switch (step) {
 		case 0:
@@ -278,6 +285,7 @@ function StepContent({
 					onTest={onTest}
 					testing={testing}
 					testResult={testResult}
+					onTestResultInvalidated={onTestResultInvalidated}
 				/>
 			);
 		case 3:

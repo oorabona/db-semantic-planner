@@ -35,8 +35,8 @@ const defaultProps = {
 	open: true,
 	onClose: vi.fn(),
 	onCreate: vi.fn(),
-	onDiscover: vi.fn().mockResolvedValue({ databases: [] }),
-	onListSchemas: vi.fn().mockResolvedValue({ schemas: [] }),
+	onDiscover: vi.fn().mockResolvedValue({ databases: [], transport: 'tls' }),
+	onListSchemas: vi.fn().mockResolvedValue({ schemas: [], transport: 'tls' }),
 	onTestConnection: vi.fn(),
 };
 

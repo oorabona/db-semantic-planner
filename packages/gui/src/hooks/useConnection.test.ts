@@ -43,6 +43,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 
@@ -70,11 +71,12 @@ describe('useConnection', () => {
 				profileId: 'profile-1',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls',
 				connectParams: {
 					host: 'localhost',
 					port: 5432,
 					user: 'testuser',
-					sslMode: 'disable',
+					sslMode: 'prefer',
 				},
 			});
 		});
@@ -84,6 +86,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 
 			let capturedStatus = '';
@@ -112,6 +115,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 
@@ -186,6 +190,7 @@ describe('useConnection', () => {
 					profileId: 'profile-1',
 					database: 'testdb',
 					schema: 'public',
+					transport: 'tls',
 				},
 				status: 'connected',
 				error: null,
@@ -233,6 +238,7 @@ describe('useConnection', () => {
 					profileId: 'profile-1',
 					database: 'testdb',
 					schema: 'public',
+					transport: 'tls',
 				},
 				status: 'connected',
 				error: null,
@@ -259,6 +265,7 @@ describe('useConnection', () => {
 				connectionId: 'test-conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'fallback-plaintext' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 			vi.mocked(sidecarApi.disconnect).mockResolvedValue({ ok: true });
@@ -284,6 +291,37 @@ describe('useConnection', () => {
 				expect(result.current.testResult).toEqual({
 					ok: true,
 					message: 'Connection successful!',
+					transport: 'fallback-plaintext',
+				});
+			});
+		});
+
+		it('keeps a successful fallback result when disconnect cleanup fails', async () => {
+			vi.mocked(sidecarApi.connect).mockResolvedValue({
+				connectionId: 'test-conn-123',
+				database: 'testdb',
+				schema: 'public',
+				transport: 'fallback-plaintext',
+			});
+			vi.mocked(sidecarApi.disconnect).mockRejectedValue(
+				new Error('sidecar cleanup failed'),
+			);
+
+			const { result } = renderHook(() => useConnection());
+			await result.current.testConnection({
+				host: 'localhost',
+				port: 5432,
+				database: 'testdb',
+				user: 'testuser',
+				password: 'testpass',
+			});
+
+			await waitFor(() => {
+				expect(result.current.testResult).toEqual({
+					ok: true,
+					message: 'Connection successful!',
+					transport: 'fallback-plaintext',
+					cleanupError: 'Disconnect failed: sidecar cleanup failed',
 				});
 			});
 		});
@@ -310,6 +348,43 @@ describe('useConnection', () => {
 					message: 'Authentication failed',
 				});
 			});
+		});
+
+		it('does not publish a result after it has been invalidated', async () => {
+			let resolveConnect:
+				| ((value: {
+						connectionId: string;
+						database: string;
+						schema: string;
+						transport: 'fallback-plaintext';
+				  }) => void)
+				| undefined;
+			vi.mocked(sidecarApi.connect).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveConnect = resolve;
+					}),
+			);
+			vi.mocked(sidecarApi.disconnect).mockResolvedValue({ ok: true });
+
+			const { result } = renderHook(() => useConnection());
+			const testing = result.current.testConnection({
+				host: 'localhost',
+				port: 5432,
+				database: 'testdb',
+				user: 'testuser',
+				password: 'testpass',
+			});
+			result.current.clearTestResult();
+			resolveConnect?.({
+				connectionId: 'test-conn-123',
+				database: 'testdb',
+				schema: 'public',
+				transport: 'fallback-plaintext',
+			});
+
+			await testing;
+			expect(result.current.testResult).toBeNull();
 		});
 
 		it("uses 'Connection failed' fallback for non-Error exceptions", async () => {
@@ -406,6 +481,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 

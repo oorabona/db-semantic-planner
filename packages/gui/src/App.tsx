@@ -235,7 +235,8 @@ export default function App() {
 	).length;
 	const projectFolderPath = useProjectStore((s) => s.folderPath);
 	const projectSettings = useProjectStore((s) => s.settings);
-	const { connect, testConnection, testResult, disconnect } = useConnection();
+	const { connect, testConnection, testResult, clearTestResult, disconnect } =
+		useConnection();
 
 	const schemaEditable =
 		projectMode === 'project' && !!projectSettings?.project?.schemaPath;
@@ -1000,7 +1001,7 @@ export default function App() {
 				user: (cfg.user as string) ?? '',
 				password: '',
 				schema: conn.schema,
-				sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'disable',
+				sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'prefer',
 			};
 		}
 		// No saved profile (standalone connect) — build from stored connect params
@@ -1228,18 +1229,21 @@ export default function App() {
 			<PreferencesDialog />
 
 			{/* Connection dialog */}
-			<ConnectionDialog
-				open={dialogOpen}
-				onClose={() => setDialogOpen(false)}
-				onConnect={handleConnect}
-				onTest={handleTest}
-				onSave={handleSave}
-				onDiscover={(params) => sidecarApi.listDatabases(params)}
-				onListSchemas={(params) => sidecarApi.listSchemas(params)}
-				testing={testing}
-				connecting={connecting}
-				testResult={testResult}
-			/>
+			{dialogOpen && (
+				<ConnectionDialog
+					open={dialogOpen}
+					onClose={() => setDialogOpen(false)}
+					onConnect={handleConnect}
+					onTest={handleTest}
+					onSave={handleSave}
+					onDiscover={(params) => sidecarApi.listDatabases(params)}
+					onListSchemas={(params) => sidecarApi.listSchemas(params)}
+					testing={testing}
+					connecting={connecting}
+					testResult={testResult}
+					onTestResultInvalidated={clearTestResult}
+				/>
+			)}
 
 			{/* Recent Projects dialog */}
 			<RecentProjectsDialog
@@ -1260,6 +1264,7 @@ export default function App() {
 					onDiscover={(params) => sidecarApi.listDatabases(params)}
 					onListSchemas={(params) => sidecarApi.listSchemas(params)}
 					onTestConnection={handleTest}
+					onTestResultInvalidated={clearTestResult}
 					testing={testing}
 					testResult={testResult}
 					creating={wizardCreating}

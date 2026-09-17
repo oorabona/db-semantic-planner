@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock pg Pool
 const mockQuery = vi.fn().mockResolvedValue({ rows: [{ '?column?': 1 }] });
+const mockPoolQuery = vi.fn().mockResolvedValue({ rows: [] });
 const mockRelease = vi.fn();
 const mockConnect = vi
 	.fn()
@@ -16,7 +17,7 @@ const mockEnd = vi.fn().mockResolvedValue(undefined);
 vi.mock('pg', () => ({
 	// biome-ignore lint/complexity/useArrowFunction: regular function required for `new Pool()` constructor
 	Pool: vi.fn(function () {
-		return { connect: mockConnect, end: mockEnd };
+		return { connect: mockConnect, query: mockPoolQuery, end: mockEnd };
 	}),
 }));
 
@@ -34,6 +35,8 @@ const {
 	getPool,
 	introspectConnection,
 	isConnected,
+	listDatabases,
+	listSchemas,
 } = await import('./connection-manager.js');
 
 const baseParams = {
@@ -44,8 +47,51 @@ const baseParams = {
 	password: 'secret',
 };
 
-beforeEach(() => {
+const fallbackOperations: ReadonlyArray<
+	readonly [string, () => Promise<unknown>]
+> = [
+	['connect', () => connect(baseParams)],
+	[
+		'listDatabases',
+		() =>
+			listDatabases({
+				host: baseParams.host,
+				port: baseParams.port,
+				user: baseParams.user,
+				password: baseParams.password,
+			}),
+	],
+	['listSchemas', () => listSchemas({ ...baseParams })],
+];
+
+const allowOperations: ReadonlyArray<
+	readonly [string, () => Promise<unknown>]
+> = [
+	['connect', () => connect({ ...baseParams, sslMode: 'allow' })],
+	[
+		'listDatabases',
+		() =>
+			listDatabases({
+				host: baseParams.host,
+				port: baseParams.port,
+				user: baseParams.user,
+				password: baseParams.password,
+				sslMode: 'allow',
+			}),
+	],
+	['listSchemas', () => listSchemas({ ...baseParams, sslMode: 'allow' })],
+];
+
+beforeEach(async () => {
+	await disconnectAll();
 	vi.clearAllMocks();
+	mockQuery.mockReset().mockResolvedValue({ rows: [{ '?column?': 1 }] });
+	mockPoolQuery.mockReset().mockResolvedValue({ rows: [] });
+	mockRelease.mockReset();
+	mockConnect
+		.mockReset()
+		.mockResolvedValue({ query: mockQuery, release: mockRelease });
+	mockEnd.mockReset().mockResolvedValue(undefined);
 });
 
 describe('sslConfig mapping', () => {
@@ -72,6 +118,76 @@ describe('sslConfig mapping', () => {
 	});
 });
 
+describe('sslmode fallback', () => {
+	const noSslError = new Error('The server does not support SSL connections');
+
+	it.each(fallbackOperations)(
+		'%s retries in plaintext only when pg reports no SSL support',
+		async (operation, run) => {
+			const { Pool } = await import('pg');
+			mockConnect.mockRejectedValueOnce(noSslError);
+
+			const result = await run();
+
+			expect(Pool).toHaveBeenCalledTimes(2);
+			expect(Pool).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ ssl: { rejectUnauthorized: false } }),
+			);
+			expect(Pool).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ ssl: false }),
+			);
+			expect(mockEnd).toHaveBeenCalled();
+			expect(result).toEqual(
+				expect.objectContaining({ transport: 'fallback-plaintext' }),
+			);
+			if (operation === 'listDatabases') {
+				expect(result).toEqual(expect.objectContaining({ databases: [] }));
+			} else if (operation === 'listSchemas') {
+				expect(result).toEqual(expect.objectContaining({ schemas: [] }));
+			}
+		},
+	);
+
+	it('rethrows a non-negotiation error without a plaintext retry', async () => {
+		const { Pool } = await import('pg');
+		const noEncryptionError = Object.assign(new Error('no encryption'), {
+			code: '28000',
+		});
+		mockConnect.mockRejectedValueOnce(noEncryptionError);
+
+		await expect(connect(baseParams)).rejects.toBe(noEncryptionError);
+		expect(Pool).toHaveBeenCalledTimes(1);
+		expect(mockEnd).toHaveBeenCalledTimes(1);
+	});
+
+	it.each(['disable', 'require', 'verify-full'] as const)(
+		'%s rethrows the no-SSL error without fallback',
+		async (sslMode) => {
+			const { Pool } = await import('pg');
+			mockConnect.mockRejectedValueOnce(noSslError);
+
+			await expect(connect({ ...baseParams, sslMode })).rejects.toBe(
+				noSslError,
+			);
+			expect(Pool).toHaveBeenCalledTimes(1);
+		},
+	);
+
+	it.each(allowOperations)(
+		'%s refuses allow before creating a pool',
+		async (_, run) => {
+			const { Pool } = await import('pg');
+
+			await expect(run()).rejects.toThrow(
+				'sslmode "allow" is not supported. Choose disable, prefer, require, or verify-full.',
+			);
+			expect(Pool).not.toHaveBeenCalled();
+		},
+	);
+});
+
 describe('connect', () => {
 	it('returns connectionId, database, and schema', async () => {
 		const result = await connect(baseParams);
@@ -80,6 +196,7 @@ describe('connect', () => {
 		);
 		expect(result.database).toBe('testdb');
 		expect(result.schema).toBe('public');
+		expect(result.transport).toBe('tls');
 	});
 
 	it('uses custom schema when provided', async () => {
@@ -87,10 +204,11 @@ describe('connect', () => {
 		expect(result.schema).toBe('tenant_1');
 	});
 
-	it('tests connection with SELECT 1', async () => {
+	it('proves the pool can connect before testing connection with SELECT 1', async () => {
 		await connect(baseParams);
 		expect(mockConnect).toHaveBeenCalled();
 		expect(mockQuery).toHaveBeenCalledWith('SELECT 1');
+		expect(mockQuery).toHaveBeenCalledTimes(1);
 		expect(mockRelease).toHaveBeenCalled();
 	});
 
@@ -125,6 +243,7 @@ describe('getConnectionInfo', () => {
 			port: 5432,
 			user: 'testuser',
 			schema: 'public',
+			transport: 'tls',
 		});
 	});
 

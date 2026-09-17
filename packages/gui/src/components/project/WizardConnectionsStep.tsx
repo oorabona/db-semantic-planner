@@ -13,6 +13,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import type { ConnectionTestResult } from '@/lib/connection-transport';
+import type { ListDatabasesResult, ListSchemasResult } from '@/lib/ipc';
 import type { SslMode } from '@/stores/connection-store';
 import type { WizardConnection } from './wizard-types';
 
@@ -28,7 +30,7 @@ interface WizardConnectionsStepProps {
 		user: string;
 		password: string;
 		sslMode: SslMode;
-	}) => Promise<{ databases: string[] }>;
+	}) => Promise<ListDatabasesResult>;
 	onListSchemas: (params: {
 		host: string;
 		port: number;
@@ -36,10 +38,11 @@ interface WizardConnectionsStepProps {
 		password: string;
 		sslMode: SslMode;
 		database: string;
-	}) => Promise<{ schemas: string[] }>;
+	}) => Promise<ListSchemasResult>;
 	onTest: (data: ConnectionFormData) => void;
 	testing?: boolean;
-	testResult?: { ok: boolean; message: string } | null;
+	testResult?: ConnectionTestResult | null;
+	onTestResultInvalidated: () => void;
 }
 
 export function WizardConnectionsStep({
@@ -52,6 +55,7 @@ export function WizardConnectionsStep({
 	onTest,
 	testing = false,
 	testResult = null,
+	onTestResultInvalidated,
 }: WizardConnectionsStepProps) {
 	const [dialogOpen, setDialogOpen] = useState(false);
 
@@ -112,17 +116,20 @@ export function WizardConnectionsStep({
 			)}
 
 			{/* Connection dialog (reused from standalone flow) */}
-			<ConnectionDialog
-				open={dialogOpen}
-				onClose={() => setDialogOpen(false)}
-				onConnect={handleSave}
-				onTest={onTest}
-				onSave={handleSave}
-				onDiscover={onDiscover}
-				onListSchemas={onListSchemas}
-				testing={testing}
-				testResult={testResult}
-			/>
+			{dialogOpen && (
+				<ConnectionDialog
+					open={dialogOpen}
+					onClose={() => setDialogOpen(false)}
+					onConnect={handleSave}
+					onTest={onTest}
+					onSave={handleSave}
+					onDiscover={onDiscover}
+					onListSchemas={onListSchemas}
+					testing={testing}
+					testResult={testResult}
+					onTestResultInvalidated={onTestResultInvalidated}
+				/>
+			)}
 		</div>
 	);
 }
