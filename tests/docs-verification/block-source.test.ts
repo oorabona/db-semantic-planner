@@ -56,7 +56,7 @@ test('module syntax removal leaves import-like template literal text intact', ()
 	const source = "const example = `\nimport x from 'pkg';\n`;";
 
 	assert.equal(
-		cleanBlockSource(source, 'template.md', 4, true),
+		cleanBlockSource(source, 'template.md', 4, true).body,
 		source,
 		'template contents must not be treated as module syntax',
 	);
@@ -65,22 +65,22 @@ test('module syntax removal leaves import-like template literal text intact', ()
 test('module syntax removal leaves export-like template literal text intact', () => {
 	const source = 'const example = `\nexport const y = 1;\n`;';
 
-	assert.equal(cleanBlockSource(source, 'template.md', 4, true), source);
+	assert.equal(cleanBlockSource(source, 'template.md', 4, true).body, source);
 });
 
 test('module syntax removal drops a multiline named import only', () => {
 	const source =
-		"import {\n\tfirst,\n\tsecond,\n} from 'pkg';\nconst value = first;";
-	const cleaned = cleanBlockSource(source, 'imports.md', 7, true);
+		"import {\n\tfirst,\n\tsecond,\n} from '@dbsp/core';\nconst value = first;";
+	const cleaned = cleanBlockSource(source, 'imports.md', 7, true).body;
 
-	assert.doesNotMatch(cleaned, /from 'pkg';/);
+	assert.doesNotMatch(cleaned, /from '@dbsp\/core';/);
 	assert.match(cleaned, /const value = first;/);
 });
 
 test('module syntax removal preserves every ECMAScript line terminator', () => {
 	const source =
-		"import /* first\r\nsecond\u2028third\u2029fourth */ { value } from 'pkg';\nconst after = value;";
-	const cleaned = cleanBlockSource(source, 'terminators.md', 8, true);
+		"import /* first\r\nsecond\u2028third\u2029fourth */ { value } from '@dbsp/core';\nconst after = value;";
+	const cleaned = cleanBlockSource(source, 'terminators.md', 8, true).body;
 
 	assert.equal(
 		cleaned,
@@ -95,10 +95,31 @@ test('module syntax removal preserves async when removing export', () => {
 		'exports.md',
 		3,
 		true,
-	);
+	).body;
 
 	assert.match(cleaned, /async function f\(\) \{\}/);
 	assert.doesNotMatch(cleaned, /export async function f/);
+});
+
+test('rejects unsupported side-effect, non-dbsp, and import-equals imports with source locations', () => {
+	assert.throws(
+		() => cleanBlockSource("import '@dbsp/core';", 'imports.md', 9, true),
+		/imports\.md:9:1 — unsupported side-effect import from "@dbsp\/core"/,
+	);
+	assert.throws(
+		() => cleanBlockSource("import { z } from 'zod';", 'imports.md', 10, false),
+		/imports\.md:10 — unsupported import from "zod"/,
+	);
+	assert.throws(
+		() =>
+			cleanBlockSource(
+				"import x = require('@dbsp/core');",
+				'imports.md',
+				11,
+				true,
+			),
+		/imports\.md:11:1 — unsupported import-equals declaration from '@dbsp\/core'/,
+	);
 });
 
 function sourceLine(markdown: string, text: string): number {
@@ -131,7 +152,7 @@ function parserDiagnostic(markdown: string, file: string): () => string {
 				block.file,
 				block.codeStartLine,
 				block.sourceColumnReliable,
-			);
+			).body;
 		} finally {
 			rmSync(directory, { force: true, recursive: true });
 		}

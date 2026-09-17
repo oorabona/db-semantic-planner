@@ -82,7 +82,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/exists-vs-rawexists.md": {
-			"explicit-skip": 3,
+			"explicit-skip": 2,
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		},
@@ -162,7 +162,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/production.md": {
-			"explicit-skip": 10,
+			"explicit-skip": 9,
 			"real-db-only": 4,
 			"heuristic-fragment": 0
 		},
@@ -227,7 +227,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/window-functions.md": {
-			"explicit-skip": 7,
+			"explicit-skip": 2,
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		},
@@ -237,7 +237,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/api/orm-api.md": {
-			"explicit-skip": 17,
+			"explicit-skip": 14,
 			"real-db-only": 7,
 			"heuristic-fragment": 0
 		},

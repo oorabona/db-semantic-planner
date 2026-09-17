@@ -14,7 +14,7 @@ pnpm add @dbsp/nql
 ## Quick Start
 
 ```typescript
-// doctest: skip — exec-only operation; compile from @dbsp/nql is not in doctest preamble and orm.from(intent).all() requires a real PostgreSQL connection
+// doctest: skip — exec-only operation; orm.from(intent).all() requires a real PostgreSQL connection
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 

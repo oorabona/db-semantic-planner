@@ -128,7 +128,6 @@ table uses a polymorphic pattern (`entityType` + `entityId`) with no `ref()` to
 with the filter you want:
 
 ```typescript
-// doctest: skip — rawExists is not yet in the doctest preamble (runner.ts); use this snippet directly in your app
 import { createOrm, rawExists, subquery, eq, schema } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 

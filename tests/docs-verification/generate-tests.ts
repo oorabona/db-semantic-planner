@@ -97,7 +97,7 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 			}
 
 			runnableBlocks++;
-			let cleaned: string;
+			let cleaned: ReturnType<typeof cleanBlockSource>;
 			try {
 				cleaned = cleanBlockSource(
 					block.code,
@@ -114,9 +114,10 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 
 			// The already-cleaned block body is passed as a string to runBlock,
 			// which wraps it in an async IIFE and evaluates via dynamic import.
-			const encoded = JSON.stringify(cleaned);
+			const encoded = JSON.stringify(cleaned.body);
+			const encodedImports = JSON.stringify(cleaned.imports);
 			cases.push(
-				`it(${label}, async () => { await runBlock(${encoded}, ${JSON.stringify(block.file)}, ${block.line}, { realDbOnly: ${block.annotations.realDbOnly === true} }); });`,
+				`it(${label}, async () => { await runBlock(${encoded}, ${encodedImports}, ${JSON.stringify(block.file)}, ${block.line}, { realDbOnly: ${block.annotations.realDbOnly === true} }); });`,
 			);
 		}
 	}

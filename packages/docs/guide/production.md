@@ -511,7 +511,6 @@ DBSP_SUPPRESS_DX_WARNINGS=1 node app.js
 Replace the logger entirely — silences every warning routed through the dbsp logger (both `'dx'` and `'runtime'`), at the sink. (A few internal diagnostics — unsupported-feature and lock warnings — call `console.warn` directly and are not affected.)
 
 ```typescript
-// doctest: skip — setLogger/silentLogger are not part of the doctest preamble import list
 import { setLogger, silentLogger } from '@dbsp/core';
 
 // Silence all logger-routed dbsp warnings (e.g. in tests)
