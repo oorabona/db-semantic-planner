@@ -773,7 +773,13 @@ describe('compareSchemata', () => {
 			expect(kinds).toContain('drop_primary_key');
 			expect(kinds).toContain('add_primary_key');
 			const dropPK = diff.changes.find((c) => c.kind === 'drop_primary_key');
+			const addPK = diff.changes.find((c) => c.kind === 'add_primary_key');
+			expect(dropPK?.destructive).toBe(true);
+			expect(addPK?.destructive).toBe(true);
 			expect(dropPK?.meta).toEqual({ columns: ['id'] });
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
 		});
 
 		it('should handle composite PK', () => {
