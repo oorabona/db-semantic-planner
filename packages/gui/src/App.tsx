@@ -682,8 +682,9 @@ export default function App() {
 					return;
 				}
 
-				const { setLoading, setDiff, setError } = useSchemaDiffStore.getState();
-				setLoading();
+				const { startComparison, setDiff, setError } =
+					useSchemaDiffStore.getState();
+				const requestId = startComparison();
 				useResultsStore.getState().setActiveTab('schema-diff');
 
 				try {
@@ -691,11 +692,11 @@ export default function App() {
 						conn.connectionId,
 						folderPath,
 					);
-					setDiff(result);
+					setDiff(requestId, conn.connectionId, result);
 				} catch (err) {
 					const message =
 						err instanceof Error ? err.message : 'Schema diff failed';
-					setError(message);
+					setError(requestId, message);
 				}
 			},
 		});

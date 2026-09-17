@@ -923,7 +923,8 @@ function comparePrimaryKeys(
 		return;
 	}
 
-	// PK differs → drop + add
+	// PK differs → drop + add. Like same-name index replacements, both halves
+	// must be all-or-nothing when destructive changes are excluded.
 	changes.push({
 		kind: 'drop_primary_key',
 		table: schema.name,
@@ -934,7 +935,7 @@ function comparePrimaryKeys(
 	changes.push({
 		kind: 'add_primary_key',
 		table: schema.name,
-		destructive: false,
+		destructive: true,
 		details: `Add primary key (${schemaPK.join(', ')})`,
 		meta: { columns: schemaPK },
 	});

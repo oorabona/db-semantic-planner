@@ -195,16 +195,34 @@ export async function handleSchemaDiff(
 	// the same canonical spelling as `dbsp push`.
 	const diff = await compare(connectionId, loaded.model, compareOptions);
 
-	const sqlOptions =
-		connectionSchema !== undefined && connectionSchema !== 'public'
+	const sqlOptions = {
+		...(connectionSchema !== undefined && connectionSchema !== 'public'
 			? { schemaName: connectionSchema }
-			: undefined;
+			: {}),
+		// Schema Apply excludes changes the migration generator classifies as
+		// destructive. The full diff, including those excluded changes, remains
+		// available in `changes`.
+		includeDestructive: false,
+	};
 
 	// 4. Generate UP and DOWN SQL
 	const upSQL =
 		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
+	// DOWN is generated from the non-destructive changes.
+	// A change the generator cannot reverse or does not emit as a statement (such
+	// as readdress_table) appears as its generator comment.
+	const appliedDiff = {
+		...diff,
+		changes: diff.changes.filter((change) => !change.destructive),
+	};
 	const downSQL =
-		diff.changes.length > 0 ? generateDownSQL(diff, sqlOptions) : [];
+		appliedDiff.changes.length > 0
+			? generateDownSQL(appliedDiff, {
+					...(connectionSchema !== undefined && connectionSchema !== 'public'
+						? { schemaName: connectionSchema }
+						: {}),
+				})
+			: [];
 
 	// 5. Serialize for JSON transport
 	return {

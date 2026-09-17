@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Tests for ApplyConfirmDialog — destructive checkbox gate + basic rendering.
- * Covers SC-22: Destructive → warning + "I reviewed" checkbox.
+ * Tests for ApplyConfirmDialog — non-destructive Apply confirmation + basic rendering.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -47,30 +46,24 @@ describe('ApplyConfirmDialog', () => {
 		});
 	});
 
-	describe('when destructive (SC-22)', () => {
+	describe('when the diff also has destructive changes', () => {
 		const destructiveProps = { ...baseProps, hasDestructive: true };
 
-		it('shows destructive warning', () => {
+		it('says destructive changes are excluded', () => {
 			render(<ApplyConfirmDialog {...destructiveProps} />);
 			expect(screen.getByTestId('destructive-warning')).toBeDefined();
+			expect(screen.getByText(/excluded from this Apply/)).toBeDefined();
 		});
 
-		it('confirm button is disabled until checkbox checked', () => {
+		it('confirms immediately because the shown bundle excludes destructive SQL', () => {
 			render(<ApplyConfirmDialog {...destructiveProps} />);
 			const btn = screen.getByTestId('apply-confirm-btn') as HTMLButtonElement;
-			expect(btn.disabled).toBe(true);
-
-			fireEvent.click(screen.getByTestId('reviewed-checkbox'));
 			expect(btn.disabled).toBe(false);
 		});
 
-		it('checkbox unchecks → re-disables confirm', () => {
+		it('does not offer a destructive reviewed checkbox', () => {
 			render(<ApplyConfirmDialog {...destructiveProps} />);
-			const checkbox = screen.getByTestId('reviewed-checkbox');
-			fireEvent.click(checkbox); // check
-			fireEvent.click(checkbox); // uncheck
-			const btn = screen.getByTestId('apply-confirm-btn') as HTMLButtonElement;
-			expect(btn.disabled).toBe(true);
+			expect(screen.queryByTestId('reviewed-checkbox')).toBeNull();
 		});
 	});
 

@@ -3,7 +3,6 @@
  */
 
 import { AlertTriangle } from 'lucide-react';
-import { useState } from 'react';
 
 interface ApplyConfirmDialogProps {
 	open: boolean;
@@ -22,11 +21,7 @@ export function ApplyConfirmDialog({
 	hasDestructive,
 	applying,
 }: ApplyConfirmDialogProps) {
-	const [reviewed, setReviewed] = useState(false);
-
 	if (!open) return null;
-
-	const canConfirm = hasDestructive ? reviewed : true;
 
 	return (
 		<div
@@ -43,7 +38,7 @@ export function ApplyConfirmDialog({
 					</p>
 				</div>
 
-				{/* Destructive warning */}
+				{/* Destructive changes are displayed but intentionally excluded. */}
 				{hasDestructive && (
 					<div
 						className="mx-4 mt-3 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/30"
@@ -51,8 +46,7 @@ export function ApplyConfirmDialog({
 					>
 						<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
 						<p className="text-xs text-red-700 dark:text-red-300">
-							This diff contains destructive changes that may result in data
-							loss.
+							Destructive changes in this diff are excluded from this Apply.
 						</p>
 					</div>
 				)}
@@ -67,22 +61,6 @@ export function ApplyConfirmDialog({
 					</pre>
 				</div>
 
-				{/* Reviewed checkbox (destructive only) */}
-				{hasDestructive && (
-					<label className="mx-4 mt-3 flex cursor-pointer items-center gap-2 text-xs">
-						<input
-							type="checkbox"
-							checked={reviewed}
-							onChange={(e) => setReviewed(e.target.checked)}
-							className="rounded border-border"
-							data-testid="reviewed-checkbox"
-						/>
-						<span>
-							I have reviewed the SQL and understand the destructive changes
-						</span>
-					</label>
-				)}
-
 				{/* Actions */}
 				<div className="mt-3 flex justify-end gap-2 border-t border-border px-4 py-3">
 					<button
@@ -96,13 +74,9 @@ export function ApplyConfirmDialog({
 					</button>
 					<button
 						type="button"
-						className={`rounded px-3 py-1.5 text-xs font-medium text-white ${
-							hasDestructive
-								? 'bg-red-600 hover:bg-red-700 disabled:bg-red-400'
-								: 'bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400'
-						}`}
+						className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:bg-blue-400"
 						onClick={onConfirm}
-						disabled={!canConfirm || applying}
+						disabled={applying}
 						data-testid="apply-confirm-btn"
 					>
 						{applying ? 'Applying...' : 'Apply'}
