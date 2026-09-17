@@ -57,7 +57,10 @@ import {
 	type ProjectionEnvelope,
 	supplementOutputDescriptors,
 } from './projection-envelope.js';
-import { resolveRelationTarget } from './relation-target-projection.js';
+import {
+	assertProjectedJsonContainerCanBeAggregated,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -650,7 +653,10 @@ function buildJsonAggColumnKeyMap(
 		const map: Record<string, string> = {};
 		for (const outputKey of columns) {
 			const descriptor = projected.get(outputKey);
-			if (descriptor?.source.kind === 'modelColumn') {
+			if (
+				descriptor?.source.kind === 'modelColumn' &&
+				outputKey === naming.toDatabase(descriptor.source.column)
+			) {
 				map[outputKey] = descriptor.source.column;
 			}
 		}
@@ -685,6 +691,10 @@ function buildJsonAggNestedReadTransforms(
 		for (const columnName of columns) {
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
+			assertProjectedJsonContainerCanBeAggregated(
+				resolveRelationTarget(targetTable, deps!),
+				descriptor,
+			);
 			const handling = resolveOutputReadHandling({ ...descriptor, shape });
 			if (handling.kind === 'nestedTransform') {
 				transforms.push({
@@ -745,6 +755,10 @@ function buildJsonAggOutputDescriptor(
 		for (const columnName of columns) {
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
+			assertProjectedJsonContainerCanBeAggregated(
+				resolveRelationTarget(targetTable, deps!),
+				descriptor,
+			);
 			if (resolveOutputReadHandling({ ...descriptor, shape }).kind !== 'none') {
 				return { ...descriptor, outputKey: `${relation}_json`, shape };
 			}

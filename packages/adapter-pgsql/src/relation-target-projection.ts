@@ -149,3 +149,25 @@ export function requireRelationTargetColumns(
 		requireRelationTargetColumn(target, column, ctx, purpose, relationName);
 	}
 }
+
+/**
+ * A projected JSON array/object has one leaf provenance descriptor today.
+ * Carrying it through another JSON aggregate would turn the container itself
+ * into a scalar transform (and can cast the whole container to text).  Until
+ * nested provenance graphs exist, reject that lossy composition.
+ */
+export function assertProjectedJsonContainerCanBeAggregated(
+	target: ResolvedRelationTarget,
+	descriptor: OutputDescriptor,
+): void {
+	if (
+		target.cteName !== undefined &&
+		descriptor.source.kind === 'modelColumn' &&
+		descriptor.source.js !== undefined &&
+		(descriptor.shape.kind === 'array' || descriptor.shape.kind === 'object')
+	) {
+		throw new Error(
+			`Nested JSON conversion cannot be carried through a projected CTE: target '${target.target}', output '${descriptor.outputKey}'.`,
+		);
+	}
+}

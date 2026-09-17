@@ -13,6 +13,7 @@ import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
 import {
+	bindAliasAuthority,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
@@ -239,6 +240,13 @@ export const cteIncludeHandler: IncludeHandler = {
 		const innerAlias = `${targetTable}_inner_${existingAliases}`;
 		const cteAlias = `${relation}_ref_${existingAliases}`;
 		state.aliases.set(`cte_${targetTable}`, cteName);
+		const aliasColumnAuthorities = bindAliasAuthority(
+			bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
+			cteAlias,
+			target,
+			ctx,
+		);
+		const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
 
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
@@ -248,12 +256,12 @@ export const cteIncludeHandler: IncludeHandler = {
 			innerAlias,
 			columns,
 			conditions,
-			ctx,
+			scopedCtx,
 			state,
 		);
 
 		// Build the CTE node
-		const cte = buildCTE(cteName, cteSelect, ctx);
+		const cte = buildCTE(cteName, cteSelect, scopedCtx);
 
 		// Register CTE in state for WITH clause
 		state.ctes.set(cteName, cte);
@@ -265,7 +273,7 @@ export const cteIncludeHandler: IncludeHandler = {
 			outerAlias,
 			sourceColumn,
 			targetColumn,
-			ctx,
+			scopedCtx,
 		);
 
 		return {

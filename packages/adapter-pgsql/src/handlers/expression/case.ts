@@ -47,6 +47,7 @@ function resolveCaseValue(
 		// caller-provided CompilerContext supplies compileCustomFnFilter.
 		(expr) =>
 			compileExpressionIntent(expr as unknown as ExpressionIntent, ctx, state),
+		ctx.aliasColumnAuthorities,
 	);
 }
 

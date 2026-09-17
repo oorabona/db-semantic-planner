@@ -14,6 +14,7 @@ import {
 	nullConstNode,
 } from '../../ast-helpers.js';
 import type { NamingPlugin } from '../../naming-plugin.js';
+import type { AliasColumnAuthority } from '../../relation-target-projection.js';
 import type { CompilerState } from '../types.js';
 import { bindParameter } from './param-value.js';
 
@@ -59,13 +60,14 @@ export function resolveCaseValue(
 	state: CompilerState,
 	nestedCaseHandler?: NestedCaseHandler,
 	expressionHandler?: CaseExpressionHandler,
+	authorities?: AliasColumnAuthority,
 ): Node {
 	if (value === null || value === undefined) {
 		return nullConstNode();
 	}
 
 	if (typeof value === 'string') {
-		return columnRef(value, alias, schema, naming);
+		return columnRef(value, alias, schema, naming, authorities);
 	}
 
 	if (typeof value !== 'object') {
@@ -90,7 +92,13 @@ export function resolveCaseValue(
 			return bindParameter(expr.value, state);
 
 		case 'column':
-			return columnRef(expr.column as string, alias, schema, naming);
+			return columnRef(
+				expr.column as string,
+				alias,
+				schema,
+				naming,
+				authorities,
+			);
 
 		case 'arithmetic': {
 			const left = resolveCaseValue(
@@ -101,6 +109,7 @@ export function resolveCaseValue(
 				state,
 				nestedCaseHandler,
 				expressionHandler,
+				authorities,
 			);
 			const right = resolveCaseValue(
 				expr.right,
@@ -110,6 +119,7 @@ export function resolveCaseValue(
 				state,
 				nestedCaseHandler,
 				expressionHandler,
+				authorities,
 			);
 			return {
 				A_Expr: {

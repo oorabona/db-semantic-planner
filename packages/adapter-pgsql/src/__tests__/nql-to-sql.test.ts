@@ -1523,6 +1523,29 @@ describe('CTE relation planning', () => {
 		}
 	});
 
+	it('rejects qualified ORDER BY reads outside a reduced relation CTE projection', () => {
+		expect(() =>
+			blogCteToSQL(
+				'with authors as (authors | select id) posts | select title, author.id | flat | order by author.name',
+			),
+		).toThrow(
+			"target 'authors' resolves to the CTE 'authors', which does not project 'name' (column reference). Available: id",
+		);
+	});
+
+	it('keeps reduced root CTE references unqualified in SELECT and WHERE', () => {
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select name) authors | select id',
+			),
+		).toContain('select authors.id from authors');
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select name) authors | where id = 1 | select id',
+			),
+		).toContain('select authors.id from authors where authors.id = $1');
+	});
+
 	it('expands a reduced visible CTE wildcard from its projection', () => {
 		expect(
 			blogCteToSQL(

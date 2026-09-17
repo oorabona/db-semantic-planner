@@ -1051,6 +1051,74 @@ describe('PlanCompiler - Coverage Tests', () => {
 			);
 		});
 
+		it('validates each projected multi-hop endpoint at its own target', () => {
+			const scalar = (outputKey) => ({
+				outputKey,
+				source: { kind: 'expression', reason: 'test projection' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			});
+			const projection = (columns) => ({
+				projection: {
+					kind: 'known',
+					outputs: new Map(columns.map((column) => [column, scalar(column)])),
+				},
+			});
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author.company.country',
+					column: 'name',
+					alias: 'author.company.country.name',
+				},
+				{
+					relation: 'author.company.country',
+					targetTable: 'authors',
+					sourceColumn: ['authorId'],
+					targetColumn: ['id'],
+					hops: [
+						{
+							target: 'companies',
+							fkColumn: ['companyId'],
+							joinColumn: ['id'],
+						},
+						{
+							target: 'countries',
+							fkColumn: ['countryId'],
+							joinColumn: ['id'],
+						},
+					],
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const options = {
+				bindingNames: new Set(['authors', 'companies', 'countries']),
+				relationTargetProjections: new Map([
+					['authors', projection(['id', 'companyId'])],
+					['companies', projection(['id', 'countryId'])],
+					['countries', projection(['id', 'name'])],
+				]),
+			};
+			expect(() =>
+				new PlanCompiler(options).compile({
+					rootTable: 'posts',
+					decisions: [relationColumn],
+				}),
+			).not.toThrow();
+
+			expect(() =>
+				new PlanCompiler({
+					...options,
+					relationTargetProjections: new Map([
+						['authors', projection(['id', 'companyId'])],
+						['companies', projection(['id'])],
+						['countries', projection(['id', 'name'])],
+					]),
+				}).compile({ rootTable: 'posts', decisions: [relationColumn] }),
+			).toThrow(/does not project 'countryId'/);
+		});
+
 		it('rejects cardinality-one dotted binding relation columns without resolved hops', () => {
 			const compiler = new PlanCompiler();
 

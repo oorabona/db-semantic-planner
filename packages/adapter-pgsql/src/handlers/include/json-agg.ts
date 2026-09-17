@@ -26,6 +26,7 @@ import {
 	resolveJsonAggColumnReadHandling,
 } from '../../json-agg-read-handling.js';
 import {
+	assertProjectedJsonContainerCanBeAggregated,
 	bindAliasAuthority,
 	emittedColumnReference,
 	requireEmittedRelationTargetColumn,
@@ -153,6 +154,9 @@ function buildJsonAggColumnValueOverrides(
 				'selected column',
 				undefined,
 			);
+			if (descriptor) {
+				assertProjectedJsonContainerCanBeAggregated(target, descriptor);
+			}
 			if (descriptor && resolveOutputReadHandling(descriptor).kind !== 'none') {
 				overrides.set(
 					columnName,
