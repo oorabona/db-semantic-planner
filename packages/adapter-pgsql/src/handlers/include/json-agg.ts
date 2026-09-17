@@ -26,6 +26,9 @@ import {
 	resolveJsonAggColumnReadHandling,
 } from '../../json-agg-read-handling.js';
 import {
+	bindAliasAuthority,
+	emittedColumnReference,
+	requireEmittedRelationTargetColumn,
 	requireRelationTargetColumn,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
@@ -91,14 +94,16 @@ function resolveJsonAggProjection(
 		!(requested.length === 1 && requested[0] === '*');
 	const target = resolveRelationTarget(targetTable, ctx);
 	if (hasExplicitProjection) {
-		requireRelationTargetColumns(
-			target,
-			requested,
-			ctx,
-			'selected column',
-			decision.relation,
+		return requested.map(
+			(column) =>
+				requireRelationTargetColumn(
+					target,
+					column,
+					ctx,
+					'selected column',
+					decision.relation,
+				)?.outputKey ?? ctx.naming.toDatabase(column),
 		);
-		return requested;
 	}
 	if (target.outputs !== undefined) {
 		// Preserve the historical to_jsonb(alias) SQL for a full physical-table
@@ -139,10 +144,12 @@ function buildJsonAggColumnValueOverrides(
 	if (target.outputs !== undefined) {
 		const overrides = new Map<string, Node>();
 		for (const columnName of columns) {
-			const descriptor = requireRelationTargetColumn(
+			// `columns` comes from the target projection here, so its keys are
+			// already emitted SQL identifiers rather than logical input names.
+			const emittedColumn = emittedColumnReference(columnName);
+			const descriptor = requireEmittedRelationTargetColumn(
 				target,
-				columnName,
-				ctx,
+				emittedColumn,
 				'selected column',
 				undefined,
 			);
@@ -150,7 +157,13 @@ function buildJsonAggColumnValueOverrides(
 				overrides.set(
 					columnName,
 					typeCast(
-						columnRef(columnName, innerAlias, undefined, ctx.naming),
+						columnRef(
+							emittedColumn,
+							innerAlias,
+							undefined,
+							ctx.naming,
+							ctx.aliasColumnAuthorities,
+						),
 						'text',
 					),
 				);
@@ -174,7 +187,13 @@ function buildJsonAggColumnValueOverrides(
 		overrides.set(
 			columnName,
 			typeCast(
-				columnRef(columnName, innerAlias, undefined, ctx.naming),
+				columnRef(
+					columnName,
+					innerAlias,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				),
 				'text',
 			),
 		);
@@ -213,12 +232,24 @@ function compileJsonAggRecursive(
 		ctx.defaultPkColumnName,
 		ctx.deriveFkColumnName,
 	);
+	const innerCtx: CompilerContext = {
+		...ctx,
+		rootTable: targetTable,
+		currentAlias: innerAlias,
+		outerAlias: parentAlias,
+		aliasColumnAuthorities: bindAliasAuthority(
+			ctx.aliasColumnAuthorities,
+			innerAlias,
+			resolveRelationTarget(targetTable, ctx),
+			ctx,
+		),
+	};
 	let whereExpr: Node = buildKeyCorrelation(
 		innerAlias,
 		targetColumn,
 		parentAlias,
 		sourceColumn,
-		ctx,
+		innerCtx,
 	);
 
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
@@ -238,7 +269,7 @@ function compileJsonAggRecursive(
 					child,
 					innerAlias,
 					depth + 1,
-					ctx,
+					innerCtx,
 					_state,
 				);
 				// Extract the COALESCE node from the ResTarget wrapper
@@ -255,24 +286,29 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
-	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
-	const resolvedTarget = resolveRelationTarget(targetTable, ctx);
+	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
+	const resolvedTarget = resolveRelationTarget(targetTable, innerCtx);
 	if (orderBy) {
 		requireRelationTargetColumns(
 			resolvedTarget,
 			orderBy.columns,
-			ctx,
+			innerCtx,
 			'order key',
 			relation,
 		);
 	}
 	const shape = jsonAggContainerShape(decision.relationType);
-	const columns = resolveJsonAggProjection(decision, targetTable, ctx, shape);
+	const columns = resolveJsonAggProjection(
+		decision,
+		targetTable,
+		innerCtx,
+		shape,
+	);
 	const columnValueOverrides = buildJsonAggColumnValueOverrides(
 		targetTable,
 		columns,
 		innerAlias,
-		ctx,
+		innerCtx,
 		shape,
 	);
 
@@ -287,6 +323,10 @@ function compileJsonAggRecursive(
 			innerAlias,
 			...(limit !== undefined && { limit }),
 			...(columns && { columns }),
+			...(resolvedTarget.outputs !== undefined && { columnsAreEmitted: true }),
+			...(innerCtx.aliasColumnAuthorities !== undefined && {
+				aliasColumnAuthorities: innerCtx.aliasColumnAuthorities,
+			}),
 			...(columnValueOverrides && { columnValueOverrides }),
 			...(orderBy && { orderBy: orderBy.columns }),
 			...(orderBy?.fallback && { orderByFallback: true }),

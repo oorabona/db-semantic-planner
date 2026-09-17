@@ -79,6 +79,7 @@ import {
 } from './handlers/index.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
 import {
+	bindAliasAuthority,
 	type RelationTargetProjectionRegistry,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
@@ -1159,10 +1160,25 @@ export class PlanCompiler {
 			(decision.conditions as PlanDecision[]).length > 0
 		) {
 			const innerAlias = '__t__';
+			const filterCtx = this.createHandlerContext(plan);
+			const targetTable = handlerDecision.targetTable ?? decision.targetTable;
+			const aliasColumnAuthorities = targetTable
+				? bindAliasAuthority(
+						filterCtx.aliasColumnAuthorities,
+						innerAlias,
+						resolveRelationTarget(targetTable, filterCtx),
+						filterCtx,
+					)
+				: filterCtx.aliasColumnAuthorities;
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
 				// Rewrite condition table references to use the inner alias
 				const rewritten = { ...c, table: innerAlias };
-				return this.dispatchWhere(rewritten, { currentAlias: innerAlias });
+				return this.dispatchWhere(rewritten, {
+					currentAlias: innerAlias,
+					...(aliasColumnAuthorities !== undefined && {
+						aliasColumnAuthorities,
+					}),
+				});
 			});
 			const combined =
 				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
@@ -1347,10 +1363,18 @@ export class PlanCompiler {
 		plan: SimplifiedPlanReport,
 		currentAlias?: string,
 	): HandlerCompilerContext {
+		const alias = currentAlias ?? plan.rootTable;
+		const rootAuthority = resolveRelationTarget(plan.rootTable, {
+			naming: this.naming,
+			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
+		});
 		return {
 			naming: this.naming,
 			rootTable: plan.rootTable,
-			currentAlias: currentAlias ?? plan.rootTable,
+			currentAlias: alias,
 			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
@@ -1364,6 +1388,16 @@ export class PlanCompiler {
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.relationTargetProjections != null && {
 				relationTargetProjections: this.relationTargetProjections,
+			}),
+			...(rootAuthority.cteName !== undefined && {
+				aliasColumnAuthorities: bindAliasAuthority(
+					undefined,
+					alias,
+					rootAuthority,
+					{
+						naming: this.naming,
+					},
+				),
 			}),
 			...(this.model != null && { model: this.model }),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
@@ -2091,6 +2125,7 @@ export class PlanCompiler {
 							decision.alias,
 							decision.table,
 							this.naming,
+							this.createHandlerContext(plan).aliasColumnAuthorities,
 						),
 					);
 				}

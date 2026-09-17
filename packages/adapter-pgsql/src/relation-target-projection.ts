@@ -17,6 +17,15 @@ export type RelationTargetProjectionRegistry = ReadonlyMap<
 	ProjectionEnvelope
 >;
 
+/** A query-scope binding from an emitted SQL alias to the relation it exposes. */
+export type AliasColumnAuthority = ReadonlyMap<string, ResolvedRelationTarget>;
+
+/** A column name after deciding whether it is logical input or emitted output. */
+export type ResolvedColumnReference = {
+	readonly requestedName: string;
+	readonly emittedName: string;
+};
+
 export type ResolvedRelationTarget = {
 	readonly target: string;
 	readonly cteName?: string;
@@ -31,6 +40,31 @@ export type RelationTargetProjectionContext = {
 		| RelationTargetProjectionRegistry
 		| undefined;
 };
+
+export function requestedColumnReference(
+	requestedName: string,
+	ctx: RelationTargetProjectionContext,
+): ResolvedColumnReference {
+	return { requestedName, emittedName: ctx.naming.toDatabase(requestedName) };
+}
+
+/** Projection keys have already crossed the naming boundary. */
+export function emittedColumnReference(
+	emittedName: string,
+): ResolvedColumnReference {
+	return { requestedName: emittedName, emittedName };
+}
+
+export function bindAliasAuthority(
+	authorities: AliasColumnAuthority | undefined,
+	alias: string,
+	target: ResolvedRelationTarget,
+	ctx: RelationTargetProjectionContext,
+): AliasColumnAuthority {
+	const next = new Map(authorities);
+	next.set(ctx.naming.toDatabase(alias), target);
+	return next;
+}
 
 /** The sole resolver for relation-target column authority. */
 export function resolveRelationTarget(
@@ -61,9 +95,42 @@ export function requireRelationTargetColumn(
 	relationName?: string,
 ): OutputDescriptor | undefined {
 	if (target.outputs === undefined) return undefined;
+	if (target.outputs.has(column)) {
+		return requireEmittedRelationTargetColumn(
+			target,
+			emittedColumnReference(column),
+			purpose,
+			relationName,
+		);
+	}
 	const dbColumn = ctx.naming.toDatabase(column);
+	return requireEmittedRelationTargetColumn(
+		target,
+		emittedColumnReference(dbColumn),
+		purpose,
+		relationName,
+	);
+}
+
+/** Validate one already-emitted reference against its alias authority. */
+export function requireEmittedRelationTargetColumn(
+	target: ResolvedRelationTarget,
+	column: ResolvedColumnReference,
+	purpose: string,
+	relationName?: string,
+): OutputDescriptor | undefined {
+	if (target.outputs === undefined) return undefined;
+	const dbColumn = column.emittedName;
 	const descriptor = target.outputs.get(dbColumn);
-	if (descriptor !== undefined) return descriptor;
+	if (descriptor !== undefined) {
+		if (descriptor.source.kind === 'ambiguous') {
+			throw new Error(
+				`${relationName ? `Relation '${relationName}' ` : ''}target '${target.target}' resolves to the CTE '${target.cteName}', ` +
+					`whose projected column '${dbColumn}' is ambiguous and cannot be referenced (${purpose}).`,
+			);
+		}
+		return descriptor;
+	}
 	const relation = relationName ? `Relation '${relationName}' ` : '';
 	throw new Error(
 		`${relation}target '${target.target}' resolves to the CTE '${target.cteName}', ` +

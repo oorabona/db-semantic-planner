@@ -39,7 +39,13 @@ function buildCteTargets(
 			.filter((col) => col !== '*')
 			.map((col) => ({
 				ResTarget: {
-					val: columnRef(col, alias, undefined, ctx.naming),
+					val: columnRef(
+						col,
+						alias,
+						undefined,
+						ctx.naming,
+						ctx.aliasColumnAuthorities,
+					),
 					name: ctx.naming.toDatabase(col),
 				},
 			}));

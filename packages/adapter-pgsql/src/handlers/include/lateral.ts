@@ -44,7 +44,13 @@ function buildLateralTargets(
 	) {
 		return columns.map((col) => ({
 			ResTarget: {
-				val: columnRef(col, alias, undefined, ctx.naming),
+				val: columnRef(
+					col,
+					alias,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				),
 			},
 		}));
 	}

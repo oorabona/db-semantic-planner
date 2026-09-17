@@ -230,9 +230,21 @@ export function compileExpressionIntent(
 			if (dotIdx !== -1) {
 				const table = i.column.slice(0, dotIdx);
 				const col = i.column.slice(dotIdx + 1);
-				return columnRef(col, table, undefined, ctx.naming);
+				return columnRef(
+					col,
+					table,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				);
 			}
-			return columnRef(i.column, undefined, undefined, ctx.naming);
+			return columnRef(
+				i.column,
+				undefined,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			);
 		}
 
 		case 'param': {
@@ -392,7 +404,13 @@ export function compileExpressionIntent(
 			const leaf = relationSegments[relationSegments.length - 1] ?? rc.relation;
 			const alias =
 				state.aliases.get(rc.relation) ?? state.aliases.get(leaf) ?? leaf;
-			return columnRef(rc.column, alias, undefined, ctx.naming);
+			return columnRef(
+				rc.column,
+				alias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			);
 		}
 
 		case 'case': {

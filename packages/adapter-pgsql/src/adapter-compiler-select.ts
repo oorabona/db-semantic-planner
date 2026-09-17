@@ -643,6 +643,19 @@ function buildJsonAggColumnKeyMap(
 ): Record<string, string> | undefined {
 	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
+	const projected = deps
+		? resolveRelationTarget(targetTable, deps).outputs
+		: undefined;
+	if (projected !== undefined) {
+		const map: Record<string, string> = {};
+		for (const outputKey of columns) {
+			const descriptor = projected.get(outputKey);
+			if (descriptor?.source.kind === 'modelColumn') {
+				map[outputKey] = descriptor.source.column;
+			}
+		}
+		return Object.keys(map).length > 0 ? map : undefined;
+	}
 	const table = model?.getTable(targetTable);
 	const map: Record<string, string> = {};
 	for (const columnName of columns) {
@@ -673,7 +686,17 @@ function buildJsonAggNestedReadTransforms(
 			const descriptor = projected.get(columnName);
 			if (!descriptor) continue;
 			const handling = resolveOutputReadHandling({ ...descriptor, shape });
-			if (handling.kind === 'nestedTransform') transforms.push(handling);
+			if (handling.kind === 'nestedTransform') {
+				transforms.push({
+					kind: handling.kind,
+					table: handling.table,
+					column: handling.column,
+					js: handling.js,
+					...(descriptor.outputKey !== handling.column
+						? { outputKey: descriptor.outputKey }
+						: {}),
+				});
+			}
 		}
 		return transforms.length > 0 ? transforms : undefined;
 	}
@@ -692,7 +715,14 @@ function buildJsonAggNestedReadTransforms(
 			column,
 			shape,
 		);
-		if (handling) transforms.push(handling);
+		if (handling) {
+			transforms.push({
+				kind: handling.kind,
+				table: handling.table,
+				column: handling.column,
+				js: handling.js,
+			});
+		}
 	}
 	return transforms.length > 0 ? transforms : undefined;
 }

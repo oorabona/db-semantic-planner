@@ -134,7 +134,13 @@ export const simpleCaseHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const testExpr = columnRef(column, tableAlias, undefined, ctx.naming);
+		const testExpr = columnRef(
+			column,
+			tableAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		const args: Node[] = conditions.map((cond) => {
 			// Build the comparison value — `when` may be a Decision with .value

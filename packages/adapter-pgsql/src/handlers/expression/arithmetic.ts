@@ -28,7 +28,13 @@ function resolveOperand(
 ): Node {
 	if (typeof operand === 'string') {
 		const alias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(operand, alias, undefined, ctx.naming);
+		return columnRef(
+			operand,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	}
 	if (
 		typeof operand === 'object' &&

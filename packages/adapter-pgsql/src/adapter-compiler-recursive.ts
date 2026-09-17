@@ -662,7 +662,7 @@ export function compileCteQuery<T = unknown>(
 	// earlier declarations; the outer query may refer to every declaration.
 	let visibleCteDeps: AdapterCompilerDeps = {
 		...deps,
-		relationTargetProjections: new Map(cteProjectionByName),
+		relationTargetProjections: cteProjectionByName,
 	};
 
 	for (const cte of intent.ctes) {
@@ -769,7 +769,7 @@ export function compileCteQuery<T = unknown>(
 				cte.name,
 				visibleCteDeps.naming,
 			),
-			relationTargetProjections: new Map(cteProjectionByName),
+			relationTargetProjections: cteProjectionByName,
 		};
 	}
 
@@ -788,7 +788,7 @@ export function compileCteQuery<T = unknown>(
 		options,
 		{
 			...visibleCteDeps,
-			relationTargetProjections: new Map(cteProjectionByName),
+			relationTargetProjections: cteProjectionByName,
 		},
 	);
 

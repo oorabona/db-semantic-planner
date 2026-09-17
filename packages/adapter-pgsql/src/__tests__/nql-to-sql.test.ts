@@ -1515,10 +1515,10 @@ describe('CTE relation planning', () => {
 		}
 		for (const nql of [missingJsonOrderKey]) {
 			expect(() => blogCteToSQL(nql)).toThrow(
-				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (order key). Available: name",
+				"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
 			);
 			expect(() => blogCteToSQL(nql, 'tenant_42')).toThrow(
-				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (order key). Available: name",
+				"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
 			);
 		}
 	});
@@ -1529,6 +1529,48 @@ describe('CTE relation planning', () => {
 				'with authors as (authors | select id) posts | select title, author.*',
 			),
 		).toContain("json_agg(jsonb_build_object('id', __t__.id)");
+	});
+
+	it('rejects an ambiguous visible CTE relation-target column', () => {
+		expect(() =>
+			blogCteToSQL(
+				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
+			),
+		).toThrow(
+			"Relation 'author' target 'authors' resolves to the CTE 'authors', whose projected column 'id' is ambiguous and cannot be referenced (join key).",
+		);
+	});
+
+	it('uses emitted CTE projection keys for snake_case relation targets', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const wildcard =
+			orm.nql`with authors as (authors | select id, name as displayName)
+posts | select title, author.*`.dump();
+		expect(wildcard.sql).toContain('__t__."displayName"');
+		expect(normalizeSQL(wildcard.sql)).toBe(
+			'with "authors" as (select authors.id, authors.name as "displayname" from authors) select posts.title, coalesce((select json_agg(jsonb_build_object(\'id\', __t__.id, \'displayname\', __t__."displayname") order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.author_id), \'[]\'::json) as author_json from posts',
+		);
+
+		expect(() =>
+			orm.nql`with authors as (authors | select id, name as displayName)
+posts | select title, author.displayName | flat`.dump(),
+		).toThrow(
+			"NQL compilation failed: Column 'displayName' does not exist on table 'authors'. Available columns: id, name",
+		);
+
+		const logicalRelationKey =
+			orm.nql`with posts as (posts | select id, authorId)
+authors | select name, posts.authorId | flat`.dump();
+		expect(normalizeSQL(logicalRelationKey.sql)).toBe(
+			'with "posts" as (select posts.id, posts.author_id from posts) select authors.name, posts.author_id as "posts.authorid" from authors left join posts as posts on authors.id = posts.author_id',
+		);
 	});
 
 	it('compares visible CTE relation keys in database casing', () => {

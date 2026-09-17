@@ -87,6 +87,7 @@ function isNestedOutputReadHandling(
 		value.kind === 'nestedTransform' &&
 		typeof value.table === 'string' &&
 		typeof value.column === 'string' &&
+		(value.outputKey === undefined || typeof value.outputKey === 'string') &&
 		(value.js === 'bigint' || value.js === 'number' || value.js === 'string')
 	);
 }
@@ -99,7 +100,12 @@ function readJsonAggNestedReadTransforms(
 	const entries: [string, NestedOutputReadHandling][] = [];
 	for (const item of raw) {
 		if (isNestedOutputReadHandling(item)) {
-			entries.push([item.column, item]);
+			entries.push([
+				item.outputKey !== undefined && item.outputKey !== item.column
+					? item.outputKey
+					: item.column,
+				item,
+			]);
 		}
 	}
 	return entries.length > 0 ? new Map(entries) : undefined;
@@ -216,13 +222,31 @@ function convertJsonAggPayload(
 
 	const table = model.getTable(tableName);
 	if (table) {
+		// A renamed projection cannot be discovered by walking model column names.
+		// `outputKey` is intentionally opt-in: legacy metadata remains column-based.
+		for (const [key, transform] of nestedReadTransforms ?? []) {
+			if (
+				transform.outputKey !== undefined &&
+				transform.outputKey !== transform.column &&
+				Object.hasOwn(value, key) &&
+				transform.table === tableName
+			) {
+				value[key] = convertBigintJsReadValue(value[key], transform.js, {
+					table: transform.table,
+					column: transform.column,
+					outputKey: key,
+				});
+			}
+		}
 		for (const column of table.columns) {
 			const key = findExistingKey(value, column.name, columnKeyMap);
 			if (key === undefined) continue;
 			const outputKey = renameExistingKey(value, key, column.name);
-			const transform = nestedReadTransforms?.get(column.name);
+			const transform = nestedReadTransforms?.get(outputKey);
 			if (
 				transform?.kind === 'nestedTransform' &&
+				(transform.outputKey === undefined ||
+					transform.outputKey === transform.column) &&
 				transform.table === tableName &&
 				transform.column === column.name
 			) {

@@ -17,6 +17,7 @@ import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { rangeVar } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
 import {
+	bindAliasAuthority,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
@@ -122,6 +123,12 @@ function buildJoinFilter(
 			...ctx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
+			aliasColumnAuthorities: bindAliasAuthority(
+				ctx.aliasColumnAuthorities,
+				targetAlias,
+				resolveRelationTarget(targetTable, ctx),
+				ctx,
+			),
 		};
 
 		if (decision.conditions.length === 1) {

@@ -19,6 +19,7 @@ import {
 } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
 import {
+	bindAliasAuthority,
 	requireRelationTargetColumns,
 	resolveRelationTarget,
 } from '../../relation-target-projection.js';
@@ -76,12 +77,19 @@ export function buildKeyCorrelation(
 
 	const comparisons = normalizedSourceCols.map((sourceColumn, index) =>
 		eqExpr(
-			columnRef(sourceColumn, sourceAlias, undefined, ctx.naming),
+			columnRef(
+				sourceColumn,
+				sourceAlias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			),
 			columnRef(
 				normalizedTargetCols[index]!,
 				targetAlias,
 				undefined,
 				ctx.naming,
+				ctx.aliasColumnAuthorities,
 			),
 		),
 	);
@@ -197,6 +205,13 @@ function buildExistsSubquery(
 	state.aliases.set(targetAlias, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
+	const targetAuthority = resolveRelationTarget(targetTable, ctx);
+	const aliasColumnAuthorities = bindAliasAuthority(
+		ctx.aliasColumnAuthorities,
+		targetAlias,
+		targetAuthority,
+		ctx,
+	);
 
 	// Build correlation condition
 	const correlation = buildKeyCorrelation(
@@ -223,6 +238,7 @@ function buildExistsSubquery(
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			outerAlias: sourceAlias,
+			aliasColumnAuthorities,
 		};
 
 		// Compile nested conditions

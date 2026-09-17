@@ -75,7 +75,10 @@ import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
-import type { RelationTargetProjectionRegistry } from './relation-target-projection.js';
+import type {
+	AliasColumnAuthority,
+	RelationTargetProjectionRegistry,
+} from './relation-target-projection.js';
 
 // ============================================================================
 // Module-level constants
@@ -131,6 +134,7 @@ export type WhereCompilerCtx = {
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
 	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
+	readonly aliasColumnAuthorities?: AliasColumnAuthority;
 	/** Naming convention plugin */
 	readonly naming: NamingPlugin;
 	/**
@@ -178,6 +182,9 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.bindingNames !== undefined && { bindingNames: ctx.bindingNames }),
 		...(ctx.relationTargetProjections !== undefined && {
 			relationTargetProjections: ctx.relationTargetProjections,
+		}),
+		...(ctx.aliasColumnAuthorities !== undefined && {
+			aliasColumnAuthorities: ctx.aliasColumnAuthorities,
 		}),
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),

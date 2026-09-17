@@ -49,7 +49,13 @@ function buildSortBy(
 	ctx: CompilerContext,
 ): Node {
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-	const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+	const colRef = columnRef(
+		column,
+		tableAlias,
+		undefined,
+		ctx.naming,
+		ctx.aliasColumnAuthorities,
+	);
 
 	const sortBy: SortBy = {
 		node: colRef,
@@ -80,7 +86,13 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 	// PARTITION BY
 	if (partition && partition.length > 0) {
 		windowDef.partitionClause = partition.map((col) =>
-			columnRef(col, tableAlias, undefined, ctx.naming),
+			columnRef(
+				col,
+				tableAlias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			),
 		);
 	}
 
@@ -197,7 +209,13 @@ function createLagLeadHandler(
 			}
 
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+			const colRef = columnRef(
+				column,
+				tableAlias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			);
 
 			const args: Node[] = [colRef];
 
@@ -243,7 +261,13 @@ function createColumnWindowHandler(
 			}
 
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+			const colRef = columnRef(
+				column,
+				tableAlias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			);
 
 			return buildWindowFunction(funcName, [colRef], decision, ctx);
 		},
@@ -302,7 +326,15 @@ export const genericWindowHandler: ExpressionHandler = {
 		// Add column if specified
 		if (decision.column) {
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-			args.push(columnRef(decision.column, tableAlias, undefined, ctx.naming));
+			args.push(
+				columnRef(
+					decision.column,
+					tableAlias,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				),
+			);
 		}
 
 		// Add other args (e.g., offset for lag/lead)

@@ -61,9 +61,21 @@ function buildAggregate(
 		const dotIdx = column.indexOf('.');
 		const table = column.slice(0, dotIdx);
 		const col = column.slice(dotIdx + 1);
-		colRef = columnRef(col, table, undefined, ctx.naming);
+		colRef = columnRef(
+			col,
+			table,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	} else {
-		colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+		colRef = columnRef(
+			column,
+			tableAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	}
 
 	return funcCall(funcName, [colRef], {
