@@ -1,8 +1,7 @@
 /**
  * Doctest framework for validating TypeScript code blocks in documentation.
  *
- * Extracts ```typescript and ```ts blocks from markdown files, compiles them
- * against the real @dbsp APIs.
+ * Extracts markdown-it-tokenized `typescript` and `ts` fences from Markdown.
  *
  * Goal: prevent documentation drift by transpiling and executing runnable
  * TypeScript fences from configured sources without type-checking.
@@ -25,7 +24,7 @@ export interface ExtractedBlock {
 	sourceColumnReliable: boolean; // whether code columns retain their source-file meaning
 	index: number; // 1-based block counter within the file
 	language: string; // "typescript" | "ts" | "bash" | ...
-	code: string; // the raw block body (no backtick fences)
+	code: string; // markdown-it fence-token content, with one trailing newline removed if present
 	annotations: Annotation; // parsed from `// doctest: skip` and `// doctest: real-db-only` markers
 }
 
@@ -47,7 +46,7 @@ function parseAnnotations(code: string): Annotation {
 }
 
 /**
- * Extract all typescript code blocks from a markdown file, recording annotations
+ * Extract markdown-it-tokenized `typescript` and `ts` fences, recording annotations
  * for callers to decide how to handle each block.
  */
 export function extractBlocks(
