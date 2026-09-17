@@ -14,6 +14,7 @@ export function cleanBlockSource(
 	code: string,
 	file: string,
 	codeStartLine: number,
+	sourceColumnReliable: boolean,
 ): string {
 	const sourceFile = ts.createSourceFile(
 		file,
@@ -25,8 +26,11 @@ export function cleanBlockSource(
 	const diagnostic = sourceFile.parseDiagnostics[0];
 	if (diagnostic !== undefined) {
 		const position = sourceFile.getLineAndCharacterOfPosition(diagnostic.start);
+		const location = sourceColumnReliable
+			? `${file}:${codeStartLine + position.line}:${position.character + 1}`
+			: `${file}:${codeStartLine + position.line}`;
 		throw new Error(
-			`${file}:${codeStartLine + position.line}:${position.character + 1} — ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`,
+			`${location} — ${ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')}`,
 		);
 	}
 

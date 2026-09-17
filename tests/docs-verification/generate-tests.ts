@@ -99,7 +99,12 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 			runnableBlocks++;
 			let cleaned: string;
 			try {
-				cleaned = cleanBlockSource(block.code, block.file, block.codeStartLine);
+				cleaned = cleanBlockSource(
+					block.code,
+					block.file,
+					block.codeStartLine,
+					block.sourceColumnReliable,
+				);
 			} catch (error) {
 				const cause = error instanceof Error ? error.message : String(error);
 				const failure = JSON.stringify(cause);

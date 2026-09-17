@@ -87,6 +87,7 @@ catalog:
   ink-table: ^3.1.0
   jsdom: ^30.0.1
   lucide-react: ^1.23.0
+  markdown-it: ^15.0.2
   mermaid: ^11.16.0
   monaco-editor: ^0.56.0
   # Also the published peer range of @dbsp/cli: 8.21 is where pg records
