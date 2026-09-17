@@ -138,6 +138,26 @@ test('imported fixture names do not replace harness setup bindings', async () =>
 	await runBlock(cleaned.body, cleaned.imports, 'fixture.md', 1);
 });
 
+test('a kept import named process cannot shadow compile-only setup', async () => {
+	const source =
+		"import { schema as process } from '@dbsp/core';\nif (typeof process !== 'function') throw new Error('wrong process');";
+	const cleaned = cleanBlockSource(source, 'process.md', 1, true);
+	await runBlock(cleaned.body, cleaned.imports, 'process.md', 1);
+});
+
+test('real-db setup reads its private environment import, not a block process binding', () => {
+	const source = "import { schema as process } from '@dbsp/core';";
+	const cleaned = cleanBlockSource(source, 'process-real-db.md', 1, true);
+	const module = renderBlockModule(
+		`${cleaned.body}\nvoid process;`,
+		cleaned.imports,
+		true,
+	);
+	assert.match(module, /env as __doctestEnv.*node:process/s);
+	assert.match(module, /connectionString: __doctestEnv\.DATABASE_URL/);
+	assert.doesNotMatch(module, /connectionString: process\.env/);
+});
+
 test('falsy thrown values fail doctest blocks', async () => {
 	const undefinedFailure = await captureRejection(() =>
 		runBlock('throw undefined;', [], 'falsy-undefined.md', 11),

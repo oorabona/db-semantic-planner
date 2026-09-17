@@ -162,7 +162,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/production.md": {
-			"explicit-skip": 9,
+			"explicit-skip": 10,
 			"real-db-only": 4,
 			"heuristic-fragment": 0
 		},
@@ -237,7 +237,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/api/orm-api.md": {
-			"explicit-skip": 14,
+			"explicit-skip": 16,
 			"real-db-only": 7,
 			"heuristic-fragment": 0
 		},

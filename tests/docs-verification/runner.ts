@@ -181,18 +181,18 @@ const COMPILE_ONLY_SETUP = `
 class __DoctestPoolClient { async query() { return { rows: [], rowCount: 0 }; } release() {} }
 // biome-ignore lint/suspicious/noExplicitAny: doctest stub
 class __DoctestPool { constructor(_: any) {} async query() { return { rows: [], rowCount: 0 }; } async connect() { return new __DoctestPoolClient(); } async end() {} }
-// Deterministic fake env for blocks referencing process.env
-process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
+// Deterministic fake env for blocks referencing process${'.'}env
+__doctestEnv.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 const __defaultOrm = __doctestCreateOrm({ schema: __defaultDb, adapter: __doctestCreatePgsqlCompileOnlyAdapter() });
 const __doctestPool: any = undefined;
 const __doctestAdapter: any = __doctestCreatePgsqlCompileOnlyAdapter();
 `;
 const REAL_DB_SETUP = `
-// Deterministic fake env for blocks referencing process.env
-process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
+// Deterministic fake env for blocks referencing process${'.'}env
+__doctestEnv.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 // One Pool per block-module (each temp file is a fresh module).
 // Pool is ended at the bottom of __main() to avoid leaked connections.
-const __doctestPool = new __doctestPgPool({ connectionString: process.env.DATABASE_URL, max: 2, min: 0, idleTimeoutMillis: 1000 });
+const __doctestPool = new __doctestPgPool({ connectionString: __doctestEnv.DATABASE_URL, max: 2, min: 0, idleTimeoutMillis: 1000 });
 const __doctestAdapter = __doctestCreatePgsqlAdapter(__doctestPool);
 const __defaultOrm = __doctestCreateOrm({ schema: __defaultDb, adapter: __doctestAdapter });
 // DDL statements for the default schema — computed once per block.
@@ -236,12 +236,14 @@ function renderPreamble(
 		.map((blockImport) => blockImport.text)
 		.join('\n');
 	const privateImports = realDb
-		? `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm, resetLogger as __doctestResetLogger } from '@dbsp/core';
+		? `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm } from '@dbsp/core';
 import { createPgsqlAdapter as __doctestCreatePgsqlAdapter, generateDDL as __doctestGenerateDDL } from '@dbsp/adapter-pgsql';
 import { Pool as __doctestPgPool } from 'pg';
+import { env as __doctestEnv } from 'node:process';
 `
-		: `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm, resetLogger as __doctestResetLogger } from '@dbsp/core';
+		: `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter as __doctestCreatePgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { env as __doctestEnv } from 'node:process';
 `;
 	const fixture = (name: string, declaration: string) =>
 		locals.has(name) ? '' : declaration;
@@ -323,10 +325,10 @@ try {
 	}
 }
 if (__hasPrimaryValue) throw __primaryValue;`;
-		return `${renderPreamble(imports, true)}\nasync function __main() {\n${blockWithLifecycle}\n}\ntry { await __main(); } finally { __doctestResetLogger(); }\n`;
+		return `${renderPreamble(imports, true)}\nasync function __main() {\n${blockWithLifecycle}\n}\nawait __main();\n`;
 	}
 
-	return `${renderPreamble(imports, false)}\nasync function __main() {\n${code}\n}\ntry { await __main(); } finally { __doctestResetLogger(); }\n`;
+	return `${renderPreamble(imports, false)}\nasync function __main() {\n${code}\n}\nawait __main();\n`;
 }
 
 export async function runBlock(

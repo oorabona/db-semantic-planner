@@ -59,7 +59,8 @@ function runtimeLocalNames(clause: ts.ImportClause): string[] {
 /**
  * Returns a body with top-level export modifiers removed plus the static
  * `@dbsp/*` and `pg` imports to hoist; refuses `import 'x'`, import-equals
- * declarations, and imports from any other module.
+ * declarations, imports from any other module, and runtime local names with
+ * the doctest harness's reserved `__` prefix.
  *
  * Parser failures retain the markdown filename and point at the original
  * documentation line, rather than at generated test source.
@@ -133,10 +134,24 @@ export function cleanBlockSource(
 					`unsupported import from ${JSON.stringify(module)}`,
 				);
 			}
+			const localNames = runtimeLocalNames(statement.importClause);
+			const reservedLocalName = localNames.find((name) =>
+				name.startsWith('__'),
+			);
+			if (reservedLocalName !== undefined) {
+				unsupportedImport(
+					sourceFile,
+					statement,
+					file,
+					codeStartLine,
+					sourceColumnReliable,
+					`unsupported import local name ${JSON.stringify(reservedLocalName)}: the __ prefix is reserved for the doctest harness`,
+				);
+			}
 			imports.push({
 				text: code.slice(statement.getStart(sourceFile), statement.end),
 				module,
-				runtimeLocalNames: runtimeLocalNames(statement.importClause),
+				runtimeLocalNames: localNames,
 			});
 			ranges.push([statement.getStart(sourceFile), statement.end]);
 			continue;

@@ -35,7 +35,8 @@ Run `pnpm check:docs-ledger` to print the live source and code-block totals.
 3. `runner.ts` evaluates a block by writing it to a scratch file inside
    `__generated__/.tmp/`, hoisting its static `@dbsp/*` imports (and `pg` only
    for real-DB blocks), then wrapping it in an async IIFE with fixed ambient
-   bindings. Other static imports and side-effect/import-equals imports fail.
+   bindings. Other static imports, side-effect/import-equals imports, and runtime
+   local names with the harness-reserved `__` prefix fail.
    Any parse error, import failure, or runtime throw becomes a test failure with
    the original markdown file and line.
 

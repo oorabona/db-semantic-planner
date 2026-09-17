@@ -122,6 +122,27 @@ test('rejects unsupported side-effect, non-dbsp, and import-equals imports with 
 	);
 });
 
+test('rejects harness-reserved runtime import local names but permits type-only names', () => {
+	assert.throws(
+		() =>
+			cleanBlockSource(
+				"import { schema as __defaultDb } from '@dbsp/core';",
+				'imports.md',
+				12,
+				true,
+			),
+		/imports\.md:12:1 — unsupported import local name "__defaultDb": the __ prefix is reserved for the doctest harness/,
+	);
+	assert.doesNotThrow(() =>
+		cleanBlockSource(
+			"import { type Foo as __Foo } from '@dbsp/core';",
+			'imports.md',
+			13,
+			true,
+		),
+	);
+});
+
 function sourceLine(markdown: string, text: string): number {
 	const offset = markdown.indexOf(text);
 	assert.notEqual(offset, -1, `fixture must contain ${JSON.stringify(text)}`);

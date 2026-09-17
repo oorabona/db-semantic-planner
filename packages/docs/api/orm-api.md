@@ -726,6 +726,7 @@ orm.select('posts')
 ### Window Functions
 
 ```typescript
+// doctest: skip — illustrative fragment: queries products, employees, orders, prices and sales, which are not in the default schema
 import { rowNumber, rank, denseRank, wSum, wAvg, wCount, wMin, wMax, lag, lead } from '@dbsp/core';
 
 // Row numbering
@@ -772,6 +773,7 @@ orm.select('sales').columns([
 ### Expressions
 
 ```typescript
+// doctest: skip — illustrative fragment: uses columns nickname and firstName and an author relation that are not in the default schema
 import { coalesce, raw, col, relationColumn } from '@dbsp/core';
 
 // COALESCE — first non-null value
