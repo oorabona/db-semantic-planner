@@ -100,17 +100,22 @@ export function ConnectionDialog({
 	const [discoveryTransport, setDiscoveryTransport] =
 		useState<ConnectionTransport | null>(null);
 	const discoveryGeneration = useRef(0);
+	const invalidateDiscovery = () => {
+		discoveryGeneration.current += 1;
+		setDiscovering(false);
+		setLoadingSchemas(false);
+	};
 
 	if (!open) return null;
 
 	const update = <K extends keyof ConnectionFormData>(
 		field: K,
 		value: ConnectionFormData[K],
-		invalidateDiscovery = true,
+		shouldInvalidateDiscovery = true,
 	) => {
 		if (form[field] === value) return false;
 		onTestResultInvalidated?.();
-		if (invalidateDiscovery) discoveryGeneration.current += 1;
+		if (shouldInvalidateDiscovery) invalidateDiscovery();
 		setDiscoveryTransport(null);
 		setForm((prev) => ({ ...prev, [field]: value }));
 		return true;
@@ -118,7 +123,7 @@ export function ConnectionDialog({
 
 	const handleClose = () => {
 		onTestResultInvalidated?.();
-		discoveryGeneration.current += 1;
+		invalidateDiscovery();
 		setDiscoveryTransport(null);
 		onClose();
 	};
@@ -133,8 +138,8 @@ export function ConnectionDialog({
 	const savedAllowMode = form.sslMode === 'allow';
 
 	const handleDiscover = async () => {
-		const generation = discoveryGeneration.current + 1;
-		discoveryGeneration.current = generation;
+		invalidateDiscovery();
+		const generation = discoveryGeneration.current;
 		setDiscovering(true);
 		setDiscoverError(null);
 		setDatabases([]);
@@ -221,7 +226,7 @@ export function ConnectionDialog({
 	};
 
 	const handleTest = () => {
-		discoveryGeneration.current += 1;
+		invalidateDiscovery();
 		onTest(form);
 	};
 
@@ -477,6 +482,11 @@ export function ConnectionDialog({
 							<span className="block mt-1 text-yellow-700">
 								Warning: TLS was unavailable, so this connection is not
 								encrypted.
+							</span>
+						)}
+						{testResult.ok && testResult.cleanupError && (
+							<span className="block mt-1 text-yellow-700">
+								Warning: {testResult.cleanupError}
 							</span>
 						)}
 					</div>

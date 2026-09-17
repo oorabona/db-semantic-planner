@@ -94,6 +94,23 @@ describe('ConnectionDialog SSL modes', () => {
 		).toBeTruthy();
 	});
 
+	it('shows a cleanup failure as a warning separate from successful test text', () => {
+		renderDialog({
+			testResult: {
+				ok: true,
+				message: 'Connection successful!',
+				transport: 'tls',
+				cleanupError: 'Disconnect failed: sidecar cleanup failed',
+			},
+		});
+
+		expect(screen.getByText('Connection successful!')).toBeTruthy();
+		const warning = screen.getByText(
+			'Warning: Disconnect failed: sidecar cleanup failed',
+		);
+		expect(warning.classList).toContain('text-yellow-700');
+	});
+
 	it('shows the fallback warning after discovery uses plaintext', async () => {
 		renderDialog({
 			initial: { database: 'app' },
@@ -241,6 +258,7 @@ describe('ConnectionDialog SSL modes', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
 		await waitFor(() => expect(onListSchemas).toHaveBeenCalledOnce());
 		fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
+		expect(screen.getByText('Schema').querySelector('svg')).toBeNull();
 		await act(async () => {
 			resolveSchemas?.({ schemas: ['public'], transport: 'tls' });
 		});
@@ -251,6 +269,40 @@ describe('ConnectionDialog SSL modes', () => {
 				'before-test',
 			);
 		});
+	});
+
+	it('clears discovery state and ignores a late response after a form edit', async () => {
+		let resolveDiscovery:
+			| ((value: { databases: string[]; transport: 'tls' }) => void)
+			| undefined;
+		const onDiscover = vi.fn(
+			() =>
+				new Promise<{ databases: string[]; transport: 'tls' }>((resolve) => {
+					resolveDiscovery = resolve;
+				}),
+		);
+		renderDialog({
+			initial: { database: 'before-edit' },
+			onDiscover,
+		});
+
+		fireEvent.click(screen.getByRole('button', { name: 'Discover' }));
+		expect(screen.getByRole('button', { name: 'Discovering...' })).toBeTruthy();
+
+		fireEvent.change(screen.getByLabelText('Host'), {
+			target: { value: 'changed.example.test' },
+		});
+		const discoverButton = screen.getByRole('button', { name: 'Discover' });
+		expect((discoverButton as HTMLButtonElement).disabled).toBe(false);
+
+		await act(async () => {
+			resolveDiscovery?.({ databases: ['late-database'], transport: 'tls' });
+		});
+
+		expect(onDiscover).toHaveBeenCalledOnce();
+		expect((screen.getByLabelText('Database') as HTMLInputElement).value).toBe(
+			'before-edit',
+		);
 	});
 
 	it('does not invalidate a result when re-selecting the current database', async () => {

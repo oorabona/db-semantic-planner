@@ -319,9 +319,9 @@ describe('useConnection', () => {
 			await waitFor(() => {
 				expect(result.current.testResult).toEqual({
 					ok: true,
-					message:
-						'Connection successful! Disconnect failed: sidecar cleanup failed',
+					message: 'Connection successful!',
 					transport: 'fallback-plaintext',
+					cleanupError: 'Disconnect failed: sidecar cleanup failed',
 				});
 			});
 		});
