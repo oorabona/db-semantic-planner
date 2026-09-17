@@ -1464,7 +1464,8 @@ pluralize('person');        // → 'people' (built-in irregular)
 Pass a `Record<string, string>` to `singularize()` for domain-specific plurals not covered by the built-in rules:
 
 ```typescript
-// doctest: skip — uses singularize without importing it
+import { singularize } from '@dbsp/core';
+
 const domainOverrides = {
   matrices: 'matrix',
   alumni: 'alumnus',
@@ -1478,7 +1479,8 @@ singularize('users', domainOverrides);    // → 'user' (falls through to built-
 Overrides take priority over built-in irregular plurals:
 
 ```typescript
-// doctest: skip — uses singularize without importing it
+import { singularize } from '@dbsp/core';
+
 singularize('people', { people: 'individual' }); // → 'individual' (overrides built-in 'person')
 ```
 

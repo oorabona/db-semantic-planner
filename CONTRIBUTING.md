@@ -139,7 +139,8 @@ pnpm test:docs:generate        # just regenerate __generated__/ test files
   execute in isolation (e.g. `orm.tables.users.truncate(options?)`).
 - Block demonstrates a production application pattern (full web server,
   long-lived daemon) that cannot be expressed as a standalone snippet.
-- Block references tables or helpers not available in the default preamble schema.
+- Block references tables not in the default schema. A public `@dbsp/*` helper is
+  not a reason to skip: import it in the block.
 
 **Running the real-DB doctest suite locally:**
 

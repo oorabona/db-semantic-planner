@@ -237,7 +237,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/api/orm-api.md": {
-			"explicit-skip": 16,
+			"explicit-skip": 14,
 			"real-db-only": 7,
 			"heuristic-fragment": 0
 		},
