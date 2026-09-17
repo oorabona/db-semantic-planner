@@ -21,6 +21,7 @@ import type {
 	SchemaDiffUnpairedColumnDefaultWarning,
 } from '@/lib/ipc';
 import { sidecarApi } from '@/lib/ipc';
+import { useConnectionStore } from '@/stores/connection-store';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { SchemaDiffSummary } from './SchemaDiffSummary';
@@ -33,6 +34,7 @@ export function SchemaDiffView() {
 	const error = useSchemaDiffStore((s) => s.error);
 	const applying = useSchemaDiffStore((s) => s.applying);
 	const applyError = useSchemaDiffStore((s) => s.applyError);
+	const active = useConnectionStore((s) => s.active);
 	const setApplying = useSchemaDiffStore((s) => s.setApplying);
 	const setApplyDone = useSchemaDiffStore((s) => s.setApplyDone);
 	const setApplyError = useSchemaDiffStore((s) => s.setApplyError);
@@ -45,14 +47,12 @@ export function SchemaDiffView() {
 		if (!diff || diff.upSQL.length === 0) return;
 		setApplying();
 		try {
-			const connectionId = (window as unknown as Record<string, unknown>)
-				.__dbsp_connectionId as string;
-			if (!connectionId) {
+			if (!active) {
 				setApplyError('No active connection');
 				setShowConfirm(false);
 				return;
 			}
-			const result = await sidecarApi.schemaApply(connectionId, [
+			const result = await sidecarApi.schemaApply(active.connectionId, [
 				...diff.upSQL,
 			]);
 			if (result.success) {
@@ -66,7 +66,7 @@ export function SchemaDiffView() {
 			setApplyError(err instanceof Error ? err.message : String(err));
 			setShowConfirm(false);
 		}
-	}, [diff, setApplying, setApplyDone, setApplyError]);
+	}, [active, diff, setApplying, setApplyDone, setApplyError]);
 
 	if (loading) {
 		return (

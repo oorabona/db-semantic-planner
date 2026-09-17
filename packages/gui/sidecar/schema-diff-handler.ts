@@ -207,8 +207,20 @@ export async function handleSchemaDiff(
 	// 4. Generate UP and DOWN SQL
 	const upSQL =
 		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
+	// DOWN reverses exactly the non-destructive bundle Apply can execute. Keep
+	// destructive rollback statements (such as DROP TABLE for CREATE TABLE).
+	const appliedDiff = {
+		...diff,
+		changes: diff.changes.filter((change) => !change.destructive),
+	};
 	const downSQL =
-		diff.changes.length > 0 ? generateDownSQL(diff, sqlOptions) : [];
+		appliedDiff.changes.length > 0
+			? generateDownSQL(appliedDiff, {
+					...(connectionSchema !== undefined && connectionSchema !== 'public'
+						? { schemaName: connectionSchema }
+						: {}),
+				})
+			: [];
 
 	// 5. Serialize for JSON transport
 	return {

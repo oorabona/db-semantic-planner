@@ -251,10 +251,14 @@ describe('handleSchemaDiff', () => {
 			schemaName: 'tenant_1',
 			includeDestructive: false,
 		});
-		expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
-			schemaName: 'tenant_1',
-			includeDestructive: false,
-		});
+		expect(generateDownSQL).toHaveBeenCalledWith(
+			expect.objectContaining({
+				changes: [diffWithChanges.changes[0]],
+			}),
+			{
+				schemaName: 'tenant_1',
+			},
+		);
 		expect(result.upSQL).toEqual([
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
 		]);
@@ -280,9 +284,12 @@ describe('handleSchemaDiff', () => {
 		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
 			includeDestructive: false,
 		});
-		expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
-			includeDestructive: false,
-		});
+		expect(generateDownSQL).toHaveBeenCalledWith(
+			expect.objectContaining({
+				changes: [diffWithChanges.changes[0]],
+			}),
+			{},
+		);
 	});
 
 	it('excludes destructive changes from the Apply bundle while preserving them in the diff', async () => {
@@ -311,6 +318,49 @@ describe('handleSchemaDiff', () => {
 					destructive: true,
 				}),
 			]),
+		);
+	});
+
+	it('previews the inverse of the applied non-destructive bundle', async () => {
+		givenLoadedSchema();
+		const createTable = {
+			...emptyDiff,
+			changes: [
+				{
+					kind: 'create_table' as const,
+					table: 'orders',
+					destructive: false,
+					details: 'Create table orders',
+				},
+				{
+					kind: 'drop_table' as const,
+					table: 'legacy',
+					destructive: true,
+					details: 'Drop table legacy',
+				},
+			],
+		} satisfies SchemaDiff;
+		vi.mocked(generateMigrationSQL).mockReturnValue([
+			'CREATE TABLE "orders" ("id" integer);',
+		]);
+		vi.mocked(generateDownSQL).mockImplementation((diff, options) => {
+			if (options?.includeDestructive === false) return [];
+			return diff.changes
+				.filter((change) => change.kind === 'create_table')
+				.map((change) => `DROP TABLE "${change.table}";`);
+		});
+
+		const result = await handleSchemaDiff(
+			{ connectionId: 'test-conn', schemaPath: '/project' },
+			comparisonReturning(createTable),
+		);
+
+		expect(result.downSQL).toEqual(['DROP TABLE "orders";']);
+		expect(generateDownSQL).toHaveBeenCalledWith(
+			expect.objectContaining({
+				changes: [createTable.changes[0]],
+			}),
+			{},
 		);
 	});
 

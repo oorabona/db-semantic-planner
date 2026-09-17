@@ -116,6 +116,7 @@ vi.mock('@/lib/ipc', () => ({
 }));
 
 import { sidecarApi } from '@/lib/ipc';
+import { useConnectionStore } from '@/stores/connection-store';
 import { SchemaDiffView } from './SchemaDiffView';
 
 afterEach(() => {
@@ -126,7 +127,7 @@ afterEach(() => {
 	mockState.applying = false;
 	mockState.applyError = null;
 	mockState.appliedCount = null;
-	delete (window as unknown as Record<string, unknown>).__dbsp_connectionId;
+	useConnectionStore.setState({ active: null });
 	vi.clearAllMocks();
 });
 
@@ -419,8 +420,14 @@ describe('SchemaDiffView', () => {
 
 	it('sends only the non-destructive Apply bundle', async () => {
 		mockState.diff = mockDiff;
-		(window as unknown as Record<string, unknown>).__dbsp_connectionId =
-			'test-connection';
+		useConnectionStore.setState({
+			active: {
+				connectionId: 'test-connection',
+				profileId: 'test-profile',
+				database: 'test-db',
+				schema: 'public',
+			},
+		});
 		vi.mocked(sidecarApi.schemaApply).mockResolvedValue({
 			success: true,
 			applied: mockDiff.upSQL.length,
