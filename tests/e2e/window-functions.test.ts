@@ -107,6 +107,45 @@ describe('DX-021: Window Functions E2E', () => {
 			expect(mostExpensive).toBeDefined();
 			expect(mostExpensive?.priceCents).toBe(2199); // Medium or Large
 		});
+
+		it('returns the top two variants per product through an NQL CTE', async () => {
+			const adapter = await getTestAdapter();
+			const orm = createOrm({ model: pimdamExtendedModel, adapter });
+
+			const input = (await orm
+				.withSchema(SCHEMA)
+				.select('variants')
+				.columns(['id', 'productId', 'priceCents'])
+				.all()) as Array<{
+				id: number;
+				productId: number;
+				priceCents: number;
+			}>;
+
+			const expectedIds = new Set(
+				[...Map.groupBy(input, (row) => row.productId).values()].flatMap(
+					(rows) =>
+						rows
+							.toSorted(
+								(left, right) =>
+									right.priceCents - left.priceCents || left.id - right.id,
+							)
+							.slice(0, 2)
+							.map((row) => row.id),
+				),
+			);
+
+			const rows = await orm.withSchema(SCHEMA).nql<{
+				id: number;
+				productId: number;
+				priceCents: number;
+				rn: string;
+			}>`with ranked as (variants | select id, productId, priceCents, row_number() over (partition by productId order by priceCents desc, id) as rn)
+ranked | where rn <= 2 | select id, productId, priceCents, rn`.all();
+
+			expect(expectedIds.size).toBeLessThan(input.length);
+			expect(new Set(rows.map((row) => row.id))).toEqual(expectedIds);
+		});
 	});
 
 	// =========================================================================

@@ -77,7 +77,7 @@ Builder methods available on all of the above:
 
 ## Pattern: rank rows within each group
 
-Rank each sale within its region by amount, descending. Keeping only the top 3 per region needs an outer query that filters on the rank, because PostgreSQL evaluates window functions after `WHERE`; this example stops at the ranking.
+Rank each sale within its region by amount, descending. Keeping only the top 3 per region needs an outer query that filters on the window result, because PostgreSQL evaluates window functions after `WHERE`.
 
 ```typescript
 import { schema, createOrm, rank } from '@dbsp/core';
@@ -98,6 +98,34 @@ ranked.dump();
 //   RANK() OVER (PARTITION BY "region" ORDER BY "amount" DESC) AS "rnk"
 // FROM "sales"
 ```
+
+For an executable top-N query, put the window calculation in an NQL CTE and
+filter it outside. This compile-only example uses its own `sales` schema:
+
+```typescript
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  sales: { id: 'integer', region: 'string', amount: 'decimal' },
+} as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+
+orm.nql<{
+  id: number;
+  region: string;
+  amount: string;
+  rn: string;
+}>`with ranked as (
+  sales | select id, region, amount,
+    row_number() over (partition by region order by amount desc, id) as rn
+)
+ranked | where rn <= 3 | select id, region, amount, rn`.dump();
+```
+
+Use `row_number()`, not `rank()`, when the result must contain at most three
+rows per region: ties share a `rank()`, so a rank cutoff can return more than
+three rows.
 
 **When to use `rank()` vs `denseRank()`:** use `rank()` when gaps in rank numbers are acceptable (e.g. "position 1, 2, 2, 4" for tied entries). Use `denseRank()` when you need consecutive rank numbers (e.g. "position 1, 2, 2, 3").
 

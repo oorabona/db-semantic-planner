@@ -283,7 +283,7 @@ Every query produces a `Dump`:
 
 ```typescript
 type Dump = {
-  plan: PlanReport;      // Decisions + reasoning + warnings
+  plan?: PlanReport;     // Decisions + reasoning + warnings; absent for set operations and NQL CTE/set-operation queries
   sql: string;           // Compiled SQL
   params: readonly unknown[]; // Bound parameters
   meta?: {
@@ -343,7 +343,7 @@ pnpm tsc --noEmit
 - **Zero/minimal runtime deps:** Tree-shakeable, pg as peer
 - **Full test coverage:** Unit + integration + golden tests
 - **Deterministic:** Same inputs → same SQL/plan (stable aliasing)
-- **Observability:** dump() = plan + SQL + params
+- **Observability:** dump() = SQL + params, plus the plan when semantic planning applies
 - **Security:** Identifier validation, param redaction in logs
 - **Performance:** Anti "row explosion" defaults, minimal JS overhead
 

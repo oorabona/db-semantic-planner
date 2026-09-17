@@ -4,7 +4,7 @@ title: Observability
 
 # Observability
 
-Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that returns the compiled SQL, bound parameters, and the full planner report — without touching the database. This makes it straightforward to inspect, log, and test every query your application generates.
+Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that returns the compiled SQL, bound parameters, and a plan when semantic planning applies — without touching the database. This makes it straightforward to inspect, log, and test every query your application generates.
 
 ---
 
