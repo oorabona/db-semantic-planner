@@ -248,7 +248,7 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			);
 		});
 
-		it('suggests dump() for a CTE without adapter', async () => {
+		it('requires an adapter for a CTE without suggesting another method', async () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
