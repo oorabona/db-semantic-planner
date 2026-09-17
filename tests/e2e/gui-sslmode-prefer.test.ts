@@ -1,9 +1,16 @@
 /**
- * #455 — PostgreSQL's test container does not serve TLS. The GUI sidecar must
- * expose that a prefer connection retried in plaintext, while require refuses
- * the downgrade.
+ * #455 — The shared PostgreSQL test container serves TLS, while this suite's
+ * dedicated container does not. The GUI sidecar must use TLS when available,
+ * retry prefer connections in plaintext when necessary, and never downgrade
+ * require connections.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+	PostgreSqlContainer,
+	type StartedPostgreSqlContainer,
+} from '@testcontainers/postgresql';
+import { Wait } from 'testcontainers';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
 	type ConnectParams,
 	connect,
@@ -28,6 +35,16 @@ function testContainerParams(): ConnectParams {
 	};
 }
 
+function containerParams(container: StartedPostgreSqlContainer): ConnectParams {
+	return {
+		host: container.getHost(),
+		port: container.getPort(),
+		database: container.getDatabase(),
+		user: container.getUsername(),
+		password: container.getPassword(),
+	};
+}
+
 let connectionId: string | undefined;
 
 afterEach(async () => {
@@ -40,9 +57,60 @@ afterEach(async () => {
 describe.runIf(process.env[LOCAL_CONTAINER_ENV] === '1')(
 	'#455 GUI sslmode prefer',
 	() => {
-		it('falls back to plaintext when the testcontainer server has no TLS', async () => {
+		let noTlsContainer: StartedPostgreSqlContainer | undefined;
+		function noTlsContainerParams(): ConnectParams {
+			if (noTlsContainer === undefined) {
+				throw new Error('No-TLS PostgreSQL container did not start');
+			}
+			return containerParams(noTlsContainer);
+		}
+
+		beforeAll(async () => {
+			const pgImage =
+				process.env.POSTGRES_IMAGE ??
+				'ghcr.io/oorabona/postgres:18-alpine-full';
+			noTlsContainer = await new PostgreSqlContainer(pgImage)
+				.withDatabase('e2e_test')
+				.withUsername('test')
+				.withPassword('test')
+				.withCommand(['postgres', '-c', 'ssl=off'])
+				.withStartupTimeout(120000)
+				.withWaitStrategy(
+					Wait.forLogMessage(
+						/database system is ready to accept connections/,
+						2,
+					),
+				)
+				.start();
+		});
+
+		afterAll(async () => {
+			await noTlsContainer?.stop();
+		});
+
+		it('uses TLS with sslmode prefer when the shared testcontainer supports it', async () => {
 			const result = await connect({
 				...testContainerParams(),
+				sslMode: 'prefer',
+			});
+			connectionId = result.connectionId;
+
+			expect(result.transport).toBe('tls');
+		});
+
+		it('uses TLS with sslmode require when the shared testcontainer supports it', async () => {
+			const result = await connect({
+				...testContainerParams(),
+				sslMode: 'require',
+			});
+			connectionId = result.connectionId;
+
+			expect(result.transport).toBe('tls');
+		});
+
+		it('falls back to plaintext with sslmode prefer when the server has no TLS', async () => {
+			const result = await connect({
+				...noTlsContainerParams(),
 				sslMode: 'prefer',
 			});
 			connectionId = result.connectionId;
@@ -50,9 +118,9 @@ describe.runIf(process.env[LOCAL_CONTAINER_ENV] === '1')(
 			expect(result.transport).toBe('fallback-plaintext');
 		});
 
-		it('does not downgrade sslmode require', async () => {
+		it('does not downgrade sslmode require when the server has no TLS', async () => {
 			await expect(
-				connect({ ...testContainerParams(), sslMode: 'require' }),
+				connect({ ...noTlsContainerParams(), sslMode: 'require' }),
 			).rejects.toThrow('The server does not support SSL connections');
 		});
 	},
