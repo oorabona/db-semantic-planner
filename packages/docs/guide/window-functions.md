@@ -27,7 +27,6 @@ function() OVER (PARTITION BY <grouping columns> ORDER BY <sort columns>)
 In `@dbsp/core`, the builder chain maps directly:
 
 ```typescript
-// doctest: skip — window function helpers (rowNumber, rank, etc.) are not in the doctest preamble
 import { schema, createOrm, rowNumber } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -81,7 +80,6 @@ Builder methods available on all of the above:
 Retrieve the top 3 sales records per region, ranked by amount descending.
 
 ```typescript
-// doctest: skip — window function helpers not in doctest preamble
 import { schema, createOrm, rank, gt } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -113,7 +111,6 @@ ranked.dump();
 Compute a cumulative order total per user, ordered by date.
 
 ```typescript
-// doctest: skip — window function helpers not in doctest preamble
 import { schema, createOrm, wSum } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -142,7 +139,6 @@ Without `.partitionBy()`, the running total accumulates across all users in the 
 Detect a gap between an event's `startedAt` and the previous event's `endedAt` for the same session:
 
 ```typescript
-// doctest: skip — window function helpers not in doctest preamble
 import { schema, createOrm, lag } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
@@ -171,7 +167,6 @@ For the first row in each partition, `LAG` returns `NULL`. Filter post-query or 
 An alternative to `OFFSET` pagination that avoids the "skipped rows on concurrent insert" problem:
 
 ```typescript
-// doctest: skip — window function helpers not in doctest preamble
 import { schema, createOrm, rowNumber } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 

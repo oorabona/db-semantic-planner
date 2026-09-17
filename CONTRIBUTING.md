@@ -139,7 +139,8 @@ pnpm test:docs:generate        # just regenerate __generated__/ test files
   execute in isolation (e.g. `orm.tables.users.truncate(options?)`).
 - Block demonstrates a production application pattern (full web server,
   long-lived daemon) that cannot be expressed as a standalone snippet.
-- Block references tables or helpers not available in the default preamble schema.
+- Block references tables not in the default schema. A public `@dbsp/*` helper is
+  not a reason to skip: import it in the block.
 
 **Running the real-DB doctest suite locally:**
 
@@ -157,10 +158,9 @@ DBSP_DOCTEST_REAL_DB=1 DATABASE_URL=postgres://postgres:postgres@localhost:5432/
 podman stop dbsp-doctest && podman rm dbsp-doctest
 ```
 
-**When to un-skip:** if you widen the runner preamble in
-`tests/docs-verification/runner.ts` to expose more symbols or tables, audit
-existing skips to see if any of them were only there because the preamble
-was too narrow.
+**When to un-skip:** a doctest's static `@dbsp/*` imports are hoisted to module
+scope; `pg` is hoisted only for real-DB blocks. Audit skips when a block's
+remaining runtime requirement becomes available.
 
 ### Architecture rule (strict)
 

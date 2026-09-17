@@ -696,7 +696,7 @@ orm.select('posts').orderBy('createdAt', 'desc').limit(10).offset(20)
 ### Aggregates
 
 ```typescript
-// doctest: skip — illustrative fragment (distinct() helper not in doctest preamble; uses orders/products tables not in default preamble)
+// doctest: skip — illustrative fragment uses orders/products tables not in the default schema
 import { distinct } from '@dbsp/core';
 
 // COUNT
@@ -726,7 +726,7 @@ orm.select('posts')
 ### Window Functions
 
 ```typescript
-// doctest: skip — illustrative fragment (window function helpers rowNumber/rank/denseRank/wSum/wAvg/wCount/wMin/wMax/lag/lead not in doctest preamble)
+// doctest: skip — illustrative fragment: queries products, employees, orders, prices and sales, which are not in the default schema
 import { rowNumber, rank, denseRank, wSum, wAvg, wCount, wMin, wMax, lag, lead } from '@dbsp/core';
 
 // Row numbering
@@ -773,7 +773,7 @@ orm.select('sales').columns([
 ### Expressions
 
 ```typescript
-// doctest: skip — illustrative fragment (coalesce/raw/col/relationColumn helpers not in doctest preamble)
+// doctest: skip — illustrative fragment: uses columns nickname and firstName and an author relation that are not in the default schema
 import { coalesce, raw, col, relationColumn } from '@dbsp/core';
 
 // COALESCE — first non-null value
@@ -1265,7 +1265,7 @@ All errors have a `code` property for programmatic handling and a `name` propert
 | `ColumnNotFoundError` | `DBSP_E008` | Column not on table |
 
 ```typescript
-// doctest: skip — illustrative fragment (Errors namespace not in doctest preamble; block also uses .firstOrThrow() which requires a real PostgreSQL connection)
+// doctest: skip — illustrative fragment uses .firstOrThrow(), which requires a real PostgreSQL connection
 import { Errors } from '@dbsp/core';
 
 try {
@@ -1448,7 +1448,6 @@ The `CamelCaseNamingPlugin` handles edge cases: acronyms (`parseJSON` → `parse
 These are optional utility functions, exported from `@dbsp/core`, useful for building custom FK derivation or other naming logic:
 
 ```typescript
-// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
 import { singularize, pluralize, IRREGULAR_PLURALS } from '@dbsp/core';
 
 singularize('posts');       // → 'post'
@@ -1465,7 +1464,8 @@ pluralize('person');        // → 'people' (built-in irregular)
 Pass a `Record<string, string>` to `singularize()` for domain-specific plurals not covered by the built-in rules:
 
 ```typescript
-// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
+import { singularize } from '@dbsp/core';
+
 const domainOverrides = {
   matrices: 'matrix',
   alumni: 'alumnus',
@@ -1479,7 +1479,8 @@ singularize('users', domainOverrides);    // → 'user' (falls through to built-
 Overrides take priority over built-in irregular plurals:
 
 ```typescript
-// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
+import { singularize } from '@dbsp/core';
+
 singularize('people', { people: 'individual' }); // → 'individual' (overrides built-in 'person')
 ```
 

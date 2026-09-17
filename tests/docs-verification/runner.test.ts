@@ -5,6 +5,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Pool } from 'pg';
+import * as ts from 'typescript';
+import { cleanBlockSource } from './block-source.js';
 import { generatedSuitesRootDirectory } from './generated-suite-path.js';
 import { renderBlockModule, runBlock } from './runner.js';
 
@@ -40,7 +42,7 @@ test('a completed run leaves no scratch file for this process', async () => {
 	fs.writeFileSync(concurrentEntry, 'export {};');
 
 	try {
-		await runBlock('const result = 1 + 1;', 'runner.test.ts', 23);
+		await runBlock('const result = 1 + 1;', [], 'runner.test.ts', 23);
 
 		assert.deepEqual(
 			scratchEntries(),
@@ -59,7 +61,7 @@ test('a completed run leaves no scratch file for this process', async () => {
 });
 
 test('a real-db module imports expect around an already-clean block', () => {
-	const body = renderBlockModule('expect(true).toBe(true);', true);
+	const body = renderBlockModule('expect(true).toBe(true);', [], true);
 
 	assert.match(
 		body,
@@ -68,9 +70,97 @@ test('a real-db module imports expect around an already-clean block', () => {
 	);
 });
 
+test('hoisted imports retain local runtime bindings and filter matching ambient names', async () => {
+	const source =
+		"import * as core from '@dbsp/core';\nimport { rawExists as exists } from '@dbsp/core';\nthrow new Error(exists === core.rawExists ? 'ok' : 'wrong');";
+	const cleaned = cleanBlockSource(source, 'alias.md', 1, true);
+	const module = renderBlockModule(cleaned.body, cleaned.imports, false);
+	assert.match(module, /^import \* as core from '@dbsp\/core';$/m);
+	assert.doesNotMatch(module, /none, exists, notExists/);
+	await assert.rejects(
+		runBlock(cleaned.body, cleaned.imports, 'alias.md', 1),
+		/alias\.md:1 — ok/,
+	);
+});
+
+test('type-only imports do not remove ambient bindings and pg stays mocked in compile-only mode', async () => {
+	const source =
+		"import { type eq } from '@dbsp/core';\nimport { Pool } from 'pg';\nif (typeof eq !== 'function' || typeof Pool !== 'function') throw new Error('wrong');";
+	const cleaned = cleanBlockSource(source, 'types.md', 1, true);
+	const module = renderBlockModule(cleaned.body, cleaned.imports, false);
+	assert.doesNotMatch(module, /from 'pg'/);
+	assert.match(module, /const Pool = __DoctestPool;/);
+	await runBlock(cleaned.body, cleaned.imports, 'types.md', 1);
+});
+
+test('a real-db pg import has one Pool binding and private pool lifecycle state', () => {
+	const cleaned = cleanBlockSource(
+		"import { Pool } from 'pg';",
+		'pool.md',
+		1,
+		true,
+	);
+	const module = renderBlockModule(cleaned.body, cleaned.imports, true);
+	const file = ts.createSourceFile(
+		'pool.ts',
+		module,
+		ts.ScriptTarget.ESNext,
+		false,
+		ts.ScriptKind.TS,
+	);
+	const poolBindings = file.statements.flatMap((statement) => {
+		if (
+			ts.isImportDeclaration(statement) &&
+			statement.importClause?.namedBindings &&
+			ts.isNamedImports(statement.importClause.namedBindings)
+		) {
+			return statement.importClause.namedBindings.elements.filter(
+				(element) => element.name.text === 'Pool',
+			);
+		}
+		if (ts.isVariableStatement(statement)) {
+			return statement.declarationList.declarations.filter(
+				(declaration) =>
+					ts.isIdentifier(declaration.name) && declaration.name.text === 'Pool',
+			);
+		}
+		return [];
+	});
+	assert.equal(poolBindings.length, 1);
+	assert.match(module, /const __doctestPool = new __doctestPgPool/);
+	assert.doesNotMatch(module, /const Pool = __doctestPgPool;/);
+});
+
+test('imported fixture names do not replace harness setup bindings', async () => {
+	const source =
+		"import * as core from '@dbsp/core';\nimport { schema as db, schema as createOrm } from '@dbsp/core';\nif (db !== core.schema || typeof orm.select !== 'function') throw new Error('wrong');";
+	const cleaned = cleanBlockSource(source, 'fixture.md', 1, true);
+	await runBlock(cleaned.body, cleaned.imports, 'fixture.md', 1);
+});
+
+test('a kept import named process cannot shadow compile-only setup', async () => {
+	const source =
+		"import { schema as process } from '@dbsp/core';\nif (typeof process !== 'function') throw new Error('wrong process');";
+	const cleaned = cleanBlockSource(source, 'process.md', 1, true);
+	await runBlock(cleaned.body, cleaned.imports, 'process.md', 1);
+});
+
+test('real-db setup reads its private environment import, not a block process binding', () => {
+	const source = "import { schema as process } from '@dbsp/core';";
+	const cleaned = cleanBlockSource(source, 'process-real-db.md', 1, true);
+	const module = renderBlockModule(
+		`${cleaned.body}\nvoid process;`,
+		cleaned.imports,
+		true,
+	);
+	assert.match(module, /env as __doctestEnv.*node:process/s);
+	assert.match(module, /connectionString: __doctestEnv\.DATABASE_URL/);
+	assert.doesNotMatch(module, /connectionString: process\.env/);
+});
+
 test('falsy thrown values fail doctest blocks', async () => {
 	const undefinedFailure = await captureRejection(() =>
-		runBlock('throw undefined;', 'falsy-undefined.md', 11),
+		runBlock('throw undefined;', [], 'falsy-undefined.md', 11),
 	);
 	assert.match(
 		(undefinedFailure as Error).message,
@@ -79,7 +169,7 @@ test('falsy thrown values fail doctest blocks', async () => {
 	);
 
 	const zeroFailure = await captureRejection(() =>
-		runBlock('throw 0;', 'falsy-zero.md', 12),
+		runBlock('throw 0;', [], 'falsy-zero.md', 12),
 	);
 	assert.match(
 		(zeroFailure as Error).message,
@@ -115,7 +205,12 @@ test('a partial scratch module is removed when writing fails, even when retentio
 		).href;
 		const { runBlock: runBlockWithWriteFailure } = await import(moduleUrl);
 		await assert.rejects(
-			runBlockWithWriteFailure('const result = 1 + 1;', 'write-failure.md', 17),
+			runBlockWithWriteFailure(
+				'const result = 1 + 1;',
+				[],
+				'write-failure.md',
+				17,
+			),
 			/write-failure\.md:17 — injected write failure/,
 		);
 		assert.deepEqual(
@@ -172,7 +267,7 @@ test('a scratch operation and its unlink failure are both retained', async () =>
 		).href;
 		const { runBlock: runBlockWithFailures } = await import(moduleUrl);
 		const failure = await captureRejection(() =>
-			runBlockWithFailures('const result = 1 + 1;', 'aggregate.md', 27),
+			runBlockWithFailures('const result = 1 + 1;', [], 'aggregate.md', 27),
 		);
 
 		assert.ok(failure instanceof AggregateError);
@@ -218,7 +313,7 @@ test('a falsy unlink failure retains its value and names the doctest location', 
 		).href;
 		const { runBlock: runBlockWithUndefinedUnlink } = await import(moduleUrl);
 		const failure = await captureRejection(() =>
-			runBlockWithUndefinedUnlink('const result = 1 + 1;', 'unlink.md', 29),
+			runBlockWithUndefinedUnlink('const result = 1 + 1;', [], 'unlink.md', 29),
 		);
 
 		assert.match(
@@ -267,7 +362,7 @@ test('a real-db reset failure ends the pool and retains an end failure', async (
 		).href;
 		const { runBlock: runRealDbBlock } = await import(moduleUrl);
 		const failure = await captureRejection(() =>
-			runRealDbBlock('const result = 1 + 1;', 'real-db-reset.md', 31, {
+			runRealDbBlock('const result = 1 + 1;', [], 'real-db-reset.md', 31, {
 				realDbOnly: true,
 			}),
 		);
@@ -320,7 +415,7 @@ test('a real-db block return still fails when ending its pool fails', async () =
 		).href;
 		const { runBlock: runRealDbBlock } = await import(moduleUrl);
 		const failure = await captureRejection(() =>
-			runRealDbBlock('return;', 'real-db-return.md', 37, {
+			runRealDbBlock('return;', [], 'real-db-return.md', 37, {
 				realDbOnly: true,
 			}),
 		);
@@ -369,9 +464,15 @@ test('a real-db block cannot shadow the harness pool with var', async () => {
 			import.meta.url,
 		).href;
 		const { runBlock: runRealDbBlock } = await import(moduleUrl);
-		await runRealDbBlock('var __pool = undefined;', 'real-db-var-pool.md', 39, {
-			realDbOnly: true,
-		});
+		await runRealDbBlock(
+			'var __pool = undefined;',
+			[],
+			'real-db-var-pool.md',
+			39,
+			{
+				realDbOnly: true,
+			},
+		);
 
 		assert.equal(
 			endCalls,
@@ -391,7 +492,7 @@ test('a real-db block cannot shadow the harness pool with var', async () => {
 
 test('an empty foreign aggregate retains its own message', async () => {
 	const emptyFailure = await captureRejection(() =>
-		runBlock('await Promise.any([]);', 'empty-aggregate.md', 41),
+		runBlock('await Promise.any([]);', [], 'empty-aggregate.md', 41),
 	);
 	assert.match(
 		(emptyFailure as Error).message,
@@ -409,7 +510,7 @@ test('an empty foreign aggregate retains its own message', async () => {
 
 test('an unstringifiable thrown value still receives a location error', async () => {
 	const failure = await captureRejection(() =>
-		runBlock('throw Object.create(null);', 'unstringifiable.md', 45),
+		runBlock('throw Object.create(null);', [], 'unstringifiable.md', 45),
 	);
 
 	assert.match(
@@ -430,6 +531,7 @@ test('a throwing Error message getter cannot replace the original failure', asyn
 				get message() { throw new Error('message getter failed'); }
 			}
 			throw new BadMessageError();`,
+			[],
 			'bad-message.md',
 			46,
 		),
@@ -446,6 +548,7 @@ test('a two-child foreign aggregate retains its message and identity', async () 
 	const applicationFailure = await captureRejection(() =>
 		runBlock(
 			"throw new AggregateError([new Error('first child'), new Error('second child')], 'application aggregate');",
+			[],
 			'foreign-aggregate.md',
 			43,
 		),
@@ -489,6 +592,7 @@ test('a foreign aggregate remains intact alongside an unlink failure', async () 
 		const failure = await captureRejection(() =>
 			runBlockWithUnlinkFailure(
 				"throw new AggregateError([new Error('first child'), new Error('second child')], 'application aggregate');",
+				[],
 				'foreign-aggregate-unlink.md',
 				47,
 			),
