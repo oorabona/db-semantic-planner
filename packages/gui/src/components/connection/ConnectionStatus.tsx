@@ -1,9 +1,6 @@
 import { AlertCircle, Database, Loader2, Unplug } from 'lucide-react';
 import type { ConnectionTransport } from '@/lib/connection-transport';
-import {
-	isNonLocalConnectionHost,
-	transportLabel,
-} from '@/lib/connection-transport';
+import { transportLabel } from '@/lib/connection-transport';
 import type { ConnectionStatus as Status } from '@/stores/connection-store';
 
 interface ConnectionStatusProps {
@@ -76,14 +73,11 @@ export function ConnectionStatus({
 					Transport: {transportLabel(transport)}
 				</span>
 			)}
-			{status === 'connected' &&
-				transport === 'fallback-plaintext' &&
-				host &&
-				isNonLocalConnectionHost(host) && (
-					<span className="text-yellow-600">
-						Warning: plaintext fallback to a non-local host
-					</span>
-				)}
+			{status === 'connected' && transport === 'fallback-plaintext' && (
+				<span className="text-yellow-600">
+					Warning: TLS was unavailable, so this connection is not encrypted.
+				</span>
+			)}
 			{status === 'error' && error && (
 				<span className="truncate text-red-500" title={error}>
 					{error}

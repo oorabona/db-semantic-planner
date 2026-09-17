@@ -320,6 +320,43 @@ describe('useConnection', () => {
 			});
 		});
 
+		it('does not publish a result after it has been invalidated', async () => {
+			let resolveConnect:
+				| ((value: {
+						connectionId: string;
+						database: string;
+						schema: string;
+						transport: 'fallback-plaintext';
+				  }) => void)
+				| undefined;
+			vi.mocked(sidecarApi.connect).mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveConnect = resolve;
+					}),
+			);
+			vi.mocked(sidecarApi.disconnect).mockResolvedValue({ ok: true });
+
+			const { result } = renderHook(() => useConnection());
+			const testing = result.current.testConnection({
+				host: 'localhost',
+				port: 5432,
+				database: 'testdb',
+				user: 'testuser',
+				password: 'testpass',
+			});
+			result.current.clearTestResult();
+			resolveConnect?.({
+				connectionId: 'test-conn-123',
+				database: 'testdb',
+				schema: 'public',
+				transport: 'fallback-plaintext',
+			});
+
+			await testing;
+			expect(result.current.testResult).toBeNull();
+		});
+
 		it("uses 'Connection failed' fallback for non-Error exceptions", async () => {
 			vi.mocked(sidecarApi.connect).mockRejectedValue({ code: 'ECONNREFUSED' });
 

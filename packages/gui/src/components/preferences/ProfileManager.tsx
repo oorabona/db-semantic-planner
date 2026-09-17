@@ -38,8 +38,14 @@ export function ProfileManager() {
 	const mode = useProjectStore((s) => s.mode);
 	const settings = useProjectStore((s) => s.settings);
 	const folderPath = useProjectStore((s) => s.folderPath);
-	const { disconnect, testConnection, testResult, saveProfile, deleteProfile } =
-		useConnection();
+	const {
+		disconnect,
+		testConnection,
+		testResult,
+		clearTestResult,
+		saveProfile,
+		deleteProfile,
+	} = useConnection();
 
 	const [dialogOpen, setDialogOpen] = useState(false);
 	const [editingProfile, setEditingProfile] =
@@ -284,21 +290,26 @@ export function ProfileManager() {
 				</div>
 			)}
 
-			<ConnectionDialog
-				open={dialogOpen}
-				onClose={() => {
-					setDialogOpen(false);
-					setEditingProfile(null);
-				}}
-				onConnect={() => {}} // Not used in profile manager context
-				onTest={handleTest}
-				onSave={handleSave}
-				onDiscover={(params) => sidecarApi.listDatabases(params)}
-				onListSchemas={(params) => sidecarApi.listSchemas(params)}
-				initial={editingProfile ? profileToFormData(editingProfile) : undefined}
-				testing={testing}
-				testResult={testResult}
-			/>
+			{dialogOpen && (
+				<ConnectionDialog
+					open={dialogOpen}
+					onClose={() => {
+						setDialogOpen(false);
+						setEditingProfile(null);
+					}}
+					onConnect={() => {}} // Not used in profile manager context
+					onTest={handleTest}
+					onSave={handleSave}
+					onDiscover={(params) => sidecarApi.listDatabases(params)}
+					onListSchemas={(params) => sidecarApi.listSchemas(params)}
+					initial={
+						editingProfile ? profileToFormData(editingProfile) : undefined
+					}
+					testing={testing}
+					testResult={testResult}
+					onTestResultInvalidated={clearTestResult}
+				/>
+			)}
 		</div>
 	);
 }

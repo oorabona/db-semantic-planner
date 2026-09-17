@@ -49,7 +49,7 @@ function isServerWithoutSsl(error: unknown): boolean {
 function assertSupportedSslMode(mode: SslMode): void {
 	if (mode === 'allow') {
 		throw new Error(
-			'sslmode "allow" is not supported. Choose disable, prefer, or require.',
+			'sslmode "allow" is not supported. Choose disable, prefer, require, or verify-full.',
 		);
 	}
 }
@@ -101,11 +101,7 @@ function buildPool(
 
 async function establishPool(pool: Pool): Promise<void> {
 	const client = await pool.connect();
-	try {
-		await client.query('SELECT 1');
-	} finally {
-		client.release();
-	}
+	client.release();
 }
 
 async function endAfterFailedConnection(pool: Pool): Promise<void> {

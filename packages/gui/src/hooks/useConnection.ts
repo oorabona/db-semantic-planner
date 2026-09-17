@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import type { ConnectionTransport } from '@/lib/connection-transport';
+import { useCallback, useRef, useState } from 'react';
+import type { ConnectionTestResult } from '@/lib/connection-transport';
 import { sidecarApi } from '@/lib/ipc';
 import {
 	type ConnectionProfile,
@@ -21,11 +21,14 @@ interface ConnectParams {
 export function useConnection() {
 	const { setActive, setStatus, clearActive, addProfile, removeProfile } =
 		useConnectionStore();
-	const [testResult, setTestResult] = useState<{
-		ok: boolean;
-		message: string;
-		transport?: ConnectionTransport;
-	} | null>(null);
+	const [testResult, setTestResult] = useState<ConnectionTestResult | null>(
+		null,
+	);
+	const testResultGeneration = useRef(0);
+	const clearTestResult = useCallback(() => {
+		testResultGeneration.current += 1;
+		setTestResult(null);
+	}, []);
 
 	const connect = useCallback(
 		async (params: ConnectParams, profileId?: string) => {
@@ -70,6 +73,8 @@ export function useConnection() {
 	}, [clearActive]);
 
 	const testConnection = useCallback(async (params: ConnectParams) => {
+		const generation = testResultGeneration.current + 1;
+		testResultGeneration.current = generation;
 		setTestResult(null);
 		try {
 			const result = await sidecarApi.connect(params);
@@ -77,14 +82,18 @@ export function useConnection() {
 			await sidecarApi.disconnect({
 				connectionId: result.connectionId,
 			});
-			setTestResult({
-				ok: true,
-				message: 'Connection successful!',
-				transport: result.transport,
-			});
+			if (generation === testResultGeneration.current) {
+				setTestResult({
+					ok: true,
+					message: 'Connection successful!',
+					transport: result.transport,
+				});
+			}
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Connection failed';
-			setTestResult({ ok: false, message });
+			if (generation === testResultGeneration.current) {
+				setTestResult({ ok: false, message });
+			}
 		}
 	}, []);
 
@@ -126,6 +135,7 @@ export function useConnection() {
 		disconnect,
 		testConnection,
 		testResult,
+		clearTestResult,
 		saveProfile,
 		deleteProfile,
 		connectFromProfile,

@@ -178,7 +178,7 @@ describe('sslmode fallback', () => {
 			const { Pool } = await import('pg');
 
 			await expect(run()).rejects.toThrow(
-				'sslmode "allow" is not supported. Choose disable, prefer, or require.',
+				'sslmode "allow" is not supported. Choose disable, prefer, require, or verify-full.',
 			);
 			expect(Pool).not.toHaveBeenCalled();
 		},
@@ -201,11 +201,11 @@ describe('connect', () => {
 		expect(result.schema).toBe('tenant_1');
 	});
 
-	it('tests connection with SELECT 1', async () => {
+	it('proves the pool can connect before testing connection with SELECT 1', async () => {
 		await connect(baseParams);
 		expect(mockConnect).toHaveBeenCalled();
 		expect(mockQuery).toHaveBeenCalledWith('SELECT 1');
-		expect(mockQuery).toHaveBeenCalledTimes(2);
+		expect(mockQuery).toHaveBeenCalledTimes(1);
 		expect(mockRelease).toHaveBeenCalled();
 	});
 

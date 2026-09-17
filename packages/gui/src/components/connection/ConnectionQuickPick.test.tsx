@@ -190,7 +190,7 @@ describe('ConnectionQuickPick', () => {
 		expect(screen.getByText('Disconnect')).toBeTruthy();
 	});
 
-	it('shows a transport warning for a non-local plaintext fallback', () => {
+	it('shows a transport warning for a plaintext fallback', () => {
 		mockConnectionState.profiles = [
 			makeProfile({
 				config: { ...makeProfile().config, host: 'db.example.test' },
@@ -206,7 +206,9 @@ describe('ConnectionQuickPick', () => {
 		render(<ConnectionQuickPick onNewConnection={onNewConnection} />);
 		expect(screen.getByText('Transport: Plaintext fallback')).toBeTruthy();
 		expect(
-			screen.getByText('Warning: plaintext fallback to a non-local host'),
+			screen.getByText(
+				'Warning: TLS was unavailable, so this connection is not encrypted.',
+			),
 		).toBeTruthy();
 	});
 

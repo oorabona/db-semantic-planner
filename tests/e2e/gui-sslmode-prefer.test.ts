@@ -119,9 +119,19 @@ describe.runIf(process.env[LOCAL_CONTAINER_ENV] === '1')(
 		});
 
 		it('does not downgrade sslmode require when the server has no TLS', async () => {
-			await expect(
-				connect({ ...noTlsContainerParams(), sslMode: 'require' }),
-			).rejects.toThrow('The server does not support SSL connections');
+			try {
+				const result = await connect({
+					...noTlsContainerParams(),
+					sslMode: 'require',
+				});
+				await disconnect(result.connectionId);
+				throw new Error('sslmode require unexpectedly connected without TLS');
+			} catch (error) {
+				expect(error).toHaveProperty(
+					'message',
+					'The server does not support SSL connections',
+				);
+			}
 		});
 	},
 );

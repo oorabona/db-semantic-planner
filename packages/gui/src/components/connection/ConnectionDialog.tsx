@@ -4,9 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import type { ConnectionTransport } from '@/lib/connection-transport';
 import {
-	isNonLocalConnectionHost,
+	type ConnectionTestResult,
 	transportLabel,
 } from '@/lib/connection-transport';
 import type { DatabaseType, SslMode } from '@/stores/connection-store';
@@ -66,11 +65,8 @@ interface ConnectionDialogProps {
 	initial?: Partial<ConnectionFormData>;
 	testing?: boolean;
 	connecting?: boolean;
-	testResult?: {
-		ok: boolean;
-		message: string;
-		transport?: ConnectionTransport;
-	} | null;
+	testResult?: ConnectionTestResult | null;
+	onTestResultInvalidated?: () => void;
 }
 
 export function ConnectionDialog({
@@ -85,6 +81,7 @@ export function ConnectionDialog({
 	testing = false,
 	connecting = false,
 	testResult = null,
+	onTestResultInvalidated,
 }: ConnectionDialogProps) {
 	const [form, setForm] = useState<ConnectionFormData>({
 		...DEFAULT_FORM,
@@ -104,7 +101,15 @@ export function ConnectionDialog({
 	const update = <K extends keyof ConnectionFormData>(
 		field: K,
 		value: ConnectionFormData[K],
-	) => setForm((prev) => ({ ...prev, [field]: value }));
+	) => {
+		onTestResultInvalidated?.();
+		setForm((prev) => ({ ...prev, [field]: value }));
+	};
+
+	const handleClose = () => {
+		onTestResultInvalidated?.();
+		onClose();
+	};
 
 	const credentialsValid =
 		form.host.trim() !== '' &&
@@ -417,7 +422,7 @@ export function ConnectionDialog({
 						}}
 					>
 						sslmode &quot;allow&quot; is not supported. Choose disable, prefer,
-						or require, then save this profile.
+						require, or verify-full, then save this profile.
 					</div>
 				)}
 
@@ -432,19 +437,17 @@ export function ConnectionDialog({
 						}}
 					>
 						{testResult.message}
-						{testResult.ok && testResult.transport && (
+						{testResult.ok && (
 							<span className="block mt-1">
 								Transport: {transportLabel(testResult.transport)}
 							</span>
 						)}
-						{testResult.ok &&
-							testResult.transport === 'fallback-plaintext' &&
-							isNonLocalConnectionHost(form.host) && (
-								<span className="block mt-1 text-yellow-700">
-									Warning: TLS was unavailable, so this connection fell back to
-									plaintext over a non-local network.
-								</span>
-							)}
+						{testResult.ok && testResult.transport === 'fallback-plaintext' && (
+							<span className="block mt-1 text-yellow-700">
+								Warning: TLS was unavailable, so this connection is not
+								encrypted.
+							</span>
+						)}
 					</div>
 				)}
 
@@ -459,20 +462,26 @@ export function ConnectionDialog({
 						{testing ? 'Testing...' : 'Test Connection'}
 					</Button>
 					<div className="flex gap-2">
-						<Button variant="ghost" size="sm" onClick={onClose}>
+						<Button variant="ghost" size="sm" onClick={handleClose}>
 							Cancel
 						</Button>
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => onSave(form)}
+							onClick={() => {
+								onTestResultInvalidated?.();
+								onSave(form);
+							}}
 							disabled={!isValid || savedAllowMode || form.name.trim() === ''}
 						>
 							Save
 						</Button>
 						<Button
 							size="sm"
-							onClick={() => onConnect(form)}
+							onClick={() => {
+								onTestResultInvalidated?.();
+								onConnect(form);
+							}}
 							disabled={!isValid || savedAllowMode || connecting}
 						>
 							{connecting ? 'Connecting...' : 'Connect'}
