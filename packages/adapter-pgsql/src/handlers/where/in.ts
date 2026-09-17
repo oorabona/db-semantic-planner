@@ -10,6 +10,7 @@ import { booleanConstNode } from '../../ast-helpers.js';
 import { supportsDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
+import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -147,7 +148,7 @@ export const inHandler: WhereHandler = {
 					? 'IN+subquery decisions must be remapped to inSubquery/notInSubquery before reaching the in handler'
 					: `expected a scalar array but received ${value === undefined ? 'undefined' : value === null ? 'null' : typeof value}`;
 			throw new Error(
-				`[in handler] Received a non-array value for operator '${operator}' on column '${column}'. ` +
+				`[in handler] Received a non-array value for operator '${escapeDiagnosticText(operator)}' on column '${escapeDiagnosticText(column)}'. ` +
 					`This is a compiler bug: ${hint}. File a bug report.`,
 			);
 		}

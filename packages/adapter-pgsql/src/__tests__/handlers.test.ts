@@ -33,6 +33,16 @@ import {
 	type WhereHandler,
 } from '../handlers/index.js';
 
+function expectOneLineError(fn: () => unknown, expected: string): void {
+	expect(fn).toThrow(expected);
+	try {
+		fn();
+	} catch (error) {
+		expect((error as Error).message).toBe(expected);
+		expect((error as Error).message).not.toMatch(/[\r\n]/);
+	}
+}
+
 describe('Handler Infrastructure', () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -107,6 +117,13 @@ describe('Handler Infrastructure', () => {
 				'No WHERE handler registered for operator: unknown',
 			);
 		});
+
+		it('escapes an unregistered operator key in its diagnostic', () => {
+			expectOneLineError(
+				() => getWhereHandler('=\nFAKE'),
+				'No WHERE handler registered for operator: =\\nFAKE',
+			);
+		});
 	});
 
 	describe('EXPRESSION Handler Registry', () => {
@@ -148,6 +165,13 @@ describe('Handler Infrastructure', () => {
 		it('throws when getting unregistered type', () => {
 			expect(() => getExpressionHandler('unknown')).toThrow(
 				'No EXPRESSION handler registered for type: unknown',
+			);
+		});
+
+		it('escapes an unregistered type key in its diagnostic', () => {
+			expectOneLineError(
+				() => getExpressionHandler('custom\nFAKE'),
+				'No EXPRESSION handler registered for type: custom\\nFAKE',
 			);
 		});
 	});
@@ -222,6 +246,13 @@ describe('Handler Infrastructure', () => {
 			expect(getRegisteredOperators().include).toEqual(INCLUDE_STRATEGIES);
 			expect(hasIncludeHandler('lateral')).toBe(true);
 			expect(getIncludeHandler('json_agg').strategy).toBe('json_agg');
+		});
+
+		it('escapes an unregistered strategy key in its diagnostic', () => {
+			expectOneLineError(
+				() => getIncludeHandler('join\nFAKE' as never),
+				'No INCLUDE handler registered for strategy: join\\nFAKE',
+			);
 		});
 	});
 

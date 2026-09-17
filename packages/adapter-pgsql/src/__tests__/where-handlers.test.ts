@@ -34,12 +34,35 @@ function compileToSql(
 	return { sql, params: state.parameters };
 }
 
+function expectOneLineError(fn: () => unknown, expected: string): void {
+	expect(fn).toThrow(expected);
+	try {
+		fn();
+	} catch (error) {
+		expect((error as Error).message).toBe(expected);
+		expect((error as Error).message).not.toMatch(/[\r\n]/);
+	}
+}
+
 describe('WHERE Handlers', () => {
 	beforeEach(() => {
 		clearHandlers();
 	});
 
 	describe('Comparison Operators', () => {
+		it('escapes an unknown operator before reporting it', () => {
+			expectOneLineError(
+				() =>
+					compileToSql({
+						type: 'comparison',
+						column: 'id',
+						operator: '=\nFAKE',
+						value: 42,
+					}),
+				'No WHERE handler registered for operator: =\\nFAKE',
+			);
+		});
+
 		it('compiles equality (=)', () => {
 			const result = compileToSql({
 				type: 'comparison',

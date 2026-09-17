@@ -14,6 +14,7 @@ import {
 	lteExpr,
 	neExpr,
 } from '../../ast-helpers.js';
+import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -98,7 +99,7 @@ export const comparisonHandler: WhereHandler = {
 
 			default:
 				throw new Error(
-					`No WHERE handler registered for operator: ${operator}`,
+					`No WHERE handler registered for operator: ${escapeDiagnosticText(String(operator))}`,
 				);
 		}
 	},

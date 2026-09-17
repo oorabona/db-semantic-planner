@@ -129,6 +129,17 @@ describe('sqlFunctionHandler errors', () => {
 		);
 	});
 
+	it('escapes a newline in an invalid function name', () => {
+		const state = createCompilerState();
+		const decision = {
+			type: 'sqlFunction',
+			function: 'func\nFAKE',
+		} as Decision;
+		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
+			'Invalid function name: func\\nFAKE',
+		);
+	});
+
 	it('throws when function name contains a semicolon (injection attempt)', () => {
 		const state = createCompilerState();
 		const decision = {

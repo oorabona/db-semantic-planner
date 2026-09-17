@@ -1,4 +1,5 @@
 import type { LedgerAddress } from '@dbsp/types';
+import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import { renderPgLockIdentifier } from './lock-identifier.js';
@@ -71,7 +72,7 @@ export function pgLockRelationForAddress(
 			address.parent.schema !== address.schema
 		)
 			console.warn(
-				`${label} lock ignores mismatched parent schema ${address.parent.schema} for ${address.kind} ${address.name}; catalogue identity resolves ${address.schema}`,
+				`${escapeDiagnosticText(label)} lock ignores mismatched parent schema ${escapeDiagnosticText(address.parent.schema)} for ${escapeDiagnosticText(address.kind)} ${escapeDiagnosticText(address.name)}; catalogue identity resolves ${escapeDiagnosticText(address.schema)}`,
 			);
 		return { schema: address.schema, table: address.parent.name };
 	}

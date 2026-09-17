@@ -123,6 +123,18 @@ describe('inHandler backstop: non-array value → throws (DEFECT 3)', () => {
 		expect(() => compileDecision(decision)).toThrow(/compiler bug/i);
 	});
 
+	it('escapes operator and column names in the compiler-bug diagnostic', () => {
+		const decision: Decision = {
+			type: 'where',
+			column: 'account\nFAKE',
+			operator: 'in\nFAKE',
+			value: { unexpected: true },
+		};
+		expect(() => compileDecision(decision)).toThrow(
+			"[in handler] Received a non-array value for operator 'in\\nFAKE' on column 'account\\nFAKE'.",
+		);
+	});
+
 	it('value is a string scalar → throws (strings are not arrays)', () => {
 		const decision: Decision = {
 			type: 'where',

@@ -14,6 +14,7 @@ import { emitWarning } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { stringConstNode } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
+import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -110,7 +111,9 @@ export const sqlFunctionHandler: ExpressionHandler = {
 
 		// Validate function name (alphanumeric + underscore only)
 		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(funcName)) {
-			throw new Error(`Invalid function name: ${funcName}`);
+			throw new Error(
+				`Invalid function name: ${escapeDiagnosticText(funcName)}`,
+			);
 		}
 
 		// Build argument nodes
