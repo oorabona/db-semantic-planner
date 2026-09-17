@@ -42,7 +42,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/patterns.md": {
-			"explicit-skip": 11,
+			"explicit-skip": 10,
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		},

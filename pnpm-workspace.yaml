@@ -112,7 +112,6 @@ catalog:
   # 4.9.0 is where tsx first exports ./esm/api; @dbsp/mcp-server's schema loader
   # calls tsImport() from it, so anything below cannot load a .ts schema.
   tsx: ^4.9.0
-  typedoc: ^0.28.19
   typescript: ~6.0.3
   valibot: ^1.4.2
   vite: ^8.1.3

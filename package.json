@@ -46,7 +46,6 @@
 		"typecheck": "pnpm -r typecheck",
 		"test:scripts": "node --test scripts/*.test.mjs",
 		"dbsp": "pnpm tsx packages/cli/src/index.ts",
-		"docs:api": "typedoc",
 		"gui:dev": "pnpm -C packages/gui tauri dev",
 		"test:docs:generate": "pnpm tsx tests/docs-verification/generate-tests.ts",
 		"test:docs": "pnpm test:docs:generate && pnpm vitest run --config tests/docs-verification/vitest.config.docs.ts"
@@ -70,7 +69,6 @@
 		"simple-git-hooks": "catalog:",
 		"testcontainers": "catalog:",
 		"tsx": "catalog:",
-		"typedoc": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:",
 		"yaml": "catalog:"

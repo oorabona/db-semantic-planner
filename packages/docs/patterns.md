@@ -106,22 +106,18 @@ Use this pattern for WHERE operators and expression types expected to grow over 
 
 ### Intent
 
-Provide a chainable, type-safe API for constructing query and mutation intents without mutating shared state. Every method call returns a new builder instance with updated state — the original is unchanged. The builder materializes to SQL or execution only through its terminal methods (listed exhaustively below for each builder).
+Provide a chainable, type-safe API for constructing query and mutation intents without mutating shared state. Every method call returns a new builder instance with updated state — the original is unchanged. The builder materializes to SQL or execution only through its terminal methods: `dump()` compiles without executing, and execution methods such as `all()` or `execute()` run the compiled statement.
 
 ### Structure
 
-| Builder | File | Terminal methods |
-|---------|------|-----------------|
-| `QueryBuilderImpl` | `packages/core/src/dx/query-builder.ts` | `.dump()`, `.exists()`, `.existsDump()`, `.execute()`, `.all()`, `.first()`, `.firstOrThrow()`, `.stream()`, `.paginate()`, `.cursorPaginate()`, `.byId()`, `.byIdOrThrow()`, `.byIds()` |
-| `InsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
-| `UpdateBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
-| `DeleteBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
-| `UpsertBuilder` | `packages/core/src/dx/mutation-builders.ts` | `.dump()`, `.execute()`, `.affectedRows()` |
-| `CteQueryBuilder` | `packages/core/src/dx/cte-builder.ts` | `.dump()`, `.all()`, `.execute()` |
-| `RecursiveQueryBuilder` | `packages/core/src/dx/recursive-query-builder.ts` | `.dump()`, `.execute()` |
-| `SetOperationBuilder` | `packages/core/src/dx/set-operation-builder.ts` | `.dump()`, `.all()`, `.first()` |
+Each builder's exact set of terminal methods is part of its public type; read it there:
 
-Public interface: `QueryBuilder` (in `query-builder-types.ts`). The `Impl` class is internal.
+| Builder | Public type |
+|---------|-------------|
+| Queries | `QueryBuilder` — `packages/core/src/dx/query-builder-types.ts` (implemented by the internal `QueryBuilderImpl`) |
+| Set operations | `SetOperationBuilder` — `packages/core/src/dx/set-operation-builder.ts` |
+| Mutations | `InsertBuilder`, `UpdateBuilder`, `DeleteBuilder`, `UpsertBuilder` — `packages/core/src/dx/mutation-builders.ts` |
+| CTEs | `CteQueryBuilder` — `packages/core/src/dx/cte-builder.ts` |
 
 Invariant enforced by `buildIntent()`: the builder collects state into an `Intent` object only when materialization is requested. State is stored as `readonly` fields; each method spreads the current `baseOpts` into a new constructor call.
 
@@ -297,21 +293,20 @@ packages/core/src/dx/              ← Uses Adapter, never imports adapter-pgsql
 packages/adapter-pgsql/src/        ← Implements Adapter<DB>
 ```
 
-Adapter interface hierarchy (composition via extends):
+Adapter interface hierarchy (composition via extends; each interface's members are declared in
+`packages/types/src/adapter.ts`):
 
 ```
 BaseAdapter
-  └─ CompilingAdapter    (compile, compileWithIncludes, compileInsert, ...)
-  └─ ExecutingAdapter    (execute, executeWithMeta?, executeOne, executeOneOrThrow)
-  └─ StreamingAdapter    (stream)
-  └─ IntrospectingAdapter (introspect)
-  └─ TransactionalAdapter (transaction, withSchema)
-  └─ RawSqlAdapter       (executeRaw, streamRaw?)
-  └─ DDLGeneratingAdapter (generateDDL)
+  └─ CompilingAdapter
+  └─ ExecutingAdapter
+  └─ StreamingAdapter
+  └─ IntrospectingAdapter
+  └─ TransactionalAdapter
+  └─ RawSqlAdapter
+  └─ DDLGeneratingAdapter
 
 TableDDLGeneratorAdapter (does not extend BaseAdapter)
-  └─ generateTruncate?, generateVacuum?, generateAlterColumn?, generateCreateIndex,
-     generateDropIndex?, listIndexes?, indexExists?, storageSize?
 
 Adapter<DB> extends the BaseAdapter-derived interfaces and TableDDLGeneratorAdapter
   ← full capability union
@@ -507,22 +502,9 @@ dump()      → buildIntent() → compileIntent(adapter, intent, options) → Mu
 execute()   → buildIntent() → compileIntent(adapter, intent, options) → adapter.execute(...)
 ```
 
-Abstract methods that subclasses must implement:
-
-```typescript
-// doctest: skip — API signature reference (abstract class method signatures with TypeScript types, not executable code)
-protected abstract buildIntent(): TIntent;
-protected abstract compileIntent(
-  adapter: Adapter,
-  intent: TIntent,
-  options?: CompileOptions,
-): CompiledQuery;
-```
-
-Concrete methods shared by all subclasses (on base):
-
-- `dump()` — compiles without executing, returns `{ sql, parameters, intent, meta? }` (and may include `sequence`)
-- `execute()` — compiles then executes via adapter, returns `T`
+Subclasses implement the two variable steps, `buildIntent()` and `compileIntent()`; the base supplies
+`dump()`, which compiles without executing and returns a `MutationDump`, and `execute()`, which compiles
+and then executes through the adapter. Their exact signatures are declared on `MutationBuilderBase`.
 
 ### Example
 
