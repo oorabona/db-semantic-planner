@@ -13,6 +13,7 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnTarget, rangeVar, starTarget } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -45,7 +46,12 @@ function buildJoin(
 
 	const joinExpr: JoinExpr = {
 		jointype: joinType === 'inner' ? 'JOIN_INNER' : 'JOIN_LEFT',
-		rarg: rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming),
+		rarg: rangeVar(
+			targetTable,
+			targetAlias,
+			schemaForFromName(ctx.schema, targetTable, ctx.bindingNames, ctx.naming),
+			ctx.naming,
+		),
 		quals: joinCondition,
 	};
 

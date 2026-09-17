@@ -1474,17 +1474,38 @@ describe('CTE relation planning', () => {
 		);
 	});
 
-	it('uses a visible CTE that shadows a relation target', () => {
+	it('uses a visible CTE that shadows a relation target with and without a schema', () => {
 		const nql =
 			"with authors as (authors | where name = 'Alice Johnson' | select id, name), enriched as (posts | select title, author.name | flat) enriched | select *";
 		const expectedWithoutSchema =
 			'with "authors" as (select authors.id, authors.name from authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
 		const expectedWithSchema =
-			'with "authors" as (select authors.id, authors.name from tenant_42.authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id) select enriched.* from enriched';
+			'with "authors" as (select authors.id, authors.name from tenant_42.authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from tenant_42.posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
 
 		expect(blogCteToSQL(nql)).toBe(expectedWithoutSchema);
-		// DIVERGENCE
 		expect(blogCteToSQL(nql, 'tenant_42')).toBe(expectedWithSchema);
+	});
+
+	it('uses a visible CTE in a schema-scoped JSON aggregation include', () => {
+		const sql = blogCteToSQL(
+			'with authors as (authors | select id, name) posts | select title, author.*',
+			'tenant_42',
+		);
+
+		expect(sql).toBe(
+			'with "authors" as (select authors.id, authors.name from tenant_42.authors) select posts.title, coalesce((select json_agg(to_jsonb(__t__) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from tenant_42.posts',
+		);
+	});
+
+	it('keeps a non-visible relation target schema-qualified', () => {
+		const sql = blogCteToSQL(
+			'with seed as (authors | select id) posts | select title, author.name | flat',
+			'tenant_42',
+		);
+
+		expect(sql).toBe(
+			'with "seed" as (select authors.id from tenant_42.authors) select posts.title, author.name as "author.name" from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id',
+		);
 	});
 
 	it('plans includes in a CTE body', () => {

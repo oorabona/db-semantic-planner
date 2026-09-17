@@ -19,6 +19,7 @@ import {
 	integerNode,
 	sortBy,
 } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -91,6 +92,12 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	const dbOuterSeed = naming.toDatabase(
 		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
 	);
+	const schemaName = schemaForFromName(
+		ctx.schema,
+		table,
+		ctx.bindingNames,
+		naming,
+	);
 
 	// Inner alias for CTE iterations
 	const innerAlias = '__n';
@@ -140,7 +147,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 			{
 				RangeVar: {
 					relname: dbTable,
-					...(ctx.schema && { schemaname: ctx.schema }),
+					...(schemaName && { schemaname: schemaName }),
 					inh: true,
 					relpersistence: 'p',
 					alias: { aliasname: innerAlias },
@@ -261,7 +268,7 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 					rarg: {
 						RangeVar: {
 							relname: dbTable,
-							...(ctx.schema && { schemaname: ctx.schema }),
+							...(schemaName && { schemaname: schemaName }),
 							inh: true,
 							relpersistence: 'p',
 							alias: { aliasname: innerAlias },
@@ -534,6 +541,12 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		const dbTable = naming.toDatabase(table);
 		const dbPk = naming.toDatabase(pkColumn);
 		const dbFk = naming.toDatabase(fkColumn);
+		const schemaName = schemaForFromName(
+			ctx.schema,
+			table,
+			ctx.bindingNames,
+			naming,
+		);
 		const dbCol = naming.toDatabase(targetColumn);
 		const outerAlias = naming.toDatabase(ctx.currentAlias ?? ctx.rootTable);
 
@@ -563,7 +576,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 				{
 					RangeVar: {
 						relname: dbTable,
-						...(ctx.schema && { schemaname: ctx.schema }),
+						...(schemaName && { schemaname: schemaName }),
 						inh: true,
 						relpersistence: 'p',
 						alias: { aliasname: innerAlias },
@@ -651,6 +664,12 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		const dbTable = naming.toDatabase(table);
 		const dbPk = naming.toDatabase(pkColumn);
 		const dbFk = naming.toDatabase(fkColumn);
+		const schemaName = schemaForFromName(
+			ctx.schema,
+			table,
+			ctx.bindingNames,
+			naming,
+		);
 
 		// Build from innermost to outermost
 		// Start with the final column selection
@@ -687,7 +706,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 					{
 						RangeVar: {
 							relname: dbTable,
-							...(ctx.schema && { schemaname: ctx.schema }),
+							...(schemaName && { schemaname: schemaName }),
 							inh: true,
 							relpersistence: 'p',
 							alias: { aliasname: alias },

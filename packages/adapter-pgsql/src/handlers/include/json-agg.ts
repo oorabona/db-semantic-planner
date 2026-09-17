@@ -16,6 +16,7 @@ import {
 	jsonAggSubquery,
 	typeCast,
 } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import {
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
@@ -212,7 +213,7 @@ function compileJsonAggRecursive(
 		targetTable,
 		whereExpr,
 		`${relation}_json`,
-		ctx.schema,
+		schemaForFromName(ctx.schema, targetTable, ctx.bindingNames, ctx.naming),
 		ctx.naming,
 		{
 			...(childNodes && { childNodes }),

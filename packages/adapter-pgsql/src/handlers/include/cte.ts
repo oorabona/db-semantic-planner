@@ -11,6 +11,7 @@ import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
@@ -85,7 +86,19 @@ function buildCteSelect(
 
 	const stmt: SelectStmt = {
 		targetList,
-		fromClause: [rangeVar(targetTable, innerAlias, ctx.schema, ctx.naming)],
+		fromClause: [
+			rangeVar(
+				targetTable,
+				innerAlias,
+				schemaForFromName(
+					ctx.schema,
+					targetTable,
+					ctx.bindingNames,
+					ctx.naming,
+				),
+				ctx.naming,
+			),
+		],
 		...(whereClause && { whereClause }),
 	};
 

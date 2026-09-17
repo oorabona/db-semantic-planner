@@ -6,7 +6,9 @@
  * Focus: all filter modes (some, none, every, is, isNot), nested conditions, JOIN construction.
  */
 
+import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
+import { normalizeSQL } from '../../ast-helpers.js';
 import { identityNaming } from '../../naming-plugin.js';
 import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
@@ -411,6 +413,87 @@ describe('relationFilterHandler mode:is with conditions', () => {
 		expect(capturedCtx).toBeDefined();
 		expect(capturedCtx!.rootTable).toBe('authors');
 		expect(capturedCtx!.currentAlias).toMatch(/^authors_rel_/);
+	});
+});
+
+describe('relationFilterHandler visible CTE target', () => {
+	it('keeps a visible relation target unqualified while the source remains schema-qualified', () => {
+		const state = createCompilerState();
+		const ctx = makeCtx({
+			schema: 'tenant_42',
+			bindingNames: new Set(['authors']),
+		});
+		const decision = {
+			type: 'where',
+			operator: 'is',
+			relation: 'author',
+			targetTable: 'authors',
+			sourceColumn: 'author_id',
+			targetColumn: 'id',
+		} as Decision;
+
+		const whereClause = relationFilterHandler.compile(
+			decision,
+			ctx,
+			state,
+			mockDispatch,
+		);
+		const join = state.joins[0]!;
+		const joinExpr = join.JoinExpr!;
+		joinExpr.larg = {
+			RangeVar: {
+				schemaname: 'tenant_42',
+				relname: 'posts',
+				inh: true,
+				relpersistence: 'p',
+			},
+		};
+		const sql = normalizeSQL(
+			deparseSync({
+				SelectStmt: {
+					withClause: {
+						ctes: [
+							{
+								CommonTableExpr: {
+									ctename: 'authors',
+									ctequery: {
+										SelectStmt: {
+											targetList: [
+												{
+													ResTarget: {
+														val: { A_Const: { ival: { ival: 1 } } },
+													},
+												},
+											],
+										},
+									},
+								},
+							},
+						],
+					},
+					targetList: [
+						{
+							ResTarget: {
+								val: {
+									ColumnRef: {
+										fields: [
+											{ String: { sval: 'posts' } },
+											{ String: { sval: 'id' } },
+										],
+									},
+								},
+							},
+						},
+					],
+					fromClause: [join],
+					whereClause,
+				},
+			}),
+		);
+
+		expect(sql).toBe(
+			'with authors as (select 1) select posts.id from tenant_42.posts join authors as authors_rel_0 on posts.author_id = authors_rel_0.id where true',
+		);
 	});
 });
 

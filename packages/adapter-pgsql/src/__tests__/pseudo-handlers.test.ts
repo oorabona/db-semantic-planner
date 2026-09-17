@@ -2,7 +2,9 @@
  * Pseudo-Column and Relation Expression Handler Tests
  */
 
+import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
+import { normalizeSQL } from '../ast-helpers.js';
 import {
 	chainedPseudoHandler,
 	prefixedRelationColumnHandler,
@@ -147,6 +149,49 @@ describe('Pseudo-Column Handlers', () => {
 			const subselect = result.SubLink.subselect;
 			// limitCount should be an integer node
 			expect(subselect.SelectStmt.limitCount).toBeDefined();
+		});
+
+		it('keeps a visible CTE target unqualified while the outer table is schema-qualified', () => {
+			const state = createCompilerState();
+			const result = singleHopPseudoHandler.compile(
+				{
+					type: 'singleHopPseudo',
+					traversal: 'parent',
+					column: 'name',
+					table: 'authors',
+					pkColumn: 'id',
+					fkColumn: 'authorId',
+				},
+				{
+					...baseCtx,
+					rootTable: 'posts',
+					currentAlias: 'posts',
+					schema: 'tenant_42',
+					bindingNames: new Set(['authors']),
+				},
+				state,
+			);
+			const sql = normalizeSQL(
+				deparseSync({
+					SelectStmt: {
+						targetList: [{ ResTarget: { val: result } }],
+						fromClause: [
+							{
+								RangeVar: {
+									schemaname: 'tenant_42',
+									relname: 'posts',
+									inh: true,
+									relpersistence: 'p',
+								},
+							},
+						],
+					},
+				}),
+			);
+
+			expect(sql).toBe(
+				'select (select __p.name from authors as __p where __p.id = posts.author_id limit 1) from tenant_42.posts',
+			);
 		});
 	});
 
