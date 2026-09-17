@@ -27,10 +27,15 @@ export function SqlPreviewPanel({ upSQL, downSQL }: SqlPreviewPanelProps) {
 				<TabButton
 					active={tab === 'down'}
 					onClick={() => setTab('down')}
-					label={`DOWN (${downSQL.length})`}
+					label={`Rollback preview (${downSQL.length})`}
 					testId="sql-tab-down"
 				/>
 			</div>
+			{tab === 'down' && (
+				<p className="border-b border-border px-2 py-1 text-xs text-muted-foreground">
+					Rollback preview only; it is not executed.
+				</p>
+			)}
 			<div
 				className="max-h-48 overflow-auto bg-muted/10 p-2"
 				data-testid="sql-preview-content"

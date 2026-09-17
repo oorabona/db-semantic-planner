@@ -73,27 +73,31 @@ describe('useSchemaDiffStore', () => {
 		expect(state.error).toBeNull();
 	});
 
-	it('setLoading sets loading=true and clears error', () => {
-		useSchemaDiffStore.getState().setError('previous error');
-		useSchemaDiffStore.getState().setLoading();
+	it('startComparison sets loading=true and clears error', () => {
+		const firstRequest = useSchemaDiffStore.getState().startComparison();
+		useSchemaDiffStore.getState().setError(firstRequest, 'previous error');
+		useSchemaDiffStore.getState().startComparison();
 		const state = useSchemaDiffStore.getState();
 		expect(state.loading).toBe(true);
 		expect(state.error).toBeNull();
 	});
 
-	it('setDiff stores result and clears loading and error', () => {
-		useSchemaDiffStore.getState().setLoading();
-		useSchemaDiffStore.getState().setDiff(mockDiff);
+	it('setDiff stores its source connection and clears loading and error', () => {
+		const requestId = useSchemaDiffStore.getState().startComparison();
+		useSchemaDiffStore.getState().setDiff(requestId, 'connection-a', mockDiff);
 		const state = useSchemaDiffStore.getState();
-		expect(state.diff).toBe(mockDiff);
+		expect(state.diff).toEqual({
+			connectionId: 'connection-a',
+			result: mockDiff,
+		});
 		expect(state.loading).toBe(false);
 		expect(state.error).toBeNull();
 	});
 
 	it('setError stores error and clears loading and diff', () => {
-		useSchemaDiffStore.getState().setLoading();
-		useSchemaDiffStore.getState().setDiff(mockDiff);
-		useSchemaDiffStore.getState().setError('Connection refused');
+		const requestId = useSchemaDiffStore.getState().startComparison();
+		useSchemaDiffStore.getState().setDiff(requestId, 'connection-a', mockDiff);
+		useSchemaDiffStore.getState().setError(requestId, 'Connection refused');
 		const state = useSchemaDiffStore.getState();
 		expect(state.error).toBe('Connection refused');
 		expect(state.loading).toBe(false);
@@ -101,8 +105,8 @@ describe('useSchemaDiffStore', () => {
 	});
 
 	it('clear resets all state', () => {
-		useSchemaDiffStore.getState().setLoading();
-		useSchemaDiffStore.getState().setDiff(mockDiff);
+		const requestId = useSchemaDiffStore.getState().startComparison();
+		useSchemaDiffStore.getState().setDiff(requestId, 'connection-a', mockDiff);
 		useSchemaDiffStore.getState().clear();
 		const state = useSchemaDiffStore.getState();
 		expect(state.diff).toBeNull();
@@ -110,27 +114,63 @@ describe('useSchemaDiffStore', () => {
 		expect(state.error).toBeNull();
 	});
 
+	it('invalidates a comparison that settles after clear', () => {
+		const requestId = useSchemaDiffStore.getState().startComparison();
+		useSchemaDiffStore.getState().clear();
+		useSchemaDiffStore.getState().setDiff(requestId, 'connection-a', mockDiff);
+
+		expect(useSchemaDiffStore.getState().diff).toBeNull();
+	});
+
 	// ── State transitions ───────────────────────────────────────────
 
 	it('loading → setDiff transition', () => {
-		useSchemaDiffStore.getState().setLoading();
+		const requestId = useSchemaDiffStore.getState().startComparison();
 		expect(useSchemaDiffStore.getState().loading).toBe(true);
 
-		useSchemaDiffStore.getState().setDiff(mockDiffSafe);
+		useSchemaDiffStore
+			.getState()
+			.setDiff(requestId, 'connection-a', mockDiffSafe);
 		const state = useSchemaDiffStore.getState();
 		expect(state.loading).toBe(false);
-		expect(state.diff).toBe(mockDiffSafe);
+		expect(state.diff).toEqual({
+			connectionId: 'connection-a',
+			result: mockDiffSafe,
+		});
 		expect(state.error).toBeNull();
 	});
 
 	it('loading → setError transition', () => {
-		useSchemaDiffStore.getState().setLoading();
+		const requestId = useSchemaDiffStore.getState().startComparison();
 		expect(useSchemaDiffStore.getState().loading).toBe(true);
 
-		useSchemaDiffStore.getState().setError('Schema file not found');
+		useSchemaDiffStore.getState().setError(requestId, 'Schema file not found');
 		const state = useSchemaDiffStore.getState();
 		expect(state.loading).toBe(false);
 		expect(state.diff).toBeNull();
 		expect(state.error).toBe('Schema file not found');
+	});
+
+	it('keeps the later result when an earlier comparison settles last', () => {
+		const earlierRequest = useSchemaDiffStore.getState().startComparison();
+		const laterRequest = useSchemaDiffStore.getState().startComparison();
+
+		useSchemaDiffStore
+			.getState()
+			.setDiff(laterRequest, 'connection-b', mockDiffSafe);
+		useSchemaDiffStore
+			.getState()
+			.setDiff(earlierRequest, 'connection-a', mockDiff);
+		useSchemaDiffStore
+			.getState()
+			.setError(earlierRequest, 'earlier request failed');
+
+		const state = useSchemaDiffStore.getState();
+		expect(state.diff).toEqual({
+			connectionId: 'connection-b',
+			result: mockDiffSafe,
+		});
+		expect(state.error).toBeNull();
+		expect(state.loading).toBe(false);
 	});
 });

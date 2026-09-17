@@ -199,16 +199,17 @@ export async function handleSchemaDiff(
 		...(connectionSchema !== undefined && connectionSchema !== 'public'
 			? { schemaName: connectionSchema }
 			: {}),
-		// Schema Apply is intentionally additive/non-destructive. The full diff,
-		// including excluded destructive changes, remains available in `changes`.
+		// Schema Apply excludes changes the migration generator classifies as
+		// destructive. The full diff, including those excluded changes, remains
+		// available in `changes`.
 		includeDestructive: false,
 	};
 
 	// 4. Generate UP and DOWN SQL
 	const upSQL =
 		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
-	// DOWN reverses exactly the non-destructive bundle Apply can execute. Keep
-	// destructive rollback statements (such as DROP TABLE for CREATE TABLE).
+	// DOWN is generated from the same non-destructive changes Apply can execute.
+	// Keep the generator comment for a change PostgreSQL cannot reverse.
 	const appliedDiff = {
 		...diff,
 		changes: diff.changes.filter((change) => !change.destructive),

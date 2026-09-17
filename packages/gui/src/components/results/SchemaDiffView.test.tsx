@@ -6,7 +6,7 @@ import {
 	screen,
 	waitFor,
 } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SchemaDiffChange, SchemaDiffResult } from '@/lib/ipc';
 
 // ── Store mock ──────────────────────────────────────────────────
@@ -18,7 +18,8 @@ const mockState = {
 	applying: false,
 	applyError: null as string | null,
 	appliedCount: null as number | null,
-	setLoading: vi.fn(),
+	requestId: 0,
+	startComparison: vi.fn(),
 	setDiff: vi.fn(),
 	setError: vi.fn(),
 	clear: vi.fn(),
@@ -27,9 +28,33 @@ const mockState = {
 	setApplyError: vi.fn(),
 };
 
+let lastMockDiff: SchemaDiffResult | null = null;
+let storedMockDiff: { connectionId: string; result: SchemaDiffResult } | null =
+	null;
+
+function currentStoredMockDiff() {
+	if (mockState.diff !== lastMockDiff) {
+		lastMockDiff = mockState.diff;
+		storedMockDiff =
+			mockState.diff === null
+				? null
+				: { connectionId: 'test-connection', result: mockState.diff };
+	}
+	return storedMockDiff;
+}
+
 vi.mock('@/stores/schema-diff-store', () => ({
-	useSchemaDiffStore: (selector: (s: typeof mockState) => unknown) =>
-		selector(mockState),
+	useSchemaDiffStore: (
+		selector: (
+			s: Omit<typeof mockState, 'diff'> & {
+				diff: { connectionId: string; result: SchemaDiffResult } | null;
+			},
+		) => unknown,
+	) =>
+		selector({
+			...mockState,
+			diff: currentStoredMockDiff(),
+		}),
 }));
 
 vi.mock('./SchemaDiffSummary', () => ({
@@ -127,8 +152,21 @@ afterEach(() => {
 	mockState.applying = false;
 	mockState.applyError = null;
 	mockState.appliedCount = null;
+	lastMockDiff = null;
+	storedMockDiff = null;
 	useConnectionStore.setState({ active: null });
 	vi.clearAllMocks();
+});
+
+beforeEach(() => {
+	useConnectionStore.setState({
+		active: {
+			connectionId: 'test-connection',
+			profileId: 'test-profile',
+			database: 'test-db',
+			schema: 'public',
+		},
+	});
 });
 
 // ── Fixtures ────────────────────────────────────────────────────
@@ -410,6 +448,42 @@ describe('SchemaDiffView', () => {
 		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
 	});
 
+	it('disables Apply until the active connection matches the comparison', () => {
+		mockState.diff = mockDiff;
+		useConnectionStore.setState({
+			active: {
+				connectionId: 'other-connection',
+				profileId: 'other-profile',
+				database: 'other-db',
+				schema: 'public',
+			},
+		});
+		render(<SchemaDiffView />);
+
+		expect(
+			screen.getByTestId('apply-btn').getAttribute('disabled'),
+		).not.toBeNull();
+		expect(
+			screen.getByTestId('apply-connection-mismatch').textContent,
+		).toContain('Rerun the comparison');
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.queryByTestId('apply-confirm-dialog')).toBeNull();
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
+	});
+
+	it('asks for a rerun when there is no active connection', () => {
+		mockState.diff = mockDiff;
+		useConnectionStore.setState({ active: null });
+		render(<SchemaDiffView />);
+
+		expect(
+			screen.getByTestId('apply-btn').getAttribute('disabled'),
+		).not.toBeNull();
+		expect(
+			screen.getByTestId('apply-connection-mismatch').textContent,
+		).toContain('No active connection');
+	});
+
 	it('passes hasDestructive to confirmation dialog', () => {
 		mockState.diff = mockDiff;
 		render(<SchemaDiffView />);
@@ -446,6 +520,107 @@ describe('SchemaDiffView', () => {
 				mockDiff.upSQL,
 			),
 		);
+	});
+
+	it('Confirm uses the source connection snapshot rather than live connection state', async () => {
+		mockState.diff = mockDiff;
+		vi.mocked(sidecarApi.schemaApply).mockResolvedValue({
+			success: true,
+			applied: mockDiff.upSQL.length,
+		});
+		render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		const confirmButton = screen.getByTestId('dialog-confirm');
+
+		useConnectionStore.setState({
+			active: {
+				connectionId: 'other-connection',
+				profileId: 'other-profile',
+				database: 'other-db',
+				schema: 'public',
+			},
+		});
+		fireEvent.click(confirmButton);
+
+		await waitFor(() =>
+			expect(sidecarApi.schemaApply).toHaveBeenCalledWith(
+				'test-connection',
+				mockDiff.upSQL,
+			),
+		);
+	});
+
+	it('Confirm sends the statements shown when confirmation opened', async () => {
+		const liveStatements = [...mockDiff.upSQL];
+		mockState.diff = { ...mockDiff, upSQL: liveStatements };
+		vi.mocked(sidecarApi.schemaApply).mockResolvedValue({
+			success: true,
+			applied: liveStatements.length,
+		});
+		render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		const shownStatements = screen.getByTestId('dialog-statements').textContent;
+
+		liveStatements.splice(0, liveStatements.length, 'SELECT changed_sql;');
+		fireEvent.click(screen.getByTestId('dialog-confirm'));
+
+		await waitFor(() =>
+			expect(sidecarApi.schemaApply).toHaveBeenCalledWith('test-connection', [
+				...mockDiff.upSQL,
+			]),
+		);
+		expect(shownStatements).toBe(mockDiff.upSQL.join('\n'));
+	});
+
+	it('closes confirmation without applying when the active connection changes', async () => {
+		mockState.diff = mockDiff;
+		render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
+
+		useConnectionStore.setState({
+			active: {
+				connectionId: 'other-connection',
+				profileId: 'other-profile',
+				database: 'other-db',
+				schema: 'public',
+			},
+		});
+
+		await waitFor(() =>
+			expect(screen.queryByTestId('apply-confirm-dialog')).toBeNull(),
+		);
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
+	});
+
+	it('closes confirmation without applying when a comparison starts', async () => {
+		mockState.diff = mockDiff;
+		const { rerender } = render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
+
+		mockState.loading = true;
+		rerender(<SchemaDiffView />);
+
+		await waitFor(() =>
+			expect(screen.queryByTestId('apply-confirm-dialog')).toBeNull(),
+		);
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
+	});
+
+	it('closes confirmation without applying when a new diff arrives', async () => {
+		mockState.diff = mockDiff;
+		const { rerender } = render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		expect(screen.getByTestId('apply-confirm-dialog')).toBeDefined();
+
+		mockState.diff = { ...mockDiff, upSQL: ['SELECT 2;'] };
+		rerender(<SchemaDiffView />);
+
+		await waitFor(() =>
+			expect(screen.queryByTestId('apply-confirm-dialog')).toBeNull(),
+		);
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
 	});
 
 	it('offers no Apply action for a destructive-only diff', () => {

@@ -13,7 +13,7 @@ import {
 	RefreshCw,
 	TriangleAlert,
 } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type {
 	SchemaDiffChange,
 	SchemaDiffComparisonWarning,
@@ -29,7 +29,7 @@ import { SideBySideChange } from './SideBySideChange';
 import { SqlPreviewPanel } from './SqlPreviewPanel';
 
 export function SchemaDiffView() {
-	const diff = useSchemaDiffStore((s) => s.diff);
+	const storedDiff = useSchemaDiffStore((s) => s.diff);
 	const loading = useSchemaDiffStore((s) => s.loading);
 	const error = useSchemaDiffStore((s) => s.error);
 	const applying = useSchemaDiffStore((s) => s.applying);
@@ -40,33 +40,36 @@ export function SchemaDiffView() {
 	const setApplyError = useSchemaDiffStore((s) => s.setApplyError);
 
 	const [showSql, setShowSql] = useState(false);
-	const [showConfirm, setShowConfirm] = useState(false);
+	const [applySnapshot, setApplySnapshot] = useState<ApplySnapshot | null>(
+		null,
+	);
 	const [showSideBySide, setShowSideBySide] = useState(false);
+	const diff = storedDiff?.result ?? null;
+
+	useEffect(() => {
+		setApplySnapshot(null);
+	}, [active?.connectionId, loading, storedDiff]);
 
 	const handleApply = useCallback(async () => {
-		if (!diff || diff.upSQL.length === 0) return;
+		if (!applySnapshot || applySnapshot.statements.length === 0) return;
 		setApplying();
 		try {
-			if (!active) {
-				setApplyError('No active connection');
-				setShowConfirm(false);
-				return;
-			}
-			const result = await sidecarApi.schemaApply(active.connectionId, [
-				...diff.upSQL,
-			]);
+			const result = await sidecarApi.schemaApply(
+				applySnapshot.connectionId,
+				applySnapshot.statements,
+			);
 			if (result.success) {
 				setApplyDone(result.applied);
-				setShowConfirm(false);
+				setApplySnapshot(null);
 			} else {
 				setApplyError(result.error ?? 'Apply failed');
-				setShowConfirm(false);
+				setApplySnapshot(null);
 			}
 		} catch (err) {
 			setApplyError(err instanceof Error ? err.message : String(err));
-			setShowConfirm(false);
+			setApplySnapshot(null);
 		}
-	}, [active, diff, setApplying, setApplyDone, setApplyError]);
+	}, [applySnapshot, setApplying, setApplyDone, setApplyError]);
 
 	if (loading) {
 		return (
@@ -84,7 +87,7 @@ export function SchemaDiffView() {
 		);
 	}
 
-	if (!diff) {
+	if (!storedDiff || !diff) {
 		return (
 			<div
 				className="flex flex-1 items-center justify-center p-8"
@@ -110,6 +113,19 @@ export function SchemaDiffView() {
 	const groups = groupChangesByTable(diff.changes);
 	const hasChanges = diff.changes.length > 0;
 	const hasApplicableStatements = diff.upSQL.length > 0;
+	const canApply = active?.connectionId === storedDiff.connectionId;
+	const applyBlockedMessage = !active
+		? 'No active connection. Rerun the comparison before applying.'
+		: 'The active connection differs from this comparison. Rerun the comparison before applying.';
+
+	const openConfirmation = () => {
+		if (!canApply) return;
+		setApplySnapshot({
+			connectionId: storedDiff.connectionId,
+			statements: [...diff.upSQL],
+			hasDestructive: diff.hasDestructive,
+		});
+	};
 
 	return (
 		<div className="flex h-full flex-col overflow-hidden">
@@ -159,16 +175,26 @@ export function SchemaDiffView() {
 					</button>
 					<div className="flex-1" />
 					{hasApplicableStatements && (
-						<button
-							type="button"
-							className="flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-							onClick={() => setShowConfirm(true)}
-							disabled={applying}
-							data-testid="apply-btn"
-						>
-							<Play className="h-3 w-3" />
-							{applying ? 'Applying...' : 'Apply'}
-						</button>
+						<>
+							<button
+								type="button"
+								className="flex items-center gap-1 rounded bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+								onClick={openConfirmation}
+								disabled={applying || !canApply}
+								data-testid="apply-btn"
+							>
+								<Play className="h-3 w-3" />
+								{applying ? 'Applying...' : 'Apply'}
+							</button>
+							{!canApply && (
+								<span
+									className="text-xs text-muted-foreground"
+									data-testid="apply-connection-mismatch"
+								>
+									{applyBlockedMessage}
+								</span>
+							)}
+						</>
 					)}
 				</div>
 			)}
@@ -199,15 +225,21 @@ export function SchemaDiffView() {
 
 			{/* Apply confirmation dialog */}
 			<ApplyConfirmDialog
-				open={showConfirm}
+				open={applySnapshot !== null}
 				onConfirm={handleApply}
-				onCancel={() => setShowConfirm(false)}
-				statements={diff.upSQL}
-				hasDestructive={diff.hasDestructive}
+				onCancel={() => setApplySnapshot(null)}
+				statements={applySnapshot?.statements ?? []}
+				hasDestructive={applySnapshot?.hasDestructive ?? false}
 				applying={applying}
 			/>
 		</div>
 	);
+}
+
+interface ApplySnapshot {
+	readonly connectionId: string;
+	readonly statements: readonly string[];
+	readonly hasDestructive: boolean;
 }
 
 function ComparisonDegradedNotice({
