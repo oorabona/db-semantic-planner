@@ -92,54 +92,9 @@ function createPlanReportForQuery(query: QueryIntent): PlanReport {
 	};
 }
 
-function queryContainsRelationPath(query: QueryIntent): boolean {
-	const visit = (value: unknown): boolean => {
-		if (value === null || typeof value !== 'object') return false;
-		if (Array.isArray(value)) return value.some(visit);
-		const record = value as Record<string, unknown>;
-		if (record.kind === 'relationColumn' || record.kind === 'relationFilter') {
-			return true;
-		}
-		return Object.values(record).some(visit);
-	};
-
-	return (
-		query.include !== undefined ||
-		query.joins?.some((join) => join.relation !== undefined) === true ||
-		visit(query.select) ||
-		visit(query.where) ||
-		visit(query.having) ||
-		visit(query.orderBy)
-	);
-}
-
-function assertNoVisibleRelationTargetCollision(
-	plan: PlanReport,
-	deps: AdapterCompilerDeps,
-	queryDescription: string,
-): void {
-	for (const decision of plan.decisions) {
-		if (decision.type !== 'join-type' && decision.type !== 'include-strategy') {
-			continue;
-		}
-		const target = decision.context.target;
-		if (
-			target === undefined ||
-			!hasBindingName(deps.bindingNames, target, deps.naming)
-		) {
-			continue;
-		}
-		throw new Error(
-			`PgsqlAdapter.compileCteQuery: relation target table "${target}" in ${queryDescription} ` +
-				`conflicts with visible CTE or binding "${emittedBindName(target, deps.naming)}".`,
-		);
-	}
-}
-
 function createPlanReportForCteQuery(
 	query: QueryIntent,
 	deps: AdapterCompilerDeps,
-	queryDescription: string,
 	hasRegisteredSource = false,
 ): PlanReport {
 	if (
@@ -152,20 +107,13 @@ function createPlanReportForCteQuery(
 		deps.model === undefined ||
 		deps.model.getTable(query.from) === undefined
 	) {
-		if (queryContainsRelationPath(query)) {
-			throw new Error(
-				`PgsqlAdapter.compileCteQuery: ${queryDescription} contains a relation path and requires a model.`,
-			);
-		}
 		return createPlanReportForQuery(query);
 	}
-	const plan = planFn(query, deps.model, {
+	return planFn(query, deps.model, {
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 	});
-	assertNoVisibleRelationTargetCollision(plan, deps, queryDescription);
-	return plan;
 }
 
 function dbOutputKey(name: string, deps: AdapterCompilerDeps): string {
@@ -412,16 +360,10 @@ function compileQueryEnvelope(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 	registry: CteProjectionRegistry,
-	queryDescription: string,
 ): ProjectionEnvelope {
 	const registeredSource = getRegisteredProjection(registry, query.from, deps);
 	const compiled = compileSelectEnvelope(
-		createPlanReportForCteQuery(
-			query,
-			deps,
-			queryDescription,
-			registeredSource !== undefined,
-		),
+		createPlanReportForCteQuery(query, deps, registeredSource !== undefined),
 		options,
 		deps,
 	);
@@ -790,7 +732,6 @@ export function compileCteQuery<T = unknown>(
 				options,
 				visibleCteDeps,
 				cteProjectionByName,
-				`CTE "${emittedCteName}"`,
 			);
 			// Renumber inner params to follow all previously accumulated CTE params
 			const currentParamOffset = allCteParams.length;
@@ -838,7 +779,6 @@ export function compileCteQuery<T = unknown>(
 		createPlanReportForCteQuery(
 			intent.query,
 			visibleCteDeps,
-			'outer query',
 			outerRegisteredSource !== undefined,
 		),
 		options,
@@ -986,7 +926,6 @@ function buildRawCte(
 		options,
 		anchorDeps,
 		registry,
-		`CTE "${emittedBindName(cte.name, anchorDeps.naming)}" anchor`,
 	);
 
 	// Compile step (recursive) query
@@ -995,7 +934,6 @@ function buildRawCte(
 		createPlanReportForCteQuery(
 			stepQuery,
 			stepDeps,
-			`CTE "${emittedBindName(cte.name, stepDeps.naming)}" step`,
 			getRegisteredProjection(registry, stepQuery.from, stepDeps) !== undefined,
 		),
 		options,

@@ -1436,7 +1436,7 @@ function blogToSQL(nql: string): { sql: string; params: readonly unknown[] } {
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
-function blogCteToSQL(nql: string): string {
+function blogCteToSQL(nql: string, schemaName?: string): string {
 	const compiled = compile(nql, blogSchema.model);
 	if (!compiled.success || !compiled.ast?.cteQuery) {
 		throw new Error(
@@ -1446,8 +1446,10 @@ function blogCteToSQL(nql: string): string {
 
 	const adapter = createPgsqlCompileOnlyAdapter();
 	return normalizeSQL(
-		adapter.compileCteQuery(compiled.ast.cteQuery, { model: blogSchema.model })
-			.sql,
+		adapter.compileCteQuery(compiled.ast.cteQuery, {
+			model: blogSchema.model,
+			...(schemaName !== undefined && { schemaName }),
+		}).sql,
 	);
 }
 
@@ -1469,6 +1471,29 @@ describe('CTE relation planning', () => {
 			),
 		).toBe(
 			'with "seed" as (select authors.id from authors) select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id',
+		);
+	});
+
+	it('uses a visible CTE that shadows a relation target', () => {
+		const nql =
+			"with authors as (authors | where name = 'Alice Johnson' | select id, name), enriched as (posts | select title, author.name | flat) enriched | select *";
+		const expectedWithoutSchema =
+			'with "authors" as (select authors.id, authors.name from authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from posts join authors as author on posts."authorid" = author.id) select enriched.* from enriched';
+		const expectedWithSchema =
+			'with "authors" as (select authors.id, authors.name from tenant_42.authors where authors.name = $1), "enriched" as (select posts.title, author.name as "author.name" from tenant_42.posts join tenant_42.authors as author on posts."authorid" = author.id) select enriched.* from enriched';
+
+		expect(blogCteToSQL(nql)).toBe(expectedWithoutSchema);
+		// DIVERGENCE
+		expect(blogCteToSQL(nql, 'tenant_42')).toBe(expectedWithSchema);
+	});
+
+	it('plans includes in a CTE body', () => {
+		expect(
+			blogCteToSQL(
+				'with enriched as (posts | select title, author.*) enriched | select *',
+			),
+		).toBe(
+			'with "enriched" as (select posts.title, coalesce((select json_agg(to_jsonb(__t__) order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts."authorid"), \'[]\'::json) as author_json from posts) select enriched.* from enriched',
 		);
 	});
 
@@ -1508,16 +1533,6 @@ describe('CTE relation planning', () => {
 		);
 	});
 
-	it('refuses a relation target that conflicts with a visible CTE', () => {
-		expect(() =>
-			blogCteToSQL(
-				'with authors as (authors | select id), enriched as (posts | select author.name) enriched | select *',
-			),
-		).toThrow(
-			'relation target table "authors" in CTE "enriched" conflicts with visible CTE or binding "authors"',
-		);
-	});
-
 	it('keeps scalar CTE compilation working without a model', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		const result = adapter.compileCteQuery({
@@ -1543,37 +1558,6 @@ describe('CTE relation planning', () => {
 		expect(normalizeSQL(result.sql)).toBe(
 			'with "scalar" as (select users.id from users) select scalar.id from scalar',
 		);
-	});
-
-	it('refuses a relation path in a CTE body without a model', () => {
-		const adapter = createPgsqlCompileOnlyAdapter();
-		expect(() =>
-			adapter.compileCteQuery({
-				kind: 'cteQuery',
-				ctes: [
-					{
-						kind: 'simpleCte',
-						name: 'enriched',
-						query: {
-							type: 'select',
-							from: 'posts',
-							select: {
-								type: 'expressions',
-								columns: [
-									{
-										kind: 'relationColumn',
-										relation: 'author',
-										column: 'name',
-										as: 'author.name',
-									},
-								],
-							},
-						},
-					},
-				],
-				query: { type: 'select', from: 'enriched', select: { type: 'all' } },
-			}),
-		).toThrow('CTE "enriched" contains a relation path and requires a model');
 	});
 });
 

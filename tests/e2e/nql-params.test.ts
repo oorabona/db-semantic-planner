@@ -159,6 +159,49 @@ enriched
 		]);
 	});
 
+	it('matches top-level relation filters in CTE bodies and outer model queries', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const topLevel = orm.nql<{ title: string; author_name: string }>`posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat
+			| order by title`;
+		// #762: CTE output aliases must remain snake_case.
+		const cteBody = orm.nql<{
+			title: string;
+			author_name: string;
+		}>`with filtered_posts as (posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat)
+filtered_posts
+			| select title, author_name
+			| order by title`;
+		const outerModelQuery = orm.nql<{
+			title: string;
+			author_name: string;
+		}>`with seed as (authors | select id)
+posts
+			| where some(author).name = ${'Bob Smith'}
+			| select title, author.name as author_name
+			| flat
+			| order by title`;
+
+		const expected = [
+			{ title: 'Draft: Database Optimization', author_name: 'Bob Smith' },
+			{ title: 'Introduction to PostgreSQL', author_name: 'Bob Smith' },
+		];
+		const topLevelRows = await topLevel.all();
+		const cteBodyRows = await cteBody.all();
+		const outerModelRows = await outerModelQuery.all();
+		expect(cteBodyRows).toEqual(topLevelRows);
+		expect(outerModelRows).toEqual(topLevelRows);
+		expect(cteBodyRows).toEqual(expected);
+		expect(outerModelRows).toEqual(expected);
+	});
+
 	it('executes binding-final read-only queries through WITH CTEs', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
