@@ -3,8 +3,10 @@
  */
 
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { type NqlCompilerOptions, compile as nqlCompile } from '@dbsp/nql';
 import type { CompiledNqlQuery } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
+import { describe, expect, it, vi } from 'vitest';
 import type {
 	Adapter,
 	CompiledQuery,
@@ -60,6 +62,35 @@ function createMutationPipelineTestSchema() {
 	} as const);
 }
 
+function compileNqlBundle(
+	source: string,
+	model: Parameters<typeof nqlCompile>[1],
+	params: Readonly<Record<string, unknown>>,
+): CompiledNqlQuery {
+	const options = {
+		params,
+		[NQL_INTERNAL_COMPILER_OPTIONS]: { allowInternalParams: true },
+	} satisfies NqlCompilerOptions & {
+		readonly [NQL_INTERNAL_COMPILER_OPTIONS]: {
+			readonly allowInternalParams: true;
+		};
+	};
+	const result = nqlCompile(source, model, undefined, options);
+	if (!result.success || result.ast === undefined) {
+		throw new Error(
+			`Expected NQL source to compile: ${result.errors?.map((error) => error.message).join(', ') ?? 'no AST produced'}`,
+		);
+	}
+	return result.ast;
+}
+
+function markExecutionAvailable(adapter: Adapter): void {
+	Object.defineProperty(adapter, 'connectionAvailability', {
+		value: { status: 'available' },
+		configurable: true,
+	});
+}
+
 function expectQueryIntent(intent: QueryIntent | MutationIntent): QueryIntent {
 	if (intent.type !== 'select') {
 		throw new Error(`Expected a query intent, received ${intent.type}`);
@@ -74,6 +105,15 @@ function expectQueryDump(dump: Dump | MutationDump): Dump & {
 		throw new Error('Expected a query dump, received a mutation dump');
 	}
 	return dump as Dump & { readonly plan: NonNullable<Dump['plan']> };
+}
+
+function expectUnplannedReadDump(dump: Dump | MutationDump): Dump {
+	if (!('params' in dump)) {
+		throw new Error(
+			'Expected an unplanned read dump, received a mutation dump.',
+		);
+	}
+	return dump;
 }
 
 function expectSelectColumns(intent: QueryIntent): readonly unknown[] {
@@ -667,5 +707,162 @@ describe('FEAT-134 nqlRaw brand guard', () => {
 		expect(() => {
 			nql<unknown>`users | ${inherited}`.toIntentIR();
 		}).toThrow(/nqlRaw\(\)/);
+	});
+});
+
+describe('NQL CTE and set-operation bundles', () => {
+	const cteSource = [
+		'with active_users as (users | where active = :__p0 | select id, name)',
+		'active_users | where name = :__p1 | select id, name',
+	].join('\n');
+	const setOperationSource =
+		'users | where active = :__p0 | select id, name | union (users | where name = :__p1 | select id, name)';
+
+	it.each([
+		['CTE', cteSource],
+		['set operation', setOperationSource],
+	])(
+		'%s dumps the original bundle without a semantic plan',
+		(shape, source) => {
+			const db = createParamTestSchema();
+			const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+			const expectedBundle = compileNqlBundle(source, db.model, {
+				__p0: true,
+				__p1: 'Ada',
+			});
+			const expected = adapter.compile(expectedBundle, { model: db.model });
+			const orm = createOrm({ schema: db, adapter });
+			const dumpResult =
+				shape === 'CTE'
+					? orm.nql<unknown>`with active_users as (users | where active = ${true} | select id, name)
+active_users | where name = ${'Ada'} | select id, name`.dump({
+							queryName: 'top-users',
+							correlationId: 'corr-752',
+						})
+					: orm.nql<unknown>`users | where active = ${true} | select id, name | union (users | where name = ${'Ada'} | select id, name)`.dump(
+							{
+								queryName: 'top-users',
+								correlationId: 'corr-752',
+							},
+						);
+			const dump = expectUnplannedReadDump(dumpResult);
+
+			expect(dump.sql).toBe(expected.sql);
+			expect(dump.params).toEqual(expected.parameters);
+			expect('plan' in dump).toBe(false);
+			expect(dump.meta).toMatchObject({
+				queryName: 'top-users',
+				correlationId: 'corr-752',
+			});
+			expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+		},
+	);
+
+	it.each([
+		['CTE', cteSource],
+		['set operation', setOperationSource],
+	])('%s refuses semantic planning and IntentIR', (shape) => {
+		const db = createParamTestSchema();
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgsqlCompileOnlyAdapter(),
+		});
+		const builder =
+			shape === 'CTE'
+				? orm.nql<unknown>`with active_users as (users | where active = ${true} | select id, name)
+active_users | where name = ${'Ada'} | select id, name`
+				: orm.nql<unknown>`users | where active = ${true} | select id, name | union (users | where name = ${'Ada'} | select id, name)`;
+
+		expect(() => builder.plan()).toThrow(
+			'NQL CTE and set-operation queries do not have execution plans.',
+		);
+		expect(() => builder.toIntentIR()).toThrow(
+			'NQL CTE and set-operation queries do not have IntentIR.',
+		);
+	});
+
+	it('compiles and executes the original CTE bundle through all()', async () => {
+		const db = createParamTestSchema();
+		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const expectedBundle = compileNqlBundle(cteSource, db.model, {
+			__p0: true,
+			__p1: 'Ada',
+		});
+		const compile = vi.spyOn(adapter, 'compile');
+		const execute = vi.fn<NonNullable<Adapter['execute']>>(
+			async <T>() => [{ id: 1, name: 'Ada' }] as T[],
+		);
+		adapter.execute = execute as unknown as NonNullable<Adapter['execute']>;
+		markExecutionAvailable(adapter);
+		const orm = createOrm({ schema: db, adapter });
+
+		const rows = await orm.nql<{
+			id: number;
+			name: string;
+		}>`with active_users as (users | where active = ${true} | select id, name)
+active_users | where name = ${'Ada'} | select id, name`.all();
+
+		expect(rows).toEqual([{ id: 1, name: 'Ada' }]);
+		expect(compile).toHaveBeenCalledTimes(1);
+		expect(compile.mock.calls[0]?.[0]).toEqual(expectedBundle);
+		expect(execute).toHaveBeenCalledTimes(1);
+	});
+
+	it('compiles a final set operation over a prior read binding as one bundle', () => {
+		const db = createParamTestSchema();
+		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const source = [
+			'users | where active = :__p0 | select id, name | bind active_users',
+			'active_users | select id, name | union (users | where name = :__p1 | select id, name)',
+		].join('\n');
+		const expectedBundle = compileNqlBundle(source, db.model, {
+			__p0: true,
+			__p1: 'Ada',
+		});
+		const expected = adapter.compile(expectedBundle, { model: db.model });
+		const orm = createOrm({ schema: db, adapter });
+
+		const dumpResult =
+			orm.nql<unknown>`users | where active = ${true} | select id, name | bind active_users
+active_users | select id, name | union (users | where name = ${'Ada'} | select id, name)`.dump();
+		const dump = expectUnplannedReadDump(dumpResult);
+
+		expect(dump.sql).toBe(expected.sql);
+		expect(dump.params).toEqual(expected.parameters);
+		expect('plan' in dump).toBe(false);
+	});
+
+	it('refuses a CTE after a mutation binding before execution', async () => {
+		const db = createMutationPipelineTestSchema();
+		const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+		const execute = vi.fn<NonNullable<Adapter['execute']>>(
+			async <T>() => [] as T[],
+		);
+		adapter.execute = execute as unknown as NonNullable<Adapter['execute']>;
+		markExecutionAvailable(adapter);
+		const orm = createOrm({ schema: db, adapter });
+
+		await expect(
+			orm.nql<unknown>`insert into archivedUsers set name = ${'Ada'} | select id | bind inserted
+with active_users as (users | select id, name) active_users | select id, name`.all(),
+		).rejects.toThrow(
+			'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.',
+		);
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it('refuses a CTE after a mutation binding in dump()', () => {
+		const db = createMutationPipelineTestSchema();
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgsqlCompileOnlyAdapter(),
+		});
+
+		expect(() =>
+			orm.nql<unknown>`insert into archivedUsers set name = ${'Ada'} | select id | bind inserted
+with active_users as (users | select id, name) active_users | select id, name`.dump(),
+		).toThrow(
+			'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.',
+		);
 	});
 });

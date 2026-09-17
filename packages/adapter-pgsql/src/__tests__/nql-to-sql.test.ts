@@ -73,6 +73,11 @@ const testSchema = schema({
 		}),
 		salary: 'decimal',
 	},
+	variants: {
+		id: { type: 'integer', primaryKey: true },
+		productId: 'integer',
+		priceCents: 'integer',
+	},
 });
 
 // ---------------------------------------------------------------------------
@@ -907,6 +912,60 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).not.toContain('users.status = users.name');
 		expect(sql).not.toContain('subset.id = null');
 		expect(params).toEqual([fieldRefShaped, null]);
+	});
+
+	it('keeps CTE sources unqualified while schema-qualifying real tables', () => {
+		const compiled = compile(
+			'with ranked as (variants | select id, productId, priceCents, row_number() over (partition by productId order by priceCents desc, id) as rn), top_variants as (ranked | select id, productId, priceCents) ranked | where rn <= 2',
+			testSchema.model,
+		);
+		if (!compiled.success || !compiled.ast?.cteQuery) {
+			throw new Error(
+				`NQL CTE compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+			);
+		}
+
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
+			model: testSchema.model,
+			schemaName: 'tenant_42',
+		});
+
+		expect(normalizeSQL(result.sql)).toBe(
+			'with "ranked" as (select variants.id, variants."productid", variants."pricecents", row_number() over (partition by variants."productid" order by variants."pricecents" desc, variants.id asc) as rn from tenant_42.variants), "top_variants" as (select ranked.id, ranked."productid", ranked."pricecents" from ranked) select ranked.* from ranked where ranked.rn <= $1',
+		);
+		expect(result.parameters).toEqual([2]);
+	});
+
+	it('validates NQL CTE declaration names before emitting SQL', () => {
+		const orm = createOrm({
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({ model: testSchema.model }),
+		});
+
+		expect(() =>
+			orm.nql`with "x"" AS (SELECT 1) SELECT 1; --" as (users | select id)
+users | select id`.dump(),
+		).toThrow(
+			'Invalid table identifier "x" AS (SELECT 1) SELECT 1; --": contains invalid characters (only letters, digits, underscore, and $ allowed)',
+		);
+	});
+
+	it('emits NQL CTE declarations with the same casing as references', () => {
+		const orm = createOrm({
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result = orm.nql`with activeUsers as (users | select id)
+activeUsers | select id`.dump();
+
+		expect(normalizeSQL(result.sql)).toBe(
+			'with "active_users" as (select users.id from users) select active_users.id from active_users',
+		);
 	});
 
 	it('binds explicit NQL param nodes through scalar SELECT subqueries', () => {

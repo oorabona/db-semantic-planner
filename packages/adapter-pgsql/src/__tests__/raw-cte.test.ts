@@ -29,6 +29,9 @@ const testSchema = schema({
 		name: { type: 'text' },
 		parent_id: { type: 'integer' },
 	},
+	chain: {
+		id: { type: 'integer', primaryKey: true },
+	},
 } as const);
 
 function buildOrm() {
@@ -64,6 +67,47 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 				') SELECT parent_chain.* FROM parent_chain',
 		);
 		expect(dump.params).toEqual([1]);
+	});
+
+	it('keeps its recursive source unqualified under a schema scope', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.withSchema('tenant_x')
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('id', 1)),
+				step: orm.select('chain'),
+			})
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE "chain" AS (' +
+				'SELECT categories.* FROM tenant_x.categories WHERE categories.id = $1' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain' +
+				') SELECT chain.* FROM chain',
+		);
+		expect(dump.params).toEqual([1]);
+	});
+
+	it('keeps a physical table in the anchor and its own name in the step', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.withSchema('tenant_x')
+			.recursive('chain', {
+				base: orm.select('chain'),
+				step: orm.select('chain'),
+			})
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE "chain" AS (' +
+				'SELECT chain.* FROM tenant_x.chain' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain' +
+				') SELECT chain.* FROM chain',
+		);
 	});
 
 	it('T2: UNION (dedup) instead of UNION ALL', () => {

@@ -4,7 +4,7 @@ title: Observability
 
 # Observability
 
-Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that returns the compiled SQL, bound parameters, and the full planner report — without touching the database. This makes it straightforward to inspect, log, and test every query your application generates.
+Every query and mutation builder in `@dbsp/core` exposes a `.dump()` method that returns the compiled SQL, bound parameters, and a plan when semantic planning applies — without touching the database. This makes it straightforward to inspect, log, and test every query your application generates.
 
 ---
 
@@ -52,7 +52,7 @@ type Dump = {
 };
 ```
 
-> **Note:** `plan` is omitted for set-operation dumps (UNION / INTERSECT / EXCEPT) because those queries bypass the semantic planner. Use `dump.plan?.decisions` or guard with `if (dump.plan)` when writing observability hooks that need to be generic across all query types.
+> **Note:** `plan` is omitted for set-operation dumps (UNION / INTERSECT / EXCEPT) and for NQL `with` (CTE) and set-operation queries, because those queries bypass the semantic planner. Use `dump.plan?.decisions` or guard with `if (dump.plan)` when writing observability hooks that need to be generic across all query types.
 
 ---
 

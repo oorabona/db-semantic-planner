@@ -31,7 +31,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
-import { emittedBindName } from './binding-registry.js';
+import { emittedBindName, withBindingName } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -55,6 +55,7 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
+import { validateIdentifier } from './validate.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 
@@ -627,13 +628,19 @@ export function compileCteQuery<T = unknown>(
 		initialProjectionByName,
 	);
 	let isRecursive = false;
+	// CTE names share the binding-name registry because both are query-local
+	// relations that must not be schema-qualified. A CTE body may only refer to
+	// earlier declarations; the outer query may refer to every declaration.
+	let visibleCteDeps = deps;
 
 	for (const cte of intent.ctes) {
+		validateIdentifier(cte.name, 'table');
+		const emittedCteName = emittedBindName(cte.name, visibleCteDeps.naming);
 		if (cte.kind === 'unnestCte') {
 			// Unnest-backed CTE: builds an AST node, deparses it
 			const beforeUnnestParamCount = state.parameters.length;
 			state.paramIndex = allCteParams.length;
-			const node = buildUnnestCte(cte, state, deps);
+			const node = buildUnnestCte(cte, state, visibleCteDeps);
 			const cteParams = state.parameters.slice(beforeUnnestParamCount);
 			allCteParams.push(...cteParams);
 			const cteSql = deparseQuoted(node);
@@ -641,12 +648,12 @@ export function compileCteQuery<T = unknown>(
 			const cteQueryAst = (node as { CommonTableExpr?: { ctequery?: Node } })
 				.CommonTableExpr?.ctequery;
 			cteProjectionByName.set(
-				cte.name,
+				emittedCteName,
 				fromAstProjection({
 					sql: cteSql,
 					parameters: cteParams,
 					ast: cteQueryAst ?? node,
-					rootTable: cte.name,
+					rootTable: emittedCteName,
 					model: undefined,
 					naming: deps.naming,
 				}),
@@ -655,7 +662,21 @@ export function compileCteQuery<T = unknown>(
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
 			const currentParamOffset = allCteParams.length;
-			const rawCte = buildRawCte(cte, deps, options, cteProjectionByName);
+			const rawCteStepDeps = {
+				...visibleCteDeps,
+				bindingNames: withBindingName(
+					visibleCteDeps.bindingNames,
+					cte.name,
+					visibleCteDeps.naming,
+				),
+			};
+			const rawCte = buildRawCte(
+				cte,
+				visibleCteDeps,
+				rawCteStepDeps,
+				options,
+				cteProjectionByName,
+			);
 			const renumberedRawCteSql =
 				currentParamOffset > 0
 					? rawCte.sql.replace(
@@ -667,7 +688,7 @@ export function compileCteQuery<T = unknown>(
 			allCteParams.push(...rawCte.params);
 			cteSqlFragments.push(renumberedRawCteSql);
 			cteProjectionByName.set(
-				cte.name,
+				emittedCteName,
 				preserveOneToOne(rawCte.projection, {
 					sql: renumberedRawCteSql,
 					parameters: rawCte.params,
@@ -680,7 +701,7 @@ export function compileCteQuery<T = unknown>(
 			const innerCompiled = compileQueryEnvelope(
 				innerCte.query,
 				options,
-				deps,
+				visibleCteDeps,
 				cteProjectionByName,
 			);
 			// Renumber inner params to follow all previously accumulated CTE params
@@ -694,9 +715,9 @@ export function compileCteQuery<T = unknown>(
 						)
 					: innerCompiled.sql;
 			allCteParams.push(...innerCompiled.parameters);
-			cteSqlFragments.push(`"${innerCte.name}" AS (${renumberedInnerSql})`);
+			cteSqlFragments.push(`"${emittedCteName}" AS (${renumberedInnerSql})`);
 			cteProjectionByName.set(
-				innerCte.name,
+				emittedCteName,
 				preserveOneToOne(innerCompiled, {
 					sql: renumberedInnerSql,
 					parameters: innerCompiled.parameters,
@@ -708,13 +729,22 @@ export function compileCteQuery<T = unknown>(
 				`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
 			);
 		}
+
+		visibleCteDeps = {
+			...visibleCteDeps,
+			bindingNames: withBindingName(
+				visibleCteDeps.bindingNames,
+				cte.name,
+				visibleCteDeps.naming,
+			),
+		};
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
 	const outerCompiled = compileSelectEnvelope(
 		createPlanReportForQuery(intent.query),
 		options,
-		deps,
+		visibleCteDeps,
 	);
 
 	// 3. Renumber outer SQL parameters to follow all CTE parameters.
@@ -828,7 +858,7 @@ function buildUnnestCte(
 
 	return {
 		CommonTableExpr: {
-			ctename: cte.name,
+			ctename: emittedBindName(cte.name, deps.naming),
 			ctequery: { SelectStmt: cteSelectStmt },
 		},
 	};
@@ -847,7 +877,8 @@ function buildUnnestCte(
  */
 function buildRawCte(
 	cte: RawCteIntent,
-	deps: AdapterCompilerDeps,
+	anchorDeps: AdapterCompilerDeps,
+	stepDeps: AdapterCompilerDeps,
 	options: CompileOptions | undefined,
 	registry: CteProjectionRegistry,
 ): {
@@ -857,14 +888,19 @@ function buildRawCte(
 } {
 	// Compile base (anchor) query
 	const baseQuery = cte.base as QueryIntent;
-	const baseCompiled = compileQueryEnvelope(baseQuery, options, deps, registry);
+	const baseCompiled = compileQueryEnvelope(
+		baseQuery,
+		options,
+		anchorDeps,
+		registry,
+	);
 
 	// Compile step (recursive) query
 	const stepQuery = cte.step as QueryIntent;
 	const rawStepCompiled = compileSelectEnvelope(
 		createPlanReportForQuery(stepQuery),
 		options,
-		deps,
+		stepDeps,
 	);
 
 	// Renumber step params to follow base params.
@@ -900,7 +936,7 @@ function buildRawCte(
 	const stepRegisteredSource =
 		stepQuery.from === cte.name
 			? baseCompiled
-			: getRegisteredProjection(registry, stepQuery.from, deps);
+			: getRegisteredProjection(registry, stepQuery.from, stepDeps);
 	const stepCompiled = stepRegisteredSource
 		? rehomeQueryEnvelope(
 				stepRegisteredSource,
@@ -908,7 +944,7 @@ function buildRawCte(
 				rawStepCompiled,
 				finalStepSql,
 				allParams,
-				deps,
+				stepDeps,
 			)
 		: preserveOneToOne(rawStepCompiled, {
 				sql: finalStepSql,
@@ -916,7 +952,7 @@ function buildRawCte(
 			});
 
 	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
-	const cteName = `"${cte.name.replace(/"/g, '""')}"`;
+	const cteName = `"${emittedBindName(cte.name, anchorDeps.naming)}"`;
 	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${finalStepSql})`;
 
 	return {

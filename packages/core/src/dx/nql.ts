@@ -90,9 +90,9 @@ export interface NqlBuilder<T> {
 	run(): Promise<void>;
 	/** Execute query and return first result or null */
 	first(): Promise<T | null>;
-	/** Get the IntentIR for debugging */
+	/** Get the IntentIR for debugging. Throws for CTE and set-operation queries. */
 	toIntentIR(): QueryIntent | MutationIntent;
-	/** Get the execution plan */
+	/** Get the execution plan. Throws for mutations and CTE and set-operation queries. */
 	plan(): PlanReport;
 	/** Get full dump. Mutations return MutationDump without a plan. */
 	dump(meta?: DumpMetaInput): Dump | MutationDump;
@@ -159,7 +159,27 @@ type CompiledNqlIntent =
 			readonly kind: 'mutation';
 			readonly bundle: CompiledNqlQuery;
 			readonly intent: MutationIntent;
+	  }
+	| {
+			/**
+			 * CTE and set-operation bundles are executable reads, but do not have a
+			 * QueryIntent that the semantic planner can consume.
+			 */
+			readonly kind: 'unplannedRead';
+			readonly bundle: CompiledNqlQuery;
+			readonly intent:
+				| NonNullable<CompiledNqlQuery['cteQuery']>
+				| NonNullable<CompiledNqlQuery['setOperation']>;
 	  };
+
+const UNPLANNED_NQL_READ_PLAN_ERROR =
+	'NQL CTE and set-operation queries do not have execution plans.';
+
+const UNPLANNED_NQL_READ_INTENT_ERROR =
+	'NQL CTE and set-operation queries do not have IntentIR.';
+
+const UNPLANNED_NQL_READ_PROGRAM_ERROR =
+	'NQL CTE and set-operation queries are not supported after mutation or snapshot bindings.';
 
 function hasNqlBindings(bundle: CompiledNqlQuery): boolean {
 	return (bundle.bindings?.size ?? 0) > 0;
@@ -1019,7 +1039,10 @@ function bindingEntryIsFinal(
 	if (compiledIntent.kind === 'query') {
 		return boundQuery === compiledIntent.intent;
 	}
-	return sourceBundle.mutationBindings?.get(bindName) === compiledIntent.intent;
+	return (
+		compiledIntent.kind === 'mutation' &&
+		sourceBundle.mutationBindings?.get(bindName) === compiledIntent.intent
+	);
 }
 
 function orderedSequenceStepToProgramStep(
@@ -1211,12 +1234,14 @@ function createNqlProgramSteps(
 			intent: compiledIntent.intent,
 			final: true,
 		});
-	} else {
+	} else if (compiledIntent.kind === 'mutation') {
 		steps.push({
 			kind: 'mutation',
 			intent: compiledIntent.intent,
 			final: true,
 		});
+	} else {
+		throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
 	}
 	assertNqlProgramSteps(compiledIntent, steps);
 	return steps;
@@ -1479,11 +1504,31 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			};
 			return this._compiled;
 		}
+		if (bundle.cteQuery !== undefined) {
+			this._compiled = {
+				kind: 'unplannedRead',
+				bundle,
+				intent: bundle.cteQuery,
+			};
+			return this._compiled;
+		}
+		if (bundle.setOperation !== undefined) {
+			this._compiled = {
+				kind: 'unplannedRead',
+				bundle,
+				intent: bundle.setOperation,
+			};
+			return this._compiled;
+		}
 		throw new Error('NQL compilation failed: no query AST produced');
 	}
 
 	toIntentIR(): QueryIntent | MutationIntent {
-		return this.compile().intent;
+		const compiled = this.compile();
+		if (compiled.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_INTENT_ERROR);
+		}
+		return compiled.intent;
 	}
 
 	private planInternal(): PlanReport {
@@ -1492,6 +1537,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error(
 				'NQL mutations do not have execution plans; use dump() for SQL and parameters.',
 			);
+		}
+		if (compiled.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
 		return executePlan(compiled.intent, this.model);
 	}
@@ -1502,6 +1550,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			throw new Error(
 				'NQL mutations do not have execution plans; use dump() for SQL and parameters.',
 			);
+		}
+		if (compiled.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_PLAN_ERROR);
 		}
 		return isBindingFinalQuery(compiled.bundle)
 			? createBindingFinalPlan(
@@ -1515,6 +1566,15 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	dump(meta?: DumpMetaInput): Dump | MutationDump {
 		const compiledIntent = this.compile();
+		if (
+			compiledIntent.kind === 'unplannedRead' &&
+			hasExecutableNqlProgramSequence(compiledIntent.bundle)
+		) {
+			throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
+		}
+		if (compiledIntent.kind === 'unplannedRead') {
+			return this.dumpUnplannedNqlRead(compiledIntent.bundle, meta);
+		}
 		if (hasExecutableNqlProgramSequence(compiledIntent.bundle)) {
 			return this.dumpNqlProgramSequence(compiledIntent, meta);
 		}
@@ -1584,6 +1644,33 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			}
 			throw err;
 		}
+	}
+
+	private dumpUnplannedNqlRead(
+		bundle: CompiledNqlQuery,
+		meta?: DumpMetaInput,
+	): Dump {
+		if (!this.adapter) {
+			return {
+				sql: '[No adapter - SQL not available]',
+				params: [],
+				...(meta !== undefined && { meta }),
+			};
+		}
+
+		const compiled = this.adapter.compile<T>(
+			bundle,
+			this.nqlBundleCompileOptions(),
+		);
+		return {
+			sql: compiled.sql,
+			params: compiled.parameters as readonly unknown[],
+			meta: {
+				...(this._schemaName !== undefined && { schema: this._schemaName }),
+				compiledAt: new Date(),
+				...meta,
+			},
+		};
 	}
 
 	private requireAdapter(operation: string): Adapter<unknown> {
@@ -1663,6 +1750,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		compiledIntent: CompiledNqlIntent,
 		planReport?: PlanReport,
 	): CompiledNqlQuery {
+		if (compiledIntent.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
+		}
 		const finalStep = createNqlProgramSteps(compiledIntent).at(-1);
 		if (compiledIntent.kind === 'query') {
 			return this.createNqlStatementBundle(
@@ -1756,6 +1846,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		compiledIntent: CompiledNqlIntent,
 		adapter: Adapter<unknown>,
 	): Promise<T[]> {
+		if (compiledIntent.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
+		}
 		assertConnectionAvailable(adapter, 'nql().all()');
 		if (!supportsTransactions(adapter)) {
 			throw new ExecutionError({
@@ -1884,6 +1977,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		compiledIntent: CompiledNqlIntent,
 		meta?: DumpMetaInput,
 	): Dump | MutationDump {
+		if (compiledIntent.kind === 'unplannedRead') {
+			throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
+		}
 		const adapter = this.requireAdapter('dump');
 		const sourceBundle = compiledIntent.bundle;
 		const priorBindings = new Map<string, QueryIntent>();
@@ -2054,18 +2150,33 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	async all(): Promise<T[]> {
 		const adapter = this.adapter;
+		const compiledIntent = this.compile();
 		if (!adapter) {
 			throw new Error(
 				'Cannot execute query: no adapter configured. ' +
-					'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.',
+					(compiledIntent.kind === 'unplannedRead'
+						? 'Pass an adapter to createOrm().'
+						: 'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.'),
 			);
 		}
 
-		const compiledIntent = this.compile();
+		if (
+			compiledIntent.kind === 'unplannedRead' &&
+			hasExecutableNqlProgramSequence(compiledIntent.bundle)
+		) {
+			throw new Error(UNPLANNED_NQL_READ_PROGRAM_ERROR);
+		}
 		if (hasExecutableNqlProgramSequence(compiledIntent.bundle)) {
 			return this.executeNqlProgramSequence(compiledIntent, adapter);
 		}
 		assertConnectionAvailable(adapter, 'nql().all()');
+		if (compiledIntent.kind === 'unplannedRead') {
+			const compiled = adapter.compile<T>(
+				compiledIntent.bundle,
+				this.nqlBundleCompileOptions(),
+			);
+			return executeCompiledQuery(adapter, compiled, 'nql().all()');
+		}
 		if (compiledIntent.kind === 'mutation') {
 			return (
 				await this.runMutationStatement(

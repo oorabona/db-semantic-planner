@@ -172,6 +172,24 @@ describe('SC-15: CTE joined with outer query', () => {
 		expect(result.parameters[0]).toEqual([1, 2]);
 		expect(result.parameters[1]).toEqual(['a', 'b']);
 	});
+
+	it('emits camel-case CTE declarations with their snake-case references', () => {
+		const orm = stringMutationOrm(
+			createOrm({
+				schema: batchSchema,
+				adapter: createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' }),
+			}),
+		);
+		const cteOrm = orm as any;
+		const result = cteOrm
+			.withCte('activeUsers')
+			.fromUnnest({ id: [1, 2] })
+			.query(cteOrm.select('activeUsers'))
+			.dump();
+
+		expect(result.sql).toContain('WITH active_users AS');
+		expect(result.sql).toContain('SELECT active_users.* FROM active_users');
+	});
 });
 
 // ---------------------------------------------------------------------------

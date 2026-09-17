@@ -244,7 +244,19 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const nql = createNqlTag(s.definition, s.model);
 
 			await expect(nql<unknown>`users`.all()).rejects.toThrow(
-				'Cannot execute query: no adapter configured',
+				'Cannot execute query: no adapter configured. Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.',
+			);
+		});
+
+		it('suggests dump() for a CTE without adapter', async () => {
+			const s = createTestSchema();
+			const nql = createNqlTag(s.definition, s.model);
+
+			await expect(
+				nql<unknown>`with active_users as (users | select id, name)
+active_users | select id, name`.all(),
+			).rejects.toThrow(
+				'Cannot execute query: no adapter configured. Pass an adapter to createOrm().',
 			);
 		});
 
