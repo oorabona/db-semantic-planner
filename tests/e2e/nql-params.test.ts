@@ -130,14 +130,14 @@ posts
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
 
-		const topLevel = orm.nql<{ title: string; author_name: string }>`posts
+		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
 			| select title, author.name as author_name
 			| flat
 			| order by title`;
 		// #762: camelCase CTE aliases do not survive snake_case naming.
 		const cte = orm.nql<{
 			title: string;
-			author_name: string;
+			authorName: string;
 		}>`with enriched as (posts
 			| select title, author.name as author_name
 			| flat)
@@ -148,14 +148,14 @@ enriched
 		const cteRows = await cte.all();
 		expect(cteRows).toEqual(await topLevel.all());
 		expect(cteRows).toEqual([
-			{ title: 'Advanced TypeScript Patterns', author_name: 'Alice Johnson' },
-			{ title: 'Draft: Database Optimization', author_name: 'Bob Smith' },
-			{ title: 'Draft: React Best Practices', author_name: 'Alice Johnson' },
+			{ title: 'Advanced TypeScript Patterns', authorName: 'Alice Johnson' },
+			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
+			{ title: 'Draft: React Best Practices', authorName: 'Alice Johnson' },
 			{
 				title: 'Getting Started with TypeScript',
-				author_name: 'Alice Johnson',
+				authorName: 'Alice Johnson',
 			},
-			{ title: 'Introduction to PostgreSQL', author_name: 'Bob Smith' },
+			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
 		]);
 	});
 
@@ -163,7 +163,7 @@ enriched
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
 
-		const topLevel = orm.nql<{ title: string; author_name: string }>`posts
+		const topLevel = orm.nql<{ title: string; authorName: string }>`posts
 			| where some(author).name = ${'Bob Smith'}
 			| select title, author.name as author_name
 			| flat
@@ -171,7 +171,7 @@ enriched
 		// #762: CTE output aliases must remain snake_case.
 		const cteBody = orm.nql<{
 			title: string;
-			author_name: string;
+			authorName: string;
 		}>`with filtered_posts as (posts
 			| where some(author).name = ${'Bob Smith'}
 			| select title, author.name as author_name
@@ -181,7 +181,7 @@ filtered_posts
 			| order by title`;
 		const outerModelQuery = orm.nql<{
 			title: string;
-			author_name: string;
+			authorName: string;
 		}>`with seed as (authors | select id)
 posts
 			| where some(author).name = ${'Bob Smith'}
@@ -190,8 +190,8 @@ posts
 			| order by title`;
 
 		const expected = [
-			{ title: 'Draft: Database Optimization', author_name: 'Bob Smith' },
-			{ title: 'Introduction to PostgreSQL', author_name: 'Bob Smith' },
+			{ title: 'Draft: Database Optimization', authorName: 'Bob Smith' },
+			{ title: 'Introduction to PostgreSQL', authorName: 'Bob Smith' },
 		];
 		const topLevelRows = await topLevel.all();
 		const cteBodyRows = await cteBody.all();
