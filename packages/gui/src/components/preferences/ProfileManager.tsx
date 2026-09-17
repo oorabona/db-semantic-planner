@@ -293,12 +293,8 @@ export function ProfileManager() {
 				onConnect={() => {}} // Not used in profile manager context
 				onTest={handleTest}
 				onSave={handleSave}
-				onDiscover={(params) =>
-					sidecarApi.listDatabases(params).catch(() => ({ databases: [] }))
-				}
-				onListSchemas={(params) =>
-					sidecarApi.listSchemas(params).catch(() => ({ schemas: [] }))
-				}
+				onDiscover={(params) => sidecarApi.listDatabases(params)}
+				onListSchemas={(params) => sidecarApi.listSchemas(params)}
 				initial={editingProfile ? profileToFormData(editingProfile) : undefined}
 				testing={testing}
 				testResult={testResult}

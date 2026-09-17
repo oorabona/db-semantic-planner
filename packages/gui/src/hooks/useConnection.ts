@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import type { ConnectionTransport } from '@/lib/connection-transport';
 import { sidecarApi } from '@/lib/ipc';
 import {
 	type ConnectionProfile,
@@ -23,6 +24,7 @@ export function useConnection() {
 	const [testResult, setTestResult] = useState<{
 		ok: boolean;
 		message: string;
+		transport?: ConnectionTransport;
 	} | null>(null);
 
 	const connect = useCallback(
@@ -36,11 +38,12 @@ export function useConnection() {
 					profileId: profileId ?? '',
 					database: result.database,
 					schema: result.schema,
+					transport: result.transport,
 					connectParams: {
 						host: params.host,
 						port: params.port,
 						user: params.user,
-						sslMode: params.sslMode ?? 'disable',
+						sslMode: params.sslMode ?? 'prefer',
 					},
 				});
 				return result;
@@ -74,7 +77,11 @@ export function useConnection() {
 			await sidecarApi.disconnect({
 				connectionId: result.connectionId,
 			});
-			setTestResult({ ok: true, message: 'Connection successful!' });
+			setTestResult({
+				ok: true,
+				message: 'Connection successful!',
+				transport: result.transport,
+			});
 		} catch (err) {
 			const message = err instanceof Error ? err.message : 'Connection failed';
 			setTestResult({ ok: false, message });

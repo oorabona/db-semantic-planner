@@ -10,6 +10,8 @@ export type SslMode =
 	| 'require'
 	| 'verify-full';
 
+export type ConnectionTransport = 'tls' | 'plaintext' | 'fallback-plaintext';
+
 export interface ConnectParams {
 	host: string;
 	port: number;
@@ -22,6 +24,7 @@ export interface ConnectParams {
 
 interface ManagedConnection {
 	pool: Pool;
+	transport: ConnectionTransport;
 	schema: string;
 	database: string;
 	host: string;
@@ -31,11 +34,30 @@ interface ManagedConnection {
 
 const connections = new Map<string, ManagedConnection>();
 
+const SERVER_DOES_NOT_SUPPORT_SSL_ERROR =
+	'The server does not support SSL connections';
+
+function isServerWithoutSsl(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'message' in error &&
+		error.message === SERVER_DOES_NOT_SUPPORT_SSL_ERROR
+	);
+}
+
+function assertSupportedSslMode(mode: SslMode): void {
+	if (mode === 'allow') {
+		throw new Error(
+			'sslmode "allow" is not supported. Choose disable, prefer, or require.',
+		);
+	}
+}
+
 function sslConfig(mode: SslMode): boolean | { rejectUnauthorized: boolean } {
 	switch (mode) {
 		case 'disable':
 			return false;
-		case 'allow':
 		case 'prefer':
 			return { rejectUnauthorized: false };
 		case 'require':
@@ -44,6 +66,84 @@ function sslConfig(mode: SslMode): boolean | { rejectUnauthorized: boolean } {
 			return { rejectUnauthorized: false };
 		case 'verify-full':
 			return { rejectUnauthorized: true };
+		case 'allow':
+			throw new Error('sslmode "allow" is not supported');
+	}
+}
+
+interface PoolOpenParams {
+	host: string;
+	port: number;
+	database: string;
+	user: string;
+	password: string;
+	sslMode?: SslMode;
+	max: number;
+	options?: string;
+}
+
+function buildPool(
+	params: PoolOpenParams,
+	ssl: ReturnType<typeof sslConfig>,
+): Pool {
+	return new Pool({
+		host: params.host,
+		port: params.port,
+		database: params.database,
+		user: params.user,
+		password: params.password,
+		ssl,
+		max: params.max,
+		connectionTimeoutMillis: 10_000,
+		...(params.options === undefined ? {} : { options: params.options }),
+	});
+}
+
+async function establishPool(pool: Pool): Promise<void> {
+	const client = await pool.connect();
+	try {
+		await client.query('SELECT 1');
+	} finally {
+		client.release();
+	}
+}
+
+async function endAfterFailedConnection(pool: Pool): Promise<void> {
+	try {
+		await pool.end();
+	} catch {
+		// Preserve the connection error that prompted cleanup.
+	}
+}
+
+async function openPool(
+	params: PoolOpenParams,
+): Promise<{ pool: Pool; transport: ConnectionTransport }> {
+	const mode = params.sslMode ?? 'prefer';
+	assertSupportedSslMode(mode);
+
+	const pool = buildPool(params, sslConfig(mode));
+	try {
+		await establishPool(pool);
+		return {
+			pool,
+			transport: mode === 'disable' ? 'plaintext' : 'tls',
+		};
+	} catch (error) {
+		if (mode === 'prefer' && isServerWithoutSsl(error)) {
+			await endAfterFailedConnection(pool);
+			const plaintextPool = buildPool(params, false);
+			try {
+				await establishPool(plaintextPool);
+				return { pool: plaintextPool, transport: 'fallback-plaintext' };
+			} catch (fallbackError) {
+				await endAfterFailedConnection(plaintextPool);
+				throw fallbackError;
+			}
+		}
+
+		await endAfterFailedConnection(pool);
+		throw error;
 	}
 }
 
@@ -51,36 +151,35 @@ export async function connect(params: ConnectParams): Promise<{
 	connectionId: string;
 	database: string;
 	schema: string;
+	transport: ConnectionTransport;
 }> {
 	const schema = params.schema ?? 'public';
-	const ssl = sslConfig(params.sslMode ?? 'prefer');
-
-	const pool = new Pool({
-		host: params.host,
-		port: params.port,
-		database: params.database,
-		user: params.user,
-		password: params.password,
-		ssl,
+	const { pool, transport } = await openPool({
+		...params,
 		max: 5,
-		connectionTimeoutMillis: 10_000,
 		// Set search_path at connection level so all clients in the pool use it
-		...(schema !== 'public' && {
-			options: `-c search_path="${schema}",public`,
-		}),
+		...(schema === 'public'
+			? {}
+			: { options: `-c search_path="${schema}",public` }),
 	});
 
-	// Test the connection
-	const client = await pool.connect();
 	try {
-		await client.query('SELECT 1');
-	} finally {
-		client.release();
+		// Test the connection after the helper has established its transport.
+		const client = await pool.connect();
+		try {
+			await client.query('SELECT 1');
+		} finally {
+			client.release();
+		}
+	} catch (error) {
+		await endAfterFailedConnection(pool);
+		throw error;
 	}
 
 	const connectionId = randomUUID();
 	connections.set(connectionId, {
 		pool,
+		transport,
 		schema,
 		database: params.database,
 		host: params.host,
@@ -88,7 +187,7 @@ export async function connect(params: ConnectParams): Promise<{
 		user: params.user,
 	});
 
-	return { connectionId, database: params.database, schema };
+	return { connectionId, database: params.database, schema, transport };
 }
 
 export async function disconnect(connectionId: string): Promise<void> {
@@ -119,6 +218,7 @@ export function getConnectionInfo(connectionId: string): {
 	port: number;
 	user: string;
 	schema: string;
+	transport: ConnectionTransport;
 } | null {
 	const conn = connections.get(connectionId);
 	if (!conn) return null;
@@ -128,6 +228,7 @@ export function getConnectionInfo(connectionId: string): {
 		port: conn.port,
 		user: conn.user,
 		schema: conn.schema,
+		transport: conn.transport,
 	};
 }
 
@@ -154,16 +255,10 @@ export interface ListSchemasParams extends DiscoverParams {
 export async function listDatabases(
 	params: DiscoverParams,
 ): Promise<{ databases: string[] }> {
-	const ssl = sslConfig(params.sslMode ?? 'prefer');
-	const pool = new Pool({
-		host: params.host,
-		port: params.port,
+	const { pool } = await openPool({
+		...params,
 		database: 'postgres',
-		user: params.user,
-		password: params.password,
-		ssl,
 		max: 1,
-		connectionTimeoutMillis: 10_000,
 	});
 	try {
 		const { rows } = await pool.query<{ datname: string }>(
@@ -182,16 +277,9 @@ export async function listDatabases(
 export async function listSchemas(
 	params: ListSchemasParams,
 ): Promise<{ schemas: string[] }> {
-	const ssl = sslConfig(params.sslMode ?? 'prefer');
-	const pool = new Pool({
-		host: params.host,
-		port: params.port,
-		database: params.database,
-		user: params.user,
-		password: params.password,
-		ssl,
+	const { pool } = await openPool({
+		...params,
 		max: 1,
-		connectionTimeoutMillis: 10_000,
 	});
 	try {
 		const { rows } = await pool.query<{ schema_name: string }>(

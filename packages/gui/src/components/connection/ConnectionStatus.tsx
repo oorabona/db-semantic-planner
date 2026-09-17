@@ -1,4 +1,9 @@
 import { AlertCircle, Database, Loader2, Unplug } from 'lucide-react';
+import type { ConnectionTransport } from '@/lib/connection-transport';
+import {
+	isNonLocalConnectionHost,
+	transportLabel,
+} from '@/lib/connection-transport';
 import type { ConnectionStatus as Status } from '@/stores/connection-store';
 
 interface ConnectionStatusProps {
@@ -6,6 +11,7 @@ interface ConnectionStatusProps {
 	database?: string;
 	schema?: string;
 	host?: string;
+	transport?: ConnectionTransport;
 	error?: string | null;
 	onReconnect?: () => void;
 }
@@ -41,6 +47,7 @@ export function ConnectionStatus({
 	database,
 	schema,
 	host,
+	transport,
 	error,
 	onReconnect,
 }: ConnectionStatusProps) {
@@ -59,9 +66,24 @@ export function ConnectionStatus({
 					)}
 					{host && <span className="text-muted-foreground"> @ {host}</span>}
 				</span>
+			) : status === 'connected' ? (
+				<span className={config.className}>{config.label}</span>
 			) : (
 				<span className={config.className}>{config.label}</span>
 			)}
+			{status === 'connected' && transport && (
+				<span className="text-muted-foreground">
+					Transport: {transportLabel(transport)}
+				</span>
+			)}
+			{status === 'connected' &&
+				transport === 'fallback-plaintext' &&
+				host &&
+				isNonLocalConnectionHost(host) && (
+					<span className="text-yellow-600">
+						Warning: plaintext fallback to a non-local host
+					</span>
+				)}
 			{status === 'error' && error && (
 				<span className="truncate text-red-500" title={error}>
 					{error}

@@ -999,7 +999,7 @@ export default function App() {
 				user: (cfg.user as string) ?? '',
 				password: '',
 				schema: conn.schema,
-				sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'disable',
+				sslMode: (cfg.sslMode as ConnectionFormData['sslMode']) ?? 'prefer',
 			};
 		}
 		// No saved profile (standalone connect) — build from stored connect params

@@ -61,6 +61,7 @@ describe('createSidecarApi', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls',
 			};
 			mockCall.mockResolvedValue(mockResponse);
 
@@ -82,6 +83,7 @@ describe('createSidecarApi', () => {
 				connectionId: 'conn-456',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls',
 			};
 			mockCall.mockResolvedValue(mockResponse);
 

@@ -43,6 +43,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 
@@ -70,11 +71,12 @@ describe('useConnection', () => {
 				profileId: 'profile-1',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls',
 				connectParams: {
 					host: 'localhost',
 					port: 5432,
 					user: 'testuser',
-					sslMode: 'disable',
+					sslMode: 'prefer',
 				},
 			});
 		});
@@ -84,6 +86,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 
 			let capturedStatus = '';
@@ -112,6 +115,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 
@@ -186,6 +190,7 @@ describe('useConnection', () => {
 					profileId: 'profile-1',
 					database: 'testdb',
 					schema: 'public',
+					transport: 'tls',
 				},
 				status: 'connected',
 				error: null,
@@ -233,6 +238,7 @@ describe('useConnection', () => {
 					profileId: 'profile-1',
 					database: 'testdb',
 					schema: 'public',
+					transport: 'tls',
 				},
 				status: 'connected',
 				error: null,
@@ -259,6 +265,7 @@ describe('useConnection', () => {
 				connectionId: 'test-conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'fallback-plaintext' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 			vi.mocked(sidecarApi.disconnect).mockResolvedValue({ ok: true });
@@ -284,6 +291,7 @@ describe('useConnection', () => {
 				expect(result.current.testResult).toEqual({
 					ok: true,
 					message: 'Connection successful!',
+					transport: 'fallback-plaintext',
 				});
 			});
 		});
@@ -406,6 +414,7 @@ describe('useConnection', () => {
 				connectionId: 'conn-123',
 				database: 'testdb',
 				schema: 'public',
+				transport: 'tls' as const,
 			};
 			vi.mocked(sidecarApi.connect).mockResolvedValue(mockResult);
 

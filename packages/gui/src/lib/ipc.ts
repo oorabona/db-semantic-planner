@@ -3,7 +3,10 @@
  * Uses IpcClient from ipc-transport.ts.
  */
 import { useLogStore } from '@/stores/log-store';
+import type { ConnectionTransport } from './connection-transport.js';
 import { IpcClient } from './ipc-transport.js';
+
+export type { ConnectionTransport } from './connection-transport.js';
 
 // ── Sidecar method types ─────────────────────────────────────────
 
@@ -28,6 +31,7 @@ export interface ConnectResult {
 	connectionId: string;
 	database: string;
 	schema: string;
+	transport: ConnectionTransport;
 }
 
 export interface ExecuteSqlParams {

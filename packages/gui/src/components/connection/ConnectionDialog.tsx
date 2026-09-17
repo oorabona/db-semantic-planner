@@ -4,6 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
+import type { ConnectionTransport } from '@/lib/connection-transport';
+import {
+	isNonLocalConnectionHost,
+	transportLabel,
+} from '@/lib/connection-transport';
 import type { DatabaseType, SslMode } from '@/stores/connection-store';
 
 export interface ConnectionFormData {
@@ -61,7 +66,11 @@ interface ConnectionDialogProps {
 	initial?: Partial<ConnectionFormData>;
 	testing?: boolean;
 	connecting?: boolean;
-	testResult?: { ok: boolean; message: string } | null;
+	testResult?: {
+		ok: boolean;
+		message: string;
+		transport?: ConnectionTransport;
+	} | null;
 }
 
 export function ConnectionDialog({
@@ -104,6 +113,7 @@ export function ConnectionDialog({
 		form.port <= 65535;
 
 	const isValid = credentialsValid && form.database.trim() !== '';
+	const savedAllowMode = form.sslMode === 'allow';
 
 	const handleDiscover = async () => {
 		setDiscovering(true);
@@ -163,8 +173,10 @@ export function ConnectionDialog({
 					update('schema', firstSchema);
 				}
 			}
-		} catch {
-			// Schema fetch failed silently — user can still type manually
+		} catch (err) {
+			setDiscoverError(
+				err instanceof Error ? err.message : 'Schema discovery failed',
+			);
 		} finally {
 			setLoadingSchemas(false);
 		}
@@ -280,7 +292,6 @@ export function ConnectionDialog({
 								onChange={(e) => update('sslMode', e.target.value as SslMode)}
 							>
 								<option value="disable">Disable</option>
-								<option value="allow">Allow</option>
 								<option value="prefer">Prefer</option>
 								<option value="require">Require</option>
 								<option value="verify-full">Verify Full</option>
@@ -292,7 +303,7 @@ export function ConnectionDialog({
 								size="sm"
 								className="w-full"
 								onClick={handleDiscover}
-								disabled={!credentialsValid || discovering}
+								disabled={!credentialsValid || savedAllowMode || discovering}
 							>
 								{discovering ? (
 									<>
@@ -397,6 +408,19 @@ export function ConnectionDialog({
 					</div>
 				)}
 
+				{savedAllowMode && (
+					<div
+						className="mt-3 rounded-md p-2 text-sm"
+						style={{
+							backgroundColor: 'rgba(220, 38, 38, 0.1)',
+							color: '#dc2626',
+						}}
+					>
+						sslmode &quot;allow&quot; is not supported. Choose disable, prefer,
+						or require, then save this profile.
+					</div>
+				)}
+
 				{testResult && (
 					<div
 						className="mt-3 rounded-md p-2 text-sm"
@@ -408,6 +432,19 @@ export function ConnectionDialog({
 						}}
 					>
 						{testResult.message}
+						{testResult.ok && testResult.transport && (
+							<span className="block mt-1">
+								Transport: {transportLabel(testResult.transport)}
+							</span>
+						)}
+						{testResult.ok &&
+							testResult.transport === 'fallback-plaintext' &&
+							isNonLocalConnectionHost(form.host) && (
+								<span className="block mt-1 text-yellow-700">
+									Warning: TLS was unavailable, so this connection fell back to
+									plaintext over a non-local network.
+								</span>
+							)}
 					</div>
 				)}
 
@@ -417,7 +454,7 @@ export function ConnectionDialog({
 						variant="outline"
 						size="sm"
 						onClick={() => onTest(form)}
-						disabled={!isValid || testing || connecting}
+						disabled={!isValid || savedAllowMode || testing || connecting}
 					>
 						{testing ? 'Testing...' : 'Test Connection'}
 					</Button>
@@ -429,14 +466,14 @@ export function ConnectionDialog({
 							variant="outline"
 							size="sm"
 							onClick={() => onSave(form)}
-							disabled={!isValid || form.name.trim() === ''}
+							disabled={!isValid || savedAllowMode || form.name.trim() === ''}
 						>
 							Save
 						</Button>
 						<Button
 							size="sm"
 							onClick={() => onConnect(form)}
-							disabled={!isValid || connecting}
+							disabled={!isValid || savedAllowMode || connecting}
 						>
 							{connecting ? 'Connecting...' : 'Connect'}
 						</Button>
