@@ -31,7 +31,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
-import { emittedBindName } from './binding-registry.js';
+import { emittedBindName, withBindingName } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -627,6 +627,10 @@ export function compileCteQuery<T = unknown>(
 		initialProjectionByName,
 	);
 	let isRecursive = false;
+	// CTE names share the binding-name registry because both are query-local
+	// relations that must not be schema-qualified. A CTE body may only refer to
+	// earlier declarations; the outer query may refer to every declaration.
+	let visibleCteDeps = deps;
 
 	for (const cte of intent.ctes) {
 		if (cte.kind === 'unnestCte') {
@@ -655,7 +659,12 @@ export function compileCteQuery<T = unknown>(
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
 			const currentParamOffset = allCteParams.length;
-			const rawCte = buildRawCte(cte, deps, options, cteProjectionByName);
+			const rawCte = buildRawCte(
+				cte,
+				visibleCteDeps,
+				options,
+				cteProjectionByName,
+			);
 			const renumberedRawCteSql =
 				currentParamOffset > 0
 					? rawCte.sql.replace(
@@ -680,7 +689,7 @@ export function compileCteQuery<T = unknown>(
 			const innerCompiled = compileQueryEnvelope(
 				innerCte.query,
 				options,
-				deps,
+				visibleCteDeps,
 				cteProjectionByName,
 			);
 			// Renumber inner params to follow all previously accumulated CTE params
@@ -708,13 +717,22 @@ export function compileCteQuery<T = unknown>(
 				`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
 			);
 		}
+
+		visibleCteDeps = {
+			...visibleCteDeps,
+			bindingNames: withBindingName(
+				visibleCteDeps.bindingNames,
+				cte.name,
+				visibleCteDeps.naming,
+			),
+		};
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
 	const outerCompiled = compileSelectEnvelope(
 		createPlanReportForQuery(intent.query),
 		options,
-		deps,
+		visibleCteDeps,
 	);
 
 	// 3. Renumber outer SQL parameters to follow all CTE parameters.
