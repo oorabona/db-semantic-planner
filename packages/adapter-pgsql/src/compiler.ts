@@ -78,6 +78,11 @@ import {
 	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
+import {
+	type RelationTargetProjectionRegistry,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 
 // Register createWhereDispatcher with compileExpressionIntent so CASE expressions
 // can compile their WHEN conditions. compiler.ts is the bridge: it imports both
@@ -736,6 +741,7 @@ export interface CompilerOptions {
 	readonly model?: import('@dbsp/types').ModelIR;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
+	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 }
 
 export class PlanCompiler {
@@ -746,6 +752,9 @@ export class PlanCompiler {
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
 	private readonly bindingNames: BindingNameRegistry | undefined;
+	private readonly relationTargetProjections:
+		| RelationTargetProjectionRegistry
+		| undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -790,6 +799,7 @@ export class PlanCompiler {
 		this.model = options.model ?? undefined;
 		this.dialectCapabilities = options.dialectCapabilities;
 		this.bindingNames = options.bindingNames;
+		this.relationTargetProjections = options.relationTargetProjections;
 	}
 
 	private childCompilerOptions(
@@ -806,6 +816,9 @@ export class PlanCompiler {
 			}),
 			...(this.bindingNames !== undefined && {
 				bindingNames: this.bindingNames,
+			}),
+			...(this.relationTargetProjections !== undefined && {
+				relationTargetProjections: this.relationTargetProjections,
 			}),
 			...overrides,
 		};
@@ -825,6 +838,9 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
 			...(this.model != null && { model: this.model }),
 			compileCustomFnFilter: buildCustomFnFilter,
 		} as HandlerCompilerContext;
@@ -1346,6 +1362,9 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
 			...(this.model != null && { model: this.model }),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
 				this.compileExpressionSubquery(query, paramOffset),
@@ -1398,6 +1417,17 @@ export class PlanCompiler {
 		relatedColumn: Node;
 	} {
 		const relatedAlias = this.allocateBindingRelationAlias();
+		const target = resolveRelationTarget(
+			fields.targetTable,
+			this.createHandlerContext(plan),
+		);
+		requireRelationTargetColumns(
+			target,
+			[fields.selectedColumn!, ...fields.targetColumn],
+			this.createHandlerContext(plan),
+			'correlation key',
+			this.bindingRelationName(fields),
+		);
 		const relatedTable = rangeVar(
 			fields.targetTable,
 			relatedAlias,
@@ -1553,6 +1583,13 @@ export class PlanCompiler {
 				for (let i = 0; i < fields.hops.length; i++) {
 					const hop = fields.hops[i]!;
 					const hopAlias = `${relatedAlias}_h${i + 1}`;
+					requireRelationTargetColumns(
+						resolveRelationTarget(hop.target, this.createHandlerContext(plan)),
+						hop.joinColumn,
+						this.createHandlerContext(plan),
+						'join key',
+						this.bindingRelationName(fields),
+					);
 					const hopTable = rangeVar(
 						hop.target,
 						hopAlias,
@@ -1647,6 +1684,15 @@ export class PlanCompiler {
 				? this.allocateBindingRelationAlias()
 				: undefined;
 			const handlerContext = this.createHandlerContext(plan);
+			if (hasCompleteManyToManyProof) {
+				requireRelationTargetColumns(
+					resolveRelationTarget(fields.through!, handlerContext),
+					[fields.throughTargetColumn!, fields.throughSourceColumn!],
+					handlerContext,
+					'junction key',
+					this.bindingRelationName(fields),
+				);
+			}
 			const fromNode = hasCompleteManyToManyProof
 				? innerJoin(
 						relatedTable,
@@ -3153,6 +3199,16 @@ export class PlanCompiler {
 			this.deriveFk(targetTable, this.defaultPk),
 		];
 		const targetKey = decision.parentKey ?? [this.defaultPk];
+		requireRelationTargetColumns(
+			resolveRelationTarget(
+				targetTable,
+				this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
+			),
+			toColumnList(targetKey),
+			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
+			'join key',
+			decision.relationName,
+		);
 		const onCondition = buildKeyCorrelation(
 			targetAlias,
 			targetKey,
@@ -3200,6 +3256,16 @@ export class PlanCompiler {
 		if (targetColumn.length === 0) {
 			throw new Error("Missing required column 'targetColumn' in compileJoin");
 		}
+		requireRelationTargetColumns(
+			resolveRelationTarget(
+				decision.targetTable ?? '',
+				this.createHandlerContext(plan),
+			),
+			targetColumn,
+			this.createHandlerContext(plan),
+			'join key',
+			decision.relationName,
+		);
 		const sourceAlias = sourceColumn.length > 1 ? plan.rootTable : '';
 		const onCondition = buildKeyCorrelation(
 			sourceAlias,

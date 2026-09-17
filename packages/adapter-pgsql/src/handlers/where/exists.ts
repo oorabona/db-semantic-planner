@@ -18,6 +18,10 @@ import {
 	rangeVar,
 } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -141,6 +145,13 @@ function buildExistsSubquery(
 	if (!targetTable) {
 		throw new Error('EXISTS handler requires targetTable or relation');
 	}
+	requireRelationTargetColumns(
+		resolveRelationTarget(targetTable, ctx),
+		toColumnList(targetColumn),
+		ctx,
+		'join key',
+		relation,
+	);
 
 	// Allocate a unique alias. Start the suffix from the current map size (which
 	// preserves the established numbering for the common case) and bump until the
@@ -331,8 +342,15 @@ function buildExistsSubquery(
 				sourceAliasForJoin, // resolved source alias (root or intermediate)
 				joinSourceCols,
 				joinAlias,
-				joinTargetCols,
+				joinTargetCols ?? [],
 				ctx,
+			);
+			requireRelationTargetColumns(
+				resolveRelationTarget(joinTargetTable, ctx),
+				joinTargetCols ?? [],
+				ctx,
+				'join key',
+				joinRelation,
 			);
 
 			const joinType =

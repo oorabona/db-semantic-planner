@@ -15,6 +15,10 @@ import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -147,6 +151,23 @@ function compileLateralCascade(
 
 	if (!targetTable) {
 		throw new Error('LATERAL include requires targetTable');
+	}
+	const target = resolveRelationTarget(targetTable, ctx);
+	requireRelationTargetColumns(
+		target,
+		toColumnList(targetColumn),
+		ctx,
+		'join key',
+		decision.relation,
+	);
+	if (columns && !(columns.length === 1 && columns[0] === '*')) {
+		requireRelationTargetColumns(
+			target,
+			columns,
+			ctx,
+			'selected column',
+			decision.relation,
+		);
 	}
 
 	// Generate unique aliases

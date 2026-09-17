@@ -1497,6 +1497,54 @@ describe('CTE relation planning', () => {
 		);
 	});
 
+	it('rejects relation reads whose visible CTE target omits required columns', () => {
+		const missingJoinKey =
+			'with authors as (authors | select name) posts | select title, author.name | flat';
+		const missingJsonOrderKey =
+			'with authors as (authors | select name) posts | select title, author.*';
+		const missingFilterJoinKey =
+			"with authors as (authors | select name) posts | where some(author).name = 'x' | select title";
+
+		for (const nql of [missingJoinKey, missingFilterJoinKey]) {
+			expect(() => blogCteToSQL(nql)).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (join key). Available: name",
+			);
+			expect(() => blogCteToSQL(nql, 'tenant_42')).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (join key). Available: name",
+			);
+		}
+		for (const nql of [missingJsonOrderKey]) {
+			expect(() => blogCteToSQL(nql)).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (order key). Available: name",
+			);
+			expect(() => blogCteToSQL(nql, 'tenant_42')).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (order key). Available: name",
+			);
+		}
+	});
+
+	it('expands a reduced visible CTE wildcard from its projection', () => {
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select id) posts | select title, author.*',
+			),
+		).toContain("json_agg(jsonb_build_object('id', __t__.id)");
+	});
+
+	it('compares visible CTE relation keys in database casing', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+		expect(() =>
+			orm.nql`with posts as (posts | select authorId, title)
+authors | select name, posts.title | flat`.dump(),
+		).not.toThrow();
+	});
+
 	it('keeps a non-visible relation target schema-qualified', () => {
 		const sql = blogCteToSQL(
 			'with seed as (authors | select id) posts | select title, author.name | flat',

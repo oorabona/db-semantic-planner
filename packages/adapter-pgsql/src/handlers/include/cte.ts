@@ -12,6 +12,10 @@ import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
@@ -204,6 +208,23 @@ export const cteIncludeHandler: IncludeHandler = {
 
 		if (!relation) {
 			throw new Error('CTE include requires relation name');
+		}
+		const target = resolveRelationTarget(targetTable, ctx);
+		requireRelationTargetColumns(
+			target,
+			toColumnList(targetColumn),
+			ctx,
+			'join key',
+			relation,
+		);
+		if (columns && !(columns.length === 1 && columns[0] === '*')) {
+			requireRelationTargetColumns(
+				target,
+				columns,
+				ctx,
+				'selected column',
+				relation,
+			);
 		}
 
 		// Generate unique names

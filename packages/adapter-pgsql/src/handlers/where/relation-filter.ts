@@ -16,6 +16,10 @@ import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { rangeVar } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -72,6 +76,13 @@ function buildJoinFilter(
 	if (!targetTable) {
 		throw new Error('Relation filter requires targetTable');
 	}
+	requireRelationTargetColumns(
+		resolveRelationTarget(targetTable, ctx),
+		toColumnList(targetColumn),
+		ctx,
+		'join key',
+		relation,
+	);
 
 	// Generate unique alias
 	const existingAliases = state.aliases.size;

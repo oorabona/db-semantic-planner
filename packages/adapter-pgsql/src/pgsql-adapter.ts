@@ -3033,6 +3033,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private buildCompileDeps(
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
+		relationTargetProjections?: NqlBindingProjectionRegistry,
 	): AdapterCompilerDeps {
 		// Validate schemaName from CompileOptions before use — prevents SQL injection
 		// via direct callers of adapter.compile().  Empty string is treated as "no
@@ -3054,6 +3055,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
 			...(bindingNames !== undefined && { bindingNames }),
+			...(relationTargetProjections !== undefined && {
+				relationTargetProjections,
+			}),
 		};
 	}
 
@@ -3149,7 +3153,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		bindingProjections?: NqlBindingProjectionRegistry,
 	): ProjectionEnvelope<T> {
 		if (bundle.query !== undefined) {
-			const deps = this.buildCompileDeps(options, bindingNames);
+			const deps = this.buildCompileDeps(
+				options,
+				bindingNames,
+				bindingProjections,
+			);
 			const queryFromBinding = hasBindingName(
 				bindingNames,
 				bundle.query.from,
@@ -3185,7 +3193,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					compileCteQueryImpl<T>(
 						bundle.cteQuery,
 						options,
-						this.buildCompileDeps(options, bindingNames),
+						this.buildCompileDeps(options, bindingNames, bindingProjections),
 						bindingProjections,
 					),
 					'NQL CTE query',

@@ -18,7 +18,7 @@ import type {
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
-import { toColumnList } from '@dbsp/types';
+import { resolveOutputReadHandling, toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
@@ -57,6 +57,7 @@ import {
 	type ProjectionEnvelope,
 	supplementOutputDescriptors,
 } from './projection-envelope.js';
+import { resolveRelationTarget } from './relation-target-projection.js';
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -270,6 +271,9 @@ function compileJoinIntents(
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
 				}),
+				...(deps.relationTargetProjections !== undefined && {
+					relationTargetProjections: deps.relationTargetProjections,
+				}),
 				...(model !== undefined && { model }),
 				...(deps.dialectCapabilities !== undefined && {
 					dialectCapabilities: deps.dialectCapabilities,
@@ -331,6 +335,9 @@ function compileJoinIntents(
 				...(schemaName !== undefined && { schemaName }),
 				...(deps.bindingNames !== undefined && {
 					bindingNames: deps.bindingNames,
+				}),
+				...(deps.relationTargetProjections !== undefined && {
+					relationTargetProjections: deps.relationTargetProjections,
 				}),
 				...(model !== undefined && { model }),
 				...(deps.dialectCapabilities !== undefined && {
@@ -610,6 +617,7 @@ function jsonAggProjectedColumns(
 	decision: PlanDecision,
 	targetTable: string,
 	model: ModelIR | undefined,
+	deps?: AdapterCompilerDeps,
 ): readonly string[] | undefined {
 	const requested = decision.columns;
 	const hasExplicitProjection =
@@ -617,6 +625,10 @@ function jsonAggProjectedColumns(
 		requested.length > 0 &&
 		!(requested.length === 1 && requested[0] === '*');
 	if (hasExplicitProjection) return requested;
+	const projected = deps
+		? resolveRelationTarget(targetTable, deps).outputs
+		: undefined;
+	if (projected !== undefined) return [...projected.keys()];
 
 	const table = model?.getTable(targetTable);
 	return table ? table.columns.map((column) => column.name) : requested;
@@ -627,8 +639,9 @@ function buildJsonAggColumnKeyMap(
 	targetTable: string,
 	model: ModelIR | undefined,
 	naming: AdapterCompilerDeps['naming'],
+	deps?: AdapterCompilerDeps,
 ): Record<string, string> | undefined {
-	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
 	const table = model?.getTable(targetTable);
 	const map: Record<string, string> = {};
@@ -646,9 +659,24 @@ function buildJsonAggNestedReadTransforms(
 	decision: PlanDecision,
 	targetTable: string,
 	model: ModelIR | undefined,
+	deps?: AdapterCompilerDeps,
 ): readonly NestedOutputReadHandling[] | undefined {
-	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
 	if (!columns || columns.length === 0) return undefined;
+	const projected = deps
+		? resolveRelationTarget(targetTable, deps).outputs
+		: undefined;
+	if (projected !== undefined) {
+		const shape = jsonAggContainerShape(decision.relationType);
+		const transforms: NestedOutputReadHandling[] = [];
+		for (const columnName of columns) {
+			const descriptor = projected.get(columnName);
+			if (!descriptor) continue;
+			const handling = resolveOutputReadHandling({ ...descriptor, shape });
+			if (handling.kind === 'nestedTransform') transforms.push(handling);
+		}
+		return transforms.length > 0 ? transforms : undefined;
+	}
 	const table = model?.getTable(targetTable);
 	if (!table) return undefined;
 	const shape = jsonAggContainerShape(decision.relationType);
@@ -673,15 +701,28 @@ function buildJsonAggOutputDescriptor(
 	decision: PlanDecision,
 	targetTable: string,
 	model: ModelIR | undefined,
+	deps?: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	const relation = decision.relation ?? decision.relationName;
 	if (!relation) return undefined;
+	const shape = jsonAggContainerShape(decision.relationType);
+	const columns = jsonAggProjectedColumns(decision, targetTable, model, deps);
+	if (!columns || columns.length === 0) return undefined;
+	const projected = deps
+		? resolveRelationTarget(targetTable, deps).outputs
+		: undefined;
+	if (projected !== undefined) {
+		for (const columnName of columns) {
+			const descriptor = projected.get(columnName);
+			if (!descriptor) continue;
+			if (resolveOutputReadHandling({ ...descriptor, shape }).kind !== 'none') {
+				return { ...descriptor, outputKey: `${relation}_json`, shape };
+			}
+		}
+		return undefined;
+	}
 	const table = model?.getTable(targetTable);
 	if (!table) return undefined;
-
-	const shape = jsonAggContainerShape(decision.relationType);
-	const columns = jsonAggProjectedColumns(decision, targetTable, model);
-	if (!columns || columns.length === 0) return undefined;
 
 	for (const columnName of columns) {
 		if (columnName === '*') continue;
@@ -703,6 +744,7 @@ function buildJsonAggOutputDescriptor(
 function buildJsonAggOutputDescriptors(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
+	deps?: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
 	for (const decision of decisions) {
@@ -711,7 +753,7 @@ function buildJsonAggOutputDescriptors(
 		}
 		const targetTable = decision.targetTable;
 		const descriptor = targetTable
-			? buildJsonAggOutputDescriptor(decision, targetTable, model)
+			? buildJsonAggOutputDescriptor(decision, targetTable, model, deps)
 			: undefined;
 		if (descriptor) descriptors.push(descriptor);
 	}
@@ -810,6 +852,7 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	rootTable: string,
 	model: ModelIR | undefined,
 	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): OutputDescriptor | undefined {
 	if (
 		decision.type !== 'selectRelationColumn' ||
@@ -826,6 +869,17 @@ function buildPhysicalRelationColumnOutputDescriptor(
 		rootTable,
 		model,
 	);
+	if (targetTable) {
+		const target = resolveRelationTarget(targetTable, deps);
+		const descriptor = target.outputs?.get(naming.toDatabase(decision.column));
+		if (descriptor) {
+			return {
+				...descriptor,
+				outputKey: naming.toDatabase(decision.alias ?? decision.column),
+				shape: { kind: 'scalar', cardinality: 'one' },
+			};
+		}
+	}
 	const table = targetTable ? model?.getTable(targetTable) : undefined;
 	const column = table?.columns.find(
 		(candidate) =>
@@ -852,6 +906,7 @@ function buildPhysicalRelationColumnOutputDescriptors(
 	rootTable: string,
 	model: ModelIR | undefined,
 	naming: AdapterCompilerDeps['naming'],
+	deps: AdapterCompilerDeps,
 ): readonly OutputDescriptor[] {
 	const descriptors: OutputDescriptor[] = [];
 	for (const decision of decisions) {
@@ -860,6 +915,7 @@ function buildPhysicalRelationColumnOutputDescriptors(
 			rootTable,
 			model,
 			naming,
+			deps,
 		);
 		if (descriptor) descriptors.push(descriptor);
 	}
@@ -896,6 +952,7 @@ function annotateJsonAggColumnKeyMaps(
 	decisions: readonly PlanDecision[],
 	model: ModelIR | undefined,
 	naming: AdapterCompilerDeps['naming'],
+	deps?: AdapterCompilerDeps,
 ): boolean {
 	let annotated = false;
 	for (const decision of decisions) {
@@ -906,11 +963,11 @@ function annotateJsonAggColumnKeyMaps(
 				: undefined;
 			const keyMap =
 				targetTable && planDecision
-					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming)
+					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming, deps)
 					: undefined;
 			const nestedReadTransforms =
 				targetTable && planDecision
-					? buildJsonAggNestedReadTransforms(decision, targetTable, model)
+					? buildJsonAggNestedReadTransforms(decision, targetTable, model, deps)
 					: undefined;
 			if ((keyMap || nestedReadTransforms) && planDecision) {
 				const context = planDecision.context as Mutable<
@@ -927,8 +984,13 @@ function annotateJsonAggColumnKeyMaps(
 		}
 		if (decision.children && decision.children.length > 0) {
 			annotated =
-				annotateJsonAggColumnKeyMaps(plan, decision.children, model, naming) ||
-				annotated;
+				annotateJsonAggColumnKeyMaps(
+					plan,
+					decision.children,
+					model,
+					naming,
+					deps,
+				) || annotated;
 		}
 	}
 	return annotated;
@@ -1008,6 +1070,9 @@ export function compileSelectEnvelope<T = unknown>(
 		deriveFkColumnName: deps.deriveFk,
 		...(deps.bindingNames !== undefined && {
 			bindingNames: deps.bindingNames,
+		}),
+		...(deps.relationTargetProjections !== undefined && {
+			relationTargetProjections: deps.relationTargetProjections,
 		}),
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
@@ -1193,6 +1258,7 @@ export function compileSelectEnvelope<T = unknown>(
 			allDecisions,
 			resolvedModelForCompiler,
 			deps.naming,
+			deps,
 		);
 		if (hasJsonAggColumnKeyMaps) {
 			hydrationPlan = candidateHydrationPlan;
@@ -1231,12 +1297,14 @@ export function compileSelectEnvelope<T = unknown>(
 		...buildJsonAggOutputDescriptors(
 			simplifiedPlan.decisions,
 			resolvedModelForCompiler,
+			deps,
 		),
 		...buildPhysicalRelationColumnOutputDescriptors(
 			simplifiedPlan.decisions,
 			plan.rootTable,
 			resolvedModelForCompiler,
 			deps.naming,
+			deps,
 		),
 		...buildTrustedRelationColumnOutputDescriptors(
 			simplifiedPlan.decisions,

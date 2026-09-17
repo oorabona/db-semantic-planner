@@ -8,7 +8,11 @@
  * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import { type JsonAggOrderByEntry, resolveJsonAggOrderKey } from '@dbsp/types';
+import {
+	type JsonAggOrderByEntry,
+	resolveJsonAggOrderKey,
+	resolveOutputReadHandling,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,
@@ -21,6 +25,11 @@ import {
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
 } from '../../json-agg-read-handling.js';
+import {
+	requireRelationTargetColumn,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -80,7 +89,27 @@ function resolveJsonAggProjection(
 		requested &&
 		requested.length > 0 &&
 		!(requested.length === 1 && requested[0] === '*');
-	if (hasExplicitProjection) return requested;
+	const target = resolveRelationTarget(targetTable, ctx);
+	if (hasExplicitProjection) {
+		requireRelationTargetColumns(
+			target,
+			requested,
+			ctx,
+			'selected column',
+			decision.relation,
+		);
+		return requested;
+	}
+	if (target.outputs !== undefined) {
+		// Preserve the historical to_jsonb(alias) SQL for a full physical-table
+		// projection.  A reduced CTE must be explicit so PostgreSQL cannot expose
+		// columns the CTE did not produce.
+		const physical = ctx.model?.getTable(targetTable);
+		const isFullPhysicalProjection = physical?.columns.every((column) =>
+			target.outputs?.has(ctx.naming.toDatabase(column.name)),
+		);
+		if (!isFullPhysicalProjection) return [...target.outputs.keys()];
+	}
 
 	const table = ctx.model?.getTable(targetTable);
 	const needsExplicitProjection =
@@ -100,7 +129,35 @@ function buildJsonAggColumnValueOverrides(
 	ctx: CompilerContext,
 	shape: ReturnType<typeof jsonAggContainerShape>,
 ): ReadonlyMap<string, Node> | undefined {
-	if (!columns || columns.length === 0) return undefined;
+	if (
+		!columns ||
+		columns.length === 0 ||
+		(columns.length === 1 && columns[0] === '*')
+	)
+		return undefined;
+	const target = resolveRelationTarget(targetTable, ctx);
+	if (target.outputs !== undefined) {
+		const overrides = new Map<string, Node>();
+		for (const columnName of columns) {
+			const descriptor = requireRelationTargetColumn(
+				target,
+				columnName,
+				ctx,
+				'selected column',
+				undefined,
+			);
+			if (descriptor && resolveOutputReadHandling(descriptor).kind !== 'none') {
+				overrides.set(
+					columnName,
+					typeCast(
+						columnRef(columnName, innerAlias, undefined, ctx.naming),
+						'text',
+					),
+				);
+			}
+		}
+		return overrides.size > 0 ? overrides : undefined;
+	}
 	const table = ctx.model?.getTable(targetTable);
 	if (!table) return undefined;
 	const overrides = new Map<string, Node>();
@@ -199,6 +256,16 @@ function compileJsonAggRecursive(
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
 	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
+	const resolvedTarget = resolveRelationTarget(targetTable, ctx);
+	if (orderBy) {
+		requireRelationTargetColumns(
+			resolvedTarget,
+			orderBy.columns,
+			ctx,
+			'order key',
+			relation,
+		);
+	}
 	const shape = jsonAggContainerShape(decision.relationType);
 	const columns = resolveJsonAggProjection(decision, targetTable, ctx, shape);
 	const columnValueOverrides = buildJsonAggColumnValueOverrides(
