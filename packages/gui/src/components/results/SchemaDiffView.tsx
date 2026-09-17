@@ -22,7 +22,10 @@ import type {
 } from '@/lib/ipc';
 import { sidecarApi } from '@/lib/ipc';
 import { useConnectionStore } from '@/stores/connection-store';
-import { useSchemaDiffStore } from '@/stores/schema-diff-store';
+import {
+	type StoredSchemaDiff,
+	useSchemaDiffStore,
+} from '@/stores/schema-diff-store';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { SchemaDiffSummary } from './SchemaDiffSummary';
 import { SideBySideChange } from './SideBySideChange';
@@ -52,6 +55,16 @@ export function SchemaDiffView() {
 
 	const handleApply = useCallback(async () => {
 		if (!applySnapshot || applySnapshot.statements.length === 0) return;
+		const currentConnection = useConnectionStore.getState().active;
+		const currentSchemaDiff = useSchemaDiffStore.getState();
+		if (
+			currentConnection?.connectionId !== applySnapshot.connectionId ||
+			currentSchemaDiff.loading ||
+			currentSchemaDiff.diff !== applySnapshot.source
+		) {
+			setApplySnapshot(null);
+			return;
+		}
 		setApplying();
 		try {
 			const result = await sidecarApi.schemaApply(
@@ -122,6 +135,7 @@ export function SchemaDiffView() {
 		if (!canApply) return;
 		setApplySnapshot({
 			connectionId: storedDiff.connectionId,
+			source: storedDiff,
 			statements: [...diff.upSQL],
 			hasDestructive: diff.hasDestructive,
 		});
@@ -238,6 +252,7 @@ export function SchemaDiffView() {
 
 interface ApplySnapshot {
 	readonly connectionId: string;
+	readonly source: StoredSchemaDiff;
 	readonly statements: readonly string[];
 	readonly hasDestructive: boolean;
 }

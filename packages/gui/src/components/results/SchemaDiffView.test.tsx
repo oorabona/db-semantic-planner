@@ -44,17 +44,25 @@ function currentStoredMockDiff() {
 }
 
 vi.mock('@/stores/schema-diff-store', () => ({
-	useSchemaDiffStore: (
-		selector: (
-			s: Omit<typeof mockState, 'diff'> & {
-				diff: { connectionId: string; result: SchemaDiffResult } | null;
-			},
-		) => unknown,
-	) =>
-		selector({
-			...mockState,
-			diff: currentStoredMockDiff(),
-		}),
+	useSchemaDiffStore: Object.assign(
+		(
+			selector: (
+				s: Omit<typeof mockState, 'diff'> & {
+					diff: { connectionId: string; result: SchemaDiffResult } | null;
+				},
+			) => unknown,
+		) =>
+			selector({
+				...mockState,
+				diff: currentStoredMockDiff(),
+			}),
+		{
+			getState: () => ({
+				...mockState,
+				diff: currentStoredMockDiff(),
+			}),
+		},
+	),
 }));
 
 vi.mock('./SchemaDiffSummary', () => ({
@@ -522,12 +530,8 @@ describe('SchemaDiffView', () => {
 		);
 	});
 
-	it('Confirm uses the source connection snapshot rather than live connection state', async () => {
+	it('does not apply when the active connection changes before the dialog closes', () => {
 		mockState.diff = mockDiff;
-		vi.mocked(sidecarApi.schemaApply).mockResolvedValue({
-			success: true,
-			applied: mockDiff.upSQL.length,
-		});
 		render(<SchemaDiffView />);
 		fireEvent.click(screen.getByTestId('apply-btn'));
 		const confirmButton = screen.getByTestId('dialog-confirm');
@@ -542,12 +546,31 @@ describe('SchemaDiffView', () => {
 		});
 		fireEvent.click(confirmButton);
 
-		await waitFor(() =>
-			expect(sidecarApi.schemaApply).toHaveBeenCalledWith(
-				'test-connection',
-				mockDiff.upSQL,
-			),
-		);
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
+	});
+
+	it('does not apply when a new stored result arrives before the dialog closes', () => {
+		mockState.diff = mockDiff;
+		render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		const confirmButton = screen.getByTestId('dialog-confirm');
+
+		mockState.diff = { ...mockDiff, upSQL: ['SELECT 2;'] };
+		fireEvent.click(confirmButton);
+
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
+	});
+
+	it('does not apply when a comparison starts before the dialog closes', () => {
+		mockState.diff = mockDiff;
+		render(<SchemaDiffView />);
+		fireEvent.click(screen.getByTestId('apply-btn'));
+		const confirmButton = screen.getByTestId('dialog-confirm');
+
+		mockState.loading = true;
+		fireEvent.click(confirmButton);
+
+		expect(sidecarApi.schemaApply).not.toHaveBeenCalled();
 	});
 
 	it('Confirm sends the statements shown when confirmation opened', async () => {

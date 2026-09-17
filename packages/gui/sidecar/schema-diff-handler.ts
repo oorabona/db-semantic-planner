@@ -208,8 +208,9 @@ export async function handleSchemaDiff(
 	// 4. Generate UP and DOWN SQL
 	const upSQL =
 		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
-	// DOWN is generated from the same non-destructive changes Apply can execute.
-	// Keep the generator comment for a change PostgreSQL cannot reverse.
+	// DOWN is generated from the non-destructive changes.
+	// A change the generator cannot reverse or does not emit as a statement (such
+	// as readdress_table) appears as its generator comment.
 	const appliedDiff = {
 		...diff,
 		changes: diff.changes.filter((change) => !change.destructive),
