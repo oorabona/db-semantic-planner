@@ -5,26 +5,19 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
 	appendIntentJournal,
-	appendTransitionAuthorization,
+	applyPgTransitionRun,
 	createPgTransitionLessor,
-	createPgTransitionPack,
 	escapeDiagnosticText,
-	preparePgExecutionSession,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
 	TransitionRunIdentityMismatchError,
-	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
 import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
-	createApplier,
-	createPackRegistry,
-	type PackRegistry,
-	selectorMatchesResource,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
@@ -594,10 +587,6 @@ export async function effectiveApplyPolicy(
 	};
 }
 
-function registry(): PackRegistry {
-	return createPackRegistry([createPgTransitionPack({})]);
-}
-
 /**
  * `dbsp apply`'s public result contract.  `outcome` is always present in
  * `--format json`; it is the stable machine-readable name and `exitCode` is
@@ -973,31 +962,6 @@ export function formatApplyHuman(result: ApplyHumanResult): string {
 				`resolving command: dbsp reconcile --db <database> ${escapeDiagnosticText(result.runId)}`,
 			].join('\n');
 	}
-}
-
-function acceptanceMatches(
-	assumption: {
-		readonly class: string;
-		readonly asserter: TrustRoot;
-		readonly scope: readonly ResourceAddress[];
-	},
-	acceptance: AssumptionAcceptance,
-): boolean {
-	return (
-		acceptance.class === assumption.class &&
-		(!acceptance.fromTrustRoot ||
-			canonicalJson(acceptance.fromTrustRoot) ===
-				canonicalJson(assumption.asserter)) &&
-		(assumption.scope.length === 0
-			? !acceptance.withinScope || acceptance.withinScope.length === 0
-			: !acceptance.withinScope ||
-				acceptance.withinScope.length === 0 ||
-				assumption.scope.every((resource) =>
-					acceptance.withinScope?.some((selector) =>
-						selectorMatchesResource(selector, resource),
-					),
-				))
-	);
 }
 
 type RecordedPlanRefusal = {
@@ -1451,94 +1415,24 @@ async function runApplyInternal(
 				);
 			}
 		} else {
-			const locked = await withPgTransitionRunLock(
+			const applied = await applyPgTransitionRun(
 				owned,
 				runId,
-				async (target) => {
-					const loadCurrent = async (id: string) => {
-						return loadOnTarget(target, id);
-					};
-					const applier = createApplier(registry(), {
-						// A durable apply only verifies the existing immutable row. The applier
-						// calls this before execution; a changed record remains a refusal.
-						persist: async () => undefined,
-					});
-					return applier.applyDurable({
-						runId,
-						expectedPlanDigest,
-						loadCurrent,
-						prepareExecutionSession: async (session, contract, plan) => {
-							const currency = await validatePgManagedLedgerCurrency(
-								session,
-								plan,
-							);
-							if (currency)
-								return {
-									ok: false,
-									kind: 'refused' as const,
-									detail: currency,
-								};
-							return preparePgExecutionSession(session, contract, plan);
-						},
-						policy,
-						target,
-						authorize: async (run, plan, session) => {
-							const current = await loadOnTarget(target, run.runId);
-							const grants = plan.assumptions.map((assumption) => ({
-								assumptionId: assumption.id,
-								grant: policy.accepts.findIndex((grant) =>
-									acceptanceMatches(assumption, grant),
-								),
-							}));
-							// Crash after commit but before intent: reuse the exact prior approval.
-							if (
-								hasReusableAuthorization(
-									current.authorizations,
-									run.runId,
-									transitionPlanDigest(plan),
-									policy.accepts,
-									grants,
-								)
-							)
-								return;
-							const actor =
-								process.env.USER ??
-								process.env.LOGNAME ??
-								'unknown-local-actor';
-							const authorizedAt = new Date().toISOString();
-							const digest = authorizationDigest(
-								run.runId,
-								transitionPlanDigest(plan),
-								policy.accepts,
-								grants,
-								actor,
-								authorizedAt,
-							);
-							const record: TransitionRunAuthorization = {
-								runId: run.runId,
-								policy: policy.accepts,
-								grants,
-								digest,
-								actor,
-								authorizedAt,
-							};
-							await appendTransitionAuthorization(session, record);
-						},
-					});
-				},
+				policy,
+				expectedPlanDigest,
 			);
-			if (locked.kind === 'busy') result = { outcome: 'run-busy', runId };
+			if (applied.kind === 'busy') result = { outcome: 'run-busy', runId };
 			else {
-				const outcome = outcomeForApplyResult(locked.value);
+				const outcome = outcomeForApplyResult(applied.result);
 				const preAppendRefusal = applyPreAppendRefusal(
 					outcome,
 					persisted.plan,
-					locked.value,
+					applied.result,
 				);
 				result = {
 					outcome,
 					runId,
-					result: locked.value,
+					result: applied.result,
 					...(preAppendRefusal === undefined
 						? {}
 						: { refusal: preAppendRefusal }),
