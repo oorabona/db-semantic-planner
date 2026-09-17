@@ -18,6 +18,11 @@ import {
 	rangeVar,
 } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	bindAliasAuthority,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -72,12 +77,19 @@ export function buildKeyCorrelation(
 
 	const comparisons = normalizedSourceCols.map((sourceColumn, index) =>
 		eqExpr(
-			columnRef(sourceColumn, sourceAlias, undefined, ctx.naming),
+			columnRef(
+				sourceColumn,
+				sourceAlias,
+				undefined,
+				ctx.naming,
+				ctx.aliasColumnAuthorities,
+			),
 			columnRef(
 				normalizedTargetCols[index]!,
 				targetAlias,
 				undefined,
 				ctx.naming,
+				ctx.aliasColumnAuthorities,
 			),
 		),
 	);
@@ -141,6 +153,13 @@ function buildExistsSubquery(
 	if (!targetTable) {
 		throw new Error('EXISTS handler requires targetTable or relation');
 	}
+	requireRelationTargetColumns(
+		resolveRelationTarget(targetTable, ctx),
+		toColumnList(targetColumn),
+		ctx,
+		'join key',
+		relation,
+	);
 
 	// Allocate a unique alias. Start the suffix from the current map size (which
 	// preserves the established numbering for the common case) and bump until the
@@ -186,6 +205,13 @@ function buildExistsSubquery(
 	state.aliases.set(targetAlias, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
+	const targetAuthority = resolveRelationTarget(targetTable, ctx);
+	const aliasColumnAuthorities = bindAliasAuthority(
+		ctx.aliasColumnAuthorities,
+		targetAlias,
+		targetAuthority,
+		ctx,
+	);
 
 	// Build correlation condition
 	const correlation = buildKeyCorrelation(
@@ -212,6 +238,7 @@ function buildExistsSubquery(
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			outerAlias: sourceAlias,
+			aliasColumnAuthorities,
 		};
 
 		// Compile nested conditions
@@ -331,8 +358,15 @@ function buildExistsSubquery(
 				sourceAliasForJoin, // resolved source alias (root or intermediate)
 				joinSourceCols,
 				joinAlias,
-				joinTargetCols,
+				joinTargetCols ?? [],
 				ctx,
+			);
+			requireRelationTargetColumns(
+				resolveRelationTarget(joinTargetTable, ctx),
+				joinTargetCols ?? [],
+				ctx,
+				'join key',
+				joinRelation,
 			);
 
 			const joinType =

@@ -44,6 +44,8 @@ export type OutputReadHandling =
 			readonly table: string;
 			readonly column: string;
 			readonly js: ColumnJsReadType;
+			/** Emitted nested JSON key; absent metadata keeps legacy column lookup. */
+			readonly outputKey?: string;
 	  }
 	| { readonly kind: 'none' };
 

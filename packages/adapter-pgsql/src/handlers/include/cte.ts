@@ -12,6 +12,11 @@ import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	bindAliasAuthority,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
@@ -35,7 +40,13 @@ function buildCteTargets(
 			.filter((col) => col !== '*')
 			.map((col) => ({
 				ResTarget: {
-					val: columnRef(col, alias, undefined, ctx.naming),
+					val: columnRef(
+						col,
+						alias,
+						undefined,
+						ctx.naming,
+						ctx.aliasColumnAuthorities,
+					),
 					name: ctx.naming.toDatabase(col),
 				},
 			}));
@@ -205,6 +216,23 @@ export const cteIncludeHandler: IncludeHandler = {
 		if (!relation) {
 			throw new Error('CTE include requires relation name');
 		}
+		const target = resolveRelationTarget(targetTable, ctx);
+		requireRelationTargetColumns(
+			target,
+			toColumnList(targetColumn),
+			ctx,
+			'join key',
+			relation,
+		);
+		if (columns) {
+			requireRelationTargetColumns(
+				target,
+				columns.filter((column) => column !== '*'),
+				ctx,
+				'selected column',
+				relation,
+			);
+		}
 
 		// Generate unique names
 		const existingAliases = state.aliases.size;
@@ -212,6 +240,13 @@ export const cteIncludeHandler: IncludeHandler = {
 		const innerAlias = `${targetTable}_inner_${existingAliases}`;
 		const cteAlias = `${relation}_ref_${existingAliases}`;
 		state.aliases.set(`cte_${targetTable}`, cteName);
+		const aliasColumnAuthorities = bindAliasAuthority(
+			bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
+			cteAlias,
+			target,
+			ctx,
+		);
+		const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
 
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
@@ -221,12 +256,12 @@ export const cteIncludeHandler: IncludeHandler = {
 			innerAlias,
 			columns,
 			conditions,
-			ctx,
+			scopedCtx,
 			state,
 		);
 
 		// Build the CTE node
-		const cte = buildCTE(cteName, cteSelect, ctx);
+		const cte = buildCTE(cteName, cteSelect, scopedCtx);
 
 		// Register CTE in state for WITH clause
 		state.ctes.set(cteName, cte);
@@ -238,7 +273,7 @@ export const cteIncludeHandler: IncludeHandler = {
 			outerAlias,
 			sourceColumn,
 			targetColumn,
-			ctx,
+			scopedCtx,
 		);
 
 		return {

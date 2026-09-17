@@ -20,6 +20,10 @@ import {
 	sortBy,
 } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -83,6 +87,12 @@ export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		selectColumn,
 		ctx,
 	} = config;
+	requireRelationTargetColumns(
+		resolveRelationTarget(table, ctx),
+		[pkColumn, fkColumn, selectColumn],
+		ctx,
+		'traversal column',
+	);
 
 	const naming = ctx.naming;
 	const dbTable = naming.toDatabase(table);
@@ -536,6 +546,12 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 		);
 		const fkColumn = decision.fkColumn ?? 'parent_id';
 		const traversal = decision.traversal ?? 'parent';
+		requireRelationTargetColumns(
+			resolveRelationTarget(table, ctx),
+			[pkColumn, fkColumn, targetColumn],
+			ctx,
+			'traversal column',
+		);
 
 		const naming = ctx.naming;
 		const dbTable = naming.toDatabase(table);
@@ -674,12 +690,17 @@ export const chainedPseudoHandler: ExpressionHandler = {
 		// Build from innermost to outermost
 		// Start with the final column selection
 		const lastTraversal = traversals[traversals.length - 1]!;
-		const targetCol = naming.toDatabase(
-			requiredColumn(
-				lastTraversal.targetColumn,
-				'targetColumn',
-				'chained pseudo',
-			),
+		const targetColumn = requiredColumn(
+			lastTraversal.targetColumn,
+			'targetColumn',
+			'chained pseudo',
+		);
+		const targetCol = naming.toDatabase(targetColumn);
+		requireRelationTargetColumns(
+			resolveRelationTarget(table, ctx),
+			[pkColumn, fkColumn, targetColumn],
+			ctx,
+			'traversal column',
 		);
 
 		// Build nested subqueries from inside out

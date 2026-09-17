@@ -14,7 +14,7 @@ import type {
 import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { innerJoin, rangeVar } from './ast-helpers.js';
+import { columnRef, innerJoin, rangeVar } from './ast-helpers.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
@@ -148,13 +148,7 @@ export function compileSubqueryInclude(
 			A_Expr: {
 				kind: 'AEXPR_IN',
 				name: [{ String: { sval: '=' } }],
-				lexpr: {
-					ColumnRef: {
-						fields: [
-							{ String: { sval: deps.naming.toDatabase(fkColumns[0]!) } },
-						],
-					},
-				},
+				lexpr: columnRef(fkColumns[0]!, undefined, undefined, deps.naming),
 				rexpr: { List: { items: paramRefs } },
 			},
 		};
@@ -175,11 +169,7 @@ export function compileSubqueryInclude(
 					A_Expr: {
 						kind: 'AEXPR_OP',
 						name: [{ String: { sval: '=' } }],
-						lexpr: {
-							ColumnRef: {
-								fields: [{ String: { sval: deps.naming.toDatabase(col) } }],
-							},
-						},
+						lexpr: columnRef(col, undefined, undefined, deps.naming),
 						rexpr: { ParamRef: { number: state.paramIndex } },
 					},
 				};
@@ -260,14 +250,7 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_IN',
 			name: [{ String: { sval: '=' } }],
-			lexpr: {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: junctionAlias } },
-						{ String: { sval: deps.naming.toDatabase(throughSourceKey) } },
-					],
-				},
-			},
+			lexpr: columnRef(throughSourceKey, junctionAlias, undefined, deps.naming),
 			rexpr: { List: { items: paramRefs } },
 		},
 	};
@@ -277,22 +260,8 @@ function compileSubqueryIncludeManyToMany(
 		A_Expr: {
 			kind: 'AEXPR_OP',
 			name: [{ String: { sval: '=' } }],
-			lexpr: {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: targetAlias } },
-						{ String: { sval: deps.naming.toDatabase(targetPk) } },
-					],
-				},
-			},
-			rexpr: {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: junctionAlias } },
-						{ String: { sval: deps.naming.toDatabase(throughTargetKey) } },
-					],
-				},
-			},
+			lexpr: columnRef(targetPk, targetAlias, undefined, deps.naming),
+			rexpr: columnRef(throughTargetKey, junctionAlias, undefined, deps.naming),
 		},
 	};
 

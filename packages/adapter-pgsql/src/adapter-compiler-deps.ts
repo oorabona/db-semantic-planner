@@ -9,6 +9,7 @@ import type { DialectCapabilities, ModelIR } from '@dbsp/types';
 import type { FkColumnDerivation } from './assert-field.js';
 import type { BindingNameRegistry } from './binding-registry.js';
 import type { NamingPlugin } from './naming-plugin.js';
+import type { RelationTargetProjectionRegistry } from './relation-target-projection.js';
 
 /**
  * All state that compilation methods need from PgsqlAdapter.
@@ -22,4 +23,5 @@ export interface AdapterCompilerDeps {
 	readonly defaultPk: string;
 	readonly deriveFk: FkColumnDerivation;
 	readonly bindingNames?: BindingNameRegistry;
+	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 }

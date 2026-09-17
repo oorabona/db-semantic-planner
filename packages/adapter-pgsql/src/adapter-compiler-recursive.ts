@@ -660,7 +660,10 @@ export function compileCteQuery<T = unknown>(
 	// CTE names share the binding-name registry because both are query-local
 	// relations that must not be schema-qualified. A CTE body may only refer to
 	// earlier declarations; the outer query may refer to every declaration.
-	let visibleCteDeps = deps;
+	let visibleCteDeps: AdapterCompilerDeps = {
+		...deps,
+		relationTargetProjections: cteProjectionByName,
+	};
 
 	for (const cte of intent.ctes) {
 		validateIdentifier(cte.name, 'table');
@@ -766,6 +769,7 @@ export function compileCteQuery<T = unknown>(
 				cte.name,
 				visibleCteDeps.naming,
 			),
+			relationTargetProjections: cteProjectionByName,
 		};
 	}
 
@@ -782,7 +786,10 @@ export function compileCteQuery<T = unknown>(
 			outerRegisteredSource !== undefined,
 		),
 		options,
-		visibleCteDeps,
+		{
+			...visibleCteDeps,
+			relationTargetProjections: cteProjectionByName,
+		},
 	);
 
 	// 3. Renumber outer SQL parameters to follow all CTE parameters.

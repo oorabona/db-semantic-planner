@@ -32,12 +32,24 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
 		const relation = column.substring(0, dotIndex);
 		const table = ctx.aliases?.get(relation) ?? relation;
 		const col = column.substring(dotIndex + 1);
-		return columnRef(col, table, undefined, ctx.naming);
+		return columnRef(
+			col,
+			table,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	}
 	const alias = ctx.currentAlias ?? ctx.rootTable;
 	// Schema is NOT used for column references — aliases and table names in WHERE
 	// are query-scoped, not schema-qualified. Schema is only for FROM/JOIN entries.
-	return columnRef(column, alias, undefined, ctx.naming);
+	return columnRef(
+		column,
+		alias,
+		undefined,
+		ctx.naming,
+		ctx.aliasColumnAuthorities,
+	);
 }
 
 /**
@@ -121,7 +133,13 @@ export function compileValueOrFieldRef(
 			value.scope === 'outer'
 				? (ctx.outerAlias ?? ctx.rootTable)
 				: (ctx.currentAlias ?? ctx.rootTable);
-		return columnRef(value.column, alias, undefined, ctx.naming);
+		return columnRef(
+			value.column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	}
 	return compileValue(value, state, columnType);
 }

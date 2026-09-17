@@ -99,7 +99,13 @@ export const relationColumnHandler: ExpressionHandler = {
 			return columnRefStar(alias, ctx.naming);
 		}
 
-		return columnRef(column, alias, undefined, ctx.naming);
+		return columnRef(
+			column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	},
 };
 
@@ -138,7 +144,13 @@ export const relationColumnsHandler: ExpressionHandler = {
 		// For multiple columns, the compiler should call this handler multiple times
 		// or use a different approach
 		const column = columns[0]!;
-		const colRef = columnRef(column, alias, undefined, ctx.naming);
+		const colRef = columnRef(
+			column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		// If there's an alias specified, wrap in ResTarget
 		const outputAlias = decision.alias;
@@ -181,7 +193,13 @@ export const relationAliasHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = resolveRelationAlias(relation, state);
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+		const colRef = columnRef(
+			column,
+			tableAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		// If no output alias, return just the column ref
 		if (!outputAlias) {
@@ -228,7 +246,13 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 
 		// Look up the alias for this relation from state
 		const tableAlias = state.aliases.get(relation) ?? relation;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+		const colRef = columnRef(
+			column,
+			tableAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		// Create prefixed output alias: relation_column
 		const prefixedAlias = `${relation}_${column}`;

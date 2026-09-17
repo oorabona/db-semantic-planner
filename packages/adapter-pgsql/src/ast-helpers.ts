@@ -38,6 +38,13 @@ import type {
 
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
+import {
+	type AliasColumnAuthority,
+	emittedColumnReference,
+	type ResolvedColumnReference,
+	requestedColumnReference,
+	requireEmittedRelationTargetColumn,
+} from './relation-target-projection.js';
 import { validateIdentifier } from './validate.js';
 
 // Re-export normalizeSQL from core (canonical location since A-9 DRY refactor)
@@ -132,10 +139,11 @@ export function nullConstNode(): Node {
  * @param naming - Naming plugin for table, alias, and column transformation
  */
 export function columnRef(
-	column: string,
+	column: string | ResolvedColumnReference,
 	table?: string,
 	schema?: string,
 	naming: NamingPlugin = identityNaming,
+	authorities?: AliasColumnAuthority,
 ): Node {
 	const fields: Node[] = [];
 
@@ -148,7 +156,28 @@ export function columnRef(
 		validateIdentifier(dbTable, 'table');
 		fields.push(stringNode(dbTable));
 	}
-	const dbColumn = naming.toDatabase(column);
+	const isWildcard =
+		typeof column === 'string' ? column === '*' : column.emittedName === '*';
+	const authority =
+		table && !isWildcard
+			? authorities?.get(naming.toDatabase(table))
+			: undefined;
+	const resolved =
+		typeof column === 'string'
+			? authority?.outputs?.has(column)
+				? emittedColumnReference(column)
+				: requestedColumnReference(column, { naming })
+			: column;
+	const dbColumn = resolved.emittedName;
+	if (table) {
+		if (authority) {
+			requireEmittedRelationTargetColumn(
+				authority,
+				emittedColumnReference(dbColumn),
+				'column reference',
+			);
+		}
+	}
 	// Defense-in-depth: validate that the column is a safe SQL identifier.
 	// Skip validation for the two internal compiler escape hatches:
 	//   '*'  — SELECT * wildcard (callers should prefer columnRefStar(); legacy path)
@@ -240,8 +269,12 @@ export function columnTarget(
 	alias?: string,
 	table?: string,
 	naming: NamingPlugin = identityNaming,
+	authorities?: AliasColumnAuthority,
 ): Node {
-	return resTarget(columnRef(column, table, undefined, naming), alias);
+	return resTarget(
+		columnRef(column, table, undefined, naming, authorities),
+		alias,
+	);
 }
 
 /**
@@ -956,6 +989,9 @@ export function jsonAggSubquery(
 		limit?: number;
 		/** Column projection — if specified, use jsonb_build_object instead of to_jsonb(__t__) */
 		columns?: readonly string[];
+		/** `columns` are projection output keys, not logical model names. */
+		columnsAreEmitted?: boolean;
+		aliasColumnAuthorities?: AliasColumnAuthority;
 		/** Per-column expression overrides for jsonb_build_object projection values. */
 		columnValueOverrides?: ReadonlyMap<string, Node>;
 		/** Aggregate ORDER BY columns for deterministic json_agg array order */
@@ -976,10 +1012,20 @@ export function jsonAggSubquery(
 		// Column projection: jsonb_build_object('col1', __t__."col1", 'col2', __t__."col2", ...)
 		const projArgs: Node[] = [];
 		for (const col of cols) {
-			projArgs.push(stringConstNode(naming.toDatabase(col)));
+			projArgs.push(
+				stringConstNode(
+					options?.columnsAreEmitted ? col : naming.toDatabase(col),
+				),
+			);
 			projArgs.push(
 				options?.columnValueOverrides?.get(col) ??
-					columnRef(col, targetAlias, undefined, naming),
+					columnRef(
+						options?.columnsAreEmitted ? emittedColumnReference(col) : col,
+						targetAlias,
+						undefined,
+						naming,
+						options?.aliasColumnAuthorities,
+					),
 			);
 		}
 		toJsonbCall = {

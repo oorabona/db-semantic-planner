@@ -41,7 +41,13 @@ export const jsonExtractHandler: ExpressionHandler = {
 		const mode = decision.jsonMode ?? 'text';
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
-		let node: Node = columnRef(column, alias, undefined, ctx.naming);
+		let node: Node = columnRef(
+			column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		for (let i = 0; i < path.length; i++) {
 			const isLast = i === path.length - 1;
@@ -110,7 +116,13 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 		const path = normalizeJsonPathArgs(decision.args);
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
-		const left: Node = columnRef(column, alias, undefined, ctx.naming);
+		const left: Node = columnRef(
+			column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 		const right = compileValue(path, state);
 		const op = mode === 'text' ? '#>>' : '#>';
 

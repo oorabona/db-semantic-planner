@@ -34,7 +34,13 @@ export const columnHandler: ExpressionHandler = {
 		}
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
-		return columnRef(column, alias, undefined, ctx.naming);
+		return columnRef(
+			column,
+			alias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 	},
 };
 
@@ -60,7 +66,13 @@ export const columnAliasHandler: ExpressionHandler = {
 		}
 
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+		const colRef = columnRef(
+			column,
+			tableAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 
 		// If no alias specified, return just the column reference
 		if (!outputAlias) {

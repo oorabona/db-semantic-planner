@@ -1497,6 +1497,119 @@ describe('CTE relation planning', () => {
 		);
 	});
 
+	it('rejects relation reads whose visible CTE target omits required columns', () => {
+		const missingJoinKey =
+			'with authors as (authors | select name) posts | select title, author.name | flat';
+		const missingJsonOrderKey =
+			'with authors as (authors | select name) posts | select title, author.*';
+		const missingFilterJoinKey =
+			"with authors as (authors | select name) posts | where some(author).name = 'x' | select title";
+
+		for (const nql of [missingJoinKey, missingFilterJoinKey]) {
+			expect(() => blogCteToSQL(nql)).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (join key). Available: name",
+			);
+			expect(() => blogCteToSQL(nql, 'tenant_42')).toThrow(
+				"Relation 'author' target 'authors' resolves to the CTE 'authors', which does not project 'id' (join key). Available: name",
+			);
+		}
+		for (const nql of [missingJsonOrderKey]) {
+			expect(() => blogCteToSQL(nql)).toThrow(
+				"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+			);
+			expect(() => blogCteToSQL(nql, 'tenant_42')).toThrow(
+				"target 'authors' resolves to the CTE 'authors', which does not project 'id' (column reference). Available: name",
+			);
+		}
+	});
+
+	it('rejects qualified ORDER BY reads outside a reduced relation CTE projection', () => {
+		expect(() =>
+			blogCteToSQL(
+				'with authors as (authors | select id) posts | select title, author.id | flat | order by author.name',
+			),
+		).toThrow(
+			"target 'authors' resolves to the CTE 'authors', which does not project 'name' (column reference). Available: id",
+		);
+	});
+
+	it('keeps reduced root CTE references unqualified in SELECT and WHERE', () => {
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select name) authors | select id',
+			),
+		).toContain('select authors.id from authors');
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select name) authors | where id = 1 | select id',
+			),
+		).toContain('select authors.id from authors where authors.id = $1');
+	});
+
+	it('expands a reduced visible CTE wildcard from its projection', () => {
+		expect(
+			blogCteToSQL(
+				'with authors as (authors | select id) posts | select title, author.*',
+			),
+		).toContain("json_agg(jsonb_build_object('id', __t__.id)");
+	});
+
+	it('rejects an ambiguous visible CTE relation-target column', () => {
+		expect(() =>
+			blogCteToSQL(
+				'with authors as (authors | select id, id, name) posts | select title, author.id | flat',
+			),
+		).toThrow(
+			"Relation 'author' target 'authors' resolves to the CTE 'authors', whose projected column 'id' is ambiguous and cannot be referenced (join key).",
+		);
+	});
+
+	it('uses emitted CTE projection keys for snake_case relation targets', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const wildcard =
+			orm.nql`with authors as (authors | select id, name as displayName)
+posts | select title, author.*`.dump();
+		expect(wildcard.sql).toContain('__t__."displayName"');
+		expect(normalizeSQL(wildcard.sql)).toBe(
+			'with "authors" as (select authors.id, authors.name as "displayname" from authors) select posts.title, coalesce((select json_agg(jsonb_build_object(\'id\', __t__.id, \'displayname\', __t__."displayname") order by __t__.id asc nulls last) from authors as __t__ where __t__.id = posts.author_id), \'[]\'::json) as author_json from posts',
+		);
+
+		expect(() =>
+			orm.nql`with authors as (authors | select id, name as displayName)
+posts | select title, author.displayName | flat`.dump(),
+		).toThrow(
+			"NQL compilation failed: Column 'displayName' does not exist on table 'authors'. Available columns: id, name",
+		);
+
+		const logicalRelationKey =
+			orm.nql`with posts as (posts | select id, authorId)
+authors | select name, posts.authorId | flat`.dump();
+		expect(normalizeSQL(logicalRelationKey.sql)).toBe(
+			'with "posts" as (select posts.id, posts.author_id from posts) select authors.name, posts.author_id as "posts.authorid" from authors left join posts as posts on authors.id = posts.author_id',
+		);
+	});
+
+	it('compares visible CTE relation keys in database casing', () => {
+		const orm = createOrm({
+			model: blogSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: blogSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+		expect(() =>
+			orm.nql`with posts as (posts | select authorId, title)
+authors | select name, posts.title | flat`.dump(),
+		).not.toThrow();
+	});
+
 	it('keeps a non-visible relation target schema-qualified', () => {
 		const sql = blogCteToSQL(
 			'with seed as (authors | select id) posts | select title, author.name | flat',

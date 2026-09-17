@@ -16,6 +16,10 @@ import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { BindingNameRegistry } from '../binding-registry.js';
 import type { NamingPlugin } from '../naming-plugin.js';
+import type {
+	AliasColumnAuthority,
+	RelationTargetProjectionRegistry,
+} from '../relation-target-projection.js';
 
 /** Built-in include strategies, shared by the runtime registry and public types. */
 export const INCLUDE_STRATEGIES = Object.freeze([
@@ -60,6 +64,10 @@ export interface CompilerContext {
 	readonly outerAlias?: string;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
+	/** Known projections for visible CTE/binding relation targets. */
+	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
+	/** Lexically visible SQL aliases that expose a known CTE projection. */
+	readonly aliasColumnAuthorities?: AliasColumnAuthority;
 	/**
 	 * Optional callback to compile a QueryIntent into an AST Node (SubLink subselect).
 	 * Set by PlanCompiler when compiling selectCustomExpression — enables SubqueryExpressionIntent

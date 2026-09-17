@@ -78,6 +78,14 @@ import {
 	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
 import { buildKeyCorrelation } from './handlers/where/exists.js';
+import {
+	type AliasColumnAuthority,
+	bindAliasAuthority,
+	type RelationTargetProjectionRegistry,
+	type ResolvedRelationTarget,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from './relation-target-projection.js';
 
 // Register createWhereDispatcher with compileExpressionIntent so CASE expressions
 // can compile their WHEN conditions. compiler.ts is the bridge: it imports both
@@ -736,6 +744,7 @@ export interface CompilerOptions {
 	readonly model?: import('@dbsp/types').ModelIR;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
 	readonly bindingNames?: BindingNameRegistry;
+	readonly relationTargetProjections?: RelationTargetProjectionRegistry;
 }
 
 export class PlanCompiler {
@@ -746,6 +755,9 @@ export class PlanCompiler {
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
 	private readonly dialectCapabilities: DialectCapabilities | undefined;
 	private readonly bindingNames: BindingNameRegistry | undefined;
+	private readonly relationTargetProjections:
+		| RelationTargetProjectionRegistry
+		| undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -781,6 +793,12 @@ export class PlanCompiler {
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
 	 */
 	private usedJoinAliases: Set<string> = new Set();
+	/**
+	 * Query-local authority for every emitted non-root alias.  Root bindings are
+	 * deliberately absent: an unqualified root reference retains its historical
+	 * SQL semantics, even when the root happens to be a reduced CTE.
+	 */
+	private aliasColumnAuthorities: AliasColumnAuthority = new Map();
 
 	constructor(options: CompilerOptions = {}) {
 		this.naming = options.naming ?? identityNaming;
@@ -790,6 +808,7 @@ export class PlanCompiler {
 		this.model = options.model ?? undefined;
 		this.dialectCapabilities = options.dialectCapabilities;
 		this.bindingNames = options.bindingNames;
+		this.relationTargetProjections = options.relationTargetProjections;
 	}
 
 	private childCompilerOptions(
@@ -806,6 +825,9 @@ export class PlanCompiler {
 			}),
 			...(this.bindingNames !== undefined && {
 				bindingNames: this.bindingNames,
+			}),
+			...(this.relationTargetProjections !== undefined && {
+				relationTargetProjections: this.relationTargetProjections,
 			}),
 			...overrides,
 		};
@@ -825,9 +847,43 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
+			...(this.aliasColumnAuthorities.size > 0 && {
+				aliasColumnAuthorities: this.aliasColumnAuthorities,
+			}),
 			...(this.model != null && { model: this.model }),
 			compileCustomFnFilter: buildCustomFnFilter,
 		} as HandlerCompilerContext;
+	}
+
+	private relationTargetContext(): Pick<
+		HandlerCompilerContext,
+		'naming' | 'bindingNames' | 'relationTargetProjections' | 'model'
+	> {
+		return {
+			naming: this.naming,
+			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
+			...(this.model != null && { model: this.model }),
+		};
+	}
+
+	/** Register an emitted alias before any column-reference path can use it. */
+	private registerAliasAuthority(
+		alias: string,
+		target: string | ResolvedRelationTarget,
+	): void {
+		const ctx = this.relationTargetContext();
+		this.aliasColumnAuthorities = bindAliasAuthority(
+			this.aliasColumnAuthorities,
+			alias,
+			typeof target === 'string' ? resolveRelationTarget(target, ctx) : target,
+			ctx,
+		);
 	}
 
 	private findAliasForLegacySourceTable(
@@ -1143,10 +1199,25 @@ export class PlanCompiler {
 			(decision.conditions as PlanDecision[]).length > 0
 		) {
 			const innerAlias = '__t__';
+			const filterCtx = this.createHandlerContext(plan);
+			const targetTable = handlerDecision.targetTable ?? decision.targetTable;
+			const aliasColumnAuthorities = targetTable
+				? bindAliasAuthority(
+						filterCtx.aliasColumnAuthorities,
+						innerAlias,
+						resolveRelationTarget(targetTable, filterCtx),
+						filterCtx,
+					)
+				: filterCtx.aliasColumnAuthorities;
 			const condNodes = (decision.conditions as PlanDecision[]).map((c) => {
 				// Rewrite condition table references to use the inner alias
 				const rewritten = { ...c, table: innerAlias };
-				return this.dispatchWhere(rewritten, { currentAlias: innerAlias });
+				return this.dispatchWhere(rewritten, {
+					currentAlias: innerAlias,
+					...(aliasColumnAuthorities !== undefined && {
+						aliasColumnAuthorities,
+					}),
+				});
 			});
 			const combined =
 				condNodes.length === 1 ? condNodes[0]! : andExpr(...condNodes);
@@ -1189,11 +1260,6 @@ export class PlanCompiler {
 				? (this.findAliasForLegacySourceTable(decision.sourceTable) ??
 					decision.sourceTable)
 				: plan.rootTable);
-		const ctx = {
-			...this.handlerCtx(),
-			currentAlias: sourceAlias,
-		} as HandlerCompilerContext;
-
 		const handlerState: HandlerCompilerState = {
 			parameters: this.state.parameters,
 			paramIndex: this.state.paramIndex,
@@ -1228,6 +1294,14 @@ export class PlanCompiler {
 				}
 			}
 		}
+		if (decision.choice === 'join' && finalJoinAlias && decision.targetTable) {
+			this.registerAliasAuthority(finalJoinAlias, decision.targetTable);
+		}
+
+		const ctx = {
+			...this.handlerCtx(),
+			currentAlias: sourceAlias,
+		} as HandlerCompilerContext;
 
 		const result = handler.compile(handlerDecision, ctx, handlerState);
 
@@ -1277,6 +1351,7 @@ export class PlanCompiler {
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
 		this.usedJoinAliases = new Set();
+		this.aliasColumnAuthorities = new Map();
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -1331,10 +1406,11 @@ export class PlanCompiler {
 		plan: SimplifiedPlanReport,
 		currentAlias?: string,
 	): HandlerCompilerContext {
+		const alias = currentAlias ?? plan.rootTable;
 		return {
 			naming: this.naming,
 			rootTable: plan.rootTable,
-			currentAlias: currentAlias ?? plan.rootTable,
+			currentAlias: alias,
 			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
@@ -1346,6 +1422,12 @@ export class PlanCompiler {
 				dialectCapabilities: this.dialectCapabilities,
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
+			...(this.relationTargetProjections != null && {
+				relationTargetProjections: this.relationTargetProjections,
+			}),
+			...(this.aliasColumnAuthorities.size > 0 && {
+				aliasColumnAuthorities: this.aliasColumnAuthorities,
+			}),
 			...(this.model != null && { model: this.model }),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
 				this.compileExpressionSubquery(query, paramOffset),
@@ -1395,25 +1477,31 @@ export class PlanCompiler {
 	): {
 		relatedAlias: string;
 		relatedTable: Node;
-		relatedColumn: Node;
+		relatedTarget: ResolvedRelationTarget;
 	} {
 		const relatedAlias = this.allocateBindingRelationAlias();
+		const target = resolveRelationTarget(
+			fields.targetTable,
+			this.createHandlerContext(plan),
+		);
+		requireRelationTargetColumns(
+			target,
+			fields.targetColumn,
+			this.createHandlerContext(plan),
+			'correlation key',
+			this.bindingRelationName(fields),
+		);
+		this.registerAliasAuthority(relatedAlias, target);
 		const relatedTable = rangeVar(
 			fields.targetTable,
 			relatedAlias,
 			this.schemaForRangeVar(plan, fields.targetTable),
 			this.naming,
 		);
-		const relatedColumn = columnRef(
-			fields.selectedColumn!,
-			relatedAlias,
-			undefined,
-			this.naming,
-		);
 		return {
 			relatedAlias,
 			relatedTable,
-			relatedColumn,
+			relatedTarget: target,
 		};
 	}
 
@@ -1537,7 +1625,7 @@ export class PlanCompiler {
 			);
 		}
 		if (fields.cardinality === 'one') {
-			const { relatedAlias, relatedTable, relatedColumn } =
+			const { relatedAlias, relatedTable, relatedTarget } =
 				this.buildCorrelatedRelationRefs(fields, plan);
 			if (
 				fields.hops.length === 0 &&
@@ -1550,9 +1638,29 @@ export class PlanCompiler {
 			if (fields.hops.length > 0) {
 				let fromNode = relatedTable;
 				let previousAlias = relatedAlias;
+				let previousTarget = relatedTarget;
 				for (let i = 0; i < fields.hops.length; i++) {
 					const hop = fields.hops[i]!;
 					const hopAlias = `${relatedAlias}_h${i + 1}`;
+					requireRelationTargetColumns(
+						previousTarget,
+						hop.fkColumn,
+						this.createHandlerContext(plan),
+						'join key',
+						this.bindingRelationName(fields),
+					);
+					const hopTarget = resolveRelationTarget(
+						hop.target,
+						this.createHandlerContext(plan),
+					);
+					requireRelationTargetColumns(
+						hopTarget,
+						hop.joinColumn,
+						this.createHandlerContext(plan),
+						'join key',
+						this.bindingRelationName(fields),
+					);
+					this.registerAliasAuthority(hopAlias, hopTarget);
 					const hopTable = rangeVar(
 						hop.target,
 						hopAlias,
@@ -1571,7 +1679,15 @@ export class PlanCompiler {
 						),
 					);
 					previousAlias = hopAlias;
+					previousTarget = hopTarget;
 				}
+				requireRelationTargetColumns(
+					previousTarget,
+					[fields.selectedColumn!],
+					this.createHandlerContext(plan),
+					'selected column',
+					this.bindingRelationName(fields),
+				);
 				return {
 					SubLink: {
 						subLinkType: 'EXPR_SUBLINK',
@@ -1584,6 +1700,7 @@ export class PlanCompiler {
 											previousAlias,
 											undefined,
 											this.naming,
+											this.aliasColumnAuthorities,
 										),
 									},
 								},
@@ -1600,11 +1717,30 @@ export class PlanCompiler {
 					},
 				};
 			}
+			requireRelationTargetColumns(
+				relatedTarget,
+				[fields.selectedColumn!],
+				this.createHandlerContext(plan),
+				'selected column',
+				this.bindingRelationName(fields),
+			);
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',
 					subselect: selectStmt({
-						targetList: [{ ResTarget: { val: relatedColumn } }],
+						targetList: [
+							{
+								ResTarget: {
+									val: columnRef(
+										fields.selectedColumn!,
+										relatedAlias,
+										undefined,
+										this.naming,
+										this.aliasColumnAuthorities,
+									),
+								},
+							},
+						],
 						from: [relatedTable],
 						where: buildKeyCorrelation(
 							relatedAlias,
@@ -1641,11 +1777,39 @@ export class PlanCompiler {
 					'JSON aggregation for NQL binding relation columns is not supported by this adapter',
 				);
 			}
-			const { relatedAlias, relatedTable, relatedColumn } =
+			const { relatedAlias, relatedTable, relatedTarget } =
 				this.buildCorrelatedRelationRefs(fields, plan);
+			requireRelationTargetColumns(
+				relatedTarget,
+				[fields.selectedColumn!],
+				this.createHandlerContext(plan),
+				'selected column',
+				this.bindingRelationName(fields),
+			);
+			const relatedColumn = columnRef(
+				fields.selectedColumn!,
+				relatedAlias,
+				undefined,
+				this.naming,
+				this.aliasColumnAuthorities,
+			);
 			const junctionAlias = hasCompleteManyToManyProof
 				? this.allocateBindingRelationAlias()
 				: undefined;
+			if (hasCompleteManyToManyProof) {
+				const throughTarget = resolveRelationTarget(
+					fields.through!,
+					this.createHandlerContext(plan),
+				);
+				requireRelationTargetColumns(
+					throughTarget,
+					[fields.throughTargetColumn!, fields.throughSourceColumn!],
+					this.createHandlerContext(plan),
+					'junction key',
+					this.bindingRelationName(fields),
+				);
+				this.registerAliasAuthority(junctionAlias!, throughTarget);
+			}
 			const handlerContext = this.createHandlerContext(plan);
 			const fromNode = hasCompleteManyToManyProof
 				? innerJoin(
@@ -2045,6 +2209,7 @@ export class PlanCompiler {
 							decision.alias,
 							decision.table,
 							this.naming,
+							this.createHandlerContext(plan).aliasColumnAuthorities,
 						),
 					);
 				}
@@ -2579,6 +2744,7 @@ export class PlanCompiler {
 				this.compileRelationAwareColumnRef(
 					decision.column as string,
 					decision.table,
+					this.aliasColumnAuthorities,
 				),
 				decision.direction ?? 'ASC',
 				decision.nulls ?? 'DEFAULT',
@@ -2593,14 +2759,21 @@ export class PlanCompiler {
 	private compileRelationAwareColumnRef(
 		column: string,
 		table: string | undefined,
+		authorities: AliasColumnAuthority | undefined,
 	): Node {
 		const dot = column.lastIndexOf('.');
 		if (dot !== -1) {
 			const relation = column.slice(0, dot);
 			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
-			return columnRef(column.slice(dot + 1), alias, undefined, this.naming);
+			return columnRef(
+				column.slice(dot + 1),
+				alias,
+				undefined,
+				this.naming,
+				authorities,
+			);
 		}
-		return columnRef(column, table, undefined, this.naming);
+		return columnRef(column, table, undefined, this.naming, authorities);
 	}
 
 	/**
@@ -2611,6 +2784,7 @@ export class PlanCompiler {
 		return this.compileRelationAwareColumnRef(
 			decision.column as string,
 			decision.table,
+			this.aliasColumnAuthorities,
 		);
 	}
 
@@ -2620,7 +2794,11 @@ export class PlanCompiler {
 	 * DISTINCT ON columns as unqualified references.
 	 */
 	private compileDistinctOnColumn(column: string): Node {
-		return this.compileRelationAwareColumnRef(column, undefined);
+		return this.compileRelationAwareColumnRef(
+			column,
+			undefined,
+			this.aliasColumnAuthorities,
+		);
 	}
 
 	/**
@@ -2908,7 +3086,11 @@ export class PlanCompiler {
 
 		const args: Node[] = conditions.map((cond) => {
 			const whenExpr = this.dispatchWhere(cond.when);
-			const thenResult = this.compileCaseValue(cond.then, plan);
+			const thenResult = this.compileCaseValue(
+				cond.then,
+				plan,
+				decision.table ?? this.currentRootTable,
+			);
 
 			return {
 				CaseWhen: {
@@ -2920,7 +3102,11 @@ export class PlanCompiler {
 
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			defresult = this.compileCaseValue(elseValue, plan);
+			defresult = this.compileCaseValue(
+				elseValue,
+				plan,
+				decision.table ?? this.currentRootTable,
+			);
 		}
 
 		return {
@@ -2935,10 +3121,14 @@ export class PlanCompiler {
 	 * Compile a CASE THEN/ELSE value based on its ExpressionIntent kind.
 	 * Delegates to shared resolveCaseValue with nested CASE support.
 	 */
-	private compileCaseValue(value: unknown, plan: SimplifiedPlanReport): Node {
+	private compileCaseValue(
+		value: unknown,
+		plan: SimplifiedPlanReport,
+		alias = this.currentRootTable,
+	): Node {
 		return resolveCaseValueShared(
 			value,
-			this.currentRootTable,
+			alias,
 			undefined,
 			this.naming,
 			this.state,
@@ -2963,6 +3153,7 @@ export class PlanCompiler {
 					expr as unknown as ExpressionIntent,
 					plan,
 				),
+			this.aliasColumnAuthorities,
 		);
 	}
 
@@ -3153,6 +3344,18 @@ export class PlanCompiler {
 			this.deriveFk(targetTable, this.defaultPk),
 		];
 		const targetKey = decision.parentKey ?? [this.defaultPk];
+		const target = resolveRelationTarget(
+			targetTable,
+			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
+		);
+		requireRelationTargetColumns(
+			target,
+			toColumnList(targetKey),
+			this.createHandlerContext({ rootTable: sourceTable, decisions: [] }),
+			'join key',
+			decision.relationName,
+		);
+		this.registerAliasAuthority(targetAlias, target);
 		const onCondition = buildKeyCorrelation(
 			targetAlias,
 			targetKey,
@@ -3200,6 +3403,19 @@ export class PlanCompiler {
 		if (targetColumn.length === 0) {
 			throw new Error("Missing required column 'targetColumn' in compileJoin");
 		}
+		const targetName = decision.targetTable ?? '';
+		const target = resolveRelationTarget(
+			targetName,
+			this.createHandlerContext(plan),
+		);
+		requireRelationTargetColumns(
+			target,
+			targetColumn,
+			this.createHandlerContext(plan),
+			'join key',
+			decision.relationName,
+		);
+		this.registerAliasAuthority(decision.alias ?? targetName, target);
 		const sourceAlias = sourceColumn.length > 1 ? plan.rootTable : '';
 		const onCondition = buildKeyCorrelation(
 			sourceAlias,

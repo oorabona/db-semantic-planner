@@ -14,6 +14,10 @@ import type { JoinExpr, Node } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnTarget, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -86,6 +90,7 @@ export const joinIncludeHandler: IncludeHandler = {
 		const targetAlias = relation ?? targetTable;
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 		const sourceColumn = toColumnList(decision.sourceColumn);
+		const columns = decision.columns;
 		if (sourceColumn.length === 0) {
 			throw new Error("Missing required column 'sourceColumn' in JOIN include");
 		}
@@ -95,6 +100,23 @@ export const joinIncludeHandler: IncludeHandler = {
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
 			),
 		];
+		const target = resolveRelationTarget(targetTable, ctx);
+		requireRelationTargetColumns(
+			target,
+			toColumnList(targetColumn),
+			ctx,
+			'join key',
+			relation,
+		);
+		if (columns) {
+			requireRelationTargetColumns(
+				target,
+				columns.filter((column) => column !== '*'),
+				ctx,
+				'selected column',
+				relation,
+			);
+		}
 
 		// Build the JOIN (LEFT or INNER based on decision.joinType)
 		const join = buildJoin(
@@ -111,7 +133,6 @@ export const joinIncludeHandler: IncludeHandler = {
 		// Prefer user-supplied alias from columnAliases; fall back to
 		// the "relation.column" convention used by the hydration layer.
 		const targets: Node[] = [];
-		const columns = decision.columns;
 		const columnAliases = decision.columnAliases;
 		const hydrationPrefix = decision.hydrationPrefix ?? relation ?? targetAlias;
 		if (columns && columns.length > 0) {

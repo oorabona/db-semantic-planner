@@ -8,7 +8,11 @@
  * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import { type JsonAggOrderByEntry, resolveJsonAggOrderKey } from '@dbsp/types';
+import {
+	type JsonAggOrderByEntry,
+	resolveJsonAggOrderKey,
+	resolveOutputReadHandling,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	andExpr,
@@ -21,6 +25,15 @@ import {
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
 } from '../../json-agg-read-handling.js';
+import {
+	assertProjectedJsonContainerCanBeAggregated,
+	bindAliasAuthority,
+	emittedColumnReference,
+	requireEmittedRelationTargetColumn,
+	requireRelationTargetColumn,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -80,7 +93,39 @@ function resolveJsonAggProjection(
 		requested &&
 		requested.length > 0 &&
 		!(requested.length === 1 && requested[0] === '*');
-	if (hasExplicitProjection) return requested;
+	const target = resolveRelationTarget(targetTable, ctx);
+	if (hasExplicitProjection) {
+		return requested.map((column) =>
+			column === '*'
+				? column
+				: (requireRelationTargetColumn(
+						target,
+						column,
+						ctx,
+						'selected column',
+						decision.relation,
+					)?.outputKey ?? ctx.naming.toDatabase(column)),
+		);
+	}
+	if (target.outputs !== undefined) {
+		// Preserve the historical to_jsonb(alias) SQL for a full physical-table
+		// projection.  A reduced CTE must be explicit so PostgreSQL cannot expose
+		// columns the CTE did not produce.
+		const physical = ctx.model?.getTable(targetTable);
+		const physicalKeys = new Set(
+			physical?.columns.map((column) => ctx.naming.toDatabase(column.name)),
+		);
+		const isFullPhysicalProjection =
+			physical !== undefined &&
+			target.outputs.size === physicalKeys.size &&
+			[...physicalKeys].every((column) => {
+				const descriptor = target.outputs?.get(column);
+				return (
+					descriptor !== undefined && descriptor.source.kind !== 'ambiguous'
+				);
+			});
+		if (!isFullPhysicalProjection) return [...target.outputs.keys()];
+	}
 
 	const table = ctx.model?.getTable(targetTable);
 	const needsExplicitProjection =
@@ -100,7 +145,47 @@ function buildJsonAggColumnValueOverrides(
 	ctx: CompilerContext,
 	shape: ReturnType<typeof jsonAggContainerShape>,
 ): ReadonlyMap<string, Node> | undefined {
-	if (!columns || columns.length === 0) return undefined;
+	if (
+		!columns ||
+		columns.length === 0 ||
+		(columns.length === 1 && columns[0] === '*')
+	)
+		return undefined;
+	const target = resolveRelationTarget(targetTable, ctx);
+	if (target.outputs !== undefined) {
+		const overrides = new Map<string, Node>();
+		for (const columnName of columns) {
+			if (columnName === '*') continue;
+			// `columns` comes from the target projection here, so its keys are
+			// already emitted SQL identifiers rather than logical input names.
+			const emittedColumn = emittedColumnReference(columnName);
+			const descriptor = requireEmittedRelationTargetColumn(
+				target,
+				emittedColumn,
+				'selected column',
+				undefined,
+			);
+			if (descriptor) {
+				assertProjectedJsonContainerCanBeAggregated(target, descriptor);
+			}
+			if (descriptor && resolveOutputReadHandling(descriptor).kind !== 'none') {
+				overrides.set(
+					columnName,
+					typeCast(
+						columnRef(
+							emittedColumn,
+							innerAlias,
+							undefined,
+							ctx.naming,
+							ctx.aliasColumnAuthorities,
+						),
+						'text',
+					),
+				);
+			}
+		}
+		return overrides.size > 0 ? overrides : undefined;
+	}
 	const table = ctx.model?.getTable(targetTable);
 	if (!table) return undefined;
 	const overrides = new Map<string, Node>();
@@ -117,7 +202,13 @@ function buildJsonAggColumnValueOverrides(
 		overrides.set(
 			columnName,
 			typeCast(
-				columnRef(columnName, innerAlias, undefined, ctx.naming),
+				columnRef(
+					columnName,
+					innerAlias,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				),
 				'text',
 			),
 		);
@@ -156,12 +247,24 @@ function compileJsonAggRecursive(
 		ctx.defaultPkColumnName,
 		ctx.deriveFkColumnName,
 	);
+	const innerCtx: CompilerContext = {
+		...ctx,
+		rootTable: targetTable,
+		currentAlias: innerAlias,
+		outerAlias: parentAlias,
+		aliasColumnAuthorities: bindAliasAuthority(
+			ctx.aliasColumnAuthorities,
+			innerAlias,
+			resolveRelationTarget(targetTable, ctx),
+			ctx,
+		),
+	};
 	let whereExpr: Node = buildKeyCorrelation(
 		innerAlias,
 		targetColumn,
 		parentAlias,
 		sourceColumn,
-		ctx,
+		innerCtx,
 	);
 
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)
@@ -181,7 +284,7 @@ function compileJsonAggRecursive(
 					child,
 					innerAlias,
 					depth + 1,
-					ctx,
+					innerCtx,
 					_state,
 				);
 				// Extract the COALESCE node from the ResTarget wrapper
@@ -198,14 +301,29 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
-	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
+	const orderBy = resolveJsonAggOrderBy(decision, targetTable, innerCtx);
+	const resolvedTarget = resolveRelationTarget(targetTable, innerCtx);
+	if (orderBy) {
+		requireRelationTargetColumns(
+			resolvedTarget,
+			orderBy.columns,
+			innerCtx,
+			'order key',
+			relation,
+		);
+	}
 	const shape = jsonAggContainerShape(decision.relationType);
-	const columns = resolveJsonAggProjection(decision, targetTable, ctx, shape);
+	const columns = resolveJsonAggProjection(
+		decision,
+		targetTable,
+		innerCtx,
+		shape,
+	);
 	const columnValueOverrides = buildJsonAggColumnValueOverrides(
 		targetTable,
 		columns,
 		innerAlias,
-		ctx,
+		innerCtx,
 		shape,
 	);
 
@@ -220,6 +338,10 @@ function compileJsonAggRecursive(
 			innerAlias,
 			...(limit !== undefined && { limit }),
 			...(columns && { columns }),
+			...(resolvedTarget.outputs !== undefined && { columnsAreEmitted: true }),
+			...(innerCtx.aliasColumnAuthorities !== undefined && {
+				aliasColumnAuthorities: innerCtx.aliasColumnAuthorities,
+			}),
 			...(columnValueOverrides && { columnValueOverrides }),
 			...(orderBy && { orderBy: orderBy.columns }),
 			...(orderBy?.fallback && { orderByFallback: true }),

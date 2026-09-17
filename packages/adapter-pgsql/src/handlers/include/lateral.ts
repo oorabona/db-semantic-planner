@@ -15,6 +15,11 @@ import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { schemaForFromName } from '../../binding-registry.js';
+import {
+	bindAliasAuthority,
+	requireRelationTargetColumns,
+	resolveRelationTarget,
+} from '../../relation-target-projection.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -40,7 +45,13 @@ function buildLateralTargets(
 	) {
 		return columns.map((col) => ({
 			ResTarget: {
-				val: columnRef(col, alias, undefined, ctx.naming),
+				val: columnRef(
+					col,
+					alias,
+					undefined,
+					ctx.naming,
+					ctx.aliasColumnAuthorities,
+				),
 			},
 		}));
 	}
@@ -148,12 +159,36 @@ function compileLateralCascade(
 	if (!targetTable) {
 		throw new Error('LATERAL include requires targetTable');
 	}
+	const target = resolveRelationTarget(targetTable, ctx);
+	requireRelationTargetColumns(
+		target,
+		toColumnList(targetColumn),
+		ctx,
+		'join key',
+		decision.relation,
+	);
+	if (columns) {
+		requireRelationTargetColumns(
+			target,
+			columns.filter((column) => column !== '*'),
+			ctx,
+			'selected column',
+			decision.relation,
+		);
+	}
 
 	// Generate unique aliases
 	const existingAliases = state.aliases.size;
 	const innerAlias = `${targetTable}_inner_${existingAliases}`;
 	const lateralAlias = `${targetTable}_lat_${existingAliases}`;
 	state.aliases.set(`lateral_${targetTable}_${existingAliases}`, lateralAlias);
+	const aliasColumnAuthorities = bindAliasAuthority(
+		bindAliasAuthority(ctx.aliasColumnAuthorities, innerAlias, target, ctx),
+		lateralAlias,
+		target,
+		ctx,
+	);
+	const scopedCtx: CompilerContext = { ...ctx, aliasColumnAuthorities };
 
 	// Build the LATERAL subquery
 	const subquery = buildLateralSubquery(
@@ -164,15 +199,15 @@ function compileLateralCascade(
 		targetColumn,
 		columns,
 		limit,
-		ctx,
+		scopedCtx,
 	);
 
 	// Build the JOIN LATERAL
-	const join = buildLateralJoin(subquery, lateralAlias, ctx);
+	const join = buildLateralJoin(subquery, lateralAlias, scopedCtx);
 	const joins: Node[] = [join];
 
 	// Build outer SELECT targets referencing the lateral alias
-	const targets: Node[] = buildLateralTargets(columns, lateralAlias, ctx);
+	const targets: Node[] = buildLateralTargets(columns, lateralAlias, scopedCtx);
 
 	// Recursively compile children
 	if (decision.children && decision.children.length > 0) {
@@ -189,7 +224,7 @@ function compileLateralCascade(
 				lateralAlias,
 				childSrc,
 				childTgt,
-				ctx,
+				scopedCtx,
 				state,
 			);
 			joins.push(...childResult.joins);

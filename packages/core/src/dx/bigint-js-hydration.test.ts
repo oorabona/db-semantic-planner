@@ -395,6 +395,38 @@ describe('bigint js json_agg hydration', () => {
 		).toThrow(/readings\.safeCount.*9007199254740992/);
 	});
 
+	it('uses an emitted nested output key for a renamed bigint projection', () => {
+		const renamedTransform = {
+			...nestedTransform('readings', 'observedAt', 'bigint'),
+			outputKey: 'readingValue',
+		} as NestedOutputReadHandling;
+		const renamedReport = {
+			rootTable: 'parents',
+			decisions: [
+				{
+					type: 'include-strategy',
+					choice: 'json_agg',
+					context: {
+						sourceTable: 'parents',
+						target: 'readings',
+						relation: 'readings',
+						relationType: 'hasMany',
+						jsonAggNestedReadTransforms: [renamedTransform],
+					},
+				},
+			],
+		} as unknown as PlanReport;
+		const results: Record<string, unknown>[] = [
+			{ readings_json: JSON.stringify([{ readingValue: '9007199254740993' }]) },
+		];
+
+		hydrateJsonAggIncludes(results, renamedReport, includeSchema.model);
+
+		expect(results).toEqual([
+			{ readings: [{ readingValue: 9007199254740993n }] },
+		]);
+	});
+
 	it('uses exact adapter-provided JSON keys for exotic column names', () => {
 		const results: Record<string, unknown>[] = [
 			{

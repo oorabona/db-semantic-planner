@@ -226,7 +226,13 @@ export const scalarSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
+		const leftOperand = columnRef(
+			column,
+			sourceAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 		const subquery = buildScalarSubquery(
 			decision,
 			'scalar',
@@ -260,7 +266,13 @@ export const inSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
+		const leftOperand = columnRef(
+			column,
+			sourceAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {
@@ -295,7 +307,13 @@ export const notInSubqueryHandler: WhereHandler = {
 		}
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
+		const leftOperand = columnRef(
+			column,
+			sourceAlias,
+			undefined,
+			ctx.naming,
+			ctx.aliasColumnAuthorities,
+		);
 		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {
