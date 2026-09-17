@@ -55,6 +55,7 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
+import { validateIdentifier } from './validate.js';
 
 type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
 
@@ -633,11 +634,13 @@ export function compileCteQuery<T = unknown>(
 	let visibleCteDeps = deps;
 
 	for (const cte of intent.ctes) {
+		validateIdentifier(cte.name, 'table');
+		const emittedCteName = emittedBindName(cte.name, visibleCteDeps.naming);
 		if (cte.kind === 'unnestCte') {
 			// Unnest-backed CTE: builds an AST node, deparses it
 			const beforeUnnestParamCount = state.parameters.length;
 			state.paramIndex = allCteParams.length;
-			const node = buildUnnestCte(cte, state, deps);
+			const node = buildUnnestCte(cte, state, visibleCteDeps);
 			const cteParams = state.parameters.slice(beforeUnnestParamCount);
 			allCteParams.push(...cteParams);
 			const cteSql = deparseQuoted(node);
@@ -645,12 +648,12 @@ export function compileCteQuery<T = unknown>(
 			const cteQueryAst = (node as { CommonTableExpr?: { ctequery?: Node } })
 				.CommonTableExpr?.ctequery;
 			cteProjectionByName.set(
-				cte.name,
+				emittedCteName,
 				fromAstProjection({
 					sql: cteSql,
 					parameters: cteParams,
 					ast: cteQueryAst ?? node,
-					rootTable: cte.name,
+					rootTable: emittedCteName,
 					model: undefined,
 					naming: deps.naming,
 				}),
@@ -659,7 +662,7 @@ export function compileCteQuery<T = unknown>(
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
 			const currentParamOffset = allCteParams.length;
-			const rawCteDeps = {
+			const rawCteStepDeps = {
 				...visibleCteDeps,
 				bindingNames: withBindingName(
 					visibleCteDeps.bindingNames,
@@ -667,7 +670,13 @@ export function compileCteQuery<T = unknown>(
 					visibleCteDeps.naming,
 				),
 			};
-			const rawCte = buildRawCte(cte, rawCteDeps, options, cteProjectionByName);
+			const rawCte = buildRawCte(
+				cte,
+				visibleCteDeps,
+				rawCteStepDeps,
+				options,
+				cteProjectionByName,
+			);
 			const renumberedRawCteSql =
 				currentParamOffset > 0
 					? rawCte.sql.replace(
@@ -679,7 +688,7 @@ export function compileCteQuery<T = unknown>(
 			allCteParams.push(...rawCte.params);
 			cteSqlFragments.push(renumberedRawCteSql);
 			cteProjectionByName.set(
-				cte.name,
+				emittedCteName,
 				preserveOneToOne(rawCte.projection, {
 					sql: renumberedRawCteSql,
 					parameters: rawCte.params,
@@ -706,9 +715,9 @@ export function compileCteQuery<T = unknown>(
 						)
 					: innerCompiled.sql;
 			allCteParams.push(...innerCompiled.parameters);
-			cteSqlFragments.push(`"${innerCte.name}" AS (${renumberedInnerSql})`);
+			cteSqlFragments.push(`"${emittedCteName}" AS (${renumberedInnerSql})`);
 			cteProjectionByName.set(
-				innerCte.name,
+				emittedCteName,
 				preserveOneToOne(innerCompiled, {
 					sql: renumberedInnerSql,
 					parameters: innerCompiled.parameters,
@@ -849,7 +858,7 @@ function buildUnnestCte(
 
 	return {
 		CommonTableExpr: {
-			ctename: cte.name,
+			ctename: emittedBindName(cte.name, deps.naming),
 			ctequery: { SelectStmt: cteSelectStmt },
 		},
 	};
@@ -868,7 +877,8 @@ function buildUnnestCte(
  */
 function buildRawCte(
 	cte: RawCteIntent,
-	deps: AdapterCompilerDeps,
+	anchorDeps: AdapterCompilerDeps,
+	stepDeps: AdapterCompilerDeps,
 	options: CompileOptions | undefined,
 	registry: CteProjectionRegistry,
 ): {
@@ -878,14 +888,19 @@ function buildRawCte(
 } {
 	// Compile base (anchor) query
 	const baseQuery = cte.base as QueryIntent;
-	const baseCompiled = compileQueryEnvelope(baseQuery, options, deps, registry);
+	const baseCompiled = compileQueryEnvelope(
+		baseQuery,
+		options,
+		anchorDeps,
+		registry,
+	);
 
 	// Compile step (recursive) query
 	const stepQuery = cte.step as QueryIntent;
 	const rawStepCompiled = compileSelectEnvelope(
 		createPlanReportForQuery(stepQuery),
 		options,
-		deps,
+		stepDeps,
 	);
 
 	// Renumber step params to follow base params.
@@ -921,7 +936,7 @@ function buildRawCte(
 	const stepRegisteredSource =
 		stepQuery.from === cte.name
 			? baseCompiled
-			: getRegisteredProjection(registry, stepQuery.from, deps);
+			: getRegisteredProjection(registry, stepQuery.from, stepDeps);
 	const stepCompiled = stepRegisteredSource
 		? rehomeQueryEnvelope(
 				stepRegisteredSource,
@@ -929,7 +944,7 @@ function buildRawCte(
 				rawStepCompiled,
 				finalStepSql,
 				allParams,
-				deps,
+				stepDeps,
 			)
 		: preserveOneToOne(rawStepCompiled, {
 				sql: finalStepSql,
@@ -937,7 +952,7 @@ function buildRawCte(
 			});
 
 	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
-	const cteName = `"${cte.name.replace(/"/g, '""')}"`;
+	const cteName = `"${emittedBindName(cte.name, anchorDeps.naming)}"`;
 	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${finalStepSql})`;
 
 	return {

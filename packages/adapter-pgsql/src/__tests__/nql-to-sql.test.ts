@@ -937,6 +937,37 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(result.parameters).toEqual([2]);
 	});
 
+	it('validates NQL CTE declaration names before emitting SQL', () => {
+		const orm = createOrm({
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({ model: testSchema.model }),
+		});
+
+		expect(() =>
+			orm.nql`with "x"" AS (SELECT 1) SELECT 1; --" as (users | select id)
+users | select id`.dump(),
+		).toThrow(
+			'Invalid table identifier "x" AS (SELECT 1) SELECT 1; --": contains invalid characters (only letters, digits, underscore, and $ allowed)',
+		);
+	});
+
+	it('emits NQL CTE declarations with the same casing as references', () => {
+		const orm = createOrm({
+			model: testSchema.model,
+			adapter: createPgsqlCompileOnlyAdapter({
+				model: testSchema.model,
+				dbCasing: 'snake_case',
+			}),
+		});
+
+		const result = orm.nql`with activeUsers as (users | select id)
+activeUsers | select id`.dump();
+
+		expect(normalizeSQL(result.sql)).toBe(
+			'with "active_users" as (select users.id from users) select active_users.id from active_users',
+		);
+	});
+
 	it('binds explicit NQL param nodes through scalar SELECT subqueries', () => {
 		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 		const { sql, params } = nqlToSQLWithNamedParams(

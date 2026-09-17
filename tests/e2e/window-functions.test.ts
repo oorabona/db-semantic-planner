@@ -122,16 +122,24 @@ describe('DX-021: Window Functions E2E', () => {
 				priceCents: number;
 			}>;
 
+			const variantsByProduct = new Map<number, typeof input>();
+			for (const row of input) {
+				const variants = variantsByProduct.get(row.productId);
+				if (variants === undefined) {
+					variantsByProduct.set(row.productId, [row]);
+				} else {
+					variants.push(row);
+				}
+			}
 			const expectedIds = new Set(
-				[...Map.groupBy(input, (row) => row.productId).values()].flatMap(
-					(rows) =>
-						rows
-							.toSorted(
-								(left, right) =>
-									right.priceCents - left.priceCents || left.id - right.id,
-							)
-							.slice(0, 2)
-							.map((row) => row.id),
+				[...variantsByProduct.values()].flatMap((rows) =>
+					[...rows]
+						.sort(
+							(left, right) =>
+								right.priceCents - left.priceCents || left.id - right.id,
+						)
+						.slice(0, 2)
+						.map((row) => row.id),
 				),
 			);
 
