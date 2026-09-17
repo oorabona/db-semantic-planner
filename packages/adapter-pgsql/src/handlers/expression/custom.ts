@@ -33,7 +33,7 @@ import {
 	typeCast,
 } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
-import { validateIdentifier } from '../../validate.js';
+import { escapeDiagnosticText, validateIdentifier } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -115,7 +115,9 @@ function assertSafeOperator(
 		);
 	}
 	if (!op) {
-		throw new Error(`Invalid operator "${op}". Operator must not be empty.`);
+		throw new Error(
+			`Invalid operator "${escapeDiagnosticText(op)}". Operator must not be empty.`,
+		);
 	}
 	const SYMBOLIC_RE = /^[-+*/<>=~!@#%^&|?]+$/;
 	const isSymbolic = SYMBOLIC_RE.test(op);
@@ -124,7 +126,7 @@ function assertSafeOperator(
 		false;
 	if (!isSymbolic && !isAllowedWord) {
 		throw new Error(
-			`Invalid operator "${op}". ` +
+			`Invalid operator "${escapeDiagnosticText(op)}". ` +
 				`Operator must consist only of symbolic characters (e.g. <=>, <->, @@, @>, <@, &&, ||, ~)` +
 				(opts?.allowWords?.length
 					? ` or one of the allowed words: ${opts.allowWords.join(', ')}.`
@@ -135,7 +137,7 @@ function assertSafeOperator(
 	// PostgreSQL forbids these inside operator names (they start comments).
 	if (op.includes('--') || op.includes('/*') || op.includes('*/')) {
 		throw new Error(
-			`Invalid operator "${op}" — must not contain SQL comment sequences (-- /* */).`,
+			`Invalid operator "${escapeDiagnosticText(op)}" — must not contain SQL comment sequences (-- /* */).`,
 		);
 	}
 }
@@ -434,7 +436,7 @@ export function compileExpressionIntent(
 
 		default: {
 			throw new Error(
-				`compileExpressionIntent: unsupported expression kind '${kind}'`,
+				`compileExpressionIntent: unsupported expression kind '${escapeDiagnosticText(kind)}'`,
 			);
 		}
 	}

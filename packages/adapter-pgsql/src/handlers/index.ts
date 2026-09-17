@@ -238,7 +238,9 @@ export function registerExpressionHandler(handler: ExpressionHandler): void {
 export function getWhereHandler(operator: string): WhereHandler {
 	const handler = whereHandlers.get(operator);
 	if (!handler) {
-		throw new Error(`No WHERE handler registered for operator: ${operator}`);
+		throw new Error(
+			`No WHERE handler registered for operator: ${describeDiagnosticValue(operator)}`,
+		);
 	}
 	return handler;
 }
@@ -250,7 +252,9 @@ export function getWhereHandler(operator: string): WhereHandler {
 export function getExpressionHandler(type: string): ExpressionHandler {
 	const handler = expressionHandlers.get(type);
 	if (!handler) {
-		throw new Error(`No EXPRESSION handler registered for type: ${type}`);
+		throw new Error(
+			`No EXPRESSION handler registered for type: ${describeDiagnosticValue(type)}`,
+		);
 	}
 	return handler;
 }
@@ -277,7 +281,9 @@ export function getIncludeHandler(
 ): IncludeHandler {
 	const handler = includeHandlers.get(strategy);
 	if (!handler) {
-		throw new Error(`No INCLUDE handler registered for strategy: ${strategy}`);
+		throw new Error(
+			`No INCLUDE handler registered for strategy: ${describeDiagnosticValue(strategy)}`,
+		);
 	}
 	return handler;
 }

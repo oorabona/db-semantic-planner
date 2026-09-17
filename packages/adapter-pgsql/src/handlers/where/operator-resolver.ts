@@ -1,4 +1,6 @@
 /** Resolve a WHERE operator without consulting Object.prototype. */
+import { escapeDiagnosticText } from '../../validate.js';
+
 export function resolveWhereOperator<T>(
 	operator: string | undefined,
 	operators: Readonly<Record<string, T>>,
@@ -21,5 +23,7 @@ export function resolveWhereOperator<T>(
 			return operator;
 		}
 	}
-	throw new Error(`No WHERE handler registered for operator: ${operator}`);
+	throw new Error(
+		`No WHERE handler registered for operator: ${escapeDiagnosticText(String(operator))}`,
+	);
 }

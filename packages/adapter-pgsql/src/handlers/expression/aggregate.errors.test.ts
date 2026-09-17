@@ -166,4 +166,15 @@ describe('genericAggregateHandler errors', () => {
 			'Aggregate string_agg requires a column',
 		);
 	});
+
+	it('escapes a newline in a generic aggregate function name', () => {
+		const state = createCompilerState();
+		const decision = {
+			type: 'aggregate',
+			function: 'string_agg\nFAKE',
+		} as Decision;
+		expect(() => genericAggregateHandler.compile(decision, ctx, state)).toThrow(
+			'Aggregate string_agg\\nFAKE requires a column',
+		);
+	});
 });

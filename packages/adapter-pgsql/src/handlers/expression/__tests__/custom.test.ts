@@ -146,6 +146,17 @@ describe('compileExpressionIntent', () => {
 	});
 
 	describe('customOp kind', () => {
+		it('escapes a newline in a rejected custom operator', () => {
+			expect(() =>
+				compileCustomExpr({
+					kind: 'customOp',
+					operator: 'invalid\nFAKE',
+					left: { kind: 'ref', column: 'a' },
+					right: { kind: 'param', value: 1 },
+				}),
+			).toThrow('Invalid operator "invalid\\nFAKE".');
+		});
+
 		it('compiles a binary custom operator', () => {
 			const result = compileCustomExpr({
 				kind: 'customOp',

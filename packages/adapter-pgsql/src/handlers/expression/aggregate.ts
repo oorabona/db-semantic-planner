@@ -8,6 +8,7 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef, funcCall } from '../../ast-helpers.js';
+import { escapeDiagnosticText } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -34,7 +35,7 @@ function buildAggregate(
 	// aggregate). Fail clearly rather than silently dropping DISTINCT.
 	if (distinct && isStarColumn) {
 		throw new Error(
-			`${funcName}(DISTINCT *) is not valid SQL — PostgreSQL does not support ` +
+			`${escapeDiagnosticText(funcName)}(DISTINCT *) is not valid SQL — PostgreSQL does not support ` +
 				'DISTINCT on a star aggregate; provide a specific column.',
 		);
 	}
@@ -49,7 +50,9 @@ function buildAggregate(
 	}
 
 	if (!column) {
-		throw new Error(`Aggregate ${funcName} requires a column`);
+		throw new Error(
+			`Aggregate ${escapeDiagnosticText(funcName)} requires a column`,
+		);
 	}
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
