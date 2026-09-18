@@ -19,6 +19,10 @@ import {
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
 import {
+	PgTransitionRunPersistenceIndeterminateError,
+	planPgTransitionRun,
+} from '@dbsp/adapter-pgsql/internal';
+import {
 	acquireTransitionLease,
 	bindDeclarationSet,
 	bindExecutionContract,
@@ -42,7 +46,7 @@ import type {
 	TransitionSessionClient,
 } from '@dbsp/types';
 import { Command } from 'commander';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
 import { type LoadedSchema, loadSchema } from '../utils/schema-loader.js';
@@ -418,127 +422,173 @@ export async function runPlan(
 	const connection = await deps.createDbConnection(options.db);
 	const { pool } = connection;
 	let result: PlanResult | undefined;
+	let renderedSql: string | undefined;
 	let operationError: unknown;
 	let failed = false;
 	try {
-		// This binding is deliberately first: every subsequent introspection and
-		// proof lease must describe the same physical PostgreSQL target.
-		const targetIdentity = await deps.captureTargetIdentity(
-			pool,
-			options.schema,
-		);
-		await deps.ensureTransitionJournal(pool);
-		const current = await deps.loadCurrent(
-			pool,
-			options.schema,
-			targetIdentity,
-		);
-		const context = await deps.readContext(
-			pool,
-			options.schema,
-			targetIdentity,
-		);
-		const planner = deps.createPlanner(loaded);
-		const compare = planner.compare(loaded.model, current, context);
-		const prove = await planner.prove(compare, pool, context);
-
-		if (prove.kind === 'proven') {
-			let executionContract: ExecutionContract | undefined;
-			try {
-				executionContract = await deps.buildExecutionContract(
-					pool,
-					options.schema,
-					prove.plan,
-					targetIdentity,
-				);
-			} catch (error) {
-				if (!(error instanceof PgExecutionContractDerivationError)) throw error;
+		if (overrides === undefined) {
+			const lifecycle = await planPgTransitionRun(
+				loaded.model,
+				async (client: TransitionSessionClient, schema: string | undefined) =>
+					createPgsqlAdapter(client as unknown as PoolClient, {
+						borrowedClient: true,
+					}).introspect(schema === undefined ? {} : { schema }),
+				pool,
+				{
+					...(options.schema === undefined ? {} : { schema: options.schema }),
+					...(loaded.dbCasing === undefined
+						? {}
+						: { dbCasing: loaded.dbCasing }),
+					persist: options.dryRun !== true,
+					beforePersist: async (plan, proofContext) => {
+						renderedSql = deps.createPlanner(loaded).render(plan, proofContext);
+					},
+				},
+			);
+			if (lifecycle.kind === 'proven') {
+				if (renderedSql === undefined)
+					throw new Error('internal error: durable plan SQL was not rendered');
 				result = {
-					compareKind: compare.kind,
-					proveKind: 'blocked',
-					assessment: executionContractBlockedAssessment(error),
+					compareKind: lifecycle.compare.kind,
+					proveKind: 'proven',
+					assessment: lifecycle.assessment,
+					persisted: options.dryRun !== true,
+					runId: options.dryRun === true ? null : lifecycle.run.runId,
+					planDigest: lifecycle.run.planDigest,
+					plan: lifecycle.plan,
+					sql: renderedSql,
+				};
+			} else {
+				result = {
+					compareKind: lifecycle.compare.kind,
+					proveKind: lifecycle.kind,
+					assessment: lifecycle.assessment,
 					persisted: false,
 					runId: null,
 					planDigest: null,
 				};
 			}
-			if (executionContract !== undefined) {
-				// Order is intentional: an id exists before an indeterminate write, while
-				// rendering happens before a durable record can be stranded unseen.
-				const contractedPlan = bindExecutionContract(
-					prove.plan,
-					executionContract,
-				);
-				const durablePlan = bindDeclarationSet(
-					contractedPlan,
-					declarationSetFromModel(
-						loaded.model,
-						{
-							engine: context.engine,
-							database: context.databaseId,
-							schema: options.schema ?? 'public',
-						},
-						getNamingPluginForDbCasing(loaded.dbCasing ?? 'preserve'),
-					),
-				);
-				const run = createTransitionRunMetadata(durablePlan);
-				const proofContext = prove.plan.observations.find(
-					(observation) => observation.role === 'evidence',
-				)?.context;
-				if (!proofContext) {
-					throw new Error(
-						'internal error: minted proven plan has no evidence observation context',
+		} else {
+			// This binding is deliberately first: every subsequent introspection and
+			// proof lease must describe the same physical PostgreSQL target.
+			const targetIdentity = await deps.captureTargetIdentity(
+				pool,
+				options.schema,
+			);
+			await deps.ensureTransitionJournal(pool);
+			const current = await deps.loadCurrent(
+				pool,
+				options.schema,
+				targetIdentity,
+			);
+			const context = await deps.readContext(
+				pool,
+				options.schema,
+				targetIdentity,
+			);
+			const planner = deps.createPlanner(loaded);
+			const compare = planner.compare(loaded.model, current, context);
+			const prove = await planner.prove(compare, pool, context);
+
+			if (prove.kind === 'proven') {
+				let executionContract: ExecutionContract | undefined;
+				try {
+					executionContract = await deps.buildExecutionContract(
+						pool,
+						options.schema,
+						prove.plan,
+						targetIdentity,
 					);
+				} catch (error) {
+					if (!(error instanceof PgExecutionContractDerivationError))
+						throw error;
+					result = {
+						compareKind: compare.kind,
+						proveKind: 'blocked',
+						assessment: executionContractBlockedAssessment(error),
+						persisted: false,
+						runId: null,
+						planDigest: null,
+					};
 				}
-				const sql = planner.render(durablePlan, proofContext);
-				if (!options.dryRun) {
-					try {
-						await deps.persist(pool, run, durablePlan);
-					} catch (error) {
-						throw new PlanPersistenceIndeterminateError(
+				if (executionContract !== undefined) {
+					// Order is intentional: an id exists before an indeterminate write, while
+					// rendering happens before a durable record can be stranded unseen.
+					const contractedPlan = bindExecutionContract(
+						prove.plan,
+						executionContract,
+					);
+					const durablePlan = bindDeclarationSet(
+						contractedPlan,
+						declarationSetFromModel(
+							loaded.model,
 							{
-								compareKind: compare.kind,
-								proveKind: prove.kind,
-								assessment: prove.assessment,
-								persisted: 'indeterminate',
-								runId: run.runId,
-								planDigest: run.planDigest,
+								engine: context.engine,
+								database: context.databaseId,
+								schema: options.schema ?? 'public',
 							},
-							error,
+							getNamingPluginForDbCasing(loaded.dbCasing ?? 'preserve'),
+						),
+					);
+					const run = createTransitionRunMetadata(durablePlan);
+					const proofContext = prove.plan.observations.find(
+						(observation) => observation.role === 'evidence',
+					)?.context;
+					if (!proofContext) {
+						throw new Error(
+							'internal error: minted proven plan has no evidence observation context',
 						);
 					}
+					const sql = planner.render(durablePlan, proofContext);
+					if (!options.dryRun) {
+						try {
+							await deps.persist(pool, run, durablePlan);
+						} catch (error) {
+							throw new PlanPersistenceIndeterminateError(
+								{
+									compareKind: compare.kind,
+									proveKind: prove.kind,
+									assessment: prove.assessment,
+									persisted: 'indeterminate',
+									runId: run.runId,
+									planDigest: run.planDigest,
+								},
+								error,
+							);
+						}
+					}
+					result = {
+						compareKind: compare.kind,
+						proveKind: prove.kind,
+						assessment: prove.assessment,
+						persisted: !options.dryRun,
+						runId: options.dryRun ? null : run.runId,
+						planDigest: run.planDigest,
+						plan: durablePlan,
+						sql,
+					};
 				}
+			}
+
+			if (prove.kind === 'no-drift') {
 				result = {
 					compareKind: compare.kind,
 					proveKind: prove.kind,
 					assessment: prove.assessment,
-					persisted: !options.dryRun,
-					runId: options.dryRun ? null : run.runId,
-					planDigest: run.planDigest,
-					plan: durablePlan,
-					sql,
+					persisted: false,
+					runId: null,
+					planDigest: null,
+				};
+			} else if (prove.kind !== 'proven') {
+				result = {
+					compareKind: compare.kind,
+					proveKind: prove.kind,
+					assessment: prove.assessment,
+					persisted: false,
+					runId: null,
+					planDigest: null,
 				};
 			}
-		}
-
-		if (prove.kind === 'no-drift') {
-			result = {
-				compareKind: compare.kind,
-				proveKind: prove.kind,
-				assessment: prove.assessment,
-				persisted: false,
-				runId: null,
-				planDigest: null,
-			};
-		} else if (prove.kind !== 'proven') {
-			result = {
-				compareKind: compare.kind,
-				proveKind: prove.kind,
-				assessment: prove.assessment,
-				persisted: false,
-				runId: null,
-				planDigest: null,
-			};
 		}
 	} catch (error) {
 		failed = true;
@@ -553,6 +603,22 @@ export async function runPlan(
 	}
 
 	if (failed) {
+		if (
+			operationError instanceof PgTransitionRunPersistenceIndeterminateError
+		) {
+			throw new PlanPersistenceIndeterminateError(
+				{
+					compareKind: operationError.compare.kind,
+					proveKind: 'proven',
+					assessment: operationError.assessment,
+					persisted: 'indeterminate',
+					runId: operationError.run.runId,
+					planDigest: operationError.run.planDigest,
+				},
+				operationError.persistenceError,
+				cleanup,
+			);
+		}
 		if (operationError instanceof PlanPersistenceIndeterminateError) {
 			throw new PlanPersistenceIndeterminateError(
 				operationError.result,

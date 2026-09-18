@@ -127,6 +127,15 @@ export {
 	withPgTransitionRunLock,
 } from './lessor.js';
 export {
+	applyPgTransitionRun,
+	type PgLiveSchemaReader,
+	type PgTransitionPlanResult,
+	type PgTransitionRunApplyResult,
+	PgTransitionRunPersistenceIndeterminateError,
+	type PlanPgTransitionRunOptions,
+	planPgTransitionRun,
+} from './lifecycle.js';
+export {
 	validatePgManagedLedgerCurrency,
 	withPgManagedOutcomeRuntime,
 } from './managed-outcome-runtime.js';
