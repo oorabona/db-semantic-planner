@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
 	appendIntentJournal,
-	applyPgTransitionRun,
+	appendTransitionAuthorization,
 	createPgTransitionLessor,
 	escapeDiagnosticText,
 	readPgLedgerAddressChain,
@@ -14,10 +14,14 @@ import {
 	TransitionRunIdentityMismatchError,
 	withPgTransitionRunLock,
 } from '@dbsp/adapter-pgsql';
-import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
+import {
+	applyPgTransitionRun,
+	lockPgJournalRun,
+} from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
+	selectorMatchesResource,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
@@ -556,6 +560,31 @@ export function hasReusableAuthorization(
 						item.authorizedAt,
 					),
 		) ?? false
+	);
+}
+
+function acceptanceMatches(
+	assumption: {
+		readonly class: string;
+		readonly asserter: TrustRoot;
+		readonly scope: readonly ResourceAddress[];
+	},
+	acceptance: AssumptionAcceptance,
+): boolean {
+	return (
+		acceptance.class === assumption.class &&
+		(!acceptance.fromTrustRoot ||
+			canonicalJson(acceptance.fromTrustRoot) ===
+				canonicalJson(assumption.asserter)) &&
+		(assumption.scope.length === 0
+			? !acceptance.withinScope || acceptance.withinScope.length === 0
+			: !acceptance.withinScope ||
+				acceptance.withinScope.length === 0 ||
+				assumption.scope.every((resource) =>
+					acceptance.withinScope?.some((selector) =>
+						selectorMatchesResource(selector, resource),
+					),
+				))
 	);
 }
 
@@ -1420,6 +1449,44 @@ async function runApplyInternal(
 				runId,
 				policy,
 				expectedPlanDigest,
+				{
+					authorize: async (current, run, plan, session) => {
+						const grants = plan.assumptions.map((assumption) => ({
+							assumptionId: assumption.id,
+							grant: policy.accepts.findIndex((grant) =>
+								acceptanceMatches(assumption, grant),
+							),
+						}));
+						if (
+							hasReusableAuthorization(
+								current.authorizations,
+								run.runId,
+								transitionPlanDigest(plan),
+								policy.accepts,
+								grants,
+							)
+						)
+							return;
+						const actor =
+							process.env.USER ?? process.env.LOGNAME ?? 'unknown-local-actor';
+						const authorizedAt = new Date().toISOString();
+						await appendTransitionAuthorization(session, {
+							runId: run.runId,
+							policy: policy.accepts,
+							grants,
+							digest: authorizationDigest(
+								run.runId,
+								transitionPlanDigest(plan),
+								policy.accepts,
+								grants,
+								actor,
+								authorizedAt,
+							),
+							actor,
+							authorizedAt,
+						});
+					},
+				},
 			);
 			if (applied.kind === 'busy') result = { outcome: 'run-busy', runId };
 			else {

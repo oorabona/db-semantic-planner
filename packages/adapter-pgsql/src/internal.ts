@@ -5,6 +5,7 @@
  * boundary. Supported integrations use the public managed execution/recovery
  * facades.
  */
+
 export {
 	appendPgLedgerClaim,
 	appendPgLedgerClaimGroup,
@@ -18,6 +19,16 @@ export {
 	type PgLedgerShapeAllowance,
 	readPgLedgerReservationsForPair,
 } from './transition/ledger.js';
+export {
+	type ApplyPgTransitionRunOptions,
+	applyPgTransitionRun,
+	type PgLiveSchemaReader,
+	type PgTransitionPlanResult,
+	type PgTransitionRunApplyResult,
+	PgTransitionRunPersistenceIndeterminateError,
+	type PlanPgTransitionRunOptions,
+	planPgTransitionRun,
+} from './transition/lifecycle.js';
 export {
 	appendPgOutcomeResolution,
 	executePgDestructiveOutcome,

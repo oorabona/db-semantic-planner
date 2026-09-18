@@ -4,9 +4,57 @@ import { join } from 'node:path';
 import { semanticArtifactId } from '@dbsp/core';
 import type { ApplyResult, TransitionRunJournal } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+
+const lifecycleFixture = vi.hoisted(() => ({
+	applyPgTransitionRun: vi.fn(),
+	createDbConnection: vi.fn(),
+	createPgTransitionLessor: vi.fn(),
+	lease: { release: vi.fn(async () => undefined), session: {} },
+	readTransitionJournal: vi.fn(),
+}));
+
+vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	return {
+		...actual,
+		createPgTransitionLessor: (...args: unknown[]) =>
+			lifecycleFixture.createPgTransitionLessor(...args),
+		readTransitionJournal: (...args: unknown[]) =>
+			lifecycleFixture.readTransitionJournal(...args),
+	};
+});
+
+vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>();
+	return {
+		...actual,
+		applyPgTransitionRun: (...args: unknown[]) =>
+			lifecycleFixture.applyPgTransitionRun(...args),
+	};
+});
+
+vi.mock('@dbsp/core', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/core')>();
+	return {
+		...actual,
+		acquireTransitionLease: vi.fn(async () => lifecycleFixture.lease),
+	};
+});
+
+vi.mock('../utils/db-utils.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../utils/db-utils.js')>();
+	return {
+		...actual,
+		createDbConnection: (...args: unknown[]) =>
+			lifecycleFixture.createDbConnection(...args),
+	};
+});
+
 import { serializeCliJson } from '../utils/output.js';
 import {
 	APPLY_OUTCOME_CONTRACT,
+	applyCommand,
 	authorizationDigest,
 	canonicalApplyPolicy,
 	effectiveApplyPolicy,
@@ -70,6 +118,49 @@ function result(
 }
 
 describe('dbsp apply contract and policy', () => {
+	it('reports a settled refused lifecycle result as a non-success command exit', async () => {
+		const refused = result('planned', 'guard-failed');
+		const pool = { end: vi.fn(async () => undefined) };
+		lifecycleFixture.createDbConnection.mockResolvedValue({ pool });
+		lifecycleFixture.createPgTransitionLessor.mockReturnValue({});
+		lifecycleFixture.readTransitionJournal.mockResolvedValue({
+			events: [],
+			plan: { steps: [] },
+			run: {
+				planDigest: 'reviewed-digest',
+				replayability: 'replayable',
+				runId: 'run-refused',
+			},
+		});
+		lifecycleFixture.applyPgTransitionRun.mockResolvedValue({
+			kind: 'settled',
+			result: refused,
+		});
+		const output = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+		const previousExitCode = process.exitCode;
+		process.exitCode = undefined;
+		try {
+			await applyCommand.parseAsync(
+				[
+					'run-refused',
+					'--db',
+					'postgres://must-not-connect',
+					'--plan-digest',
+					'reviewed-digest',
+				],
+				{ from: 'user' },
+			);
+			expect(output).toHaveBeenCalledWith(
+				expect.stringContaining('guard-failed: run-refused'),
+			);
+			expect(process.exitCode).toBe(exitCodeForApplyOutcome('guard-failed'));
+			expect(process.exitCode).not.toBe(0);
+		} finally {
+			process.exitCode = previousExitCode;
+			output.mockRestore();
+		}
+	});
+
 	it('mutation: collapsing outcome exit codes is caught by the public contract table', () => {
 		const codes = APPLY_OUTCOME_CONTRACT.map(([, code]) => code);
 		expect(new Set(codes).size).toBe(codes.length);

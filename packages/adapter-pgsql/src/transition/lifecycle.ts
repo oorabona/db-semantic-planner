@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
@@ -11,25 +10,21 @@ import {
 	createTransitionRunMetadata,
 	declarationSetFromModel,
 	type InProcessProvenPlan,
-	selectorMatchesResource,
-	transitionPlanDigest,
 	validateDeclarationModel,
 } from '@dbsp/core';
 import type {
 	ApplyPolicy,
 	ApplyResult,
-	AssumptionAcceptance,
 	CompareOutcome,
 	ExecutionContract,
 	ModelIR,
 	ObservationContext,
 	PlanAssessment,
 	PostgreSqlObservationTargetIdentity,
-	ResourceAddress,
-	TransitionRunAuthorization,
+	ProvenPlanShape,
+	TransitionRunJournal,
 	TransitionRunMetadata,
 	TransitionSessionClient,
-	TrustRoot,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
@@ -41,7 +36,6 @@ import {
 	readPgExecutionTargetFromClient,
 } from './execution-contract.js';
 import {
-	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	ensureTransitionJournal,
 	readTransitionJournal,
@@ -342,135 +336,21 @@ export async function planPgTransitionRun(
 
 export type PgTransitionRunApplyResult =
 	| { readonly kind: 'busy' }
-	| { readonly kind: 'applied'; readonly result: ApplyResult };
+	| { readonly kind: 'settled'; readonly result: ApplyResult };
 
-function acceptanceMatches(
-	assumption: {
-		readonly class: string;
-		readonly asserter: TrustRoot;
-		readonly scope: readonly ResourceAddress[];
-	},
-	acceptance: AssumptionAcceptance,
-): boolean {
-	return (
-		acceptance.class === assumption.class &&
-		(!acceptance.fromTrustRoot ||
-			canonicalJson(acceptance.fromTrustRoot) ===
-				canonicalJson(assumption.asserter)) &&
-		(assumption.scope.length === 0
-			? !acceptance.withinScope || acceptance.withinScope.length === 0
-			: !acceptance.withinScope ||
-				acceptance.withinScope.length === 0 ||
-				assumption.scope.every((resource) =>
-					acceptance.withinScope?.some((selector) =>
-						selectorMatchesResource(selector, resource),
-					),
-				))
-	);
-}
-
-function canonicalJson(value: unknown): string {
-	if (value === null || typeof value !== 'object') return JSON.stringify(value);
-	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-	const record = value as Record<string, unknown>;
-	return `{${Object.keys(record)
-		.sort()
-		.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-		.join(',')}}`;
-}
-
-function compareCodeUnits(left: string, right: string): number {
-	return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function canonicalApplyPolicy(
-	acceptances: readonly AssumptionAcceptance[],
-): readonly AssumptionAcceptance[] {
-	return [
-		...new Map(
-			acceptances.map((acceptance) => {
-				const withinScope = acceptance.withinScope
-					? [
-							...new Map(
-								acceptance.withinScope.map((selector) => [
-									canonicalJson(selector),
-									selector,
-								]),
-							),
-						]
-							.sort(([left], [right]) => compareCodeUnits(left, right))
-							.map(([, selector]) => JSON.parse(canonicalJson(selector)))
-					: undefined;
-				const normalized = JSON.parse(
-					canonicalJson({
-						class: acceptance.class,
-						...(acceptance.fromTrustRoot
-							? { fromTrustRoot: acceptance.fromTrustRoot }
-							: {}),
-						...(withinScope === undefined ? {} : { withinScope }),
-					}),
-				) as AssumptionAcceptance;
-				return [canonicalJson(normalized), normalized] as const;
-			}),
-		),
-	]
-		.sort(([left], [right]) => compareCodeUnits(left, right))
-		.map(([, acceptance]) => acceptance);
-}
-
-function authorizationDigest(
-	runId: string,
-	planDigest: string,
-	policy: readonly AssumptionAcceptance[],
-	grants: TransitionRunAuthorization['grants'],
-	actor: string,
-	authorizedAt: string,
-): string {
-	const authorizedInstant = new Date(authorizedAt);
-	if (Number.isNaN(authorizedInstant.getTime()))
-		throw new Error('authorization timestamp must be a valid instant');
-	return createHash('sha256')
-		.update(
-			canonicalJson({
-				runId,
-				planDigest,
-				policy: canonicalApplyPolicy(policy),
-				grants,
-				actor,
-				authorizedAt: authorizedInstant.toISOString(),
-			}),
-		)
-		.digest('hex');
-}
-
-function hasReusableAuthorization(
-	authorizations:
-		| readonly Pick<
-				TransitionRunAuthorization,
-				'digest' | 'actor' | 'authorizedAt' | 'policy' | 'grants'
-		  >[]
-		| undefined,
-	runId: string,
-	planDigest: string,
-	policy: readonly AssumptionAcceptance[],
-	grants: TransitionRunAuthorization['grants'],
-): boolean {
-	return (
-		authorizations?.some(
-			(item) =>
-				canonicalJson(item.policy) === canonicalJson(policy) &&
-				canonicalJson(item.grants) === canonicalJson(grants) &&
-				item.digest ===
-					authorizationDigest(
-						runId,
-						planDigest,
-						policy,
-						grants,
-						item.actor,
-						item.authorizedAt,
-					),
-		) ?? false
-	);
+export interface ApplyPgTransitionRunOptions {
+	/**
+	 * Completes durable authorization using the journal already loaded for this
+	 * run. This internal trusted facade is not a security boundary: core treats
+	 * a callback that returns without throwing as authorization complete and
+	 * does not verify that it appended an authorization record.
+	 */
+	readonly authorize: (
+		journal: TransitionRunJournal,
+		run: TransitionRunJournal['run'],
+		plan: ProvenPlanShape,
+		session: TransitionSessionClient,
+	) => Promise<void>;
 }
 
 /** Applies one already-persisted, non-generator PostgreSQL transition run. */
@@ -479,14 +359,18 @@ export async function applyPgTransitionRun(
 	runId: string,
 	policy: ApplyPolicy,
 	expectedPlanDigest: string,
+	options: ApplyPgTransitionRunOptions,
 ): Promise<PgTransitionRunApplyResult> {
 	const locked = await withPgTransitionRunLock(pool, runId, async (target) => {
+		let loadedJournal: TransitionRunJournal | undefined;
 		const loadCurrent = async (id: string) => {
 			const lease = await acquireExclusiveTransitionLease(target);
 			try {
-				return await readTransitionJournal(lease.session, id, {
+				const journal = await readTransitionJournal(lease.session, id, {
 					ensure: false,
 				});
+				loadedJournal = journal;
+				return journal;
 			} finally {
 				await lease.release();
 			}
@@ -508,45 +392,13 @@ export async function applyPgTransitionRun(
 			policy,
 			target,
 			authorize: async (run, plan, session) => {
-				const current = await loadCurrent(run.runId);
-				const grants = plan.assumptions.map((assumption) => ({
-					assumptionId: assumption.id,
-					grant: policy.accepts.findIndex((grant) =>
-						acceptanceMatches(assumption, grant),
-					),
-				}));
-				if (
-					hasReusableAuthorization(
-						current.authorizations,
-						run.runId,
-						transitionPlanDigest(plan),
-						policy.accepts,
-						grants,
-					)
-				)
-					return;
-				const actor =
-					process.env.USER ?? process.env.LOGNAME ?? 'unknown-local-actor';
-				const authorizedAt = new Date().toISOString();
-				await appendTransitionAuthorization(session, {
-					runId: run.runId,
-					policy: policy.accepts,
-					grants,
-					digest: authorizationDigest(
-						run.runId,
-						transitionPlanDigest(plan),
-						policy.accepts,
-						grants,
-						actor,
-						authorizedAt,
-					),
-					actor,
-					authorizedAt,
-				});
+				if (!loadedJournal)
+					throw new Error('internal error: durable run was not loaded');
+				return options.authorize(loadedJournal, run, plan, session);
 			},
 		});
 	});
 	return locked.kind === 'busy'
 		? { kind: 'busy' }
-		: { kind: 'applied', result: locked.value };
+		: { kind: 'settled', result: locked.value };
 }

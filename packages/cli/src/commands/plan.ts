@@ -14,12 +14,14 @@ import {
 	escapeDiagnosticText,
 	getNamingPluginForDbCasing,
 	PgExecutionContractDerivationError,
-	PgTransitionRunPersistenceIndeterminateError,
 	pgTargetIdentityMismatch,
-	planPgTransitionRun,
 	readPgExecutionTargetFromClient,
 	readPgObservationContextFromLessor,
 } from '@dbsp/adapter-pgsql';
+import {
+	PgTransitionRunPersistenceIndeterminateError,
+	planPgTransitionRun,
+} from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireTransitionLease,
 	bindDeclarationSet,
