@@ -1,10 +1,12 @@
 import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
-import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
+import {
+	executeGeneratorPlan,
+	lockPgJournalRun,
+} from '@dbsp/adapter-pgsql/internal';
 import { transitionPlanDigest } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 import {

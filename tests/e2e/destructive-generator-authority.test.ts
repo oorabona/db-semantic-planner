@@ -18,6 +18,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerResolution,
+	executeGeneratorPlan,
 	lockPgJournalRun,
 	openPgOutcomeClaimGroup,
 	resolvePgOutcomeClaimGroup,
@@ -41,7 +42,6 @@ import {
 	runApply,
 	runNoArgumentApply,
 } from '../../packages/cli/src/commands/apply.js';
-import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { spawnCheckpointChild } from './harness/index.js';

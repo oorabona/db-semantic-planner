@@ -1,18 +1,23 @@
 import {
-	type GeneratedIdentityObservation,
-	type GeneratedPostconditionSession,
-	type GeneratedStructuralObservation,
-	generatedPostconditionDigest,
-	generatedPostconditionForChange,
-	readGeneratedPostcondition,
-	withGeneratedPostconditionSession,
-} from '@dbsp/adapter-pgsql';
-import {
 	canonicalJsonDigest,
 	type ValidatedManagedStepManifest,
 } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	type GeneratedIdentityObservation,
+	type GeneratedStructuralObservation,
+	readGeneratedPostcondition,
+} from '../ddl/generated-postcondition-reader.js';
+import {
+	type GeneratedPostconditionSession,
+	withGeneratedPostconditionSession,
+} from '../ddl/generated-postcondition-verifier.js';
+import {
+	generatedPostconditionDigest,
+	generatedPostconditionForChange,
+} from '../ddl/managed-step-manifest.js';
+import { executeGeneratorPlan } from './generator-execution.js';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
@@ -22,31 +27,55 @@ const readGeneratedPostconditionMock = vi.hoisted(() => vi.fn());
 const readGeneratedPostconditionReadBackMock = vi.hoisted(() => vi.fn());
 const generatedPostconditionReaderDelegates = vi.hoisted(() => ({
 	reader:
-		undefined as unknown as typeof import('@dbsp/adapter-pgsql').readGeneratedPostcondition,
+		undefined as unknown as typeof import('../ddl/generated-postcondition-reader.js').readGeneratedPostcondition,
 	readerReadBack:
-		undefined as unknown as typeof import('@dbsp/adapter-pgsql').readGeneratedPostconditionReadBack,
+		undefined as unknown as typeof import('../ddl/generated-postcondition-reader.js').readGeneratedPostconditionReadBack,
 }));
 
-vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+vi.mock('../ddl/generated-postcondition-reader.js', async (importOriginal) => {
+	const actual =
+		await importOriginal<
+			typeof import('../ddl/generated-postcondition-reader.js')
+		>();
 	generatedPostconditionReaderDelegates.reader =
 		actual.readGeneratedPostcondition;
 	generatedPostconditionReaderDelegates.readerReadBack =
 		actual.readGeneratedPostconditionReadBack;
 	return {
 		...actual,
-		executePgAdmittedOperation: (...args: unknown[]) =>
-			executePgAdmittedOperation(...args),
-		preflightPgDeclaredAdoption: (...args: unknown[]) =>
-			preflightPgDeclaredAdoption(...args),
-		executePgDeclaredAdoption: (...args: unknown[]) =>
-			executePgDeclaredAdoption(...args),
-		executePgPersistedTableReaddress: (...args: unknown[]) =>
-			executePgPersistedTableReaddress(...args),
 		readGeneratedPostcondition: (...args: unknown[]) =>
 			readGeneratedPostconditionMock(...args),
 		readGeneratedPostconditionReadBack: (...args: unknown[]) =>
 			readGeneratedPostconditionReadBackMock(...args),
+	};
+});
+
+vi.mock('./adoption.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./adoption.js')>();
+	return {
+		...actual,
+		preflightPgDeclaredAdoption: (...args: unknown[]) =>
+			preflightPgDeclaredAdoption(...args),
+		executePgDeclaredAdoption: (...args: unknown[]) =>
+			executePgDeclaredAdoption(...args),
+	};
+});
+
+vi.mock('./outcome-protocol.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./outcome-protocol.js')>();
+	return {
+		...actual,
+		executePgAdmittedOperation: (...args: unknown[]) =>
+			executePgAdmittedOperation(...args),
+	};
+});
+
+vi.mock('./readdress.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('./readdress.js')>();
+	return {
+		...actual,
+		executePgPersistedTableReaddress: (...args: unknown[]) =>
+			executePgPersistedTableReaddress(...args),
 	};
 });
 
@@ -60,8 +89,6 @@ beforeEach(() => {
 		generatedPostconditionReaderDelegates.readerReadBack,
 	);
 });
-
-import { executeGeneratorPlan } from './generator-execution.js';
 
 const generatedIdentityObservation = {
 	value: { kind: 'identity-observed' },

@@ -60,10 +60,13 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	};
 });
 
-vi.mock('./generator-execution.js', async (importOriginal) => {
+vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
 	const actual =
-		await importOriginal<typeof import('./generator-execution.js')>();
-	return { ...actual, executeGeneratorPlan };
+		await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>();
+	return {
+		...actual,
+		executeGeneratorPlan,
+	};
 });
 
 vi.mock('@dbsp/core', async (importOriginal) => {

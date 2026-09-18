@@ -15,6 +15,8 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	applyPgTransitionRun,
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
 	lockPgJournalRun,
 } from '@dbsp/adapter-pgsql/internal';
 import {
@@ -45,10 +47,6 @@ import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
 import { executionIdsForRun } from './execution-ids.js';
-import {
-	executeGeneratorPlan,
-	type GeneratorExecutionResult,
-} from './generator-execution.js';
 import type { GeneratorDurablePlan } from './generator-plan.js';
 import {
 	persistedLifecycleDirectiveError,
