@@ -2,23 +2,6 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
-	compareSchemata,
-	createPgsqlAdapter,
-	executePgAdmittedOperation,
-	executePgDeclaredAdoption,
-	executePgPersistedTableReaddress,
-	type PgLockedRun,
-	type PgOutcomeCheckpointObserver,
-	preflightPgDeclaredAdoption,
-	readGeneratedPostcondition,
-	readGeneratedPostconditionReadBack,
-	readPgCatalogueIdentity,
-	readPgLedgerAddressChain,
-	readPgLedgerScopeCurrency,
-	readPgRemovalEffectsClosure,
-	withGeneratedPostconditionSession,
-} from '@dbsp/adapter-pgsql';
-import {
 	canonicalJsonDigest,
 	outcomeClaimEventId,
 	outcomeClaimId,
@@ -43,6 +26,27 @@ import type {
 } from '@dbsp/types';
 import { ledgerAddressKey } from '@dbsp/types';
 import type { Pool } from 'pg';
+import {
+	readGeneratedPostcondition,
+	readGeneratedPostconditionReadBack,
+} from '../ddl/generated-postcondition-reader.js';
+import { withGeneratedPostconditionSession } from '../ddl/generated-postcondition-verifier.js';
+import { compareSchemata } from '../ddl/schema-diff.js';
+import { createPgsqlAdapter } from '../pgsql-adapter.js';
+import {
+	executePgDeclaredAdoption,
+	preflightPgDeclaredAdoption,
+} from './adoption.js';
+import { readPgCatalogueIdentity } from './catalogue-identity.js';
+import { readPgLedgerAddressChain } from './chain-reader.js';
+import {
+	executePgAdmittedOperation,
+	type PgLockedRun,
+	type PgOutcomeCheckpointObserver,
+} from './outcome-protocol.js';
+import { executePgPersistedTableReaddress } from './readdress.js';
+import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
+import { readPgRemovalEffectsClosure } from './removal-containment.js';
 
 function managedSteps(manifest: ValidatedManagedStepManifest) {
 	return manifest.steps;

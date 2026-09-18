@@ -46,6 +46,7 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 		...actual,
 		appendIntentJournal: fixture.appendIntent,
 		createPgTransitionLessor: vi.fn(() => ({})),
+		executeGeneratorPlan,
 		readPgLedgerAddressChain: fixture.chain,
 		readPgLedgerReservationsForExecution: fixture.reservations,
 		readTransitionJournal: vi.fn(async () => {
@@ -58,12 +59,6 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			value: await callback({}),
 		})),
 	};
-});
-
-vi.mock('./generator-execution.js', async (importOriginal) => {
-	const actual =
-		await importOriginal<typeof import('./generator-execution.js')>();
-	return { ...actual, executeGeneratorPlan };
 });
 
 vi.mock('@dbsp/core', async (importOriginal) => {

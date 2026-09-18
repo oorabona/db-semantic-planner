@@ -7,6 +7,8 @@ import {
 	appendIntentJournal,
 	createPgTransitionLessor,
 	escapeDiagnosticText,
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
@@ -45,10 +47,6 @@ import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
 import { executionIdsForRun } from './execution-ids.js';
-import {
-	executeGeneratorPlan,
-	type GeneratorExecutionResult,
-} from './generator-execution.js';
 import type { GeneratorDurablePlan } from './generator-plan.js';
 import {
 	persistedLifecycleDirectiveError,

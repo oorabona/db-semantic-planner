@@ -12,6 +12,7 @@ import {
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
+	executeGeneratorPlan,
 	readPgCatalogueIdentity,
 	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
@@ -41,7 +42,6 @@ import {
 	runApply,
 	runNoArgumentApply,
 } from '../../packages/cli/src/commands/apply.js';
-import { executeGeneratorPlan } from '../../packages/cli/src/commands/generator-execution.js';
 import type { GeneratorDurablePlan } from '../../packages/cli/src/commands/generator-plan.js';
 import { runReconcile } from '../../packages/cli/src/commands/reconcile.js';
 import { spawnCheckpointChild } from './harness/index.js';

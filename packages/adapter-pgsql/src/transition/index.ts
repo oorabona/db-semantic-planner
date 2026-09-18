@@ -79,6 +79,10 @@ export {
 	validatePgExecutionContractDerivation,
 } from './execution-contract.js';
 export {
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
+} from './generator-execution.js';
+export {
 	INDEX_INCLUDE_CAPABILITY,
 	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
 } from './index-feature-capabilities.js';

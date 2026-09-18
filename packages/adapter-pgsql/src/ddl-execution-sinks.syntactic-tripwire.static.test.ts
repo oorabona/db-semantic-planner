@@ -34,7 +34,7 @@ const DDL_TRIPWIRE_ALLOWLIST: Readonly<Record<string, string>> = {
 	'transition/operations/create-unique-index-concurrently.ts':
 		'token-gated managed DDL',
 	'transition/operations/manual-sql.ts': 'token-gated managed DDL',
-	'../../cli/src/commands/generator-execution.ts': 'token-gated managed DDL',
+	'transition/generator-execution.ts': 'token-gated managed DDL',
 	'../../cli/src/ddl-executor.ts': 'explicitly unmanaged test fixture API',
 	'ddl/generated-postcondition-verifier.ts': 'rollback-only managed DDL proof',
 	'pgsql-adapter.ts': 'explicitly unmanaged API',
