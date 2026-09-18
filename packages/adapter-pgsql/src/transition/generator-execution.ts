@@ -39,6 +39,7 @@ import {
 } from './adoption.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
+import type { TransitionJournalQueryable } from './journal.js';
 import {
 	executePgAdmittedOperation,
 	type PgLockedRun,
@@ -207,8 +208,12 @@ function withheldDestructiveAuthorityFromReason(
 	return undefined;
 }
 
-async function databaseId(pool: Pool): Promise<string> {
-	const result = await pool.query('SELECT current_database() AS database_id');
+async function databaseId(
+	executor: TransitionJournalQueryable,
+): Promise<string> {
+	const result = await executor.query(
+		'SELECT current_database() AS database_id',
+	);
 	const database = result.rows[0]?.database_id;
 	if (typeof database !== 'string' || database.length === 0)
 		throw new Error(
@@ -218,6 +223,17 @@ async function databaseId(pool: Pool): Promise<string> {
 }
 
 type LedgerQueryable = Parameters<typeof readPgLedgerAddressChain>[0];
+
+/** A checked-out client owns its session and must never be checked out again. */
+function isPoolQueryable(
+	executor: TransitionJournalQueryable,
+): executor is Pool {
+	return (
+		'connect' in executor &&
+		typeof executor.connect === 'function' &&
+		!('release' in executor && typeof executor.release === 'function')
+	);
+}
 
 async function managed(
 	executor: LedgerQueryable,
@@ -397,7 +413,7 @@ async function removalContainment(
  * a generator run back by id: that persisted row remains review-only.
  */
 export async function executeGeneratorPlan(input: {
-	readonly pool: Pool;
+	readonly pool: TransitionJournalQueryable;
 	/** Bound by apply after validating the persisted durable manifest. */
 	readonly manifest?: ValidatedManagedStepManifest;
 	/** @deprecated Compatibility shim for direct fixtures; it is validated before use. */
@@ -449,6 +465,7 @@ export async function executeGeneratorPlan(input: {
 		const executionId = `dbsp.generator.execution.${randomUUID()}`;
 		await input.recordAttempt(executionId);
 		const steps = managedSteps(manifest);
+		const adoptionPool = isPoolQueryable(input.pool) ? input.pool : undefined;
 		for (const step of steps) {
 			if (step.lifecycle?.kind === 'adoption-refused')
 				return {
@@ -457,6 +474,11 @@ export async function executeGeneratorPlan(input: {
 				};
 			const lifecycle = step.lifecycle;
 			if (lifecycle?.kind !== 'adoption') continue;
+			if (!adoptionPool)
+				return {
+					outcome: 'execution-failed',
+					detail: `adoption step ${step.stepKey} requires a pool executor for live shape introspection`,
+				};
 			const address = step.address;
 			if (
 				!address ||
@@ -474,7 +496,7 @@ export async function executeGeneratorPlan(input: {
 				declaration: step.expectedDeclaration,
 				expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 				shapeMatches: () =>
-					adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
+					adoptionShapeMatches(adoptionPool, input.schema, lifecycle.shape),
 			});
 			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
 				return preflight.outcome === 'adoption-refused'
@@ -520,6 +542,11 @@ export async function executeGeneratorPlan(input: {
 			if (step.lifecycle?.kind === 'adoption-refused') continue;
 			if (step.lifecycle?.kind === 'adoption') {
 				const lifecycle = step.lifecycle;
+				if (!adoptionPool)
+					return {
+						outcome: 'execution-failed',
+						detail: `adoption step ${step.stepKey} requires a pool executor for live shape introspection`,
+					};
 				const address = step.address;
 				if (
 					!address ||
@@ -543,7 +570,7 @@ export async function executeGeneratorPlan(input: {
 					declaration: step.expectedDeclaration,
 					expectedCatalogueIdentity: step.expectedCatalogueIdentity,
 					shapeMatches: () =>
-						adoptionShapeMatches(input.pool, input.schema, lifecycle.shape),
+						adoptionShapeMatches(adoptionPool, input.schema, lifecycle.shape),
 					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {

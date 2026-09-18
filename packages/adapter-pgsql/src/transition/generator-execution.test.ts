@@ -496,6 +496,7 @@ describe('generator execution fixture shim', () => {
 			executeGeneratorPlan({
 				pool: {
 					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+					connect: vi.fn(),
 				} as never,
 				run: {} as never,
 				plan: {
@@ -517,6 +518,82 @@ describe('generator execution fixture shim', () => {
 		expect(executePgPersistedTableReaddress).toHaveBeenCalledWith(
 			expect.objectContaining({ executionId }),
 		);
+	});
+
+	it('uses a pinned client as the admitted operation executor', async () => {
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'executed-single-outcome',
+		});
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			connect: vi.fn(),
+			release: vi.fn(),
+		};
+		const step: NormalizedManagedStep = {
+			...dataDestructiveStep,
+			classification: 'non-destructive',
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: 'CREATE TABLE tenant.accounts (id integer)' },
+				],
+			},
+		};
+
+		await expect(
+			executeGeneratorPlan({
+				pool: executor,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({ outcome: 'completed' });
+
+		expect(executePgAdmittedOperation).toHaveBeenCalledWith(
+			executor,
+			expect.any(Object),
+		);
+		expect(executor.connect).not.toHaveBeenCalled();
+	});
+
+	it('refuses adoption on a pinned client executor', async () => {
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			release: vi.fn(),
+		};
+		const step = {
+			...dataDestructiveStep,
+			stepKey: 'adoption:0',
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			selection: { kind: 'adoption', selector: 'table:accounts' },
+			lifecycle: { kind: 'adoption', shape: {} },
+			expectedDeclaration: { value: { kind: 'table' }, digest: 'declared' },
+			expectedCatalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '1' },
+			},
+		} as unknown as NormalizedManagedStep;
+
+		await expect(
+			executeGeneratorPlan({
+				pool: executor,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({
+			outcome: 'execution-failed',
+			detail:
+				'adoption step adoption:0 requires a pool executor for live shape introspection',
+		});
 	});
 
 	it.each([
