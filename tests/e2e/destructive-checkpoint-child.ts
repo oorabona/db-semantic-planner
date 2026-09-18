@@ -1,8 +1,8 @@
+import { createPgsqlGeneratedManagedStep } from '@dbsp/adapter-pgsql';
 import {
-	createPgsqlGeneratedManagedStep,
 	executeGeneratorPlan,
-} from '@dbsp/adapter-pgsql';
-import { lockPgJournalRun } from '@dbsp/adapter-pgsql/internal';
+	lockPgJournalRun,
+} from '@dbsp/adapter-pgsql/internal';
 import { transitionPlanDigest } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import pg from 'pg';

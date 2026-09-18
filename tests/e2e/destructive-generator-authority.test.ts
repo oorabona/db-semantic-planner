@@ -12,13 +12,13 @@ import {
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
-	executeGeneratorPlan,
 	readPgCatalogueIdentity,
 	readPgRemovalEffectsClosure,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerResolution,
+	executeGeneratorPlan,
 	lockPgJournalRun,
 	openPgOutcomeClaimGroup,
 	resolvePgOutcomeClaimGroup,

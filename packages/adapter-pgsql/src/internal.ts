@@ -7,6 +7,10 @@
  */
 
 export {
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
+} from './transition/generator-execution.js';
+export {
 	appendPgLedgerClaim,
 	appendPgLedgerClaimGroup,
 	appendPgLedgerProgress,

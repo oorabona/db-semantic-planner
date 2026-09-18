@@ -7,8 +7,6 @@ import {
 	appendIntentJournal,
 	createPgTransitionLessor,
 	escapeDiagnosticText,
-	executeGeneratorPlan,
-	type GeneratorExecutionResult,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
@@ -17,6 +15,8 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	applyPgTransitionRun,
+	executeGeneratorPlan,
+	type GeneratorExecutionResult,
 	lockPgJournalRun,
 } from '@dbsp/adapter-pgsql/internal';
 import {
