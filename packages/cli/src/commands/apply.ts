@@ -5,7 +5,6 @@ import { readFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import {
 	appendIntentJournal,
-	appendTransitionAuthorization,
 	createPgTransitionLessor,
 	escapeDiagnosticText,
 	readPgLedgerAddressChain,
@@ -1450,27 +1449,27 @@ async function runApplyInternal(
 				policy,
 				expectedPlanDigest,
 				{
-					authorize: async (current, run, plan, session) => {
+					authorize: async ({ current, run, plan }) => {
 						const grants = plan.assumptions.map((assumption) => ({
 							assumptionId: assumption.id,
 							grant: policy.accepts.findIndex((grant) =>
 								acceptanceMatches(assumption, grant),
 							),
 						}));
-						if (
+						const reusable = current.authorizations?.find((authorization) =>
 							hasReusableAuthorization(
-								current.authorizations,
+								[authorization],
 								run.runId,
 								transitionPlanDigest(plan),
 								policy.accepts,
 								grants,
-							)
-						)
-							return;
+							),
+						);
+						if (reusable) return reusable;
 						const actor =
 							process.env.USER ?? process.env.LOGNAME ?? 'unknown-local-actor';
 						const authorizedAt = new Date().toISOString();
-						await appendTransitionAuthorization(session, {
+						return {
 							runId: run.runId,
 							policy: policy.accepts,
 							grants,
@@ -1484,7 +1483,7 @@ async function runApplyInternal(
 							),
 							actor,
 							authorizedAt,
-						});
+						};
 					},
 				},
 			);

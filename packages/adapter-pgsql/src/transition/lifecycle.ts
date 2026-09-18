@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import {
 	acquireExclusiveTransitionLease,
 	acquireTransitionLease,
@@ -10,7 +11,6 @@ import {
 	createTransitionRunMetadata,
 	declarationSetFromModel,
 	type InProcessProvenPlan,
-	validateDeclarationModel,
 } from '@dbsp/core';
 import type {
 	ApplyPolicy,
@@ -22,12 +22,14 @@ import type {
 	PlanAssessment,
 	PostgreSqlObservationTargetIdentity,
 	ProvenPlanShape,
+	TransitionRunAuthorization,
 	TransitionRunJournal,
 	TransitionRunMetadata,
 	TransitionSessionClient,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import { DBSP_META_SCHEMA, DBSP_TRANSITION_RUN_TABLE } from './constants.js';
 import {
 	createPgExecutionContract,
 	PgExecutionContractDerivationError,
@@ -36,6 +38,7 @@ import {
 	readPgExecutionTargetFromClient,
 } from './execution-contract.js';
 import {
+	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	ensureTransitionJournal,
 	readTransitionJournal,
@@ -47,6 +50,7 @@ import {
 } from './lessor.js';
 import { validatePgManagedLedgerCurrency } from './managed-outcome-runtime.js';
 import { readPgObservationContextFromLessor } from './observation-issuer.js';
+import { withPgTransitionTransaction } from './outcome-protocol.js';
 import { createPgTransitionPack } from './pack.js';
 
 /** Reads the live schema from a short-lived adapter-owned PostgreSQL session. */
@@ -196,7 +200,6 @@ export async function planPgTransitionRun(
 	pool: Pool,
 	options: PlanPgTransitionRunOptions = {},
 ): Promise<PgTransitionPlanResult> {
-	validateDeclarationModel(model);
 	const schema = options.schema;
 	const targetLease = await acquireTransitionLease(
 		createPgTransitionLessor(pool),
@@ -340,17 +343,40 @@ export type PgTransitionRunApplyResult =
 
 export interface ApplyPgTransitionRunOptions {
 	/**
-	 * Completes durable authorization using the journal already loaded for this
-	 * run. This internal trusted facade is not a security boundary: core treats
-	 * a callback that returns without throwing as authorization complete and
-	 * does not verify that it appended an authorization record.
+	 * Chooses a durable authorization record from a freshly read journal. Before
+	 * core may execute, the adapter holds the run-row lock while it commits that
+	 * exact record to this run's authorization stream, unless the same record was
+	 * already present. The fresh read, choice, and commit share one transaction.
 	 */
-	readonly authorize: (
-		journal: TransitionRunJournal,
-		run: TransitionRunJournal['run'],
-		plan: ProvenPlanShape,
-		session: TransitionSessionClient,
-	) => Promise<void>;
+	readonly authorize: (input: {
+		readonly run: TransitionRunMetadata;
+		readonly plan: ProvenPlanShape;
+		readonly current: TransitionRunJournal;
+	}) => Promise<TransitionRunAuthorization>;
+}
+
+async function readLockedTransitionAuthorizationJournal(
+	session: Parameters<typeof withPgTransitionTransaction>[0],
+	runId: string,
+): Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }> {
+	const locked = await session.query(
+		`SELECT run_id FROM "${DBSP_META_SCHEMA}"."${DBSP_TRANSITION_RUN_TABLE}" WHERE run_id = $1 FOR UPDATE`,
+		[runId],
+	);
+	if (!locked.rows[0])
+		throw new Error(`dbsp transition run ${runId} was not found`);
+	return readTransitionJournal(session, runId, { ensure: false });
+}
+
+function hasExactTransitionAuthorization(
+	journal: TransitionRunJournal,
+	record: TransitionRunAuthorization,
+): boolean {
+	return (
+		journal.authorizations?.some((authorization) =>
+			isDeepStrictEqual(authorization, record),
+		) ?? false
+	);
 }
 
 /** Applies one already-persisted, non-generator PostgreSQL transition run. */
@@ -362,15 +388,12 @@ export async function applyPgTransitionRun(
 	options: ApplyPgTransitionRunOptions,
 ): Promise<PgTransitionRunApplyResult> {
 	const locked = await withPgTransitionRunLock(pool, runId, async (target) => {
-		let loadedJournal: TransitionRunJournal | undefined;
 		const loadCurrent = async (id: string) => {
 			const lease = await acquireExclusiveTransitionLease(target);
 			try {
-				const journal = await readTransitionJournal(lease.session, id, {
+				return await readTransitionJournal(lease.session, id, {
 					ensure: false,
 				});
-				loadedJournal = journal;
-				return journal;
 			} finally {
 				await lease.release();
 			}
@@ -392,9 +415,19 @@ export async function applyPgTransitionRun(
 			policy,
 			target,
 			authorize: async (run, plan, session) => {
-				if (!loadedJournal)
-					throw new Error('internal error: durable run was not loaded');
-				return options.authorize(loadedJournal, run, plan, session);
+				await withPgTransitionTransaction(session, async (transaction) => {
+					const current = await readLockedTransitionAuthorizationJournal(
+						transaction,
+						run.runId,
+					);
+					const record = await options.authorize({ run, plan, current });
+					if (record.runId !== run.runId)
+						throw new Error(
+							`transition authorization run id ${record.runId} does not match ${run.runId}`,
+						);
+					if (!hasExactTransitionAuthorization(current, record))
+						await appendTransitionAuthorization(transaction, record);
+				});
 			},
 		});
 	});
