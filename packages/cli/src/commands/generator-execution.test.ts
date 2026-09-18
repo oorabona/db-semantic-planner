@@ -1,12 +1,10 @@
 import {
-	GeneratedPostconditionBindingResolutionError,
+	type GeneratedIdentityObservation,
 	type GeneratedPostconditionSession,
+	type GeneratedStructuralObservation,
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
-	type verifyGeneratedCheckPostcondition as VerifyGeneratedCheckPostcondition,
-	type verifyGeneratedColumnPostcondition as VerifyGeneratedColumnPostcondition,
-	type verifyGeneratedIndexPostcondition as VerifyGeneratedIndexPostcondition,
-	type verifyGeneratedTablePostcondition as VerifyGeneratedTablePostcondition,
+	readGeneratedPostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -20,23 +18,21 @@ const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgDeclaredAdoption = vi.hoisted(() => vi.fn());
 const executePgPersistedTableReaddress = vi.hoisted(() => vi.fn());
-const verifyGeneratedTablePostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedColumnPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedIndexPostcondition = vi.hoisted(() => vi.fn());
-const verifyGeneratedCheckPostcondition = vi.hoisted(() => vi.fn());
-const v3VerifierDelegates = vi.hoisted(() => ({
-	table: undefined as unknown as typeof VerifyGeneratedTablePostcondition,
-	column: undefined as unknown as typeof VerifyGeneratedColumnPostcondition,
-	index: undefined as unknown as typeof VerifyGeneratedIndexPostcondition,
-	check: undefined as unknown as typeof VerifyGeneratedCheckPostcondition,
+const readGeneratedPostconditionMock = vi.hoisted(() => vi.fn());
+const readGeneratedPostconditionReadBackMock = vi.hoisted(() => vi.fn());
+const generatedPostconditionReaderDelegates = vi.hoisted(() => ({
+	reader:
+		undefined as unknown as typeof import('@dbsp/adapter-pgsql').readGeneratedPostcondition,
+	readerReadBack:
+		undefined as unknown as typeof import('@dbsp/adapter-pgsql').readGeneratedPostconditionReadBack,
 }));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
-	v3VerifierDelegates.table = actual.verifyGeneratedTablePostcondition;
-	v3VerifierDelegates.column = actual.verifyGeneratedColumnPostcondition;
-	v3VerifierDelegates.index = actual.verifyGeneratedIndexPostcondition;
-	v3VerifierDelegates.check = actual.verifyGeneratedCheckPostcondition;
+	generatedPostconditionReaderDelegates.reader =
+		actual.readGeneratedPostcondition;
+	generatedPostconditionReaderDelegates.readerReadBack =
+		actual.readGeneratedPostconditionReadBack;
 	return {
 		...actual,
 		executePgAdmittedOperation: (...args: unknown[]) =>
@@ -47,42 +43,25 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 			executePgDeclaredAdoption(...args),
 		executePgPersistedTableReaddress: (...args: unknown[]) =>
 			executePgPersistedTableReaddress(...args),
-		verifyGeneratedTablePostcondition: (...args: unknown[]) =>
-			verifyGeneratedTablePostcondition(...args),
-		verifyGeneratedColumnPostcondition: (...args: unknown[]) =>
-			verifyGeneratedColumnPostcondition(...args),
-		verifyGeneratedIndexPostcondition: (...args: unknown[]) =>
-			verifyGeneratedIndexPostcondition(...args),
-		verifyGeneratedCheckPostcondition: (...args: unknown[]) =>
-			verifyGeneratedCheckPostcondition(...args),
+		readGeneratedPostcondition: (...args: unknown[]) =>
+			readGeneratedPostconditionMock(...args),
+		readGeneratedPostconditionReadBack: (...args: unknown[]) =>
+			readGeneratedPostconditionReadBackMock(...args),
 	};
 });
 
 beforeEach(() => {
-	verifyGeneratedTablePostcondition.mockReset();
-	verifyGeneratedColumnPostcondition.mockReset();
-	verifyGeneratedIndexPostcondition.mockReset();
-	verifyGeneratedCheckPostcondition.mockReset();
-	verifyGeneratedTablePostcondition.mockImplementation(
-		v3VerifierDelegates.table,
+	readGeneratedPostconditionMock.mockReset();
+	readGeneratedPostconditionReadBackMock.mockReset();
+	readGeneratedPostconditionMock.mockImplementation(
+		generatedPostconditionReaderDelegates.reader,
 	);
-	verifyGeneratedColumnPostcondition.mockImplementation(
-		v3VerifierDelegates.column,
-	);
-	verifyGeneratedIndexPostcondition.mockImplementation(
-		v3VerifierDelegates.index,
-	);
-	verifyGeneratedCheckPostcondition.mockImplementation(
-		v3VerifierDelegates.check,
+	readGeneratedPostconditionReadBackMock.mockImplementation(
+		generatedPostconditionReaderDelegates.readerReadBack,
 	);
 });
 
-import {
-	executeGeneratorPlan,
-	type GeneratedIdentityObservation,
-	type GeneratedStructuralObservation,
-	readGeneratedPostcondition,
-} from './generator-execution.js';
+import { executeGeneratorPlan } from './generator-execution.js';
 
 const generatedIdentityObservation = {
 	value: { kind: 'identity-observed' },
@@ -299,205 +278,6 @@ describe('generator execution fixture shim', () => {
 			readTestGeneratedPostcondition({ query }, step, step.address!),
 		).resolves.toMatchObject({ value: { kind: 'absent' } });
 		expect(query).toHaveBeenCalled();
-	});
-
-	it.each([
-		[
-			'table',
-			{
-				postconditionVersion: 3,
-				targetBinding: {
-					bindingVersion: 1,
-					bindingKind: 'managed-step-address',
-				},
-				declaration: {
-					canonicalFormVersion: 1,
-					kind: 'table',
-					columns: [{ name: 'id' }],
-				},
-			},
-			dataDestructiveStep.address,
-			verifyGeneratedTablePostcondition,
-			{
-				kind: 'table',
-				projection: {
-					columns: [
-						{
-							name: 'id',
-							type: 'integer',
-							nullable: false,
-							default: undefined,
-							collation: null,
-							identity: null,
-						},
-					],
-				},
-			},
-		],
-		[
-			'column',
-			{
-				postconditionVersion: 3,
-				targetBinding: {
-					bindingVersion: 1,
-					bindingKind: 'managed-step-address',
-				},
-				declaration: {
-					canonicalFormVersion: 1,
-					kind: 'column',
-					column: { type: 'integer', nullable: false },
-				},
-			},
-			{
-				...dataDestructiveStep.address,
-				kind: 'column',
-				name: 'id',
-				parent: dataDestructiveStep.address,
-			},
-			verifyGeneratedColumnPostcondition,
-			{
-				kind: 'column',
-				projection: {
-					type: 'integer',
-					nullable: false,
-					default: undefined,
-					collation: null,
-					identity: null,
-				},
-			},
-		],
-		[
-			'index',
-			{
-				postconditionVersion: 3,
-				targetBinding: {
-					bindingVersion: 1,
-					bindingKind: 'managed-step-address',
-				},
-				declaration: {
-					canonicalFormVersion: 1,
-					kind: 'index',
-					index: {
-						method: 'btree',
-						unique: false,
-						valid: true,
-						ready: true,
-						live: true,
-						columns: ['id'],
-						nullsNotDistinct: false,
-					},
-				},
-			},
-			{
-				...dataDestructiveStep.address,
-				kind: 'index',
-				name: 'accounts_id_idx',
-				parent: dataDestructiveStep.address,
-			},
-			verifyGeneratedIndexPostcondition,
-			{ kind: 'index', projection: { method: 'btree' } },
-		],
-		[
-			'check',
-			{
-				postconditionVersion: 3,
-				targetBinding: {
-					bindingVersion: 1,
-					bindingKind: 'managed-step-address',
-				},
-				declaration: {
-					canonicalFormVersion: 1,
-					kind: 'check',
-					check: {
-						expression: {
-							canonicalFormVersion: 1,
-							sql: 'CHECK (id > 0)',
-						},
-						notValid: false,
-					},
-				},
-			},
-			{
-				...dataDestructiveStep.address,
-				kind: 'constraint',
-				name: 'accounts_id_check',
-				parent: dataDestructiveStep.address,
-			},
-			verifyGeneratedCheckPostcondition,
-			{
-				kind: 'constraint',
-				projection: {
-					expression: 'CHECK (id > 0)',
-					validated: true,
-					noInherit: false,
-					enforced: true,
-					isLocal: true,
-					inheritanceCount: 0,
-					parentId: 0,
-				},
-			},
-		],
-	] as const)(
-		'routes a v3 %s postcondition through its binding-aware verifier',
-		async (_kind, value, address, verify, result) => {
-			vi.clearAllMocks();
-			verify.mockResolvedValue(result);
-			const step = {
-				...dataDestructiveStep,
-				address,
-				expectedDeclaration: { value, digest: 'v3-postcondition' },
-			} as unknown as NormalizedManagedStep;
-
-			await readTestGeneratedPostcondition(
-				{ query: vi.fn() },
-				step,
-				address as LedgerAddress,
-			);
-
-			expect(verify).toHaveBeenCalledWith(
-				expect.objectContaining({ postcondition: value, address }),
-			);
-		},
-	);
-
-	it('refuses a malformed v3 binding address before verifier dispatch', async () => {
-		const address: LedgerAddress = {
-			...dataDestructiveStep.address!,
-			kind: 'column',
-			name: 'id',
-		};
-		const declaration = v3({
-			kind: 'column',
-			column: { type: 'integer', nullable: false },
-		});
-		const step = {
-			...dataDestructiveStep,
-			address,
-			expectedDeclaration: {
-				value: declaration,
-				digest: generatedPostconditionDigest(declaration),
-			},
-		} as unknown as NormalizedManagedStep;
-		verifyGeneratedColumnPostcondition.mockResolvedValue({
-			kind: 'column',
-			catalogueIdentity: {
-				engine: 'postgresql',
-				format: 1,
-				value: { parentOid: 'proof-scope-X', name: 'id' },
-			},
-			projection: {
-				type: 'integer',
-				nullable: false,
-				default: undefined,
-				collation: null,
-				identity: null,
-			},
-		});
-
-		await expect(
-			readTestGeneratedPostcondition({ query: vi.fn() }, step, address),
-		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
-		expect(verifyGeneratedColumnPostcondition).not.toHaveBeenCalled();
 	});
 
 	it('refuses a deferred declaration/address kind mismatch before catalogue observation', async () => {
@@ -1438,27 +1218,30 @@ describe('generator execution fixture shim', () => {
 		});
 		if (!expectedDeclaration)
 			throw new Error('missing partial column declaration');
-		const declaration = expectedDeclaration.value;
 		const step = {
 			...dataDestructiveStep,
 			address,
 			expectedDeclaration,
 		} as unknown as NormalizedManagedStep;
-		verifyGeneratedColumnPostcondition.mockResolvedValue({
-			kind: 'column',
+		const readBack = {
 			catalogueIdentity: {
 				engine: 'postgresql',
 				format: 1,
-				value: { parentOid: 'proof-scope-X', name: 'id' },
+				value: {
+					parentOid: 'recording-sentinel-parent',
+					name: 'recording-sentinel-column',
+				},
 			},
-			projection: {
-				type: 'bigint',
-				nullable: false,
-				default: undefined,
-				collation: null,
-				identity: null,
+			observed: {
+				value: {
+					kind: 'recording-sentinel',
+					reader: 'readGeneratedPostconditionReadBack-stub',
+				},
+				digest: 'recording-sentinel-observation',
+				payloadKind: 'generated-structural-observation',
 			},
-		});
+		};
+		readGeneratedPostconditionReadBackMock.mockResolvedValue(readBack);
 		let observed: unknown;
 		let recordedIdentity: unknown;
 		executePgAdmittedOperation.mockImplementation(
@@ -1506,19 +1289,8 @@ describe('generator execution fixture shim', () => {
 				recordAttempt: async () => undefined,
 			}),
 		).resolves.toEqual({ outcome: 'completed' });
-		expect(verifyGeneratedColumnPostcondition.mock.calls[0]?.[0]).toMatchObject(
-			{
-				postcondition: declaration,
-			},
-		);
-		expect(observed).toMatchObject({
-			value: { kind: 'column', type: 'bigint', nullable: false },
-		});
-		expect(recordedIdentity).toEqual({
-			engine: 'postgresql',
-			format: 1,
-			value: { parentOid: 'proof-scope-X', name: 'id' },
-		});
+		expect(observed).toEqual(readBack.observed);
+		expect(recordedIdentity).toEqual(readBack.catalogueIdentity);
 	});
 
 	it('preserves a post-executing open claim as recovery-required', async () => {

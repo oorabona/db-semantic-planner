@@ -17,6 +17,14 @@ export {
 	refusesRecordedPlanRemoval,
 } from './destructive-classification.js';
 export {
+	type GeneratedIdentityObservation,
+	type GeneratedPostconditionObservation,
+	type GeneratedPostconditionReadBack,
+	type GeneratedStructuralObservation,
+	readGeneratedPostcondition,
+	readGeneratedPostconditionReadBack,
+} from './generated-postcondition-reader.js';
+export {
 	assertGeneratedPostconditionSession,
 	decodeGeneratedPostcondition,
 	decodeGeneratedPostconditionPayload,
