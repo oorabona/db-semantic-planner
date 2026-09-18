@@ -6,11 +6,11 @@ import {
 	createPgsqlGeneratedManagedStep,
 	derivePostgresqlCapabilitiesForVersion,
 	generateDDL,
+	readGeneratedPostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 import { afterAll, describe, expect, it } from 'vitest';
-import { readGeneratedPostcondition } from '../../packages/cli/src/commands/generator-execution.js';
 import {
 	closeTestDb,
 	createSchema,
