@@ -334,8 +334,20 @@ pnpm test
 Type-check:
 
 ```bash
-pnpm tsc --noEmit
+pnpm typecheck
 ```
+
+`pnpm typecheck` runs `pnpm -r typecheck`, one `tsc --noEmit` per workspace
+project under that project's own `tsconfig.json`, and is the command
+`.github/workflows/ci.yml:34` runs.
+
+A root `pnpm tsc --noEmit` is **not** that check. The root `tsconfig.json`
+declares compiler options and no `include` or `exclude`, so it compiles every
+`.ts` and `.tsx` under the repository as one program — `packages/gui`, the
+generated doc tests, every package at once — and exits 2 with 2332 diagnostics
+on a clean `main` (2053 of them from `packages/gui`, 243 from
+`tests/docs-verification`; measured 2026-09-19). None of that says anything
+about the change you are making.
 
 ## NFRs
 
