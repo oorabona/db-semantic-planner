@@ -1663,6 +1663,36 @@ function ledgerLockKey(home: LedgerHome): string {
 }
 
 /**
+ * Session-scoped counterpart for callers whose work spans several admitted
+ * transactions.  The caller owns the checked-out client until it confirms the
+ * matching unlock; this deliberately shares the ordinary ledger lock key.
+ */
+export async function acquirePgLedgerSessionLock(
+	executor: TransitionJournalQueryable,
+	home: LedgerHome,
+): Promise<{ readonly kind: 'acquired' } | { readonly kind: 'busy' }> {
+	const result = await executor.query(
+		'SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked',
+		[ledgerLockKey(home)],
+	);
+	return result.rows[0]?.locked === true
+		? { kind: 'acquired' }
+		: { kind: 'busy' };
+}
+
+/** Returns false unless PostgreSQL confirmed that this session released the lock. */
+export async function releasePgLedgerSessionLock(
+	executor: TransitionJournalQueryable,
+	home: LedgerHome,
+): Promise<boolean> {
+	const result = await executor.query(
+		'SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked',
+		[ledgerLockKey(home)],
+	);
+	return result.rows[0]?.unlocked === true;
+}
+
+/**
  * Transaction-scoped, non-waiting locks for one effects closure. The ordering
  * is dbsp_meta first and then schema name, so opposing closures cannot deadlock.
  */

@@ -7,6 +7,11 @@
  */
 
 export {
+	convergePg,
+	PgConvergeRefusalError,
+	type PgConvergeResult,
+} from './transition/converge.js';
+export {
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
 } from './transition/generator-execution.js';
