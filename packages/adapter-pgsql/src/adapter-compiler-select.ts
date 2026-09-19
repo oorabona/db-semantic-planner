@@ -239,6 +239,7 @@ function compileJoinIntents(
 				type: 'join',
 				targetTable: rel.target,
 				alias,
+				relationName: intent.relation,
 				sourceColumn,
 				targetColumn,
 				joinType: intent.type,

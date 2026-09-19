@@ -560,7 +560,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 			};
 		}
 
-		it('compiles relation column selection', () => {
+		it('refuses relation column selection with no emitted alias', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				decisions: [
@@ -573,9 +573,9 @@ describe('PlanCompiler - Coverage Tests', () => {
 				],
 			};
 			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			// Should compile via expression handler
-			expect(result.sql).toBeDefined();
+			expect(() => compiler.compile(plan)).toThrow(
+				'relation column "author"."name" has no emitted alias in this query',
+			);
 		});
 
 		it('compiles trusted hasMany binding relation columns as a correlated json_agg subquery', () => {
@@ -2567,7 +2567,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 	});
 
 	describe('selectRelationColumn with schema', () => {
-		it('compiles relation column with schema context', () => {
+		it('refuses relation columns with schema context and no emitted alias', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
 				schema: 'tenant_rc',
@@ -2581,8 +2581,9 @@ describe('PlanCompiler - Coverage Tests', () => {
 				],
 			};
 			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			expect(result.sql).toBeDefined();
+			expect(() => compiler.compile(plan)).toThrow(
+				'relation column "author"."name" has no emitted alias in this query',
+			);
 		});
 	});
 

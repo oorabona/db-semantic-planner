@@ -111,6 +111,7 @@ import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
+import { resolveVisibleRelationAlias } from './relation-alias.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
@@ -788,6 +789,11 @@ export class PlanCompiler {
 	 */
 	private joinAliasMap: Map<string, JoinAliasEntry> = new Map();
 	/**
+	 * Immutable-before-emission mapping from a public relation qualifier to the
+	 * SQL alias that is actually emitted for that relation.
+	 */
+	private visibleSqlQualifiers: ReadonlyMap<string, string> = new Map();
+	/**
 	 * Tracks all join aliases in use for the current query.
 	 * Entries are stored in emitted database-alias space, after naming.toDatabase().
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
@@ -838,7 +844,10 @@ export class PlanCompiler {
 		return {
 			naming: this.naming,
 			rootTable: this.currentRootTable,
-			aliases: this.resolvedJoinAliases(),
+			aliases:
+				this.visibleSqlQualifiers.size > 0
+					? this.visibleSqlQualifiers
+					: this.resolvedJoinAliases(),
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -920,6 +929,21 @@ export class PlanCompiler {
 			}
 		}
 		return aliases;
+	}
+
+	private resolveVisibleSqlQualifier(relation: string, column: string): string {
+		return resolveVisibleRelationAlias(
+			relation,
+			column,
+			this.visibleSqlQualifiers,
+		);
+	}
+
+	private filterJoinAlias(decision: PlanDecision): string {
+		const targetTable = decision.targetTable!;
+		return targetTable === this.currentRootTable
+			? (decision.relationName ?? `${targetTable}_join`)
+			: targetTable;
 	}
 
 	/**
@@ -1350,6 +1374,7 @@ export class PlanCompiler {
 		this.rawJoins = [];
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
+		this.visibleSqlQualifiers = new Map();
 		this.usedJoinAliases = new Set();
 		this.aliasColumnAuthorities = new Map();
 
@@ -1411,7 +1436,7 @@ export class PlanCompiler {
 			naming: this.naming,
 			rootTable: plan.rootTable,
 			currentAlias: alias,
-			aliases: this.resolvedJoinAliases(),
+			aliases: this.visibleSqlQualifiers,
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -1446,7 +1471,7 @@ export class PlanCompiler {
 			parameters: this.state.parameters,
 			paramIndex: this.state.paramIndex,
 			ctes: new Map(),
-			aliases: this.resolvedJoinAliases(),
+			aliases: new Map(this.visibleSqlQualifiers),
 			joins: [],
 		};
 	}
@@ -1958,7 +1983,18 @@ export class PlanCompiler {
 							'NQL relationColumn expression requires relation and column',
 						);
 					}
-					return buildColumnRef(`${relation}.${column}`, ctx);
+					const alias = resolveVisibleRelationAlias(
+						relation,
+						column,
+						ctx.aliases ?? new Map(),
+					);
+					return columnRef(
+						column,
+						alias,
+						undefined,
+						ctx.naming,
+						ctx.aliasColumnAuthorities,
+					);
 				}
 
 				case 'param':
@@ -2463,6 +2499,58 @@ export class PlanCompiler {
 	}
 
 	/**
+	 * Allocate visible SQL qualifiers before compiling a target. Only emitted
+	 * joins register their public qualifier; strategies without an outer source
+	 * deliberately leave their relation unavailable to qualified references.
+	 */
+	private allocateVisibleSqlQualifiers(
+		decisions: readonly PlanDecision[],
+		plan: SimplifiedPlanReport,
+	): Map<PlanDecision, IncludeCompilationResult> {
+		this.reserveManualJoinAliases(decisions);
+		const includeResults = this.compileJoinIncludeAllocationPass(
+			decisions,
+			plan,
+		);
+		const qualifiers = new Map<string, string>();
+
+		for (const decision of decisions) {
+			if (decision.type === 'includeStrategy') {
+				continue;
+			}
+			if (decision.type === 'join') {
+				const alias = decision.alias ?? decision.targetTable;
+				if (!alias) continue;
+				qualifiers.set(alias, alias);
+				if (decision.relationName) {
+					qualifiers.set(decision.relationName, alias);
+				}
+				continue;
+			}
+			if (
+				decision.type === 'where' &&
+				decision.operator === 'exists' &&
+				decision.choice === 'join' &&
+				decision.targetTable
+			) {
+				const alias = this.filterJoinAlias(decision);
+				qualifiers.set(alias, alias);
+				const relation = decision.relationName ?? decision.relation;
+				if (relation) {
+					qualifiers.set(relation, alias);
+				}
+			}
+		}
+
+		for (const [relation, alias] of this.resolvedJoinAliases()) {
+			qualifiers.set(relation, alias);
+		}
+		this.visibleSqlQualifiers = qualifiers;
+		this.state.aliases = new Map(qualifiers);
+		return includeResults;
+	}
+
+	/**
 	 * Fold a WHERE-family decision into an existing where expression.
 	 * Returns the updated (or new) where node.
 	 */
@@ -2764,7 +2852,19 @@ export class PlanCompiler {
 		const dot = column.lastIndexOf('.');
 		if (dot !== -1) {
 			const relation = column.slice(0, dot);
-			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
+			if (relation === this.currentRootTable) {
+				return columnRef(
+					column.slice(dot + 1),
+					relation,
+					undefined,
+					this.naming,
+					authorities,
+				);
+			}
+			const alias = this.resolveVisibleSqlQualifier(
+				relation,
+				column.slice(dot + 1),
+			);
 			return columnRef(
 				column.slice(dot + 1),
 				alias,
@@ -2882,12 +2982,10 @@ export class PlanCompiler {
 			plan.decisions,
 			plan.rootTable,
 		);
-		this.reserveManualJoinAliases(decisions);
-		const includeJoinResults = this.compileJoinIncludeAllocationPass(
+		const includeJoinResults = this.allocateVisibleSqlQualifiers(
 			decisions,
 			plan,
 		);
-		this.state.aliases = this.resolvedJoinAliases();
 		const targetList: Node[] = [];
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
@@ -3335,11 +3433,8 @@ export class PlanCompiler {
 		// For belongsTo: FK is on source table, references target PK
 		// e.g., posts.author_id → authors.id
 		// Use relation-based alias for self-referential tables
-		const alias =
-			targetTable === sourceTable
-				? (decision.relationName ?? `${targetTable}_join`)
-				: undefined;
-		const targetAlias = alias ?? targetTable;
+		const targetAlias = this.filterJoinAlias(decision);
+		const alias = targetAlias === targetTable ? undefined : targetAlias;
 		const fkColumn = decision.foreignKey ?? [
 			this.deriveFk(targetTable, this.defaultPk),
 		];

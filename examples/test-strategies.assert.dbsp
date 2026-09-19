@@ -89,7 +89,7 @@ sql.equals: SELECT departments.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDE
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
-# Query 9: employees | select *, assignments.* — json_agg (M:N junction)
+# Query 9: employees | select *, assignments.* — json_agg (direct 1:N junction rows; M:N target projects not reached)
 # ─────────────────────────────────────────
 --- query: 9
 success: true

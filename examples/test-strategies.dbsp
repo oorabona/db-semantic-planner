@@ -35,7 +35,7 @@ orgs | select *, departments.*
 # 1:N include — departments with employees (json_agg)
 departments | select *, employees.*
 
-# M:N through junction — employees with assignments (json_agg)
+# Direct 1:N include of junction rows — employees with assignments (json_agg); the M:N target projects is not reached
 employees | select *, assignments.*
 
 # =============================================================================

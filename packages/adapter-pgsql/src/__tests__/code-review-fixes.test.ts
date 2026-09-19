@@ -3,7 +3,7 @@
  *
  * B1 - CTE include: ESM-safe static import (no require())
  * B2 - Parameterized LIMIT emits ParamRef not literal index
- * B3 - Multi-hop relationColumn dotted path resolves leaf alias
+ * B3 - Multi-hop relationColumn dotted path resolves only its registered full-path alias
  * C1 - Upsert conflictTarget.where partial-index WHERE clause
  * C3 - compileWithIncludes no double-fetch (subqueryIncludes always empty)
  * C5 - Introspected column defaults stored as { sql } verbatim
@@ -57,15 +57,16 @@ describe('B1: CTE handler import (ESM-safe)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// B3: Multi-hop relationColumn dotted path resolves leaf alias
+// B3: Multi-hop relationColumn dotted path resolves only its registered full-path
+// alias. A leaf-name fallback would bind a same-leaf relation joined by another path.
 // ---------------------------------------------------------------------------
 describe('B3: Multi-hop relationColumn dotted path', () => {
-	it('callee.file resolves to registered leaf alias "file_0"', async () => {
+	it('callee.file resolves to its registered path alias "file_0"', async () => {
 		const { relationColumnHandler } = await import(
 			'../handlers/expression/relation.js'
 		);
 		const state = makeState();
-		state.aliases.set('file', 'file_0');
+		state.aliases.set('callee.file', 'file_0');
 
 		const decision = {
 			type: 'selectRelationColumn',
@@ -87,7 +88,7 @@ describe('B3: Multi-hop relationColumn dotted path', () => {
 		expect(sql).not.toContain('callee');
 	});
 
-	it('dotted path falls back to leaf segment name when no alias registered', async () => {
+	it('dotted path refuses when no alias is registered', async () => {
 		const { relationColumnHandler } = await import(
 			'../handlers/expression/relation.js'
 		);
@@ -99,21 +100,11 @@ describe('B3: Multi-hop relationColumn dotted path', () => {
 			column: 'size',
 		} as unknown as Decision;
 
-		const node = relationColumnHandler.compile(
-			decision,
-			makeCtx('calls'),
-			state,
+		expect(() =>
+			relationColumnHandler.compile(decision, makeCtx('calls'), state),
+		).toThrow(
+			'relation column "callee.file"."size" has no emitted alias in this query',
 		);
-		const wrapped = {
-			SelectStmt: { targetList: [{ ResTarget: { val: node } }] },
-		} as unknown as Node;
-		const sql = deparseSync(wrapped);
-
-		// Must use leaf 'file', not the broken dotted identifier '"callee.file"'
-		// pgsql-deparser emits lowercase identifiers without quotes: file.size
-		expect(sql).toMatch(/\bfile\b/);
-		expect(sql).not.toContain('callee.file');
-		expect(sql).not.toContain('"callee.file"');
 	});
 });
 

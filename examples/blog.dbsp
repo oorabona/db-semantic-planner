@@ -1,5 +1,5 @@
 # Chapter 2: Blog Schema
-# QUICKSTART.md - M:N relations, aggregates (count, sum, avg), group by, distinct
+# QUICKSTART.md - Junction-table schema, aggregates (count, sum, avg), group by, distinct
 #
 # Usage:
 #   pnpm dbsp repl --schema ./examples/blog.schema.ts \
@@ -69,9 +69,9 @@ posts | select *, comments.* | flat
 # For now, use ORM API: include('posts', { via: 'authoredPosts' })
 
 # =============================================================================
-# 2.7 Many-to-Many Relations (Tags)
+# 2.7 Junction-Row Aggregation (Tags)
 # =============================================================================
-posts | select *, tags.*
+# Traversal to the far side is unsupported; see #787.
 postTags | group by postId | select count(*)
 
 # =============================================================================

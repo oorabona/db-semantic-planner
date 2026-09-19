@@ -39,24 +39,30 @@ describe('relationStarHandler — coverage', () => {
 		expect(node.ColumnRef.fields[1]).toHaveProperty('A_Star');
 	});
 
-	it('falls back to relation name when no alias in state', () => {
+	it('refuses relation.* when no alias is emitted', () => {
 		const state = createCompilerState();
-		const node = relationStarHandler.compile(
-			{ type: 'relationStar', relation: 'author' },
-			makeCtx(),
-			state,
+		expect(() =>
+			relationStarHandler.compile(
+				{ type: 'relationStar', relation: 'author' },
+				makeCtx(),
+				state,
+			),
+		).toThrow(
+			'relation column "author"."*" has no emitted alias in this query',
 		);
-		expect(node.ColumnRef.fields[0].String.sval).toBe('author');
 	});
 
-	it('uses expandRelation fallback', () => {
+	it('refuses expandRelation when no alias is emitted', () => {
 		const state = createCompilerState();
-		const node = relationStarHandler.compile(
-			{ type: 'expandStar', expandRelation: 'comments' },
-			makeCtx(),
-			state,
+		expect(() =>
+			relationStarHandler.compile(
+				{ type: 'expandStar', expandRelation: 'comments' },
+				makeCtx(),
+				state,
+			),
+		).toThrow(
+			'relation column "comments"."*" has no emitted alias in this query',
 		);
-		expect(node.ColumnRef.fields[0].String.sval).toBe('comments');
 	});
 
 	it('throws when relation name is missing', () => {
@@ -81,6 +87,7 @@ describe('relationColumnHandler — coverage', () => {
 
 	it('compiles relation.* (wildcard) via columnRefStar', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = relationColumnHandler.compile(
 			{ type: 'relationColumn', relation: 'author', column: '*' },
 			makeCtx(),
@@ -92,14 +99,17 @@ describe('relationColumnHandler — coverage', () => {
 		expect(fields.some((f) => 'A_Star' in f)).toBe(true);
 	});
 
-	it('falls back to relation name when no alias', () => {
+	it('refuses relation.column when no alias is emitted', () => {
 		const state = createCompilerState();
-		const node = relationColumnHandler.compile(
-			{ type: 'relCol', relation: 'editor', column: 'email' },
-			makeCtx(),
-			state,
+		expect(() =>
+			relationColumnHandler.compile(
+				{ type: 'relCol', relation: 'editor', column: 'email' },
+				makeCtx(),
+				state,
+			),
+		).toThrow(
+			'relation column "editor"."email" has no emitted alias in this query',
 		);
-		expect(node).toHaveProperty('ColumnRef');
 	});
 
 	it('throws when relation is missing', () => {
@@ -128,6 +138,7 @@ describe('relationColumnHandler — coverage', () => {
 describe('relationColumnsHandler — coverage', () => {
 	it('compiles first column from columns array', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = relationColumnsHandler.compile(
 			{
 				type: 'relationColumns',
@@ -142,6 +153,7 @@ describe('relationColumnsHandler — coverage', () => {
 
 	it('compiles with alias → ResTarget', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = relationColumnsHandler.compile(
 			{
 				type: 'expandColumns',
@@ -156,18 +168,21 @@ describe('relationColumnsHandler — coverage', () => {
 		expect(node.ResTarget.name).toBe('author_name');
 	});
 
-	it('uses expandRelation fallback', () => {
+	it('refuses relation columns when no alias is emitted', () => {
 		const state = createCompilerState();
-		const node = relationColumnsHandler.compile(
-			{
-				type: 'relCols',
-				expandRelation: 'tags',
-				relationColumns: ['label'],
-			},
-			makeCtx(),
-			state,
+		expect(() =>
+			relationColumnsHandler.compile(
+				{
+					type: 'relCols',
+					expandRelation: 'tags',
+					relationColumns: ['label'],
+				},
+				makeCtx(),
+				state,
+			),
+		).toThrow(
+			'relation column "tags"."label" has no emitted alias in this query',
 		);
-		expect(node).toHaveProperty('ColumnRef');
 	});
 
 	it('throws when relation is missing', () => {
@@ -207,6 +222,7 @@ describe('relationColumnsHandler — coverage', () => {
 describe('relationAliasHandler — coverage', () => {
 	it('compiles relation.column AS alias → ResTarget', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = relationAliasHandler.compile(
 			{
 				type: 'relationAlias',
@@ -223,6 +239,7 @@ describe('relationAliasHandler — coverage', () => {
 
 	it('compiles without alias → bare ColumnRef', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = relationAliasHandler.compile(
 			{ type: 'relationAlias', relation: 'author', column: 'name' },
 			makeCtx(),
@@ -231,19 +248,22 @@ describe('relationAliasHandler — coverage', () => {
 		expect(node).toHaveProperty('ColumnRef');
 	});
 
-	it('uses expandRelation fallback', () => {
+	it('refuses relation aliases when no alias is emitted', () => {
 		const state = createCompilerState();
-		const node = relationAliasHandler.compile(
-			{
-				type: 'relColAs',
-				expandRelation: 'editor',
-				column: 'email',
-				alias: 'e',
-			},
-			makeCtx(),
-			state,
+		expect(() =>
+			relationAliasHandler.compile(
+				{
+					type: 'relColAs',
+					expandRelation: 'editor',
+					column: 'email',
+					alias: 'e',
+				},
+				makeCtx(),
+				state,
+			),
+		).toThrow(
+			'relation column "editor"."email" has no emitted alias in this query',
 		);
-		expect(node).toHaveProperty('ResTarget');
 	});
 
 	it('throws when relation is missing', () => {
@@ -272,6 +292,7 @@ describe('relationAliasHandler — coverage', () => {
 describe('prefixedRelationColumnHandler — coverage', () => {
 	it('compiles relation.column with prefixed alias', () => {
 		const state = createCompilerState();
+		state.aliases.set('author', 'author');
 		const node = prefixedRelationColumnHandler.compile(
 			{
 				type: 'prefixedRelationColumn',
