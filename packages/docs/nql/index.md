@@ -82,7 +82,7 @@ Each operator transforms the query progressively. The final result compiles to a
 | Schema | Tables | Key Features |
 |--------|--------|--------------|
 | `minimal` | users, posts | Simple 1:N, basics |
-| `blog` | authors, posts, tags, comments, postTags | M:N, aggregates |
+| `blog` | authors, posts, tags, comments, postTags | Junction-table schema, aggregates |
 | `blog-extended` | authors, posts, categories, tags, postTags | Hierarchy, ORDER BY |
 | `ecommerce` | categories, products, variants, customers, addresses, orders, orderItems | Window functions, complex FKs |
 | `hierarchy` | employees | Self-ref, recursive CTE |
@@ -636,37 +636,9 @@ WHERE users.active = $1
 
 *Schema: blog*
 
-Many-to-many relations work with the same `relation.*` syntax. The planner detects the junction table automatically and generates the correct JOIN path (posts → postTags → tags).
+`posts | select *, tags.*` is refused, and reports `relation column "tags"."*" has no emitted alias in this query`. Nothing declares a `posts.tags` foreign key; the two hops through `postTags` are not synthesised.
 
-```nql
-posts | select *, tags.*
-```
-
-<details><summary>SQL</summary>
-
-```sql
-SELECT posts.*,
-  COALESCE(
-    (SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)
-     FROM ch2_blog.tags AS __t__
-     INNER JOIN ch2_blog.post_tags ON __t__.id = post_tags.tag_id
-     WHERE post_tags.post_id = posts.id),
-    '[]'::json
-  ) AS tags_json
-FROM ch2_blog.posts
-```
-</details>
-
-| id | title                           | published | tags_json                           |
-|----|---------------------------------|-----------|-------------------------------------|
-| 1  | Getting Started with PostgreSQL | True      | [{"id":1,"name":"postgresql"},...]  |
-| 2  | TypeScript Best Practices 2024  | True      | [{"id":2,"name":"typescript"},...]  |
-| 3  | Query Optimization Techniques   | True      | [{"id":1,"name":"postgresql"},...]  |
-| 4  | Introduction to Range Types     | True      | [{"id":1,"name":"postgresql"},...]  |
-| 5  | Draft: Advanced Indexing        | False     | [{"id":1,"name":"postgresql"},...]  |
-| 6  | Why Type Safety Matters         | True      | [{"id":2,"name":"typescript"},...]  |
-
-*(6 rows)*
+[#787](https://github.com/oorabona/db-semantic-planner/issues/787) tracks it, and carries the measurements for the neighbouring forms.
 
 ### Edge Tables (Dual-FK)
 

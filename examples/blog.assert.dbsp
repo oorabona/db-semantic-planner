@@ -1,5 +1,5 @@
 # Assertions for blog.dbsp
-# Validates M:N relations, aggregates, and DISTINCT queries
+# Validates aggregates and DISTINCT queries
 
 # ─────────────────────────────────────────
 # Query 0-3: Setup commands (CREATE, .use, .import DDL, .import seed)
@@ -17,19 +17,10 @@ success: true
 success: true
 
 # ─────────────────────────────────────────
-# Query 16: posts | select *, tags.*
-# M:N include through junction table (postTags)
-# NOTE: M:N compilation incomplete — SQL references tags.* without JOIN
-# ─────────────────────────────────────────
---- query: 16
-success: true
-sql.equals: SELECT posts.*, tags.* AS "tags.*" FROM ch2_blog.posts
-
-# ─────────────────────────────────────────
-# Query 21: comments | where approved = true | select count(distinct authorName)
+# Query 20: comments | where approved = true | select count(distinct authorName)
 # Count distinct aggregate with WHERE filter
 # ─────────────────────────────────────────
---- query: 21
+--- query: 20
 success: true
 sql.equals: SELECT count(DISTINCT comments.author_name) FROM ch2_blog.comments WHERE comments.approved = $1
 params.equals: [true]
@@ -39,10 +30,10 @@ db.output:
 | 6 |
 
 # ─────────────────────────────────────────
-# Query 22: posts | select distinct *
+# Query 21: posts | select distinct *
 # DISTINCT with all columns
 # ─────────────────────────────────────────
---- query: 22
+--- query: 21
 success: true
 sql.equals: SELECT DISTINCT posts.* FROM ch2_blog.posts
 db.rows.equals: 6

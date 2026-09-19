@@ -33,6 +33,7 @@ import {
 	typeCast,
 } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
+import { resolveVisibleRelationAlias } from '../../relation-alias.js';
 import { escapeDiagnosticText, validateIdentifier } from '../../validate.js';
 import type {
 	CompilerContext,
@@ -400,10 +401,11 @@ export function compileExpressionIntent(
 				column: string;
 				as: string;
 			};
-			const relationSegments = rc.relation.split('.');
-			const leaf = relationSegments[relationSegments.length - 1] ?? rc.relation;
-			const alias =
-				state.aliases.get(rc.relation) ?? state.aliases.get(leaf) ?? leaf;
+			const alias = resolveVisibleRelationAlias(
+				rc.relation,
+				rc.column,
+				state.aliases,
+			);
 			return columnRef(
 				rc.column,
 				alias,

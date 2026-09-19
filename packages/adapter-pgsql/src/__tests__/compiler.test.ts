@@ -718,7 +718,7 @@ describe('PlanCompiler', () => {
 	});
 
 	describe('selectRelationColumn decisions', () => {
-		it('compiles relation column via expression handler', () => {
+		it('refuses relation column via expression handler without an emitted alias', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'orders',
 				decisions: [
@@ -732,13 +732,9 @@ describe('PlanCompiler', () => {
 				],
 			};
 
-			const result = compilePlan(plan);
-			const normalized = normalizeSQL(result.sql);
-
-			// The relation handler uses the relation name as table ref
-			expect(normalized).toContain('customer');
-			expect(normalized).toContain('.name');
-			expect(normalized).toContain('customer_name');
+			expect(() => compilePlan(plan)).toThrow(
+				'relation column "customer"."name" has no emitted alias in this query',
+			);
 		});
 	});
 

@@ -792,11 +792,22 @@ orm.select('users').columns([
 // col() — aliased column
 orm.select('users').columns([col('firstName', 'first')])
 
-// relationColumn() — column from joined relation
-orm.select('posts').columns([
-  'title',
-  relationColumn('author', 'name', 'authorName')
-])
+// relationColumn() — names a relation whose JOIN this query already emitted.
+// Without one, compilation reports:
+// relation column "author"."name" has no emitted alias in this query
+orm.select('products')
+  .join('category')
+  .columns(['name', relationColumn('category', 'name', 'categoryName')])
+
+// An include that explicitly emits an outer join supplies the alias too.
+// A bare include aggregates the relation instead, so the column lands inside
+// `category_json` rather than under `categoryName` (#793).
+orm.select('products')
+  .include('category', { join: 'left' })
+  .columns(['name', relationColumn('category', 'name', 'categoryName')])
+
+// relationColumn() does not derive joins: their type, null behavior, and row
+// multiplication remain a caller-owned query decision.
 ```
 
 ### Subqueries

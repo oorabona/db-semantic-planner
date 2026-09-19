@@ -7,7 +7,7 @@ Eight realistic schemas with full assertions, DDL, seed data, and NQL sessions. 
 | Domain | Demonstrates | Files |
 |---|---|---|
 | **`minimal`** | The smallest possible schema and query | `minimal.{dbsp,ddl.sql,seed.sql,schema.ts}` |
-| **`blog`** | M:N relations (postTags), aggregates (count, sum, avg), group by, distinct, soft mutations | `blog.{dbsp,assert.dbsp,ddl.sql,seed.sql,schema.ts}` |
+| **`blog`** | Junction-table schema (postTags), aggregates (count, sum, avg), group by, distinct, soft mutations | `blog.{dbsp,assert.dbsp,ddl.sql,seed.sql,schema.ts}` |
 | **`blog-extended`** | Same domain with advanced patterns (relation disambiguation, deeper joins) | `blog-extended.{dbsp,assert.dbsp,ddl.sql,seed.sql,schema.ts}` |
 | **`ecommerce`** | Orders, products, line items, inventory — typical e-commerce shape | `ecommerce.{dbsp,assert.dbsp,ddl.sql,seed.sql,schema.ts}` |
 | **`iam`** | Identity & access management — junction tables, edge-table hierarchy, dual-FK disambiguation, self-ref adjacency, SoD rules, audit trail | `iam.{dbsp,assert.dbsp,ddl.sql,seed.sql,schema.ts}` |

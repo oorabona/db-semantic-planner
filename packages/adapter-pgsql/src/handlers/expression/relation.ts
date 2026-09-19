@@ -10,26 +10,13 @@
 
 import type { Node, ResTarget } from '@pgsql/types';
 import { columnRef, columnRefStar } from '../../ast-helpers.js';
+import { resolveVisibleRelationAlias } from '../../relation-alias.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
-
-function resolveRelationAlias(
-	relation: string,
-	state: CompilerState,
-	options: { resolveDottedLeaf?: boolean } = {},
-): string {
-	if (options.resolveDottedLeaf && relation.includes('.')) {
-		const segments = relation.split('.');
-		const leaf = segments[segments.length - 1]!;
-		return state.aliases.get(relation) ?? state.aliases.get(leaf) ?? leaf;
-	}
-
-	return state.aliases.get(relation) ?? relation;
-}
 
 /**
  * Relation star handler
@@ -52,8 +39,7 @@ export const relationStarHandler: ExpressionHandler = {
 			throw new Error('Relation star handler requires relation name');
 		}
 
-		// Look up the alias for this relation from state
-		const alias = state.aliases.get(relation) ?? relation;
+		const alias = resolveVisibleRelationAlias(relation, '*', state.aliases);
 		const dbAlias = ctx.naming.toDatabase(alias);
 
 		// Return qualified star: alias.*
@@ -90,9 +76,7 @@ export const relationColumnHandler: ExpressionHandler = {
 			throw new Error('Relation column handler requires column name');
 		}
 
-		const alias = resolveRelationAlias(relation, state, {
-			resolveDottedLeaf: true,
-		});
+		const alias = resolveVisibleRelationAlias(relation, column, state.aliases);
 
 		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
 		if (column === '*') {
@@ -138,7 +122,11 @@ export const relationColumnsHandler: ExpressionHandler = {
 			throw new Error('Relation columns handler requires columns array');
 		}
 
-		const alias = resolveRelationAlias(relation, state);
+		const alias = resolveVisibleRelationAlias(
+			relation,
+			columns[0]!,
+			state.aliases,
+		);
 
 		// Build the first column reference (handler must return a single node)
 		// For multiple columns, the compiler should call this handler multiple times
@@ -192,7 +180,11 @@ export const relationAliasHandler: ExpressionHandler = {
 			throw new Error('Relation alias handler requires column name');
 		}
 
-		const tableAlias = resolveRelationAlias(relation, state);
+		const tableAlias = resolveVisibleRelationAlias(
+			relation,
+			column,
+			state.aliases,
+		);
 		const colRef = columnRef(
 			column,
 			tableAlias,
@@ -244,8 +236,11 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 			throw new Error('Prefixed relation column handler requires column name');
 		}
 
-		// Look up the alias for this relation from state
-		const tableAlias = state.aliases.get(relation) ?? relation;
+		const tableAlias = resolveVisibleRelationAlias(
+			relation,
+			column,
+			state.aliases,
+		);
 		const colRef = columnRef(
 			column,
 			tableAlias,
