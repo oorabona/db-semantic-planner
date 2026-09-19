@@ -16,7 +16,7 @@
 ## Test plan
 
 <!-- Bulleted checklist. Be specific. -->
-- [ ] `pnpm tsc --noEmit` passes
+- [ ] `pnpm typecheck` passes
 - [ ] `pnpm test` passes
 - [ ] Manual verification: <describe>
 
