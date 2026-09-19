@@ -43,9 +43,7 @@ function table(name: string, includeNickname = true): TableIR {
 				: []),
 		],
 		foreignKeys: [],
-		indexes: includeNickname
-			? [{ name: `idx_${name}_nickname`, columns: ['nickname'] }]
-			: [],
+		indexes: [],
 	};
 }
 
@@ -97,7 +95,7 @@ describe('convergePg', () => {
 		await closeTestDb();
 	});
 
-	it('creates a declared table, nullable column and non-unique index with managed terminals', async () => {
+	it('creates a declared table and nullable column with a managed table terminal', async () => {
 		const pool = await getTestPool();
 		const databaseId = await database();
 		const desired = model([table('first_fixture')]);
@@ -122,21 +120,33 @@ describe('convergePg', () => {
 				[schema, 'first_fixture', 'nickname'],
 			),
 		).resolves.toMatchObject({ rows: [{ is_nullable: 'YES' }] });
-		await expect(
-			pool.query(
-				'SELECT index_definition.indisunique AS unique FROM pg_catalog.pg_index index_definition JOIN pg_catalog.pg_class index_class ON index_class.oid = index_definition.indexrelid JOIN pg_catalog.pg_class table_class ON table_class.oid = index_definition.indrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = table_class.relnamespace WHERE namespace.nspname = $1 AND table_class.relname = $2 AND index_class.relname = $3',
-				[schema, 'first_fixture', 'idx_first_fixture_nickname'],
-			),
-		).resolves.toMatchObject({ rows: [{ unique: false }] });
 		await expect(managed(root)).resolves.toBe(true);
-		await expect(
-			managed(address(databaseId, 'index', 'idx_first_fixture_nickname', root)),
-		).resolves.toBe(true);
 		await expect(
 			pool.query(
 				`SELECT 1 FROM "${schema}".dbsp_ledger_event WHERE address_kind = 'column' AND address_parent @> jsonb_build_object('kind', 'table', 'name', 'first_fixture')`,
 			),
 		).resolves.toMatchObject({ rows: [] });
+	});
+
+	it('refuses a declared table with an index before creating the table', async () => {
+		const pool = await getTestPool();
+		const desired = model([
+			{
+				...table('indexed_fixture'),
+				indexes: [
+					{ name: 'idx_indexed_fixture_nickname', columns: ['nickname'] },
+				],
+			},
+		]);
+
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.indexed_fixture`,
+			]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
 	});
 
 	it('adds a nullable column to a managed table with a managed column terminal', async () => {

@@ -108,7 +108,7 @@ function change(
 
 function stepFor(changeInput: Record<string, unknown>) {
 	const kind = changeInput.kind;
-	const child = kind === 'add_column' || kind === 'create_index';
+	const child = kind === 'add_column';
 	return {
 		stepKey: 'converge:0',
 		order: 0,
@@ -119,12 +119,8 @@ function stepFor(changeInput: Record<string, unknown>) {
 			engine: 'postgresql',
 			database: 'app',
 			schema: 'public',
-			kind: kind === 'create_index' ? 'index' : child ? 'column' : 'table',
-			name: child
-				? kind === 'create_index'
-					? 'idx_users_email'
-					: 'email'
-				: 'users',
+			kind: child ? 'column' : 'table',
+			name: child ? 'email' : 'users',
 			...(child
 				? {
 						parent: {
@@ -241,18 +237,9 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('refuses a concurrent index', async () => {
+	it('refuses a create_index before execution', async () => {
 		await expectRefusal(
-			change('create_index', {
-				index: { columns: ['email'], concurrently: true },
-			}),
-			'unsupported-change',
-		);
-	});
-
-	it('refuses a unique index', async () => {
-		await expectRefusal(
-			change('create_index', { index: { columns: ['email'], unique: true } }),
+			change('create_index', { index: { columns: ['email'] } }),
 			'unsupported-change',
 		);
 	});
@@ -295,97 +282,6 @@ describe('convergePg refusal boundary', () => {
 			}),
 			'unmanaged-parent',
 		);
-	});
-
-	it('refuses a create_index on an unmanaged parent', async () => {
-		mocks.identity.mockResolvedValue(undefined);
-		await expectRefusal(
-			change('create_index', { index: { columns: ['email'] } }),
-			'unmanaged-parent',
-		);
-	});
-
-	it('accepts an index on a table created earlier in the manifest', async () => {
-		const changes = [
-			change('create_table'),
-			change('create_index', { index: { columns: ['email'] } }),
-		];
-		mocks.compare.mockResolvedValue({ changes });
-		mocks.createStep.mockImplementation(
-			({
-				change: input,
-				stepKey,
-				order,
-			}: {
-				change: Record<string, unknown>;
-				stepKey: string;
-				order: number;
-			}) => ({
-				...stepFor(input),
-				stepKey,
-				order,
-				plannedClaimKeys: [`${stepKey}:root`],
-			}),
-		);
-		mocks.identity.mockResolvedValue(undefined);
-
-		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
-			kind: 'applied',
-			applied: ['create_table', 'create_index'],
-		});
-	});
-
-	it('refuses an index on a live but unmanaged parent', async () => {
-		mocks.identity.mockImplementation(
-			(_client: PoolClient, address: { readonly kind: string }) =>
-				address.kind === 'table'
-					? { catalogueIdentity: { value: { oid: '1' } } }
-					: undefined,
-		);
-		mocks.compare.mockResolvedValue({
-			changes: [change('create_index', { index: { columns: ['email'] } })],
-		});
-		mocks.createStep.mockImplementation(
-			({ change: input }: { change: Record<string, unknown> }) =>
-				stepFor(input),
-		);
-
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
-			refusal: 'unmanaged-parent',
-			detail: 'converge refuses create_index on unmanaged parent users',
-		});
-		expect(mocks.execute).not.toHaveBeenCalled();
-	});
-
-	it('refuses an index whose parent is created later in the manifest', async () => {
-		const changes = [
-			change('create_index', { index: { columns: ['email'] } }),
-			change('create_table'),
-		];
-		mocks.compare.mockResolvedValue({ changes });
-		mocks.createStep.mockImplementation(
-			({
-				change: input,
-				stepKey,
-				order,
-			}: {
-				change: Record<string, unknown>;
-				stepKey: string;
-				order: number;
-			}) => ({
-				...stepFor(input),
-				stepKey,
-				order,
-				plannedClaimKeys: [`${stepKey}:root`],
-			}),
-		);
-
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
-			refusal: 'unmanaged-parent',
-			detail:
-				'converge refuses create_index because parent users is created later in the manifest',
-		});
-		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
 	it('passes a schema-scoped generated parent address to the ledger', async () => {
@@ -433,6 +329,34 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
+	it('refuses a declared table absent after comparison without sending DDL', async () => {
+		const testClient = client();
+		const model = {
+			...emptyModel(),
+			tables: new Map([
+				['users', { name: 'users', columns: [], foreignKeys: [], indexes: [] }],
+			]),
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue(undefined);
+
+		await expect(convergePg(poolFor(testClient), model)).rejects.toMatchObject({
+			refusal: 'concurrent-drift',
+			detail: expect.stringContaining('users'),
+		});
+		const receivedSql = (
+			testClient.query as unknown as {
+				readonly mock: { readonly calls: readonly [string][] };
+			}
+		).mock.calls.map(([sql]) => sql);
+		expect(
+			receivedSql.some((sql) =>
+				/^\s*(?:ALTER|CREATE|DROP|GRANT|REVOKE)\b/i.test(sql),
+			),
+		).toBe(false);
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
 	it('ignores an undeclared live table while comparing declared physical names', async () => {
 		const model = {
 			...emptyModel(),
@@ -451,6 +375,41 @@ describe('convergePg refusal boundary', () => {
 				return { changes: [] };
 			},
 		);
+		const catalogueIdentity = {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		};
+		const address = {
+			scope: 'schema',
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'public',
+			kind: 'table',
+			name: 'user_profile',
+		} as const;
+		mocks.identity.mockResolvedValue({ catalogueIdentity });
+		mocks.chain.mockResolvedValue({
+			ledger: { scope: 'schema', schema: 'public' },
+			address,
+			events: [
+				{
+					eventId: 'adopt-intent',
+					address,
+					eventKind: 'adopt-intent',
+					controller: 'deployment',
+				},
+				{
+					eventId: 'adopt',
+					predecessor: 'adopt-intent',
+					address,
+					eventKind: 'adopt',
+					controller: 'deployment',
+					observed: { value: { table: 'user_profile' }, digest: 'observed' },
+				},
+			],
+			terminalMember: { catalogueIdentity },
+		} as never);
 
 		await expect(
 			convergePg(poolFor(), model, { dbCasing: 'snake_case' }),
@@ -537,7 +496,23 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
+	it('destroys the client when the ledger lock release is unconfirmed', async () => {
+		const testClient = client();
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.unlock.mockResolvedValue(false);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		expect(testClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: 'converge could not confirm ledger lock release',
+			}),
+		);
+	});
+
 	it('returns a transport-ambiguous executor outcome', async () => {
+		const testClient = client();
 		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
 		mocks.createStep.mockImplementation(
 			({ change: input }: { change: Record<string, unknown> }) =>
@@ -548,13 +523,21 @@ describe('convergePg refusal boundary', () => {
 			detail: 'terminal commit acknowledgement was lost',
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).resolves.toEqual({
 			kind: 'transport-ambiguous',
 			detail: 'terminal commit acknowledgement was lost',
 		});
+		expect(testClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: 'converge received a transport-ambiguous outcome',
+			}),
+		);
 	});
 
 	it('returns a recovery-required executor outcome', async () => {
+		const testClient = client();
 		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
 		mocks.createStep.mockImplementation(
 			({ change: input }: { change: Record<string, unknown> }) =>
@@ -566,11 +549,18 @@ describe('convergePg refusal boundary', () => {
 			detail: 'claim needs reconciliation',
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).resolves.toEqual({
 			kind: 'recovery-required',
 			claimId: 'claim-769',
 			detail: 'claim needs reconciliation',
 		});
+		expect(testClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: 'converge received a recovery-required outcome',
+			}),
+		);
 	});
 
 	it('refuses an execution-failed executor outcome with its detail unchanged', async () => {

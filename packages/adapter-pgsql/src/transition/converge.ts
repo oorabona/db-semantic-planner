@@ -38,6 +38,7 @@ export type PgConvergeRefusal =
 	| 'unsupported-change'
 	| 'unmanaged-object'
 	| 'unmanaged-parent'
+	| 'concurrent-drift'
 	| 'ledger-absent'
 	| 'incompatible-ledger'
 	| 'busy'
@@ -134,19 +135,11 @@ function plainNullableColumn(change: SchemaChange): boolean {
 function additiveChange(change: SchemaChange): boolean {
 	if (change.kind === 'create_table') return true;
 	if (change.kind === 'add_column') return plainNullableColumn(change);
-	if (change.kind !== 'create_index') return false;
-	const index = change.meta?.index;
-	return (
-		index !== null &&
-		typeof index === 'object' &&
-		!Array.isArray(index) &&
-		(index as Record<string, unknown>).unique !== true &&
-		(index as Record<string, unknown>).concurrently !== true
-	);
+	return false;
 }
 
 function parentAddress(address: LedgerAddress): LedgerAddress | undefined {
-	if (address.kind !== 'column' && address.kind !== 'index') return undefined;
+	if (address.kind !== 'column') return undefined;
 	const parent = address.parent;
 	if (!parent) return undefined;
 	return {
@@ -251,14 +244,17 @@ async function assertExistingDeclaredTablesManaged(
 			kind: 'table',
 			name: naming.toDatabase(table.name),
 		};
-		// A table with a declared diff is checked by assertOwnedChange while the
-		// manifest is assembled, so an obstacle refuses the whole convergence
-		// before any planned DDL runs.
+		// Reaching this loop means comparison saw the table: an absent table would
+		// produce create_table, put it in changedTables, and skip this check.
 		if (changedTables.has(address.name)) continue;
-		if (
-			(await readPgCatalogueIdentity(client, address)) &&
-			!(await isManagedCurrent(client, address))
-		)
+		const live = await readPgCatalogueIdentity(client, address);
+		if (!live)
+			throw refusal(
+				'concurrent-drift',
+				[],
+				`converge observed declared table ${address.name} absent after comparison`,
+			);
+		if (!(await isManagedCurrent(client, address)))
 			throw refusal(
 				'unmanaged-object',
 				[],
@@ -268,8 +264,14 @@ async function assertExistingDeclaredTablesManaged(
 }
 
 /**
- * Converges only startup-safe PostgreSQL additions. Its run ids are ephemeral
- * claim namespaces: no transition journal or durable run relation is touched.
+ * Converges only startup-safe PostgreSQL additions: it creates eligible tables
+ * and adds plain nullable columns to managed tables. It does not create indexes.
+ *
+ * Converge mutates only declared additions whose target and existing parent pass
+ * managed admission. It compares structural shape; it does not audit the
+ * provenance of an exact-matching child already present on a managed table.
+ * Its run ids are ephemeral claim namespaces: no transition journal or durable
+ * run relation is touched.
  */
 export async function convergePg(
 	pool: Pool,
@@ -280,7 +282,11 @@ export async function convergePg(
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
 	const client = await pool.connect();
-	let destroy = false;
+	let destroyReason:
+		| 'converge could not confirm ledger lock release'
+		| 'converge received a transport-ambiguous outcome'
+		| 'converge received a recovery-required outcome'
+		| undefined;
 	let locked = false;
 	try {
 		const lock = await acquirePgLedgerSessionLock(client, schemaHome(schema));
@@ -438,29 +444,31 @@ export async function convergePg(
 				notStartedStepKeys: outcome.notStartedStepKeys,
 				detail: outcome.detail,
 			};
-		if (outcome.outcome === 'recovery-required')
+		if (outcome.outcome === 'recovery-required') {
+			destroyReason = 'converge received a recovery-required outcome';
 			return {
 				kind: 'recovery-required',
 				claimId: outcome.claimId,
 				detail: outcome.detail,
 			};
-		if (outcome.outcome === 'transport-ambiguous')
+		}
+		if (outcome.outcome === 'transport-ambiguous') {
+			destroyReason = 'converge received a transport-ambiguous outcome';
 			return { kind: 'transport-ambiguous', detail: outcome.detail };
+		}
 		throw refusal('execution-refused', diff.changes, outcome.detail);
 	} finally {
 		lockedConvergeClients.delete(client);
 		if (locked) {
 			try {
 				if (!(await releasePgLedgerSessionLock(client, schemaHome(schema))))
-					destroy = true;
+					destroyReason = 'converge could not confirm ledger lock release';
 			} catch {
-				destroy = true;
+				destroyReason = 'converge could not confirm ledger lock release';
 			}
 		}
 		client.release(
-			destroy
-				? new Error('converge could not confirm ledger lock release')
-				: undefined,
+			destroyReason === undefined ? undefined : new Error(destroyReason),
 		);
 	}
 }
