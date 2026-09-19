@@ -3,6 +3,7 @@ import {
 	type ValidatedManagedStepManifest,
 } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
+import type { PoolClient } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	type GeneratedIdentityObservation,
@@ -541,7 +542,7 @@ describe('generator execution fixture shim', () => {
 
 		await expect(
 			executeGeneratorPlan({
-				pool: executor,
+				pool: executor as unknown as PoolClient,
 				run: {} as never,
 				plan: { steps: [step] },
 				planDigest: 'reviewed-plan',
@@ -581,7 +582,7 @@ describe('generator execution fixture shim', () => {
 
 		await expect(
 			executeGeneratorPlan({
-				pool: executor,
+				pool: executor as unknown as PoolClient,
 				run: {} as never,
 				plan: { steps: [step] },
 				planDigest: 'reviewed-plan',

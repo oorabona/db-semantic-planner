@@ -56,10 +56,6 @@ vi.mock('./ledger.js', async (importOriginal) => ({
 	acquirePgLedgerSessionLock: (...args: unknown[]) => forward(mocks.lock, args),
 	releasePgLedgerSessionLock: (...args: unknown[]) =>
 		forward(mocks.unlock, args),
-	ensureDbspMetaLedger: vi.fn(),
-	ensurePgLedger: vi.fn(),
-	recordPgLedgerIdentity: vi.fn(),
-	writePgLedgerShapeMarker: vi.fn(),
 }));
 vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./reinitialize-preflight.js')>()),
@@ -176,6 +172,48 @@ afterEach(() => {
 });
 
 describe('convergePg refusal boundary', () => {
+	it('refuses an absent schema ledger without sending DDL', async () => {
+		const testClient = client();
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'ledger-absent',
+		});
+		const receivedSql = (
+			testClient.query as unknown as {
+				readonly mock: { readonly calls: readonly [string][] };
+			}
+		).mock.calls.map(([sql]) => sql);
+		expect(
+			receivedSql.some((sql) =>
+				/^\s*(?:ALTER|CREATE|DROP|GRANT|REVOKE)\b/i.test(sql),
+			),
+		).toBe(false);
+	});
+
+	it('refuses a non-current schema ledger with its currency reason', async () => {
+		mocks.currency.mockResolvedValue({
+			kind: 'not-current',
+			reason: 'lineage',
+		} as never);
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'incompatible-ledger',
+			detail: expect.stringContaining('lineage'),
+		});
+	});
+
+	it('reports a held session lock as busy', async () => {
+		mocks.lock.mockResolvedValue({ kind: 'busy' });
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'busy',
+		});
+		expect(mocks.currency).not.toHaveBeenCalled();
+	});
+
 	it('refuses a non-nullable column', async () => {
 		await expectRefusal(
 			change('add_column', {
@@ -496,6 +534,59 @@ describe('convergePg refusal boundary', () => {
 			detail: 'second step failed',
 			completedStepKeys: ['converge:0'],
 			notStartedStepKeys: ['converge:1'],
+		});
+	});
+
+	it('returns a transport-ambiguous executor outcome', async () => {
+		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mocks.execute.mockResolvedValue({
+			outcome: 'transport-ambiguous',
+			detail: 'terminal commit acknowledgement was lost',
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'transport-ambiguous',
+			detail: 'terminal commit acknowledgement was lost',
+		});
+	});
+
+	it('returns a recovery-required executor outcome', async () => {
+		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mocks.execute.mockResolvedValue({
+			outcome: 'recovery-required',
+			claimId: 'claim-769',
+			detail: 'claim needs reconciliation',
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'recovery-required',
+			claimId: 'claim-769',
+			detail: 'claim needs reconciliation',
+		});
+	});
+
+	it('refuses an execution-failed executor outcome with its detail unchanged', async () => {
+		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mocks.execute.mockResolvedValue({
+			outcome: 'execution-failed',
+			detail: 'the executor detail',
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'execution-refused',
+			detail: 'the executor detail',
 		});
 	});
 });

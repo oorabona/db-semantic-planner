@@ -25,7 +25,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { ledgerAddressKey } from '@dbsp/types';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import {
 	readGeneratedPostcondition,
 	readGeneratedPostconditionReadBack,
@@ -225,9 +225,7 @@ async function databaseId(
 type LedgerQueryable = Parameters<typeof readPgLedgerAddressChain>[0];
 
 /** A checked-out client owns its session and must never be checked out again. */
-function isPoolQueryable(
-	executor: TransitionJournalQueryable,
-): executor is Pool {
+function isPoolQueryable(executor: Pool | PoolClient): executor is Pool {
 	return (
 		'connect' in executor &&
 		typeof executor.connect === 'function' &&
@@ -413,7 +411,12 @@ async function removalContainment(
  * a generator run back by id: that persisted row remains review-only.
  */
 export async function executeGeneratorPlan(input: {
-	readonly pool: TransitionJournalQueryable;
+	/**
+	 * A pg pool or checked-out PoolClient. A connected standalone pg.Client is
+	 * deliberately unsupported: although session-pinned, it has no release(),
+	 * and the pool/client distinction must not try to connect it again.
+	 */
+	readonly pool: Pool | PoolClient;
 	/** Bound by apply after validating the persisted durable manifest. */
 	readonly manifest?: ValidatedManagedStepManifest;
 	/** @deprecated Compatibility shim for direct fixtures; it is validated before use. */

@@ -11,7 +11,6 @@ import type {
 	DbCasing,
 	LedgerAddress,
 	LedgerHome,
-	LedgerIdentity,
 	ModelIR,
 	NormalizedManagedStep,
 	TransitionRunMetadata,
@@ -30,11 +29,7 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import {
 	acquirePgLedgerSessionLock,
-	ensureDbspMetaLedger,
-	ensurePgLedger,
-	recordPgLedgerIdentity,
 	releasePgLedgerSessionLock,
-	writePgLedgerShapeMarker,
 } from './ledger.js';
 import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
@@ -43,7 +38,9 @@ export type PgConvergeRefusal =
 	| 'unsupported-change'
 	| 'unmanaged-object'
 	| 'unmanaged-parent'
+	| 'ledger-absent'
 	| 'incompatible-ledger'
+	| 'busy'
 	| 'execution-refused';
 
 /** A typed refusal leaves no claim that a durable run was created or can recover. */
@@ -69,7 +66,17 @@ export type PgConvergeResult =
 			readonly completedStepKeys: readonly string[];
 			readonly notStartedStepKeys: readonly string[];
 			readonly detail: string;
-	  };
+	  }
+	| {
+			readonly kind: 'recovery-required';
+			/**
+			 * Locator for a reconciliation workflow, not a recovery handle: recovery
+			 * also needs the address, reservations, resolution event id, and read-back.
+			 */
+			readonly claimId: string;
+			readonly detail: string;
+	  }
+	| { readonly kind: 'transport-ambiguous'; readonly detail: string };
 
 export interface ConvergePgOptions {
 	readonly schema?: string;
@@ -151,89 +158,6 @@ function parentAddress(address: LedgerAddress): LedgerAddress | undefined {
 		kind: parent.kind,
 		name: parent.name,
 	};
-}
-
-async function liveLedgerIdentity(
-	executor: Queryable,
-	home: LedgerHome,
-): Promise<LedgerIdentity> {
-	const schema = home.scope === 'database' ? 'dbsp_meta' : home.schema;
-	const row = (
-		await executor.query(
-			`SELECT (pg_catalog.pg_control_system()).system_identifier::text AS cluster_system_identifier, database_row.oid::text AS database_oid, namespace_row.oid::text AS namespace_oid FROM pg_catalog.pg_database database_row CROSS JOIN pg_catalog.pg_namespace namespace_row WHERE database_row.datname = pg_catalog.current_database() AND namespace_row.nspname = $1`,
-			[schema],
-		)
-	).rows[0];
-	if (
-		typeof row?.cluster_system_identifier !== 'string' ||
-		typeof row.database_oid !== 'string' ||
-		typeof row.namespace_oid !== 'string'
-	)
-		throw new Error(`converge could not read ledger identity for ${schema}`);
-	return {
-		clusterSystemIdentifier: row.cluster_system_identifier,
-		databaseOid: row.database_oid,
-		namespaceOid: row.namespace_oid,
-	};
-}
-
-async function ledgerHasRelations(
-	executor: Queryable,
-	home: LedgerHome,
-): Promise<boolean> {
-	const schema = home.scope === 'database' ? 'dbsp_meta' : home.schema;
-	const result = await executor.query(
-		`SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname LIKE 'dbsp_ledger_%') AS present`,
-		[schema],
-	);
-	return result.rows[0]?.present === true;
-}
-
-/** Bootstrap only wholly absent ledger homes, with markers as the final writes. */
-async function bootstrapLedgers(
-	client: PoolClient,
-	schema: string,
-): Promise<void> {
-	const homes: readonly LedgerHome[] = [
-		{ scope: 'database' },
-		schemaHome(schema),
-	];
-	await client.query('BEGIN');
-	try {
-		const absent: LedgerHome[] = [];
-		for (const home of homes) {
-			const currency = await readPgLedgerScopeCurrency(client, home);
-			if (currency.kind === 'current') continue;
-			if (currency.kind === 'not-current')
-				throw refusal(
-					'incompatible-ledger',
-					[],
-					`converge refuses non-current ledger ${home.scope === 'database' ? 'dbsp_meta' : schema}`,
-				);
-			if (await ledgerHasRelations(client, home))
-				throw refusal(
-					'incompatible-ledger',
-					[],
-					`converge refuses partially present ledger ${home.scope === 'database' ? 'dbsp_meta' : schema}`,
-				);
-			absent.push(home);
-		}
-		for (const home of absent) {
-			if (home.scope === 'database')
-				await ensureDbspMetaLedger(client, { writeMarker: false });
-			else await ensurePgLedger(client, home, { writeMarker: false });
-			await recordPgLedgerIdentity(
-				client,
-				home,
-				await liveLedgerIdentity(client, home),
-			);
-		}
-		for (const home of absent) await writePgLedgerShapeMarker(client, home);
-		await client.query('COMMIT');
-	} catch (error) {
-		await client.query('ROLLBACK').catch(() => undefined);
-		throw error;
-	}
 }
 
 function mintPgConvergeLockedRun(
@@ -362,13 +286,28 @@ export async function convergePg(
 		const lock = await acquirePgLedgerSessionLock(client, schemaHome(schema));
 		if (lock.kind === 'busy')
 			throw new PgConvergeRefusalError(
-				'execution-refused',
+				'busy',
 				[],
 				'converge schema ledger lock is busy',
 			);
 		locked = true;
 		lockedConvergeClients.add(client);
-		await bootstrapLedgers(client, schema);
+		const currency = await readPgLedgerScopeCurrency(
+			client,
+			schemaHome(schema),
+		);
+		if (currency.kind === 'absent')
+			throw new PgConvergeRefusalError(
+				'ledger-absent',
+				[],
+				`converge requires a current schema ledger for ${schema}; runPgReinitializePreflight creates one`,
+			);
+		if (currency.kind === 'not-current')
+			throw new PgConvergeRefusalError(
+				'incompatible-ledger',
+				[],
+				`converge requires a current schema ledger for ${schema}; ledger currency failed ${currency.reason}`,
+			);
 		const database = await databaseId(client);
 		const adapter = createPgsqlAdapter(client, {
 			borrowedClient: true,
@@ -499,11 +438,15 @@ export async function convergePg(
 				notStartedStepKeys: outcome.notStartedStepKeys,
 				detail: outcome.detail,
 			};
-		throw refusal(
-			'execution-refused',
-			diff.changes,
-			`converge ${outcome.outcome}: ${outcome.detail ?? ''}`,
-		);
+		if (outcome.outcome === 'recovery-required')
+			return {
+				kind: 'recovery-required',
+				claimId: outcome.claimId,
+				detail: outcome.detail,
+			};
+		if (outcome.outcome === 'transport-ambiguous')
+			return { kind: 'transport-ambiguous', detail: outcome.detail };
+		throw refusal('execution-refused', diff.changes, outcome.detail);
 	} finally {
 		lockedConvergeClients.delete(client);
 		if (locked) {

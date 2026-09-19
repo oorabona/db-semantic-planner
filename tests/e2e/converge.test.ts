@@ -14,6 +14,7 @@ import {
 	dropSchema,
 	getTestPool,
 } from './testkit/index.js';
+import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
 
 const schema = `converge_e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 
@@ -88,6 +89,7 @@ function address(
 describe('convergePg', () => {
 	beforeAll(async () => {
 		await createSchema(schema);
+		await runPreflight([schema], { writeAdoptionFile: async () => {} });
 	});
 
 	afterAll(async () => {
@@ -192,6 +194,33 @@ describe('convergePg', () => {
 			await expect(managed(address(databaseId, 'table', name))).resolves.toBe(
 				true,
 			);
+		}
+	});
+
+	it('refuses an absent schema ledger without creating relations', async () => {
+		const absentLedgerSchema = `converge_absent_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		await createSchema(absentLedgerSchema);
+		try {
+			const relationCount = async () =>
+				Number(
+					(
+						await pool.query(
+							'SELECT count(*)::text AS count FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1',
+							[absentLedgerSchema],
+						)
+					).rows[0]?.count,
+				);
+			const before = await relationCount();
+
+			await expect(
+				convergePg(pool, model([]), { schema: absentLedgerSchema }),
+			).rejects.toMatchObject({
+				refusal: 'ledger-absent',
+			});
+			expect(await relationCount()).toBe(before);
+		} finally {
+			await dropSchema(absentLedgerSchema);
 		}
 	});
 });
