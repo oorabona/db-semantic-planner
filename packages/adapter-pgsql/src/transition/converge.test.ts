@@ -201,13 +201,31 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
-	it('reports a held session lock as busy', async () => {
+	it('reports a held session lock as busy without discarding the client', async () => {
+		const testClient = client();
 		mocks.lock.mockResolvedValue({ kind: 'busy' });
 
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
 			refusal: 'busy',
 		});
 		expect(mocks.currency).not.toHaveBeenCalled();
+		expect(testClient.release).toHaveBeenCalledWith(undefined);
+	});
+
+	it('discards a client whose ledger lock acquisition is undetermined', async () => {
+		const testClient = client();
+		mocks.lock.mockRejectedValue(new Error('ledger lock response lost'));
+
+		await expect(convergePg(poolFor(testClient), emptyModel())).rejects.toThrow(
+			'ledger lock response lost',
+		);
+		expect(testClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message: 'converge could not determine ledger lock acquisition',
+			}),
+		);
 	});
 
 	it('refuses a non-nullable column', async () => {
@@ -536,8 +554,7 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('returns a recovery-required executor outcome', async () => {
-		const testClient = client();
+	it('refuses a recovery-required executor outcome with its detail unchanged', async () => {
 		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
 		mocks.createStep.mockImplementation(
 			({ change: input }: { change: Record<string, unknown> }) =>
@@ -549,18 +566,10 @@ describe('convergePg refusal boundary', () => {
 			detail: 'claim needs reconciliation',
 		});
 
-		await expect(
-			convergePg(poolFor(testClient), emptyModel()),
-		).resolves.toEqual({
-			kind: 'recovery-required',
-			claimId: 'claim-769',
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'execution-refused',
 			detail: 'claim needs reconciliation',
 		});
-		expect(testClient.release).toHaveBeenCalledWith(
-			expect.objectContaining({
-				message: 'converge received a recovery-required outcome',
-			}),
-		);
 	});
 
 	it('refuses an execution-failed executor outcome with its detail unchanged', async () => {

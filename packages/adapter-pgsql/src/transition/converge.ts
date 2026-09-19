@@ -44,7 +44,11 @@ export type PgConvergeRefusal =
 	| 'busy'
 	| 'execution-refused';
 
-/** A typed refusal leaves no claim that a durable run was created or can recover. */
+/**
+ * Unsupported-change, ledger and ownership refusals occur before converge commits
+ * managed DDL. An execution refusal may follow a rolled-back transactional DDL
+ * attempt, and comparison may use rollback-only scratch DDL.
+ */
 export class PgConvergeRefusalError extends Error {
 	constructor(
 		readonly refusal: PgConvergeRefusal,
@@ -66,15 +70,6 @@ export type PgConvergeResult =
 			readonly kind: 'partially-applied';
 			readonly completedStepKeys: readonly string[];
 			readonly notStartedStepKeys: readonly string[];
-			readonly detail: string;
-	  }
-	| {
-			readonly kind: 'recovery-required';
-			/**
-			 * Locator for a reconciliation workflow, not a recovery handle: recovery
-			 * also needs the address, reservations, resolution event id, and read-back.
-			 */
-			readonly claimId: string;
 			readonly detail: string;
 	  }
 	| { readonly kind: 'transport-ambiguous'; readonly detail: string };
@@ -265,7 +260,9 @@ async function assertExistingDeclaredTablesManaged(
 
 /**
  * Converges only startup-safe PostgreSQL additions: it creates eligible tables
- * and adds plain nullable columns to managed tables. It does not create indexes.
+ * and adds plain nullable columns to managed tables. Standalone declared indexes
+ * are refused; newly created tables may still get the backing indexes PostgreSQL
+ * builds for a declared primary key or unique constraint.
  *
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the
@@ -283,13 +280,15 @@ export async function convergePg(
 	const casing = options.dbCasing ?? 'preserve';
 	const client = await pool.connect();
 	let destroyReason:
+		| 'converge could not determine ledger lock acquisition'
 		| 'converge could not confirm ledger lock release'
 		| 'converge received a transport-ambiguous outcome'
-		| 'converge received a recovery-required outcome'
 		| undefined;
 	let locked = false;
 	try {
+		destroyReason = 'converge could not determine ledger lock acquisition';
 		const lock = await acquirePgLedgerSessionLock(client, schemaHome(schema));
+		destroyReason = undefined;
 		if (lock.kind === 'busy')
 			throw new PgConvergeRefusalError(
 				'busy',
@@ -444,14 +443,6 @@ export async function convergePg(
 				notStartedStepKeys: outcome.notStartedStepKeys,
 				detail: outcome.detail,
 			};
-		if (outcome.outcome === 'recovery-required') {
-			destroyReason = 'converge received a recovery-required outcome';
-			return {
-				kind: 'recovery-required',
-				claimId: outcome.claimId,
-				detail: outcome.detail,
-			};
-		}
 		if (outcome.outcome === 'transport-ambiguous') {
 			destroyReason = 'converge received a transport-ambiguous outcome';
 			return { kind: 'transport-ambiguous', detail: outcome.detail };
