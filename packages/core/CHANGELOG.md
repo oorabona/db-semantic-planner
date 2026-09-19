@@ -1,5 +1,22 @@
 # Changelog
 
+## [4.0.1](https://github.com/oorabona/db-semantic-planner/compare/core-v4.0.0...core-v4.0.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A relation column needs an alias a join emitted ([#794](https://github.com/oorabona/db-semantic-planner/issues/794)) ([19a3ea4](https://github.com/oorabona/db-semantic-planner/commit/19a3ea43e1ff4cdb7c4b9cef22e459734674df6f))
+* **adapter-pgsql:** A relation target resolved to a CTE uses that CTE's projection ([#772](https://github.com/oorabona/db-semantic-planner/issues/772)) ([b93f976](https://github.com/oorabona/db-semantic-planner/commit/b93f9769676cbdd7404d31469db509781379b811))
+* **core:** Orm.nql runs the CTE and set-operation queries the NQL guide documents ([#756](https://github.com/oorabona/db-semantic-planner/issues/756)) ([2ec48e3](https://github.com/oorabona/db-semantic-planner/commit/2ec48e379acca1989bc9d8594f00897c336c875d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.10.5
+    * @dbsp/types bumped to 4.0.1
+
 ## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/core-v3.4.0...core-v4.0.0) (2026-08-25)
 
 
