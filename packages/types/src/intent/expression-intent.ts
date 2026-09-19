@@ -70,8 +70,11 @@ export interface ColumnAliasIntent {
 
 /**
  * Relation column expression: select a column from a related table
- * The query must already emit the named relation's JOIN. Otherwise compilation
- * reports `relation column "<relation>"."<column>" has no emitted alias in this query`.
+ * The query must already emit the named relation's JOIN, through `.join()` or
+ * an include with an explicit outer join. Without one, compilation reports
+ * `relation column "<relation>"."<column>" has no emitted alias in this query`.
+ * A bare include aggregates the relation instead, and the column lands inside
+ * `<relation>_json` rather than under its own alias (#793).
  * @example orm.select('products').join('category').columns([
  *            relationColumn('category', 'name', 'categoryName'),
  *          ])

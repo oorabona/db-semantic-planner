@@ -62,7 +62,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		const orm = buildOrm();
 		const dump = orm.select('calls').join('caller').dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT calls.* FROM (calls JOIN symbols AS caller ON caller_id = caller.id) caller',
+			'SELECT calls.* FROM calls JOIN symbols AS caller ON calls.caller_id = caller.id',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -74,7 +74,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 			.join('caller', { type: 'left' })
 			.dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT calls.* FROM (calls LEFT JOIN symbols AS caller ON caller_id = caller.id) caller',
+			'SELECT calls.* FROM calls LEFT JOIN symbols AS caller ON calls.caller_id = caller.id',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -83,7 +83,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		const orm = buildOrm();
 		const dump = orm.select('symbols').join('file').dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM (symbols JOIN files AS file ON file_id = file.id) file',
+			'SELECT symbols.* FROM symbols JOIN files AS file ON symbols.file_id = file.id',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -95,7 +95,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 			.join('callee', { type: 'left' })
 			.dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT calls.* FROM (calls LEFT JOIN symbols AS callee ON callee_id = callee.id) callee',
+			'SELECT calls.* FROM calls LEFT JOIN symbols AS callee ON calls.callee_id = callee.id',
 		);
 		expect(dump.params).toEqual([]);
 	});
@@ -133,7 +133,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 			.join('callee')
 			.dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT calls.* FROM ((calls JOIN symbols AS caller ON caller_id = caller.id) caller JOIN symbols AS callee ON callee_id = callee.id) callee',
+			'SELECT calls.* FROM calls JOIN symbols AS caller ON calls.caller_id = caller.id JOIN symbols AS callee ON calls.callee_id = callee.id',
 		);
 		expect(dump.params).toEqual([]);
 	});

@@ -887,7 +887,9 @@ export function col(column: string, alias: string): ExpressionSpec {
  *   .join('category')
  *   .columns(['name', relationColumn('category', 'name', 'categoryName')])
  *
- * // An include with an explicit outer join also supplies it.
+ * // An include with an explicit outer join supplies the alias too. A bare
+ * // include aggregates the relation instead, so the column lands inside
+ * // `<relation>_json` rather than at the top level under its own alias (#793).
  * orm.select('products')
  *   .include('category', { join: 'left' })
  *   .columns(['name', relationColumn('category', 'name', 'categoryName')])

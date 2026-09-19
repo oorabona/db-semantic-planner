@@ -3561,7 +3561,7 @@ export class PlanCompiler {
 			decision.relationName,
 		);
 		this.registerAliasAuthority(decision.alias ?? targetName, target);
-		const sourceAlias = sourceColumn.length > 1 ? plan.rootTable : '';
+		const sourceAlias = plan.rootTable;
 		const onCondition = buildKeyCorrelation(
 			sourceAlias,
 			sourceColumn,
@@ -3571,10 +3571,10 @@ export class PlanCompiler {
 		);
 
 		if (decision.joinType === 'left') {
-			return leftJoin(baseTable, targetTable, onCondition, decision.alias);
+			return leftJoin(baseTable, targetTable, onCondition);
 		}
 
-		return innerJoin(baseTable, targetTable, onCondition, decision.alias);
+		return innerJoin(baseTable, targetTable, onCondition);
 	}
 }
 

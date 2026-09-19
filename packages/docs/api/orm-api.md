@@ -799,7 +799,9 @@ orm.select('products')
   .join('category')
   .columns(['name', relationColumn('category', 'name', 'categoryName')])
 
-// An include can supply the alias when it explicitly emits an outer join.
+// An include that explicitly emits an outer join supplies the alias too.
+// A bare include aggregates the relation instead, so the column lands inside
+// `category_json` rather than under `categoryName` (#793).
 orm.select('products')
   .include('category', { join: 'left' })
   .columns(['name', relationColumn('category', 'name', 'categoryName')])
