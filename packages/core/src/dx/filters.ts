@@ -866,10 +866,14 @@ export function col(column: string, alias: string): ExpressionSpec {
 
 /**
  * Creates a relation column expression for selecting a column from a related table.
- * Auto-creates JOINs via the include mechanism and selects with custom alias.
  *
- * Uses structured relation-column intent - no raw SQL. The compiler resolves the
- * relation to its join alias and renders a dialect-specific aliased column.
+ * Names a relation whose JOIN the query has already emitted. The compiler resolves
+ * that relation to its emitted SQL alias and renders a dialect-specific aliased
+ * column. Without an emitted alias, it reports
+ * `relation column "<relation>"."<column>" has no emitted alias in this query`.
+ *
+ * It does not derive a join: choosing its type, null behavior, and row
+ * multiplication is a separate caller-owned query decision.
  *
  * @param relation - Relation path to traverse (dot-separated for multi-level)
  * @param column - Column name to select from the target relation
@@ -878,19 +882,15 @@ export function col(column: string, alias: string): ExpressionSpec {
  *
  * @example
  * ```typescript
- * // Select from direct relation
- * relationColumn('category', 'name', 'categoryName')
- * // → SELECT t1."name" AS "categoryName" (with JOIN to categories)
+ * // A relation join supplies the emitted alias.
+ * orm.select('products')
+ *   .join('category')
+ *   .columns(['name', relationColumn('category', 'name', 'categoryName')])
  *
- * // Select from nested relation (multi-level path)
- * relationColumn('category.parent', 'name', 'parentName')
- * // → SELECT t2."name" AS "parentName" (with JOINs through category to parent)
- *
- * // In a query
- * orm.select('products').columns([
- *   'name',
- *   relationColumn('category', 'name', 'categoryName'),
- * ])
+ * // An include with an explicit outer join also supplies it.
+ * orm.select('products')
+ *   .include('category', { join: 'left' })
+ *   .columns(['name', relationColumn('category', 'name', 'categoryName')])
  * ```
  */
 export function relationColumn<A extends string>(

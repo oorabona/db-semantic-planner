@@ -111,7 +111,11 @@ import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
-import { resolveVisibleRelationAlias } from './relation-alias.js';
+import {
+	ambiguousRelationAlias,
+	isAmbiguousRelationAlias,
+	resolveVisibleRelationAlias,
+} from './relation-alias.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
@@ -2512,8 +2516,24 @@ export class PlanCompiler {
 			decisions,
 			plan,
 		);
-		const qualifiers = new Map<string, string>();
+		const emittedAliases = new Map<string, string>();
+		const relationPaths = new Map<string, string>();
 
+		const registerRelationPath = (relation: string, alias: string): void => {
+			const existingAlias = relationPaths.get(relation);
+			if (existingAlias === undefined) {
+				relationPaths.set(relation, alias);
+				return;
+			}
+			if (existingAlias !== alias && !isAmbiguousRelationAlias(existingAlias)) {
+				relationPaths.set(
+					relation,
+					ambiguousRelationAlias(existingAlias, alias),
+				);
+			}
+		};
+
+		// First pass: retain every alias in the namespace actually emitted by FROM.
 		for (const decision of decisions) {
 			if (decision.type === 'includeStrategy') {
 				continue;
@@ -2521,10 +2541,7 @@ export class PlanCompiler {
 			if (decision.type === 'join') {
 				const alias = decision.alias ?? decision.targetTable;
 				if (!alias) continue;
-				qualifiers.set(alias, alias);
-				if (decision.relationName) {
-					qualifiers.set(decision.relationName, alias);
-				}
+				emittedAliases.set(alias, alias);
 				continue;
 			}
 			if (
@@ -2534,15 +2551,48 @@ export class PlanCompiler {
 				decision.targetTable
 			) {
 				const alias = this.filterJoinAlias(decision);
-				qualifiers.set(alias, alias);
+				emittedAliases.set(alias, alias);
+			}
+		}
+
+		for (const [, alias] of this.resolvedJoinAliases()) {
+			emittedAliases.set(alias, alias);
+		}
+
+		// Second pass: public relation paths resolve to their emitted alias and
+		// deliberately override a same-spelled emitted-alias key below.
+		for (const decision of decisions) {
+			if (decision.type === 'includeStrategy') {
+				continue;
+			}
+			if (decision.type === 'join') {
+				const alias = decision.alias ?? decision.targetTable;
+				if (alias && decision.relationName) {
+					registerRelationPath(decision.relationName, alias);
+				}
+				continue;
+			}
+			if (
+				decision.type === 'where' &&
+				decision.operator === 'exists' &&
+				decision.choice === 'join' &&
+				decision.targetTable
+			) {
 				const relation = decision.relationName ?? decision.relation;
 				if (relation) {
-					qualifiers.set(relation, alias);
+					registerRelationPath(relation, this.filterJoinAlias(decision));
 				}
 			}
 		}
 
 		for (const [relation, alias] of this.resolvedJoinAliases()) {
+			registerRelationPath(relation, alias);
+		}
+
+		// Relation paths are a public namespace and intentionally overlay SQL
+		// aliases when their spellings collide.
+		const qualifiers = new Map(emittedAliases);
+		for (const [relation, alias] of relationPaths) {
 			qualifiers.set(relation, alias);
 		}
 		this.visibleSqlQualifiers = qualifiers;

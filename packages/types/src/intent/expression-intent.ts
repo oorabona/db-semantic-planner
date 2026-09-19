@@ -70,11 +70,17 @@ export interface ColumnAliasIntent {
 
 /**
  * Relation column expression: select a column from a related table
- * Auto-creates JOIN via include mechanism and selects with custom alias
- * @example { kind: 'relationColumn', relation: 'category', column: 'name', as: 'categoryName' }
- *          → SELECT t1."name" AS "categoryName" (where t1 is the joined category table)
- * @example { kind: 'relationColumn', relation: 'category.parent', column: 'name', as: 'parentCategoryName' }
- *          → Multi-level join: products → category → parent, select parent.name
+ * The query must already emit the named relation's JOIN. Otherwise compilation
+ * reports `relation column "<relation>"."<column>" has no emitted alias in this query`.
+ * @example orm.select('products').join('category').columns([
+ *            relationColumn('category', 'name', 'categoryName'),
+ *          ])
+ * @example orm.select('products').include('category', { join: 'left' }).columns([
+ *            relationColumn('category', 'name', 'categoryName'),
+ *          ])
+ *
+ * Deriving a join would choose join type, null behavior, and row multiplication
+ * on the caller's behalf; that is a separate feature.
  */
 export interface RelationColumnIntent {
 	readonly kind: 'relationColumn';

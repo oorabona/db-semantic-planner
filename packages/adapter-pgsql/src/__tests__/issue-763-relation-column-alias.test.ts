@@ -18,6 +18,7 @@ const issue763Schema = schema({
 	users: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
+		email: 'string',
 	},
 	files: {
 		id: { type: 'integer', primaryKey: true },
@@ -27,6 +28,20 @@ const issue763Schema = schema({
 		id: { type: 'integer', primaryKey: true },
 		author_id: ref('users', { as: 'author', inverse: 'posts' }),
 		file_id: ref('files', { as: 'file', inverse: 'posts' }),
+	},
+	articles: {
+		id: { type: 'integer', primaryKey: true },
+		editor_id: ref('users', { as: 'editor', inverse: 'edited_articles' }),
+		author_id: ref('users', { as: 'author', inverse: 'authored_articles' }),
+	},
+	categories: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	products: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		category_id: ref('categories', { as: 'category', inverse: 'products' }),
 	},
 });
 
@@ -79,6 +94,16 @@ function orm() {
 
 const missingAlias =
 	'relation column "author"."name" has no emitted alias in this query';
+
+function articleEditorAliasQuery(reverseJoins = false) {
+	const query = (orm() as any).select('articles');
+	const joined = reverseJoins
+		? query.join('author', { as: 'editor' }).join('editor', { as: 'reviewer' })
+		: query.join('editor', { as: 'reviewer' }).join('author', { as: 'editor' });
+	return joined
+		.columns([relationColumn('editor', 'email', 'editorEmail')])
+		.dump().sql;
+}
 
 function nestedPathPlan(includeCompetingPath: boolean): SimplifiedPlanReport {
 	return {
@@ -151,6 +176,56 @@ function nestedPathPlan(includeCompetingPath: boolean): SimplifiedPlanReport {
 }
 
 describe('issue 763: relation qualifiers require an emitted SQL alias', () => {
+	it('binds a relation path before a colliding emitted SQL alias', () => {
+		expect(articleEditorAliasQuery()).toBe(
+			'SELECT reviewer.email AS "editorEmail" FROM ((articles JOIN users AS reviewer ON editor_id = reviewer.id) reviewer JOIN users AS editor ON author_id = editor.id) editor',
+		);
+	});
+
+	it('keeps a colliding relation path bound when the joins are reversed', () => {
+		expect(articleEditorAliasQuery(true)).toBe(
+			'SELECT reviewer.email AS "editorEmail" FROM ((articles JOIN users AS editor ON author_id = editor.id) editor JOIN users AS reviewer ON editor_id = reviewer.id) reviewer',
+		);
+	});
+
+	it('refuses an ambiguous relation path only when a relation column asks for it', () => {
+		expect(() =>
+			(orm() as any)
+				.select('articles')
+				.join('author', { as: 'author_one' })
+				.join('author', { as: 'author_two' })
+				.columns([relationColumn('author', 'email', 'authorEmail')])
+				.dump(),
+		).toThrow(
+			'relation column "author"."email" is ambiguous between emitted aliases "author_one" and "author_two"',
+		);
+	});
+
+	it('allocates an ambiguous relation path without refusing raw emitted aliases', () => {
+		expect(
+			(orm() as any)
+				.select('articles')
+				.join('author', { as: 'author_one' })
+				.join('author', { as: 'author_two' })
+				.columns([exprRef('author_one.email')])
+				.dump().sql,
+		).toBe(
+			'SELECT author_one.email FROM ((articles JOIN users AS author_one ON author_id = author_one.id) author_one JOIN users AS author_two ON author_id = author_two.id) author_two',
+		);
+	});
+
+	it('resolves relationColumn through an include that emits a left join', () => {
+		expect(
+			orm()
+				.select('products')
+				.include('category', { join: 'left' })
+				.columns([relationColumn('category', 'name', 'categoryName')])
+				.dump().sql,
+		).toBe(
+			'SELECT category.name AS "categoryName" FROM products LEFT JOIN categories AS category ON products.category_id = category.id',
+		);
+	});
+
 	it('refuses a projected relation column with no joined relation', () => {
 		expect(() =>
 			orm()
