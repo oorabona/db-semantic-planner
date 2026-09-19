@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.8](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v2.0.7...mcp-server-v2.0.8) (2026-09-19)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 4.0.1
+    * @dbsp/types bumped to 4.0.1
+
 ## [2.0.7](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v2.0.6...mcp-server-v2.0.7) (2026-08-25)
 
 

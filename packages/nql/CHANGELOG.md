@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.5](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.4...nql-v1.10.5) (2026-09-19)
+
+
+### Bug Fixes
+
+* **repo:** A documentation block runs with the imports it declares ([#750](https://github.com/oorabona/db-semantic-planner/issues/750)) ([6bf70c1](https://github.com/oorabona/db-semantic-planner/commit/6bf70c1dd62c23c989901ad780f51b5312167057))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 4.0.1
+
 ## [1.10.4](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.10.3...nql-v1.10.4) (2026-08-25)
 
 
