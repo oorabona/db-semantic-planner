@@ -175,6 +175,38 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 
+	it('converges emitted original and neutral PostgreSQL column types', async () => {
+		const desired = model([
+			table('type_fixed_points', [
+				column('settings', 'json', { originalDbType: 'JSONB' }),
+				column('confidence', 'number', { originalDbType: 'REAL' }),
+				column('j', 'json'),
+				column('n', 'number'),
+			]),
+		]);
+
+		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+	});
+
+	it('converges defaulted sequence options and detects a changed default', async () => {
+		const desired = model([], undefined, [
+			{ name: 'explicit_sequence', startWith: 1, incrementBy: 1 },
+			{ name: 'descending_sequence', incrementBy: -1 },
+			{ name: 'minimum_sequence', minValue: 10 },
+			{ name: 'default_sequence' },
+		]);
+
+		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+
+		const pool = await getTestPool();
+		await pool.query(`ALTER SEQUENCE ${SCHEMA}.default_sequence MAXVALUE 1000`);
+		expect(
+			(await changes(desired)).changes.map((change) => change.kind),
+		).toEqual(['alter_sequence']);
+	});
+
 	it('converges non-default GIN/GiST opclasses and INCLUDE columns', async () => {
 		const pool = await getTestPool();
 		await pool.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
