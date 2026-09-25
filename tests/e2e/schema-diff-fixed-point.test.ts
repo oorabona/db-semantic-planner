@@ -6,6 +6,7 @@
 import {
 	comparePgsqlDatabaseSchema,
 	compareSchemata,
+	generateDownSQL,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl } from '@dbsp/core';
@@ -170,7 +171,74 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		]);
 		expect(
 			(await changes(desired)).changes.map((change) => change.kind),
-		).toEqual(['alter_column_default']);
+		).toEqual(['alter_column_auto_increment']);
+	});
+
+	it('refuses both auto-increment transitions without changing defaults or sequence ownership', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE ${SCHEMA}.plain_projects (id integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE TABLE ${SCHEMA}.serial_projects (id SERIAL PRIMARY KEY)`,
+		);
+		const plainProjects = table('plain_projects', [column('id', 'integer')]);
+		const serialProjects = table(
+			'serial_projects',
+			[column('id', 'integer', { autoIncrement: true })],
+			{ primaryKey: 'id' },
+		);
+
+		const cases = [
+			{
+				name: 'plain_projects',
+				desired: model([
+					table('plain_projects', [
+						column('id', 'integer', { autoIncrement: true }),
+					]),
+					serialProjects,
+				]),
+			},
+			{
+				name: 'serial_projects',
+				desired: model([
+					plainProjects,
+					table('serial_projects', [column('id', 'integer')], {
+						primaryKey: 'id',
+					}),
+				]),
+			},
+		] as const;
+
+		for (const { name, desired } of cases) {
+			const diff = await changes(desired);
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'alter_column_auto_increment',
+			]);
+			const before = (
+				await pool.query(
+					`SELECT column_default, pg_get_serial_sequence('${SCHEMA}.${name}', 'id') AS sequence FROM information_schema.columns WHERE table_schema = '${SCHEMA}' AND table_name = '${name}' AND column_name = 'id'`,
+				)
+			).rows;
+
+			expect(() =>
+				generateMigrationSQL(diff, {
+					includeDestructive: false,
+					schemaName: SCHEMA,
+				}),
+			).toThrow(
+				expect.objectContaining({
+					name: 'AutoIncrementTransitionUnsupportedError',
+					message: expect.stringContaining(`${name}.id`),
+				}),
+			);
+			const after = (
+				await pool.query(
+					`SELECT column_default, pg_get_serial_sequence('${SCHEMA}.${name}', 'id') AS sequence FROM information_schema.columns WHERE table_schema = '${SCHEMA}' AND table_name = '${name}' AND column_name = 'id'`,
+				)
+			).rows;
+			expect(after).toEqual(before);
+		}
 	});
 
 	it('does not report internal identity sequences as free-standing sequences', async () => {
@@ -214,6 +282,25 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect(
 			(await changes(desired)).changes.map((change) => change.kind),
 		).toEqual(['alter_sequence']);
+	});
+
+	it('alters a standalone sequence to its complete declared state and restores its prior maximum', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SEQUENCE ${SCHEMA}.s MAXVALUE 1000`);
+		const desired = model([], undefined, [{ name: 's' }]);
+		const diff = await changes(desired);
+		expect(diff.changes.map((change) => change.kind)).toEqual([
+			'alter_sequence',
+		]);
+
+		for (const statement of generateMigrationSQL(diff, { schemaName: SCHEMA }))
+			await pool.query(statement);
+		expect((await changes(desired)).changes).toEqual([]);
+
+		for (const statement of generateDownSQL(diff, { schemaName: SCHEMA }))
+			await pool.query(statement);
+		const live = await adapter.introspect({ schema: SCHEMA });
+		expect(live.sequences?.get('s')?.maxValue).toBe('1000');
 	});
 
 	it('converges non-default GIN/GiST opclasses and INCLUDE columns', async () => {

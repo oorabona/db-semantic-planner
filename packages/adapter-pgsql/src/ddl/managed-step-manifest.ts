@@ -867,6 +867,7 @@ export function assertDeclarableChangeKind(
 	| 'drop_policy'
 	| 'add_comment'
 	| 'drop_comment'
+	| 'alter_column_auto_increment'
 > {
 	switch (kind) {
 		case 'enable_rls':
@@ -875,8 +876,11 @@ export function assertDeclarableChangeKind(
 		case 'drop_policy':
 		case 'add_comment':
 		case 'drop_comment':
+		case 'alter_column_auto_increment':
 			throw new Error(
-				`generator planning refuses ${kind}: it is diagnostic-only and non-declarable`,
+				kind === 'alter_column_auto_increment'
+					? `generator planning refuses ${kind}: sequence creation, ownership, and default DDL must be written by hand`
+					: `generator planning refuses ${kind}: it is diagnostic-only and non-declarable`,
 			);
 		case 'create_table':
 		case 'drop_table':
@@ -1014,6 +1018,10 @@ export function addressForChange(input: {
 		case 'alter_column_collation':
 		case 'alter_column_identity':
 			return column();
+		case 'alter_column_auto_increment':
+			throw new Error(
+				`generator planning refuses ${change.kind}: sequence creation, ownership, and default DDL must be written by hand`,
+			);
 		case 'alter_column_unique':
 			return constraint(
 				text(

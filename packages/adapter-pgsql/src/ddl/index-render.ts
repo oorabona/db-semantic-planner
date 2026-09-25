@@ -109,6 +109,22 @@ export class IndexFeatureUnsupportedError extends Error {
 	}
 }
 
+export class AutoIncrementTransitionUnsupportedError extends Error {
+	readonly table: string;
+	readonly column: string;
+	readonly direction: string;
+
+	constructor(table: string, column: string, direction: string) {
+		super(
+			`auto-increment transition for ${table}.${column} (${direction}) is unsupported: sequence creation, ownership, and default DDL must be written by hand`,
+		);
+		this.name = 'AutoIncrementTransitionUnsupportedError';
+		this.table = table;
+		this.column = column;
+		this.direction = direction;
+	}
+}
+
 function formatServerVersion(versionNum: number): string {
 	const major = Math.trunc(versionNum / 10_000);
 	const minor = Math.trunc((versionNum % 10_000) / 100);

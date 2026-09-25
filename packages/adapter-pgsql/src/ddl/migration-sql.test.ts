@@ -1100,6 +1100,54 @@ describe('generateMigrationSQL', () => {
 	});
 
 	describe('destructive filtering', () => {
+		it.each([false, true])(
+			'refuses an auto-increment transition before UP rendering when includeDestructive=%s',
+			(includeDestructive) => {
+				const diff = makeDiff([
+					{
+						kind: 'add_column',
+						table: 'users',
+						column: 'other',
+						destructive: false,
+						details: '',
+						meta: {
+							column: makeCol({
+								name: 'other',
+								type: 'integer',
+								nullable: true,
+							}),
+						},
+					},
+					{
+						kind: 'alter_column_auto_increment',
+						table: 'users',
+						column: 'id',
+						destructive: true,
+						details: 'Enable generated auto-increment for "id"',
+						meta: {
+							autoIncrement: true,
+							previousAutoIncrement: false,
+						},
+					},
+				]);
+
+				expect(() =>
+					generateMigrationSQL(diff, { includeDestructive }),
+				).toThrow(
+					expect.objectContaining({
+						name: 'AutoIncrementTransitionUnsupportedError',
+						message: expect.stringContaining('users.id'),
+					}),
+				);
+				expect(() => generateDownSQL(diff, { includeDestructive })).toThrow(
+					expect.objectContaining({
+						name: 'AutoIncrementTransitionUnsupportedError',
+						message: expect.stringContaining('written by hand'),
+					}),
+				);
+			},
+		);
+
 		it('should exclude destructive changes when includeDestructive=false', () => {
 			const sql = generateMigrationSQL(
 				makeDiff([
@@ -4037,6 +4085,43 @@ describe('Extensions — migration SQL', () => {
 // ============================================================================
 
 describe('Sequences — migration SQL', () => {
+	it('alters every effective option and restores every prior option', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['order_seq', { name: 'order_seq' }]]),
+		);
+		const db = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([
+				[
+					'order_seq',
+					{
+						name: 'order_seq',
+						startWith: '1',
+						incrementBy: '1',
+						minValue: '1',
+						maxValue: '1000',
+						cycle: false,
+					},
+				],
+			]),
+		);
+
+		const diff = compareSchemata(schema, db);
+		expect(generateMigrationSQL(diff)).toEqual([
+			'ALTER SEQUENCE "order_seq" START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
+		]);
+		expect(generateDownSQL(diff)).toEqual([
+			'ALTER SEQUENCE "order_seq" START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 1000 NO CYCLE;',
+		]);
+	});
+
 	it('should generate CREATE SEQUENCE with all options', () => {
 		const seq: SequenceIR = {
 			name: 'order_seq',

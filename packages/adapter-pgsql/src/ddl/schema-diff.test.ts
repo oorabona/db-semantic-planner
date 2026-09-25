@@ -601,6 +601,24 @@ describe('compareSchemata', () => {
 
 			expect(compareSchemata(schema, generatedDb).changes).toEqual([]);
 
+			const authoredNextvalStringDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: "nextval('users_id_seq'::regclass)",
+						}),
+					],
+				}),
+			]);
+
+			expect(
+				changeKinds(compareSchemata(schema, authoredNextvalStringDb).changes),
+			).toEqual(['alter_column_default']);
+
 			const authoredDefaultDb = makeModel([
 				makeTable({
 					name: 'users',
@@ -633,7 +651,7 @@ describe('compareSchemata', () => {
 			]);
 
 			expect(changeKinds(compareSchemata(schema, plainDb).changes)).toEqual([
-				'alter_column_default',
+				'alter_column_auto_increment',
 			]);
 		});
 
@@ -665,9 +683,101 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
-				'alter_column_default',
-			);
+			expect(changeKinds(compareSchemata(schema, db).changes)).toEqual([
+				'alter_column_auto_increment',
+			]);
+		});
+
+		it.each([
+			[
+				'enables a generated sequence for a declared auto-increment column',
+				makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+				makeCol({ name: 'id', type: 'integer' }),
+				true,
+				false,
+			],
+			[
+				'disables a live serial column for a plain declaration',
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({
+					name: 'id',
+					type: 'integer',
+					autoIncrement: true,
+					default: { sql: "nextval('users_id_seq'::regclass)" },
+				}),
+				false,
+				true,
+			],
+			[
+				'treats an authored default on an auto-increment declaration as a disable',
+				makeCol({
+					name: 'id',
+					type: 'integer',
+					autoIncrement: true,
+					default: 42,
+				}),
+				makeCol({
+					name: 'id',
+					type: 'integer',
+					autoIncrement: true,
+					default: { sql: "nextval('users_id_seq'::regclass)" },
+				}),
+				false,
+				true,
+			],
+		] as const)(
+			'%s',
+			(_, schemaColumn, dbColumn, autoIncrement, previousAutoIncrement) => {
+				const schema = makeModel([
+					makeTable({ name: 'users', columns: [schemaColumn] }),
+				]);
+				const db = makeModel([
+					makeTable({ name: 'users', columns: [dbColumn] }),
+				]);
+
+				expect(compareSchemata(schema, db).changes).toEqual([
+					expect.objectContaining({
+						kind: 'alter_column_auto_increment',
+						table: 'users',
+						column: 'id',
+						destructive: true,
+						meta: {
+							column: schemaColumn,
+							fromColumn: dbColumn,
+							autoIncrement,
+							previousAutoIncrement,
+						},
+					}),
+				]);
+			},
+		);
+
+		it('reports non-default drift alongside an auto-increment transition', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'bigint',
+							nullable: false,
+							autoIncrement: true,
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer', nullable: true })],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toEqual([
+				'alter_column_auto_increment',
+				'alter_column_type',
+				'alter_column_nullable',
+			]);
 		});
 
 		it('should not flag identical defaults', () => {
@@ -4112,6 +4222,65 @@ describe('Sequences', () => {
 		);
 	});
 
+	it('carries complete effective sequence options for both directions of an alteration', () => {
+		const schema = makeModelWithSequences([{ name: 'order_seq' }]);
+		const db = makeModelWithSequences([
+			{
+				name: 'order_seq',
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '1000',
+				cycle: false,
+			},
+		]);
+
+		const change = compareSchemata(schema, db).changes.find(
+			(candidate) => candidate.kind === 'alter_sequence',
+		);
+		expect(change?.meta).toEqual({
+			sequence: {
+				name: 'order_seq',
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '9223372036854775807',
+				cycle: false,
+			},
+			previousSequence: {
+				name: 'order_seq',
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '1000',
+				cycle: false,
+			},
+		});
+	});
+
+	it('uses the descending effective minimum when the declared sequence omits it', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', incrementBy: -1 },
+		]);
+		const db = makeModelWithSequences([
+			{
+				name: 'order_seq',
+				startWith: '-1',
+				incrementBy: '-1',
+				minValue: '-5',
+				maxValue: '-1',
+				cycle: false,
+			},
+		]);
+
+		const change = compareSchemata(schema, db).changes.find(
+			(candidate) => candidate.kind === 'alter_sequence',
+		);
+		expect(change?.meta?.sequence).toMatchObject({
+			minValue: '-9223372036854775808',
+		});
+	});
+
 	it('should detect altered sequence (cycle changed)', () => {
 		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
 		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
@@ -4167,7 +4336,7 @@ describe('Sequences', () => {
 		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
-		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: 1 });
+		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: '1' });
 	});
 });
 
@@ -4320,6 +4489,25 @@ describe('buildSummary — missing ChangeKind cases (F-006 regression)', () => {
 		]);
 		const diff = compareSchemata(schema, db);
 		expect(diff.summary.columns.altered).toBeGreaterThanOrEqual(1);
+	});
+
+	it('F-006: alter_column_auto_increment counts as columns.altered', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [
+					makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(diff.summary.columns.altered).toBe(1);
 	});
 
 	it('F-006: create_extension does not throw and does not count in tables/columns/indexes/constraints', () => {

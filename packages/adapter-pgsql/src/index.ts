@@ -33,6 +33,7 @@ export { dbTypesEqual } from './db-type.js';
 // DDL Generation
 export {
 	type AddedEnumValue,
+	AutoIncrementTransitionUnsupportedError,
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
 	assertDeclarableChangeKind,

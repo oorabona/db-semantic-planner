@@ -67,6 +67,7 @@ export type ChangeKind =
 	| 'alter_column_nullable'
 	| 'alter_column_default'
 	| 'alter_column_unique'
+	| 'alter_column_auto_increment'
 	// Constraints
 	| 'add_primary_key'
 	| 'drop_primary_key'
@@ -710,6 +711,28 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
+	const declaredGeneratedSequence =
+		schema.autoIncrement === true && schema.default === undefined;
+	const liveGeneratedSequence = db.autoIncrement === true;
+	const generatedSequenceChanged =
+		declaredGeneratedSequence !== liveGeneratedSequence;
+	if (generatedSequenceChanged) {
+		const direction = declaredGeneratedSequence ? 'Enable' : 'Disable';
+		changes.push({
+			kind: 'alter_column_auto_increment',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `${direction} generated auto-increment for "${schema.name}"`,
+			meta: {
+				column: schema,
+				fromColumn: db,
+				autoIncrement: declaredGeneratedSequence,
+				previousAutoIncrement: liveGeneratedSequence,
+			},
+		});
+	}
+
 	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024)).
 	// Compare via dbTypesEqual so equivalent spellings (varchar ≡ character varying,
 	// timestamptz ≡ timestamp with time zone, int4 ≡ integer) do NOT false-diff, while
@@ -798,11 +821,11 @@ function compareColumnDetails(
 	const schemaDefault = normalizeDefault(schema.default);
 	const dbDefault = normalizeDefault(db.default);
 	const ignoreGeneratedSequenceDefault =
-		schema.autoIncrement === true &&
-		db.autoIncrement === true &&
-		schema.default === undefined &&
-		(dbDefault === undefined ||
-			/^nextval\('([^']|'')*'::regclass\)$/.test(dbDefault));
+		generatedSequenceChanged ||
+		(declaredGeneratedSequence &&
+			liveGeneratedSequence &&
+			schema.default === undefined &&
+			(db.default === undefined || isGeneratedSequenceDefault(db.default)));
 	if (!ignoreGeneratedSequenceDefault && schemaDefault !== dbDefault) {
 		changes.push({
 			kind: 'alter_column_default',
@@ -911,6 +934,15 @@ function normalizeDefault(value: unknown): string | undefined {
 	}
 
 	return String(value);
+}
+
+function isGeneratedSequenceDefault(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		return false;
+	const sql = (value as Record<string, unknown>).sql;
+	return (
+		typeof sql === 'string' && /^nextval\('([^']|'')*'::regclass\)$/.test(sql)
+	);
 }
 
 // ============================================================================
@@ -1743,6 +1775,14 @@ function effectiveSequenceOptions(sequence: SequenceIR): {
 	};
 }
 
+function completeSequence(sequence: SequenceIR): SequenceIR {
+	return {
+		name: sequence.name,
+		...(sequence.schema === undefined ? {} : { schema: sequence.schema }),
+		...effectiveSequenceOptions(sequence),
+	};
+}
+
 function compareSequences(
 	schema: ModelIR,
 	db: ModelIR,
@@ -1774,12 +1814,17 @@ function compareSequences(
 				effectiveSchemaSeq.maxValue !== effectiveDbSeq.maxValue ||
 				effectiveSchemaSeq.cycle !== effectiveDbSeq.cycle
 			) {
+				const completeSchemaSeq = completeSequence(seq);
+				const completeDbSeq = completeSequence(dbSeq);
 				changes.push({
 					kind: 'alter_sequence',
 					table: '',
 					destructive: false,
 					details: `Alter sequence "${name}"`,
-					meta: { sequence: seq, previousSequence: dbSeq },
+					meta: {
+						sequence: completeSchemaSeq,
+						previousSequence: completeDbSeq,
+					},
 				});
 			}
 		}
@@ -1921,6 +1966,7 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 			case 'alter_column_nullable':
 			case 'alter_column_default':
 			case 'alter_column_unique':
+			case 'alter_column_auto_increment':
 				columns.altered++;
 				break;
 			case 'add_primary_key':
