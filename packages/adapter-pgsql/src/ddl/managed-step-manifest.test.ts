@@ -83,6 +83,32 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		},
 	);
 
+	it('refuses an auto-increment transition before any manifest address exists', () => {
+		expect(() =>
+			assertDeclarableChangeKind('alter_column_auto_increment'),
+		).toThrow(
+			'sequence creation, ownership, and default DDL must be written by hand',
+		);
+		expect(() =>
+			createPgsqlGeneratedManagedStep({
+				change: {
+					kind: 'alter_column_auto_increment',
+					table: 'orders',
+					column: 'id',
+					destructive: true,
+					details: 'disable generated auto-increment',
+				},
+				database: 'app',
+				schema: 'public',
+				stepKey: 'generator:auto-increment',
+				order: 0,
+				statements: ['SELECT 1'],
+			}),
+		).toThrow(
+			'sequence creation, ownership, and default DDL must be written by hand',
+		);
+	});
+
 	it('rejects non-boolean sequence flags instead of applying truthiness', () => {
 		expect(() =>
 			buildSequenceClause('CREATE SEQUENCE', '"orders_id_seq"', {

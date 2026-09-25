@@ -2,6 +2,7 @@
  * Tests for Schema Verifier — Drift Detection via Comparison Engine
  */
 
+import type { SchemaDiff } from '@dbsp/adapter-pgsql';
 import { compareSchemata } from '@dbsp/adapter-pgsql';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -208,6 +209,39 @@ describe('verify (via compareSchemata)', () => {
 	});
 
 	describe('column-level drift', () => {
+		it('classifies generated auto-increment transitions as errors', () => {
+			const diff: SchemaDiff = {
+				changes: [
+					{
+						kind: 'alter_column_auto_increment',
+						table: 'users',
+						column: 'id',
+						destructive: true,
+						details: 'Enable generated auto-increment for "id"',
+					},
+				],
+				hasDestructive: true,
+				summary: {
+					tables: { added: 0, dropped: 0 },
+					columns: { added: 0, dropped: 0, altered: 1 },
+					indexes: { added: 0, dropped: 0 },
+					constraints: { added: 0, dropped: 0, altered: 0 },
+				},
+			};
+
+			const result = verifyFromDiff(diff, ['users'], ['users']);
+
+			expect(result.issues).toEqual([
+				{
+					severity: 'error',
+					type: 'auto_increment_mismatch',
+					table: 'users',
+					column: 'id',
+					message: 'Enable generated auto-increment for "id"',
+				},
+			]);
+		});
+
 		it('should detect missing column in database', () => {
 			const schemaModel = makeModel([
 				[

@@ -40,6 +40,7 @@ import {
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
 import {
+	AutoIncrementTransitionUnsupportedError,
 	assertCreateIndexesSupported,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
@@ -353,6 +354,8 @@ function isChangeSupported(
 			return caps.supportsDDLCollation === true;
 		case 'alter_column_identity':
 			return caps.supportsDDLIdentityColumns === true;
+		case 'alter_column_auto_increment':
+			return false;
 		case 'enable_rls':
 		case 'disable_rls':
 		case 'create_policy':
@@ -361,6 +364,33 @@ function isChangeSupported(
 		default:
 			return true;
 	}
+}
+
+function autoIncrementTransitionDirection(
+	change: SchemaChange,
+	direction: 'up' | 'down',
+): 'enable' | 'disable' | 'retype' | 'unknown' {
+	const transition = change.meta?.transition;
+	if (transition === 'retype') return transition;
+	if (transition === 'enable') return direction === 'up' ? 'enable' : 'disable';
+	if (transition === 'disable')
+		return direction === 'up' ? 'disable' : 'enable';
+	return 'unknown';
+}
+
+function assertNoAutoIncrementTransitions(
+	diff: SchemaDiff,
+	direction: 'up' | 'down',
+): void {
+	const change = diff.changes.find(
+		(candidate) => candidate.kind === 'alter_column_auto_increment',
+	);
+	if (!change) return;
+	throw new AutoIncrementTransitionUnsupportedError(
+		change.table,
+		change.column ?? '<unknown column>',
+		autoIncrementTransitionDirection(change, direction),
+	);
 }
 
 function isValidateConstraintSupported(
@@ -546,6 +576,7 @@ export function generateMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): readonly string[] {
+	assertNoAutoIncrementTransitions(diff, 'up');
 	const schemaName = options?.schemaName;
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
@@ -671,6 +702,7 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'alter_column_default':
 		case 'alter_column_collation':
 		case 'alter_column_identity':
+		case 'alter_column_auto_increment':
 			return 8;
 		case 'alter_column_unique':
 		case 'add_primary_key':
@@ -1092,6 +1124,12 @@ function changeToUpSQL(
 			return upAlterColumnCollation(change, schemaName);
 		case 'alter_column_identity':
 			return upAlterColumnIdentity(change, schemaName);
+		case 'alter_column_auto_increment':
+			throw new AutoIncrementTransitionUnsupportedError(
+				change.table,
+				change.column ?? '<unknown column>',
+				autoIncrementTransitionDirection(change, 'up'),
+			);
 		case 'add_comment':
 			return upAddComment(change, schemaName);
 		case 'drop_comment': {
@@ -1508,6 +1546,13 @@ function changeToDownSQL(
 			};
 		}
 
+		case 'alter_column_auto_increment':
+			throw new AutoIncrementTransitionUnsupportedError(
+				change.table,
+				change.column ?? '<unknown column>',
+				autoIncrementTransitionDirection(change, 'down'),
+			);
+
 		case 'add_comment': {
 			// DOWN: restore the previous comment if this was a change; otherwise
 			// remove the fresh comment that was added.
@@ -1732,6 +1777,7 @@ export function generateDownMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): DownMigrationSQL {
+	assertNoAutoIncrementTransitions(diff, 'down');
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 

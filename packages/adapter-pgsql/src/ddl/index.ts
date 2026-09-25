@@ -44,6 +44,7 @@ export {
 	withGeneratedPostconditionSession,
 } from './generated-postcondition-verifier.js';
 export {
+	AutoIncrementTransitionUnsupportedError,
 	assertCreateIndexesSupported,
 	assertCreateIndexSupported,
 	type IndexCapabilityContext,

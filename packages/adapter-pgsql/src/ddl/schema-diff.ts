@@ -67,6 +67,7 @@ export type ChangeKind =
 	| 'alter_column_nullable'
 	| 'alter_column_default'
 	| 'alter_column_unique'
+	| 'alter_column_auto_increment'
 	// Constraints
 	| 'add_primary_key'
 	| 'drop_primary_key'
@@ -710,6 +711,30 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
+	const changeStart = changes.length;
+	const declaredGeneratedSequence =
+		schema.autoIncrement === true && schema.default === undefined;
+	const liveGeneratedSequence = db.autoIncrement === true;
+	const generatedSequenceChanged =
+		declaredGeneratedSequence !== liveGeneratedSequence;
+	if (generatedSequenceChanged) {
+		const direction = declaredGeneratedSequence ? 'Enable' : 'Disable';
+		changes.push({
+			kind: 'alter_column_auto_increment',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `${direction} generated auto-increment for "${schema.name}"`,
+			meta: {
+				column: schema,
+				fromColumn: db,
+				autoIncrement: declaredGeneratedSequence,
+				previousAutoIncrement: liveGeneratedSequence,
+				transition: declaredGeneratedSequence ? 'enable' : 'disable',
+			},
+		});
+	}
+
 	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024)).
 	// Compare via dbTypesEqual so equivalent spellings (varchar ≡ character varying,
 	// timestamptz ≡ timestamp with time zone, int4 ≡ integer) do NOT false-diff, while
@@ -782,6 +807,23 @@ function compareColumnDetails(
 		});
 	}
 
+	if (declaredGeneratedSequence && liveGeneratedSequence && typeChanged) {
+		changes.splice(changeStart, 0, {
+			kind: 'alter_column_auto_increment',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `Retype generated auto-increment for "${schema.name}"`,
+			meta: {
+				column: schema,
+				fromColumn: db,
+				autoIncrement: true,
+				previousAutoIncrement: true,
+				transition: 'retype',
+			},
+		});
+	}
+
 	// Nullable change
 	if (schema.nullable !== db.nullable) {
 		changes.push({
@@ -798,11 +840,11 @@ function compareColumnDetails(
 	const schemaDefault = normalizeDefault(schema.default);
 	const dbDefault = normalizeDefault(db.default);
 	const ignoreGeneratedSequenceDefault =
-		schema.autoIncrement === true &&
-		db.autoIncrement === true &&
-		schema.default === undefined &&
-		(dbDefault === undefined ||
-			/^nextval\('([^']|'')*'::regclass\)$/.test(dbDefault));
+		generatedSequenceChanged ||
+		(declaredGeneratedSequence &&
+			liveGeneratedSequence &&
+			schema.default === undefined &&
+			(db.default === undefined || isGeneratedSequenceDefault(db.default)));
 	if (!ignoreGeneratedSequenceDefault && schemaDefault !== dbDefault) {
 		changes.push({
 			kind: 'alter_column_default',
@@ -911,6 +953,15 @@ function normalizeDefault(value: unknown): string | undefined {
 	}
 
 	return String(value);
+}
+
+function isGeneratedSequenceDefault(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		return false;
+	const sql = (value as Record<string, unknown>).sql;
+	return (
+		typeof sql === 'string' && /^nextval\('([^']|'')*'::regclass\)$/.test(sql)
+	);
 }
 
 // ============================================================================
@@ -1714,7 +1765,10 @@ function compareExtensions(
  * Compare those effective values so the DDL generated from a declaration reads
  * back as a fixed point, while a changed catalog value remains observable.
  */
-function effectiveSequenceOptions(sequence: SequenceIR): {
+function effectiveSequenceOptions(
+	sequence: SequenceIR,
+	validateDeclaredOptions = false,
+): {
 	readonly startWith: string;
 	readonly incrementBy: string;
 	readonly minValue: string;
@@ -1732,10 +1786,39 @@ function effectiveSequenceOptions(sequence: SequenceIR): {
 		normalizeSequenceInteger(sequence.maxValue, 'sequence MAXVALUE') ??
 		(ascending ? '9223372036854775807' : '-1');
 
+	const startWith =
+		normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
+		(ascending ? minValue : maxValue);
+	if (validateDeclaredOptions) {
+		if (
+			BigInt(minValue) < -9223372036854775808n ||
+			BigInt(minValue) > 9223372036854775807n
+		)
+			throw new Error(
+				`sequence "${sequence.name}": minValue must be within the bigint range`,
+			);
+		if (
+			BigInt(maxValue) < -9223372036854775808n ||
+			BigInt(maxValue) > 9223372036854775807n
+		)
+			throw new Error(
+				`sequence "${sequence.name}": maxValue must be within the bigint range`,
+			);
+		if (BigInt(minValue) >= BigInt(maxValue))
+			throw new Error(
+				`sequence "${sequence.name}": minValue must be less than maxValue`,
+			);
+		if (
+			BigInt(startWith) < BigInt(minValue) ||
+			BigInt(startWith) > BigInt(maxValue)
+		)
+			throw new Error(
+				`sequence "${sequence.name}": startWith must be within minValue and maxValue`,
+			);
+	}
+
 	return {
-		startWith:
-			normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
-			(ascending ? minValue : maxValue),
+		startWith,
 		incrementBy,
 		minValue,
 		maxValue,
@@ -1753,6 +1836,7 @@ function compareSequences(
 
 	// Sequences in schema but not in DB → create
 	for (const [name, seq] of schemaSeqs) {
+		const effectiveSchemaSeq = effectiveSequenceOptions(seq, true);
 		if (!dbSeqs.has(name)) {
 			changes.push({
 				kind: 'create_sequence',
@@ -1763,7 +1847,6 @@ function compareSequences(
 			});
 		} else {
 			const dbSeq = dbSeqs.get(name)!;
-			const effectiveSchemaSeq = effectiveSequenceOptions(seq);
 			const effectiveDbSeq = effectiveSequenceOptions(dbSeq);
 			// Compare the effective PostgreSQL sequence state exactly. The integer
 			// normalizer preserves int64 precision before the BigInt sign check above.
@@ -1921,6 +2004,7 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 			case 'alter_column_nullable':
 			case 'alter_column_default':
 			case 'alter_column_unique':
+			case 'alter_column_auto_increment':
 				columns.altered++;
 				break;
 			case 'add_primary_key':

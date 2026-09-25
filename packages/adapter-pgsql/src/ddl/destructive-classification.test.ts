@@ -18,6 +18,7 @@ const FROZEN_CHANGE_KIND_CLASSIFICATIONS: Readonly<
 	alter_column_nullable: 'non-destructive',
 	alter_column_default: 'non-destructive',
 	alter_column_unique: 'non-destructive',
+	alter_column_auto_increment: 'data-destructive',
 	add_primary_key: 'non-destructive',
 	drop_primary_key: 'removal',
 	add_foreign_key: 'non-destructive',

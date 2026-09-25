@@ -53,6 +53,7 @@ export type DriftType =
 	// Column enhancements
 	| 'collation_mismatch'
 	| 'identity_mismatch'
+	| 'auto_increment_mismatch'
 	// Comments
 	| 'comment_mismatch'
 	// Extensions & Sequences
@@ -132,6 +133,10 @@ const CHANGE_TO_DRIFT: Record<
 	// Column enhancements
 	alter_column_collation: { type: 'collation_mismatch', severity: 'warning' },
 	alter_column_identity: { type: 'identity_mismatch', severity: 'warning' },
+	alter_column_auto_increment: {
+		type: 'auto_increment_mismatch',
+		severity: 'error',
+	},
 	// Comments
 	add_comment: { type: 'comment_mismatch', severity: 'info' },
 	drop_comment: { type: 'comment_mismatch', severity: 'info' },

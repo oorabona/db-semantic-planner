@@ -270,6 +270,16 @@ describe('convergePg refusal boundary', () => {
 		await expectRefusal(change('alter_column_type'), 'unsupported-change');
 	});
 
+	it('refuses an auto-increment transition before execution', async () => {
+		await expectRefusal(
+			change('alter_column_auto_increment', {
+				autoIncrement: true,
+				previousAutoIncrement: false,
+			}),
+			'unsupported-change',
+		);
+	});
+
 	it('uses snake_case physical table names for unmanaged ownership', async () => {
 		const model = {
 			...emptyModel(),

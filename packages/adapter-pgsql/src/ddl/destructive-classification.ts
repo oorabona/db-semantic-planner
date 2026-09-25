@@ -52,6 +52,7 @@ export function classifyGeneratedMutation(
 	// A re-address has two ledger chains, two identities and a paired terminal.
 	// It is neither a generic safe mutation nor a destructive fallback.
 	if (kind === 'readdress_table') return 'paired-readdress';
+	if (kind === 'alter_column_auto_increment') return 'data-destructive';
 	if (
 		kind === 'enable_rls' ||
 		kind === 'disable_rls' ||

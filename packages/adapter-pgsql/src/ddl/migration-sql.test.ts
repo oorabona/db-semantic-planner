@@ -1100,6 +1100,95 @@ describe('generateMigrationSQL', () => {
 	});
 
 	describe('destructive filtering', () => {
+		it.each([false, true])(
+			'refuses an auto-increment transition before UP rendering when includeDestructive=%s',
+			(includeDestructive) => {
+				const diff = makeDiff([
+					{
+						kind: 'add_column',
+						table: 'users',
+						column: 'other',
+						destructive: false,
+						details: '',
+						meta: {
+							column: makeCol({
+								name: 'other',
+								type: 'integer',
+								nullable: true,
+							}),
+						},
+					},
+					{
+						kind: 'alter_column_auto_increment',
+						table: 'users',
+						column: 'id',
+						destructive: true,
+						details: 'Enable generated auto-increment for "id"',
+						meta: {
+							autoIncrement: true,
+							previousAutoIncrement: false,
+						},
+					},
+				]);
+
+				expect(() =>
+					generateMigrationSQL(diff, { includeDestructive }),
+				).toThrow(
+					expect.objectContaining({
+						name: 'AutoIncrementTransitionUnsupportedError',
+						message: expect.stringContaining('users.id'),
+					}),
+				);
+				expect(() => generateDownSQL(diff, { includeDestructive })).toThrow(
+					expect.objectContaining({
+						name: 'AutoIncrementTransitionUnsupportedError',
+						message: expect.stringContaining('written by hand'),
+					}),
+				);
+			},
+		);
+
+		it('names the inverse direction for a DOWN auto-increment refusal', () => {
+			const diff = makeDiff([
+				{
+					kind: 'alter_column_auto_increment',
+					table: 'users',
+					column: 'id',
+					destructive: true,
+					details: '',
+					meta: {
+						autoIncrement: true,
+						previousAutoIncrement: false,
+						transition: 'enable',
+					},
+				},
+			]);
+
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'enable' }),
+			);
+			expect(() => generateDownSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'disable' }),
+			);
+		});
+
+		it('names an unknown direction for malformed auto-increment metadata', () => {
+			const diff = makeDiff([
+				{
+					kind: 'alter_column_auto_increment',
+					table: 'users',
+					column: 'id',
+					destructive: true,
+					details: '',
+					meta: { transition: 'invalid' },
+				},
+			]);
+
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'unknown' }),
+			);
+		});
+
 		it('should exclude destructive changes when includeDestructive=false', () => {
 			const sql = generateMigrationSQL(
 				makeDiff([
