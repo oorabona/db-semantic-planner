@@ -18,8 +18,11 @@ describe('ledger physical shape session settings', () => {
 	});
 
 	afterAll(async () => {
-		await dropSchema(schema);
-		await closeTestDb();
+		try {
+			await dropSchema(schema);
+		} finally {
+			await closeTestDb();
+		}
 	});
 
 	it('restores search_path and quote_all_identifiers on the caller transaction', async () => {
@@ -42,8 +45,17 @@ describe('ledger physical shape session settings', () => {
 				),
 			).resolves.toMatchObject({ rows: before.rows });
 		} finally {
-			await client.query('ROLLBACK');
-			client.release();
+			let rollbackFailed = true;
+			try {
+				await client.query('ROLLBACK');
+				rollbackFailed = false;
+			} finally {
+				if (rollbackFailed) {
+					client.release(true);
+				} else {
+					client.release();
+				}
+			}
 		}
 	});
 });
