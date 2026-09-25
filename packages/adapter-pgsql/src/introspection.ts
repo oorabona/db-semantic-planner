@@ -282,6 +282,7 @@ interface CatalogResults {
 	extensions: Array<{ name: string }>;
 	sequences: Array<{
 		name: string;
+		data_type: 'smallint' | 'integer' | 'bigint';
 		start_value: unknown;
 		increment_by: unknown;
 		min_value: unknown;
@@ -561,6 +562,7 @@ async function queryAllCatalogs(
 			// 11. Sequences not backed by SERIAL or IDENTITY columns
 			pool.query<{
 				name: string;
+				data_type: 'smallint' | 'integer' | 'bigint';
 				start_value: string;
 				increment_by: string;
 				min_value: string;
@@ -568,6 +570,7 @@ async function queryAllCatalogs(
 				cycle: boolean;
 			}>(
 				`SELECT s.sequencename AS name,
+				        s.data_type::text AS data_type,
 				        s.start_value::text AS start_value,
 				        s.increment_by::text AS increment_by,
 				        s.min_value::text AS min_value,
@@ -702,6 +705,7 @@ async function queryAllCatalogs(
 		QueryResult<{ name: string }>,
 		QueryResult<{
 			name: string;
+			data_type: 'smallint' | 'integer' | 'bigint';
 			start_value: unknown;
 			increment_by: unknown;
 			min_value: unknown;
@@ -1305,6 +1309,7 @@ function normalizeIntrospectedSequenceInteger(
 function buildSequenceMap(
 	rows: Array<{
 		name: string;
+		data_type: 'smallint' | 'integer' | 'bigint';
 		start_value: unknown;
 		increment_by: unknown;
 		min_value: unknown;
@@ -1316,6 +1321,9 @@ function buildSequenceMap(
 	for (const row of rows) {
 		result.set(row.name, {
 			name: row.name,
+			...(row.data_type === 'smallint' || row.data_type === 'integer'
+				? { dataType: row.data_type }
+				: {}),
 			startWith: normalizeIntrospectedSequenceInteger(
 				row.start_value,
 				`sequence ${row.name} START WITH`,

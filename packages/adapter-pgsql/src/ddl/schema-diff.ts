@@ -1761,7 +1761,8 @@ function compareExtensions(
 // ============================================================================
 
 /**
- * PostgreSQL materializes omitted CREATE SEQUENCE options as bigint defaults.
+ * PostgreSQL materializes omitted CREATE SEQUENCE options with defaults that
+ * depend on the sequence data type and increment direction.
  * Compare those effective values so the DDL generated from a declaration reads
  * back as a fixed point, while a changed catalog value remains observable.
  */
@@ -1769,27 +1770,48 @@ function effectiveSequenceOptions(
 	sequence: SequenceIR,
 	validateDeclaredOptions = false,
 ): {
+	readonly dataType: 'smallint' | 'integer' | 'bigint';
 	readonly startWith: string;
 	readonly incrementBy: string;
 	readonly minValue: string;
 	readonly maxValue: string;
 	readonly cycle: boolean;
 } {
+	const dataType = sequence.dataType ?? 'bigint';
+	const typeRange = {
+		smallint: { min: '-32768', max: '32767' },
+		integer: { min: '-2147483648', max: '2147483647' },
+		bigint: { min: '-9223372036854775808', max: '9223372036854775807' },
+	}[dataType];
 	const incrementBy =
 		normalizeSequenceInteger(sequence.incrementBy, 'sequence INCREMENT BY') ??
 		'1';
 	const ascending = BigInt(incrementBy) > 0n;
 	const minValue =
 		normalizeSequenceInteger(sequence.minValue, 'sequence MINVALUE') ??
-		(ascending ? '1' : '-9223372036854775808');
+		(ascending ? '1' : typeRange.min);
 	const maxValue =
 		normalizeSequenceInteger(sequence.maxValue, 'sequence MAXVALUE') ??
-		(ascending ? '9223372036854775807' : '-1');
+		(ascending ? typeRange.max : '-1');
 
 	const startWith =
 		normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
 		(ascending ? minValue : maxValue);
 	if (validateDeclaredOptions) {
+		if (
+			BigInt(minValue) < BigInt(typeRange.min) ||
+			BigInt(minValue) > BigInt(typeRange.max)
+		)
+			throw new Error(
+				`sequence "${sequence.name}": minValue must be within the ${dataType} range`,
+			);
+		if (
+			BigInt(maxValue) < BigInt(typeRange.min) ||
+			BigInt(maxValue) > BigInt(typeRange.max)
+		)
+			throw new Error(
+				`sequence "${sequence.name}": maxValue must be within the ${dataType} range`,
+			);
 		if (BigInt(minValue) >= BigInt(maxValue))
 			throw new Error(
 				`sequence "${sequence.name}": minValue must be less than maxValue`,
@@ -1804,6 +1826,7 @@ function effectiveSequenceOptions(
 	}
 
 	return {
+		dataType,
 		startWith,
 		incrementBy,
 		minValue,
@@ -1845,6 +1868,7 @@ function compareSequences(
 			// Compare the effective PostgreSQL sequence state exactly. The integer
 			// normalizer preserves int64 precision before the BigInt sign check above.
 			if (
+				effectiveSchemaSeq.dataType !== effectiveDbSeq.dataType ||
 				effectiveSchemaSeq.startWith !== effectiveDbSeq.startWith ||
 				effectiveSchemaSeq.incrementBy !== effectiveDbSeq.incrementBy ||
 				effectiveSchemaSeq.minValue !== effectiveDbSeq.minValue ||

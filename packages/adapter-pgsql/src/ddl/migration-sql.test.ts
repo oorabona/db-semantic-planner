@@ -4159,7 +4159,7 @@ describe('Sequences — migration SQL', () => {
 			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
 		]);
 		expect(generateDownSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 1000 NO CYCLE;',
+			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 1000 NO CYCLE;',
 		]);
 	});
 
@@ -4200,6 +4200,21 @@ describe('Sequences — migration SQL', () => {
 		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toBe('CREATE SEQUENCE "simple_seq";');
+	});
+
+	it('emits a declared sequence data type without changing the untyped CREATE form', () => {
+		const sql = generateMigrationSQL(
+			makeDiff([
+				{
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { sequence: { name: 'small_seq', dataType: 'smallint' } },
+				},
+			]),
+		);
+		expect(sql).toEqual(['CREATE SEQUENCE "small_seq" AS smallint;']);
 	});
 
 	it('should generate CREATE SEQUENCE with schema prefix', () => {
@@ -4293,9 +4308,7 @@ describe('Sequences — migration SQL', () => {
 			},
 		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe(
-			'ALTER SEQUENCE "order_seq" AS bigint INCREMENT BY 10 NO CYCLE;',
-		);
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 10 NO CYCLE;');
 	});
 
 	it('should generate ALTER SEQUENCE with CYCLE', () => {
@@ -4310,7 +4323,7 @@ describe('Sequences — migration SQL', () => {
 			},
 		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" AS bigint CYCLE;');
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" CYCLE;');
 	});
 
 	it('should generate DROP SEQUENCE IF EXISTS CASCADE', () => {

@@ -320,6 +320,17 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 				)
 			).rows[0]?.data_type,
 		).toBe('bigint');
+
+		for (const statement of generateDownSQL(diff, { schemaName: SCHEMA }))
+			await pool.query(statement);
+		expect(
+			(
+				await pool.query(
+					'SELECT data_type, max_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2',
+					[SCHEMA, 'narrow_seq'],
+				)
+			).rows[0],
+		).toMatchObject({ data_type: 'integer', max_value: '2147483647' });
 	});
 
 	it('converges non-default GIN/GiST opclasses and INCLUDE columns', async () => {

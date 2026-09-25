@@ -250,13 +250,12 @@ export function buildSequenceClause(
 	seqName: string,
 	seq: Pick<
 		SequenceIR,
-		'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
+		'dataType' | 'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
 	>,
 	includeCycleNoCycle = false,
-	includeBigintDataType = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
-	if (includeBigintDataType) parts.push('AS bigint');
+	if (seq.dataType !== undefined) parts.push(`AS ${seq.dataType}`);
 	const startWith = normalizeSequenceInteger(
 		seq.startWith,
 		'sequence START WITH',
@@ -1168,7 +1167,6 @@ function changeToUpSQL(
 						'ALTER SEQUENCE',
 						upSequenceName(schemaName, seq),
 						seq,
-						true,
 						true,
 					)
 				: undefined;
