@@ -128,6 +128,35 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({ rows: [] });
 	});
 
+	it('creates a vector column after validating the ledger on the step session', async () => {
+		const pool = await getTestPool();
+		await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
+		const desired = model([
+			{
+				...table('vector_fixture', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{
+						name: 'embedding',
+						type: 'string',
+						nullable: true,
+						originalDbType: 'vector(3)',
+					},
+				],
+			},
+		]);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(
+			pool.query(
+				'SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS type FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND NOT attribute.attisdropped',
+				[schema, 'vector_fixture', 'embedding'],
+			),
+		).resolves.toMatchObject({ rows: [{ type: 'vector(3)' }] });
+	});
+
 	it('refuses a declared table with an index before creating the table', async () => {
 		const pool = await getTestPool();
 		const desired = model([

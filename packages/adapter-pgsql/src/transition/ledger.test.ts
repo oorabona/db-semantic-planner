@@ -7,6 +7,7 @@ import {
 	appendPgLedgerResolution,
 	appendPgLedgerResolutionGroup,
 	assertPgLedgerPhysicalShapeVerified,
+	classifyPgLedgerPhysicalShape,
 	classifyPgLedgerShapeError,
 	createPgLedgerShapeAllowance,
 	ensurePgLedger,
@@ -31,6 +32,17 @@ import {
 } from './ledger-spec.js';
 
 const target = { scope: 'schema', schema: 'tenant_a' } as const;
+
+const ledgerSessionSettingsQuery =
+	"SELECT pg_catalog.current_setting('search_path') AS search_path, pg_catalog.current_setting('quote_all_identifiers') AS quote_all_identifiers";
+const ledgerSessionSettingsRestoreQuery =
+	"SELECT pg_catalog.set_config('search_path', $1, true), pg_catalog.set_config('quote_all_identifiers', $2, true)";
+
+function ledgerSessionSettingsRows() {
+	return {
+		rows: [{ search_path: '"$user", public', quote_all_identifiers: 'off' }],
+	};
+}
 
 function assertNonEmptyStringRecord(value: unknown, field: string): void {
 	expect(value, `${field} must be an object`).toBeTypeOf('object');
@@ -294,6 +306,8 @@ describe('managed ledger storage', () => {
 				"SELECT current_setting('server_version_num') AS server_version_num"
 			)
 				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
 			if (sql.includes('FROM pg_catalog.pg_constraint'))
 				return { rows: live.constraints };
 			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
@@ -337,6 +351,8 @@ describe('managed ledger storage', () => {
 				"SELECT current_setting('server_version_num') AS server_version_num"
 			)
 				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
 			if (sql.includes('FROM pg_catalog.pg_constraint'))
 				return { rows: live.constraints };
 			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
@@ -393,6 +409,118 @@ describe('managed ledger storage', () => {
 		},
 	);
 
+	it('restores both pinned settings through bind parameters after verification', async () => {
+		const live = createdLedgerDdlLiveProjection();
+		const priorSettings = {
+			search_path: '"$user", public, "odd,schema"',
+			quote_all_identifiers: 'on',
+		};
+		const query = vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (
+				sql ===
+				"SELECT current_setting('server_version_num') AS server_version_num"
+			)
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery) return { rows: [priorSettings] };
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return { rows: live.constraints };
+			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
+				return { rows: live.defaults };
+			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
+				return { rows: live.triggers };
+			if (sql.includes('FROM pg_catalog.pg_index index_definition'))
+				return { rows: live.indexes };
+			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+				return { rows: live.columns };
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: live.tables };
+			return { rows: [], params };
+		});
+
+		await expect(
+			classifyPgLedgerPhysicalShape({ query }, target),
+		).resolves.toEqual({
+			kind: 'verified',
+		});
+		expect(query.mock.calls.at(-1)).toEqual([
+			ledgerSessionSettingsRestoreQuery,
+			[priorSettings.search_path, priorSettings.quote_all_identifiers],
+		]);
+	});
+
+	it('does not verify when the settings restoration fails', async () => {
+		const live = createdLedgerDdlLiveProjection();
+		const restoreError = Object.assign(new Error('restore denied'), {
+			code: '42501',
+		});
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql ===
+				"SELECT current_setting('server_version_num') AS server_version_num"
+			)
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
+			if (sql === ledgerSessionSettingsRestoreQuery) throw restoreError;
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return { rows: live.constraints };
+			if (sql.includes('FROM pg_catalog.pg_attrdef default_item'))
+				return { rows: live.defaults };
+			if (sql.includes('FROM pg_catalog.pg_trigger trigger_item'))
+				return { rows: live.triggers };
+			if (sql.includes('FROM pg_catalog.pg_index index_definition'))
+				return { rows: live.indexes };
+			if (sql.includes('FROM pg_catalog.pg_attribute attribute'))
+				return { rows: live.columns };
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: live.tables };
+			return { rows: [] };
+		});
+
+		await expect(
+			classifyPgLedgerPhysicalShape({ query }, target),
+		).resolves.not.toEqual({
+			kind: 'verified',
+		});
+	});
+
+	it('restores settings after a physical shape rejection', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql ===
+				"SELECT current_setting('server_version_num') AS server_version_num"
+			)
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
+			if (
+				sql.includes(
+					'FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace',
+				)
+			)
+				return { rows: [] };
+			return { rows: [] };
+		});
+
+		await expect(
+			classifyPgLedgerPhysicalShape({ query }, target),
+		).resolves.toMatchObject({
+			kind: 'shape-wrong',
+		});
+		expect(query).toHaveBeenCalledWith(ledgerSessionSettingsRestoreQuery, [
+			'"$user", public',
+			'off',
+		]);
+	});
+
 	it('surfaces an erroring discovery candidate rather than silently skipping it', async () => {
 		const discoveryRows = ['counterfeit', 'unreadable'].flatMap((schema) =>
 			PG_LEDGER_SPEC.map((table) => ({
@@ -416,6 +544,8 @@ describe('managed ledger storage', () => {
 					throw Object.assign(new Error('denied'), { code: '42501' });
 				return { rows: [{ server_version_num: '180000' }] };
 			}
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
 			return { rows: [] };
 		});
 		const result = await readPgLedgerReservationsForPair({ query }, 'pair-1');
@@ -829,6 +959,8 @@ describe('managed ledger storage', () => {
 				"SELECT current_setting('server_version_num') AS server_version_num"
 			)
 				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
 			if (sql.includes('FROM pg_catalog.pg_constraint'))
 				return { rows: without(createdLedgerInvariantConstraintRows()) };
 			if (sql.includes('FROM pg_catalog.pg_index'))
