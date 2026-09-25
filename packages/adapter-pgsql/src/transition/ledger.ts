@@ -290,6 +290,10 @@ export async function classifyPgLedgerPhysicalShape(
 	allowance?: PgLedgerShapeAllowance,
 ): Promise<PgLedgerPhysicalShapeOutcome> {
 	let major: number | undefined;
+	let sessionSettings:
+		| { readonly searchPath: string; readonly quoteAllIdentifiers: string }
+		| undefined;
+	let searchPathPinAttempted = false;
 	try {
 		const value = (
 			await executor.query(
@@ -302,6 +306,21 @@ export async function classifyPgLedgerPhysicalShape(
 		major = Math.floor(version / 10000);
 		const fixture = await readLedgerDeparseFixture(major);
 		if (!fixture) return { kind: 'unsupported-major', major };
+		const settings = (
+			await executor.query(
+				"SELECT pg_catalog.current_setting('search_path') AS search_path, pg_catalog.current_setting('quote_all_identifiers') AS quote_all_identifiers",
+			)
+		).rows[0];
+		if (
+			typeof settings?.search_path !== 'string' ||
+			typeof settings.quote_all_identifiers !== 'string'
+		)
+			return { kind: 'unverifiable', cause: 'unknown' };
+		sessionSettings = {
+			searchPath: settings.search_path,
+			quoteAllIdentifiers: settings.quote_all_identifiers,
+		};
+		searchPathPinAttempted = true;
 		await executor.query('SET LOCAL search_path = pg_catalog');
 		await executor.query('SET LOCAL quote_all_identifiers = off');
 		await validatePgLedgerPhysicalShapeFacts(
@@ -310,8 +329,17 @@ export async function classifyPgLedgerPhysicalShape(
 			fixture,
 			allowance,
 		);
+		await restorePgLedgerSessionSettings(executor, sessionSettings);
 		return { kind: 'verified' };
 	} catch (error) {
+		if (searchPathPinAttempted && sessionSettings !== undefined) {
+			try {
+				await restorePgLedgerSessionSettings(executor, sessionSettings);
+			} catch {
+				// A failed validator query may have aborted the transaction. Its error
+				// remains the admission outcome; the transaction rollback discards pins.
+			}
+		}
 		if (
 			error instanceof Error &&
 			error.message.startsWith('ledger physical shape:')
@@ -319,6 +347,19 @@ export async function classifyPgLedgerPhysicalShape(
 			return { kind: 'shape-wrong', artefact: error.message };
 		return classifyPgLedgerShapeError(error);
 	}
+}
+
+async function restorePgLedgerSessionSettings(
+	executor: TransitionJournalQueryable,
+	settings: {
+		readonly searchPath: string;
+		readonly quoteAllIdentifiers: string;
+	},
+): Promise<void> {
+	await executor.query(
+		"SELECT pg_catalog.set_config('search_path', $1, true), pg_catalog.set_config('quote_all_identifiers', $2, true)",
+		[settings.searchPath, settings.quoteAllIdentifiers],
+	);
 }
 
 export class PgLedgerPhysicalShapeValidationError extends Error {
