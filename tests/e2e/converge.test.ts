@@ -7,6 +7,7 @@ import {
 } from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
 import type { LedgerAddress, ModelIR, TableIR } from '@dbsp/types';
+import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -17,6 +18,9 @@ import {
 import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
 
 const schema = `converge_e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+const typesSchema = `${schema}_types`;
+const typesSearchPath = `${typesSchema},public`;
+const domain = 'converge_step_type';
 
 function model(tables: readonly TableIR[]): ModelIR {
 	const byName = new Map(tables.map((table) => [table.name, table]));
@@ -87,12 +91,22 @@ function address(
 describe('convergePg', () => {
 	beforeAll(async () => {
 		await createSchema(schema);
+		await createSchema(typesSchema);
+		const pool = await getTestPool();
+		await pool.query(`CREATE DOMAIN "${typesSchema}"."${domain}" AS integer`);
 		await runPreflight([schema], { writeAdoptionFile: async () => {} });
 	});
 
 	afterAll(async () => {
-		await dropSchema(schema);
-		await closeTestDb();
+		try {
+			await dropSchema(schema);
+		} finally {
+			try {
+				await dropSchema(typesSchema);
+			} finally {
+				await closeTestDb();
+			}
+		}
 	});
 
 	it('creates a declared table and nullable column with a managed table terminal', async () => {
@@ -128,33 +142,43 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({ rows: [] });
 	});
 
-	it('creates a vector column after validating the ledger on the step session', async () => {
-		const pool = await getTestPool();
-		await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
-		const desired = model([
-			{
-				...table('vector_fixture', false),
-				columns: [
-					{ name: 'id', type: 'integer', nullable: false },
-					{
-						name: 'embedding',
-						type: 'string',
-						nullable: true,
-						originalDbType: 'vector(3)',
-					},
-				],
-			},
-		]);
-
-		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
-			kind: 'applied',
+	it('creates a domain column after validating the ledger on the step session', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: `-c search_path=${typesSearchPath}`,
 		});
-		await expect(
-			pool.query(
-				'SELECT pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS type FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND NOT attribute.attisdropped',
-				[schema, 'vector_fixture', 'embedding'],
-			),
-		).resolves.toMatchObject({ rows: [{ type: 'vector(3)' }] });
+		try {
+			expect(
+				(await dedicatedPool.query<{ search_path: string }>('SHOW search_path'))
+					.rows[0]?.search_path,
+			).toBe(typesSearchPath);
+			const desired = model([
+				{
+					...table('domain_fixture', false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{
+							name: 'value',
+							type: 'integer',
+							nullable: true,
+							originalDbType: domain,
+						},
+					],
+				},
+			]);
+
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				dedicatedPool.query(
+					'SELECT attribute.atttypid = domain_type.oid AS uses_domain FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace relation_namespace ON relation_namespace.oid = relation.relnamespace JOIN pg_catalog.pg_type domain_type ON domain_type.typname = $4 JOIN pg_catalog.pg_namespace domain_namespace ON domain_namespace.oid = domain_type.typnamespace AND domain_namespace.nspname = $5 WHERE relation_namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND NOT attribute.attisdropped',
+					[schema, 'domain_fixture', 'value', domain, typesSchema],
+				),
+			).resolves.toMatchObject({ rows: [{ uses_domain: true }] });
+		} finally {
+			await dedicatedPool.end();
+		}
 	});
 
 	it('refuses a declared table with an index before creating the table', async () => {
