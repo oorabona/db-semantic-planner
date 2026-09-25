@@ -1148,6 +1148,47 @@ describe('generateMigrationSQL', () => {
 			},
 		);
 
+		it('names the inverse direction for a DOWN auto-increment refusal', () => {
+			const diff = makeDiff([
+				{
+					kind: 'alter_column_auto_increment',
+					table: 'users',
+					column: 'id',
+					destructive: true,
+					details: '',
+					meta: {
+						autoIncrement: true,
+						previousAutoIncrement: false,
+						transition: 'enable',
+					},
+				},
+			]);
+
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'enable' }),
+			);
+			expect(() => generateDownSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'disable' }),
+			);
+		});
+
+		it('names an unknown direction for malformed auto-increment metadata', () => {
+			const diff = makeDiff([
+				{
+					kind: 'alter_column_auto_increment',
+					table: 'users',
+					column: 'id',
+					destructive: true,
+					details: '',
+					meta: { transition: 'invalid' },
+				},
+			]);
+
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'unknown' }),
+			);
+		});
+
 		it('should exclude destructive changes when includeDestructive=false', () => {
 			const sql = generateMigrationSQL(
 				makeDiff([
@@ -4115,7 +4156,7 @@ describe('Sequences — migration SQL', () => {
 
 		const diff = compareSchemata(schema, db);
 		expect(generateMigrationSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
+			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
 		]);
 		expect(generateDownSQL(diff)).toEqual([
 			'ALTER SEQUENCE "order_seq" START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 1000 NO CYCLE;',
@@ -4252,7 +4293,9 @@ describe('Sequences — migration SQL', () => {
 			},
 		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 10 NO CYCLE;');
+		expect(sql[0]).toBe(
+			'ALTER SEQUENCE "order_seq" AS bigint INCREMENT BY 10 NO CYCLE;',
+		);
 	});
 
 	it('should generate ALTER SEQUENCE with CYCLE', () => {
@@ -4267,7 +4310,7 @@ describe('Sequences — migration SQL', () => {
 			},
 		]);
 		const sql = generateMigrationSQL(diff);
-		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" CYCLE;');
+		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" AS bigint CYCLE;');
 	});
 
 	it('should generate DROP SEQUENCE IF EXISTS CASCADE', () => {
@@ -4363,6 +4406,7 @@ describe('Sequences — migration SQL', () => {
 		]);
 		const sql = generateDownSQL(diff);
 		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 1;');
+		expect(sql[0]).not.toContain('AS bigint');
 	});
 });
 

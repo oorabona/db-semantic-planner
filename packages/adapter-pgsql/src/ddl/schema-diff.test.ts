@@ -746,6 +746,7 @@ describe('compareSchemata', () => {
 							fromColumn: dbColumn,
 							autoIncrement,
 							previousAutoIncrement,
+							transition: autoIncrement ? 'enable' : 'disable',
 						},
 					}),
 				]);
@@ -778,6 +779,38 @@ describe('compareSchemata', () => {
 				'alter_column_type',
 				'alter_column_nullable',
 			]);
+		});
+
+		it('refuses retyping a generated auto-increment column', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'bigint', autoIncrement: true }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+					],
+				}),
+			]);
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'alter_column_auto_increment',
+				'alter_column_type',
+			]);
+			expect(diff.changes[0]?.meta?.transition).toBe('retype');
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'retype' }),
+			);
+			expect(() => generateDownSQL(diff)).toThrow(
+				expect.objectContaining({ direction: 'retype' }),
+			);
 		});
 
 		it('should not flag identical defaults', () => {
@@ -4297,6 +4330,26 @@ describe('Sequences', () => {
 		expect(() => compareSchemata(schema, db)).toThrow(
 			'sequence CYCLE: expected a boolean',
 		);
+	});
+
+	it.each([
+		[
+			'has a minimum that is not less than its maximum',
+			{ name: 'order_seq', minValue: 10, maxValue: 5 },
+			'minValue must be less than maxValue',
+		],
+		[
+			'has a start outside its effective bounds',
+			{ name: 'order_seq', startWith: 0 },
+			'startWith must be within minValue and maxValue',
+		],
+	] as const)('refuses a declared sequence that %s', (_, sequence, rule) => {
+		expect(() =>
+			compareSchemata(
+				makeModelWithSequences([sequence]),
+				makeModelWithSequences([]),
+			),
+		).toThrow(`sequence "order_seq": ${rule}`);
 	});
 
 	it('should detect altered sequence (minValue/maxValue changed)', () => {

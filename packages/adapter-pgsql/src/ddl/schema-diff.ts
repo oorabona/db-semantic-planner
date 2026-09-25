@@ -711,6 +711,7 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
+	const changeStart = changes.length;
 	const declaredGeneratedSequence =
 		schema.autoIncrement === true && schema.default === undefined;
 	const liveGeneratedSequence = db.autoIncrement === true;
@@ -729,6 +730,7 @@ function compareColumnDetails(
 				fromColumn: db,
 				autoIncrement: declaredGeneratedSequence,
 				previousAutoIncrement: liveGeneratedSequence,
+				transition: declaredGeneratedSequence ? 'enable' : 'disable',
 			},
 		});
 	}
@@ -802,6 +804,23 @@ function compareColumnDetails(
 			destructive: true,
 			details: `Change type of "${schema.name}" from ${db.type} to ${schema.type}`,
 			meta: { fromType: db.type, toType: schema.type, column: schema },
+		});
+	}
+
+	if (declaredGeneratedSequence && liveGeneratedSequence && typeChanged) {
+		changes.splice(changeStart, 0, {
+			kind: 'alter_column_auto_increment',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `Retype generated auto-increment for "${schema.name}"`,
+			meta: {
+				column: schema,
+				fromColumn: db,
+				autoIncrement: true,
+				previousAutoIncrement: true,
+				transition: 'retype',
+			},
 		});
 	}
 
@@ -1746,7 +1765,10 @@ function compareExtensions(
  * Compare those effective values so the DDL generated from a declaration reads
  * back as a fixed point, while a changed catalog value remains observable.
  */
-function effectiveSequenceOptions(sequence: SequenceIR): {
+function effectiveSequenceOptions(
+	sequence: SequenceIR,
+	validateDeclaredOptions = false,
+): {
 	readonly startWith: string;
 	readonly incrementBy: string;
 	readonly minValue: string;
@@ -1764,10 +1786,25 @@ function effectiveSequenceOptions(sequence: SequenceIR): {
 		normalizeSequenceInteger(sequence.maxValue, 'sequence MAXVALUE') ??
 		(ascending ? '9223372036854775807' : '-1');
 
+	const startWith =
+		normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
+		(ascending ? minValue : maxValue);
+	if (validateDeclaredOptions) {
+		if (BigInt(minValue) >= BigInt(maxValue))
+			throw new Error(
+				`sequence "${sequence.name}": minValue must be less than maxValue`,
+			);
+		if (
+			BigInt(startWith) < BigInt(minValue) ||
+			BigInt(startWith) > BigInt(maxValue)
+		)
+			throw new Error(
+				`sequence "${sequence.name}": startWith must be within minValue and maxValue`,
+			);
+	}
+
 	return {
-		startWith:
-			normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
-			(ascending ? minValue : maxValue),
+		startWith,
 		incrementBy,
 		minValue,
 		maxValue,
@@ -1793,6 +1830,7 @@ function compareSequences(
 
 	// Sequences in schema but not in DB → create
 	for (const [name, seq] of schemaSeqs) {
+		const effectiveSchemaSeq = effectiveSequenceOptions(seq, true);
 		if (!dbSeqs.has(name)) {
 			changes.push({
 				kind: 'create_sequence',
@@ -1803,7 +1841,6 @@ function compareSequences(
 			});
 		} else {
 			const dbSeq = dbSeqs.get(name)!;
-			const effectiveSchemaSeq = effectiveSequenceOptions(seq);
 			const effectiveDbSeq = effectiveSequenceOptions(dbSeq);
 			// Compare the effective PostgreSQL sequence state exactly. The integer
 			// normalizer preserves int64 precision before the BigInt sign check above.

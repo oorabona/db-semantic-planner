@@ -112,9 +112,13 @@ export class IndexFeatureUnsupportedError extends Error {
 export class AutoIncrementTransitionUnsupportedError extends Error {
 	readonly table: string;
 	readonly column: string;
-	readonly direction: string;
+	readonly direction: 'enable' | 'disable' | 'retype' | 'unknown';
 
-	constructor(table: string, column: string, direction: string) {
+	constructor(
+		table: string,
+		column: string,
+		direction: 'enable' | 'disable' | 'retype' | 'unknown',
+	) {
 		super(
 			`auto-increment transition for ${table}.${column} (${direction}) is unsupported: sequence creation, ownership, and default DDL must be written by hand`,
 		);

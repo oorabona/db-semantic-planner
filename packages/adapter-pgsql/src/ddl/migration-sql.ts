@@ -253,8 +253,10 @@ export function buildSequenceClause(
 		'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
 	>,
 	includeCycleNoCycle = false,
+	includeBigintDataType = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
+	if (includeBigintDataType) parts.push('AS bigint');
 	const startWith = normalizeSequenceInteger(
 		seq.startWith,
 		'sequence START WITH',
@@ -366,19 +368,30 @@ function isChangeSupported(
 	}
 }
 
-function assertNoAutoIncrementTransitions(diff: SchemaDiff): void {
+function autoIncrementTransitionDirection(
+	change: SchemaChange,
+	direction: 'up' | 'down',
+): 'enable' | 'disable' | 'retype' | 'unknown' {
+	const transition = change.meta?.transition;
+	if (transition === 'retype') return transition;
+	if (transition === 'enable') return direction === 'up' ? 'enable' : 'disable';
+	if (transition === 'disable')
+		return direction === 'up' ? 'disable' : 'enable';
+	return 'unknown';
+}
+
+function assertNoAutoIncrementTransitions(
+	diff: SchemaDiff,
+	direction: 'up' | 'down',
+): void {
 	const change = diff.changes.find(
 		(candidate) => candidate.kind === 'alter_column_auto_increment',
 	);
 	if (!change) return;
-	const direction =
-		change.meta?.autoIncrement === true
-			? 'enable generated auto-increment'
-			: 'disable generated auto-increment';
 	throw new AutoIncrementTransitionUnsupportedError(
 		change.table,
 		change.column ?? '<unknown column>',
-		direction,
+		autoIncrementTransitionDirection(change, direction),
 	);
 }
 
@@ -565,7 +578,7 @@ export function generateMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): readonly string[] {
-	assertNoAutoIncrementTransitions(diff);
+	assertNoAutoIncrementTransitions(diff, 'up');
 	const schemaName = options?.schemaName;
 	const changes = changesAppliedByUp(diff, options);
 	const indexContext = indexContextFromOptions(options);
@@ -1117,9 +1130,7 @@ function changeToUpSQL(
 			throw new AutoIncrementTransitionUnsupportedError(
 				change.table,
 				change.column ?? '<unknown column>',
-				change.meta?.autoIncrement === true
-					? 'enable generated auto-increment'
-					: 'disable generated auto-increment',
+				autoIncrementTransitionDirection(change, 'up'),
 			);
 		case 'add_comment':
 			return upAddComment(change, schemaName);
@@ -1157,6 +1168,7 @@ function changeToUpSQL(
 						'ALTER SEQUENCE',
 						upSequenceName(schemaName, seq),
 						seq,
+						true,
 						true,
 					)
 				: undefined;
@@ -1541,9 +1553,7 @@ function changeToDownSQL(
 			throw new AutoIncrementTransitionUnsupportedError(
 				change.table,
 				change.column ?? '<unknown column>',
-				change.meta?.autoIncrement === true
-					? 'enable generated auto-increment'
-					: 'disable generated auto-increment',
+				autoIncrementTransitionDirection(change, 'down'),
 			);
 
 		case 'add_comment': {
@@ -1770,7 +1780,7 @@ export function generateDownMigrationSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): DownMigrationSQL {
-	assertNoAutoIncrementTransitions(diff);
+	assertNoAutoIncrementTransitions(diff, 'down');
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
