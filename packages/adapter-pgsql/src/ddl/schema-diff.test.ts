@@ -4255,146 +4255,6 @@ describe('Sequences', () => {
 		);
 	});
 
-	it('compares the effective sequence data type and preserves it in alteration metadata', () => {
-		const schema = makeModelWithSequences([{ name: 'order_seq' }]);
-		const db = makeModelWithSequences([
-			{
-				name: 'order_seq',
-				dataType: 'integer',
-				startWith: '1',
-				incrementBy: '1',
-				minValue: '1',
-				maxValue: '2147483647',
-				cycle: false,
-			},
-		]);
-
-		const diff = compareSchemata(schema, db);
-		expect(changeKinds(diff.changes)).toEqual(['alter_sequence']);
-		expect(diff.changes[0]?.meta).toMatchObject({
-			sequence: { dataType: 'bigint' },
-			previousSequence: { dataType: 'integer' },
-		});
-		expect(generateMigrationSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
-		]);
-		expect(generateDownSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" AS integer START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 NO CYCLE;',
-		]);
-	});
-
-	it('does not alter a sequence whose declared and live effective data types match', () => {
-		const sequence: SequenceIR = {
-			name: 'order_seq',
-			dataType: 'integer',
-			startWith: '1',
-			incrementBy: '1',
-			minValue: '1',
-			maxValue: '2147483647',
-			cycle: false,
-		};
-		expect(
-			changeKinds(
-				compareSchemata(
-					makeModelWithSequences([sequence]),
-					makeModelWithSequences([sequence]),
-				).changes,
-			),
-		).not.toContain('alter_sequence');
-	});
-
-	it.each([
-		['smallint ascending', 'smallint', '1', '32767'],
-		['smallint descending', 'smallint', '-32768', '-1'],
-		['integer ascending', 'integer', '1', '2147483647'],
-		['integer descending', 'integer', '-2147483648', '-1'],
-		['bigint ascending', 'bigint', '1', '9223372036854775807'],
-		['bigint descending', 'bigint', '-9223372036854775808', '-1'],
-	] as const)(
-		'derives %s defaults from the sequence type and increment direction',
-		(_, dataType, minValue, maxValue) => {
-			const incrementBy = minValue.startsWith('-') ? '-1' : '1';
-			const declared = { name: 'order_seq', dataType, incrementBy };
-			const live = {
-				...declared,
-				startWith: incrementBy === '1' ? minValue : maxValue,
-				minValue,
-				maxValue,
-				cycle: false,
-			};
-
-			expect(
-				changeKinds(
-					compareSchemata(
-						makeModelWithSequences([declared]),
-						makeModelWithSequences([live]),
-					).changes,
-				),
-			).not.toContain('alter_sequence');
-		},
-	);
-
-	it('carries complete effective sequence options for both directions of an alteration', () => {
-		const schema = makeModelWithSequences([{ name: 'order_seq' }]);
-		const db = makeModelWithSequences([
-			{
-				name: 'order_seq',
-				startWith: '1',
-				incrementBy: '1',
-				minValue: '1',
-				maxValue: '1000',
-				cycle: false,
-			},
-		]);
-
-		const change = compareSchemata(schema, db).changes.find(
-			(candidate) => candidate.kind === 'alter_sequence',
-		);
-		expect(change?.meta).toEqual({
-			sequence: {
-				name: 'order_seq',
-				dataType: 'bigint',
-				startWith: '1',
-				incrementBy: '1',
-				minValue: '1',
-				maxValue: '9223372036854775807',
-				cycle: false,
-			},
-			previousSequence: {
-				name: 'order_seq',
-				dataType: 'bigint',
-				startWith: '1',
-				incrementBy: '1',
-				minValue: '1',
-				maxValue: '1000',
-				cycle: false,
-			},
-		});
-	});
-
-	it('uses the descending effective minimum when the declared sequence omits it', () => {
-		const schema = makeModelWithSequences([
-			{ name: 'order_seq', incrementBy: -1 },
-		]);
-		const db = makeModelWithSequences([
-			{
-				name: 'order_seq',
-				startWith: '-1',
-				incrementBy: '-1',
-				minValue: '-5',
-				maxValue: '-1',
-				cycle: false,
-			},
-		]);
-
-		const change = compareSchemata(schema, db).changes.find(
-			(candidate) => candidate.kind === 'alter_sequence',
-		);
-		expect(change?.meta?.sequence).toMatchObject({
-			minValue: '-9223372036854775808',
-		});
-	});
-
 	it('should detect altered sequence (cycle changed)', () => {
 		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
 		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
@@ -4417,17 +4277,17 @@ describe('Sequences', () => {
 		[
 			'has a minimum that is not less than its maximum',
 			{ name: 'order_seq', minValue: 10, maxValue: 5 },
-			'minValue must be less than maxValue',
+			'sequence "order_seq": minValue must be less than maxValue',
 		],
 		[
 			'has a start outside its effective bounds',
 			{ name: 'order_seq', startWith: 0 },
-			'startWith must be within minValue and maxValue',
+			'sequence "order_seq": startWith must be within minValue and maxValue',
 		],
 		[
-			'has a bound outside its effective data type range',
-			{ name: 'order_seq', dataType: 'smallint', maxValue: 40000 },
-			'maxValue must be within the smallint range',
+			'has a bound outside the bigint range',
+			{ name: 'order_seq', maxValue: '9223372036854775808' },
+			'sequence MAXVALUE: outside PostgreSQL sequence bounds',
 		],
 	] as const)('refuses a declared sequence that %s', (_, sequence, rule) => {
 		expect(() =>
@@ -4435,7 +4295,7 @@ describe('Sequences', () => {
 				makeModelWithSequences([sequence]),
 				makeModelWithSequences([]),
 			),
-		).toThrow(`sequence "order_seq": ${rule}`);
+		).toThrow(rule);
 	});
 
 	it('should detect altered sequence (minValue/maxValue changed)', () => {
@@ -4475,7 +4335,7 @@ describe('Sequences', () => {
 		const db = makeModelWithSequences([{ name: 'order_seq', incrementBy: 1 }]);
 		const diff = compareSchemata(schema, db);
 		const change = diff.changes.find((c) => c.kind === 'alter_sequence');
-		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: '1' });
+		expect(change?.meta?.previousSequence).toMatchObject({ incrementBy: 1 });
 	});
 });
 

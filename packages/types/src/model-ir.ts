@@ -308,8 +308,6 @@ export interface ForeignKeyIR {
 export interface SequenceIR {
 	/** Sequence name */
 	readonly name: string;
-	/** Sequence data type; absent means bigint, the type CREATE SEQUENCE uses without AS. */
-	readonly dataType?: 'smallint' | 'integer' | 'bigint';
 	/** Start value */
 	readonly startWith?: number | string;
 	/** Increment step */

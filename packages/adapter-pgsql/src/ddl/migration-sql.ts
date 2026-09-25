@@ -250,12 +250,11 @@ export function buildSequenceClause(
 	seqName: string,
 	seq: Pick<
 		SequenceIR,
-		'dataType' | 'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
+		'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
 	>,
 	includeCycleNoCycle = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
-	if (seq.dataType !== undefined) parts.push(`AS ${seq.dataType}`);
 	const startWith = normalizeSequenceInteger(
 		seq.startWith,
 		'sequence START WITH',

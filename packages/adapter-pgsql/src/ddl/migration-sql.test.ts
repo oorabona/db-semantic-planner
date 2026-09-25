@@ -4126,43 +4126,6 @@ describe('Extensions — migration SQL', () => {
 // ============================================================================
 
 describe('Sequences — migration SQL', () => {
-	it('alters every effective option and restores every prior option', () => {
-		const schema = new ModelIRImpl(
-			new Map(),
-			new Map(),
-			undefined,
-			undefined,
-			new Map([['order_seq', { name: 'order_seq' }]]),
-		);
-		const db = new ModelIRImpl(
-			new Map(),
-			new Map(),
-			undefined,
-			undefined,
-			new Map([
-				[
-					'order_seq',
-					{
-						name: 'order_seq',
-						startWith: '1',
-						incrementBy: '1',
-						minValue: '1',
-						maxValue: '1000',
-						cycle: false,
-					},
-				],
-			]),
-		);
-
-		const diff = compareSchemata(schema, db);
-		expect(generateMigrationSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 NO CYCLE;',
-		]);
-		expect(generateDownSQL(diff)).toEqual([
-			'ALTER SEQUENCE "order_seq" AS bigint START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 1000 NO CYCLE;',
-		]);
-	});
-
 	it('should generate CREATE SEQUENCE with all options', () => {
 		const seq: SequenceIR = {
 			name: 'order_seq',
@@ -4200,21 +4163,6 @@ describe('Sequences — migration SQL', () => {
 		]);
 		const sql = generateMigrationSQL(diff);
 		expect(sql[0]).toBe('CREATE SEQUENCE "simple_seq";');
-	});
-
-	it('emits a declared sequence data type without changing the untyped CREATE form', () => {
-		const sql = generateMigrationSQL(
-			makeDiff([
-				{
-					kind: 'create_sequence',
-					table: '',
-					destructive: false,
-					details: '',
-					meta: { sequence: { name: 'small_seq', dataType: 'smallint' } },
-				},
-			]),
-		);
-		expect(sql).toEqual(['CREATE SEQUENCE "small_seq" AS smallint;']);
 	});
 
 	it('should generate CREATE SEQUENCE with schema prefix', () => {
@@ -4419,7 +4367,6 @@ describe('Sequences — migration SQL', () => {
 		]);
 		const sql = generateDownSQL(diff);
 		expect(sql[0]).toBe('ALTER SEQUENCE "order_seq" INCREMENT BY 1;');
-		expect(sql[0]).not.toContain('AS bigint');
 	});
 });
 

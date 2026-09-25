@@ -6,7 +6,6 @@
 import {
 	comparePgsqlDatabaseSchema,
 	compareSchemata,
-	generateDownSQL,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl } from '@dbsp/core';
@@ -282,55 +281,6 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect(
 			(await changes(desired)).changes.map((change) => change.kind),
 		).toEqual(['alter_sequence']);
-	});
-
-	it('alters a standalone sequence to its complete declared state and restores its prior maximum', async () => {
-		const pool = await getTestPool();
-		await pool.query(`CREATE SEQUENCE ${SCHEMA}.s MAXVALUE 1000`);
-		const desired = model([], undefined, [{ name: 's' }]);
-		const diff = await changes(desired);
-		expect(diff.changes.map((change) => change.kind)).toEqual([
-			'alter_sequence',
-		]);
-
-		for (const statement of generateMigrationSQL(diff, { schemaName: SCHEMA }))
-			await pool.query(statement);
-		expect((await changes(desired)).changes).toEqual([]);
-
-		for (const statement of generateDownSQL(diff, { schemaName: SCHEMA }))
-			await pool.query(statement);
-		const live = await adapter.introspect({ schema: SCHEMA });
-		expect(live.sequences?.get('s')?.maxValue).toBe('1000');
-	});
-
-	it('alters an integer standalone sequence to the declared bigint type', async () => {
-		const pool = await getTestPool();
-		await pool.query(`CREATE SEQUENCE "${SCHEMA}"."narrow_seq" AS integer`);
-		const desired = model([], undefined, [{ name: 'narrow_seq' }]);
-		const diff = await changes(desired);
-
-		for (const statement of generateMigrationSQL(diff, { schemaName: SCHEMA }))
-			await pool.query(statement);
-		expect((await changes(desired)).changes).toEqual([]);
-		expect(
-			(
-				await pool.query(
-					'SELECT data_type FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2',
-					[SCHEMA, 'narrow_seq'],
-				)
-			).rows[0]?.data_type,
-		).toBe('bigint');
-
-		for (const statement of generateDownSQL(diff, { schemaName: SCHEMA }))
-			await pool.query(statement);
-		expect(
-			(
-				await pool.query(
-					'SELECT data_type, max_value FROM pg_sequences WHERE schemaname = $1 AND sequencename = $2',
-					[SCHEMA, 'narrow_seq'],
-				)
-			).rows[0],
-		).toMatchObject({ data_type: 'integer', max_value: '2147483647' });
 	});
 
 	it('converges non-default GIN/GiST opclasses and INCLUDE columns', async () => {
