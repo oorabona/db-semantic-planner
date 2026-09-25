@@ -35,6 +35,7 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
+import { generatedSequenceDefaultPredicate } from './ddl/generated-sequence-default.js';
 import { normalizeSequenceInteger } from './ddl/generated-source-normalizers.js';
 import {
 	DBSP_META_SCHEMA,
@@ -96,6 +97,7 @@ interface RawColumn {
 	collation_name: string | null;
 	is_identity: string;
 	identity_generation: string | null;
+	is_generated_sequence_default: boolean;
 }
 
 interface RawFormattedColumnType {
@@ -311,13 +313,36 @@ async function queryAllCatalogs(
 ): Promise<CatalogResults> {
 	const catalogQueries = [
 		() =>
-			// 1. Columns (including identity and collation)
+			// 1. Columns (including identity, collation, and SERIAL default ownership)
 			pool.query<RawColumn>(
-				`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
-			        collation_name, is_identity, identity_generation
-			 FROM information_schema.columns
-			 WHERE table_schema = $1
-			 ORDER BY table_name, ordinal_position`,
+				`SELECT columns.table_name, columns.column_name, columns.data_type, columns.udt_name,
+			        columns.is_nullable, columns.column_default, columns.collation_name,
+			        columns.is_identity, columns.identity_generation,
+			        EXISTS (
+			          SELECT 1
+			          FROM pg_catalog.pg_namespace namespace
+			          JOIN pg_catalog.pg_class relation
+			            ON relation.relnamespace = namespace.oid
+			          JOIN pg_catalog.pg_attribute attribute
+			            ON attribute.attrelid = relation.oid
+			           AND attribute.attnum > 0
+			           AND NOT attribute.attisdropped
+			          JOIN pg_catalog.pg_attrdef default_value
+			            ON default_value.adrelid = attribute.attrelid
+			           AND default_value.adnum = attribute.attnum
+			          WHERE namespace.nspname = columns.table_schema
+			            AND relation.relname = columns.table_name
+			            AND attribute.attname = columns.column_name
+			            AND attribute.atttypid IN ('pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
+			            AND ${generatedSequenceDefaultPredicate({
+										relation: 'relation',
+										attribute: 'attribute',
+										attrdef: 'default_value',
+									})}
+			        ) AS is_generated_sequence_default
+			 FROM information_schema.columns columns
+			 WHERE columns.table_schema = $1
+			 ORDER BY columns.table_name, columns.ordinal_position`,
 				[schema],
 			),
 		() =>
@@ -391,18 +416,18 @@ async function queryAllCatalogs(
 			   i.relname AS index_name,
 			   t.relname AS table_name,
 			   -- Key columns (attnum != 0 means real column, within key positions)
-			   array_agg(a.attname ORDER BY k.n)
+			   array_agg(a.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0) AS columns,
 			   -- INCLUDE columns (positions after indnkeyatts)
-			   array_agg(a_inc.attname ORDER BY k.n)
+			   array_agg(a_inc.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n > ix.indnkeyatts) AS include_columns,
 			   -- Full expression string for expression indexes (NULL if none)
 			   pg_get_expr(ix.indexprs, ix.indrelid, false) AS expressions_text,
 			   -- Non-default opclass names (parallel arrays with opclass_cols)
-			   array_agg(oc.opcname ORDER BY k.n)
+			   array_agg(oc.opcname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_names,
-			   array_agg(a.attname ORDER BY k.n)
+			   array_agg(a.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
@@ -461,7 +486,7 @@ async function queryAllCatalogs(
 				`SELECT
 			   t.typname AS name,
 			   n.nspname AS schema,
-			   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+			   array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS values
 			 FROM pg_type t
 			 JOIN pg_enum e ON e.enumtypid = t.oid
 			 JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -515,7 +540,7 @@ async function queryAllCatalogs(
 				`SELECT
 			   c.relname AS table_name,
 			   p.partstrat AS strategy,
-			   array_agg(a.attname ORDER BY pk.n) AS columns
+			   array_agg(a.attname::text ORDER BY pk.n) AS columns
 			 FROM pg_partitioned_table p
 			 JOIN pg_class c ON c.oid = p.partrelid
 			 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -533,7 +558,7 @@ async function queryAllCatalogs(
 			 WHERE extname != 'plpgsql'`,
 			),
 		() =>
-			// 11. Sequences not backed by SERIAL
+			// 11. Sequences not backed by SERIAL or IDENTITY columns
 			pool.query<{
 				name: string;
 				start_value: string;
@@ -551,9 +576,16 @@ async function queryAllCatalogs(
 			 FROM pg_sequences s
 			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
 			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
-			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
-			 WHERE s.schemaname = $1
-			   AND d.objid IS NULL`,
+				 WHERE s.schemaname = $1
+				   AND NOT EXISTS (
+				     SELECT 1
+				     FROM pg_catalog.pg_depend d
+				     WHERE d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+				       AND d.objid = c.oid
+				       AND d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+				       AND d.refobjsubid > 0
+				       AND d.deptype IN ('a', 'i')
+				   )`,
 				[schema],
 			),
 		() =>
@@ -1179,6 +1211,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
 				: {}),
+			...(col.is_generated_sequence_default ? { autoIncrement: true } : {}),
 			// format_type preserves typmod/array fidelity; any schema qualification it
 			// adds is search_path-relative, so originalDbType is stored bare and the
 			// catalog schema/scope are stored structurally.

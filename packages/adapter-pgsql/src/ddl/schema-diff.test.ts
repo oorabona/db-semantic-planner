@@ -571,6 +571,105 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('alter_column_default');
 		});
 
+		it('ignores only absent or generated sequence defaults when both columns are auto-incrementing', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+						}),
+					],
+				}),
+			]);
+			const generatedDefault = { sql: "nextval('users_id_seq'::regclass)" };
+			const generatedDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: generatedDefault,
+						}),
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, generatedDb).changes).toEqual([]);
+
+			const authoredDefaultDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: 42,
+						}),
+					],
+				}),
+			]);
+
+			expect(
+				changeKinds(compareSchemata(schema, authoredDefaultDb).changes),
+			).toEqual(['alter_column_default']);
+
+			const plainDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							default: generatedDefault,
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, plainDb).changes)).toEqual([
+				'alter_column_default',
+			]);
+		});
+
+		it('compares an authored auto-increment default against a generated default', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: 42,
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: { sql: "nextval('users_id_seq'::regclass)" },
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+				'alter_column_default',
+			);
+		});
+
 		it('should not flag identical defaults', () => {
 			const schema = makeModel([
 				makeTable({
@@ -2708,6 +2807,189 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
+		it('treats an empty declared originalDbType as absent', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'value',
+							type: 'string',
+							originalDbType: '',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'value',
+							type: 'string',
+							originalDbType: 'text',
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).not.toContain(
+				'alter_column_type',
+			);
+		});
+
+		it.each([
+			{
+				name: 'JSONB',
+				authoredType: 'json' as ColumnIR['type'],
+				authoredDbType: 'JSONB',
+				liveType: 'jsonb' as ColumnIR['type'],
+				liveDbType: 'jsonb',
+			},
+			{
+				name: 'REAL',
+				authoredType: 'number' as ColumnIR['type'],
+				authoredDbType: 'REAL',
+				liveType: 'decimal' as ColumnIR['type'],
+				liveDbType: 'float4',
+			},
+			{
+				name: 'vector(1024)',
+				authoredType: 'json' as ColumnIR['type'],
+				authoredDbType: 'vector(1024)',
+				liveType: 'string' as ColumnIR['type'],
+				liveDbType: 'vector(1024)',
+			},
+		])(
+			'does not fall through to neutral types after matching physical %s',
+			({ authoredType, authoredDbType, liveType, liveDbType }) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [
+							makeCol({
+								name: 'value',
+								type: authoredType,
+								originalDbType: authoredDbType,
+							}),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [
+							makeCol({
+								name: 'value',
+								type: liveType,
+								originalDbType: liveDbType,
+							}),
+						],
+					}),
+				]);
+
+				expect(changeKinds(compareSchemata(schema, db).changes)).not.toContain(
+					'alter_column_type',
+				);
+			},
+		);
+
+		const emittedTypeCases: readonly [
+			ColumnIR['type'],
+			ColumnIR['type'],
+			string,
+		][] = [
+			['json', 'jsonb', 'jsonb'],
+			['number', 'decimal', 'integer'],
+			['string', 'string', 'varchar(255)'],
+		];
+
+		it.each(emittedTypeCases)(
+			'uses the emitted type when only the live column has originalDbType (%s)',
+			(authoredType, liveType, liveDbType) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [makeCol({ name: 'value', type: authoredType })],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [
+							makeCol({
+								name: 'value',
+								type: liveType,
+								originalDbType: liveDbType,
+							}),
+						],
+					}),
+				]);
+
+				expect(changeKinds(compareSchemata(schema, db).changes)).not.toContain(
+					'alter_column_type',
+				);
+			},
+		);
+
+		it.each([
+			['integer', 'int4'],
+			['json', 'jsonb'],
+		] as const)(
+			'detects a custom %s type whose bare name collides with a built-in',
+			(authoredType, liveDbType) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [makeCol({ name: 'value', type: authoredType })],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [
+							makeCol({
+								name: 'value',
+								type: 'string',
+								originalDbType: liveDbType,
+								originalDbTypeSchema: 'tenant',
+								originalDbTypeSchemaScope: 'absolute',
+							}),
+						],
+					}),
+				]);
+
+				expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+					'alter_column_type',
+				);
+			},
+		);
+
+		it('keeps a neutral physical mismatch as an alter_column_type', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [makeCol({ name: 'value', type: 'integer' })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'items',
+					columns: [
+						makeCol({
+							name: 'value',
+							type: 'text',
+							originalDbType: 'text',
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+				'alter_column_type',
+			);
+		});
+
 		it('falls back to base type when no originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
@@ -3753,11 +4035,99 @@ describe('Sequences', () => {
 		);
 	});
 
+	it.each([
+		[
+			'explicit start and increment',
+			{ startWith: 1, incrementBy: 1 },
+			{
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '9223372036854775807',
+				cycle: false,
+			},
+		],
+		[
+			'descending increment',
+			{ incrementBy: -1 },
+			{
+				startWith: '-1',
+				incrementBy: '-1',
+				minValue: '-9223372036854775808',
+				maxValue: '-1',
+				cycle: false,
+			},
+		],
+		[
+			'explicit minimum',
+			{ minValue: 10 },
+			{
+				startWith: '10',
+				incrementBy: '1',
+				minValue: '10',
+				maxValue: '9223372036854775807',
+				cycle: false,
+			},
+		],
+		[
+			'all defaults',
+			{},
+			{
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '9223372036854775807',
+				cycle: false,
+			},
+		],
+	] as const)(
+		'does not alter PostgreSQL defaulted sequence options (%s)',
+		(_, declared, live) => {
+			const schema = makeModelWithSequences([
+				{ name: 'order_seq', ...declared },
+			]);
+			const db = makeModelWithSequences([{ name: 'order_seq', ...live }]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).not.toContain(
+				'alter_sequence',
+			);
+		},
+	);
+
+	it('still detects a hand-altered defaulted maximum', () => {
+		const schema = makeModelWithSequences([{ name: 'order_seq' }]);
+		const db = makeModelWithSequences([
+			{
+				name: 'order_seq',
+				startWith: '1',
+				incrementBy: '1',
+				minValue: '1',
+				maxValue: '1000',
+				cycle: false,
+			},
+		]);
+
+		expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+			'alter_sequence',
+		);
+	});
+
 	it('should detect altered sequence (cycle changed)', () => {
 		const schema = makeModelWithSequences([{ name: 'order_seq', cycle: true }]);
 		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('rejects a null cycle just as sequence emission does', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', cycle: null as unknown as boolean },
+		]);
+		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
+
+		expect(() => compareSchemata(schema, db)).toThrow(
+			'sequence CYCLE: expected a boolean',
+		);
 	});
 
 	it('should detect altered sequence (minValue/maxValue changed)', () => {

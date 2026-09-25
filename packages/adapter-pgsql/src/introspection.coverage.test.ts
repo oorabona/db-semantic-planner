@@ -68,6 +68,57 @@ function createMockPool(
 // Column type mapping
 // ---------------------------------------------------------------------------
 describe('introspection — column type mapping', () => {
+	it('preserves a SERIAL default and marks its owned int4 column as auto-incrementing', async () => {
+		const columns = {
+			rows: [
+				{
+					table_name: 'projects',
+					column_name: 'id',
+					data_type: 'integer',
+					udt_name: 'int4',
+					is_nullable: 'NO',
+					column_default: "nextval('projects_id_seq'::regclass)",
+					is_generated_sequence_default: true,
+				},
+				{
+					table_name: 'projects',
+					column_name: 'not_generated',
+					data_type: 'integer',
+					udt_name: 'int4',
+					is_nullable: 'NO',
+					column_default: "nextval('free_seq'::regclass)",
+					is_generated_sequence_default: false,
+				},
+			],
+		};
+		const pool = {
+			query: vi.fn((sql: string) => {
+				if (sql.includes('information_schema.columns')) return columns;
+				return { rows: [] };
+			}),
+		} as any;
+
+		const model = await introspect(pool);
+		expect(model.getTable('projects')?.columns).toEqual([
+			expect.objectContaining({
+				name: 'id',
+				autoIncrement: true,
+				default: { sql: "nextval('projects_id_seq'::regclass)" },
+			}),
+			expect.objectContaining({
+				name: 'not_generated',
+				default: { sql: "nextval('free_seq'::regclass)" },
+			}),
+		]);
+		expect(
+			model
+				.getTable('projects')
+				?.columns.find((column) => column.name === 'not_generated')
+				?.autoIncrement,
+		).toBeUndefined();
+		expect(pool.query).toHaveBeenCalledTimes(15);
+	});
+
 	it('maps uuid UDT type', async () => {
 		const pool = createMockPool(
 			{

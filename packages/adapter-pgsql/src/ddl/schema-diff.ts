@@ -46,7 +46,10 @@ import {
 	type NamingPlugin,
 } from '../naming-plugin.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
-import { normalizeSequenceInteger } from './generated-source-normalizers.js';
+import {
+	normalizeOptionalBoolean,
+	normalizeSequenceInteger,
+} from './generated-source-normalizers.js';
 
 // ============================================================================
 // Types
@@ -719,16 +722,39 @@ function compareColumnDetails(
 	// `status` carrying an equal schema identity) and let the schema IDENTITY carry
 	// any schema difference — avoids double-counting the schema and false-diffing a
 	// qualified string against an equivalent bare+field column.
-	if (
-		schema.originalDbType &&
-		db.originalDbType &&
+	const carriedOriginalDbType = (column: ColumnIR): string | undefined => {
+		const originalDbType = column.originalDbType;
+		return originalDbType?.trim() ? originalDbType : undefined;
+	};
+	const schemaOriginalDbType = carriedOriginalDbType(schema);
+	const dbOriginalDbType = carriedOriginalDbType(db);
+	const bothCarryOriginalDbType =
+		schemaOriginalDbType !== undefined && dbOriginalDbType !== undefined;
+	const physicalTypesDiffer =
+		bothCarryOriginalDbType &&
 		(!dbTypesEqual(
-			stripDbTypeSchema(schema.originalDbType),
-			stripDbTypeSchema(db.originalDbType),
+			stripDbTypeSchema(schemaOriginalDbType),
+			stripDbTypeSchema(dbOriginalDbType),
 		) ||
-			(compareSchemaIdentity && schemaTypeIdentity !== dbTypeIdentity))
-	) {
-		// Both have originalDbType and they differ → precision/type change
+			(compareSchemaIdentity && schemaTypeIdentity !== dbTypeIdentity));
+	const emittedTypeMatchesLiveOriginalDbType =
+		schemaOriginalDbType === undefined &&
+		dbOriginalDbType !== undefined &&
+		// A rendered built-in must not match a custom type with the same bare
+		// spelling (for example tenant.int4). Introspection gives every built-in
+		// the `builtin` identity and custom types a target or absolute identity.
+		dbTypeIdentity === 'builtin' &&
+		dbTypesEqual(
+			stripDbTypeSchema(renderColumnDbType(schema)),
+			stripDbTypeSchema(dbOriginalDbType),
+		);
+	const typeChanged = bothCarryOriginalDbType
+		? physicalTypesDiffer
+		: !areTypesEquivalent(schema.type, db.type) &&
+			!emittedTypeMatchesLiveOriginalDbType;
+
+	if (typeChanged && bothCarryOriginalDbType) {
+		// Both have originalDbType and they differ → precision/type change.
 		changes.push({
 			kind: 'alter_column_type',
 			table: tableName,
@@ -744,7 +770,7 @@ function compareColumnDetails(
 				fromColumn: db,
 			},
 		});
-	} else if (!areTypesEquivalent(schema.type, db.type)) {
+	} else if (typeChanged) {
 		// Fall back to base type comparison (original behavior)
 		changes.push({
 			kind: 'alter_column_type',
@@ -771,7 +797,13 @@ function compareColumnDetails(
 	// Default change — compare normalized string representations
 	const schemaDefault = normalizeDefault(schema.default);
 	const dbDefault = normalizeDefault(db.default);
-	if (schemaDefault !== dbDefault) {
+	const ignoreGeneratedSequenceDefault =
+		schema.autoIncrement === true &&
+		db.autoIncrement === true &&
+		schema.default === undefined &&
+		(dbDefault === undefined ||
+			/^nextval\('([^']|'')*'::regclass\)$/.test(dbDefault));
+	if (!ignoreGeneratedSequenceDefault && schemaDefault !== dbDefault) {
 		changes.push({
 			kind: 'alter_column_default',
 			table: tableName,
@@ -1677,6 +1709,40 @@ function compareExtensions(
 // Sequence Diff
 // ============================================================================
 
+/**
+ * PostgreSQL materializes omitted CREATE SEQUENCE options as bigint defaults.
+ * Compare those effective values so the DDL generated from a declaration reads
+ * back as a fixed point, while a changed catalog value remains observable.
+ */
+function effectiveSequenceOptions(sequence: SequenceIR): {
+	readonly startWith: string;
+	readonly incrementBy: string;
+	readonly minValue: string;
+	readonly maxValue: string;
+	readonly cycle: boolean;
+} {
+	const incrementBy =
+		normalizeSequenceInteger(sequence.incrementBy, 'sequence INCREMENT BY') ??
+		'1';
+	const ascending = BigInt(incrementBy) > 0n;
+	const minValue =
+		normalizeSequenceInteger(sequence.minValue, 'sequence MINVALUE') ??
+		(ascending ? '1' : '-9223372036854775808');
+	const maxValue =
+		normalizeSequenceInteger(sequence.maxValue, 'sequence MAXVALUE') ??
+		(ascending ? '9223372036854775807' : '-1');
+
+	return {
+		startWith:
+			normalizeSequenceInteger(sequence.startWith, 'sequence START WITH') ??
+			(ascending ? minValue : maxValue),
+		incrementBy,
+		minValue,
+		maxValue,
+		cycle: normalizeOptionalBoolean(sequence.cycle, 'sequence CYCLE') ?? false,
+	};
+}
+
 function compareSequences(
 	schema: ModelIR,
 	db: ModelIR,
@@ -1697,20 +1763,16 @@ function compareSequences(
 			});
 		} else {
 			const dbSeq = dbSeqs.get(name)!;
-			// Compare relevant properties
+			const effectiveSchemaSeq = effectiveSequenceOptions(seq);
+			const effectiveDbSeq = effectiveSequenceOptions(dbSeq);
+			// Compare the effective PostgreSQL sequence state exactly. The integer
+			// normalizer preserves int64 precision before the BigInt sign check above.
 			if (
-				normalizeSequenceInteger(seq.startWith, 'sequence START WITH') !==
-					normalizeSequenceInteger(dbSeq.startWith, 'sequence START WITH') ||
-				normalizeSequenceInteger(seq.incrementBy, 'sequence INCREMENT BY') !==
-					normalizeSequenceInteger(
-						dbSeq.incrementBy,
-						'sequence INCREMENT BY',
-					) ||
-				normalizeSequenceInteger(seq.minValue, 'sequence MINVALUE') !==
-					normalizeSequenceInteger(dbSeq.minValue, 'sequence MINVALUE') ||
-				normalizeSequenceInteger(seq.maxValue, 'sequence MAXVALUE') !==
-					normalizeSequenceInteger(dbSeq.maxValue, 'sequence MAXVALUE') ||
-				seq.cycle !== dbSeq.cycle
+				effectiveSchemaSeq.startWith !== effectiveDbSeq.startWith ||
+				effectiveSchemaSeq.incrementBy !== effectiveDbSeq.incrementBy ||
+				effectiveSchemaSeq.minValue !== effectiveDbSeq.minValue ||
+				effectiveSchemaSeq.maxValue !== effectiveDbSeq.maxValue ||
+				effectiveSchemaSeq.cycle !== effectiveDbSeq.cycle
 			) {
 				changes.push({
 					kind: 'alter_sequence',
