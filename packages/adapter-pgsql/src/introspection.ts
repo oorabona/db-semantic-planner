@@ -97,6 +97,7 @@ interface RawColumn {
 	collation_name: string | null;
 	is_identity: string;
 	identity_generation: string | null;
+	is_generated_sequence_default: boolean;
 }
 
 interface RawFormattedColumnType {
@@ -105,11 +106,6 @@ interface RawFormattedColumnType {
 	db_type: string;
 	/** nspname of the column type's own namespace (pg_type.typnamespace). */
 	type_schema: string;
-}
-
-interface RawGeneratedSequenceDefault {
-	table_name: string;
-	column_name: string;
 }
 
 interface RawLogicalIdentity {
@@ -303,15 +299,13 @@ interface CatalogResults {
 		with_check_expr: string | null;
 	}>;
 	formattedColumnTypes: RawFormattedColumnType[];
-	generatedSequenceDefaults: RawGeneratedSequenceDefault[];
 }
 
 /**
- * Run all 15 catalog queries in parallel.
+ * Run all 14 catalog queries in parallel.
  * Order matches the coverage test mock sequence: columns, pks, fks, indexes,
  * unique columns, enums, comments, checks, partitions, extensions (no schema
- * param), sequences, rls state, policies, formatted column types, generated
- * sequence defaults.
+ * param), sequences, rls state, policies, formatted column types.
  */
 async function queryAllCatalogs(
 	pool: CatalogQueryExecutor,
@@ -319,13 +313,36 @@ async function queryAllCatalogs(
 ): Promise<CatalogResults> {
 	const catalogQueries = [
 		() =>
-			// 1. Columns (including identity and collation)
+			// 1. Columns (including identity, collation, and SERIAL default ownership)
 			pool.query<RawColumn>(
-				`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
-			        collation_name, is_identity, identity_generation
-			 FROM information_schema.columns
-			 WHERE table_schema = $1
-			 ORDER BY table_name, ordinal_position`,
+				`SELECT columns.table_name, columns.column_name, columns.data_type, columns.udt_name,
+			        columns.is_nullable, columns.column_default, columns.collation_name,
+			        columns.is_identity, columns.identity_generation,
+			        EXISTS (
+			          SELECT 1
+			          FROM pg_catalog.pg_namespace namespace
+			          JOIN pg_catalog.pg_class relation
+			            ON relation.relnamespace = namespace.oid
+			          JOIN pg_catalog.pg_attribute attribute
+			            ON attribute.attrelid = relation.oid
+			           AND attribute.attnum > 0
+			           AND NOT attribute.attisdropped
+			          JOIN pg_catalog.pg_attrdef default_value
+			            ON default_value.adrelid = attribute.attrelid
+			           AND default_value.adnum = attribute.attnum
+			          WHERE namespace.nspname = columns.table_schema
+			            AND relation.relname = columns.table_name
+			            AND attribute.attname = columns.column_name
+			            AND attribute.atttypid IN ('pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
+			            AND ${generatedSequenceDefaultPredicate({
+										relation: 'relation',
+										attribute: 'attribute',
+										attrdef: 'default_value',
+									})}
+			        ) AS is_generated_sequence_default
+			 FROM information_schema.columns columns
+			 WHERE columns.table_schema = $1
+			 ORDER BY columns.table_name, columns.ordinal_position`,
 				[schema],
 			),
 		() =>
@@ -559,9 +576,16 @@ async function queryAllCatalogs(
 			 FROM pg_sequences s
 			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
 			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
-			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype IN ('a', 'i')
-			 WHERE s.schemaname = $1
-			   AND d.objid IS NULL`,
+				 WHERE s.schemaname = $1
+				   AND NOT EXISTS (
+				     SELECT 1
+				     FROM pg_catalog.pg_depend d
+				     WHERE d.classid = 'pg_catalog.pg_class'::pg_catalog.regclass
+				       AND d.objid = c.oid
+				       AND d.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass
+				       AND d.refobjsubid > 0
+				       AND d.deptype IN ('a', 'i')
+				   )`,
 				[schema],
 			),
 		() =>
@@ -630,28 +654,6 @@ async function queryAllCatalogs(
 			   )`,
 				[schema],
 			),
-		() =>
-			// 15. SERIAL/BIGSERIAL defaults owned by their int4/int8 column.
-			pool.query<RawGeneratedSequenceDefault>(
-				`SELECT relation.relname AS table_name, attribute.attname AS column_name
-				 FROM pg_catalog.pg_namespace namespace
-				 JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid
-				 JOIN pg_catalog.pg_attribute attribute
-				   ON attribute.attrelid = relation.oid
-				   AND attribute.attnum > 0
-				   AND NOT attribute.attisdropped
-				 JOIN pg_catalog.pg_attrdef default_value
-				   ON default_value.adrelid = attribute.attrelid
-				   AND default_value.adnum = attribute.attnum
-				 WHERE namespace.nspname = $1
-				   AND attribute.atttypid IN ('pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
-				   AND ${generatedSequenceDefaultPredicate({
-							relation: 'relation',
-							attribute: 'attribute',
-							attrdef: 'default_value',
-						})}`,
-				[schema],
-			),
 	] as const;
 
 	const results = pool.sequentialCatalogReads
@@ -678,7 +680,6 @@ async function queryAllCatalogs(
 		rlsResult,
 		policiesResult,
 		formattedColumnTypesResult,
-		generatedSequenceDefaultsResult,
 	] = results as [
 		QueryResult<RawColumn>,
 		QueryResult<RawPrimaryKey>,
@@ -718,7 +719,6 @@ async function queryAllCatalogs(
 			with_check_expr: string | null;
 		}>,
 		QueryResult<RawFormattedColumnType>,
-		QueryResult<RawGeneratedSequenceDefault>,
 	];
 
 	return {
@@ -736,7 +736,6 @@ async function queryAllCatalogs(
 		rls: rlsResult.rows,
 		policies: policiesResult.rows,
 		formattedColumnTypes: formattedColumnTypesResult.rows,
-		generatedSequenceDefaults: generatedSequenceDefaultsResult.rows,
 	};
 }
 
@@ -888,21 +887,6 @@ function buildColumnMap(rows: RawColumn[]): Map<string, RawColumn[]> {
 			existing.push(col);
 		} else {
 			result.set(col.table_name, [col]);
-		}
-	}
-	return result;
-}
-
-function buildGeneratedSequenceDefaultMap(
-	rows: RawGeneratedSequenceDefault[],
-): Map<string, Set<string>> {
-	const result = new Map<string, Set<string>>();
-	for (const row of rows) {
-		const columns = result.get(row.table_name);
-		if (columns) {
-			columns.add(row.column_name);
-		} else {
-			result.set(row.table_name, new Set([row.column_name]));
 		}
 	}
 	return result;
@@ -1162,7 +1146,6 @@ function buildLogicalIdentityMaps(rows: readonly RawLogicalIdentity[]): {
 interface TableIRContext {
 	tableColumns: Map<string, RawColumn[]>;
 	formattedColumnTypes: Map<string, FormattedColumnType>;
-	generatedSequenceDefaults: Map<string, Set<string>>;
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
@@ -1185,8 +1168,6 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	const rawCols = ctx.tableColumns.get(tableName) ?? [];
 	const pkCols = ctx.tablePKs.get(tableName);
 	const uniqueColumns = ctx.uniqueColumns.get(tableName);
-	const generatedSequenceDefaults =
-		ctx.generatedSequenceDefaults.get(tableName);
 
 	const columns: ColumnIR[] = rawCols.map((col) => {
 		// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
@@ -1230,9 +1211,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
 				: {}),
-			...(generatedSequenceDefaults?.has(col.column_name)
-				? { autoIncrement: true }
-				: {}),
+			...(col.is_generated_sequence_default ? { autoIncrement: true } : {}),
 			// format_type preserves typmod/array fidelity; any schema qualification it
 			// adds is search_path-relative, so originalDbType is stored bare and the
 			// catalog schema/scope are stored structurally.
@@ -1441,9 +1420,6 @@ export async function introspectWithExecutor(
 	const formattedColumnTypes = buildFormattedColumnTypeMap(
 		raw.formattedColumnTypes,
 	);
-	const generatedSequenceDefaults = buildGeneratedSequenceDefaultMap(
-		raw.generatedSequenceDefaults,
-	);
 	const tablePKs = buildPKMap(raw.pks);
 	const fksByConstraint = buildFKMap(raw.fks);
 	const enumMap = buildEnumMap(raw.enums);
@@ -1471,7 +1447,6 @@ export async function introspectWithExecutor(
 		const table = buildTableIR(tableName, {
 			tableColumns,
 			formattedColumnTypes,
-			generatedSequenceDefaults,
 			tablePKs,
 			fksByConstraint,
 			tableIndexes,

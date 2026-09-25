@@ -46,7 +46,10 @@ import {
 	type NamingPlugin,
 } from '../naming-plugin.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
-import { normalizeSequenceInteger } from './generated-source-normalizers.js';
+import {
+	normalizeOptionalBoolean,
+	normalizeSequenceInteger,
+} from './generated-source-normalizers.js';
 
 // ============================================================================
 // Types
@@ -737,6 +740,10 @@ function compareColumnDetails(
 	const emittedTypeMatchesLiveOriginalDbType =
 		schemaOriginalDbType === undefined &&
 		dbOriginalDbType !== undefined &&
+		// A rendered built-in must not match a custom type with the same bare
+		// spelling (for example tenant.int4). Introspection gives every built-in
+		// the `builtin` identity and custom types a target or absolute identity.
+		dbTypeIdentity === 'builtin' &&
 		dbTypesEqual(
 			stripDbTypeSchema(renderColumnDbType(schema)),
 			stripDbTypeSchema(dbOriginalDbType),
@@ -790,7 +797,13 @@ function compareColumnDetails(
 	// Default change — compare normalized string representations
 	const schemaDefault = normalizeDefault(schema.default);
 	const dbDefault = normalizeDefault(db.default);
-	if (schema.autoIncrement !== true || db.autoIncrement !== true) {
+	if (
+		!(
+			schema.autoIncrement === true &&
+			db.autoIncrement === true &&
+			schema.default === undefined
+		)
+	) {
 		if (schemaDefault !== dbDefault) {
 			changes.push({
 				kind: 'alter_column_default',
@@ -1728,7 +1741,7 @@ function effectiveSequenceOptions(sequence: SequenceIR): {
 		incrementBy,
 		minValue,
 		maxValue,
-		cycle: sequence.cycle ?? false,
+		cycle: normalizeOptionalBoolean(sequence.cycle, 'sequence CYCLE') ?? false,
 	};
 }
 

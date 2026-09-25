@@ -153,6 +153,15 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 
+	it('keeps a declared free-standing sequence out of create_sequence changes', async () => {
+		const desired = model([], undefined, [{ name: 'catalog_free_seq' }]);
+		await apply(desired);
+
+		expect(
+			(await changes(desired)).changes.map((change) => change.kind),
+		).not.toContain('create_sequence');
+	});
+
 	it('still reports a live SERIAL column against a plain integer declaration', async () => {
 		const pool = await getTestPool();
 		await pool.query(`CREATE TABLE ${SCHEMA}.projects (id SERIAL PRIMARY KEY)`);

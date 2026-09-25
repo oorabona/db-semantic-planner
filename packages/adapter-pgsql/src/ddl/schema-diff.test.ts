@@ -619,6 +619,39 @@ describe('compareSchemata', () => {
 			]);
 		});
 
+		it('compares an authored auto-increment default against a generated default', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: 42,
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: { sql: "nextval('users_id_seq'::regclass)" },
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+				'alter_column_default',
+			);
+		});
+
 		it('should not flag identical defaults', () => {
 			const schema = makeModel([
 				makeTable({
@@ -2881,6 +2914,39 @@ describe('compareSchemata', () => {
 			},
 		);
 
+		it.each([
+			['integer', 'int4'],
+			['json', 'jsonb'],
+		] as const)(
+			'detects a custom %s type whose bare name collides with a built-in',
+			(authoredType, liveDbType) => {
+				const schema = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [makeCol({ name: 'value', type: authoredType })],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'items',
+						columns: [
+							makeCol({
+								name: 'value',
+								type: 'string',
+								originalDbType: liveDbType,
+								originalDbTypeSchema: 'tenant',
+								originalDbTypeSchemaScope: 'absolute',
+							}),
+						],
+					}),
+				]);
+
+				expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+					'alter_column_type',
+				);
+			},
+		);
+
 		it('keeps a neutral physical mismatch as an alter_column_type', () => {
 			const schema = makeModel([
 				makeTable({
@@ -4033,6 +4099,17 @@ describe('Sequences', () => {
 		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toContain('alter_sequence');
+	});
+
+	it('rejects a null cycle just as sequence emission does', () => {
+		const schema = makeModelWithSequences([
+			{ name: 'order_seq', cycle: null as unknown as boolean },
+		]);
+		const db = makeModelWithSequences([{ name: 'order_seq', cycle: false }]);
+
+		expect(() => compareSchemata(schema, db)).toThrow(
+			'sequence CYCLE: expected a boolean',
+		);
 	});
 
 	it('should detect altered sequence (minValue/maxValue changed)', () => {
