@@ -16,6 +16,7 @@ import {
 	parseGeneratedPostconditionV3Declaration,
 	snapshotGeneratedPostconditionJson,
 } from './generated-postcondition-v3-validator.js';
+import { generatedSequenceDefaultPredicate } from './generated-sequence-default.js';
 import { DEFAULT_DDL_LOCK_TIMEOUT_MS } from './lock-timeout.js';
 import type {
 	GeneratedColumnPostcondition,
@@ -1574,8 +1575,11 @@ function generatedColumnProjection(
 // The deparse is PostgreSQL's canonical form.  The sequence name is deliberately
 // not compared, but the entire expression must be the top-level SERIAL nextval
 // shape and the referenced sequence must be owned by this exact column.
-const GENERATED_SEQUENCE_EVIDENCE_SQL =
-	"(pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid, false) ~ $dbsp_serial$^nextval\\('([^']|'')*'::regclass\\)$dbsp_serial$ AND EXISTS (SELECT 1 FROM pg_catalog.pg_depend default_sequence JOIN pg_catalog.pg_class sequence_relation ON sequence_relation.oid = default_sequence.refobjid WHERE default_sequence.classid = 'pg_catalog.pg_attrdef'::pg_catalog.regclass AND default_sequence.objid = default_value.oid AND default_sequence.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass AND default_sequence.deptype = 'n' AND sequence_relation.relkind = 'S' AND EXISTS (SELECT 1 FROM pg_catalog.pg_depend ownership WHERE ownership.classid = 'pg_catalog.pg_class'::pg_catalog.regclass AND ownership.objid = sequence_relation.oid AND ownership.refclassid = 'pg_catalog.pg_class'::pg_catalog.regclass AND ownership.refobjid = relation.oid AND ownership.refobjsubid = attribute.attnum AND ownership.deptype = 'a'))) AS generated_sequence_default";
+const GENERATED_SEQUENCE_EVIDENCE_SQL = `${generatedSequenceDefaultPredicate({
+	relation: 'relation',
+	attribute: 'attribute',
+	attrdef: 'default_value',
+})} AS generated_sequence_default`;
 
 const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
 

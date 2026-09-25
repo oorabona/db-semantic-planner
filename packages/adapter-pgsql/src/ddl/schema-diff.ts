@@ -771,15 +771,17 @@ function compareColumnDetails(
 	// Default change — compare normalized string representations
 	const schemaDefault = normalizeDefault(schema.default);
 	const dbDefault = normalizeDefault(db.default);
-	if (schemaDefault !== dbDefault) {
-		changes.push({
-			kind: 'alter_column_default',
-			table: tableName,
-			column: schema.name,
-			destructive: false,
-			details: `Change default of "${schema.name}" from ${dbDefault ?? 'none'} to ${schemaDefault ?? 'none'}`,
-			meta: { default: schema.default, oldDefault: db.default },
-		});
+	if (schema.autoIncrement !== true || db.autoIncrement !== true) {
+		if (schemaDefault !== dbDefault) {
+			changes.push({
+				kind: 'alter_column_default',
+				table: tableName,
+				column: schema.name,
+				destructive: false,
+				details: `Change default of "${schema.name}" from ${dbDefault ?? 'none'} to ${schemaDefault ?? 'none'}`,
+				meta: { default: schema.default, oldDefault: db.default },
+			});
+		}
 	}
 
 	// Unique change — missing unique is equivalent to false

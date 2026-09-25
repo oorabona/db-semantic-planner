@@ -571,6 +571,54 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('alter_column_default');
 		});
 
+		it('ignores generated defaults only when both columns are auto-incrementing', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+						}),
+					],
+				}),
+			]);
+			const generatedDefault = { sql: "nextval('users_id_seq'::regclass)" };
+			const generatedDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							autoIncrement: true,
+							default: generatedDefault,
+						}),
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, generatedDb).changes).toEqual([]);
+
+			const plainDb = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							default: generatedDefault,
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, plainDb).changes)).toEqual([
+				'alter_column_default',
+			]);
+		});
+
 		it('should not flag identical defaults', () => {
 			const schema = makeModel([
 				makeTable({

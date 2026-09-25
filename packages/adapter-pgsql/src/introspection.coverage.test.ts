@@ -42,6 +42,7 @@ function createMockPool(
 	rlsState: QueryResult<any> = { rows: [] },
 	policies: QueryResult<any> = { rows: [] },
 	formattedColumnTypes: QueryResult<any> = { rows: [] },
+	generatedSequenceDefaults: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -60,6 +61,7 @@ function createMockPool(
 			.mockResolvedValueOnce(rlsState) // RLS enabled state per table
 			.mockResolvedValueOnce(policies) // RLS policies
 			.mockResolvedValueOnce(formattedColumnTypes) // formatted column types
+			.mockResolvedValueOnce(generatedSequenceDefaults) // generated SERIAL defaults
 			.mockResolvedValueOnce({ rows: [{ exists: false }] }), // logical identity side table
 	} as any;
 }
@@ -68,6 +70,39 @@ function createMockPool(
 // Column type mapping
 // ---------------------------------------------------------------------------
 describe('introspection — column type mapping', () => {
+	it('preserves a SERIAL default and marks its owned int4 column as auto-incrementing', async () => {
+		const columns = {
+			rows: [
+				{
+					table_name: 'projects',
+					column_name: 'id',
+					data_type: 'integer',
+					udt_name: 'int4',
+					is_nullable: 'NO',
+					column_default: "nextval('projects_id_seq'::regclass)",
+				},
+			],
+		};
+		const pool = {
+			query: vi.fn((sql: string) => {
+				if (sql.includes('information_schema.columns')) return columns;
+				if (sql.includes("'pg_catalog.int8'::pg_catalog.regtype")) {
+					return { rows: [{ table_name: 'projects', column_name: 'id' }] };
+				}
+				return { rows: [] };
+			}),
+		} as any;
+
+		const model = await introspect(pool);
+		expect(model.getTable('projects')?.columns).toEqual([
+			expect.objectContaining({
+				name: 'id',
+				autoIncrement: true,
+				default: { sql: "nextval('projects_id_seq'::regclass)" },
+			}),
+		]);
+	});
+
 	it('maps uuid UDT type', async () => {
 		const pool = createMockPool(
 			{
@@ -1957,8 +1992,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 14 catalog queries plus the logical-identity carrier probe.
-		expect(pool.query).toHaveBeenCalledTimes(15);
+		// Default schema = 'public' (passed to queries); 15 catalog queries plus the logical-identity carrier probe.
+		expect(pool.query).toHaveBeenCalledTimes(16);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

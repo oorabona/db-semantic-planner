@@ -376,7 +376,7 @@ function makeIntrospectPool(
 		formattedColumnTypes?: Record<string, unknown>[];
 	},
 ): Pool {
-	// queryAllCatalogs fires the 14 catalog queries in sequence via Promise.all;
+	// queryAllCatalogs fires the 15 catalog queries in sequence via Promise.all;
 	// makePool returns these in call order, so the order MUST match queryAllCatalogs.
 	const results: Record<string, unknown>[][] = [
 		columns, // 1. columns
@@ -393,6 +393,7 @@ function makeIntrospectPool(
 		[], // 12. rls
 		[], // 13. policies
 		overrides?.formattedColumnTypes ?? [], // 14. formattedColumnTypes
+		[], // 15. generatedSequenceDefaults
 	];
 	return makePool(results);
 }

@@ -35,6 +35,7 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
+import { generatedSequenceDefaultPredicate } from './ddl/generated-sequence-default.js';
 import { normalizeSequenceInteger } from './ddl/generated-source-normalizers.js';
 import {
 	DBSP_META_SCHEMA,
@@ -104,6 +105,11 @@ interface RawFormattedColumnType {
 	db_type: string;
 	/** nspname of the column type's own namespace (pg_type.typnamespace). */
 	type_schema: string;
+}
+
+interface RawGeneratedSequenceDefault {
+	table_name: string;
+	column_name: string;
 }
 
 interface RawLogicalIdentity {
@@ -297,13 +303,15 @@ interface CatalogResults {
 		with_check_expr: string | null;
 	}>;
 	formattedColumnTypes: RawFormattedColumnType[];
+	generatedSequenceDefaults: RawGeneratedSequenceDefault[];
 }
 
 /**
- * Run all 14 catalog queries in parallel.
+ * Run all 15 catalog queries in parallel.
  * Order matches the coverage test mock sequence: columns, pks, fks, indexes,
  * unique columns, enums, comments, checks, partitions, extensions (no schema
- * param), sequences, rls state, policies, formatted column types.
+ * param), sequences, rls state, policies, formatted column types, generated
+ * sequence defaults.
  */
 async function queryAllCatalogs(
 	pool: CatalogQueryExecutor,
@@ -391,18 +399,18 @@ async function queryAllCatalogs(
 			   i.relname AS index_name,
 			   t.relname AS table_name,
 			   -- Key columns (attnum != 0 means real column, within key positions)
-			   array_agg(a.attname ORDER BY k.n)
+			   array_agg(a.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0) AS columns,
 			   -- INCLUDE columns (positions after indnkeyatts)
-			   array_agg(a_inc.attname ORDER BY k.n)
+			   array_agg(a_inc.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n > ix.indnkeyatts) AS include_columns,
 			   -- Full expression string for expression indexes (NULL if none)
 			   pg_get_expr(ix.indexprs, ix.indrelid, false) AS expressions_text,
 			   -- Non-default opclass names (parallel arrays with opclass_cols)
-			   array_agg(oc.opcname ORDER BY k.n)
+			   array_agg(oc.opcname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_names,
-			   array_agg(a.attname ORDER BY k.n)
+			   array_agg(a.attname::text ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
@@ -461,7 +469,7 @@ async function queryAllCatalogs(
 				`SELECT
 			   t.typname AS name,
 			   n.nspname AS schema,
-			   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
+			   array_agg(e.enumlabel::text ORDER BY e.enumsortorder) AS values
 			 FROM pg_type t
 			 JOIN pg_enum e ON e.enumtypid = t.oid
 			 JOIN pg_namespace n ON n.oid = t.typnamespace
@@ -515,7 +523,7 @@ async function queryAllCatalogs(
 				`SELECT
 			   c.relname AS table_name,
 			   p.partstrat AS strategy,
-			   array_agg(a.attname ORDER BY pk.n) AS columns
+			   array_agg(a.attname::text ORDER BY pk.n) AS columns
 			 FROM pg_partitioned_table p
 			 JOIN pg_class c ON c.oid = p.partrelid
 			 JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -533,7 +541,7 @@ async function queryAllCatalogs(
 			 WHERE extname != 'plpgsql'`,
 			),
 		() =>
-			// 11. Sequences not backed by SERIAL
+			// 11. Sequences not backed by SERIAL or IDENTITY columns
 			pool.query<{
 				name: string;
 				start_value: string;
@@ -551,7 +559,7 @@ async function queryAllCatalogs(
 			 FROM pg_sequences s
 			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
 			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
-			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
+			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype IN ('a', 'i')
 			 WHERE s.schemaname = $1
 			   AND d.objid IS NULL`,
 				[schema],
@@ -622,6 +630,28 @@ async function queryAllCatalogs(
 			   )`,
 				[schema],
 			),
+		() =>
+			// 15. SERIAL/BIGSERIAL defaults owned by their int4/int8 column.
+			pool.query<RawGeneratedSequenceDefault>(
+				`SELECT relation.relname AS table_name, attribute.attname AS column_name
+				 FROM pg_catalog.pg_namespace namespace
+				 JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid
+				 JOIN pg_catalog.pg_attribute attribute
+				   ON attribute.attrelid = relation.oid
+				   AND attribute.attnum > 0
+				   AND NOT attribute.attisdropped
+				 JOIN pg_catalog.pg_attrdef default_value
+				   ON default_value.adrelid = attribute.attrelid
+				   AND default_value.adnum = attribute.attnum
+				 WHERE namespace.nspname = $1
+				   AND attribute.atttypid IN ('pg_catalog.int4'::pg_catalog.regtype, 'pg_catalog.int8'::pg_catalog.regtype)
+				   AND ${generatedSequenceDefaultPredicate({
+							relation: 'relation',
+							attribute: 'attribute',
+							attrdef: 'default_value',
+						})}`,
+				[schema],
+			),
 	] as const;
 
 	const results = pool.sequentialCatalogReads
@@ -648,6 +678,7 @@ async function queryAllCatalogs(
 		rlsResult,
 		policiesResult,
 		formattedColumnTypesResult,
+		generatedSequenceDefaultsResult,
 	] = results as [
 		QueryResult<RawColumn>,
 		QueryResult<RawPrimaryKey>,
@@ -687,6 +718,7 @@ async function queryAllCatalogs(
 			with_check_expr: string | null;
 		}>,
 		QueryResult<RawFormattedColumnType>,
+		QueryResult<RawGeneratedSequenceDefault>,
 	];
 
 	return {
@@ -704,6 +736,7 @@ async function queryAllCatalogs(
 		rls: rlsResult.rows,
 		policies: policiesResult.rows,
 		formattedColumnTypes: formattedColumnTypesResult.rows,
+		generatedSequenceDefaults: generatedSequenceDefaultsResult.rows,
 	};
 }
 
@@ -855,6 +888,21 @@ function buildColumnMap(rows: RawColumn[]): Map<string, RawColumn[]> {
 			existing.push(col);
 		} else {
 			result.set(col.table_name, [col]);
+		}
+	}
+	return result;
+}
+
+function buildGeneratedSequenceDefaultMap(
+	rows: RawGeneratedSequenceDefault[],
+): Map<string, Set<string>> {
+	const result = new Map<string, Set<string>>();
+	for (const row of rows) {
+		const columns = result.get(row.table_name);
+		if (columns) {
+			columns.add(row.column_name);
+		} else {
+			result.set(row.table_name, new Set([row.column_name]));
 		}
 	}
 	return result;
@@ -1114,6 +1162,7 @@ function buildLogicalIdentityMaps(rows: readonly RawLogicalIdentity[]): {
 interface TableIRContext {
 	tableColumns: Map<string, RawColumn[]>;
 	formattedColumnTypes: Map<string, FormattedColumnType>;
+	generatedSequenceDefaults: Map<string, Set<string>>;
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
@@ -1136,6 +1185,8 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	const rawCols = ctx.tableColumns.get(tableName) ?? [];
 	const pkCols = ctx.tablePKs.get(tableName);
 	const uniqueColumns = ctx.uniqueColumns.get(tableName);
+	const generatedSequenceDefaults =
+		ctx.generatedSequenceDefaults.get(tableName);
 
 	const columns: ColumnIR[] = rawCols.map((col) => {
 		// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
@@ -1178,6 +1229,9 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			// of quoting it as a string literal.
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
+				: {}),
+			...(generatedSequenceDefaults?.has(col.column_name)
+				? { autoIncrement: true }
 				: {}),
 			// format_type preserves typmod/array fidelity; any schema qualification it
 			// adds is search_path-relative, so originalDbType is stored bare and the
@@ -1387,6 +1441,9 @@ export async function introspectWithExecutor(
 	const formattedColumnTypes = buildFormattedColumnTypeMap(
 		raw.formattedColumnTypes,
 	);
+	const generatedSequenceDefaults = buildGeneratedSequenceDefaultMap(
+		raw.generatedSequenceDefaults,
+	);
 	const tablePKs = buildPKMap(raw.pks);
 	const fksByConstraint = buildFKMap(raw.fks);
 	const enumMap = buildEnumMap(raw.enums);
@@ -1414,6 +1471,7 @@ export async function introspectWithExecutor(
 		const table = buildTableIR(tableName, {
 			tableColumns,
 			formattedColumnTypes,
+			generatedSequenceDefaults,
 			tablePKs,
 			fksByConstraint,
 			tableIndexes,
