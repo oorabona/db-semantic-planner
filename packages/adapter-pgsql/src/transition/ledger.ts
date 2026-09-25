@@ -293,7 +293,7 @@ export async function classifyPgLedgerPhysicalShape(
 	let sessionSettings:
 		| { readonly searchPath: string; readonly quoteAllIdentifiers: string }
 		| undefined;
-	let searchPathPinned = false;
+	let searchPathPinAttempted = false;
 	try {
 		const value = (
 			await executor.query(
@@ -320,8 +320,8 @@ export async function classifyPgLedgerPhysicalShape(
 			searchPath: settings.search_path,
 			quoteAllIdentifiers: settings.quote_all_identifiers,
 		};
+		searchPathPinAttempted = true;
 		await executor.query('SET LOCAL search_path = pg_catalog');
-		searchPathPinned = true;
 		await executor.query('SET LOCAL quote_all_identifiers = off');
 		await validatePgLedgerPhysicalShapeFacts(
 			executor,
@@ -332,7 +332,7 @@ export async function classifyPgLedgerPhysicalShape(
 		await restorePgLedgerSessionSettings(executor, sessionSettings);
 		return { kind: 'verified' };
 	} catch (error) {
-		if (searchPathPinned && sessionSettings !== undefined) {
+		if (searchPathPinAttempted && sessionSettings !== undefined) {
 			try {
 				await restorePgLedgerSessionSettings(executor, sessionSettings);
 			} catch {

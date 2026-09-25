@@ -487,9 +487,38 @@ describe('managed ledger storage', () => {
 
 		await expect(
 			classifyPgLedgerPhysicalShape({ query }, target),
-		).resolves.not.toEqual({
-			kind: 'verified',
+		).resolves.toEqual({
+			kind: 'unverifiable',
+			cause: '42501',
 		});
+	});
+
+	it('restores settings when the search path pin rejects ambiguously', async () => {
+		const pinError = Object.assign(new Error('pin acknowledgement lost'), {
+			code: '42501',
+		});
+		const query = vi.fn(async (sql: string) => {
+			if (
+				sql ===
+				"SELECT current_setting('server_version_num') AS server_version_num"
+			)
+				return { rows: [{ server_version_num: '180000' }] };
+			if (sql === ledgerSessionSettingsQuery)
+				return ledgerSessionSettingsRows();
+			if (sql === 'SET LOCAL search_path = pg_catalog') throw pinError;
+			return { rows: [] };
+		});
+
+		await expect(
+			classifyPgLedgerPhysicalShape({ query }, target),
+		).resolves.toEqual({
+			kind: 'unverifiable',
+			cause: '42501',
+		});
+		expect(query).toHaveBeenCalledWith(ledgerSessionSettingsRestoreQuery, [
+			'"$user", public',
+			'off',
+		]);
 	});
 
 	it('restores settings after a physical shape rejection', async () => {
