@@ -93,8 +93,12 @@ export interface ConvergePgOptions {
 	 * Exact physical PostgreSQL index names that converge must leave alone on
 	 * declared model tables. Each table name uses the model's naming, while the
 	 * index name is used verbatim. Entries are validated before connecting: they
-	 * must be distinct, name declared tables, and must not name declared indexes.
-	 * Converge neither creates nor drops these external indexes.
+	 * must be distinct, name declared tables, and must not equal the name of an
+	 * index listed in any declared table's `indexes`. Converge never drops a
+	 * live index named here. It does not check these names against the other
+	 * relations the model creates (tables, sequences, primary-key or UNIQUE
+	 * constraint indexes); PostgreSQL rejects such a collision when the step
+	 * runs, and converge reports it as that step's failure.
 	 */
 	readonly externalIndexes?: readonly {
 		readonly table: string;
@@ -802,7 +806,8 @@ function describeFkAutoIndexSpecs(
  * provenance of an exact-matching child already present on a managed table.
  * `externalIndexes` accepts exact physical index names on logical model tables;
  * entries are validated before the ledger lock or any query, and converge
- * neither creates nor drops a matching external index.
+ * never drops a matching live index. A name that collides with another
+ * relation the model creates fails when that step runs.
  * Its run ids are ephemeral claim namespaces: no transition journal or durable
  * run relation is touched.
  */
