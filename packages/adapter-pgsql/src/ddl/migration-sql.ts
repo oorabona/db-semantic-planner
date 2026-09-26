@@ -492,7 +492,7 @@ function buildFkAutoIndex(table: TableIR, fkCol: string): IndexIR {
 	};
 }
 
-function collectFkAutoIndexSpecs(
+export function collectFkAutoIndexSpecs(
 	changes: readonly SchemaChange[],
 	schemaName: string | undefined,
 ): IndexRenderSpec[] {
@@ -670,7 +670,7 @@ export function generateMigrationSQL(
 // Phase Mapping (Topological Order)
 // ============================================================================
 
-function getPhase(kind: SchemaChange['kind']): number {
+export function getPhase(kind: SchemaChange['kind']): number {
 	switch (kind) {
 		case 'drop_foreign_key':
 		case 'drop_check_constraint':

@@ -249,6 +249,14 @@ export {
 	generateCursorName,
 	type StreamConfig,
 } from './streaming/index.js';
+// Startup convergence
+export {
+	type ConvergePgOptions,
+	convergePg,
+	type PgConvergeRefusal,
+	PgConvergeRefusalError,
+	type PgConvergeResult,
+} from './transition/converge.js';
 // ADR-0003 transition planner pack
 export {
 	ADD_CHECK_RULE_ID,

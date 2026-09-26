@@ -9,10 +9,13 @@ import {
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	DbCasing,
+	ForeignKeyIR,
+	IndexIR,
 	LedgerAddress,
 	LedgerHome,
 	ModelIR,
 	NormalizedManagedStep,
+	TableIR,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
@@ -22,6 +25,8 @@ import {
 	generateMigrationSQL,
 	type SchemaChange,
 } from '../ddl/index.js';
+import { addressForChange } from '../ddl/managed-step-manifest.js';
+import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -29,6 +34,8 @@ import { readPgLedgerAddressChain } from './chain-reader.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import {
 	acquirePgLedgerSessionLock,
+	ensurePgLedgerStorageVersion,
+	PgLedgerStorageUnsupportedError,
 	releasePgLedgerSessionLock,
 } from './ledger.js';
 import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
@@ -41,6 +48,7 @@ export type PgConvergeRefusal =
 	| 'concurrent-drift'
 	| 'ledger-absent'
 	| 'incompatible-ledger'
+	| 'unsupported-server'
 	| 'busy'
 	| 'execution-refused';
 
@@ -127,14 +135,90 @@ function plainNullableColumn(change: SchemaChange): boolean {
 	);
 }
 
-function additiveChange(change: SchemaChange): boolean {
+function generatedAddress(
+	change: SchemaChange,
+	database: string,
+	schema: string,
+): LedgerAddress {
+	return addressForChange({ change, database, schema });
+}
+
+function referencedTableAddress(
+	change: SchemaChange,
+	database: string,
+	schema: string,
+): LedgerAddress | undefined {
+	const fk = change.meta?.fk;
+	if (!fk || typeof fk !== 'object' || Array.isArray(fk)) return undefined;
+	const references = (fk as Record<string, unknown>).references;
+	if (
+		!references ||
+		typeof references !== 'object' ||
+		Array.isArray(references)
+	)
+		return undefined;
+	const record = references as Record<string, unknown>;
+	if (typeof record.table !== 'string' || record.table.length === 0)
+		return undefined;
+	if (record.schema !== undefined && typeof record.schema !== 'string')
+		return undefined;
+	return {
+		scope: 'schema',
+		engine: 'postgresql',
+		database,
+		schema: record.schema ?? schema,
+		kind: 'table',
+		name: record.table,
+	};
+}
+
+function additiveChange(
+	change: SchemaChange,
+	database: string,
+	schema: string,
+	createdTableAddresses: ReadonlySet<string>,
+): boolean {
 	if (change.kind === 'create_table') return true;
 	if (change.kind === 'add_column') return plainNullableColumn(change);
+	if (change.kind === 'create_sequence') return true;
+	if (
+		change.kind !== 'create_index' &&
+		change.kind !== 'add_check_constraint' &&
+		change.kind !== 'add_foreign_key'
+	)
+		return false;
+	if (isUnnamedExpressionOnlyIndex(change))
+		throw refusal(
+			'unsupported-change',
+			[change],
+			`converge refuses unnamed expression-only index on ${change.table}; name the index`,
+		);
+	const address = generatedAddress(change, database, schema);
+	const parent = parentAddress(address);
+	if (
+		(change.kind === 'create_index' ||
+			change.kind === 'add_check_constraint') &&
+		parent
+	)
+		return createdTableAddresses.has(canonicalJsonDigest(parent));
+	if (change.kind === 'add_foreign_key' && parent) {
+		const referenced = referencedTableAddress(change, database, schema);
+		return (
+			referenced !== undefined &&
+			createdTableAddresses.has(canonicalJsonDigest(parent)) &&
+			createdTableAddresses.has(canonicalJsonDigest(referenced))
+		);
+	}
 	return false;
 }
 
 function parentAddress(address: LedgerAddress): LedgerAddress | undefined {
-	if (address.kind !== 'column') return undefined;
+	if (
+		address.kind !== 'column' &&
+		address.kind !== 'index' &&
+		address.kind !== 'constraint'
+	)
+		return undefined;
 	const parent = address.parent;
 	if (!parent) return undefined;
 	return {
@@ -166,54 +250,75 @@ async function databaseId(client: Queryable): Promise<string> {
 	return database;
 }
 
+type ManagedCurrent = 'managed' | 'unmanaged' | 'absent';
+
+/** Read one catalogue identity and classify its corresponding ledger terminal. */
 async function isManagedCurrent(
 	client: PoolClient,
 	address: LedgerAddress,
-): Promise<boolean> {
+): Promise<ManagedCurrent> {
 	const live = await readPgCatalogueIdentity(client, address);
-	if (!live?.catalogueIdentity) return false;
+	if (!live?.catalogueIdentity) return 'absent';
 	const chain = await readPgLedgerAddressChain(
 		client,
 		addressHome(address),
 		address,
 	);
 	const state = projectLedgerChain(chain);
-	return (
-		state.kind === 'projected-ledger-chain' &&
+	return state.kind === 'projected-ledger-chain' &&
 		state.stableState === 'managed' &&
 		isDeepStrictEqual(
 			chain.terminalMember?.catalogueIdentity,
 			live.catalogueIdentity,
 		)
-	);
+		? 'managed'
+		: 'unmanaged';
 }
 
 async function assertOwnedChange(
 	client: PoolClient,
 	change: SchemaChange,
 	step: NormalizedManagedStep,
+	createdTableAddresses: ReadonlySet<string>,
 	previouslyCreatedAddresses: ReadonlySet<string>,
 	laterCreatedAddresses: ReadonlySet<string>,
 ): Promise<void> {
 	const address = step.address;
 	if (!address) throw new Error(`converge step ${step.stepKey} has no address`);
 	const parent = parentAddress(address);
-	if (parent && !previouslyCreatedAddresses.has(canonicalJsonDigest(parent))) {
+	const requiresCreatedParent =
+		change.kind === 'create_index' ||
+		change.kind === 'add_check_constraint' ||
+		change.kind === 'add_foreign_key';
+	if (
+		parent &&
+		requiresCreatedParent &&
+		!createdTableAddresses.has(canonicalJsonDigest(parent))
+	)
+		throw refusal(
+			'unsupported-change',
+			[change],
+			`converge refuses ${change.kind} on a table not created by this run`,
+		);
+	if (
+		parent &&
+		!requiresCreatedParent &&
+		!previouslyCreatedAddresses.has(canonicalJsonDigest(parent))
+	) {
 		if (laterCreatedAddresses.has(canonicalJsonDigest(parent)))
 			throw refusal(
 				'unmanaged-parent',
 				[change],
 				`converge refuses ${change.kind} because parent ${parent.name} is created later in the manifest`,
 			);
-		if (!(await isManagedCurrent(client, parent)))
+		if ((await isManagedCurrent(client, parent)) !== 'managed')
 			throw refusal(
 				'unmanaged-parent',
 				[change],
 				`converge refuses ${change.kind} on unmanaged parent ${parent.name}`,
 			);
 	}
-	const live = await readPgCatalogueIdentity(client, address);
-	if (live && !(await isManagedCurrent(client, address)))
+	if ((await isManagedCurrent(client, address)) === 'unmanaged')
 		throw refusal(
 			'unmanaged-object',
 			[change],
@@ -242,14 +347,14 @@ async function assertExistingDeclaredTablesManaged(
 		// Reaching this loop means comparison saw the table: an absent table would
 		// produce create_table, put it in changedTables, and skip this check.
 		if (changedTables.has(address.name)) continue;
-		const live = await readPgCatalogueIdentity(client, address);
-		if (!live)
+		const managed = await isManagedCurrent(client, address);
+		if (managed === 'absent')
 			throw refusal(
 				'concurrent-drift',
 				[],
 				`converge observed declared table ${address.name} absent after comparison`,
 			);
-		if (!(await isManagedCurrent(client, address)))
+		if (managed === 'unmanaged')
 			throw refusal(
 				'unmanaged-object',
 				[],
@@ -258,11 +363,258 @@ async function assertExistingDeclaredTablesManaged(
 	}
 }
 
+async function assertExistingDeclaredSequencesManaged(
+	client: PoolClient,
+	database: string,
+	schema: string,
+	model: ModelIR,
+	createdSequenceAddresses: ReadonlySet<string>,
+): Promise<void> {
+	for (const sequence of model.sequences?.values() ?? []) {
+		const address = generatedAddress(
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: `Create sequence ${sequence.name}`,
+				meta: { sequence },
+			},
+			database,
+			schema,
+		);
+		if (createdSequenceAddresses.has(canonicalJsonDigest(address))) continue;
+		const managed = await isManagedCurrent(client, address);
+		if (managed === 'absent')
+			throw refusal(
+				'concurrent-drift',
+				[],
+				`converge observed declared sequence ${address.name} absent after comparison`,
+			);
+		if (managed === 'unmanaged')
+			throw refusal(
+				'unmanaged-object',
+				[],
+				`converge refuses unmanaged live sequence ${address.name}`,
+			);
+	}
+}
+
+function assertDeclaredSequenceNamesPreserved(
+	model: ModelIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): void {
+	for (const [key, sequence] of model.sequences ?? []) {
+		if (key !== sequence.name)
+			throw refusal(
+				'unsupported-change',
+				[],
+				`converge refuses declared sequence map key ${key}: SequenceIR.name is ${sequence.name}`,
+			);
+		for (const name of [key, sequence.name]) {
+			const physicalName = naming.toDatabase(name);
+			if (physicalName !== name)
+				throw refusal(
+					'unsupported-change',
+					[],
+					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}; see #803`,
+				);
+		}
+	}
+}
+
+function sameColumnSet(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	const leftKey = canonicalColumnSet(left);
+	const rightKey = canonicalColumnSet(right);
+	return leftKey !== undefined && leftKey === rightKey;
+}
+
+/** A unique-key column set, with duplicates rejected and names encoded unambiguously. */
+function canonicalColumnSet(columns: readonly string[]): string | undefined {
+	if (new Set(columns).size !== columns.length) return undefined;
+	return JSON.stringify([...columns].sort());
+}
+
+function referencedUniqueKey(
+	table: LedgerAddress,
+	columns: readonly string[],
+): string | undefined {
+	const columnSet = canonicalColumnSet(columns);
+	return columnSet === undefined
+		? undefined
+		: JSON.stringify([canonicalJsonDigest(table), columnSet]);
+}
+
+function foreignKeyForChange(change: SchemaChange): ForeignKeyIR | undefined {
+	const foreignKey = change.meta?.fk;
+	if (
+		!foreignKey ||
+		typeof foreignKey !== 'object' ||
+		Array.isArray(foreignKey)
+	)
+		return undefined;
+	return foreignKey as ForeignKeyIR;
+}
+
+function indexForChange(change: SchemaChange): IndexIR | undefined {
+	const index = change.meta?.index;
+	if (!index || typeof index !== 'object' || Array.isArray(index))
+		return undefined;
+	return index as IndexIR;
+}
+
+function tableForChange(change: SchemaChange): TableIR | undefined {
+	const table = change.meta?.table;
+	if (!table || typeof table !== 'object' || Array.isArray(table))
+		return undefined;
+	return table as TableIR;
+}
+
+function tableHasInlineUniqueKey(
+	table: TableIR | undefined,
+	columns: readonly string[],
+): boolean {
+	if (!table) return false;
+	const primaryKey = table.primaryKey;
+	if (
+		primaryKey !== undefined &&
+		sameColumnSet(
+			typeof primaryKey === 'string' ? [primaryKey] : primaryKey,
+			columns,
+		)
+	)
+		return true;
+	return (
+		columns.length === 1 &&
+		table.columns.some(
+			(column) => column.name === columns[0] && column.unique === true,
+		)
+	);
+}
+
+function isQualifyingUniqueIndex(
+	index: IndexIR | undefined,
+	columns: readonly string[],
+): boolean {
+	return (
+		index?.unique === true &&
+		index.where === undefined &&
+		(index.expressions === undefined || index.expressions.length === 0) &&
+		sameColumnSet(index.columns, columns)
+	);
+}
+
+function isUnnamedExpressionOnlyIndex(change: SchemaChange): boolean {
+	if (change.kind !== 'create_index') return false;
+	const index = indexForChange(change);
+	return (
+		index !== undefined &&
+		(typeof index.name !== 'string' || index.name.length === 0) &&
+		index.columns.length === 0
+	);
+}
+
 /**
- * Converges only startup-safe PostgreSQL additions: it creates eligible tables
- * and adds plain nullable columns to managed tables. Standalone declared indexes
- * are refused; newly created tables may still get the backing indexes PostgreSQL
- * builds for a declared primary key or unique constraint.
+ * PostgreSQL only accepts a fresh FK to an inline PK, an inline single-column
+ * UNIQUE, or a declared non-partial, column-only unique index. TableIR has no
+ * table-level unique-constraint representation to admit here.
+ */
+function assertFreshForeignKeysReferenceUniqueKeys(
+	changes: readonly SchemaChange[],
+	database: string,
+	schema: string,
+): ReadonlyMap<SchemaChange, SchemaChange> {
+	const createdTables = new Map<string, SchemaChange>();
+	const qualifyingIndexesByReferencedKey = new Map<string, SchemaChange>();
+	for (const change of changes) {
+		if (change.kind === 'create_table') {
+			const address = generatedAddress(change, database, schema);
+			createdTables.set(canonicalJsonDigest(address), change);
+			continue;
+		}
+		if (change.kind !== 'create_index') continue;
+		const index = indexForChange(change);
+		if (
+			index?.unique !== true ||
+			index.where !== undefined ||
+			(index.expressions !== undefined && index.expressions.length > 0)
+		)
+			continue;
+		const parent = parentAddress(generatedAddress(change, database, schema));
+		if (!parent) continue;
+		const key = referencedUniqueKey(parent, index.columns);
+		if (key !== undefined) qualifyingIndexesByReferencedKey.set(key, change);
+	}
+	const qualifyingIndexes = new Map<SchemaChange, SchemaChange>();
+	for (const change of changes) {
+		if (change.kind !== 'add_foreign_key') continue;
+		const foreignKey = foreignKeyForChange(change);
+		const referenced = referencedTableAddress(change, database, schema);
+		if (!foreignKey || !referenced)
+			throw new Error(
+				'converge admitted add_foreign_key without a typed referenced table',
+			);
+		const referencedTable = createdTables.get(canonicalJsonDigest(referenced));
+		if (!referencedTable)
+			throw new Error(
+				'converge admitted add_foreign_key without a referenced creating table',
+			);
+		if (
+			tableHasInlineUniqueKey(
+				tableForChange(referencedTable),
+				foreignKey.references.columns,
+			)
+		)
+			continue;
+		const referencedKey = referencedUniqueKey(
+			referenced,
+			foreignKey.references.columns,
+		);
+		const indexChange =
+			referencedKey === undefined
+				? undefined
+				: qualifyingIndexesByReferencedKey.get(referencedKey);
+		if (
+			indexChange &&
+			isQualifyingUniqueIndex(
+				indexForChange(indexChange),
+				foreignKey.references.columns,
+			)
+		) {
+			qualifyingIndexes.set(change, indexChange);
+			continue;
+		}
+		const fkName = `fk_${change.table}_${foreignKey.columns.join('_')}`;
+		throw refusal(
+			'unsupported-change',
+			[change],
+			`converge refuses fresh foreign key ${fkName}: referenced columns ${referenced.name}(${foreignKey.references.columns.join(', ')}) have no declared qualifying unique key`,
+		);
+	}
+	return qualifyingIndexes;
+}
+
+function convergePhase(change: SchemaChange): number {
+	if (change.kind === 'create_index') return getPhase('add_foreign_key');
+	if (change.kind === 'add_foreign_key') return getPhase('create_index');
+	return getPhase(change.kind);
+}
+
+function describeFkAutoIndexSpecs(
+	specs: ReturnType<typeof collectFkAutoIndexSpecs>,
+): string {
+	return specs
+		.map((spec) => `${spec.table}.${spec.keys[0]?.column} (${spec.name})`)
+		.join(', ');
+}
+
+/**
+ * Converges only startup-safe PostgreSQL additions: it creates tables and
+ * sequences, adds plain nullable columns to managed tables, and creates
+ * indexes, CHECK constraints, and foreign keys when their table parents are
+ * created by this same run (for foreign keys, both tables).
  *
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the
@@ -297,6 +649,17 @@ export async function convergePg(
 			);
 		locked = true;
 		lockedConvergeClients.add(client);
+		try {
+			await ensurePgLedgerStorageVersion(client);
+		} catch (error) {
+			if (error instanceof PgLedgerStorageUnsupportedError)
+				throw new PgConvergeRefusalError(
+					'unsupported-server',
+					[],
+					`converge refuses unsupported PostgreSQL server version: ${error.message}`,
+				);
+			throw error;
+		}
 		const currency = await readPgLedgerScopeCurrency(
 			client,
 			schemaHome(schema),
@@ -319,22 +682,33 @@ export async function convergePg(
 			dbCasing: casing,
 		});
 		const naming = getNamingPluginForDbCasing(casing);
+		assertDeclaredSequenceNamesPreserved(model, naming);
 		const declaredTables = [...model.tables.values()].map((table) =>
 			naming.toDatabase(table.name),
 		);
+		const declaredSequences = new Set(model.sequences?.keys() ?? []);
 		const declarationScopedAdapter = new Proxy(adapter, {
 			get(target, property, receiver) {
 				if (property === 'introspect') {
 					return (
 						introspectionOptions?: Parameters<typeof target.introspect>[0],
 					) =>
-						target.introspect({
-							...introspectionOptions,
-							include: declaredTables,
-							// `include: []` means all tables to the introspector. An empty
-							// declaration must instead compare no live tables.
-							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
-						});
+						target
+							.introspect({
+								...introspectionOptions,
+								include: declaredTables,
+								// `include: []` means all tables to the introspector. An empty
+								// declaration must instead compare no live tables.
+								...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
+							})
+							.then((introspected) => ({
+								...introspected,
+								sequences: new Map(
+									[...(introspected.sequences ?? [])].filter(([name]) =>
+										declaredSequences.has(name),
+									),
+								),
+							}));
 				}
 				return Reflect.get(target, property, receiver);
 			},
@@ -348,13 +722,54 @@ export async function convergePg(
 				ignoreUnmanagedExtensions: true,
 			},
 		);
-		const rejected = diff.changes.filter((change) => !additiveChange(change));
+		const createdTableAddresses = new Set(
+			diff.changes.flatMap((change) => {
+				if (change.kind !== 'create_table') return [];
+				const address = generatedAddress(change, database, schema);
+				return [canonicalJsonDigest(address)];
+			}),
+		);
+		const createdSequenceAddresses = new Set(
+			diff.changes.flatMap((change) => {
+				if (change.kind !== 'create_sequence') return [];
+				const address = generatedAddress(change, database, schema);
+				return [canonicalJsonDigest(address)];
+			}),
+		);
+		await assertExistingDeclaredSequencesManaged(
+			client,
+			database,
+			schema,
+			model,
+			createdSequenceAddresses,
+		);
+		const rejected = diff.changes.filter(
+			(change) =>
+				!additiveChange(change, database, schema, createdTableAddresses),
+		);
 		if (rejected.length > 0)
 			throw refusal(
 				'unsupported-change',
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
+		const fkUniqueIndexes = assertFreshForeignKeysReferenceUniqueKeys(
+			diff.changes,
+			database,
+			schema,
+		);
+		const fkAutoIndexSpecs = collectFkAutoIndexSpecs(diff.changes, schema);
+		if (fkAutoIndexSpecs.length > 0) {
+			const tables = new Set(fkAutoIndexSpecs.map((spec) => spec.table));
+			throw refusal(
+				'unsupported-change',
+				diff.changes.filter(
+					(change) =>
+						change.kind === 'create_table' && tables.has(change.table),
+				),
+				`converge refuses fresh foreign keys without declared indexes: ${describeFkAutoIndexSpecs(fkAutoIndexSpecs)}; declare each index in the model`,
+			);
+		}
 		await assertExistingDeclaredTablesManaged(
 			client,
 			database,
@@ -364,16 +779,66 @@ export async function convergePg(
 			new Set(diff.changes.map((change) => naming.toDatabase(change.table))),
 		);
 		if (diff.changes.length === 0) return { kind: 'no-drift', applied: [] };
+		const orderedChanges = [...diff.changes].sort(
+			(left, right) => convergePhase(left) - convergePhase(right),
+		);
+		const createTableStepKeys = new Map<string, string>();
+		const createIndexStepKeys = new Map<SchemaChange, string>();
+		for (const [order, change] of orderedChanges.entries()) {
+			if (change.kind === 'create_table') {
+				const address = generatedAddress(change, database, schema);
+				createTableStepKeys.set(
+					canonicalJsonDigest(address),
+					`converge:${order}`,
+				);
+			}
+			if (change.kind === 'create_index')
+				createIndexStepKeys.set(change, `converge:${order}`);
+		}
 		const assembled: {
 			readonly change: SchemaChange;
 			readonly step: NormalizedManagedStep;
 		}[] = [];
-		const createdAddresses = new Set<string>();
-		for (const change of diff.changes) {
-			const order = assembled.length;
+		for (const [order, change] of orderedChanges.entries()) {
+			const address = generatedAddress(change, database, schema);
+			const parent = parentAddress(address);
+			const dependencies = new Set<string>();
+			if (
+				parent &&
+				(change.kind === 'create_index' ||
+					change.kind === 'add_check_constraint' ||
+					change.kind === 'add_foreign_key')
+			) {
+				const dependency = createTableStepKeys.get(canonicalJsonDigest(parent));
+				if (!dependency)
+					throw new Error(
+						`converge admitted ${change.kind} without a creating table step`,
+					);
+				dependencies.add(dependency);
+			}
+			if (change.kind === 'add_foreign_key') {
+				const referenced = referencedTableAddress(change, database, schema);
+				const dependency =
+					referenced &&
+					createTableStepKeys.get(canonicalJsonDigest(referenced));
+				if (!dependency)
+					throw new Error(
+						'converge admitted add_foreign_key without a referenced creating table step',
+					);
+				dependencies.add(dependency);
+				const indexChange = fkUniqueIndexes.get(change);
+				if (indexChange) {
+					const indexDependency = createIndexStepKeys.get(indexChange);
+					if (!indexDependency)
+						throw new Error(
+							'converge admitted add_foreign_key without its qualifying unique index step',
+						);
+					dependencies.add(indexDependency);
+				}
+			}
 			const statements = generateMigrationSQL(
 				{ ...diff, changes: [change] },
-				{ includeDestructive: false, schemaName: schema },
+				{ includeDestructive: false, schemaName: schema, fkAutoIndex: false },
 			);
 			const step = createPgsqlGeneratedManagedStep({
 				change,
@@ -381,11 +846,10 @@ export async function convergePg(
 				schema,
 				stepKey: `converge:${order}`,
 				order,
+				dependencyOrder: [...dependencies],
 				statements,
 			});
 			assembled.push({ change, step });
-			if (change.kind === 'create_table' && step.address)
-				createdAddresses.add(canonicalJsonDigest(step.address));
 		}
 		const manifest = validateNormalizedManagedStepManifest(
 			assembled.map(({ step }) => step),
@@ -393,7 +857,7 @@ export async function convergePg(
 		if (!manifest.ok)
 			throw new Error(`converge manifest is invalid: ${manifest.detail}`);
 		const previouslyCreatedAddresses = new Set<string>();
-		const laterCreatedAddresses = new Set(createdAddresses);
+		const laterCreatedAddresses = new Set(createdTableAddresses);
 		for (const { change, step } of assembled) {
 			if (change.kind === 'create_table' && step.address)
 				laterCreatedAddresses.delete(canonicalJsonDigest(step.address));
@@ -401,6 +865,7 @@ export async function convergePg(
 				client,
 				change,
 				step,
+				createdTableAddresses,
 				previouslyCreatedAddresses,
 				laterCreatedAddresses,
 			);
@@ -434,7 +899,7 @@ export async function convergePg(
 		if (outcome.outcome === 'completed')
 			return {
 				kind: 'applied',
-				applied: diff.changes.map((change) => change.kind),
+				applied: orderedChanges.map((change) => change.kind),
 			};
 		if (outcome.outcome === 'partially-applied')
 			return {
