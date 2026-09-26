@@ -546,6 +546,19 @@ describe('convergePg refusal boundary', () => {
 		},
 	);
 
+	it('refuses a preserve-cased sequence whose map key differs from SequenceIR.name before comparison', async () => {
+		const model: ModelIR = {
+			...emptyModel(),
+			sequences: new Map([['order_sequence', { name: 'actual_sequence' }]]),
+		};
+
+		await expect(convergePg(poolFor(), model)).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('actual_sequence'),
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		['snake_case', 'order_number'],
 		['preserve', 'orderNumber'],
@@ -600,6 +613,7 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(testClient.query).toHaveBeenCalledWith('SHOW server_version_num');
+		expect(mocks.currency).not.toHaveBeenCalled();
 	});
 
 	it('uses snake_case physical table names for unmanaged ownership', async () => {
@@ -704,6 +718,20 @@ describe('convergePg refusal boundary', () => {
 				/^\s*(?:ALTER|CREATE|DROP|GRANT|REVOKE)\b/i.test(sql),
 			),
 		).toBe(false);
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(mocks.identity).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses a declared sequence absent after comparison with one catalogue probe', async () => {
+		const model = modelWithSequences(['missing_sequence']);
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue(undefined);
+
+		await expect(convergePg(poolFor(), model)).rejects.toMatchObject({
+			refusal: 'concurrent-drift',
+			detail: expect.stringContaining('missing_sequence'),
+		});
+		expect(mocks.identity).toHaveBeenCalledTimes(1);
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
@@ -864,6 +892,7 @@ describe('convergePg refusal boundary', () => {
 					table: {
 						name: 'right_table',
 						columns: [],
+						primaryKey: 'id',
 						foreignKeys: [],
 						indexes: [],
 					},
@@ -890,6 +919,7 @@ describe('convergePg refusal boundary', () => {
 					table: {
 						name: 'left_table',
 						columns: [],
+						primaryKey: 'id',
 						foreignKeys: [],
 						indexes: [],
 					},
@@ -914,6 +944,10 @@ describe('convergePg refusal boundary', () => {
 						address: { kind: 'table', name: 'left_table' },
 					},
 					{
+						address: { kind: 'index', name: 'idx_left_table_id' },
+						dependencyOrder: ['converge:1'],
+					},
+					{
 						address: { kind: 'constraint', name: 'fk_left_table_right_id' },
 						dependencyOrder: ['converge:1', 'converge:0'],
 					},
@@ -922,15 +956,265 @@ describe('convergePg refusal boundary', () => {
 						dependencyOrder: ['converge:0', 'converge:1'],
 					},
 					{
-						address: { kind: 'index', name: 'idx_left_table_id' },
-						dependencyOrder: ['converge:1'],
-					},
-					{
 						address: { kind: 'constraint', name: 'left_id_check' },
 						dependencyOrder: ['converge:1'],
 					},
 				],
 			},
+		});
+	});
+
+	it('orders a qualifying unique index before its fresh foreign key and records the dependency', async () => {
+		const changes: SchemaChange[] = [
+			{
+				kind: 'add_foreign_key',
+				table: 'child_table',
+				destructive: false,
+				details: 'child references parent external id',
+				meta: {
+					fk: {
+						columns: ['parent_external_id'],
+						references: { table: 'parent_table', columns: ['external_id'] },
+					},
+				},
+			},
+			{
+				kind: 'create_index',
+				table: 'parent_table',
+				destructive: false,
+				details: 'parent external id unique',
+				meta: {
+					index: {
+						name: 'parent_table_external_id_unique',
+						columns: ['external_id'],
+						unique: true,
+					},
+				},
+			},
+			{
+				kind: 'create_table',
+				table: 'child_table',
+				destructive: false,
+				details: 'create child',
+				meta: {
+					table: {
+						name: 'child_table',
+						columns: [],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+			{
+				kind: 'create_table',
+				table: 'parent_table',
+				destructive: false,
+				details: 'create parent',
+				meta: {
+					table: {
+						name: 'parent_table',
+						columns: [],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+		];
+		mocks.compare.mockResolvedValue({ changes });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'applied',
+			applied: [
+				'create_table',
+				'create_table',
+				'create_index',
+				'add_foreign_key',
+			],
+		});
+		expect(mocks.execute.mock.calls[0]?.[0]).toMatchObject({
+			manifest: {
+				steps: [
+					{ address: { kind: 'table', name: 'child_table' } },
+					{ address: { kind: 'table', name: 'parent_table' } },
+					{
+						stepKey: 'converge:2',
+						address: {
+							kind: 'index',
+							name: 'parent_table_external_id_unique',
+						},
+					},
+					{
+						address: {
+							kind: 'constraint',
+							name: 'fk_child_table_parent_external_id',
+						},
+						dependencyOrder: ['converge:0', 'converge:1', 'converge:2'],
+					},
+				],
+			},
+		});
+	});
+
+	it.each([
+		[
+			'partial unique index',
+			{
+				name: 'parent_table_external_id_unique',
+				columns: ['external_id'],
+				unique: true,
+				where: 'external_id IS NOT NULL',
+			},
+		],
+		[
+			'expression unique index',
+			{
+				name: 'parent_table_external_id_unique',
+				columns: ['external_id'],
+				unique: true,
+				expressions: ['lower(external_id::text)'],
+			},
+		],
+		['no unique key', undefined],
+	] as const)(
+		'refuses a fresh FK referencing a %s before execution',
+		async (_label, index) => {
+			const changes: SchemaChange[] = [
+				{
+					kind: 'create_table',
+					table: 'parent_table',
+					destructive: false,
+					details: 'create parent',
+					meta: {
+						table: {
+							name: 'parent_table',
+							columns: [],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+				},
+				{
+					kind: 'create_table',
+					table: 'child_table',
+					destructive: false,
+					details: 'create child',
+					meta: {
+						table: {
+							name: 'child_table',
+							columns: [],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+				},
+				{
+					kind: 'add_foreign_key',
+					table: 'child_table',
+					destructive: false,
+					details: 'child references parent external id',
+					meta: {
+						fk: {
+							columns: ['parent_external_id'],
+							references: { table: 'parent_table', columns: ['external_id'] },
+						},
+					},
+				},
+				...(index === undefined
+					? []
+					: [
+							{
+								kind: 'create_index' as const,
+								table: 'parent_table',
+								destructive: false,
+								details: 'partial unique parent external id',
+								meta: { index },
+							},
+						]),
+			];
+			mocks.compare.mockResolvedValue({ changes });
+
+			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+				refusal: 'unsupported-change',
+				detail: expect.stringContaining('fk_child_table_parent_external_id'),
+			});
+			expect(mocks.execute).not.toHaveBeenCalled();
+		},
+	);
+
+	it('admits fresh FKs to a primary key and a column-level unique key', async () => {
+		const changes: SchemaChange[] = [
+			{
+				kind: 'create_table',
+				table: 'parent_table',
+				destructive: false,
+				details: 'create parent',
+				meta: {
+					table: {
+						name: 'parent_table',
+						columns: [
+							{
+								name: 'external_id',
+								type: 'integer',
+								nullable: false,
+								unique: true,
+							},
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+			{
+				kind: 'create_table',
+				table: 'child_table',
+				destructive: false,
+				details: 'create child',
+				meta: {
+					table: {
+						name: 'child_table',
+						columns: [],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+			{
+				kind: 'add_foreign_key',
+				table: 'child_table',
+				destructive: false,
+				details: 'child references parent id',
+				meta: {
+					fk: {
+						columns: ['parent_id'],
+						references: { table: 'parent_table', columns: ['id'] },
+					},
+				},
+			},
+			{
+				kind: 'add_foreign_key',
+				table: 'child_table',
+				destructive: false,
+				details: 'child references parent external id',
+				meta: {
+					fk: {
+						columns: ['parent_external_id'],
+						references: { table: 'parent_table', columns: ['external_id'] },
+					},
+				},
+			},
+		];
+		mocks.compare.mockResolvedValue({ changes });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
 		});
 	});
 

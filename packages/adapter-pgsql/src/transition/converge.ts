@@ -9,10 +9,13 @@ import {
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
 	DbCasing,
+	ForeignKeyIR,
+	IndexIR,
 	LedgerAddress,
 	LedgerHome,
 	ModelIR,
 	NormalizedManagedStep,
+	TableIR,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
@@ -239,26 +242,29 @@ async function databaseId(client: Queryable): Promise<string> {
 	return database;
 }
 
+type ManagedCurrent = 'managed' | 'unmanaged' | 'absent';
+
+/** Read one catalogue identity and classify its corresponding ledger terminal. */
 async function isManagedCurrent(
 	client: PoolClient,
 	address: LedgerAddress,
-): Promise<boolean> {
+): Promise<ManagedCurrent> {
 	const live = await readPgCatalogueIdentity(client, address);
-	if (!live?.catalogueIdentity) return false;
+	if (!live?.catalogueIdentity) return 'absent';
 	const chain = await readPgLedgerAddressChain(
 		client,
 		addressHome(address),
 		address,
 	);
 	const state = projectLedgerChain(chain);
-	return (
-		state.kind === 'projected-ledger-chain' &&
+	return state.kind === 'projected-ledger-chain' &&
 		state.stableState === 'managed' &&
 		isDeepStrictEqual(
 			chain.terminalMember?.catalogueIdentity,
 			live.catalogueIdentity,
 		)
-	);
+		? 'managed'
+		: 'unmanaged';
 }
 
 async function assertOwnedChange(
@@ -297,15 +303,14 @@ async function assertOwnedChange(
 				[change],
 				`converge refuses ${change.kind} because parent ${parent.name} is created later in the manifest`,
 			);
-		if (!(await isManagedCurrent(client, parent)))
+		if ((await isManagedCurrent(client, parent)) !== 'managed')
 			throw refusal(
 				'unmanaged-parent',
 				[change],
 				`converge refuses ${change.kind} on unmanaged parent ${parent.name}`,
 			);
 	}
-	const live = await readPgCatalogueIdentity(client, address);
-	if (live && !(await isManagedCurrent(client, address)))
+	if ((await isManagedCurrent(client, address)) === 'unmanaged')
 		throw refusal(
 			'unmanaged-object',
 			[change],
@@ -334,14 +339,14 @@ async function assertExistingDeclaredTablesManaged(
 		// Reaching this loop means comparison saw the table: an absent table would
 		// produce create_table, put it in changedTables, and skip this check.
 		if (changedTables.has(address.name)) continue;
-		const live = await readPgCatalogueIdentity(client, address);
-		if (!live)
+		const managed = await isManagedCurrent(client, address);
+		if (managed === 'absent')
 			throw refusal(
 				'concurrent-drift',
 				[],
 				`converge observed declared table ${address.name} absent after comparison`,
 			);
-		if (!(await isManagedCurrent(client, address)))
+		if (managed === 'unmanaged')
 			throw refusal(
 				'unmanaged-object',
 				[],
@@ -372,14 +377,14 @@ async function assertExistingDeclaredSequencesManaged(
 		if (!address)
 			throw new Error(`converge could not address sequence ${sequence.name}`);
 		if (createdSequenceAddresses.has(canonicalJsonDigest(address))) continue;
-		const live = await readPgCatalogueIdentity(client, address);
-		if (!live)
+		const managed = await isManagedCurrent(client, address);
+		if (managed === 'absent')
 			throw refusal(
 				'concurrent-drift',
 				[],
 				`converge observed declared sequence ${address.name} absent after comparison`,
 			);
-		if (!(await isManagedCurrent(client, address)))
+		if (managed === 'unmanaged')
 			throw refusal(
 				'unmanaged-object',
 				[],
@@ -393,6 +398,12 @@ function assertDeclaredSequenceNamesPreserved(
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): void {
 	for (const [key, sequence] of model.sequences ?? []) {
+		if (key !== sequence.name)
+			throw refusal(
+				'unsupported-change',
+				[],
+				`converge refuses declared sequence map key ${key}: SequenceIR.name is ${sequence.name}`,
+			);
 		for (const name of [key, sequence.name]) {
 			const physicalName = naming.toDatabase(name);
 			if (physicalName !== name)
@@ -403,6 +414,141 @@ function assertDeclaredSequenceNamesPreserved(
 				);
 		}
 	}
+}
+
+function sameColumns(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((column, i) => column === right[i])
+	);
+}
+
+function foreignKeyForChange(change: SchemaChange): ForeignKeyIR | undefined {
+	const foreignKey = change.meta?.fk;
+	if (
+		!foreignKey ||
+		typeof foreignKey !== 'object' ||
+		Array.isArray(foreignKey)
+	)
+		return undefined;
+	return foreignKey as ForeignKeyIR;
+}
+
+function indexForChange(change: SchemaChange): IndexIR | undefined {
+	const index = change.meta?.index;
+	if (!index || typeof index !== 'object' || Array.isArray(index))
+		return undefined;
+	return index as IndexIR;
+}
+
+function tableForChange(change: SchemaChange): TableIR | undefined {
+	const table = change.meta?.table;
+	if (!table || typeof table !== 'object' || Array.isArray(table))
+		return undefined;
+	return table as TableIR;
+}
+
+function tableHasInlineUniqueKey(
+	table: TableIR | undefined,
+	columns: readonly string[],
+): boolean {
+	if (!table) return false;
+	const primaryKey = table.primaryKey;
+	if (
+		primaryKey !== undefined &&
+		sameColumns(
+			typeof primaryKey === 'string' ? [primaryKey] : primaryKey,
+			columns,
+		)
+	)
+		return true;
+	return (
+		columns.length === 1 &&
+		table.columns.some(
+			(column) => column.name === columns[0] && column.unique === true,
+		)
+	);
+}
+
+function isQualifyingUniqueIndex(
+	index: IndexIR | undefined,
+	columns: readonly string[],
+): boolean {
+	return (
+		index?.unique === true &&
+		index.where === undefined &&
+		(index.expressions === undefined || index.expressions.length === 0) &&
+		sameColumns(index.columns, columns)
+	);
+}
+
+/**
+ * PostgreSQL only accepts a fresh FK to an inline PK, an inline single-column
+ * UNIQUE, or a declared non-partial, column-only unique index. TableIR has no
+ * table-level unique-constraint representation to admit here.
+ */
+function assertFreshForeignKeysReferenceUniqueKeys(
+	changes: readonly SchemaChange[],
+	database: string,
+	schema: string,
+): ReadonlyMap<SchemaChange, SchemaChange> {
+	const createdTables = new Map<string, SchemaChange>();
+	for (const change of changes) {
+		if (change.kind !== 'create_table') continue;
+		const address = generatedAddress(change, database, schema);
+		if (address) createdTables.set(canonicalJsonDigest(address), change);
+	}
+	const qualifyingIndexes = new Map<SchemaChange, SchemaChange>();
+	for (const change of changes) {
+		if (change.kind !== 'add_foreign_key') continue;
+		const foreignKey = foreignKeyForChange(change);
+		const referenced = referencedTableAddress(change, database, schema);
+		if (!foreignKey || !referenced)
+			throw new Error(
+				'converge admitted add_foreign_key without a typed referenced table',
+			);
+		const referencedTable = createdTables.get(canonicalJsonDigest(referenced));
+		if (!referencedTable)
+			throw new Error(
+				'converge admitted add_foreign_key without a referenced creating table',
+			);
+		if (
+			tableHasInlineUniqueKey(
+				tableForChange(referencedTable),
+				foreignKey.references.columns,
+			)
+		)
+			continue;
+		const indexChange = changes.find(
+			(candidate) =>
+				candidate.kind === 'create_index' &&
+				candidate.table === referenced.name &&
+				isQualifyingUniqueIndex(
+					indexForChange(candidate),
+					foreignKey.references.columns,
+				),
+		);
+		if (indexChange) {
+			qualifyingIndexes.set(change, indexChange);
+			continue;
+		}
+		const fkName = `fk_${change.table}_${foreignKey.columns.join('_')}`;
+		throw refusal(
+			'unsupported-change',
+			[change],
+			`converge refuses fresh foreign key ${fkName}: referenced columns ${referenced.name}(${foreignKey.references.columns.join(', ')}) have no declared qualifying unique key`,
+		);
+	}
+	return qualifyingIndexes;
+}
+
+function convergePhase(change: SchemaChange): number {
+	if (change.kind === 'create_index') return getPhase('add_foreign_key');
+	if (change.kind === 'add_foreign_key') return getPhase('create_index');
+	return getPhase(change.kind);
 }
 
 function describeFkAutoIndexSpecs(
@@ -452,6 +598,17 @@ export async function convergePg(
 			);
 		locked = true;
 		lockedConvergeClients.add(client);
+		try {
+			await ensurePgLedgerStorageVersion(client);
+		} catch (error) {
+			if (error instanceof PgLedgerStorageUnsupportedError)
+				throw new PgConvergeRefusalError(
+					'unsupported-server',
+					[],
+					`converge refuses unsupported PostgreSQL server version: ${error.message}`,
+				);
+			throw error;
+		}
 		const currency = await readPgLedgerScopeCurrency(
 			client,
 			schemaHome(schema),
@@ -468,17 +625,6 @@ export async function convergePg(
 				[],
 				`converge requires a current schema ledger for ${schema}; ledger currency failed ${currency.reason}`,
 			);
-		try {
-			await ensurePgLedgerStorageVersion(client);
-		} catch (error) {
-			if (error instanceof PgLedgerStorageUnsupportedError)
-				throw new PgConvergeRefusalError(
-					'unsupported-server',
-					[],
-					`converge refuses unsupported PostgreSQL server version: ${error.message}`,
-				);
-			throw error;
-		}
 		const database = await databaseId(client);
 		const adapter = createPgsqlAdapter(client, {
 			borrowedClient: true,
@@ -556,6 +702,11 @@ export async function convergePg(
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
+		const fkUniqueIndexes = assertFreshForeignKeysReferenceUniqueKeys(
+			diff.changes,
+			database,
+			schema,
+		);
 		const fkAutoIndexSpecs = collectFkAutoIndexSpecs(diff.changes, schema);
 		if (fkAutoIndexSpecs.length > 0) {
 			const tables = new Set(fkAutoIndexSpecs.map((spec) => spec.table));
@@ -578,17 +729,21 @@ export async function convergePg(
 		);
 		if (diff.changes.length === 0) return { kind: 'no-drift', applied: [] };
 		const orderedChanges = [...diff.changes].sort(
-			(left, right) => getPhase(left.kind) - getPhase(right.kind),
+			(left, right) => convergePhase(left) - convergePhase(right),
 		);
 		const createTableStepKeys = new Map<string, string>();
+		const createIndexStepKeys = new Map<SchemaChange, string>();
 		for (const [order, change] of orderedChanges.entries()) {
-			if (change.kind !== 'create_table') continue;
-			const address = generatedAddress(change, database, schema);
-			if (address)
-				createTableStepKeys.set(
-					canonicalJsonDigest(address),
-					`converge:${order}`,
-				);
+			if (change.kind === 'create_table') {
+				const address = generatedAddress(change, database, schema);
+				if (address)
+					createTableStepKeys.set(
+						canonicalJsonDigest(address),
+						`converge:${order}`,
+					);
+			}
+			if (change.kind === 'create_index')
+				createIndexStepKeys.set(change, `converge:${order}`);
 		}
 		const assembled: {
 			readonly change: SchemaChange;
@@ -621,6 +776,15 @@ export async function convergePg(
 						'converge admitted add_foreign_key without a referenced creating table step',
 					);
 				dependencies.add(dependency);
+				const indexChange = fkUniqueIndexes.get(change);
+				if (indexChange) {
+					const indexDependency = createIndexStepKeys.get(indexChange);
+					if (!indexDependency)
+						throw new Error(
+							'converge admitted add_foreign_key without its qualifying unique index step',
+						);
+					dependencies.add(indexDependency);
+				}
 			}
 			const statements = generateMigrationSQL(
 				{ ...diff, changes: [change] },
@@ -685,7 +849,7 @@ export async function convergePg(
 		if (outcome.outcome === 'completed')
 			return {
 				kind: 'applied',
-				applied: diff.changes.map((change) => change.kind),
+				applied: orderedChanges.map((change) => change.kind),
 			};
 		if (outcome.outcome === 'partially-applied')
 			return {

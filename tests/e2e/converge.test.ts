@@ -194,7 +194,15 @@ describe('convergePg', () => {
 				{
 					...table('fresh_users', false),
 					columns: [
-						{ name: 'id', type: 'integer', nullable: false },
+						{
+							name: 'id',
+							type: 'integer',
+							nullable: false,
+							default: {
+								sql: `nextval('${schema}.fresh_sequence'::regclass)`,
+							},
+						},
+						{ name: 'external_id', type: 'integer', nullable: false },
 						{
 							name: 'profile',
 							type: 'string',
@@ -203,7 +211,11 @@ describe('convergePg', () => {
 						},
 					],
 					indexes: [
-						{ name: 'fresh_users_id_unique', columns: ['id'], unique: true },
+						{
+							name: 'fresh_users_external_id_unique',
+							columns: ['external_id'],
+							unique: true,
+						},
 						{
 							name: 'fresh_users_profile_gin',
 							columns: ['profile'],
@@ -223,7 +235,7 @@ describe('convergePg', () => {
 					foreignKeys: [
 						{
 							columns: ['user_id'],
-							references: { table: 'fresh_users', columns: ['id'] },
+							references: { table: 'fresh_users', columns: ['external_id'] },
 						},
 					],
 					indexes: [
@@ -247,7 +259,9 @@ describe('convergePg', () => {
 		const users = address(databaseId, 'table', 'fresh_users');
 		const posts = address(databaseId, 'table', 'fresh_posts');
 		await expect(
-			managed(address(databaseId, 'index', 'fresh_users_id_unique', users)),
+			managed(
+				address(databaseId, 'index', 'fresh_users_external_id_unique', users),
+			),
 		).resolves.toBe(true);
 		await expect(
 			managed(address(databaseId, 'constraint', 'fresh_users_id_check', users)),
@@ -261,6 +275,71 @@ describe('convergePg', () => {
 			managed(address(databaseId, 'sequence', 'fresh_sequence')),
 		).resolves.toBe(true);
 	});
+
+	it.each([
+		[
+			'partial unique index',
+			[
+				{
+					name: 'partial_unique_parent_external_id',
+					columns: ['external_id'],
+					unique: true,
+					where: 'external_id IS NOT NULL',
+				},
+			],
+		],
+		['no unique key', []],
+	] as const)(
+		'refuses a fresh FK to columns with a %s before creating either table',
+		async (_reason, parentIndexes) => {
+			const pool = await getTestPool();
+			const desired = model([
+				{
+					...table('partial_unique_parent', false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'external_id', type: 'integer', nullable: false },
+					],
+					indexes: parentIndexes,
+				},
+				{
+					...table('partial_unique_child', false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'parent_external_id', type: 'integer', nullable: false },
+					],
+					foreignKeys: [
+						{
+							columns: ['parent_external_id'],
+							references: {
+								table: 'partial_unique_parent',
+								columns: ['external_id'],
+							},
+						},
+					],
+					indexes: [
+						{
+							name: 'partial_unique_child_parent_external_id_index',
+							columns: ['parent_external_id'],
+						},
+					],
+				},
+			]);
+
+			await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject(
+				{
+					refusal: 'unsupported-change',
+					detail: expect.stringContaining('partial_unique_parent(external_id)'),
+				},
+			);
+			for (const tableName of ['partial_unique_parent', 'partial_unique_child'])
+				await expect(
+					pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+						`${schema}.${tableName}`,
+					]),
+				).resolves.toMatchObject({ rows: [{ relation: null }] });
+		},
+	);
 
 	it('ignores undeclared live sequences', async () => {
 		const pool = await getTestPool();
@@ -329,6 +408,21 @@ describe('convergePg', () => {
 			const parent = address(databaseId, 'table', tableName);
 			await expect(
 				managed(address(databaseId, 'index', indexName, parent)),
+			).resolves.toBe(true);
+		}
+		for (const [tableName, foreignKeyName] of [
+			['cycle_left', 'fk_cycle_left_right_id'],
+			['cycle_right', 'fk_cycle_right_left_id'],
+		] as const) {
+			await expect(
+				pool.query(
+					'SELECT constraint_item.conname FROM pg_catalog.pg_constraint constraint_item JOIN pg_catalog.pg_class relation ON relation.oid = constraint_item.conrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND constraint_item.contype = $3',
+					[schema, tableName, 'f'],
+				),
+			).resolves.toMatchObject({ rows: [{ conname: foreignKeyName }] });
+			const parent = address(databaseId, 'table', tableName);
+			await expect(
+				managed(address(databaseId, 'constraint', foreignKeyName, parent)),
 			).resolves.toBe(true);
 		}
 	});
