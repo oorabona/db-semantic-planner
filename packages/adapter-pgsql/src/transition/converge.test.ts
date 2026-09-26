@@ -191,9 +191,12 @@ function compareIntrospectedSchema(): void {
 }
 
 const typeClassificationQuery =
-	'SELECT t.typtype FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)';
+	"SELECT t.typtype, t.typnamespace = 'pg_catalog'::pg_catalog.regnamespace AS is_pg_catalog FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)";
 
-function client(typeKind?: string): PoolClient {
+function client(type?: {
+	readonly typtype: string;
+	readonly is_pg_catalog: boolean;
+}): PoolClient {
 	return {
 		query: vi.fn(async (sql: string) => {
 			if (sql === 'SHOW server_version_num')
@@ -202,7 +205,7 @@ function client(typeKind?: string): PoolClient {
 				return { rows: [{ database_id: 'app' }] };
 			if (sql === typeClassificationQuery)
 				return {
-					rows: typeKind === undefined ? [] : [{ typtype: typeKind }],
+					rows: type === undefined ? [] : [type],
 				};
 			return { rows: [] };
 		}),
@@ -285,8 +288,8 @@ async function expectRefusal(
 
 async function expectAdmittedAddColumn(
 	column: Record<string, unknown>,
-	typeKind?: string,
-	testClient = client(typeKind),
+	type?: { readonly typtype: string; readonly is_pg_catalog: boolean },
+	testClient = client(type),
 ): Promise<PoolClient> {
 	const parent = {
 		scope: 'schema',
@@ -483,10 +486,17 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
-	it.each(['constrained', 'unconstrained'])(
-		'refuses a defaulted column with a %s domain type before execution',
-		async () => {
-			const testClient = client('d');
+	it.each([
+		['base type outside pg_catalog', { typtype: 'b', is_pg_catalog: false }],
+		['composite type', { typtype: 'c', is_pg_catalog: false }],
+		['pseudo type', { typtype: 'p', is_pg_catalog: true }],
+		['range type', { typtype: 'r', is_pg_catalog: false }],
+		['multirange type', { typtype: 'm', is_pg_catalog: false }],
+		['domain type', { typtype: 'd', is_pg_catalog: false }],
+	] as const)(
+		'refuses a defaulted column with a %s before execution',
+		async (_label, type) => {
+			const testClient = client(type);
 			await expectRefusal(
 				change('add_column', {
 					column: {
@@ -516,7 +526,7 @@ describe('convergePg refusal boundary', () => {
 				originalDbType: 'BIGINT',
 				default: '0',
 			},
-			'b',
+			{ typtype: 'b', is_pg_catalog: true },
 		);
 		expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
 			'BIGINT',
@@ -532,7 +542,7 @@ describe('convergePg refusal boundary', () => {
 				originalDbType: 'state_enum',
 				default: 'pending',
 			},
-			'e',
+			{ typtype: 'e', is_pg_catalog: false },
 		);
 		expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
 			'state_enum',

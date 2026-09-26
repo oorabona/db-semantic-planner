@@ -167,7 +167,7 @@ function startupSafeAddColumn(change: SchemaChange): boolean {
 	);
 }
 
-async function assertDefaultedColumnsUseNonDomainTypes(
+async function assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
 	client: Queryable,
 	changes: readonly SchemaChange[],
 	schema: string,
@@ -184,17 +184,23 @@ async function assertDefaultedColumnsUseNonDomainTypes(
 			continue;
 
 		const typeName = mapColumnType(column as ColumnIR, schema);
-		const typeKind = (
-			await client.query<{ readonly typtype: string }>(
-				'SELECT t.typtype FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)',
+		const type = (
+			await client.query<{
+				readonly typtype: string;
+				readonly is_pg_catalog: boolean;
+			}>(
+				"SELECT t.typtype, t.typnamespace = 'pg_catalog'::pg_catalog.regnamespace AS is_pg_catalog FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)",
 				[typeName],
 			)
-		).rows[0]?.typtype;
-		if (typeKind === undefined || typeKind === 'd')
+		).rows[0];
+		if (
+			type === undefined ||
+			(type.typtype !== 'e' && (type.typtype !== 'b' || !type.is_pg_catalog))
+		)
 			throw refusal(
 				'unsupported-change',
 				[change],
-				`converge refuses defaulted column ${record.name} with ${typeKind === 'd' ? 'domain' : 'unresolvable'} type ${typeName}`,
+				`converge refuses defaulted column ${record.name} with ${type?.typtype ?? 'unresolvable'} type ${typeName}`,
 			);
 	}
 }
@@ -678,10 +684,10 @@ function describeFkAutoIndexSpecs(
  * Converges only startup-safe PostgreSQL additions: it creates tables and
  * sequences, adds nullable columns without defaults and NOT NULL columns with
  * boolean, finite-number, or non-function-like string literal defaults of a
- * built-in, enum, or extension base type to managed tables, and creates
+ * a PostgreSQL built-in base type or an enum to managed tables, and creates
  * indexes, CHECK constraints, and foreign keys when their table parents are
  * created by this same run (for foreign keys, both tables).
- * A defaulted column whose original database type is a domain is refused.
+ * Other defaulted original database types are refused.
  *
  * Adding a column still takes an ACCESS EXCLUSIVE lock on its table, bounded by
  * the executor's five-second lock_timeout and held through read-back and the
@@ -824,7 +830,11 @@ export async function convergePg(
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
-		await assertDefaultedColumnsUseNonDomainTypes(client, diff.changes, schema);
+		await assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
+			client,
+			diff.changes,
+			schema,
+		);
 		const fkUniqueIndexes = assertFreshForeignKeysReferenceUniqueKeys(
 			diff.changes,
 			database,
