@@ -116,6 +116,71 @@ function createTableWithForeignKey(
 	};
 }
 
+function freshForeignKeyChanges(
+	referencedColumns: readonly string[],
+	options: {
+		readonly primaryKey?: string | readonly string[];
+		readonly index?: Record<string, unknown>;
+	} = {},
+): SchemaChange[] {
+	return [
+		{
+			kind: 'create_table',
+			table: 'parent_table',
+			destructive: false,
+			details: 'create parent',
+			meta: {
+				table: {
+					name: 'parent_table',
+					columns: [],
+					foreignKeys: [],
+					indexes: [],
+					...(options.primaryKey === undefined
+						? {}
+						: { primaryKey: options.primaryKey }),
+				},
+			},
+		},
+		{
+			kind: 'create_table',
+			table: 'child_table',
+			destructive: false,
+			details: 'create child',
+			meta: {
+				table: {
+					name: 'child_table',
+					columns: [],
+					foreignKeys: [],
+					indexes: [],
+				},
+			},
+		},
+		{
+			kind: 'add_foreign_key',
+			table: 'child_table',
+			destructive: false,
+			details: 'child references parent',
+			meta: {
+				fk: {
+					columns: ['parent_first', 'parent_second'],
+					references: { table: 'parent_table', columns: referencedColumns },
+				},
+			},
+		},
+		...(options.index === undefined
+			? []
+			: [
+					{
+						kind: 'create_index' as const,
+						table: 'parent_table',
+						destructive: false,
+						details: 'create parent index',
+						meta: { index: options.index },
+					},
+				]),
+	];
+}
+
 function compareIntrospectedSchema(): void {
 	mocks.compare.mockImplementation(
 		async (
@@ -1056,6 +1121,179 @@ describe('convergePg refusal boundary', () => {
 				],
 			},
 		});
+	});
+
+	it('admits a fresh FK whose referenced columns reverse a composite primary key', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: freshForeignKeyChanges(['external_id', 'tenant_id'], {
+				primaryKey: ['tenant_id', 'external_id'],
+			}),
+		});
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+	});
+
+	it('orders a reversed composite qualifying unique index before its fresh FK', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: freshForeignKeyChanges(['b', 'a'], {
+				index: {
+					name: 'parent_table_a_b_unique',
+					columns: ['a', 'b'],
+					unique: true,
+				},
+			}),
+		});
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		const executionInput = mocks.execute.mock.calls[0]?.[0];
+		expect(executionInput).toBeDefined();
+		const steps = (
+			executionInput as {
+				readonly manifest: {
+					readonly steps: readonly {
+						readonly stepKey: string;
+						readonly address?: { readonly kind: string; readonly name: string };
+						readonly dependencyOrder: readonly string[];
+					}[];
+				};
+			}
+		).manifest.steps;
+		const indexStep = steps.find(
+			(step) =>
+				step.address?.kind === 'index' &&
+				step.address.name === 'parent_table_a_b_unique',
+		);
+		const foreignKeyStep = steps.find(
+			(step) =>
+				step.address?.kind === 'constraint' &&
+				step.address.name === 'fk_child_table_parent_first_parent_second',
+		);
+		expect(indexStep).toBeDefined();
+		expect(foreignKeyStep).toBeDefined();
+		expect(foreignKeyStep?.dependencyOrder).toContain(indexStep?.stepKey);
+	});
+
+	it.each([
+		['primary key', { primaryKey: 'a' }],
+		[
+			'unique index',
+			{
+				index: {
+					name: 'parent_table_a_b_unique',
+					columns: ['a', 'b'],
+					unique: true,
+				},
+			},
+		],
+	] as const)(
+		'refuses duplicate referenced columns against a %s before execution',
+		async (_label, options) => {
+			mocks.compare.mockResolvedValue({
+				changes: freshForeignKeyChanges(['a', 'a'], options),
+			});
+
+			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+				refusal: 'unsupported-change',
+			});
+			expect(mocks.execute).not.toHaveBeenCalled();
+		},
+	);
+
+	it('refuses an unnamed expression-only index on a fresh table before execution', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'create_table',
+					table: 'users',
+					destructive: false,
+					details: 'create users',
+					meta: {
+						table: { name: 'users', columns: [], foreignKeys: [], indexes: [] },
+					},
+				},
+				{
+					kind: 'create_index',
+					table: 'users',
+					destructive: false,
+					details: 'create expression index',
+					meta: { index: { columns: [], expressions: ['lower(email::text)'] } },
+				},
+			],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('users'),
+		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('admits a named expression-only index on a fresh table', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'create_table',
+					table: 'users',
+					destructive: false,
+					details: 'create users',
+					meta: {
+						table: { name: 'users', columns: [], foreignKeys: [], indexes: [] },
+					},
+				},
+				{
+					kind: 'create_index',
+					table: 'users',
+					destructive: false,
+					details: 'create expression index',
+					meta: {
+						index: {
+							name: 'users_lower_email_idx',
+							columns: [],
+							expressions: ['lower(email::text)'],
+						},
+					},
+				},
+			],
+		});
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+	});
+
+	it('propagates an address failure for an otherwise admitted change', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'create_table',
+					table: 'users',
+					destructive: false,
+					details: 'create users',
+					meta: {
+						table: { name: 'users', columns: [], foreignKeys: [], indexes: [] },
+					},
+				},
+				{
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: 'malformed check',
+					meta: { check: null },
+				},
+			],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toThrow(
+			'generator planning refuses add_check_constraint: missing typed check',
+		);
+		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
 	it.each([

@@ -139,12 +139,8 @@ function generatedAddress(
 	change: SchemaChange,
 	database: string,
 	schema: string,
-): LedgerAddress | undefined {
-	try {
-		return addressForChange({ change, database, schema });
-	} catch {
-		return undefined;
-	}
+): LedgerAddress {
+	return addressForChange({ change, database, schema });
 }
 
 function referencedTableAddress(
@@ -185,8 +181,20 @@ function additiveChange(
 	if (change.kind === 'create_table') return true;
 	if (change.kind === 'add_column') return plainNullableColumn(change);
 	if (change.kind === 'create_sequence') return true;
+	if (
+		change.kind !== 'create_index' &&
+		change.kind !== 'add_check_constraint' &&
+		change.kind !== 'add_foreign_key'
+	)
+		return false;
+	if (isUnnamedExpressionOnlyIndex(change))
+		throw refusal(
+			'unsupported-change',
+			[change],
+			`converge refuses unnamed expression-only index on ${change.table}; name the index`,
+		);
 	const address = generatedAddress(change, database, schema);
-	const parent = address && parentAddress(address);
+	const parent = parentAddress(address);
 	if (
 		(change.kind === 'create_index' ||
 			change.kind === 'add_check_constraint') &&
@@ -374,8 +382,6 @@ async function assertExistingDeclaredSequencesManaged(
 			database,
 			schema,
 		);
-		if (!address)
-			throw new Error(`converge could not address sequence ${sequence.name}`);
 		if (createdSequenceAddresses.has(canonicalJsonDigest(address))) continue;
 		const managed = await isManagedCurrent(client, address);
 		if (managed === 'absent')
@@ -416,14 +422,29 @@ function assertDeclaredSequenceNamesPreserved(
 	}
 }
 
-function sameColumns(
+function sameColumnSet(
 	left: readonly string[],
 	right: readonly string[],
 ): boolean {
-	return (
-		left.length === right.length &&
-		left.every((column, i) => column === right[i])
-	);
+	const leftKey = canonicalColumnSet(left);
+	const rightKey = canonicalColumnSet(right);
+	return leftKey !== undefined && leftKey === rightKey;
+}
+
+/** A unique-key column set, with duplicates rejected and names encoded unambiguously. */
+function canonicalColumnSet(columns: readonly string[]): string | undefined {
+	if (new Set(columns).size !== columns.length) return undefined;
+	return JSON.stringify([...columns].sort());
+}
+
+function referencedUniqueKey(
+	table: LedgerAddress,
+	columns: readonly string[],
+): string | undefined {
+	const columnSet = canonicalColumnSet(columns);
+	return columnSet === undefined
+		? undefined
+		: JSON.stringify([canonicalJsonDigest(table), columnSet]);
 }
 
 function foreignKeyForChange(change: SchemaChange): ForeignKeyIR | undefined {
@@ -459,7 +480,7 @@ function tableHasInlineUniqueKey(
 	const primaryKey = table.primaryKey;
 	if (
 		primaryKey !== undefined &&
-		sameColumns(
+		sameColumnSet(
 			typeof primaryKey === 'string' ? [primaryKey] : primaryKey,
 			columns,
 		)
@@ -481,7 +502,17 @@ function isQualifyingUniqueIndex(
 		index?.unique === true &&
 		index.where === undefined &&
 		(index.expressions === undefined || index.expressions.length === 0) &&
-		sameColumns(index.columns, columns)
+		sameColumnSet(index.columns, columns)
+	);
+}
+
+function isUnnamedExpressionOnlyIndex(change: SchemaChange): boolean {
+	if (change.kind !== 'create_index') return false;
+	const index = indexForChange(change);
+	return (
+		index !== undefined &&
+		(typeof index.name !== 'string' || index.name.length === 0) &&
+		index.columns.length === 0
 	);
 }
 
@@ -496,10 +527,25 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 	schema: string,
 ): ReadonlyMap<SchemaChange, SchemaChange> {
 	const createdTables = new Map<string, SchemaChange>();
+	const qualifyingIndexesByReferencedKey = new Map<string, SchemaChange>();
 	for (const change of changes) {
-		if (change.kind !== 'create_table') continue;
-		const address = generatedAddress(change, database, schema);
-		if (address) createdTables.set(canonicalJsonDigest(address), change);
+		if (change.kind === 'create_table') {
+			const address = generatedAddress(change, database, schema);
+			createdTables.set(canonicalJsonDigest(address), change);
+			continue;
+		}
+		if (change.kind !== 'create_index') continue;
+		const index = indexForChange(change);
+		if (
+			index?.unique !== true ||
+			index.where !== undefined ||
+			(index.expressions !== undefined && index.expressions.length > 0)
+		)
+			continue;
+		const parent = parentAddress(generatedAddress(change, database, schema));
+		if (!parent) continue;
+		const key = referencedUniqueKey(parent, index.columns);
+		if (key !== undefined) qualifyingIndexesByReferencedKey.set(key, change);
 	}
 	const qualifyingIndexes = new Map<SchemaChange, SchemaChange>();
 	for (const change of changes) {
@@ -522,16 +568,21 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 			)
 		)
 			continue;
-		const indexChange = changes.find(
-			(candidate) =>
-				candidate.kind === 'create_index' &&
-				candidate.table === referenced.name &&
-				isQualifyingUniqueIndex(
-					indexForChange(candidate),
-					foreignKey.references.columns,
-				),
+		const referencedKey = referencedUniqueKey(
+			referenced,
+			foreignKey.references.columns,
 		);
-		if (indexChange) {
+		const indexChange =
+			referencedKey === undefined
+				? undefined
+				: qualifyingIndexesByReferencedKey.get(referencedKey);
+		if (
+			indexChange &&
+			isQualifyingUniqueIndex(
+				indexForChange(indexChange),
+				foreignKey.references.columns,
+			)
+		) {
 			qualifyingIndexes.set(change, indexChange);
 			continue;
 		}
@@ -675,14 +726,14 @@ export async function convergePg(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_table') return [];
 				const address = generatedAddress(change, database, schema);
-				return address === undefined ? [] : [canonicalJsonDigest(address)];
+				return [canonicalJsonDigest(address)];
 			}),
 		);
 		const createdSequenceAddresses = new Set(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_sequence') return [];
 				const address = generatedAddress(change, database, schema);
-				return address === undefined ? [] : [canonicalJsonDigest(address)];
+				return [canonicalJsonDigest(address)];
 			}),
 		);
 		await assertExistingDeclaredSequencesManaged(
@@ -736,11 +787,10 @@ export async function convergePg(
 		for (const [order, change] of orderedChanges.entries()) {
 			if (change.kind === 'create_table') {
 				const address = generatedAddress(change, database, schema);
-				if (address)
-					createTableStepKeys.set(
-						canonicalJsonDigest(address),
-						`converge:${order}`,
-					);
+				createTableStepKeys.set(
+					canonicalJsonDigest(address),
+					`converge:${order}`,
+				);
 			}
 			if (change.kind === 'create_index')
 				createIndexStepKeys.set(change, `converge:${order}`);
@@ -751,7 +801,7 @@ export async function convergePg(
 		}[] = [];
 		for (const [order, change] of orderedChanges.entries()) {
 			const address = generatedAddress(change, database, schema);
-			const parent = address && parentAddress(address);
+			const parent = parentAddress(address);
 			const dependencies = new Set<string>();
 			if (
 				parent &&
