@@ -98,7 +98,9 @@ describe('convergePg', () => {
 		await createSchema(schema);
 		await createSchema(typesSchema);
 		const pool = await getTestPool();
-		await pool.query(`CREATE DOMAIN "${typesSchema}"."${domain}" AS integer`);
+		await pool.query(
+			`CREATE DOMAIN "${typesSchema}"."${domain}" AS integer CHECK (VALUE > 0)`,
+		);
 		await runPreflight([schema], { writeAdoptionFile: async () => {} });
 	});
 
@@ -538,6 +540,52 @@ describe('convergePg', () => {
 		).resolves.toBe(true);
 	});
 
+	it('refuses a defaulted constrained-domain column on a populated managed table', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: `-c search_path=${typesSearchPath}`,
+		});
+		const name = 'defaulted_domain_fixture';
+		try {
+			await expect(
+				convergePg(dedicatedPool, model([table(name, false)]), { schema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await dedicatedPool.query(
+				`INSERT INTO "${schema}"."${name}" ("id") VALUES (1)`,
+			);
+
+			await expect(
+				convergePg(
+					dedicatedPool,
+					model([
+						{
+							...table(name, false),
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{
+									name: 'value',
+									type: 'integer',
+									nullable: false,
+									originalDbType: domain,
+									default: 1,
+								},
+							],
+						},
+					]),
+					{ schema },
+				),
+			).rejects.toMatchObject({ refusal: 'unsupported-change' });
+			await expect(
+				dedicatedPool.query(
+					'SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3) AS exists',
+					[schema, name, 'value'],
+				),
+			).resolves.toMatchObject({ rows: [{ exists: false }] });
+		} finally {
+			await dedicatedPool.end();
+		}
+	});
+
 	it('adds astix-style NOT NULL literal-default columns to a populated managed table without a rewrite', async () => {
 		const pool = await getTestPool();
 		const databaseId = await database();
@@ -636,10 +684,17 @@ describe('convergePg', () => {
 		});
 		await expect(
 			pool.query(
-				'SELECT attribute.atthasmissing FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = $3 AND NOT attribute.attisdropped',
-				[schema, name, 'is_primary'],
+				'SELECT attribute.attname AS column_name, attribute.atthasmissing FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = ANY($3) AND NOT attribute.attisdropped',
+				[schema, name, columns.map((column) => column.name)],
 			),
-		).resolves.toMatchObject({ rows: [{ atthasmissing: true }] });
+		).resolves.toMatchObject({
+			rows: expect.arrayContaining(
+				columns.map((column) => ({
+					column_name: column.name,
+					atthasmissing: true,
+				})),
+			),
+		});
 		const root = address(databaseId, 'table', name);
 		for (const column of columns)
 			await expect(

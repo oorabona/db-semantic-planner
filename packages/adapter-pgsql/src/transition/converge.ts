@@ -8,6 +8,7 @@ import {
 } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
+	ColumnIR,
 	DbCasing,
 	ForeignKeyIR,
 	IndexIR,
@@ -27,6 +28,7 @@ import {
 } from '../ddl/index.js';
 import { addressForChange } from '../ddl/managed-step-manifest.js';
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
+import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -163,6 +165,38 @@ function startupSafeAddColumn(change: SchemaChange): boolean {
 		((record.nullable === true && !hasDefault) ||
 			(record.nullable === false && hasDefault))
 	);
+}
+
+async function assertDefaultedColumnsUseNonDomainTypes(
+	client: Queryable,
+	changes: readonly SchemaChange[],
+	schema: string,
+): Promise<void> {
+	for (const change of changes) {
+		if (change.kind !== 'add_column' || !change.meta?.column) continue;
+		const column = change.meta.column;
+		if (typeof column !== 'object' || Array.isArray(column)) continue;
+		const record = column as Record<string, unknown>;
+		if (
+			record.default === undefined ||
+			typeof record.originalDbType !== 'string'
+		)
+			continue;
+
+		const typeName = mapColumnType(column as ColumnIR, schema);
+		const typeKind = (
+			await client.query<{ readonly typtype: string }>(
+				'SELECT t.typtype FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)',
+				[typeName],
+			)
+		).rows[0]?.typtype;
+		if (typeKind === undefined || typeKind === 'd')
+			throw refusal(
+				'unsupported-change',
+				[change],
+				`converge refuses defaulted column ${record.name} with ${typeKind === 'd' ? 'domain' : 'unresolvable'} type ${typeName}`,
+			);
+	}
 }
 
 function generatedAddress(
@@ -643,10 +677,11 @@ function describeFkAutoIndexSpecs(
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
  * sequences, adds nullable columns without defaults and NOT NULL columns with
- * boolean, finite-number, or non-function-like string literal defaults to
- * managed tables, and creates
+ * boolean, finite-number, or non-function-like string literal defaults of a
+ * built-in, enum, or extension base type to managed tables, and creates
  * indexes, CHECK constraints, and foreign keys when their table parents are
  * created by this same run (for foreign keys, both tables).
+ * A defaulted column whose original database type is a domain is refused.
  *
  * Adding a column still takes an ACCESS EXCLUSIVE lock on its table, bounded by
  * the executor's five-second lock_timeout and held through read-back and the
@@ -789,6 +824,7 @@ export async function convergePg(
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
+		await assertDefaultedColumnsUseNonDomainTypes(client, diff.changes, schema);
 		const fkUniqueIndexes = assertFreshForeignKeysReferenceUniqueKeys(
 			diff.changes,
 			database,
