@@ -540,6 +540,98 @@ describe('convergePg', () => {
 		).resolves.toBe(true);
 	});
 
+	it('leaves a caller-named external index in place and otherwise still refuses it', async () => {
+		const pool = await getTestPool();
+		const name = 'external_index_no_drift_fixture';
+		const index = 'idx_external_index_no_drift';
+		const desired = model([table(name, false)]);
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await pool.query(
+			`CREATE INDEX "${index}" ON "${schema}"."${name}" ("id") WHERE "id" > 0`,
+		);
+
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		const externalOptions = {
+			schema,
+			externalIndexes: [{ table: name, name: index }],
+		};
+		await expect(convergePg(pool, desired, externalOptions)).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		await expect(
+			pool.query(
+				'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname = $3) AS exists',
+				[schema, name, index],
+			),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('applies a declared nullable column without dropping a caller-named external index', async () => {
+		const pool = await getTestPool();
+		const name = 'external_index_add_column_fixture';
+		const index = 'idx_external_index_add_column';
+		await expect(
+			convergePg(pool, model([table(name, false)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await pool.query(
+			`CREATE INDEX "${index}" ON "${schema}"."${name}" ("id") WHERE "id" > 0`,
+		);
+		const externalOptions = {
+			schema,
+			externalIndexes: [{ table: name, name: index }],
+		};
+
+		await expect(
+			convergePg(pool, model([table(name)]), externalOptions),
+		).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+		await expect(
+			pool.query(
+				'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname = $3) AS exists',
+				[schema, name, index],
+			),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('refuses when an undeclared index remains after masking only the caller-named one', async () => {
+		const pool = await getTestPool();
+		const name = 'external_index_remaining_fixture';
+		const external = 'idx_external_index_named';
+		const remaining = 'idx_external_index_remaining';
+		const desired = model([table(name, false)]);
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		for (const index of [external, remaining]) {
+			await pool.query(
+				`CREATE INDEX "${index}" ON "${schema}"."${name}" ("id") WHERE "id" > 0`,
+			);
+		}
+		const externalOptions = {
+			schema,
+			externalIndexes: [{ table: name, name: external }],
+		};
+
+		await expect(
+			convergePg(pool, desired, externalOptions),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [expect.objectContaining({ kind: 'drop_index' })],
+		});
+		for (const index of [external, remaining]) {
+			await expect(
+				pool.query(
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname = $3) AS exists',
+					[schema, name, index],
+				),
+			).resolves.toMatchObject({ rows: [{ exists: true }] });
+		}
+	});
+
 	it('refuses a defaulted constrained-domain column on a populated managed table', async () => {
 		const dedicatedPool = new pg.Pool({
 			connectionString: process.env.DATABASE_URL!,

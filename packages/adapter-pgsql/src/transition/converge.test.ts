@@ -1,4 +1,4 @@
-import type { ModelIR } from '@dbsp/types';
+import type { ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
@@ -85,6 +85,52 @@ function modelWithSequences(names: readonly string[]): ModelIR {
 		...emptyModel(),
 		sequences: new Map(names.map((name) => [name, { name }])),
 	};
+}
+
+function modelWithTable(
+	name: string,
+	indexes: readonly TableIR['indexes'][number][] = [],
+): ModelIR {
+	const table: TableIR = { name, columns: [], foreignKeys: [], indexes };
+	const tables = new Map([[name, table]]);
+	return {
+		...emptyModel(),
+		tables,
+		getTable: (tableName) => tables.get(tableName),
+	};
+}
+
+function mockManagedObjects(): void {
+	const catalogueIdentity = {
+		engine: 'postgresql',
+		format: 1,
+		value: { oid: '1' },
+	};
+	mocks.identity.mockResolvedValue({ catalogueIdentity });
+	mocks.chain.mockImplementation((async (...args: unknown[]) => {
+		const address = args[2] as Record<string, unknown>;
+		return {
+			ledger: { scope: 'schema', schema: 'public' },
+			address,
+			events: [
+				{
+					eventId: 'adopt-intent',
+					address,
+					eventKind: 'adopt-intent',
+					controller: 'deployment',
+				},
+				{
+					eventId: 'adopt',
+					predecessor: 'adopt-intent',
+					address,
+					eventKind: 'adopt',
+					controller: 'deployment',
+					observed: { value: { table: address.name }, digest: 'observed' },
+				},
+			],
+			terminalMember: { catalogueIdentity },
+		};
+	}) as never);
 }
 
 function createTableWithForeignKey(
@@ -825,6 +871,175 @@ describe('convergePg refusal boundary', () => {
 			}),
 			'unsupported-change',
 		);
+	});
+
+	it('leaves an exact external index drop out of converge while refusing it without the option', async () => {
+		const desired = modelWithTable('users');
+		const externalDrop = change('drop_index', {
+			index: { name: 'idx_users_external', columns: ['email'] },
+		});
+		mocks.compare.mockResolvedValue({ changes: [externalDrop] });
+
+		await expect(convergePg(poolFor(), desired)).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+
+		mockManagedObjects();
+		await expect(
+			convergePg(poolFor(), desired, {
+				externalIndexes: [{ table: 'users', name: 'idx_users_external' }],
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('applies declared additions without assembling a matching external index drop', async () => {
+		const desired = modelWithTable('users');
+		mocks.compare.mockResolvedValue({
+			changes: [
+				change('drop_index', {
+					index: { name: 'idx_users_external', columns: ['email'] },
+				}),
+				change('add_column', {
+					column: { name: 'nickname', type: 'string', nullable: true },
+				}),
+			],
+		});
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mockManagedObjects();
+
+		await expect(
+			convergePg(poolFor(), desired, {
+				externalIndexes: [{ table: 'users', name: 'idx_users_external' }],
+			}),
+		).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+		expect(mocks.createStep).toHaveBeenCalledWith(
+			expect.objectContaining({
+				change: expect.objectContaining({ kind: 'add_column' }),
+			}),
+		);
+		expect(mocks.createStep).toHaveBeenCalledTimes(1);
+	});
+
+	it('continues to refuse an undeclared index not named external', async () => {
+		const desired = modelWithTable('users');
+		mocks.compare.mockResolvedValue({
+			changes: [
+				change('drop_index', {
+					index: { name: 'idx_users_external', columns: ['email'] },
+				}),
+				change('drop_index', {
+					index: { name: 'idx_users_other', columns: ['name'] },
+				}),
+			],
+		});
+
+		await expect(
+			convergePg(poolFor(), desired, {
+				externalIndexes: [{ table: 'users', name: 'idx_users_external' }],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: [expect.objectContaining({ details: 'drop_index' })],
+		});
+	});
+
+	it.each([
+		[
+			'explicitly named declared index',
+			modelWithTable('users', [
+				{ name: 'idx_users_email', columns: ['email'] },
+			]),
+			[{ table: 'users', name: 'idx_users_email' }],
+		],
+		[
+			'unnamed declared index by its generated physical name',
+			modelWithTable('users', [{ columns: ['email'] }]),
+			[{ table: 'users', name: 'idx_users_email' }],
+		],
+	] as const)(
+		'rejects an entry naming an %s before connecting',
+		async (_case, desired, externalIndexes) => {
+			const testClient = client();
+			const pool = poolFor(testClient);
+
+			await expect(
+				convergePg(pool, desired, { externalIndexes }),
+			).rejects.toMatchObject({
+				refusal: 'invalid-options',
+				detail: expect.stringContaining('externalIndexes[0]'),
+			});
+			expect(pool.connect).not.toHaveBeenCalled();
+			expect(testClient.query).not.toHaveBeenCalled();
+			expect(mocks.execute).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		['undeclared table', [{ table: 'missing', name: 'idx_missing_email' }]],
+		[
+			'duplicate entry',
+			[
+				{ table: 'users', name: 'idx_users_email' },
+				{ table: 'users', name: 'idx_users_email' },
+			],
+		],
+		['empty table', [{ table: '', name: 'idx_users_email' }]],
+		['empty name', [{ table: 'users', name: '' }]],
+		['non-string field', [{ table: 'users', name: 1 }]],
+		['non-object entry', [null]],
+	] as const)(
+		'rejects a %s external-index entry before connecting',
+		async (_case, externalIndexes) => {
+			const testClient = client();
+			const pool = poolFor(testClient);
+
+			await expect(
+				convergePg(pool, modelWithTable('users'), {
+					externalIndexes: externalIndexes as never,
+				}),
+			).rejects.toMatchObject({ refusal: 'invalid-options' });
+			expect(pool.connect).not.toHaveBeenCalled();
+			expect(testClient.query).not.toHaveBeenCalled();
+			expect(mocks.execute).not.toHaveBeenCalled();
+		},
+	);
+
+	it('treats an absent external index as a no-op', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjects();
+
+		await expect(
+			convergePg(poolFor(), modelWithTable('users'), {
+				externalIndexes: [{ table: 'users', name: 'idx_users_absent' }],
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+	});
+
+	it('matches the logical external table entry to a snake_case diff table', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('drop_index', {
+						index: { name: 'idx_user_profiles_external', columns: ['email'] },
+					}),
+					table: 'user_profiles',
+				},
+			],
+		});
+		mockManagedObjects();
+
+		await expect(
+			convergePg(poolFor(), modelWithTable('userProfiles'), {
+				dbCasing: 'snake_case',
+				externalIndexes: [
+					{ table: 'userProfiles', name: 'idx_user_profiles_external' },
+				],
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 	});
 
 	it('refuses a fresh single-column FK without a declared index before execution', async () => {

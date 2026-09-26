@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	canonicalJsonDigest,
+	defaultIndexName,
 	projectLedgerChain,
 	validateDeclarationModel,
 	validateNormalizedManagedStepManifest,
@@ -44,6 +45,7 @@ import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 export type PgConvergeRefusal =
+	| 'invalid-options'
 	| 'unsupported-change'
 	| 'unmanaged-object'
 	| 'unmanaged-parent'
@@ -87,9 +89,22 @@ export type PgConvergeResult =
 export interface ConvergePgOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
+	/**
+	 * Exact physical PostgreSQL index names that converge must leave alone on
+	 * declared model tables. Each table name uses the model's naming, while the
+	 * index name is used verbatim. Entries are validated before connecting: they
+	 * must be distinct, name declared tables, and must not name declared indexes.
+	 * Converge neither creates nor drops these external indexes.
+	 */
+	readonly externalIndexes?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
 }
 
 type Queryable = Pick<PoolClient, 'query'>;
+
+type ExternalIndex = { readonly table: string; readonly name: string };
 
 const lockedConvergeClients = new WeakSet<object>();
 
@@ -117,6 +132,91 @@ function refusal(
 			details: change.details,
 		})),
 		detail,
+	);
+}
+
+function invalidOptions(detail: string): PgConvergeRefusalError {
+	return new PgConvergeRefusalError('invalid-options', [], detail);
+}
+
+function declaredIndexNames(
+	table: TableIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): ReadonlySet<string> {
+	const physicalTable = naming.toDatabase(table.name);
+	return new Set(
+		table.indexes.map((index) =>
+			defaultIndexName(physicalTable, {
+				...index,
+				...(index.name === undefined
+					? {}
+					: { name: naming.toDatabase(index.name) }),
+				columns: index.columns.map((column) => naming.toDatabase(column)),
+			}),
+		),
+	);
+}
+
+/** Validate logical option entries and produce physical table names for diff matching. */
+function validateExternalIndexes(
+	model: ModelIR,
+	options: ConvergePgOptions,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): readonly ExternalIndex[] {
+	const supplied = options.externalIndexes;
+	if (supplied === undefined) return [];
+	if (!Array.isArray(supplied))
+		throw invalidOptions('converge externalIndexes must be an array');
+
+	const declaredTables = new Map(
+		[...model.tables.values()].map((table) => [table.name, table]),
+	);
+	const seen = new Set<string>();
+	return supplied.map((entry, position) => {
+		const label = `externalIndexes[${position}]`;
+		if (
+			entry === null ||
+			typeof entry !== 'object' ||
+			Array.isArray(entry) ||
+			typeof entry.table !== 'string' ||
+			entry.table.length === 0 ||
+			typeof entry.name !== 'string' ||
+			entry.name.length === 0
+		)
+			throw invalidOptions(
+				`converge ${label} must be an object with non-empty string table and name fields`,
+			);
+
+		const key = JSON.stringify([entry.table, entry.name]);
+		if (seen.has(key))
+			throw invalidOptions(
+				`converge ${label} duplicates external index ${entry.table}.${entry.name}`,
+			);
+		seen.add(key);
+
+		const table = declaredTables.get(entry.table);
+		if (!table)
+			throw invalidOptions(
+				`converge ${label} names undeclared table ${entry.table}`,
+			);
+		if (declaredIndexNames(table, naming).has(entry.name))
+			throw invalidOptions(
+				`converge ${label} names declared index ${entry.table}.${entry.name}`,
+			);
+		return { table: naming.toDatabase(entry.table), name: entry.name };
+	});
+}
+
+function masksExternalIndexDrop(
+	change: SchemaChange,
+	externalIndexes: readonly ExternalIndex[],
+): boolean {
+	if (change.kind !== 'drop_index') return false;
+	const index = indexForChange(change);
+	if (typeof index?.name !== 'string') return false;
+	return externalIndexes.some(
+		(external) =>
+			external.table === change.table && external.name === index.name,
 	);
 }
 
@@ -696,6 +796,9 @@ function describeFkAutoIndexSpecs(
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the
  * provenance of an exact-matching child already present on a managed table.
+ * `externalIndexes` accepts exact physical index names on logical model tables;
+ * entries are validated before the ledger lock or any query, and converge
+ * neither creates nor drops a matching external index.
  * Its run ids are ephemeral claim namespaces: no transition journal or durable
  * run relation is touched.
  */
@@ -707,6 +810,8 @@ export async function convergePg(
 	validateDeclarationModel(model);
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
+	const naming = getNamingPluginForDbCasing(casing);
+	const externalIndexes = validateExternalIndexes(model, options, naming);
 	const client = await pool.connect();
 	let destroyReason:
 		| 'converge could not determine ledger lock acquisition'
@@ -758,7 +863,6 @@ export async function convergePg(
 			borrowedClient: true,
 			dbCasing: casing,
 		});
-		const naming = getNamingPluginForDbCasing(casing);
 		assertDeclaredSequenceNamesPreserved(model, naming);
 		const declaredTables = [...model.tables.values()].map((table) =>
 			naming.toDatabase(table.name),
@@ -790,7 +894,7 @@ export async function convergePg(
 				return Reflect.get(target, property, receiver);
 			},
 		});
-		const diff = await comparePgsqlDatabaseSchema(
+		const compared = await comparePgsqlDatabaseSchema(
 			declarationScopedAdapter,
 			model,
 			{
@@ -799,6 +903,12 @@ export async function convergePg(
 				ignoreUnmanagedExtensions: true,
 			},
 		);
+		const diff = {
+			...compared,
+			changes: compared.changes.filter(
+				(change) => !masksExternalIndexDrop(change, externalIndexes),
+			),
+		};
 		const createdTableAddresses = new Set(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_table') return [];
