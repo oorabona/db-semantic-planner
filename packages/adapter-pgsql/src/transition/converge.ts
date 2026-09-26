@@ -118,20 +118,50 @@ function refusal(
 	);
 }
 
-function plainNullableColumn(change: SchemaChange): boolean {
+function startupSafeAddColumn(change: SchemaChange): boolean {
 	if (change.kind !== 'add_column' || !change.meta?.column) return false;
 	const column = change.meta.column;
 	if (typeof column !== 'object' || Array.isArray(column)) return false;
 	const record = column as Record<string, unknown>;
 	// This is intentionally a positive shape allowlist. New ColumnIR surface
 	// cannot become startup DDL until this list is deliberately reconsidered.
+	if (
+		!Object.keys(record).every((key) =>
+			['name', 'type', 'nullable', 'js', 'originalDbType', 'default'].includes(
+				key,
+			),
+		) ||
+		[
+			'logicalIdentity',
+			'originalDbTypeSchema',
+			'originalDbTypeSchemaScope',
+			'unique',
+			'uniqueConstraintName',
+			'autoIncrement',
+			'collation',
+			'comment',
+			'identity',
+		].some((field) => record[field] !== undefined) ||
+		typeof record.name !== 'string' ||
+		typeof record.type !== 'string' ||
+		typeof record.nullable !== 'boolean' ||
+		(record.js !== undefined &&
+			(typeof record.js !== 'string' || record.js.length === 0)) ||
+		(record.originalDbType !== undefined &&
+			(typeof record.originalDbType !== 'string' ||
+				record.originalDbType.length === 0))
+	)
+		return false;
+
+	const hasDefault = record.default !== undefined;
+	const defaultIsLiteral =
+		typeof record.default === 'boolean' ||
+		(typeof record.default === 'number' && Number.isFinite(record.default)) ||
+		(typeof record.default === 'string' && !record.default.endsWith('()'));
 	return (
-		Object.keys(record).every((key) =>
-			['name', 'type', 'nullable'].includes(key),
-		) &&
-		typeof record.name === 'string' &&
-		typeof record.type === 'string' &&
-		record.nullable === true
+		(!hasDefault || defaultIsLiteral) &&
+		((record.nullable === true && !hasDefault) ||
+			(record.nullable === false && hasDefault))
 	);
 }
 
@@ -179,7 +209,7 @@ function additiveChange(
 	createdTableAddresses: ReadonlySet<string>,
 ): boolean {
 	if (change.kind === 'create_table') return true;
-	if (change.kind === 'add_column') return plainNullableColumn(change);
+	if (change.kind === 'add_column') return startupSafeAddColumn(change);
 	if (change.kind === 'create_sequence') return true;
 	if (
 		change.kind !== 'create_index' &&
@@ -612,9 +642,15 @@ function describeFkAutoIndexSpecs(
 
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
- * sequences, adds plain nullable columns to managed tables, and creates
+ * sequences, adds nullable columns without defaults and NOT NULL columns with
+ * boolean, finite-number, or non-function-like string literal defaults to
+ * managed tables, and creates
  * indexes, CHECK constraints, and foreign keys when their table parents are
  * created by this same run (for foreign keys, both tables).
+ *
+ * Adding a column still takes an ACCESS EXCLUSIVE lock on its table, bounded by
+ * the executor's five-second lock_timeout and held through read-back and the
+ * ledger terminal. A no-rewrite default is therefore not non-blocking.
  *
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the

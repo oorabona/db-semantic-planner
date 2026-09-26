@@ -270,6 +270,61 @@ async function expectRefusal(input: Record<string, unknown>, refusal: string) {
 	expect(mocks.execute).not.toHaveBeenCalled();
 }
 
+async function expectAdmittedAddColumn(
+	column: Record<string, unknown>,
+): Promise<void> {
+	const parent = {
+		scope: 'schema',
+		engine: 'postgresql',
+		database: 'app',
+		schema: 'public',
+		kind: 'table',
+		name: 'users',
+	} as const;
+	const catalogueIdentity = {
+		engine: 'postgresql',
+		format: 1,
+		value: { oid: '1' },
+	};
+	mocks.compare.mockResolvedValue({
+		changes: [change('add_column', { column })],
+	});
+	mocks.createStep.mockImplementation(
+		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
+	);
+	mocks.identity.mockImplementation(
+		async (_client: unknown, address: { readonly kind?: string }) =>
+			address.kind === 'table' ? { catalogueIdentity } : undefined,
+	);
+	mocks.chain.mockResolvedValue({
+		ledger: { scope: 'schema', schema: 'public' },
+		address: parent,
+		events: [
+			{
+				eventId: 'adopt-intent',
+				address: parent,
+				eventKind: 'adopt-intent',
+				controller: 'deployment',
+			},
+			{
+				eventId: 'adopt',
+				predecessor: 'adopt-intent',
+				address: parent,
+				eventKind: 'adopt',
+				controller: 'deployment',
+				observed: { value: { table: 'users' }, digest: 'observed' },
+			},
+		],
+		terminalMember: { catalogueIdentity },
+	} as never);
+
+	await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+		kind: 'applied',
+		applied: ['add_column'],
+	});
+	expect(mocks.execute).toHaveBeenCalled();
+}
+
 afterEach(() => {
 	for (const mock of Object.values(mocks)) {
 		if ('mockReset' in mock) mock.mockReset();
@@ -389,6 +444,29 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
+	it('admits a nullable column with js and originalDbType but no default', async () => {
+		await expectAdmittedAddColumn({
+			name: 'coverage_epoch',
+			type: 'bigint',
+			nullable: true,
+			js: 'bigint',
+			originalDbType: 'BIGINT',
+		});
+	});
+
+	it.each([
+		['boolean', false],
+		['finite number', 0],
+		['string', 'unknown'],
+	])('admits a NOT NULL column with a %s default', async (_kind, value) => {
+		await expectAdmittedAddColumn({
+			name: 'value',
+			type: 'string',
+			nullable: false,
+			default: value,
+		});
+	});
+
 	it('refuses a column with a default', async () => {
 		await expectRefusal(
 			change('add_column', {
@@ -402,6 +480,97 @@ describe('convergePg refusal boundary', () => {
 		await expectRefusal(
 			change('add_column', {
 				column: { name: 'email', type: 'string', nullable: true, unique: true },
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		['null', null],
+		['raw SQL', { sql: 'now()' }],
+		['attested raw SQL', { sql: 'now()', attestedBy: 'test' }],
+		['function-like string', 'now()'],
+		['UUID function-like string', 'gen_random_uuid()'],
+		['NaN', Number.NaN],
+		['infinity', Number.POSITIVE_INFINITY],
+		['negative infinity', Number.NEGATIVE_INFINITY],
+		['object', { value: 'x' }],
+		['array', ['x']],
+	])('refuses a NOT NULL column with a %s default', async (_kind, value) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: false,
+					default: value,
+				},
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		'logicalIdentity',
+		'originalDbTypeSchema',
+		'originalDbTypeSchemaScope',
+		'uniqueConstraintName',
+		'autoIncrement',
+		'collation',
+		'comment',
+		'identity',
+		'unknown',
+	])('refuses a column with a %s key', async (key) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: true,
+					[key]: true,
+				},
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it('refuses inherited or non-enumerable unique column properties', async () => {
+		const inheritedUnique = Object.assign(Object.create({ unique: true }), {
+			name: 'email',
+			type: 'string',
+			nullable: true,
+		});
+		await expectRefusal(
+			change('add_column', { column: inheritedUnique }),
+			'unsupported-change',
+		);
+
+		const nonEnumerableUnique = {
+			name: 'email',
+			type: 'string',
+			nullable: true,
+		};
+		Object.defineProperty(nonEnumerableUnique, 'unique', { value: true });
+		await expectRefusal(
+			change('add_column', { column: nonEnumerableUnique }),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		['empty js', { js: '' }],
+		['empty originalDbType', { originalDbType: '' }],
+		['non-string js', { js: true }],
+		['non-string originalDbType', { originalDbType: true }],
+	])('refuses a column with %s', async (_kind, extra) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: true,
+					...extra,
+				},
 			}),
 			'unsupported-change',
 		);
