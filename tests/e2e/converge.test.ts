@@ -98,7 +98,9 @@ describe('convergePg', () => {
 		await createSchema(schema);
 		await createSchema(typesSchema);
 		const pool = await getTestPool();
-		await pool.query(`CREATE DOMAIN "${typesSchema}"."${domain}" AS integer`);
+		await pool.query(
+			`CREATE DOMAIN "${typesSchema}"."${domain}" AS integer CHECK (VALUE > 0)`,
+		);
 		await runPreflight([schema], { writeAdoptionFile: async () => {} });
 	});
 
@@ -537,6 +539,264 @@ describe('convergePg', () => {
 			managed(address(databaseId, 'column', 'nickname', root)),
 		).resolves.toBe(true);
 	});
+
+	it('refuses a defaulted constrained-domain column on a populated managed table', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: `-c search_path=${typesSearchPath}`,
+		});
+		const name = 'defaulted_domain_fixture';
+		try {
+			await expect(
+				convergePg(dedicatedPool, model([table(name, false)]), { schema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await dedicatedPool.query(
+				`INSERT INTO "${schema}"."${name}" ("id") VALUES (1)`,
+			);
+
+			await expect(
+				convergePg(
+					dedicatedPool,
+					model([
+						{
+							...table(name, false),
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{
+									name: 'value',
+									type: 'integer',
+									nullable: false,
+									originalDbType: domain,
+									default: 1,
+								},
+							],
+						},
+					]),
+					{ schema },
+				),
+			).rejects.toMatchObject({ refusal: 'unsupported-change' });
+			await expect(
+				dedicatedPool.query(
+					'SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3) AS exists',
+					[schema, name, 'value'],
+				),
+			).resolves.toMatchObject({ rows: [{ exists: false }] });
+		} finally {
+			await dedicatedPool.end();
+		}
+	});
+
+	it('adds astix-style NOT NULL literal-default columns to a populated managed table without a rewrite', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'literal_default_columns_fixture';
+		const columns = [
+			{ name: 'is_primary', type: 'boolean', nullable: false, default: false },
+			{
+				name: 'coverage_epoch',
+				type: 'bigint',
+				nullable: false,
+				js: 'bigint',
+				originalDbType: 'BIGINT',
+				default: '0',
+			},
+			{
+				name: 'file_state_version',
+				type: 'bigint',
+				nullable: false,
+				js: 'bigint',
+				originalDbType: 'BIGINT',
+				default: '0',
+			},
+			{ name: 'is_test', type: 'boolean', nullable: false, default: false },
+			{
+				name: 'description_stale',
+				type: 'boolean',
+				nullable: false,
+				default: false,
+			},
+			{
+				name: 'call_kind',
+				type: 'string',
+				nullable: false,
+				default: 'unknown',
+			},
+			{
+				name: 'resolution_status',
+				type: 'string',
+				nullable: false,
+				default: 'pending',
+			},
+		] satisfies TableIR['columns'];
+
+		await expect(
+			convergePg(pool, model([table(name, false)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await pool.query(`INSERT INTO "${schema}"."${name}" ("id") VALUES (1)`);
+		await expect(
+			convergePg(
+				pool,
+				model([
+					{
+						...table(name, false),
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							...columns,
+						],
+					},
+				]),
+				{ schema },
+			),
+		).resolves.toMatchObject({ kind: 'applied' });
+
+		const nullability = await pool.query<{
+			column_name: string;
+			is_nullable: string;
+		}>(
+			'SELECT column_name, is_nullable FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = ANY($3)',
+			[schema, name, columns.map((column) => column.name)],
+		);
+		expect(nullability.rows).toHaveLength(columns.length);
+		expect(nullability.rows).toEqual(
+			expect.arrayContaining(
+				columns.map((column) => ({
+					column_name: column.name,
+					is_nullable: 'NO',
+				})),
+			),
+		);
+		await expect(
+			pool.query(
+				`SELECT "is_primary", "coverage_epoch"::text, "file_state_version"::text, "is_test", "description_stale", "call_kind", "resolution_status" FROM "${schema}"."${name}" WHERE "id" = 1`,
+			),
+		).resolves.toMatchObject({
+			rows: [
+				{
+					is_primary: false,
+					coverage_epoch: '0',
+					file_state_version: '0',
+					is_test: false,
+					description_stale: false,
+					call_kind: 'unknown',
+					resolution_status: 'pending',
+				},
+			],
+		});
+		await expect(
+			pool.query(
+				'SELECT attribute.attname AS column_name, attribute.atthasmissing FROM pg_catalog.pg_attribute attribute JOIN pg_catalog.pg_class relation ON relation.oid = attribute.attrelid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND attribute.attname = ANY($3) AND NOT attribute.attisdropped',
+				[schema, name, columns.map((column) => column.name)],
+			),
+		).resolves.toMatchObject({
+			rows: expect.arrayContaining(
+				columns.map((column) => ({
+					column_name: column.name,
+					atthasmissing: true,
+				})),
+			),
+		});
+		const root = address(databaseId, 'table', name);
+		for (const column of columns)
+			await expect(
+				managed(address(databaseId, 'column', column.name, root)),
+			).resolves.toBe(true);
+		await expect(
+			convergePg(
+				pool,
+				model([
+					{
+						...table(name, false),
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							...columns,
+						],
+					},
+				]),
+				{ schema },
+			),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+	});
+
+	it('adds a string literal default containing quotes and backslashes intact', async () => {
+		const pool = await getTestPool();
+		const name = 'escaped_default_fixture';
+		const value = "O'Reilly\\backslash";
+		await expect(
+			convergePg(pool, model([table(name, false)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await pool.query(`INSERT INTO "${schema}"."${name}" ("id") VALUES (1)`);
+		await expect(
+			convergePg(
+				pool,
+				model([
+					{
+						...table(name, false),
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{
+								name: 'escaped_default',
+								type: 'string',
+								nullable: false,
+								default: value,
+							},
+						],
+					},
+				]),
+				{ schema },
+			),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(
+			pool.query(
+				`SELECT "escaped_default" FROM "${schema}"."${name}" WHERE "id" = 1`,
+			),
+		).resolves.toMatchObject({ rows: [{ escaped_default: value }] });
+	});
+
+	it.each([
+		[
+			'not-null column without a default',
+			{ name: 'missing_default', type: 'string', nullable: false },
+		],
+		[
+			'function-like default',
+			{
+				name: 'function_default',
+				type: 'string',
+				nullable: false,
+				default: 'now()',
+			},
+		],
+	] satisfies readonly [string, TableIR['columns'][number]][])(
+		'refuses a %s without adding it',
+		async (_kind, column) => {
+			const pool = await getTestPool();
+			const name = `refused_${column.name}_fixture`;
+			await expect(
+				convergePg(pool, model([table(name, false)]), { schema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(
+					pool,
+					model([
+						{
+							...table(name, false),
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								column,
+							],
+						},
+					]),
+					{ schema },
+				),
+			).rejects.toBeInstanceOf(PgConvergeRefusalError);
+			await expect(
+				pool.query(
+					'SELECT count(*)::text AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+					[schema, name, column.name],
+				),
+			).resolves.toMatchObject({ rows: [{ count: '0' }] });
+		},
+	);
 
 	it('leaves unobstructed declarations absent on refusal, then applies all after the obstacle is removed', async () => {
 		const pool = await getTestPool();

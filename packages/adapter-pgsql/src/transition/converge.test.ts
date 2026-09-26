@@ -190,13 +190,23 @@ function compareIntrospectedSchema(): void {
 	);
 }
 
-function client(): PoolClient {
+const typeClassificationQuery =
+	"SELECT t.typtype, t.typnamespace = 'pg_catalog'::pg_catalog.regnamespace AS is_pg_catalog FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)";
+
+function client(type?: {
+	readonly typtype: string;
+	readonly is_pg_catalog: boolean;
+}): PoolClient {
 	return {
 		query: vi.fn(async (sql: string) => {
 			if (sql === 'SHOW server_version_num')
 				return { rows: [{ server_version_num: '150000' }] };
 			if (sql === 'SELECT current_database() AS database_id')
 				return { rows: [{ database_id: 'app' }] };
+			if (sql === typeClassificationQuery)
+				return {
+					rows: type === undefined ? [] : [type],
+				};
 			return { rows: [] };
 		}),
 		release: vi.fn(),
@@ -258,16 +268,80 @@ function stepFor(changeInput: Record<string, unknown>) {
 	};
 }
 
-async function expectRefusal(input: Record<string, unknown>, refusal: string) {
+async function expectRefusal(
+	input: Record<string, unknown>,
+	refusal: string,
+	testClient = client(),
+) {
 	mocks.compare.mockResolvedValue({ changes: [input] });
 	mocks.createStep.mockImplementation(
 		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
 	);
-	await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+	await expect(
+		convergePg(poolFor(testClient), emptyModel()),
+	).rejects.toMatchObject({
 		name: 'PgConvergeRefusalError',
 		refusal,
 	});
 	expect(mocks.execute).not.toHaveBeenCalled();
+}
+
+async function expectAdmittedAddColumn(
+	column: Record<string, unknown>,
+	type?: { readonly typtype: string; readonly is_pg_catalog: boolean },
+	testClient = client(type),
+): Promise<PoolClient> {
+	const parent = {
+		scope: 'schema',
+		engine: 'postgresql',
+		database: 'app',
+		schema: 'public',
+		kind: 'table',
+		name: 'users',
+	} as const;
+	const catalogueIdentity = {
+		engine: 'postgresql',
+		format: 1,
+		value: { oid: '1' },
+	};
+	mocks.compare.mockResolvedValue({
+		changes: [change('add_column', { column })],
+	});
+	mocks.createStep.mockImplementation(
+		({ change: value }: { change: Record<string, unknown> }) => stepFor(value),
+	);
+	mocks.identity.mockImplementation(
+		async (_client: unknown, address: { readonly kind?: string }) =>
+			address.kind === 'table' ? { catalogueIdentity } : undefined,
+	);
+	mocks.chain.mockResolvedValue({
+		ledger: { scope: 'schema', schema: 'public' },
+		address: parent,
+		events: [
+			{
+				eventId: 'adopt-intent',
+				address: parent,
+				eventKind: 'adopt-intent',
+				controller: 'deployment',
+			},
+			{
+				eventId: 'adopt',
+				predecessor: 'adopt-intent',
+				address: parent,
+				eventKind: 'adopt',
+				controller: 'deployment',
+				observed: { value: { table: 'users' }, digest: 'observed' },
+			},
+		],
+		terminalMember: { catalogueIdentity },
+	} as never);
+
+	await expect(convergePg(poolFor(testClient), emptyModel())).resolves.toEqual({
+		kind: 'applied',
+		applied: ['add_column'],
+	});
+	expect(mocks.execute).toHaveBeenCalled();
+	return testClient;
 }
 
 afterEach(() => {
@@ -389,6 +463,163 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
+	it('admits a nullable column with js and originalDbType but no default', async () => {
+		await expectAdmittedAddColumn({
+			name: 'coverage_epoch',
+			type: 'bigint',
+			nullable: true,
+			js: 'bigint',
+			originalDbType: 'BIGINT',
+		});
+	});
+
+	it.each([
+		['boolean', false],
+		['finite number', 0],
+		['string', 'unknown'],
+	])('admits a NOT NULL column with a %s default', async (_kind, value) => {
+		await expectAdmittedAddColumn({
+			name: 'value',
+			type: 'string',
+			nullable: false,
+			default: value,
+		});
+	});
+
+	it.each([
+		['base type outside pg_catalog', { typtype: 'b', is_pg_catalog: false }],
+		['composite type', { typtype: 'c', is_pg_catalog: false }],
+		['pseudo type', { typtype: 'p', is_pg_catalog: true }],
+		['range type', { typtype: 'r', is_pg_catalog: false }],
+		['multirange type', { typtype: 'm', is_pg_catalog: false }],
+		['domain type', { typtype: 'd', is_pg_catalog: false }],
+	] as const)(
+		'refuses a defaulted column with a %s before execution',
+		async (_label, type) => {
+			const testClient = client(type);
+			await expectRefusal(
+				change('add_column', {
+					column: {
+						name: 'value',
+						type: 'integer',
+						nullable: false,
+						originalDbType: 'domain_type',
+						default: 1,
+					},
+				}),
+				'unsupported-change',
+				testClient,
+			);
+			expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+				'domain_type',
+			]);
+		},
+	);
+
+	it('admits a defaulted column with a built-in originalDbType', async () => {
+		const testClient = await expectAdmittedAddColumn(
+			{
+				name: 'coverage_epoch',
+				type: 'bigint',
+				nullable: false,
+				js: 'bigint',
+				originalDbType: 'BIGINT',
+				default: '0',
+			},
+			{ typtype: 'b', is_pg_catalog: true },
+		);
+		expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+			'BIGINT',
+		]);
+	});
+
+	it('admits a defaulted column with an enum originalDbType', async () => {
+		const testClient = await expectAdmittedAddColumn(
+			{
+				name: 'state',
+				type: 'string',
+				nullable: false,
+				originalDbType: 'state_enum',
+				default: 'pending',
+			},
+			{ typtype: 'e', is_pg_catalog: false },
+		);
+		expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+			'state_enum',
+		]);
+	});
+
+	it('refuses a defaulted column with an unresolvable originalDbType', async () => {
+		const testClient = client();
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'value',
+					type: 'integer',
+					nullable: false,
+					originalDbType: 'missing_type',
+					default: 1,
+				},
+			}),
+			'unsupported-change',
+			testClient,
+		);
+		expect(testClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+			'missing_type',
+		]);
+	});
+
+	it('propagates a defaulted column type-rendering error before execution', async () => {
+		const testClient = client();
+		mocks.compare.mockResolvedValue({
+			changes: [
+				change('add_column', {
+					column: {
+						name: 'value',
+						type: 'integer',
+						nullable: false,
+						originalDbType: 'integer; DROP TABLE users',
+						default: 1,
+					},
+				}),
+			],
+		});
+
+		let thrown: unknown;
+		try {
+			await convergePg(poolFor(testClient), emptyModel());
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toBeInstanceOf(Error);
+		expect(thrown).not.toBeInstanceOf(PgConvergeRefusalError);
+		expect((thrown as Error).message).toContain('Unsafe database type name');
+		expect(testClient.query).not.toHaveBeenCalledWith(
+			typeClassificationQuery,
+			expect.anything(),
+		);
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('does not classify a defaulted column without originalDbType', async () => {
+		const testClient = client();
+		await expectAdmittedAddColumn(
+			{
+				name: 'value',
+				type: 'integer',
+				nullable: false,
+				default: 1,
+			},
+			undefined,
+			testClient,
+		);
+		expect(testClient.query).not.toHaveBeenCalledWith(
+			typeClassificationQuery,
+			expect.anything(),
+		);
+	});
+
 	it('refuses a column with a default', async () => {
 		await expectRefusal(
 			change('add_column', {
@@ -402,6 +633,97 @@ describe('convergePg refusal boundary', () => {
 		await expectRefusal(
 			change('add_column', {
 				column: { name: 'email', type: 'string', nullable: true, unique: true },
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		['null', null],
+		['raw SQL', { sql: 'now()' }],
+		['attested raw SQL', { sql: 'now()', attestedBy: 'test' }],
+		['function-like string', 'now()'],
+		['UUID function-like string', 'gen_random_uuid()'],
+		['NaN', Number.NaN],
+		['infinity', Number.POSITIVE_INFINITY],
+		['negative infinity', Number.NEGATIVE_INFINITY],
+		['object', { value: 'x' }],
+		['array', ['x']],
+	])('refuses a NOT NULL column with a %s default', async (_kind, value) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: false,
+					default: value,
+				},
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		'logicalIdentity',
+		'originalDbTypeSchema',
+		'originalDbTypeSchemaScope',
+		'uniqueConstraintName',
+		'autoIncrement',
+		'collation',
+		'comment',
+		'identity',
+		'unknown',
+	])('refuses a column with a %s key', async (key) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: true,
+					[key]: true,
+				},
+			}),
+			'unsupported-change',
+		);
+	});
+
+	it('refuses inherited or non-enumerable unique column properties', async () => {
+		const inheritedUnique = Object.assign(Object.create({ unique: true }), {
+			name: 'email',
+			type: 'string',
+			nullable: true,
+		});
+		await expectRefusal(
+			change('add_column', { column: inheritedUnique }),
+			'unsupported-change',
+		);
+
+		const nonEnumerableUnique = {
+			name: 'email',
+			type: 'string',
+			nullable: true,
+		};
+		Object.defineProperty(nonEnumerableUnique, 'unique', { value: true });
+		await expectRefusal(
+			change('add_column', { column: nonEnumerableUnique }),
+			'unsupported-change',
+		);
+	});
+
+	it.each([
+		['empty js', { js: '' }],
+		['empty originalDbType', { originalDbType: '' }],
+		['non-string js', { js: true }],
+		['non-string originalDbType', { originalDbType: true }],
+	])('refuses a column with %s', async (_kind, extra) => {
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'email',
+					type: 'string',
+					nullable: true,
+					...extra,
+				},
 			}),
 			'unsupported-change',
 		);

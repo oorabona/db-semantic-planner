@@ -8,6 +8,7 @@ import {
 } from '@dbsp/core';
 import { mintDurablyLoadedRun } from '@dbsp/core/internal';
 import type {
+	ColumnIR,
 	DbCasing,
 	ForeignKeyIR,
 	IndexIR,
@@ -27,6 +28,7 @@ import {
 } from '../ddl/index.js';
 import { addressForChange } from '../ddl/managed-step-manifest.js';
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
+import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -118,21 +120,89 @@ function refusal(
 	);
 }
 
-function plainNullableColumn(change: SchemaChange): boolean {
+function startupSafeAddColumn(change: SchemaChange): boolean {
 	if (change.kind !== 'add_column' || !change.meta?.column) return false;
 	const column = change.meta.column;
 	if (typeof column !== 'object' || Array.isArray(column)) return false;
 	const record = column as Record<string, unknown>;
 	// This is intentionally a positive shape allowlist. New ColumnIR surface
 	// cannot become startup DDL until this list is deliberately reconsidered.
+	if (
+		!Object.keys(record).every((key) =>
+			['name', 'type', 'nullable', 'js', 'originalDbType', 'default'].includes(
+				key,
+			),
+		) ||
+		[
+			'logicalIdentity',
+			'originalDbTypeSchema',
+			'originalDbTypeSchemaScope',
+			'unique',
+			'uniqueConstraintName',
+			'autoIncrement',
+			'collation',
+			'comment',
+			'identity',
+		].some((field) => record[field] !== undefined) ||
+		typeof record.name !== 'string' ||
+		typeof record.type !== 'string' ||
+		typeof record.nullable !== 'boolean' ||
+		(record.js !== undefined &&
+			(typeof record.js !== 'string' || record.js.length === 0)) ||
+		(record.originalDbType !== undefined &&
+			(typeof record.originalDbType !== 'string' ||
+				record.originalDbType.length === 0))
+	)
+		return false;
+
+	const hasDefault = record.default !== undefined;
+	const defaultIsLiteral =
+		typeof record.default === 'boolean' ||
+		(typeof record.default === 'number' && Number.isFinite(record.default)) ||
+		(typeof record.default === 'string' && !record.default.endsWith('()'));
 	return (
-		Object.keys(record).every((key) =>
-			['name', 'type', 'nullable'].includes(key),
-		) &&
-		typeof record.name === 'string' &&
-		typeof record.type === 'string' &&
-		record.nullable === true
+		(!hasDefault || defaultIsLiteral) &&
+		((record.nullable === true && !hasDefault) ||
+			(record.nullable === false && hasDefault))
 	);
+}
+
+async function assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
+	client: Queryable,
+	changes: readonly SchemaChange[],
+	schema: string,
+): Promise<void> {
+	for (const change of changes) {
+		if (change.kind !== 'add_column' || !change.meta?.column) continue;
+		const column = change.meta.column;
+		if (typeof column !== 'object' || Array.isArray(column)) continue;
+		const record = column as Record<string, unknown>;
+		if (
+			record.default === undefined ||
+			typeof record.originalDbType !== 'string'
+		)
+			continue;
+
+		const typeName = mapColumnType(column as ColumnIR, schema);
+		const type = (
+			await client.query<{
+				readonly typtype: string;
+				readonly is_pg_catalog: boolean;
+			}>(
+				"SELECT t.typtype, t.typnamespace = 'pg_catalog'::pg_catalog.regnamespace AS is_pg_catalog FROM pg_catalog.pg_type t WHERE t.oid = pg_catalog.to_regtype($1)",
+				[typeName],
+			)
+		).rows[0];
+		if (
+			type === undefined ||
+			(type.typtype !== 'e' && (type.typtype !== 'b' || !type.is_pg_catalog))
+		)
+			throw refusal(
+				'unsupported-change',
+				[change],
+				`converge refuses defaulted column ${record.name} with ${type?.typtype ?? 'unresolvable'} type ${typeName}`,
+			);
+	}
 }
 
 function generatedAddress(
@@ -179,7 +249,7 @@ function additiveChange(
 	createdTableAddresses: ReadonlySet<string>,
 ): boolean {
 	if (change.kind === 'create_table') return true;
-	if (change.kind === 'add_column') return plainNullableColumn(change);
+	if (change.kind === 'add_column') return startupSafeAddColumn(change);
 	if (change.kind === 'create_sequence') return true;
 	if (
 		change.kind !== 'create_index' &&
@@ -612,9 +682,16 @@ function describeFkAutoIndexSpecs(
 
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
- * sequences, adds plain nullable columns to managed tables, and creates
+ * sequences, adds nullable columns without defaults and NOT NULL columns with
+ * boolean, finite-number, or non-function-like string literal defaults of a
+ * a PostgreSQL built-in base type or an enum to managed tables, and creates
  * indexes, CHECK constraints, and foreign keys when their table parents are
  * created by this same run (for foreign keys, both tables).
+ * Other defaulted original database types are refused.
+ *
+ * Adding a column still takes an ACCESS EXCLUSIVE lock on its table, bounded by
+ * the executor's five-second lock_timeout and held through read-back and the
+ * ledger terminal. A no-rewrite default is therefore not non-blocking.
  *
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the
@@ -753,6 +830,11 @@ export async function convergePg(
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
+		await assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
+			client,
+			diff.changes,
+			schema,
+		);
 		const fkUniqueIndexes = assertFreshForeignKeysReferenceUniqueKeys(
 			diff.changes,
 			database,
