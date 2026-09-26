@@ -1,5 +1,36 @@
 # Changelog
 
+## [5.1.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v5.0.0...adapter-pgsql-v5.1.0) (2026-09-26)
+
+
+### Features
+
+* **adapter-pgsql:** Auto-increment transitions are reported and refused by name ([#802](https://github.com/oorabona/db-semantic-planner/issues/802)) ([d02e01d](https://github.com/oorabona/db-semantic-planner/commit/d02e01dce74f868ce6217e49338c2a3956a6f6fe))
+* **adapter-pgsql:** Converge a declared model onto a live schema ([#786](https://github.com/oorabona/db-semantic-planner/issues/786)) ([be4c57f](https://github.com/oorabona/db-semantic-planner/commit/be4c57fd74e53561c707f4f2deab5c2a0c2cfba9))
+* **adapter-pgsql:** Converge creates a whole declared schema on a fresh install ([#805](https://github.com/oorabona/db-semantic-planner/issues/805)) ([5c61f2b](https://github.com/oorabona/db-semantic-planner/commit/5c61f2bb8ea1f9c70101f8b7a487076d358f22a0))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A ledger check no longer changes the search_path of the step it guards ([#798](https://github.com/oorabona/db-semantic-planner/issues/798)) ([78e0c63](https://github.com/oorabona/db-semantic-planner/commit/78e0c63f65285989d1ac1c883e01455ec4903e9a))
+* **adapter-pgsql:** A registration is dispatchable, or refused whole ([#722](https://github.com/oorabona/db-semantic-planner/issues/722)) ([9390704](https://github.com/oorabona/db-semantic-planner/commit/9390704b8a8ccca0a3fffb7b1d6c67c80e3b52de))
+* **adapter-pgsql:** A relation column needs an alias a join emitted ([#794](https://github.com/oorabona/db-semantic-planner/issues/794)) ([19a3ea4](https://github.com/oorabona/db-semantic-planner/commit/19a3ea43e1ff4cdb7c4b9cef22e459734674df6f))
+* **adapter-pgsql:** A relation target resolved to a CTE uses that CTE's projection ([#772](https://github.com/oorabona/db-semantic-planner/issues/772)) ([b93f976](https://github.com/oorabona/db-semantic-planner/commit/b93f9769676cbdd7404d31469db509781379b811))
+* **adapter-pgsql:** Diagnostics print caller-supplied identifiers on one escaped line ([#760](https://github.com/oorabona/db-semantic-planner/issues/760)) ([c3a3cc7](https://github.com/oorabona/db-semantic-planner/commit/c3a3cc704123abeb0c3708032ea368a775f7212c)), closes [#585](https://github.com/oorabona/db-semantic-planner/issues/585)
+* **adapter-pgsql:** Enforce noImplicitOverride like the other six packages ([#738](https://github.com/oorabona/db-semantic-planner/issues/738)) ([5886ec6](https://github.com/oorabona/db-semantic-planner/commit/5886ec609cf1373268ccaa666814a23020190220))
+* **adapter-pgsql:** Relation paths inside NQL CTE queries get their joins ([#767](https://github.com/oorabona/db-semantic-planner/issues/767)) ([2663476](https://github.com/oorabona/db-semantic-planner/commit/266347619e02c0710cb5253d17a2b934a7978bd5))
+* **adapter-pgsql:** The live comparison reaches a fixed point on a schema dbsp generated ([#801](https://github.com/oorabona/db-semantic-planner/issues/801)) ([dbace4e](https://github.com/oorabona/db-semantic-planner/commit/dbace4ec04aac02c3eb725211201375b0b6c85dd))
+* **core:** Orm.nql runs the CTE and set-operation queries the NQL guide documents ([#756](https://github.com/oorabona/db-semantic-planner/issues/756)) ([2ec48e3](https://github.com/oorabona/db-semantic-planner/commit/2ec48e379acca1989bc9d8594f00897c336c875d))
+* **gui:** Schema Apply runs only non-destructive changes on the compared connection ([#765](https://github.com/oorabona/db-semantic-planner/issues/765)) ([01b3a10](https://github.com/oorabona/db-semantic-planner/commit/01b3a1098c0dd556d63e1fe6bf6e7f5895e362f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 4.0.1
+    * @dbsp/types bumped to 4.0.1
+
 ## [5.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v4.0.0...adapter-pgsql-v5.0.0) (2026-09-05)
 
 
