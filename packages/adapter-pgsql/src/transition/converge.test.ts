@@ -91,12 +91,15 @@ function modelWithTable(
 	name: string,
 	indexes: readonly TableIR['indexes'][number][] = [],
 ): ModelIR {
-	const table: TableIR = { name, columns: [], foreignKeys: [], indexes };
-	const tables = new Map([[name, table]]);
+	return modelWithTables([{ name, columns: [], foreignKeys: [], indexes }]);
+}
+
+function modelWithTables(tables: readonly TableIR[]): ModelIR {
+	const tableMap = new Map(tables.map((table) => [table.name, table]));
 	return {
 		...emptyModel(),
-		tables,
-		getTable: (tableName) => tables.get(tableName),
+		tables: tableMap,
+		getTable: (tableName) => tableMap.get(tableName),
 	};
 }
 
@@ -977,6 +980,48 @@ describe('convergePg refusal boundary', () => {
 			expect(mocks.execute).not.toHaveBeenCalled();
 		},
 	);
+
+	it('refuses an external index declared on another table before connecting', async () => {
+		const desired = modelWithTables([
+			{ name: 'users', columns: [], foreignKeys: [], indexes: [] },
+			{
+				name: 'orders',
+				columns: [],
+				foreignKeys: [],
+				indexes: [{ name: 'idx_shared', columns: ['user_id'] }],
+			},
+		]);
+		const testClient = client();
+		const pool = poolFor(testClient);
+
+		await expect(
+			convergePg(pool, desired, {
+				externalIndexes: [{ table: 'users', name: 'idx_shared' }],
+			}),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+		expect(testClient.query).not.toHaveBeenCalled();
+	});
+
+	it('refuses duplicate external index names across tables before connecting', async () => {
+		const desired = modelWithTables([
+			{ name: 'users', columns: [], foreignKeys: [], indexes: [] },
+			{ name: 'orders', columns: [], foreignKeys: [], indexes: [] },
+		]);
+		const testClient = client();
+		const pool = poolFor(testClient);
+
+		await expect(
+			convergePg(pool, desired, {
+				externalIndexes: [
+					{ table: 'users', name: 'x' },
+					{ table: 'orders', name: 'x' },
+				],
+			}),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+		expect(testClient.query).not.toHaveBeenCalled();
+	});
 
 	it.each([
 		['undeclared table', [{ table: 'missing', name: 'idx_missing_email' }]],

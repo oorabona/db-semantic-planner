@@ -104,8 +104,6 @@ export interface ConvergePgOptions {
 
 type Queryable = Pick<PoolClient, 'query'>;
 
-type ExternalIndex = { readonly table: string; readonly name: string };
-
 const lockedConvergeClients = new WeakSet<object>();
 
 function schemaHome(schema: string): LedgerHome {
@@ -140,39 +138,47 @@ function invalidOptions(detail: string): PgConvergeRefusalError {
 }
 
 function declaredIndexNames(
-	table: TableIR,
+	model: ModelIR,
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): ReadonlySet<string> {
-	const physicalTable = naming.toDatabase(table.name);
 	return new Set(
-		table.indexes.map((index) =>
-			defaultIndexName(physicalTable, {
-				...index,
-				...(index.name === undefined
-					? {}
-					: { name: naming.toDatabase(index.name) }),
-				columns: index.columns.map((column) => naming.toDatabase(column)),
-			}),
-		),
+		[...model.tables.values()].flatMap((table) => {
+			const physicalTable = naming.toDatabase(table.name);
+			return table.indexes.map((index) =>
+				defaultIndexName(physicalTable, {
+					...index,
+					...(index.name === undefined
+						? {}
+						: { name: naming.toDatabase(index.name) }),
+					columns: index.columns.map((column) => naming.toDatabase(column)),
+				}),
+			);
+		}),
 	);
 }
 
-/** Validate logical option entries and produce physical table names for diff matching. */
+function externalIndexKey(table: string, name: string): string {
+	return JSON.stringify([table, name]);
+}
+
+/** Validate logical option entries and produce physical keys for diff matching. */
 function validateExternalIndexes(
 	model: ModelIR,
 	options: ConvergePgOptions,
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
-): readonly ExternalIndex[] {
+): ReadonlySet<string> {
 	const supplied = options.externalIndexes;
-	if (supplied === undefined) return [];
+	if (supplied === undefined) return new Set();
 	if (!Array.isArray(supplied))
 		throw invalidOptions('converge externalIndexes must be an array');
 
-	const declaredTables = new Map(
-		[...model.tables.values()].map((table) => [table.name, table]),
+	const declaredTables = new Set(
+		[...model.tables.values()].map((table) => table.name),
 	);
+	const declaredIndexes = declaredIndexNames(model, naming);
 	const seen = new Set<string>();
-	return supplied.map((entry, position) => {
+	const externalIndexKeys = new Set<string>();
+	for (const [position, entry] of supplied.entries()) {
 		const label = `externalIndexes[${position}]`;
 		if (
 			entry === null ||
@@ -187,37 +193,35 @@ function validateExternalIndexes(
 				`converge ${label} must be an object with non-empty string table and name fields`,
 			);
 
-		const key = JSON.stringify([entry.table, entry.name]);
-		if (seen.has(key))
+		if (seen.has(entry.name))
 			throw invalidOptions(
-				`converge ${label} duplicates external index ${entry.table}.${entry.name}`,
+				`converge ${label} duplicates external index ${entry.name}`,
 			);
-		seen.add(key);
+		seen.add(entry.name);
 
-		const table = declaredTables.get(entry.table);
-		if (!table)
+		if (!declaredTables.has(entry.table))
 			throw invalidOptions(
 				`converge ${label} names undeclared table ${entry.table}`,
 			);
-		if (declaredIndexNames(table, naming).has(entry.name))
+		if (declaredIndexes.has(entry.name))
 			throw invalidOptions(
-				`converge ${label} names declared index ${entry.table}.${entry.name}`,
+				`converge ${label} names declared index ${entry.name}`,
 			);
-		return { table: naming.toDatabase(entry.table), name: entry.name };
-	});
+		externalIndexKeys.add(
+			externalIndexKey(naming.toDatabase(entry.table), entry.name),
+		);
+	}
+	return externalIndexKeys;
 }
 
 function masksExternalIndexDrop(
 	change: SchemaChange,
-	externalIndexes: readonly ExternalIndex[],
+	externalIndexKeys: ReadonlySet<string>,
 ): boolean {
 	if (change.kind !== 'drop_index') return false;
 	const index = indexForChange(change);
 	if (typeof index?.name !== 'string') return false;
-	return externalIndexes.some(
-		(external) =>
-			external.table === change.table && external.name === index.name,
-	);
+	return externalIndexKeys.has(externalIndexKey(change.table, index.name));
 }
 
 function startupSafeAddColumn(change: SchemaChange): boolean {
