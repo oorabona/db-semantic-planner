@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.1.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v3.0.1...cli-v3.1.0) (2026-09-26)
+
+
+### Features
+
+* **adapter-pgsql:** Auto-increment transitions are reported and refused by name ([#802](https://github.com/oorabona/db-semantic-planner/issues/802)) ([d02e01d](https://github.com/oorabona/db-semantic-planner/commit/d02e01dce74f868ce6217e49338c2a3956a6f6fe))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 5.1.0
+    * @dbsp/core bumped to 4.0.1
+    * @dbsp/nql bumped to 1.10.5
+    * @dbsp/types bumped to 4.0.1
+
 ## [3.0.1](https://github.com/oorabona/db-semantic-planner/compare/cli-v3.0.0...cli-v3.0.1) (2026-09-05)
 
 

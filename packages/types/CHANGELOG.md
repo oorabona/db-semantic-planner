@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.0.1](https://github.com/oorabona/db-semantic-planner/compare/types-v4.0.0...types-v4.0.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** A relation column needs an alias a join emitted ([#794](https://github.com/oorabona/db-semantic-planner/issues/794)) ([19a3ea4](https://github.com/oorabona/db-semantic-planner/commit/19a3ea43e1ff4cdb7c4b9cef22e459734674df6f))
+* **adapter-pgsql:** A relation target resolved to a CTE uses that CTE's projection ([#772](https://github.com/oorabona/db-semantic-planner/issues/772)) ([b93f976](https://github.com/oorabona/db-semantic-planner/commit/b93f9769676cbdd7404d31469db509781379b811))
+
 ## [4.0.0](https://github.com/oorabona/db-semantic-planner/compare/types-v3.4.0...types-v4.0.0) (2026-08-25)
 
 
