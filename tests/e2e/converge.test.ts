@@ -6,7 +6,7 @@ import {
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
-import type { LedgerAddress, ModelIR, TableIR } from '@dbsp/types';
+import type { LedgerAddress, ModelIR, SequenceIR, TableIR } from '@dbsp/types';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -22,10 +22,14 @@ const typesSchema = `${schema}_types`;
 const typesSearchPath = `${typesSchema},public`;
 const domain = 'converge_step_type';
 
-function model(tables: readonly TableIR[]): ModelIR {
+function model(
+	tables: readonly TableIR[],
+	sequences: readonly SequenceIR[] = [],
+): ModelIR {
 	const byName = new Map(tables.map((table) => [table.name, table]));
 	return {
 		tables: byName,
+		sequences: new Map(sequences.map((sequence) => [sequence.name, sequence])),
 		relations: new Map(),
 		getTable: (name) => byName.get(name),
 		getRelation: () => undefined,
@@ -46,6 +50,7 @@ function table(name: string, includeNickname = true): TableIR {
 					] satisfies TableIR['columns'])
 				: []),
 		],
+		primaryKey: 'id',
 		foreignKeys: [],
 		indexes: [],
 	};
@@ -181,25 +186,182 @@ describe('convergePg', () => {
 		}
 	});
 
-	it('refuses a declared table with an index before creating the table', async () => {
+	it('creates a fresh declaration with indexes, CHECKs, FKs, and a sequence', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const desired = model(
+			[
+				{
+					...table('fresh_users', false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{
+							name: 'profile',
+							type: 'string',
+							nullable: true,
+							originalDbType: 'jsonb',
+						},
+					],
+					indexes: [
+						{ name: 'fresh_users_id_unique', columns: ['id'], unique: true },
+						{
+							name: 'fresh_users_profile_gin',
+							columns: ['profile'],
+							method: 'gin',
+						},
+					],
+					checkConstraints: [
+						{ name: 'fresh_users_id_check', expression: 'id > 0' },
+					],
+				},
+				{
+					...table('fresh_posts', false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'user_id', type: 'integer', nullable: false },
+					],
+					foreignKeys: [
+						{
+							columns: ['user_id'],
+							references: { table: 'fresh_users', columns: ['id'] },
+						},
+					],
+					indexes: [
+						{ name: 'fresh_posts_user_id_index', columns: ['user_id'] },
+					],
+					checkConstraints: [
+						{ name: 'fresh_posts_id_check', expression: 'id > 0' },
+					],
+				},
+			],
+			[{ name: 'fresh_sequence' }],
+		);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		const users = address(databaseId, 'table', 'fresh_users');
+		const posts = address(databaseId, 'table', 'fresh_posts');
+		await expect(
+			managed(address(databaseId, 'index', 'fresh_users_id_unique', users)),
+		).resolves.toBe(true);
+		await expect(
+			managed(address(databaseId, 'constraint', 'fresh_users_id_check', users)),
+		).resolves.toBe(true);
+		await expect(
+			managed(
+				address(databaseId, 'constraint', 'fk_fresh_posts_user_id', posts),
+			),
+		).resolves.toBe(true);
+		await expect(
+			managed(address(databaseId, 'sequence', 'fresh_sequence')),
+		).resolves.toBe(true);
+	});
+
+	it('ignores undeclared live sequences', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SEQUENCE "${schema}"."undeclared_sequence"`);
+
+		await expect(convergePg(pool, model([]), { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists', [
+				`${schema}.undeclared_sequence`,
+			]),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('creates cyclic foreign keys after both fresh tables', async () => {
 		const pool = await getTestPool();
 		const desired = model([
 			{
-				...table('indexed_fixture'),
-				indexes: [
-					{ name: 'idx_indexed_fixture_nickname', columns: ['nickname'] },
+				...table('cycle_left', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'right_id', type: 'integer', nullable: true },
+				],
+				foreignKeys: [
+					{
+						columns: ['right_id'],
+						references: { table: 'cycle_right', columns: ['id'] },
+					},
+				],
+			},
+			{
+				...table('cycle_right', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'left_id', type: 'integer', nullable: true },
+				],
+				foreignKeys: [
+					{
+						columns: ['left_id'],
+						references: { table: 'cycle_left', columns: ['id'] },
+					},
 				],
 			},
 		]);
 
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+	});
+
+	it('refuses new-table children that target an existing managed table', async () => {
+		const pool = await getTestPool();
+		await expect(
+			convergePg(pool, model([table('managed_parent', false)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		const desired = model([
+			{
+				...table('managed_parent', false),
+				indexes: [{ name: 'managed_parent_id_index', columns: ['id'] }],
+				checkConstraints: [
+					{ name: 'managed_parent_id_check', expression: 'id > 0' },
+				],
+			},
+			{
+				...table('new_child', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'parent_id', type: 'integer', nullable: false },
+				],
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: { table: 'managed_parent', columns: ['id'] },
+					},
+				],
+				indexes: [
+					{ name: 'new_child_parent_id_index', columns: ['parent_id'] },
+				],
+				checkConstraints: [
+					{ name: 'new_child_id_check', expression: 'id > 0' },
+				],
+			},
+		]);
 		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 		});
 		await expect(
 			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
-				`${schema}.indexed_fixture`,
+				`${schema}.new_child`,
 			]),
 		).resolves.toMatchObject({ rows: [{ relation: null }] });
+	});
+
+	it('refuses a declared unmanaged sequence', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SEQUENCE "${schema}"."unmanaged_sequence"`);
+		await expect(
+			convergePg(pool, model([], [{ name: 'unmanaged_sequence' }]), { schema }),
+		).rejects.toMatchObject({ refusal: 'unmanaged-object' });
 	});
 
 	it('adds a nullable column to a managed table with a managed column terminal', async () => {

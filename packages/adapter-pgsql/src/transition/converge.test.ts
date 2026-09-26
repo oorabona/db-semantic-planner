@@ -2,7 +2,7 @@ import type { ModelIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
-import type { SchemaChange } from '../ddl/schema-diff.js';
+import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import type { GeneratorExecutionResult } from './generator-execution.js';
 
 const mocks = vi.hoisted(() => {
@@ -77,9 +77,27 @@ function emptyModel(): ModelIR {
 	};
 }
 
+function modelWithSequences(names: readonly string[]): ModelIR {
+	return {
+		...emptyModel(),
+		sequences: new Map(names.map((name) => [name, { name }])),
+	};
+}
+
+function compareIntrospectedSchema(): void {
+	mocks.compare.mockImplementation(
+		async (
+			adapter: { introspect: (options?: unknown) => Promise<ModelIR> },
+			model: ModelIR,
+		) => compareSchemata(model, await adapter.introspect({ schema: 'public' })),
+	);
+}
+
 function client(): PoolClient {
 	return {
 		query: vi.fn(async (sql: string) => {
+			if (sql === 'SHOW server_version_num')
+				return { rows: [{ server_version_num: '150000' }] };
 			if (sql === 'SELECT current_database() AS database_id')
 				return { rows: [{ database_id: 'app' }] };
 			return { rows: [] };
@@ -168,6 +186,43 @@ afterEach(() => {
 });
 
 describe('convergePg refusal boundary', () => {
+	it('does not compare an undeclared live sequence when the model declares none', async () => {
+		mocks.introspect.mockResolvedValue(modelWithSequences(['live_sequence']));
+		compareIntrospectedSchema();
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
+	it('creates a declared vacant sequence without comparing an undeclared live sequence', async () => {
+		mocks.introspect.mockResolvedValue(modelWithSequences(['live_sequence']));
+		compareIntrospectedSchema();
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+
+		await expect(
+			convergePg(poolFor(), modelWithSequences(['declared_sequence'])),
+		).resolves.toEqual({
+			kind: 'applied',
+			applied: ['create_sequence'],
+		});
+		expect(mocks.execute).toHaveBeenCalledTimes(1);
+	});
+
+	it('returns no drift for an empty model with live sequences', async () => {
+		mocks.introspect.mockResolvedValue(modelWithSequences(['live_sequence']));
+		compareIntrospectedSchema();
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
 	it('refuses an absent schema ledger without sending DDL', async () => {
 		const testClient = client();
 		mocks.currency.mockResolvedValue({ kind: 'absent' });
@@ -262,8 +317,95 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
+	it('refuses an index or CHECK on an existing managed table', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('create_table', { table: { name: 'new_table' } }),
+					table: 'new_table',
+				},
+				{
+					...change('create_index', {
+						index: { name: 'idx_users', columns: ['email'] },
+					}),
+					table: 'users',
+				},
+			],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('create_table', { table: { name: 'new_table' } }),
+					table: 'new_table',
+				},
+				{
+					...change('add_check_constraint', {
+						check: {
+							name: 'users_email_check',
+							expression: 'email IS NOT NULL',
+						},
+					}),
+					table: 'users',
+				},
+			],
+		});
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+	});
+
+	it('refuses a foreign key from a new table to an existing table', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					...change('create_table', { table: { name: 'new_table' } }),
+					table: 'new_table',
+				},
+				{
+					...change('add_foreign_key', {
+						fk: {
+							columns: ['user_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					}),
+					table: 'new_table',
+				},
+			],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+	});
+
 	it('refuses a drop before execution', async () => {
 		await expectRefusal(change('drop_table'), 'unsupported-change');
+	});
+
+	it('continues to refuse sequence alteration and removal', async () => {
+		await expectRefusal(
+			change('alter_sequence', { sequence: { name: 'users_id_seq' } }),
+			'unsupported-change',
+		);
+		await expectRefusal(
+			change('drop_sequence', { sequence: { name: 'users_id_seq' } }),
+			'unsupported-change',
+		);
+	});
+
+	it('continues to refuse index removal', async () => {
+		await expectRefusal(
+			change('drop_index', {
+				index: { name: 'idx_users_email', columns: ['email'] },
+			}),
+			'unsupported-change',
+		);
 	});
 
 	it('refuses a type change before execution', async () => {
@@ -278,6 +420,28 @@ describe('convergePg refusal boundary', () => {
 			}),
 			'unsupported-change',
 		);
+	});
+
+	it('refuses an unsupported server before comparison', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '140000' }] };
+				if (sql === 'SELECT current_database() AS database_id')
+					return { rows: [{ database_id: 'app' }] };
+				return { rows: [] };
+			},
+		);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-server',
+			detail: expect.stringContaining('140000'),
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(testClient.query).toHaveBeenCalledWith('SHOW server_version_num');
 	});
 
 	it('uses snake_case physical table names for unmanaged ownership', async () => {
@@ -500,6 +664,115 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).toHaveBeenCalledTimes(1);
 		expect(mocks.execute.mock.calls[0]?.[0]).toMatchObject({
 			manifest: { steps: [{ order: 0 }, { order: 1 }, { order: 2 }] },
+		});
+	});
+
+	it('orders created tables before their indexes, CHECKs, and cyclic foreign keys', async () => {
+		const changes: SchemaChange[] = [
+			{
+				kind: 'add_foreign_key',
+				table: 'left_table',
+				destructive: false,
+				details: 'left references right',
+				meta: {
+					fk: {
+						columns: ['right_id'],
+						references: { table: 'right_table', columns: ['id'] },
+					},
+				},
+			},
+			{
+				kind: 'create_index',
+				table: 'left_table',
+				destructive: false,
+				details: 'left index',
+				meta: {
+					index: { name: 'idx_left_table_id', columns: ['id'], unique: true },
+				},
+			},
+			{
+				kind: 'add_check_constraint',
+				table: 'left_table',
+				destructive: false,
+				details: 'left check',
+				meta: { check: { name: 'left_id_check', expression: 'id > 0' } },
+			},
+			{
+				kind: 'create_table',
+				table: 'right_table',
+				destructive: false,
+				details: 'create right',
+				meta: {
+					table: {
+						name: 'right_table',
+						columns: [],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+			{
+				kind: 'add_foreign_key',
+				table: 'right_table',
+				destructive: false,
+				details: 'right references left',
+				meta: {
+					fk: {
+						columns: ['left_id'],
+						references: { table: 'left_table', columns: ['id'] },
+					},
+				},
+			},
+			{
+				kind: 'create_table',
+				table: 'left_table',
+				destructive: false,
+				details: 'create left',
+				meta: {
+					table: {
+						name: 'left_table',
+						columns: [],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+		];
+		mocks.compare.mockResolvedValue({ changes });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		expect(mocks.execute.mock.calls[0]?.[0]).toMatchObject({
+			manifest: {
+				steps: [
+					{
+						stepKey: 'converge:0',
+						address: { kind: 'table', name: 'right_table' },
+					},
+					{
+						stepKey: 'converge:1',
+						address: { kind: 'table', name: 'left_table' },
+					},
+					{
+						address: { kind: 'constraint', name: 'fk_left_table_right_id' },
+						dependencyOrder: ['converge:1', 'converge:0'],
+					},
+					{
+						address: { kind: 'constraint', name: 'fk_right_table_left_id' },
+						dependencyOrder: ['converge:0', 'converge:1'],
+					},
+					{
+						address: { kind: 'index', name: 'idx_left_table_id' },
+						dependencyOrder: ['converge:1'],
+					},
+					{
+						address: { kind: 'constraint', name: 'left_id_check' },
+						dependencyOrder: ['converge:1'],
+					},
+				],
+			},
 		});
 	});
 
