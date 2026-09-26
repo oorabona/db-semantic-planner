@@ -492,7 +492,7 @@ function buildFkAutoIndex(table: TableIR, fkCol: string): IndexIR {
 	};
 }
 
-function collectFkAutoIndexSpecs(
+export function collectFkAutoIndexSpecs(
 	changes: readonly SchemaChange[],
 	schemaName: string | undefined,
 ): IndexRenderSpec[] {

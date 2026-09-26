@@ -278,6 +278,7 @@ describe('convergePg', () => {
 	});
 
 	it('creates cyclic foreign keys after both fresh tables', async () => {
+		const databaseId = await database();
 		const pool = await getTestPool();
 		const desired = model([
 			{
@@ -292,6 +293,7 @@ describe('convergePg', () => {
 						references: { table: 'cycle_right', columns: ['id'] },
 					},
 				],
+				indexes: [{ name: 'cycle_left_right_id_index', columns: ['right_id'] }],
 			},
 			{
 				...table('cycle_right', false),
@@ -305,12 +307,69 @@ describe('convergePg', () => {
 						references: { table: 'cycle_left', columns: ['id'] },
 					},
 				],
+				indexes: [{ name: 'cycle_right_left_id_index', columns: ['left_id'] }],
 			},
 		]);
 
 		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
 			kind: 'applied',
 		});
+		for (const [tableName, indexName] of [
+			['cycle_left', 'cycle_left_right_id_index'],
+			['cycle_right', 'cycle_right_left_id_index'],
+		] as const) {
+			await expect(
+				pool.query(
+					'SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY indexname',
+					[schema, tableName],
+				),
+			).resolves.toMatchObject({
+				rows: [{ indexname: indexName }, { indexname: `pk_${tableName}` }],
+			});
+			const parent = address(databaseId, 'table', tableName);
+			await expect(
+				managed(address(databaseId, 'index', indexName, parent)),
+			).resolves.toBe(true);
+		}
+	});
+
+	it('refuses a fresh single-column FK without a declared index before creating either table', async () => {
+		const pool = await getTestPool();
+		const desired = model([
+			table('fk_auto_index_refusal_parent', false),
+			{
+				...table('fk_auto_index_refusal_child', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'parent_id', type: 'integer', nullable: false },
+				],
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: {
+							table: 'fk_auto_index_refusal_parent',
+							columns: ['id'],
+						},
+					},
+				],
+			},
+		]);
+
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining(
+				'fk_auto_index_refusal_child.parent_id (idx_fk_auto_index_refusal_child_parent_id)',
+			),
+		});
+		for (const tableName of [
+			'fk_auto_index_refusal_parent',
+			'fk_auto_index_refusal_child',
+		])
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${schema}.${tableName}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
 	});
 
 	it('refuses new-table children that target an existing managed table', async () => {

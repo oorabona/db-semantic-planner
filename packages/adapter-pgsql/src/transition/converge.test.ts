@@ -2,6 +2,7 @@ import type { ModelIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
+import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import type { GeneratorExecutionResult } from './generator-execution.js';
 
@@ -12,7 +13,9 @@ const mocks = vi.hoisted(() => {
 	return {
 		compare: vi.fn(),
 		createStep: vi.fn(),
-		generate: vi.fn(() => ['CREATE TABLE "users" ()']),
+		generate: vi.fn<(...args: unknown[]) => readonly string[]>(() => [
+			'CREATE TABLE "users" ()',
+		]),
 		execute: vi.fn<(...args: unknown[]) => Promise<GeneratorExecutionResult>>(
 			async () => ({ outcome: 'completed' }),
 		),
@@ -81,6 +84,35 @@ function modelWithSequences(names: readonly string[]): ModelIR {
 	return {
 		...emptyModel(),
 		sequences: new Map(names.map((name) => [name, { name }])),
+	};
+}
+
+function createTableWithForeignKey(
+	table: string,
+	foreignKeyColumns: readonly string[],
+	indexes: readonly {
+		readonly name: string;
+		readonly columns: readonly string[];
+	}[] = [],
+): SchemaChange {
+	return {
+		kind: 'create_table',
+		table,
+		destructive: false,
+		details: `Create table ${table}`,
+		meta: {
+			table: {
+				name: table,
+				columns: [],
+				foreignKeys: [
+					{
+						columns: foreignKeyColumns,
+						references: { table: 'parents', columns: ['id'] },
+					},
+				],
+				indexes,
+			},
+		},
 	};
 }
 
@@ -407,6 +439,132 @@ describe('convergePg refusal boundary', () => {
 			'unsupported-change',
 		);
 	});
+
+	it('refuses a fresh single-column FK without a declared index before execution', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [createTableWithForeignKey('posts', ['author_id'])],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('posts.author_id (idx_posts_author_id)'),
+			changes: [
+				expect.objectContaining({ kind: 'create_table', table: 'posts' }),
+			],
+		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('admits a fresh composite FK because the generator does not auto-index it', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [createTableWithForeignKey('posts', ['author_id', 'tenant_id'])],
+		});
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		expect(mocks.generate).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ fkAutoIndex: false }),
+		);
+	});
+
+	it('keeps a fresh table step to table DDL when its FK index is declared', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				createTableWithForeignKey(
+					'posts',
+					['author_id'],
+					[{ name: 'posts_author_id_index', columns: ['author_id'] }],
+				),
+			],
+		});
+		mocks.generate.mockImplementation((...args: unknown[]) =>
+			generateMigrationSql(
+				args[0] as Parameters<typeof generateMigrationSql>[0],
+				args[1] as Parameters<typeof generateMigrationSql>[1],
+			),
+		);
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		const plan = mocks.execute.mock.calls[0]?.[0] as {
+			readonly manifest: {
+				readonly steps: readonly {
+					readonly statementBundle: {
+						readonly statements: readonly { readonly sql: string }[];
+					};
+				}[];
+			};
+		};
+		const statements = plan.manifest.steps[0]?.statementBundle.statements;
+		expect(statements).toHaveLength(1);
+		expect(statements?.[0]?.sql).toMatch(/^CREATE TABLE\b/);
+		expect(
+			statements?.some((statement) => /CREATE INDEX/i.test(statement.sql)),
+		).toBe(false);
+		expect(mocks.generate).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ fkAutoIndex: false }),
+		);
+	});
+
+	it('refuses a sequence whose declared name changes under snake_case before comparison', async () => {
+		await expect(
+			convergePg(poolFor(), modelWithSequences(['orderNumber']), {
+				dbCasing: 'snake_case',
+			}),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('order_number'),
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['order_number', 'orderNumber'],
+		['orderNumber', 'order_number'],
+	])(
+		'refuses a snake_case sequence when its map key and SequenceIR name disagree (%s, %s)',
+		async (key, name) => {
+			const model: ModelIR = {
+				...emptyModel(),
+				sequences: new Map([[key, { name }]]),
+			};
+
+			await expect(
+				convergePg(poolFor(), model, { dbCasing: 'snake_case' }),
+			).rejects.toMatchObject({
+				refusal: 'unsupported-change',
+				detail: expect.stringContaining('order_number'),
+			});
+			expect(mocks.compare).not.toHaveBeenCalled();
+		},
+	);
+
+	it.each([
+		['snake_case', 'order_number'],
+		['preserve', 'orderNumber'],
+	] as const)(
+		'admits a sequence whose declared name is unchanged under %s',
+		async (dbCasing, name) => {
+			const sequenceChange = {
+				...change('create_sequence', { sequence: { name } }),
+				table: '',
+				column: undefined,
+			};
+			mocks.compare.mockResolvedValue({ changes: [sequenceChange] });
+			mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+			await expect(
+				convergePg(poolFor(), modelWithSequences([name]), { dbCasing }),
+			).resolves.toMatchObject({ kind: 'applied' });
+		},
+	);
 
 	it('refuses a type change before execution', async () => {
 		await expectRefusal(change('alter_column_type'), 'unsupported-change');

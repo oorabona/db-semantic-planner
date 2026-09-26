@@ -23,7 +23,7 @@ import {
 	type SchemaChange,
 } from '../ddl/index.js';
 import { addressForChange } from '../ddl/managed-step-manifest.js';
-import { getPhase } from '../ddl/migration-sql.js';
+import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
@@ -388,6 +388,31 @@ async function assertExistingDeclaredSequencesManaged(
 	}
 }
 
+function assertDeclaredSequenceNamesPreserved(
+	model: ModelIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): void {
+	for (const [key, sequence] of model.sequences ?? []) {
+		for (const name of [key, sequence.name]) {
+			const physicalName = naming.toDatabase(name);
+			if (physicalName !== name)
+				throw refusal(
+					'unsupported-change',
+					[],
+					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}; see #803`,
+				);
+		}
+	}
+}
+
+function describeFkAutoIndexSpecs(
+	specs: ReturnType<typeof collectFkAutoIndexSpecs>,
+): string {
+	return specs
+		.map((spec) => `${spec.table}.${spec.keys[0]?.column} (${spec.name})`)
+		.join(', ');
+}
+
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
  * sequences, adds plain nullable columns to managed tables, and creates
@@ -460,6 +485,7 @@ export async function convergePg(
 			dbCasing: casing,
 		});
 		const naming = getNamingPluginForDbCasing(casing);
+		assertDeclaredSequenceNamesPreserved(model, naming);
 		const declaredTables = [...model.tables.values()].map((table) =>
 			naming.toDatabase(table.name),
 		);
@@ -530,6 +556,18 @@ export async function convergePg(
 				rejected,
 				`converge refuses change ${rejected.map((change) => change.kind).join(', ')}`,
 			);
+		const fkAutoIndexSpecs = collectFkAutoIndexSpecs(diff.changes, schema);
+		if (fkAutoIndexSpecs.length > 0) {
+			const tables = new Set(fkAutoIndexSpecs.map((spec) => spec.table));
+			throw refusal(
+				'unsupported-change',
+				diff.changes.filter(
+					(change) =>
+						change.kind === 'create_table' && tables.has(change.table),
+				),
+				`converge refuses fresh foreign keys without declared indexes: ${describeFkAutoIndexSpecs(fkAutoIndexSpecs)}; declare each index in the model`,
+			);
+		}
 		await assertExistingDeclaredTablesManaged(
 			client,
 			database,
@@ -586,7 +624,7 @@ export async function convergePg(
 			}
 			const statements = generateMigrationSQL(
 				{ ...diff, changes: [change] },
-				{ includeDestructive: false, schemaName: schema },
+				{ includeDestructive: false, schemaName: schema, fkAutoIndex: false },
 			);
 			const step = createPgsqlGeneratedManagedStep({
 				change,
