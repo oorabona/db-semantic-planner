@@ -503,13 +503,17 @@ async function validateDbspMetaSchemaOwnershipAndGrants(
  */
 async function validateTransitionJournalOwnershipAndGrants(
 	executor: TransitionJournalQueryable,
+	checkGrants = true,
 ): Promise<void> {
 	const currentUser = await executor.query('SELECT current_user AS role');
 	const role = currentUser.rows[0]?.role;
 	if (typeof role !== 'string')
 		throw new Error('current_user could not be read');
+	const grantChecks = checkGrants
+		? `, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> c.relowner) AS widened, EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND (acl.grantee = 0 OR acl.grantee <> c.relowner)) AS column_widened`
+		: '';
 	const objects = await executor.query(
-		`SELECT c.relname, pg_catalog.pg_get_userbyid(c.relowner) AS owner, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> c.relowner) AS widened FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
+		`SELECT c.relname, pg_catalog.pg_get_userbyid(c.relowner) AS owner${grantChecks} FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
 		[DBSP_META_SCHEMA, TRANSITION_JOURNAL_TABLES],
 	);
 	if (objects.rows.length !== TRANSITION_JOURNAL_TABLES.length) {
@@ -530,6 +534,10 @@ async function validateTransitionJournalOwnershipAndGrants(
 			throw new Error(
 				`transition journal table ${String(object.relname)} is owned by ${String(object.owner)}, not deployment role ${role}`,
 			);
+		if (object.column_widened === true)
+			throw new Error(
+				`transition journal table ${String(object.relname)} has widened grants on a column`,
+			);
 		if (object.widened === true)
 			throw new Error(
 				`transition journal table ${String(object.relname)} has widened grants`,
@@ -544,7 +552,6 @@ async function validateTransitionJournalOwnershipAndGrants(
 async function validatePreexistingTransitionJournal(
 	executor: TransitionJournalQueryable,
 ): Promise<boolean> {
-	await validateDbspMetaSchemaOwnershipAndGrants(executor);
 	const relations = await executor.query(
 		`SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
 		[DBSP_META_SCHEMA, TRANSITION_JOURNAL_TABLES],
@@ -561,7 +568,6 @@ async function validatePreexistingTransitionJournal(
 			`transition journal table ${missing} is missing from a partial journal family`,
 		);
 	await verifyTransitionJournalShape(executor);
-	await validateTransitionJournalOwnershipAndGrants(executor);
 	return true;
 }
 
@@ -574,18 +580,22 @@ async function createAndValidateTransitionJournal(
 	await executor.query(renderCreateTransitionJournalTableSql());
 	await executor.query(renderCreateTransitionAuthorizationTableSql());
 	// Another session can create part or all of the family after the initial
-	// absence check. Admit that result before ALTER/REVOKE so preflight never
-	// silently repairs a raced-in foreign, widened, or drifted relation.
+	// absence check. Admit its presence, shape, and ownership before ALTER/REVOKE
+	// so preflight never silently repairs a raced-in foreign or drifted relation.
+	// ACLs are deliberately deferred: CREATE inherits default privileges, which
+	// the following REVOKE is responsible for removing.
 	if (!(await validatePreexistingTransitionJournal(executor)))
 		throw new Error(
 			'transition journal creation did not create its table family',
 		);
+	await validateTransitionJournalOwnershipAndGrants(executor, false);
 	for (const sql of renderTransitionJournalCreationGrantSql())
 		await executor.query(sql);
 	if (!(await validatePreexistingTransitionJournal(executor)))
 		throw new Error(
 			'transition journal creation did not create its table family',
 		);
+	await validateTransitionJournalOwnershipAndGrants(executor);
 }
 
 async function establishCreationOwnershipAndGrants(
@@ -764,10 +774,17 @@ async function processScope(
 		// ledger creation so a partial, foreign-owned, or drifted family cannot be
 		// silently completed. Schema-scoped homes never touch these relations.
 		failureStep = 'ownership-grants';
+		if (current.home.scope === 'database')
+			await validateDbspMetaSchemaOwnershipAndGrants(client);
+		failureStep = 'create';
 		const preexistingTransitionJournal =
 			current.home.scope === 'database'
 				? await validatePreexistingTransitionJournal(client)
 				: false;
+		if (preexistingTransitionJournal) {
+			failureStep = 'ownership-grants';
+			await validateTransitionJournalOwnershipAndGrants(client);
+		}
 		let initializedTransitionJournal = false;
 		// A fresh database ledger has no dbsp_meta namespace yet, so bootstrap it
 		// before reading that namespace's live OID. The marker remains deferred.

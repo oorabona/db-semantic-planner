@@ -395,6 +395,7 @@ describe('SC-20 #769 reinitialize-preflight transition journal', () => {
 				outcome: 'failed',
 				reason: expect.objectContaining({
 					message: expect.stringContaining(DBSP_TRANSITION_RUN_PLAN_TABLE),
+					step: 'create',
 				}),
 			}),
 		);
@@ -418,9 +419,31 @@ describe('SC-20 #769 reinitialize-preflight transition journal', () => {
 				outcome: 'failed',
 				reason: expect.objectContaining({
 					message: expect.stringContaining('authorization'),
+					step: 'create',
 				}),
 			}),
 		);
+	});
+
+	it('removes inherited PUBLIC grants from a fresh journal family', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SCHEMA ${quoteIdent(DBSP_META_SCHEMA)}`);
+		await pool.query(
+			`ALTER DEFAULT PRIVILEGES IN SCHEMA ${quoteIdent(DBSP_META_SCHEMA)} GRANT SELECT ON TABLES TO PUBLIC`,
+		);
+
+		const report = await runPreflight([]);
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'current',
+			}),
+		);
+		const publicGrants = await pool.query<{ count: string }>(
+			`SELECT count(*)::text AS count FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) AND acl.grantee = 0`,
+			[DBSP_META_SCHEMA, transitionJournalTables],
+		);
+		expect(publicGrants.rows[0]?.count).toBe('0');
 	});
 });
 
@@ -496,6 +519,37 @@ describeWithE2eCapabilities(
 					}),
 				}),
 			);
+		});
+
+		it('refuses a column grant on a conforming journal table', async () => {
+			const grantee = uniqueName('dbsp_journal_column_grantee');
+			roles.push(grantee);
+			const pool = await getTestPool();
+			await pool.query(`CREATE ROLE ${quoteIdent(grantee)}`);
+			await ensureTransitionJournal(pool);
+			await runPreflight([]);
+			await pool.query(
+				`GRANT SELECT (${quoteIdent('run_id')}) ON TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)} TO ${quoteIdent(grantee)}`,
+			);
+
+			const report = await runPreflight([]);
+			expect(report.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					refusal: expect.objectContaining({
+						code: 'reinitialize-preflight-grants',
+					}),
+					reason: expect.objectContaining({
+						message: expect.stringContaining(DBSP_TRANSITION_RUN_TABLE),
+						step: 'ownership-grants',
+					}),
+				}),
+			);
+			const failed = report.scopes.find(
+				(scope) => scope.ledger.scope === 'database',
+			);
+			expect(failed?.reason?.message).toContain('widened grants on a column');
 		});
 	},
 );
