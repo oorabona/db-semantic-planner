@@ -8,6 +8,11 @@ import {
 	DBSP_LEDGER_MARKER_TABLE,
 	DBSP_LEDGER_RESERVATION_TABLE,
 	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
+	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
+	DBSP_TRANSITION_RUN_TABLE,
+	ensureTransitionJournal,
 	PG_LEDGER_SHAPE_VERSION,
 } from '@dbsp/adapter-pgsql';
 import type { ReinitializePreflightReport } from '@dbsp/types';
@@ -40,6 +45,13 @@ function quoteLiteral(value: string): string {
 	return `'${value.replaceAll("'", "''")}'`;
 }
 
+const transitionJournalTables = [
+	DBSP_TRANSITION_RUN_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
+	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
+] as const;
+
 describeWithE2eCapabilities(
 	['role-administration'],
 	'SC-13 / OBL-REC8 #481 reinitialize-preflight ownership and grants',
@@ -57,6 +69,7 @@ describeWithE2eCapabilities(
 				DBSP_LEDGER_RESERVATION_TABLE,
 				DBSP_LEDGER_IDENTITY_TABLE,
 				DBSP_LEDGER_MARKER_TABLE,
+				...transitionJournalTables,
 			]) {
 				await pool.query(
 					`ALTER TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)} OWNER TO ${quoteIdent(owner)}`,
@@ -133,6 +146,9 @@ describeWithE2eCapabilities(
 							DBSP_LEDGER_RESERVATION_TABLE,
 							DBSP_LEDGER_IDENTITY_TABLE,
 							DBSP_LEDGER_MARKER_TABLE,
+							...(ledgerSchema === DBSP_META_SCHEMA
+								? transitionJournalTables
+								: []),
 						]) {
 							const access = await setup.query<{ allowed: boolean }>(
 								'SELECT has_table_privilege($1, $2, $3) AS allowed',
@@ -258,6 +274,232 @@ describe('SC-15 #481 reinitialize-preflight marker refusals', () => {
 	);
 });
 
+describe('SC-20 #769 reinitialize-preflight transition journal', () => {
+	beforeEach(resetDbspMeta);
+
+	afterEach(resetDbspMeta);
+
+	async function journalState(): Promise<
+		readonly {
+			readonly name: string;
+			readonly owner: string;
+			readonly widened: boolean;
+		}[]
+	> {
+		const pool = await getTestPool();
+		const result = await pool.query<{
+			name: string;
+			owner: string;
+			widened: boolean;
+		}>(
+			`SELECT c.relname AS name, pg_catalog.pg_get_userbyid(c.relowner) AS owner, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> c.relowner) AS widened FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
+			[DBSP_META_SCHEMA, transitionJournalTables],
+		);
+		return result.rows;
+	}
+
+	it('creates and owns an empty journal family once, including from a schema-scoped preflight', async () => {
+		const schema = uniqueName('reinitialize_journal_scope');
+		await createPreflightSchema(schema);
+		try {
+			const pool = await getTestPool();
+			const role = await pool.query<{ role: string }>(
+				'SELECT current_user AS role',
+			);
+			const first = await runPreflight([schema]);
+			expect(first.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'current',
+				}),
+			);
+			const state = await journalState();
+			expect(state).toHaveLength(transitionJournalTables.length);
+			expect(state).toEqual(
+				expect.arrayContaining(
+					transitionJournalTables.map((name) => ({
+						name,
+						owner: role.rows[0]?.role,
+						widened: false,
+					})),
+				),
+			);
+			for (const table of transitionJournalTables) {
+				const count = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`,
+				);
+				expect(count.rows[0]?.count).toBe('0');
+			}
+			const second = await runPreflight([schema]);
+			expect(second.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'unchanged',
+				}),
+			);
+		} finally {
+			await dropSchema(schema);
+		}
+	});
+
+	it('creates an absent journal family on the current-ledger fast path', async () => {
+		const pool = await getTestPool();
+		await runPreflight([]);
+		await pool.query(
+			`DROP TABLE ${transitionJournalTables
+				.map((table) => `${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`)
+				.join(', ')} CASCADE`,
+		);
+
+		const report = await runPreflight([]);
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'current',
+				marker: { kind: 'current' },
+			}),
+		);
+		expect(await journalState()).toHaveLength(transitionJournalTables.length);
+	});
+
+	it('keeps a conforming journal family and its rows untouched', async () => {
+		const pool = await getTestPool();
+		await ensureTransitionJournal(pool);
+		await pool.query(
+			`INSERT INTO ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)} (run_id, plan_digest, target_context_digest, database_id, core_version) VALUES ('preserved-run', 'plan', 'context', 'database', 'core')`,
+		);
+
+		const report = await runPreflight([]);
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'current',
+			}),
+		);
+		const count = await pool.query<{ count: string }>(
+			`SELECT count(*)::text AS count FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)}`,
+		);
+		expect(count.rows[0]?.count).toBe('1');
+	});
+
+	it('refuses partial and drifted journal families before creating the ledger', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SCHEMA ${quoteIdent(DBSP_META_SCHEMA)}`);
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)} (id text PRIMARY KEY)`,
+		);
+		const partial = await runPreflight([]);
+		expect(partial.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'failed',
+				reason: expect.objectContaining({
+					message: expect.stringContaining(DBSP_TRANSITION_RUN_PLAN_TABLE),
+				}),
+			}),
+		);
+		const ledger = await pool.query<{ exists: boolean }>(
+			'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+			[
+				`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_LEDGER_EVENT_TABLE)}`,
+			],
+		);
+		expect(ledger.rows[0]?.exists).toBe(false);
+
+		await resetDbspMeta();
+		await ensureTransitionJournal(pool);
+		await pool.query(
+			`ALTER TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_AUTHORIZATION_TABLE)} DROP COLUMN actor`,
+		);
+		const drifted = await runPreflight([]);
+		expect(drifted.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'failed',
+				reason: expect.objectContaining({
+					message: expect.stringContaining('authorization'),
+				}),
+			}),
+		);
+	});
+});
+
+describeWithE2eCapabilities(
+	['role-administration'],
+	'SC-20a #769 reinitialize-preflight transition journal authority refusals',
+	() => {
+		const roles: string[] = [];
+
+		afterEach(async () => {
+			await resetDbspMeta();
+			const pool = await getTestPool();
+			for (const role of roles.splice(0)) {
+				await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);
+				await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
+			}
+		});
+
+		it('refuses a foreign-owned or widened journal table without repairing it', async () => {
+			const foreignOwner = uniqueName('dbsp_journal_owner');
+			const grantee = uniqueName('dbsp_journal_grantee');
+			roles.push(foreignOwner, grantee);
+			const pool = await getTestPool();
+			for (const role of [foreignOwner, grantee])
+				await pool.query(`CREATE ROLE ${quoteIdent(role)}`);
+			await ensureTransitionJournal(pool);
+			await runPreflight([]);
+			await pool.query(
+				`ALTER TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)} OWNER TO ${quoteIdent(foreignOwner)}`,
+			);
+			const foreign = await runPreflight([]);
+			expect(foreign.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					reason: expect.objectContaining({
+						message: expect.stringContaining(DBSP_TRANSITION_RUN_TABLE),
+					}),
+				}),
+			);
+
+			await resetDbspMeta();
+			await ensureTransitionJournal(pool);
+			await runPreflight([]);
+			await pool.query(
+				`GRANT SELECT ON TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_JOURNAL_TABLE)} TO ${quoteIdent(grantee)}`,
+			);
+			const widened = await runPreflight([]);
+			expect(widened.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					refusal: expect.objectContaining({
+						code: 'reinitialize-preflight-grants',
+					}),
+					reason: expect.objectContaining({
+						message: expect.stringContaining(DBSP_TRANSITION_JOURNAL_TABLE),
+					}),
+				}),
+			);
+
+			await resetDbspMeta();
+			await pool.query(
+				`CREATE SCHEMA ${quoteIdent(DBSP_META_SCHEMA)} AUTHORIZATION ${quoteIdent(foreignOwner)}`,
+			);
+			const foreignSchema = await runPreflight([]);
+			expect(foreignSchema.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					reason: expect.objectContaining({
+						message: expect.stringContaining(DBSP_META_SCHEMA),
+					}),
+				}),
+			);
+		});
+	},
+);
+
 describe('SC-15a #481 pre-existing ledger-shape admission', () => {
 	const schemas: string[] = [];
 
@@ -361,6 +603,7 @@ describeWithE2eCapabilities(
 				DBSP_LEDGER_RESERVATION_TABLE,
 				DBSP_LEDGER_IDENTITY_TABLE,
 				DBSP_LEDGER_MARKER_TABLE,
+				...transitionJournalTables,
 			]) {
 				await pool.query(
 					`ALTER TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)} OWNER TO ${quoteIdent(owner)}`,
@@ -650,6 +893,7 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 				'covered',
 				'candidate',
 				DBSP_LEDGER_EVENT_TABLE,
+				DBSP_TRANSITION_RUN_TABLE,
 			]),
 			writeAdoptionFile: (value: ReinitializePreflightReport) =>
 				writeAdoptionFileAtomically(out, value),
@@ -696,7 +940,7 @@ describe('OBL-REC11 reinitialize preflight statement capture', () => {
 		await resetDbspMeta();
 	}, 30_000);
 
-	it('captures a full preflight with zero event or reservation-table writes', async () => {
+	it('captures a full preflight with zero event, reservation, or journal-table writes', async () => {
 		const schema = uniqueName('reinitialize_statement_capture');
 		schemas.push(schema);
 		await createPreflightSchema(schema);
@@ -728,7 +972,8 @@ describe('OBL-REC11 reinitialize preflight statement capture', () => {
 			(sql) =>
 				/^\s*(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/i.test(sql) &&
 				(sql.includes(DBSP_LEDGER_EVENT_TABLE) ||
-					sql.includes(DBSP_LEDGER_RESERVATION_TABLE)),
+					sql.includes(DBSP_LEDGER_RESERVATION_TABLE) ||
+					transitionJournalTables.some((table) => sql.includes(table))),
 		);
 		expect(writes).toEqual([]);
 	});

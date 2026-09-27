@@ -18,13 +18,24 @@ import {
 	DBSP_LEDGER_MARKER_TABLE,
 	DBSP_LEDGER_TABLES,
 	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
+	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
+	DBSP_TRANSITION_RUN_TABLE,
 	isDbspLedgerInfrastructureTable,
 } from './constants.js';
 import {
 	assertPgDatabaseWritable,
 	isPgDatabaseReadOnlyError,
 } from './database-writability.js';
-import type { TransitionJournalQueryable } from './journal.js';
+import {
+	renderCreateTransitionAuthorizationTableSql,
+	renderCreateTransitionJournalTableSql,
+	renderCreateTransitionRunPlanTableSql,
+	renderCreateTransitionRunTableSql,
+	type TransitionJournalQueryable,
+	verifyTransitionJournalShape,
+} from './journal.js';
 import {
 	acquirePgLedgerLocks,
 	ensureDbspMetaLedger,
@@ -103,6 +114,18 @@ export interface PgReinitializePreflightOptions {
 }
 
 const LEDGER_TABLES = DBSP_LEDGER_TABLES;
+const TRANSITION_JOURNAL_TABLES = [
+	DBSP_TRANSITION_RUN_TABLE,
+	DBSP_TRANSITION_RUN_PLAN_TABLE,
+	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_AUTHORIZATION_TABLE,
+] as const;
+
+function isTransitionJournalTable(
+	table: string,
+): table is (typeof TRANSITION_JOURNAL_TABLES)[number] {
+	return (TRANSITION_JOURNAL_TABLES as readonly string[]).includes(table);
+}
 
 /** Bound every PostgreSQL object-lock wait made by one preflight scope. */
 export const REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL =
@@ -143,6 +166,13 @@ export function renderReinitializePreflightCreationGrantSql(
 			`REVOKE ALL ON TABLE ${qualified(home, table)} FROM PUBLIC`,
 		]),
 	];
+}
+
+function renderTransitionJournalCreationGrantSql(): readonly string[] {
+	return TRANSITION_JOURNAL_TABLES.flatMap((table) => [
+		`ALTER TABLE ${qualified({ scope: 'database' }, table)} OWNER TO CURRENT_USER`,
+		`REVOKE ALL ON TABLE ${qualified({ scope: 'database' }, table)} FROM PUBLIC`,
+	]);
 }
 
 function homesFor(schemas: readonly string[]): readonly LedgerHome[] {
@@ -434,16 +464,128 @@ async function validateOwnershipAndGrants(
 		if (object.widened === true)
 			throw new Error(`ledger ${String(object.relname)} has widened grants`);
 	}
-	if (home.scope === 'database') {
-		const meta = await executor.query(
-			`SELECT pg_catalog.pg_get_userbyid(n.nspowner) AS owner, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> n.nspowner) AS widened FROM pg_catalog.pg_namespace n WHERE n.nspname = $1`,
-			[DBSP_META_SCHEMA],
-		);
-		const row = meta.rows[0];
-		if (!row || row.owner !== role)
-			throw new Error(`dbsp_meta is not owned by deployment role ${role}`);
-		if (row.widened === true) throw new Error('dbsp_meta has widened grants');
+	if (home.scope === 'database')
+		await validateDbspMetaSchemaOwnershipAndGrants(executor, role, true);
+}
+
+/** Validates a pre-existing dbsp_meta before any CREATE ... IF NOT EXISTS. */
+async function validateDbspMetaSchemaOwnershipAndGrants(
+	executor: TransitionJournalQueryable,
+	role?: string,
+	required = false,
+): Promise<void> {
+	const meta = await executor.query(
+		`SELECT pg_catalog.pg_get_userbyid(n.nspowner) AS owner, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(n.nspacl, pg_catalog.acldefault('n', n.nspowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> n.nspowner) AS widened FROM pg_catalog.pg_namespace n WHERE n.nspname = $1`,
+		[DBSP_META_SCHEMA],
+	);
+	const row = meta.rows[0];
+	if (!row) {
+		if (required)
+			throw new Error(
+				'dbsp_meta ownership could not be validated because the schema is missing',
+			);
+		return;
 	}
+	const currentRole =
+		role ?? (await executor.query('SELECT current_user AS role')).rows[0]?.role;
+	if (typeof currentRole !== 'string')
+		throw new Error('current_user could not be read');
+	if (row.owner !== currentRole)
+		throw new Error(
+			`dbsp_meta is owned by ${String(row.owner)}, not deployment role ${currentRole}`,
+		);
+	if (row.widened === true) throw new Error('dbsp_meta has widened grants');
+}
+
+/**
+ * The transition journal is database-global, unlike schema-scoped ledgers.
+ * Keep its ownership list separate from the ledger's fixed four-table list.
+ */
+async function validateTransitionJournalOwnershipAndGrants(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	const currentUser = await executor.query('SELECT current_user AS role');
+	const role = currentUser.rows[0]?.role;
+	if (typeof role !== 'string')
+		throw new Error('current_user could not be read');
+	const objects = await executor.query(
+		`SELECT c.relname, pg_catalog.pg_get_userbyid(c.relowner) AS owner, EXISTS (SELECT 1 FROM pg_catalog.aclexplode(COALESCE(c.relacl, pg_catalog.acldefault('r', c.relowner))) acl WHERE acl.grantee = 0 OR acl.grantee <> c.relowner) AS widened FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
+		[DBSP_META_SCHEMA, TRANSITION_JOURNAL_TABLES],
+	);
+	if (objects.rows.length !== TRANSITION_JOURNAL_TABLES.length) {
+		const found = new Set(
+			objects.rows
+				.map((object) => object.relname)
+				.filter((name): name is string => typeof name === 'string'),
+		);
+		const missing = TRANSITION_JOURNAL_TABLES.find(
+			(table) => !found.has(table),
+		);
+		throw new Error(
+			`transition journal table ${missing ?? 'unknown'} ownership could not be validated because it is missing`,
+		);
+	}
+	for (const object of objects.rows) {
+		if (object.owner !== role)
+			throw new Error(
+				`transition journal table ${String(object.relname)} is owned by ${String(object.owner)}, not deployment role ${role}`,
+			);
+		if (object.widened === true)
+			throw new Error(
+				`transition journal table ${String(object.relname)} has widened grants`,
+			);
+	}
+}
+
+/**
+ * Refuses partial or drifted existing journals before the ledger path can make
+ * a change. A false return means all four relations were absent.
+ */
+async function validatePreexistingTransitionJournal(
+	executor: TransitionJournalQueryable,
+): Promise<boolean> {
+	await validateDbspMetaSchemaOwnershipAndGrants(executor);
+	const relations = await executor.query(
+		`SELECT c.relname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = ANY($2::text[]) ORDER BY c.relname`,
+		[DBSP_META_SCHEMA, TRANSITION_JOURNAL_TABLES],
+	);
+	if (relations.rows.length === 0) return false;
+	const found = new Set(
+		relations.rows
+			.map((relation) => relation.relname)
+			.filter((name): name is string => typeof name === 'string'),
+	);
+	const missing = TRANSITION_JOURNAL_TABLES.find((table) => !found.has(table));
+	if (missing)
+		throw new Error(
+			`transition journal table ${missing} is missing from a partial journal family`,
+		);
+	await verifyTransitionJournalShape(executor);
+	await validateTransitionJournalOwnershipAndGrants(executor);
+	return true;
+}
+
+/** Creates an absent family, then revalidates it to close CREATE races. */
+async function createAndValidateTransitionJournal(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	await executor.query(renderCreateTransitionRunTableSql());
+	await executor.query(renderCreateTransitionRunPlanTableSql());
+	await executor.query(renderCreateTransitionJournalTableSql());
+	await executor.query(renderCreateTransitionAuthorizationTableSql());
+	// Another session can create part or all of the family after the initial
+	// absence check. Admit that result before ALTER/REVOKE so preflight never
+	// silently repairs a raced-in foreign, widened, or drifted relation.
+	if (!(await validatePreexistingTransitionJournal(executor)))
+		throw new Error(
+			'transition journal creation did not create its table family',
+		);
+	for (const sql of renderTransitionJournalCreationGrantSql())
+		await executor.query(sql);
+	if (!(await validatePreexistingTransitionJournal(executor)))
+		throw new Error(
+			'transition journal creation did not create its table family',
+		);
 }
 
 async function establishCreationOwnershipAndGrants(
@@ -618,6 +760,15 @@ async function processScope(
 		const preexistingLedger =
 			current.marker.kind !== 'current' &&
 			(await hasPreexistingLedgerRelations(client, current.home));
+		// Journal history is database-scoped. Admit any pre-existing family before
+		// ledger creation so a partial, foreign-owned, or drifted family cannot be
+		// silently completed. Schema-scoped homes never touch these relations.
+		failureStep = 'ownership-grants';
+		const preexistingTransitionJournal =
+			current.home.scope === 'database'
+				? await validatePreexistingTransitionJournal(client)
+				: false;
+		let initializedTransitionJournal = false;
 		// A fresh database ledger has no dbsp_meta namespace yet, so bootstrap it
 		// before reading that namespace's live OID. The marker remains deferred.
 		let initializedDatabaseLedger = false;
@@ -637,11 +788,19 @@ async function processScope(
 				await validatePgLedgerPhysicalShape(client, current.home);
 				failureStep = 'ownership-grants';
 				await validateOwnershipAndGrants(client, current.home);
+				if (
+					current.home.scope === 'database' &&
+					!preexistingTransitionJournal
+				) {
+					failureStep = 'create';
+					await createAndValidateTransitionJournal(client);
+					initializedTransitionJournal = true;
+				}
 				await client.query('COMMIT');
 				begun = false;
 				return {
 					ledger: current.home,
-					outcome: 'unchanged',
+					outcome: initializedTransitionJournal ? 'current' : 'unchanged',
 					marker: current.marker,
 				};
 			}
@@ -676,6 +835,9 @@ async function processScope(
 			await ensureDbspMetaLedger(client, { writeMarker: false });
 		else if (!initializedDatabaseLedger)
 			await ensurePgLedger(client, current.home, { writeMarker: false });
+		if (current.home.scope === 'database' && !preexistingTransitionJournal) {
+			await createAndValidateTransitionJournal(client);
+		}
 		failureStep = 'record-identity';
 		await recordPgLedgerIdentity(client, current.home, live);
 		await checkpoint(observer, 'create', current.home);
@@ -779,7 +941,8 @@ export function selectReinitializeAdoptionCandidates(
 		.filter(
 			(candidate) =>
 				(candidate.address.kind !== 'table' ||
-					!isDbspLedgerInfrastructureTable(candidate.address.name)) &&
+					(!isDbspLedgerInfrastructureTable(candidate.address.name) &&
+						!isTransitionJournalTable(candidate.address.name))) &&
 				!chainAddresses.has(addressKey(candidate.address)),
 		);
 }

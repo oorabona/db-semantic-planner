@@ -471,7 +471,15 @@ async function readJournalTableShape(
 	return result.rows[0] as JournalTableShapeRow | undefined;
 }
 
-async function verifyTransitionJournalShape(
+/**
+ * Verifies the journal relations that recovery reads without modifying them.
+ *
+ * This deliberately does not compare foreign-key ON DELETE/UPDATE actions,
+ * match mode, or deferrability. An actor able to pre-create relations in
+ * dbsp_meta can therefore supply a different FK action that passes this
+ * structural check; tightening that DDL-authority boundary is out of scope.
+ */
+export async function verifyTransitionJournalShape(
 	executor: TransitionJournalQueryable,
 ): Promise<void> {
 	assertRunTableShape(
