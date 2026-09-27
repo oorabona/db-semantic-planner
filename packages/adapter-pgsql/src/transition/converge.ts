@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	canonicalJsonDigest,
+	defaultIndexName,
 	projectLedgerChain,
 	validateDeclarationModel,
 	validateNormalizedManagedStepManifest,
@@ -44,6 +45,7 @@ import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 export type PgConvergeRefusal =
+	| 'invalid-options'
 	| 'unsupported-change'
 	| 'unmanaged-object'
 	| 'unmanaged-parent'
@@ -87,6 +89,21 @@ export type PgConvergeResult =
 export interface ConvergePgOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
+	/**
+	 * Exact physical PostgreSQL index names that converge must leave alone on
+	 * declared model tables. Each table name uses the model's naming, while the
+	 * index name is used verbatim. Entries are validated before connecting: they
+	 * must be distinct, name declared tables, and must not equal the name of an
+	 * index listed in any declared table's `indexes`. Converge never drops a
+	 * live index named here. It does not check these names against the other
+	 * relations the model creates (tables, sequences, primary-key or UNIQUE
+	 * constraint indexes); PostgreSQL rejects such a collision when the step
+	 * runs, and converge reports it as that step's failure.
+	 */
+	readonly externalIndexes?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
 }
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -118,6 +135,97 @@ function refusal(
 		})),
 		detail,
 	);
+}
+
+function invalidOptions(detail: string): PgConvergeRefusalError {
+	return new PgConvergeRefusalError('invalid-options', [], detail);
+}
+
+function declaredIndexNames(
+	model: ModelIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): ReadonlySet<string> {
+	return new Set(
+		[...model.tables.values()].flatMap((table) => {
+			const physicalTable = naming.toDatabase(table.name);
+			return table.indexes.map((index) =>
+				defaultIndexName(physicalTable, {
+					...index,
+					...(index.name === undefined
+						? {}
+						: { name: naming.toDatabase(index.name) }),
+					columns: index.columns.map((column) => naming.toDatabase(column)),
+				}),
+			);
+		}),
+	);
+}
+
+function externalIndexKey(table: string, name: string): string {
+	return JSON.stringify([table, name]);
+}
+
+/** Validate logical option entries and produce physical keys for diff matching. */
+function validateExternalIndexes(
+	model: ModelIR,
+	options: ConvergePgOptions,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): ReadonlySet<string> {
+	const supplied = options.externalIndexes;
+	if (supplied === undefined) return new Set();
+	if (!Array.isArray(supplied))
+		throw invalidOptions('converge externalIndexes must be an array');
+
+	const declaredTables = new Set(
+		[...model.tables.values()].map((table) => table.name),
+	);
+	const declaredIndexes = declaredIndexNames(model, naming);
+	const seen = new Set<string>();
+	const externalIndexKeys = new Set<string>();
+	for (const [position, entry] of supplied.entries()) {
+		const label = `externalIndexes[${position}]`;
+		if (
+			entry === null ||
+			typeof entry !== 'object' ||
+			Array.isArray(entry) ||
+			typeof entry.table !== 'string' ||
+			entry.table.length === 0 ||
+			typeof entry.name !== 'string' ||
+			entry.name.length === 0
+		)
+			throw invalidOptions(
+				`converge ${label} must be an object with non-empty string table and name fields`,
+			);
+
+		if (seen.has(entry.name))
+			throw invalidOptions(
+				`converge ${label} duplicates external index ${entry.name}`,
+			);
+		seen.add(entry.name);
+
+		if (!declaredTables.has(entry.table))
+			throw invalidOptions(
+				`converge ${label} names undeclared table ${entry.table}`,
+			);
+		if (declaredIndexes.has(entry.name))
+			throw invalidOptions(
+				`converge ${label} names declared index ${entry.name}`,
+			);
+		externalIndexKeys.add(
+			externalIndexKey(naming.toDatabase(entry.table), entry.name),
+		);
+	}
+	return externalIndexKeys;
+}
+
+function masksExternalIndexDrop(
+	change: SchemaChange,
+	externalIndexKeys: ReadonlySet<string>,
+): boolean {
+	if (change.kind !== 'drop_index') return false;
+	const index = indexForChange(change);
+	if (typeof index?.name !== 'string') return false;
+	return externalIndexKeys.has(externalIndexKey(change.table, index.name));
 }
 
 function startupSafeAddColumn(change: SchemaChange): boolean {
@@ -696,6 +804,10 @@ function describeFkAutoIndexSpecs(
  * Converge mutates only declared additions whose target and existing parent pass
  * managed admission. It compares structural shape; it does not audit the
  * provenance of an exact-matching child already present on a managed table.
+ * `externalIndexes` accepts exact physical index names on logical model tables;
+ * entries are validated before the ledger lock or any query, and converge
+ * never drops a matching live index. A name that collides with another
+ * relation the model creates fails when that step runs.
  * Its run ids are ephemeral claim namespaces: no transition journal or durable
  * run relation is touched.
  */
@@ -707,6 +819,8 @@ export async function convergePg(
 	validateDeclarationModel(model);
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
+	const naming = getNamingPluginForDbCasing(casing);
+	const externalIndexes = validateExternalIndexes(model, options, naming);
 	const client = await pool.connect();
 	let destroyReason:
 		| 'converge could not determine ledger lock acquisition'
@@ -758,7 +872,6 @@ export async function convergePg(
 			borrowedClient: true,
 			dbCasing: casing,
 		});
-		const naming = getNamingPluginForDbCasing(casing);
 		assertDeclaredSequenceNamesPreserved(model, naming);
 		const declaredTables = [...model.tables.values()].map((table) =>
 			naming.toDatabase(table.name),
@@ -790,7 +903,7 @@ export async function convergePg(
 				return Reflect.get(target, property, receiver);
 			},
 		});
-		const diff = await comparePgsqlDatabaseSchema(
+		const compared = await comparePgsqlDatabaseSchema(
 			declarationScopedAdapter,
 			model,
 			{
@@ -799,6 +912,12 @@ export async function convergePg(
 				ignoreUnmanagedExtensions: true,
 			},
 		);
+		const diff = {
+			...compared,
+			changes: compared.changes.filter(
+				(change) => !masksExternalIndexDrop(change, externalIndexes),
+			),
+		};
 		const createdTableAddresses = new Set(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_table') return [];
