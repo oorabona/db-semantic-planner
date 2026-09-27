@@ -496,6 +496,38 @@ describe('convergePg refusal boundary', () => {
 		).toHaveLength(1);
 	});
 
+	it('names mapped runs and unmapped executions separately for live reservations', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:mapped' } as never,
+			{ executionId: 'execution:unmapped' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([['execution:mapped', ['run:recover']]]),
+		);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: ['run:recover'],
+			executionIds: ['execution:unmapped'],
+			detail:
+				'converge found live ledger reservations; reconcile run run:recover with reconcilePgTransitionRun or dbsp reconcile run:recover; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it before converge can run',
+		});
+	});
+
 	it('requires recovery for an unmapped live reservation without trying a run lock', async () => {
 		const testClient = client();
 		mocks.reservations.mockResolvedValue([
@@ -516,6 +548,41 @@ describe('convergePg refusal boundary', () => {
 				String(sql).includes('pg_try_advisory_lock'),
 			),
 		).toBe(false);
+	});
+
+	it.each(['42501', '42P01'])(
+		'treats journal lookup SQLSTATE %s as unmapped live reservations',
+		async (code) => {
+			mocks.reservations.mockResolvedValue([
+				{ executionId: 'execution:one' } as never,
+				{ executionId: 'execution:two' } as never,
+			]);
+			mocks.runIds.mockRejectedValue(
+				Object.assign(new Error('lookup failed'), { code }),
+			);
+
+			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+				refusal: 'recovery-required',
+				runIds: [],
+				executionIds: ['execution:one', 'execution:two'],
+			});
+		},
+	);
+
+	it('propagates a transport failure during journal lookup and destroys the client', async () => {
+		const testClient = client();
+		const failure = Object.assign(new Error('connection terminated'), {
+			code: '08006',
+		});
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockRejectedValue(failure);
+
+		await expect(convergePg(poolFor(testClient), emptyModel())).rejects.toBe(
+			failure,
+		);
+		expect(testClient.release).toHaveBeenCalledWith(expect.any(Error));
 	});
 
 	it('does not compare an undeclared live sequence when the model declares none', async () => {
@@ -2211,7 +2278,7 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('refuses a recovery-required executor outcome with its detail unchanged', async () => {
+	it('refuses a recovery-required executor outcome as execution-refused', async () => {
 		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
 		mocks.createStep.mockImplementation(
 			({ change: input }: { change: Record<string, unknown> }) =>
@@ -2224,8 +2291,8 @@ describe('convergePg refusal boundary', () => {
 		});
 
 		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
-			refusal: 'recovery-required',
-			detail: expect.stringContaining('claim-769'),
+			refusal: 'execution-refused',
+			detail: 'claim needs reconciliation',
 		});
 	});
 

@@ -81,6 +81,16 @@ export class PgConvergeRefusalError extends Error {
 	}
 }
 
+function isPgJournalLookupUnavailable(error: unknown): boolean {
+	return (
+		error !== null &&
+		typeof error === 'object' &&
+		'code' in error &&
+		((error as { readonly code?: unknown }).code === '42501' ||
+			(error as { readonly code?: unknown }).code === '42P01')
+	);
+}
+
 async function refuseForLiveReservations(
 	client: PoolClient,
 	schema: string,
@@ -92,10 +102,16 @@ async function refuseForLiveReservations(
 	);
 	if (reservations.length === 0) return;
 	const executionIds = [...new Set(reservations.map((row) => row.executionId))];
-	const mappings = await readTransitionRunIdsForExecutionIds(
-		client,
-		executionIds,
-	);
+	let mappings: ReadonlyMap<string, readonly string[]>;
+	try {
+		mappings = await readTransitionRunIdsForExecutionIds(client, executionIds);
+	} catch (error) {
+		if (!isPgJournalLookupUnavailable(error)) {
+			markSessionCompromised();
+			throw error;
+		}
+		mappings = new Map();
+	}
 	const runIds = [...new Set([...mappings.values()].flat())];
 	const unmappedExecutionIds = executionIds.filter(
 		(executionId) => !mappings.has(executionId),
@@ -133,10 +149,20 @@ async function refuseForLiveReservations(
 			);
 		}
 	}
+	const recoveryDetail = [
+		...runIds.map(
+			(runId) =>
+				`reconcile run ${runId} with reconcilePgTransitionRun or dbsp reconcile ${runId}`,
+		),
+		...unmappedExecutionIds.map(
+			(executionId) =>
+				`no journal run is recorded for execution ${executionId}; the ledger owner must resolve it before converge can run`,
+		),
+	].join('; ');
 	throw new PgConvergeRefusalError(
 		'recovery-required',
 		[],
-		`converge found live ledger reservations; reconcile ${runIds.length > 0 ? runIds.map((runId) => `run ${runId}`).join(', ') : unmappedExecutionIds.map((executionId) => `execution ${executionId}`).join(', ')} with reconcilePgTransitionRun or dbsp reconcile <run-id>, then call convergePg again`,
+		`converge found live ledger reservations; ${recoveryDetail}`,
 		runIds,
 		unmappedExecutionIds,
 	);
@@ -1186,12 +1212,6 @@ export async function convergePg(
 			destroyReason = 'converge received a transport-ambiguous outcome';
 			return { kind: 'transport-ambiguous', detail: outcome.detail };
 		}
-		if (outcome.outcome === 'recovery-required')
-			throw refusal(
-				'recovery-required',
-				diff.changes,
-				`converge execution claim ${outcome.claimId} requires recovery: ${outcome.detail}`,
-			);
 		throw refusal('execution-refused', diff.changes, outcome.detail);
 	} finally {
 		lockedConvergeClients.delete(client);
