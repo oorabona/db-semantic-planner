@@ -7,6 +7,7 @@ import {
 	appendIntentJournal,
 	createPgTransitionLessor,
 	escapeDiagnosticText,
+	executionIdsForRun,
 	readPgLedgerAddressChain,
 	readPgLedgerReservationsForExecution,
 	readTransitionJournal,
@@ -46,7 +47,6 @@ import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
-import { executionIdsForRun } from './execution-ids.js';
 import type { GeneratorDurablePlan } from './generator-plan.js';
 import {
 	persistedLifecycleDirectiveError,
