@@ -362,6 +362,48 @@ describe('SC-20 #769 reinitialize-preflight transition journal', () => {
 		expect(await journalState()).toHaveLength(transitionJournalTables.length);
 	});
 
+	it('refuses a concurrently created journal table without completing its family', async () => {
+		const pool = await getTestPool();
+		await runPreflight([]);
+		await pool.query(
+			`DROP TABLE ${transitionJournalTables
+				.map((table) => `${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`)
+				.join(', ')} CASCADE`,
+		);
+
+		const report = await runPreflight([], {
+			observer: async (checkpoint, ledger) => {
+				if (
+					(checkpoint as string) !== 'journal-create' ||
+					ledger?.scope !== 'database'
+				)
+					return;
+				await pool.query(
+					`CREATE TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(DBSP_TRANSITION_RUN_TABLE)} (id text PRIMARY KEY)`,
+				);
+			},
+			writeAdoptionFile: async () => {},
+		});
+
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'failed',
+				reason: expect.objectContaining({
+					message: expect.stringContaining(DBSP_TRANSITION_RUN_TABLE),
+					step: 'create',
+				}),
+			}),
+		);
+		for (const table of transitionJournalTables) {
+			const exists = await pool.query<{ exists: boolean }>(
+				'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+				[`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`],
+			);
+			expect(exists.rows[0]?.exists).toBe(table === DBSP_TRANSITION_RUN_TABLE);
+		}
+	});
+
 	it('keeps a conforming journal family and its rows untouched', async () => {
 		const pool = await getTestPool();
 		await ensureTransitionJournal(pool);
@@ -955,6 +997,9 @@ describe('SC-19 #481 reinitialize-preflight adoption output', () => {
 
 		expect(report.adoptionCandidates).toEqual([
 			expect.objectContaining({ address: tableAddress(schema, 'candidate') }),
+			expect.objectContaining({
+				address: tableAddress(schema, DBSP_TRANSITION_RUN_TABLE),
+			}),
 		]);
 		expect(JSON.parse(await readFile(out, 'utf8'))).toEqual({
 			version: 1,

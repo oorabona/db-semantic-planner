@@ -52,6 +52,7 @@ export type ReinitializePreflightCheckpoint =
 	| 'archive'
 	| 'create'
 	| 'grants'
+	| 'journal-create'
 	| 'marker'
 	| 'output';
 
@@ -120,12 +121,6 @@ const TRANSITION_JOURNAL_TABLES = [
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	DBSP_TRANSITION_AUTHORIZATION_TABLE,
 ] as const;
-
-function isTransitionJournalTable(
-	table: string,
-): table is (typeof TRANSITION_JOURNAL_TABLES)[number] {
-	return (TRANSITION_JOURNAL_TABLES as readonly string[]).includes(table);
-}
 
 /** Bound every PostgreSQL object-lock wait made by one preflight scope. */
 export const REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL =
@@ -571,19 +566,24 @@ async function validatePreexistingTransitionJournal(
 	return true;
 }
 
-/** Creates an absent family, then revalidates it to close CREATE races. */
+/**
+ * Creates an absent family exclusively, then revalidates its owner, shape, and
+ * ACL. The exclusive CREATEs refuse a raced-in partial family; revalidation
+ * verifies the family that this transaction created before and after grants.
+ */
 async function createAndValidateTransitionJournal(
 	executor: TransitionJournalQueryable,
+	observer: ReinitializePreflightObserver | undefined,
+	home: LedgerHome,
 ): Promise<void> {
-	await executor.query(renderCreateTransitionRunTableSql());
-	await executor.query(renderCreateTransitionRunPlanTableSql());
-	await executor.query(renderCreateTransitionJournalTableSql());
-	await executor.query(renderCreateTransitionAuthorizationTableSql());
-	// Another session can create part or all of the family after the initial
-	// absence check. Admit its presence, shape, and ownership before ALTER/REVOKE
-	// so preflight never silently repairs a raced-in foreign or drifted relation.
-	// ACLs are deliberately deferred: CREATE inherits default privileges, which
-	// the following REVOKE is responsible for removing.
+	await checkpoint(observer, 'journal-create', home);
+	await executor.query(renderCreateTransitionRunTableSql(true));
+	await executor.query(renderCreateTransitionRunPlanTableSql(true));
+	await executor.query(renderCreateTransitionJournalTableSql(true));
+	await executor.query(renderCreateTransitionAuthorizationTableSql(true));
+	// Revalidate the family that this transaction exclusively created before
+	// ALTER/REVOKE. ACLs are deliberately deferred: CREATE inherits default
+	// privileges, which the following REVOKE is responsible for removing.
 	if (!(await validatePreexistingTransitionJournal(executor)))
 		throw new Error(
 			'transition journal creation did not create its table family',
@@ -810,7 +810,11 @@ async function processScope(
 					!preexistingTransitionJournal
 				) {
 					failureStep = 'create';
-					await createAndValidateTransitionJournal(client);
+					await createAndValidateTransitionJournal(
+						client,
+						observer,
+						current.home,
+					);
 					initializedTransitionJournal = true;
 				}
 				await client.query('COMMIT');
@@ -853,7 +857,7 @@ async function processScope(
 		else if (!initializedDatabaseLedger)
 			await ensurePgLedger(client, current.home, { writeMarker: false });
 		if (current.home.scope === 'database' && !preexistingTransitionJournal) {
-			await createAndValidateTransitionJournal(client);
+			await createAndValidateTransitionJournal(client, observer, current.home);
 		}
 		failureStep = 'record-identity';
 		await recordPgLedgerIdentity(client, current.home, live);
@@ -958,8 +962,7 @@ export function selectReinitializeAdoptionCandidates(
 		.filter(
 			(candidate) =>
 				(candidate.address.kind !== 'table' ||
-					(!isDbspLedgerInfrastructureTable(candidate.address.name) &&
-						!isTransitionJournalTable(candidate.address.name))) &&
+					!isDbspLedgerInfrastructureTable(candidate.address.name)) &&
 				!chainAddresses.has(addressKey(candidate.address)),
 		);
 }

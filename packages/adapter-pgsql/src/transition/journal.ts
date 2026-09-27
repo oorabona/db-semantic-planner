@@ -93,9 +93,9 @@ export function renderCreateDbspMetaSchemaSql(): string {
 	return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(DBSP_META_SCHEMA, 'schema')}`;
 }
 
-export function renderCreateTransitionRunTableSql(): string {
+export function renderCreateTransitionRunTableSql(exclusive = false): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionRunTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionRunTable()} (` +
 		'run_id text PRIMARY KEY, ' +
 		'plan_digest text NOT NULL, ' +
 		'target_context_digest text NOT NULL, ' +
@@ -107,9 +107,11 @@ export function renderCreateTransitionRunTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionJournalTableSql(): string {
+export function renderCreateTransitionJournalTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionJournalTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionJournalTable()} (` +
 		'run_id text NOT NULL, ' +
 		'seq bigint NOT NULL, ' +
 		'event text NOT NULL, ' +
@@ -125,9 +127,11 @@ export function renderCreateTransitionJournalTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionRunPlanTableSql(): string {
+export function renderCreateTransitionRunPlanTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionRunPlanTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionRunPlanTable()} (` +
 		'run_id text PRIMARY KEY, ' +
 		'bound_run_id text NOT NULL, ' +
 		'plan jsonb NOT NULL, ' +
@@ -136,9 +140,11 @@ export function renderCreateTransitionRunPlanTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionAuthorizationTableSql(): string {
+export function renderCreateTransitionAuthorizationTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionAuthorizationTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionAuthorizationTable()} (` +
 		'run_id text NOT NULL, seq bigint NOT NULL, policy jsonb NOT NULL, grants jsonb NOT NULL, digest text NOT NULL, actor text NOT NULL, authorized_at timestamptz NOT NULL DEFAULT now(), ' +
 		`PRIMARY KEY (run_id, seq), FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id))`
 	);
