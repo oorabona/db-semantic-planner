@@ -93,9 +93,9 @@ export function renderCreateDbspMetaSchemaSql(): string {
 	return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(DBSP_META_SCHEMA, 'schema')}`;
 }
 
-export function renderCreateTransitionRunTableSql(): string {
+export function renderCreateTransitionRunTableSql(exclusive = false): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionRunTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionRunTable()} (` +
 		'run_id text PRIMARY KEY, ' +
 		'plan_digest text NOT NULL, ' +
 		'target_context_digest text NOT NULL, ' +
@@ -107,9 +107,11 @@ export function renderCreateTransitionRunTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionJournalTableSql(): string {
+export function renderCreateTransitionJournalTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionJournalTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionJournalTable()} (` +
 		'run_id text NOT NULL, ' +
 		'seq bigint NOT NULL, ' +
 		'event text NOT NULL, ' +
@@ -125,9 +127,11 @@ export function renderCreateTransitionJournalTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionRunPlanTableSql(): string {
+export function renderCreateTransitionRunPlanTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionRunPlanTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionRunPlanTable()} (` +
 		'run_id text PRIMARY KEY, ' +
 		'bound_run_id text NOT NULL, ' +
 		'plan jsonb NOT NULL, ' +
@@ -136,9 +140,11 @@ export function renderCreateTransitionRunPlanTableSql(): string {
 	);
 }
 
-export function renderCreateTransitionAuthorizationTableSql(): string {
+export function renderCreateTransitionAuthorizationTableSql(
+	exclusive = false,
+): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${transitionAuthorizationTable()} (` +
+		`CREATE TABLE${exclusive ? '' : ' IF NOT EXISTS'} ${transitionAuthorizationTable()} (` +
 		'run_id text NOT NULL, seq bigint NOT NULL, policy jsonb NOT NULL, grants jsonb NOT NULL, digest text NOT NULL, actor text NOT NULL, authorized_at timestamptz NOT NULL DEFAULT now(), ' +
 		`PRIMARY KEY (run_id, seq), FOREIGN KEY (run_id) REFERENCES ${transitionRunTable()} (run_id))`
 	);
@@ -471,7 +477,15 @@ async function readJournalTableShape(
 	return result.rows[0] as JournalTableShapeRow | undefined;
 }
 
-async function verifyTransitionJournalShape(
+/**
+ * Verifies the journal relations that recovery reads without modifying them.
+ *
+ * This deliberately does not compare foreign-key ON DELETE/UPDATE actions,
+ * match mode, or deferrability. An actor able to pre-create relations in
+ * dbsp_meta can therefore supply a different FK action that passes this
+ * structural check; tightening that DDL-authority boundary is out of scope.
+ */
+export async function verifyTransitionJournalShape(
 	executor: TransitionJournalQueryable,
 ): Promise<void> {
 	assertRunTableShape(
