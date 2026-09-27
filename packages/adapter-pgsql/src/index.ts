@@ -421,6 +421,18 @@ export {
 	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from './transition/index.js';
+// Durable transition recovery. This is the supported non-CLI reconciliation API.
+export {
+	executionIdsForRun,
+	type PgReconcileFailureStage,
+	type PgReconcileRecoveryFailureCause,
+	type PgReconcileRecoveryOutcome,
+	type PgReconcileRecoveryReport,
+	type PgReconcileSelectedIssue,
+	PgReconcileTransitionRunError,
+	type PgReconcileTransitionRunResult,
+	reconcilePgTransitionRun,
+} from './transition/reconcile.js';
 // Validation
 export {
 	escapeDiagnosticText,

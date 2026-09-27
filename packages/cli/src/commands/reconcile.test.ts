@@ -1,171 +1,94 @@
-import { canonicalJsonDigest } from '@dbsp/core';
 import { describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => {
-	const lockSession = { query: vi.fn() };
-	const recovery = vi.fn();
-	const writability = vi.fn();
-	const readOnly = vi.fn(() => false);
-	const reservations = vi.fn(async (executionId: string) =>
-		executionId === 'dbsp.generator.execution.run:generator'
-			? [
-					{
-						address: {
-							scope: 'schema',
-							engine: 'postgresql',
-							database: 'app',
-							schema: 'tenant',
-							kind: 'table',
-							name: 'interrupted_generator',
-						},
-						claimKind: 'retire-intent',
-						executionId: 'dbsp.generator.execution.run:generator',
-						rootClaimId: 'claim:generator',
-						homeLedger: { scope: 'schema', schema: 'tenant' },
-					},
-				]
-			: [],
-	);
 	const currency = vi.fn(async () => ({ kind: 'current' }));
-	const chain = vi.fn(async () => []);
+	const recoveryAdmission = vi.fn();
+	const pack = vi.fn();
 	return {
-		lockSession,
-		recovery,
-		writability,
-		readOnly,
-		reservations,
+		reconcile: vi.fn(),
+		writable: vi.fn(),
+		readOnly: vi.fn(() => false),
 		currency,
-		chain,
+		recoveryAdmission,
+		pack,
+		lockSession: { query: vi.fn() },
 	};
 });
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
-	assertCreateUniqueIndexConcurrentlyRecoveryNotInvalid: vi.fn(),
-	assertPgDatabaseWritable: fixture.writability,
 	escapeDiagnosticText: (value: string) => value,
+	assertPgDatabaseWritable: fixture.writable,
+	createPgTransitionPack: fixture.pack,
 	isPgDatabaseReadOnlyError: fixture.readOnly,
-	readPgLedgerAddressChain: fixture.chain,
-	readPgLedgerReservationsForExecution: vi.fn(
-		async (_session, _home, executionId) => fixture.reservations(executionId),
-	),
+	preparePgRecoveryAdmission: fixture.recoveryAdmission,
 	readPgLedgerScopeCurrency: fixture.currency,
-	readTransitionJournal: vi.fn(async () => ({
-		run: { runId: 'run:generator', planDigest: 'digest:generator' },
-		plan: {
-			generator: {},
-			steps: [
-				{
-					managedClaim: {
-						plannedClaimKey: 'generator:0',
-						address: {
-							scope: 'schema',
-							engine: 'postgresql',
-							database: 'app',
-							schema: 'tenant',
-							kind: 'table',
-							name: 'interrupted_generator',
-						},
-						statementBundle: { statements: [] },
-					},
-					guards: [],
-					restsOnAssumptions: [],
-				},
-			],
-		},
-		events: [
-			{
-				event: 'intent',
-				record: {
-					executionId: 'dbsp.generator.execution.run:generator',
-				},
-			} as never,
-		],
-	})),
-	readVerifiedPgLedgerReservationsForPair: vi.fn(),
-	recoverPgReaddressPair: vi.fn(),
+	readPgObservationContextFromLessor: vi.fn(),
+	readTransitionJournal: vi.fn(),
 	withPgTransitionRunLock: vi.fn(async (_pool, _runId, callback) => ({
 		kind: 'acquired',
 		value: await callback({}),
 	})),
-}));
-
-vi.mock('@dbsp/adapter-pgsql/internal', () => ({
-	recoverPgOutcomeClaim: fixture.recovery,
+	PgReconcileTransitionRunError: class PgReconcileTransitionRunError extends Error {
+		readonly originalCause: unknown;
+		readonly stage: 'journal' | 'catalogue' | 'reconcile';
+		constructor(stage: 'journal' | 'catalogue' | 'reconcile', cause: unknown) {
+			super('reconcile failed');
+			this.stage = stage;
+			this.originalCause = cause;
+		}
+	},
+	reconcilePgTransitionRun: fixture.reconcile,
 }));
 
 vi.mock('@dbsp/core', async (importOriginal) => ({
 	...(await importOriginal<typeof import('@dbsp/core')>()),
-	acquireExclusiveTransitionLease: vi.fn(async () => ({
-		session: fixture.lockSession,
-		release: vi.fn(),
-	})),
 	acquireTransitionTargetLease: vi.fn(async () => ({
 		session: fixture.lockSession,
 		release: vi.fn(),
 	})),
-	assumptionAccepted: vi.fn(),
 	loadVerifiedRecoveryJournal: vi.fn(async () => ({
 		ok: true,
 		journal: {
-			run: { runId: 'run:generator', planDigest: 'digest:generator' },
-			plan: { steps: [], assumptions: [] },
+			run: { runId: 'run-1', planDigest: 'digest:generator' },
+			plan: {
+				assumptions: [],
+				steps: [
+					{
+						managedClaim: {
+							address: {
+								scope: 'schema',
+								engine: 'postgresql',
+								database: 'app',
+								schema: 'tenant',
+								kind: 'table',
+								name: 'accounts',
+							},
+						},
+					},
+				],
+			},
 			events: [],
 		},
 	})),
-	outcomeClaimId: vi.fn(),
-	projectLedgerChain: vi.fn(() => ({
-		kind: 'projected-ledger-chain',
-		openClaim: {
-			event: {
-				eventId: 'claim:generator',
-				executionId: 'dbsp.generator.execution.run:generator',
-				rootClaimId: 'claim:generator',
-				plannedClaimKey: 'generator:0',
-			},
-			stableStateBeforeClaim: 'managed',
-		},
-	})),
-	resourceScopeCovers: vi.fn(),
-	transitionPlanDigest: vi.fn(() => 'digest:generator'),
 }));
 
 import {
 	classifyReconcileFailure,
-	executionIdsForRun,
 	formatReconcileHuman,
-	recoveryPayload,
 	runReconcile,
 	unresolvedRecoveryDetail,
 } from './reconcile.js';
 
-describe('reconcile durable outcome ordering', () => {
-	function resetFixture(): void {
-		fixture.recovery.mockReset();
-		fixture.writability.mockReset();
-		fixture.readOnly.mockReset();
-		fixture.readOnly.mockReturnValue(false);
-		fixture.reservations.mockClear();
-		fixture.currency.mockReset();
-		fixture.currency.mockResolvedValue({ kind: 'current' });
-		fixture.chain.mockReset();
-		fixture.chain.mockResolvedValue([]);
-	}
+const address = {
+	scope: 'schema' as const,
+	engine: 'postgresql',
+	database: 'app',
+	schema: 'tenant',
+	kind: 'table',
+	name: 'accounts',
+};
 
-	it('omits an absent recovered catalogue identity before canonicalizing', () => {
-		expect(recoveryPayload(undefined)).toEqual({
-			value: {},
-			digest: canonicalJsonDigest({}),
-		});
-	});
-
-	it('retains a null recovered catalogue identity before canonicalizing', () => {
-		const value = { catalogueIdentity: null };
-		expect(recoveryPayload(null as never)).toEqual({
-			value,
-			digest: canonicalJsonDigest(value),
-		});
-	});
-
+describe('reconcile CLI mapping', () => {
 	it.each([
 		['authentication', { code: '28P01' }, 'reconcile'],
 		['transport', { code: '08006' }, 'reconcile'],
@@ -176,215 +99,134 @@ describe('reconcile durable outcome ordering', () => {
 	});
 
 	it.each(['transport-ambiguous', 'no-open-claim'] as const)(
-		'never treats %s as completed recovery',
+		'keeps %s in rendered unresolved diagnostics',
 		(outcome) => {
-			expect(
-				unresolvedRecoveryDetail([
-					{
-						address: {
-							scope: 'schema',
-							engine: 'postgresql',
-							database: 'app',
-							schema: 'tenant',
-							kind: 'table',
-							name: 'accounts',
-						},
-						outcome,
-					},
-				]),
-			).toContain(outcome);
+			expect(unresolvedRecoveryDetail([{ address, outcome }])).toContain(
+				outcome,
+			);
 		},
 	);
 
-	it('keeps documented generator scopes and adds every durable attempt', () => {
-		const executionId = 'dbsp.generator.execution.attempt-2';
-		expect(
-			executionIdsForRun({
-				run: { runId: 'run:generator', planDigest: 'digest:generator' },
-				plan: { generator: {}, steps: [] },
-				events: [
-					{
-						event: 'intent',
-						record: { executionId },
-					} as never,
-				],
-			} as never),
-		).toEqual([
-			'run:generator',
-			executionId,
-			'dbsp.generator.execution.run:generator',
-		]);
-	});
-	it('commits an interrupted generator refusal through the pool-owned outcome session', async () => {
-		resetFixture();
-		fixture.recovery.mockResolvedValue({
-			kind: 'outcome-recovery-appended',
-			classification: {
-				resolution: { reason: 'interrupted generator claim refused' },
-			},
-			append: { kind: 'appended-outcome-resolution' },
-		});
-		const pool = { connect: vi.fn() };
-
-		await expect(
-			runReconcile(
-				'run:generator',
-				{ db: 'postgres://fixture' },
-				pool as never,
-			),
-		).resolves.toMatchObject({ outcome: 'reconcile-completed' });
-
-		expect(fixture.recovery).toHaveBeenCalledWith(
-			pool,
-			expect.objectContaining({
-				resolutionEventId: 'claim:generator:reconcile:run:generator',
-			}),
-		);
-	});
-
-	it.each([
-		'appended-outcome-resolution',
-		'already-appended-outcome-resolution',
-	] as const)(
-		'keeps an %s indeterminate resolution unresolved',
-		async (appendKind) => {
-			resetFixture();
-			fixture.recovery.mockResolvedValue({
-				kind: 'outcome-recovery-appended',
-				classification: {
-					resolution: {
-						eventKind: 'indeterminate',
-						reason: 'live state remains unknown',
-					},
+	it('maps the adapter marker issue to ERR-03 without scanning detail text', async () => {
+		fixture.reconcile.mockResolvedValue({
+			kind: 'unresolved',
+			runId: 'run-1',
+			addresses: [address],
+			recovery: [{ address, outcome: 'blocked' }],
+			selectedIssue: {
+				kind: 'ledger-not-current',
+				currency: {
+					kind: 'not-current',
+					marker: { kind: 'future', version: 2 },
+					reason: 'marker',
 				},
-				append: { kind: appendKind },
-			});
-			const result = await runReconcile(
-				'run:generator',
-				{ db: 'postgres://fixture' },
-				{} as never,
-			);
-			expect(result).toMatchObject({
-				outcome: 'reconcile-unresolved',
+				affectedAddresses: [address],
+			},
+		});
+		const result = await runReconcile(
+			'run-1',
+			{ db: 'postgres://fixture' },
+			{} as never,
+		);
+		expect(result).toMatchObject({
+			outcome: 'reconcile-unresolved',
+			detail: 'ledger marker future; run dbsp preflight --reinitialize',
+			refusal: { refusal: { code: 'ERR-03' } },
+		});
+	});
+
+	it('maps read-only and recovery issues to their existing documents', async () => {
+		fixture.reconcile
+			.mockResolvedValueOnce({
+				kind: 'database-read-only',
+				runId: 'run-1',
+				addresses: [address],
+				selectedIssue: {
+					kind: 'database-read-only',
+					reason: 'target is read-only',
+					affectedAddresses: [address],
+				},
+			})
+			.mockResolvedValueOnce({
+				kind: 'unresolved',
+				runId: 'run-1',
+				addresses: [address],
 				recovery: [
 					{
-						address: { name: 'interrupted_generator' },
-						outcome: 'indeterminate-appended',
-						reason: 'live state remains unknown',
+						address,
+						outcome: 'malformed-chain',
+						reason: 'chain invalid',
+						failureCause: 'malformed-journal',
 					},
 				],
+				selectedIssue: { kind: 'malformed-chain', address },
 			});
-			expect(result.outcome === 'reconcile-completed' ? 0 : 1).toBe(1);
-			expect(formatReconcileHuman(result)).toContain(
-				'interrupted_generator: indeterminate-appended: live state remains unknown',
-			);
-		},
-	);
+		await expect(
+			runReconcile('run-1', { db: 'postgres://fixture' }, {} as never),
+		).resolves.toMatchObject({ refusal: { refusal: { code: 'ERR-07' } } });
+		await expect(
+			runReconcile('run-1', { db: 'postgres://fixture' }, {} as never),
+		).resolves.toMatchObject({ refusal: { refusal: { code: 'ERR-08' } } });
+	});
 
-	it.each([
-		[
-			'foreign executionId',
-			() =>
-				fixture.reservations.mockImplementation(async (executionId: string) =>
-					executionId === 'dbsp.generator.execution.run:generator'
-						? [
-								{
-									address: {
-										scope: 'schema',
-										engine: 'postgresql',
-										database: 'app',
-										schema: 'tenant',
-										kind: 'table',
-										name: 'interrupted_generator',
-									},
-									claimKind: 'retire-intent',
-									executionId: 'foreign-execution',
-									rootClaimId: 'claim:generator',
-									homeLedger: { scope: 'schema', schema: 'tenant' },
-								},
-							]
-						: [],
-				),
-			'reservation disagreement',
-		],
-		[
-			'two open roots',
-			() => {
-				const row = {
-					address: {
-						scope: 'schema' as const,
-						engine: 'postgresql' as const,
-						database: 'app',
-						schema: 'tenant',
-						kind: 'table' as const,
-						name: 'interrupted_generator',
-					},
-					claimKind: 'retire-intent' as const,
-					executionId: 'dbsp.generator.execution.run:generator',
-					rootClaimId: 'claim:generator',
-					homeLedger: { scope: 'schema' as const, schema: 'tenant' },
-				};
-				fixture.reservations.mockImplementation(async (executionId: string) =>
-					executionId === 'dbsp.generator.execution.run:generator'
-						? [
-								row,
-								{ ...row, address: { ...row.address, name: 'second_root' } },
-							]
-						: [],
-				);
-				fixture.chain.mockResolvedValue({ terminalMember: {} } as never);
-			},
-			'has 2 open root members',
-		],
-		[
-			'stale ledger home',
-			() =>
-				fixture.currency.mockResolvedValue({
-					kind: 'not-current',
-					marker: { kind: 'future' },
-				} as never),
-			'ledger marker future',
-		],
-	] as const)(
-		'OBL-REC1: reconcile refuses a %s group before recovery append',
-		async (_name, arrange, detail) => {
-			resetFixture();
-			arrange();
-			await expect(
-				runReconcile(
-					'run:generator',
-					{ db: 'postgres://fixture' },
-					{} as never,
-				),
-			).resolves.toMatchObject({
-				outcome:
-					_name === 'stale ledger home'
-						? 'reconcile-unresolved'
-						: 'reconcile-claim-selection-unavailable',
-				detail: expect.stringContaining(detail),
-			});
-			expect(fixture.recovery).not.toHaveBeenCalled();
-		},
-	);
+	it('keeps indeterminate recovery unresolved in the rendered document', async () => {
+		fixture.reconcile.mockResolvedValue({
+			kind: 'unresolved',
+			runId: 'run-1',
+			addresses: [address],
+			recovery: [
+				{
+					address,
+					outcome: 'indeterminate-appended',
+					reason: 'live state remains unknown',
+				},
+			],
+		});
+		const result = await runReconcile(
+			'run-1',
+			{ db: 'postgres://fixture' },
+			{} as never,
+		);
+		expect(result.outcome).toBe('reconcile-unresolved');
+		expect(formatReconcileHuman(result)).toContain(
+			'accounts: indeterminate-appended: live state remains unknown',
+		);
+	});
+
+	it('maps an adapter-held lock to the existing unavailable result', async () => {
+		fixture.reconcile.mockResolvedValue({
+			kind: 'busy',
+			runId: 'run-1',
+			addresses: [],
+		});
+		await expect(
+			runReconcile('run-1', { db: 'postgres://fixture' }, {} as never),
+		).resolves.toEqual({
+			outcome: 'reconcile-run-unavailable',
+			runId: 'run-1',
+			addresses: [],
+		});
+	});
 
 	it('OBL-CLI10: recover returns the typed read-only refusal before marker selection', async () => {
-		resetFixture();
-		fixture.writability.mockRejectedValue(
-			new Error('database-read-only: target session is read-only'),
-		);
-		fixture.readOnly.mockReturnValue(true);
+		fixture.currency.mockClear();
+		fixture.recoveryAdmission.mockClear();
+		fixture.pack.mockClear();
+		fixture.writable.mockRejectedValueOnce(new Error('target is read-only'));
+		fixture.readOnly.mockReturnValueOnce(true);
 		const { runRecover } = await import('./recover.js');
 		await expect(
 			runRecover(
-				'run:generator',
+				'run-1',
 				{ db: 'postgres://fixture', planDigest: 'digest:generator' },
 				{} as never,
 			),
 		).resolves.toMatchObject({
 			outcome: 'database-read-only',
-			detail: 'database-read-only: target session is read-only',
+			detail: 'target is read-only',
 		});
 		expect(fixture.currency).not.toHaveBeenCalled();
-		expect(fixture.recovery).not.toHaveBeenCalled();
+		expect(fixture.recoveryAdmission).not.toHaveBeenCalled();
+		expect(fixture.pack).not.toHaveBeenCalled();
 	});
 });
