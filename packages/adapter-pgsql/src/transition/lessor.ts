@@ -512,7 +512,8 @@ function advisoryLockIds(key: bigint): {
 	};
 }
 
-function advisoryKey(runId: string): bigint {
+/** The shared PostgreSQL advisory-lock key for one durable transition run. */
+export function advisoryKey(runId: string): bigint {
 	const bytes = createHash('sha256')
 		.update('dbsp.transition.run.v1:\0')
 		.update(runId)

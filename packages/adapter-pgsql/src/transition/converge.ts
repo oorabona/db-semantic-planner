@@ -35,12 +35,15 @@ import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { executeGeneratorPlan } from './generator-execution.js';
+import { readTransitionRunIdsForExecutionIds } from './journal.js';
 import {
 	acquirePgLedgerSessionLock,
 	ensurePgLedgerStorageVersion,
 	PgLedgerStorageUnsupportedError,
+	readPgLedgerReservationsForHome,
 	releasePgLedgerSessionLock,
 } from './ledger.js';
+import { advisoryKey } from './lessor.js';
 import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
@@ -54,6 +57,7 @@ export type PgConvergeRefusal =
 	| 'incompatible-ledger'
 	| 'unsupported-server'
 	| 'busy'
+	| 'recovery-required'
 	| 'execution-refused';
 
 /**
@@ -69,10 +73,73 @@ export class PgConvergeRefusalError extends Error {
 			'kind' | 'table' | 'column' | 'details'
 		>[],
 		readonly detail?: string,
+		readonly runIds?: readonly string[],
+		readonly executionIds?: readonly string[],
 	) {
 		super(detail ?? `converge refuses ${refusal}`);
 		this.name = 'PgConvergeRefusalError';
 	}
+}
+
+async function refuseForLiveReservations(
+	client: PoolClient,
+	schema: string,
+	markSessionCompromised: () => void,
+): Promise<void> {
+	const reservations = await readPgLedgerReservationsForHome(
+		client,
+		schemaHome(schema),
+	);
+	if (reservations.length === 0) return;
+	const executionIds = [...new Set(reservations.map((row) => row.executionId))];
+	const mappings = await readTransitionRunIdsForExecutionIds(
+		client,
+		executionIds,
+	);
+	const runIds = [...new Set([...mappings.values()].flat())];
+	const unmappedExecutionIds = executionIds.filter(
+		(executionId) => !mappings.has(executionId),
+	);
+	for (const runId of runIds) {
+		const key = advisoryKey(runId);
+		const lock = await client
+			.query('SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked', [
+				key.toString(),
+			])
+			.catch((error: unknown) => {
+				markSessionCompromised();
+				throw error;
+			});
+		if (lock.rows[0]?.locked !== true)
+			throw new PgConvergeRefusalError(
+				'busy',
+				[],
+				`converge found a live ledger reservation of run ${runId}, which holds its run lock and is still executing; call convergePg again after it finishes`,
+				runIds,
+				unmappedExecutionIds,
+			);
+		const unlock = await client
+			.query('SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked', [
+				key.toString(),
+			])
+			.catch((error: unknown) => {
+				markSessionCompromised();
+				throw error;
+			});
+		if (unlock.rows[0]?.unlocked !== true) {
+			markSessionCompromised();
+			throw new Error(
+				'converge could not confirm predecessor run lock release',
+			);
+		}
+	}
+	throw new PgConvergeRefusalError(
+		'recovery-required',
+		[],
+		`converge found live ledger reservations; reconcile ${runIds.length > 0 ? runIds.map((runId) => `run ${runId}`).join(', ') : unmappedExecutionIds.map((executionId) => `execution ${executionId}`).join(', ')} with reconcilePgTransitionRun or dbsp reconcile <run-id>, then call convergePg again`,
+		runIds,
+		unmappedExecutionIds,
+	);
 }
 
 export type PgConvergeResult =
@@ -808,8 +875,10 @@ function describeFkAutoIndexSpecs(
  * entries are validated before the ledger lock or any query, and converge
  * never drops a matching live index. A name that collides with another
  * relation the model creates fails when that step runs.
- * Its run ids are ephemeral claim namespaces: no transition journal or durable
- * run relation is touched.
+ * Before comparison, converge refuses while its target ledger home has a live
+ * reservation: reconcile that run, then call converge again. Each converge step
+ * is transactional, so an interrupted converge leaves no open claim. Converge
+ * runs are not journaled.
  */
 export async function convergePg(
 	pool: Pool,
@@ -825,6 +894,7 @@ export async function convergePg(
 	let destroyReason:
 		| 'converge could not determine ledger lock acquisition'
 		| 'converge could not confirm ledger lock release'
+		| 'converge could not confirm predecessor run lock release'
 		| 'converge received a transport-ambiguous outcome'
 		| undefined;
 	let locked = false;
@@ -867,6 +937,9 @@ export async function convergePg(
 				[],
 				`converge requires a current schema ledger for ${schema}; ledger currency failed ${currency.reason}`,
 			);
+		await refuseForLiveReservations(client, schema, () => {
+			destroyReason = 'converge could not confirm predecessor run lock release';
+		});
 		const database = await databaseId(client);
 		const adapter = createPgsqlAdapter(client, {
 			borrowedClient: true,
@@ -1113,6 +1186,12 @@ export async function convergePg(
 			destroyReason = 'converge received a transport-ambiguous outcome';
 			return { kind: 'transport-ambiguous', detail: outcome.detail };
 		}
+		if (outcome.outcome === 'recovery-required')
+			throw refusal(
+				'recovery-required',
+				diff.changes,
+				`converge execution claim ${outcome.claimId} requires recovery: ${outcome.detail}`,
+			);
 		throw refusal('execution-refused', diff.changes, outcome.detail);
 	} finally {
 		lockedConvergeClients.delete(client);

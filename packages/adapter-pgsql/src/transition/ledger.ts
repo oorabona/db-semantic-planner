@@ -764,6 +764,49 @@ export type PgLedgerLockResult =
 
 export type PgLedgerTarget = LedgerHome;
 
+function reservationFromRow(
+	target: PgLedgerTarget,
+	row: Record<string, unknown>,
+): LedgerReservationRow {
+	const schema = String(row.address_schema ?? '');
+	const homeSchema = String(row.home_ledger_schema ?? '');
+	const parent = row.address_parent;
+	return {
+		address: {
+			scope: target.scope,
+			engine: String(row.address_engine),
+			database: String(row.address_database),
+			...(schema ? { schema } : {}),
+			...(parent == null
+				? {}
+				: {
+						parent: typeof parent === 'string' ? JSON.parse(parent) : parent,
+					}),
+			kind: String(row.address_kind),
+			name: String(row.address_name),
+		},
+		claimKind: String(row.claim_kind) as LedgerReservationRow['claimKind'],
+		executionId: String(row.execution_id),
+		...(row.pair_id == null ? {} : { pairId: String(row.pair_id) }),
+		rootClaimId: String(row.root_claim_id),
+		homeLedger:
+			row.home_ledger_scope === 'database'
+				? { scope: 'database' }
+				: { scope: 'schema', schema: homeSchema },
+	};
+}
+
+/** Read every live reservation from one already-verified ledger home. */
+export async function readPgLedgerReservationsForHome(
+	executor: TransitionJournalQueryable,
+	target: PgLedgerTarget,
+): Promise<readonly LedgerReservationRow[]> {
+	const result = await executor.query(
+		`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} ORDER BY root_claim_id, address_kind, address_name`,
+	);
+	return result.rows.map((row) => reservationFromRow(target, row));
+}
+
 /** Read only reservations explicitly linked to one durable execution/run. */
 export async function readPgLedgerReservationsForExecution(
 	executor: TransitionJournalQueryable,
@@ -774,34 +817,7 @@ export async function readPgLedgerReservationsForExecution(
 		`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} WHERE execution_id = $1 ORDER BY root_claim_id, address_kind, address_name`,
 		[executionId],
 	);
-	return result.rows.map((row) => {
-		const schema = String(row.address_schema ?? '');
-		const homeSchema = String(row.home_ledger_schema ?? '');
-		const parent = row.address_parent;
-		return {
-			address: {
-				scope: target.scope,
-				engine: String(row.address_engine),
-				database: String(row.address_database),
-				...(schema ? { schema } : {}),
-				...(parent == null
-					? {}
-					: {
-							parent: typeof parent === 'string' ? JSON.parse(parent) : parent,
-						}),
-				kind: String(row.address_kind),
-				name: String(row.address_name),
-			},
-			claimKind: String(row.claim_kind) as LedgerReservationRow['claimKind'],
-			executionId: String(row.execution_id),
-			...(row.pair_id == null ? {} : { pairId: String(row.pair_id) }),
-			rootClaimId: String(row.root_claim_id),
-			homeLedger:
-				row.home_ledger_scope === 'database'
-					? { scope: 'database' }
-					: { scope: 'schema', schema: homeSchema },
-		};
-	});
+	return result.rows.map((row) => reservationFromRow(target, row));
 }
 
 /**
@@ -1064,38 +1080,7 @@ export async function readPgLedgerReservationsForPairInHomes(
 				`SELECT address_engine, address_database, address_schema, address_parent, address_kind, address_name, claim_kind, execution_id, pair_id, root_claim_id, home_ledger_scope, home_ledger_schema FROM ${reservationTable(target)} WHERE pair_id = $1 ORDER BY root_claim_id, address_kind, address_name`,
 				[pairId],
 			);
-			return result.rows.map((value) => {
-				const schema = String(value.address_schema ?? '');
-				const homeSchema = String(value.home_ledger_schema ?? '');
-				return {
-					address: {
-						scope: target.scope,
-						engine: String(value.address_engine),
-						database: String(value.address_database),
-						...(schema ? { schema } : {}),
-						...(value.address_parent == null
-							? {}
-							: {
-									parent:
-										typeof value.address_parent === 'string'
-											? JSON.parse(value.address_parent)
-											: value.address_parent,
-								}),
-						kind: String(value.address_kind),
-						name: String(value.address_name),
-					},
-					claimKind: String(
-						value.claim_kind,
-					) as LedgerReservationRow['claimKind'],
-					executionId: String(value.execution_id),
-					...(value.pair_id == null ? {} : { pairId: String(value.pair_id) }),
-					rootClaimId: String(value.root_claim_id),
-					homeLedger:
-						value.home_ledger_scope === 'database'
-							? { scope: 'database' as const }
-							: { scope: 'schema' as const, schema: homeSchema },
-				};
-			});
+			return result.rows.map((value) => reservationFromRow(target, value));
 		}),
 	);
 	return rows.flat();

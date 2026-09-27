@@ -1029,3 +1029,43 @@ export async function readTransitionJournal(
 		}),
 	};
 }
+
+/**
+ * Maps execution ids from durable attempt records back to their runs without
+ * creating or validating journal storage. An absent journal is simply unable
+ * to attribute any execution id.
+ */
+export async function readTransitionRunIdsForExecutionIds(
+	executor: TransitionJournalQueryable,
+	executionIds: readonly string[],
+): Promise<ReadonlyMap<string, readonly string[]>> {
+	const requested = [...new Set(executionIds)];
+	if (requested.length === 0) return new Map();
+	const exists = await executor.query(
+		'SELECT to_regclass($1) AS journal, to_regclass($2) AS plan',
+		[
+			`${DBSP_META_SCHEMA}.${DBSP_TRANSITION_JOURNAL_TABLE}`,
+			`${DBSP_META_SCHEMA}.${DBSP_TRANSITION_RUN_PLAN_TABLE}`,
+		],
+	);
+	if (exists.rows[0]?.journal == null || exists.rows[0]?.plan == null)
+		return new Map();
+	const result = await executor.query(
+		`WITH attempt_runs AS (SELECT DISTINCT run_id FROM ${transitionJournalTable()} WHERE event IN ('intent', 'observed')), execution_attempts AS (` +
+			`SELECT record ->> 'executionId' AS execution_id, run_id FROM ${transitionJournalTable()} WHERE event = 'intent' ` +
+			`UNION ALL SELECT record #>> '{intent,executionId}' AS execution_id, run_id FROM ${transitionJournalTable()} WHERE event = 'observed' ` +
+			`UNION ALL SELECT run_id AS execution_id, run_id FROM attempt_runs ` +
+			`UNION ALL SELECT 'dbsp.generator.execution.' || attempt.run_id AS execution_id, attempt.run_id FROM attempt_runs attempt JOIN ${transitionRunPlanTable()} plan ON plan.run_id = attempt.run_id WHERE plan.plan ? 'generator'` +
+			`) SELECT DISTINCT execution_id, run_id FROM execution_attempts WHERE execution_id = ANY($1::text[]) ORDER BY execution_id, run_id`,
+		[requested],
+	);
+	const mapped = new Map<string, string[]>();
+	for (const row of result.rows) {
+		if (typeof row.execution_id !== 'string' || typeof row.run_id !== 'string')
+			continue;
+		const runs = mapped.get(row.execution_id) ?? [];
+		if (!runs.includes(row.run_id)) runs.push(row.run_id);
+		mapped.set(row.execution_id, runs);
+	}
+	return mapped;
+}
