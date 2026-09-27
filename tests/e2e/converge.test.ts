@@ -1,12 +1,31 @@
 /** Live proof for the non-persisted, additive startup convergence entry point. */
 import { randomUUID } from 'node:crypto';
-import { readPgLedgerAddressChain } from '@dbsp/adapter-pgsql';
 import {
+	appendIntentJournal,
+	createPgTransitionRunPersister,
+	readPgLedgerAddressChain,
+	reconcilePgTransitionRun,
+} from '@dbsp/adapter-pgsql';
+import {
+	appendPgLedgerClaim,
 	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
-import { projectLedgerChain } from '@dbsp/core';
-import type { LedgerAddress, ModelIR, SequenceIR, TableIR } from '@dbsp/types';
+import {
+	projectLedgerChain,
+	semanticArtifactId,
+	transitionPlanDigest,
+} from '@dbsp/core';
+import type {
+	LedgerAddress,
+	LedgerReservationRow,
+	ModelIR,
+	PhysicalOperation,
+	ProvenPlanShape,
+	SequenceIR,
+	TableIR,
+	TransitionRunMetadata,
+} from '@dbsp/types';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -147,6 +166,94 @@ describe('convergePg', () => {
 				`SELECT 1 FROM "${schema}".dbsp_ledger_event WHERE address_kind = 'column' AND address_parent @> jsonb_build_object('kind', 'table', 'name', 'first_fixture')`,
 			),
 		).resolves.toMatchObject({ rows: [] });
+	});
+
+	it('requires reconciliation of a seeded predecessor claim before convergence', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const runId = `converge-predecessor-${randomUUID()}`;
+		const claimId = `${runId}:claim`;
+		const plannedClaimKey = 'converge-predecessor:0';
+		const openAddress = address(
+			databaseId,
+			'table',
+			'predecessor_gate_fixture',
+		);
+		const plan = {
+			observations: [],
+			claims: [],
+			assumptions: [],
+			preconditions: [],
+			segments: [],
+			steps: [
+				{
+					address: openAddress,
+					plannedClaimKeys: [plannedClaimKey],
+				},
+			],
+			postconditions: [],
+		} as unknown as ProvenPlanShape;
+		const run: TransitionRunMetadata = {
+			runId,
+			planDigest: transitionPlanDigest(plan),
+			targetContextDigest: 'converge-predecessor-e2e',
+			databaseId,
+			coreVersion: 'converge-predecessor-e2e',
+			startedAt: new Date().toISOString(),
+			replayability: 'replayable',
+		};
+		const operation: PhysicalOperation = {
+			ref: 'postgresql:converge-predecessor-e2e',
+			operationKind: {
+				artifact: { id: semanticArtifactId('dbsp.e2e'), version: '1' },
+				name: 'ConvergePredecessorE2e',
+			},
+			payload: {},
+		};
+		const reservation: LedgerReservationRow = {
+			address: openAddress,
+			claimKind: 'intent',
+			executionId: runId,
+			rootClaimId: claimId,
+			homeLedger: { scope: 'schema', schema },
+		};
+
+		await createPgTransitionRunPersister(pool).persist(run, plan);
+		await appendIntentJournal(pool, {
+			runId,
+			run,
+			stepId: plannedClaimKey,
+			operation,
+			recordedAt: new Date().toISOString(),
+		});
+		await appendPgLedgerClaim(
+			pool,
+			{ scope: 'schema', schema },
+			{
+				eventId: claimId,
+				eventKind: 'intent',
+				address: openAddress,
+				executionId: runId,
+				rootClaimId: claimId,
+				plannedClaimKey,
+			},
+			[reservation],
+		);
+
+		await expect(convergePg(pool, model([]), { schema })).rejects.toMatchObject(
+			{
+				refusal: 'recovery-required',
+				runIds: [runId],
+			},
+		);
+		await expect(reconcilePgTransitionRun(pool, runId)).resolves.toMatchObject({
+			kind: 'completed',
+			runId,
+		});
+		await expect(convergePg(pool, model([]), { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
 	});
 
 	it('creates a domain column after validating the ledger on the step session', async () => {

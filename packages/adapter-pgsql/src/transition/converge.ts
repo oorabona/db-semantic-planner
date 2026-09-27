@@ -32,15 +32,19 @@ import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
+import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { executeGeneratorPlan } from './generator-execution.js';
+import { readTransitionRunIdsForExecutionIds } from './journal.js';
 import {
 	acquirePgLedgerSessionLock,
 	ensurePgLedgerStorageVersion,
 	PgLedgerStorageUnsupportedError,
+	readPgLedgerReservationsForHome,
 	releasePgLedgerSessionLock,
 } from './ledger.js';
+import { advisoryKey } from './lessor.js';
 import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
@@ -54,6 +58,7 @@ export type PgConvergeRefusal =
 	| 'incompatible-ledger'
 	| 'unsupported-server'
 	| 'busy'
+	| 'recovery-required'
 	| 'execution-refused';
 
 /**
@@ -69,10 +74,137 @@ export class PgConvergeRefusalError extends Error {
 			'kind' | 'table' | 'column' | 'details'
 		>[],
 		readonly detail?: string,
+		readonly runIds?: readonly string[],
+		readonly executionIds?: readonly string[],
+		readonly busyRunIds?: readonly string[],
 	) {
 		super(detail ?? `converge refuses ${refusal}`);
 		this.name = 'PgConvergeRefusalError';
 	}
+}
+
+function isPgJournalLookupUnavailable(error: unknown): boolean {
+	return (
+		error !== null &&
+		typeof error === 'object' &&
+		'code' in error &&
+		((error as { readonly code?: unknown }).code === '42501' ||
+			(error as { readonly code?: unknown }).code === '42P01')
+	);
+}
+
+function pgJournalLookupUnavailableCode(
+	error: unknown,
+): '42501' | '42P01' | undefined {
+	if (!isPgJournalLookupUnavailable(error)) return undefined;
+	return (error as { readonly code: '42501' | '42P01' }).code;
+}
+
+async function refuseForLiveReservations(
+	client: PoolClient,
+	schema: string,
+	markSessionCompromised: () => void,
+): Promise<void> {
+	const reservations = await readPgLedgerReservationsForHome(
+		client,
+		schemaHome(schema),
+	);
+	if (reservations.length === 0) return;
+	const executionIds = [...new Set(reservations.map((row) => row.executionId))];
+	let mappings: ReadonlyMap<string, readonly string[]>;
+	let unavailableJournalLookupCode: '42501' | '42P01' | undefined;
+	try {
+		mappings = await readTransitionRunIdsForExecutionIds(client, executionIds);
+	} catch (error) {
+		unavailableJournalLookupCode = pgJournalLookupUnavailableCode(error);
+		if (!unavailableJournalLookupCode) {
+			markSessionCompromised();
+			throw error;
+		}
+		mappings = new Map();
+	}
+	const runIds = [...new Set([...mappings.values()].flat())];
+	const unmappedExecutionIds = executionIds.filter(
+		(executionId) =>
+			unavailableJournalLookupCode !== '42501' && !mappings.has(executionId),
+	);
+	const unreadableJournalAttributionExecutionIds =
+		unavailableJournalLookupCode === '42501' ? executionIds : [];
+	const recoverableRunIds: string[] = [];
+	const busyRunIds: string[] = [];
+	for (const runId of runIds) {
+		const key = advisoryKey(runId);
+		const lock = await client
+			.query('SELECT pg_catalog.pg_try_advisory_lock($1::bigint) AS locked', [
+				key.toString(),
+			])
+			.catch((error: unknown) => {
+				markSessionCompromised();
+				throw error;
+			});
+		const acquired = lock.rows[0]?.locked;
+		if (acquired !== true && acquired !== false) {
+			markSessionCompromised();
+			throw new Error('converge predecessor lock acquisition is indeterminate');
+		}
+		if (acquired === false) {
+			busyRunIds.push(runId);
+			continue;
+		}
+		const unlock = await client
+			.query('SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked', [
+				key.toString(),
+			])
+			.catch((error: unknown) => {
+				markSessionCompromised();
+				throw error;
+			});
+		if (unlock.rows[0]?.unlocked !== true) {
+			markSessionCompromised();
+			throw new Error(
+				'converge could not confirm predecessor run lock release',
+			);
+		}
+		recoverableRunIds.push(runId);
+	}
+	const runList = (ids: readonly string[]) =>
+		ids.map((id) => `run ${escapeDiagnosticText(id)}`).join(', ');
+	const executionList = (ids: readonly string[]) =>
+		ids.map((id) => `execution ${escapeDiagnosticText(id)}`).join(', ');
+	const recoveryDetail = [
+		...(busyRunIds.length === 0
+			? []
+			: [
+					`${runList(busyRunIds)} ${busyRunIds.length === 1 ? 'is' : 'are'} still executing; call convergePg again after ${busyRunIds.length === 1 ? 'it finishes' : 'they finish'}`,
+				]),
+		...(recoverableRunIds.length === 0
+			? []
+			: [
+					`reconcile ${runList(recoverableRunIds)}: call reconcilePgTransitionRun(pool, runId) or run \`dbsp reconcile --db <database> <run-id>\` once per run`,
+				]),
+		...(unmappedExecutionIds.length === 0
+			? []
+			: [
+					`no journal run is recorded for ${executionList(unmappedExecutionIds)}; the ledger owner must resolve it`,
+				]),
+		...(unreadableJournalAttributionExecutionIds.length === 0
+			? []
+			: [
+					`journal attribution for ${executionList(unreadableJournalAttributionExecutionIds)} could not be read (SQLSTATE 42501); the journal owner must resolve it`,
+				]),
+	].join('; ');
+	throw new PgConvergeRefusalError(
+		recoverableRunIds.length === 0 &&
+			unmappedExecutionIds.length === 0 &&
+			unreadableJournalAttributionExecutionIds.length === 0
+			? 'busy'
+			: 'recovery-required',
+		[],
+		`converge found live ledger reservations; ${recoveryDetail}`,
+		recoverableRunIds,
+		[...unmappedExecutionIds, ...unreadableJournalAttributionExecutionIds],
+		busyRunIds,
+	);
 }
 
 export type PgConvergeResult =
@@ -808,8 +940,14 @@ function describeFkAutoIndexSpecs(
  * entries are validated before the ledger lock or any query, and converge
  * never drops a matching live index. A name that collides with another
  * relation the model creates fails when that step runs.
- * Its run ids are ephemeral claim namespaces: no transition journal or durable
- * run relation is touched.
+ * Before comparison, converge refuses while its target ledger home has a live
+ * reservation: wait for a run that is still executing, reconcile a run whose
+ * lock is free with reconcilePgTransitionRun or `dbsp reconcile --db
+ * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
+ * and the journal owner one whose journal attribution cannot be read, then call
+ * converge again.
+ * Each converge step is transactional, so an interrupted converge leaves no
+ * open claim. Converge runs are not journaled.
  */
 export async function convergePg(
 	pool: Pool,
@@ -825,6 +963,7 @@ export async function convergePg(
 	let destroyReason:
 		| 'converge could not determine ledger lock acquisition'
 		| 'converge could not confirm ledger lock release'
+		| 'converge could not confirm predecessor run lock release'
 		| 'converge received a transport-ambiguous outcome'
 		| undefined;
 	let locked = false;
@@ -867,6 +1006,9 @@ export async function convergePg(
 				[],
 				`converge requires a current schema ledger for ${schema}; ledger currency failed ${currency.reason}`,
 			);
+		await refuseForLiveReservations(client, schema, () => {
+			destroyReason = 'converge could not confirm predecessor run lock release';
+		});
 		const database = await databaseId(client);
 		const adapter = createPgsqlAdapter(client, {
 			borrowedClient: true,

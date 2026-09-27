@@ -16,6 +16,7 @@ import {
 	PG_LEDGER_MIN_SERVER_VERSION_NUM,
 	PgLedgerPhysicalShapeValidationError,
 	PgLedgerStorageUnsupportedError,
+	readPgLedgerReservationsForHome,
 	readPgLedgerReservationsForPair,
 	renderCreateLedgerEventTableSql,
 	validatePgLedgerPhysicalShape,
@@ -298,6 +299,48 @@ function createdLedgerDdlLiveProjection() {
 }
 
 describe('managed ledger storage', () => {
+	it('reads every live reservation from one ledger home with the execution decoder', async () => {
+		const query = vi.fn(async (_sql: string) => ({
+			rows: [
+				{
+					address_engine: 'postgresql',
+					address_database: 'app',
+					address_schema: 'tenant_a',
+					address_parent: null,
+					address_kind: 'table',
+					address_name: 'accounts',
+					claim_kind: 'intent',
+					execution_id: 'execution:open',
+					pair_id: null,
+					root_claim_id: 'claim:open',
+					home_ledger_scope: 'schema',
+					home_ledger_schema: 'tenant_a',
+				},
+			],
+		}));
+
+		await expect(
+			readPgLedgerReservationsForHome({ query }, target),
+		).resolves.toEqual([
+			{
+				address: {
+					scope: 'schema',
+					engine: 'postgresql',
+					database: 'app',
+					schema: 'tenant_a',
+					kind: 'table',
+					name: 'accounts',
+				},
+				claimKind: 'intent',
+				executionId: 'execution:open',
+				rootClaimId: 'claim:open',
+				homeLedger: target,
+			},
+		]);
+		expect(query.mock.calls[0]?.[0]).toContain(
+			'FROM "tenant_a"."dbsp_ledger_reservation" ORDER BY',
+		);
+	});
 	it('validates a live projection identical to the generated DDL product', async () => {
 		const live = createdLedgerDdlLiveProjection();
 		const query = vi.fn(async (sql: string) => {

@@ -9,7 +9,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { semanticArtifactId } from './ids.js';
 import {
 	appendCompletionJournal,
@@ -18,6 +18,7 @@ import {
 	appendTransitionAuthorization,
 	createPgTransitionRunPersister,
 	readTransitionJournal,
+	readTransitionRunIdsForExecutionIds,
 	reserveTransitionJournalRun,
 	type TransitionJournalQueryable,
 } from './journal.js';
@@ -336,6 +337,51 @@ async function persistRun(
 }
 
 describe('transition journal primitive', () => {
+	it('maps intent and observed execution ids without creating the journal', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('SELECT to_regclass'))
+				return {
+					rows: [
+						{
+							journal: 'dbsp_transition_journal',
+							plan: 'dbsp_transition_run_plan',
+						},
+					],
+				};
+			return {
+				rows: [
+					{ execution_id: 'execution:intent', run_id: 'run:intent' },
+					{ execution_id: 'execution:observed', run_id: 'run:observed' },
+				],
+			};
+		});
+
+		await expect(
+			readTransitionRunIdsForExecutionIds({ query }, [
+				'execution:intent',
+				'execution:observed',
+			]),
+		).resolves.toEqual(
+			new Map([
+				['execution:intent', ['run:intent']],
+				['execution:observed', ['run:observed']],
+			]),
+		);
+		expect(
+			query.mock.calls.some(([sql]) => String(sql).startsWith('CREATE')),
+		).toBe(false);
+	});
+
+	it('leaves every execution id unmapped when the journal table is absent', async () => {
+		const query = vi.fn(async () => ({
+			rows: [{ journal: null, plan: null }],
+		}));
+
+		await expect(
+			readTransitionRunIdsForExecutionIds({ query }, ['execution:unknown']),
+		).resolves.toEqual(new Map());
+		expect(query).toHaveBeenCalledOnce();
+	});
 	it.each([
 		[
 			'adoption',

@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => {
 		),
 		identity: vi.fn(),
 		chain: vi.fn(async () => ({ events: [] })),
+		reservations: vi.fn(async () => []),
+		runIds: vi.fn(async () => new Map()),
 		lock: vi.fn(async () => ({ kind: 'acquired' })),
 		unlock: vi.fn(async () => true),
 		currency: vi.fn(async () => ({ kind: 'current' })),
@@ -57,8 +59,15 @@ vi.mock('./chain-reader.js', () => ({
 vi.mock('./ledger.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./ledger.js')>()),
 	acquirePgLedgerSessionLock: (...args: unknown[]) => forward(mocks.lock, args),
+	readPgLedgerReservationsForHome: (...args: unknown[]) =>
+		forward(mocks.reservations, args),
 	releasePgLedgerSessionLock: (...args: unknown[]) =>
 		forward(mocks.unlock, args),
+}));
+vi.mock('./journal.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./journal.js')>()),
+	readTransitionRunIdsForExecutionIds: (...args: unknown[]) =>
+		forward(mocks.runIds, args),
 }));
 vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./reinitialize-preflight.js')>()),
@@ -402,10 +411,335 @@ afterEach(() => {
 	mocks.lock.mockResolvedValue({ kind: 'acquired' });
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
+	mocks.reservations.mockResolvedValue([]);
+	mocks.runIds.mockResolvedValue(new Map());
 	mocks.introspect.mockResolvedValue(emptyModel());
 });
 
 describe('convergePg refusal boundary', () => {
+	it('continues unchanged when its ledger home has no live reservation', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		expect(mocks.reservations).toHaveBeenCalledOnce();
+		expect(mocks.runIds).not.toHaveBeenCalled();
+	});
+
+	it('refuses busy before comparison when a mapped predecessor run lock is held', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: false }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(new Map([['execution:open', ['run:held']]]));
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'busy',
+			runIds: [],
+			executionIds: [],
+			busyRunIds: ['run:held'],
+			detail:
+				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes',
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.some(([sql]) =>
+				String(sql).includes('pg_advisory_unlock'),
+			),
+		).toBe(false);
+	});
+
+	it('releases a free predecessor run lock then requires recovery before comparison', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([['execution:open', ['run:recover']]]),
+		);
+
+		const refusal = convergePg(poolFor(testClient), emptyModel());
+		await expect(refusal).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: ['run:recover'],
+			executionIds: [],
+			busyRunIds: [],
+		});
+		const error = await refusal.catch((caught: unknown) => caught);
+		expect((error as PgConvergeRefusalError).detail).toContain(
+			'dbsp reconcile --db <database> <run-id>',
+		);
+		expect((error as PgConvergeRefusalError).detail).not.toContain(
+			'dbsp reconcile run:recover',
+		);
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.filter(
+				([sql]) => String(sql).includes('pg_advisory_unlock'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('classifies free, held, and unmapped predecessor reservations before refusing', async () => {
+		const testClient = client();
+		let probes = 0;
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock')) {
+					probes += 1;
+					return { rows: [{ locked: probes === 1 }] };
+				}
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:free' } as never,
+			{ executionId: 'execution:held' } as never,
+			{ executionId: 'execution:unmapped' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([
+				['execution:free', ['run:free']],
+				['execution:held', ['run:held']],
+			]),
+		);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: ['run:free'],
+			busyRunIds: ['run:held'],
+			executionIds: ['execution:unmapped'],
+			detail:
+				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes; reconcile run run:free: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <database> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
+		});
+		expect(probes).toBe(2);
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.filter(
+				([sql]) => String(sql).includes('pg_advisory_unlock'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('names mapped runs and unmapped executions separately for live reservations', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:mapped' } as never,
+			{ executionId: 'execution:unmapped' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([['execution:mapped', ['run:recover']]]),
+		);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: ['run:recover'],
+			executionIds: ['execution:unmapped'],
+			busyRunIds: [],
+			detail:
+				'converge found live ledger reservations; reconcile run run:recover: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <database> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
+		});
+	});
+
+	async function expectIndeterminatePredecessorProbe(
+		probeResult: unknown,
+	): Promise<void> {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock')) return probeResult;
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([['execution:open', ['run:indeterminate']]]),
+		);
+
+		await expect(convergePg(poolFor(testClient), emptyModel())).rejects.toThrow(
+			'predecessor lock acquisition is indeterminate',
+		);
+		expect(testClient.release).toHaveBeenCalledWith(expect.any(Error));
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.some(([sql]) =>
+				String(sql).includes('pg_advisory_unlock'),
+			),
+		).toBe(false);
+	}
+
+	it('destroys the client when predecessor lock acquisition returns no row', async () => {
+		await expectIndeterminatePredecessorProbe({ rows: [] });
+	});
+
+	it("destroys the client when predecessor lock acquisition returns a string 't'", async () => {
+		await expectIndeterminatePredecessorProbe({ rows: [{ locked: 't' }] });
+	});
+
+	it('requires recovery for an unmapped live reservation without trying a run lock', async () => {
+		const testClient = client();
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:unknown' } as never,
+		]);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: [],
+			executionIds: ['execution:unknown'],
+			busyRunIds: [],
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.some(([sql]) =>
+				String(sql).includes('pg_try_advisory_lock'),
+			),
+		).toBe(false);
+	});
+
+	it('requires recovery when journal attribution cannot be read', async () => {
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:one' } as never,
+			{ executionId: 'execution:two' } as never,
+		]);
+		mocks.runIds.mockRejectedValue(
+			Object.assign(new Error('lookup failed'), { code: '42501' }),
+		);
+
+		const refusal = convergePg(poolFor(), emptyModel());
+		await expect(refusal).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: [],
+			executionIds: ['execution:one', 'execution:two'],
+			busyRunIds: [],
+			detail:
+				'converge found live ledger reservations; journal attribution for execution execution:one, execution execution:two could not be read (SQLSTATE 42501); the journal owner must resolve it',
+		});
+		const error = await refusal.catch((caught: unknown) => caught);
+		expect((error as PgConvergeRefusalError).detail).not.toContain(
+			'no journal run is recorded',
+		);
+	});
+
+	it('treats an absent transition journal as unmapped live reservations', async () => {
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:one' } as never,
+		]);
+		mocks.runIds.mockRejectedValue(
+			Object.assign(new Error('lookup failed'), { code: '42P01' }),
+		);
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: [],
+			executionIds: ['execution:one'],
+			busyRunIds: [],
+			detail: expect.stringContaining('no journal run is recorded'),
+		});
+	});
+
+	it('escapes predecessor identifiers in refusal diagnostics only', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock'))
+					return { rows: [{ locked: true }] };
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		const runId = 'run:recover\ncontinued';
+		const executionId = 'execution:\u202eunmapped';
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:mapped' } as never,
+			{ executionId } as never,
+		]);
+		mocks.runIds.mockResolvedValue(new Map([['execution:mapped', [runId]]]));
+
+		const error = await convergePg(poolFor(testClient), emptyModel()).catch(
+			(caught: unknown) => caught,
+		);
+		expect(error).toBeInstanceOf(PgConvergeRefusalError);
+		const refusal = error as PgConvergeRefusalError;
+		expect(refusal).toMatchObject({
+			refusal: 'recovery-required',
+			runIds: [runId],
+			executionIds: [executionId],
+		});
+		expect(refusal.detail).not.toContain('\n');
+		expect(refusal.detail).not.toContain('\u202e');
+		expect(refusal.detail).toContain('run:recover\\ncontinued');
+		expect(refusal.detail).toContain('execution:\\u202eunmapped');
+	});
+
+	it('propagates a transport failure during journal lookup and destroys the client', async () => {
+		const testClient = client();
+		const failure = Object.assign(new Error('connection terminated'), {
+			code: '08006',
+		});
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockRejectedValue(failure);
+
+		await expect(convergePg(poolFor(testClient), emptyModel())).rejects.toBe(
+			failure,
+		);
+		expect(testClient.release).toHaveBeenCalledWith(expect.any(Error));
+	});
+
 	it('does not compare an undeclared live sequence when the model declares none', async () => {
 		mocks.introspect.mockResolvedValue(modelWithSequences(['live_sequence']));
 		compareIntrospectedSchema();
@@ -2099,7 +2433,7 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('refuses a recovery-required executor outcome with its detail unchanged', async () => {
+	it('refuses a recovery-required executor outcome as execution-refused', async () => {
 		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
 		mocks.createStep.mockImplementation(
 			({ change: input }: { change: Record<string, unknown> }) =>
