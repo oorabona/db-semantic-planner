@@ -75,6 +75,7 @@ export class PgConvergeRefusalError extends Error {
 		readonly detail?: string,
 		readonly runIds?: readonly string[],
 		readonly executionIds?: readonly string[],
+		readonly busyRunIds?: readonly string[],
 	) {
 		super(detail ?? `converge refuses ${refusal}`);
 		this.name = 'PgConvergeRefusalError';
@@ -116,6 +117,8 @@ async function refuseForLiveReservations(
 	const unmappedExecutionIds = executionIds.filter(
 		(executionId) => !mappings.has(executionId),
 	);
+	const recoverableRunIds: string[] = [];
+	const busyRunIds: string[] = [];
 	for (const runId of runIds) {
 		const key = advisoryKey(runId);
 		const lock = await client
@@ -126,14 +129,15 @@ async function refuseForLiveReservations(
 				markSessionCompromised();
 				throw error;
 			});
-		if (lock.rows[0]?.locked !== true)
-			throw new PgConvergeRefusalError(
-				'busy',
-				[],
-				`converge found a live ledger reservation of run ${runId}, which holds its run lock and is still executing; call convergePg again after it finishes`,
-				runIds,
-				unmappedExecutionIds,
-			);
+		const acquired = lock.rows[0]?.locked;
+		if (acquired !== true && acquired !== false) {
+			markSessionCompromised();
+			throw new Error('converge predecessor lock acquisition is indeterminate');
+		}
+		if (acquired === false) {
+			busyRunIds.push(runId);
+			continue;
+		}
 		const unlock = await client
 			.query('SELECT pg_catalog.pg_advisory_unlock($1::bigint) AS unlocked', [
 				key.toString(),
@@ -148,23 +152,36 @@ async function refuseForLiveReservations(
 				'converge could not confirm predecessor run lock release',
 			);
 		}
+		recoverableRunIds.push(runId);
 	}
+	const runList = (ids: readonly string[]) =>
+		ids.map((id) => `run ${id}`).join(', ');
 	const recoveryDetail = [
-		...runIds.map(
-			(runId) =>
-				`reconcile run ${runId} with reconcilePgTransitionRun or dbsp reconcile ${runId}`,
-		),
-		...unmappedExecutionIds.map(
-			(executionId) =>
-				`no journal run is recorded for execution ${executionId}; the ledger owner must resolve it before converge can run`,
-		),
+		...(busyRunIds.length === 0
+			? []
+			: [
+					`${runList(busyRunIds)} ${busyRunIds.length === 1 ? 'is' : 'are'} still executing; call convergePg again after ${busyRunIds.length === 1 ? 'it finishes' : 'they finish'}`,
+				]),
+		...(recoverableRunIds.length === 0
+			? []
+			: [
+					`reconcile ${runList(recoverableRunIds)} with reconcilePgTransitionRun or dbsp reconcile ${recoverableRunIds.join(', ')}`,
+				]),
+		...(unmappedExecutionIds.length === 0
+			? []
+			: [
+					`no journal run is recorded for ${unmappedExecutionIds.map((executionId) => `execution ${executionId}`).join(', ')}; the ledger owner must resolve it`,
+				]),
 	].join('; ');
 	throw new PgConvergeRefusalError(
-		'recovery-required',
+		recoverableRunIds.length === 0 && unmappedExecutionIds.length === 0
+			? 'busy'
+			: 'recovery-required',
 		[],
 		`converge found live ledger reservations; ${recoveryDetail}`,
-		runIds,
+		recoverableRunIds,
 		unmappedExecutionIds,
+		busyRunIds,
 	);
 }
 
@@ -902,9 +919,11 @@ function describeFkAutoIndexSpecs(
  * never drops a matching live index. A name that collides with another
  * relation the model creates fails when that step runs.
  * Before comparison, converge refuses while its target ledger home has a live
- * reservation: reconcile that run, then call converge again. Each converge step
- * is transactional, so an interrupted converge leaves no open claim. Converge
- * runs are not journaled.
+ * reservation: wait for a run that is still executing, reconcile a run whose
+ * lock is free with reconcilePgTransitionRun or dbsp reconcile, and have the
+ * ledger owner resolve an unmapped reservation, then call converge again. Each
+ * converge step is transactional, so an interrupted converge leaves no open
+ * claim. Converge runs are not journaled.
  */
 export async function convergePg(
 	pool: Pool,

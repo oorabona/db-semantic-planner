@@ -448,8 +448,11 @@ describe('convergePg refusal boundary', () => {
 			convergePg(poolFor(testClient), emptyModel()),
 		).rejects.toMatchObject({
 			refusal: 'busy',
-			runIds: ['run:held'],
+			runIds: [],
 			executionIds: [],
+			busyRunIds: ['run:held'],
+			detail:
+				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes',
 		});
 		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
@@ -486,9 +489,56 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'recovery-required',
 			runIds: ['run:recover'],
 			executionIds: [],
+			busyRunIds: [],
 		});
 		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.filter(
+				([sql]) => String(sql).includes('pg_advisory_unlock'),
+			),
+		).toHaveLength(1);
+	});
+
+	it('classifies free, held, and unmapped predecessor reservations before refusing', async () => {
+		const testClient = client();
+		let probes = 0;
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock')) {
+					probes += 1;
+					return { rows: [{ locked: probes === 1 }] };
+				}
+				if (sql.includes('pg_advisory_unlock'))
+					return { rows: [{ unlocked: true }] };
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:free' } as never,
+			{ executionId: 'execution:held' } as never,
+			{ executionId: 'execution:unmapped' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([
+				['execution:free', ['run:free']],
+				['execution:held', ['run:held']],
+			]),
+		);
+
+		await expect(
+			convergePg(poolFor(testClient), emptyModel()),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			runIds: ['run:free'],
+			busyRunIds: ['run:held'],
+			executionIds: ['execution:unmapped'],
+			detail:
+				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes; reconcile run run:free with reconcilePgTransitionRun or dbsp reconcile run:free; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
+		});
+		expect(probes).toBe(2);
 		expect(
 			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.filter(
 				([sql]) => String(sql).includes('pg_advisory_unlock'),
@@ -523,9 +573,48 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'recovery-required',
 			runIds: ['run:recover'],
 			executionIds: ['execution:unmapped'],
+			busyRunIds: [],
 			detail:
-				'converge found live ledger reservations; reconcile run run:recover with reconcilePgTransitionRun or dbsp reconcile run:recover; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it before converge can run',
+				'converge found live ledger reservations; reconcile run run:recover with reconcilePgTransitionRun or dbsp reconcile run:recover; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
 		});
+	});
+
+	async function expectIndeterminatePredecessorProbe(
+		probeResult: unknown,
+	): Promise<void> {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql.includes('pg_try_advisory_lock')) return probeResult;
+				return { rows: [] };
+			},
+		);
+		mocks.reservations.mockResolvedValue([
+			{ executionId: 'execution:open' } as never,
+		]);
+		mocks.runIds.mockResolvedValue(
+			new Map([['execution:open', ['run:indeterminate']]]),
+		);
+
+		await expect(convergePg(poolFor(testClient), emptyModel())).rejects.toThrow(
+			'predecessor lock acquisition is indeterminate',
+		);
+		expect(testClient.release).toHaveBeenCalledWith(expect.any(Error));
+		expect(
+			(testClient.query as ReturnType<typeof vi.fn>).mock.calls.some(([sql]) =>
+				String(sql).includes('pg_advisory_unlock'),
+			),
+		).toBe(false);
+	}
+
+	it('destroys the client when predecessor lock acquisition returns no row', async () => {
+		await expectIndeterminatePredecessorProbe({ rows: [] });
+	});
+
+	it("destroys the client when predecessor lock acquisition returns a string 't'", async () => {
+		await expectIndeterminatePredecessorProbe({ rows: [{ locked: 't' }] });
 	});
 
 	it('requires recovery for an unmapped live reservation without trying a run lock', async () => {
@@ -540,6 +629,7 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'recovery-required',
 			runIds: [],
 			executionIds: ['execution:unknown'],
+			busyRunIds: [],
 		});
 		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
@@ -565,6 +655,7 @@ describe('convergePg refusal boundary', () => {
 				refusal: 'recovery-required',
 				runIds: [],
 				executionIds: ['execution:one', 'execution:two'],
+				busyRunIds: [],
 			});
 		},
 	);
