@@ -1,19 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const fixture = vi.hoisted(() => ({
-	reconcile: vi.fn(),
-	writable: vi.fn(),
-	readOnly: vi.fn(() => false),
-	lockSession: { query: vi.fn() },
-}));
+const fixture = vi.hoisted(() => {
+	const currency = vi.fn(async () => ({ kind: 'current' }));
+	const recoveryAdmission = vi.fn();
+	const pack = vi.fn();
+	return {
+		reconcile: vi.fn(),
+		writable: vi.fn(),
+		readOnly: vi.fn(() => false),
+		currency,
+		recoveryAdmission,
+		pack,
+		lockSession: { query: vi.fn() },
+	};
+});
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
 	escapeDiagnosticText: (value: string) => value,
 	assertPgDatabaseWritable: fixture.writable,
-	createPgTransitionPack: vi.fn(),
+	createPgTransitionPack: fixture.pack,
 	isPgDatabaseReadOnlyError: fixture.readOnly,
-	preparePgRecoveryAdmission: vi.fn(),
-	readPgLedgerScopeCurrency: vi.fn(),
+	preparePgRecoveryAdmission: fixture.recoveryAdmission,
+	readPgLedgerScopeCurrency: fixture.currency,
 	readPgObservationContextFromLessor: vi.fn(),
 	readTransitionJournal: vi.fn(),
 	withPgTransitionRunLock: vi.fn(async (_pool, _runId, callback) => ({
@@ -42,7 +50,23 @@ vi.mock('@dbsp/core', async (importOriginal) => ({
 		ok: true,
 		journal: {
 			run: { runId: 'run-1', planDigest: 'digest:generator' },
-			plan: { assumptions: [], steps: [] },
+			plan: {
+				assumptions: [],
+				steps: [
+					{
+						managedClaim: {
+							address: {
+								scope: 'schema',
+								engine: 'postgresql',
+								database: 'app',
+								schema: 'tenant',
+								kind: 'table',
+								name: 'accounts',
+							},
+						},
+					},
+				],
+			},
 			events: [],
 		},
 	})),
@@ -184,7 +208,10 @@ describe('reconcile CLI mapping', () => {
 		});
 	});
 
-	it('keeps recover read-only handling before marker selection', async () => {
+	it('OBL-CLI10: recover returns the typed read-only refusal before marker selection', async () => {
+		fixture.currency.mockClear();
+		fixture.recoveryAdmission.mockClear();
+		fixture.pack.mockClear();
 		fixture.writable.mockRejectedValueOnce(new Error('target is read-only'));
 		fixture.readOnly.mockReturnValueOnce(true);
 		const { runRecover } = await import('./recover.js');
@@ -198,5 +225,8 @@ describe('reconcile CLI mapping', () => {
 			outcome: 'database-read-only',
 			detail: 'target is read-only',
 		});
+		expect(fixture.currency).not.toHaveBeenCalled();
+		expect(fixture.recoveryAdmission).not.toHaveBeenCalled();
+		expect(fixture.pack).not.toHaveBeenCalled();
 	});
 });
