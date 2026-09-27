@@ -593,6 +593,65 @@ describeWithE2eCapabilities(
 			);
 			expect(failed?.reason?.message).toContain('widened grants on a column');
 		});
+
+		it('attributes a fresh journal named default grant refusal to ownership-grants', async () => {
+			const deployment = uniqueName('dbsp_journal_deployment');
+			const grantee = uniqueName('dbsp_journal_default_grantee');
+			const password = uniqueName('password');
+			roles.push(deployment, grantee);
+			const pool = await getTestPool();
+			for (const role of [deployment, grantee]) {
+				await pool.query(
+					`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
+				);
+			}
+			await runPreflight([]);
+			await pool.query(
+				`ALTER SCHEMA ${quoteIdent(DBSP_META_SCHEMA)} OWNER TO ${quoteIdent(deployment)}`,
+			);
+			for (const table of [
+				DBSP_LEDGER_EVENT_TABLE,
+				DBSP_LEDGER_RESERVATION_TABLE,
+				DBSP_LEDGER_IDENTITY_TABLE,
+				DBSP_LEDGER_MARKER_TABLE,
+				...transitionJournalTables,
+			]) {
+				await pool.query(
+					`ALTER TABLE ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)} OWNER TO ${quoteIdent(deployment)}`,
+				);
+			}
+			const deployed = await rolePool(deployment, password);
+			try {
+				await deployed.query(
+					`ALTER DEFAULT PRIVILEGES IN SCHEMA ${quoteIdent(DBSP_META_SCHEMA)} GRANT SELECT ON TABLES TO ${quoteIdent(grantee)}`,
+				);
+				await deployed.query(
+					`DROP TABLE ${transitionJournalTables
+						.map(
+							(table) => `${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(table)}`,
+						)
+						.join(', ')} CASCADE`,
+				);
+				const report = await runPreflight([], {
+					pool: deployed,
+					writeAdoptionFile: async () => {},
+				});
+				expect(report.scopes).toContainEqual(
+					expect.objectContaining({
+						ledger: { scope: 'database' },
+						outcome: 'failed',
+						refusal: expect.objectContaining({
+							code: 'reinitialize-preflight-grants',
+						}),
+						reason: expect.objectContaining({
+							step: 'ownership-grants',
+						}),
+					}),
+				);
+			} finally {
+				await deployed.end();
+			}
+		});
 	},
 );
 

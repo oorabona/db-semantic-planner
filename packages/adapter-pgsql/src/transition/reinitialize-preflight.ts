@@ -575,7 +575,9 @@ async function createAndValidateTransitionJournal(
 	executor: TransitionJournalQueryable,
 	observer: ReinitializePreflightObserver | undefined,
 	home: LedgerHome,
+	setFailureStep: (step: ReinitializePreflightFailureStep) => void,
 ): Promise<void> {
+	setFailureStep('create');
 	await checkpoint(observer, 'journal-create', home);
 	await executor.query(renderCreateTransitionRunTableSql(true));
 	await executor.query(renderCreateTransitionRunPlanTableSql(true));
@@ -589,8 +591,10 @@ async function createAndValidateTransitionJournal(
 			'transition journal creation did not create its table family',
 		);
 	await validateTransitionJournalOwnershipAndGrants(executor, false);
+	setFailureStep('creation-grants');
 	for (const sql of renderTransitionJournalCreationGrantSql())
 		await executor.query(sql);
+	setFailureStep('ownership-grants');
 	if (!(await validatePreexistingTransitionJournal(executor)))
 		throw new Error(
 			'transition journal creation did not create its table family',
@@ -814,6 +818,9 @@ async function processScope(
 						client,
 						observer,
 						current.home,
+						(step) => {
+							failureStep = step;
+						},
 					);
 					initializedTransitionJournal = true;
 				}
@@ -857,7 +864,14 @@ async function processScope(
 		else if (!initializedDatabaseLedger)
 			await ensurePgLedger(client, current.home, { writeMarker: false });
 		if (current.home.scope === 'database' && !preexistingTransitionJournal) {
-			await createAndValidateTransitionJournal(client, observer, current.home);
+			await createAndValidateTransitionJournal(
+				client,
+				observer,
+				current.home,
+				(step) => {
+					failureStep = step;
+				},
+			);
 		}
 		failureStep = 'record-identity';
 		await recordPgLedgerIdentity(client, current.home, live);
