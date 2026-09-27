@@ -492,7 +492,7 @@ describe('convergePg refusal boundary', () => {
 		});
 		const error = await refusal.catch((caught: unknown) => caught);
 		expect((error as PgConvergeRefusalError).detail).toContain(
-			'dbsp reconcile --db <url> <run-id>',
+			'dbsp reconcile --db <database> <run-id>',
 		);
 		expect((error as PgConvergeRefusalError).detail).not.toContain(
 			'dbsp reconcile run:recover',
@@ -542,7 +542,7 @@ describe('convergePg refusal boundary', () => {
 			busyRunIds: ['run:held'],
 			executionIds: ['execution:unmapped'],
 			detail:
-				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes; reconcile run run:free: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <url> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
+				'converge found live ledger reservations; run run:held is still executing; call convergePg again after it finishes; reconcile run run:free: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <database> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
 		});
 		expect(probes).toBe(2);
 		expect(
@@ -581,7 +581,7 @@ describe('convergePg refusal boundary', () => {
 			executionIds: ['execution:unmapped'],
 			busyRunIds: [],
 			detail:
-				'converge found live ledger reservations; reconcile run run:recover: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <url> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
+				'converge found live ledger reservations; reconcile run run:recover: call reconcilePgTransitionRun(pool, runId) or run `dbsp reconcile --db <database> <run-id>` once per run; no journal run is recorded for execution execution:unmapped; the ledger owner must resolve it',
 		});
 	});
 
@@ -661,7 +661,8 @@ describe('convergePg refusal boundary', () => {
 			runIds: [],
 			executionIds: ['execution:one', 'execution:two'],
 			busyRunIds: [],
-			detail: expect.stringContaining('could not be read (SQLSTATE 42501)'),
+			detail:
+				'converge found live ledger reservations; journal attribution for execution execution:one, execution execution:two could not be read (SQLSTATE 42501); the journal owner must resolve it',
 		});
 		const error = await refusal.catch((caught: unknown) => caught);
 		expect((error as PgConvergeRefusalError).detail).not.toContain(

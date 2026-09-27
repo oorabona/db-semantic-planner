@@ -180,7 +180,7 @@ async function refuseForLiveReservations(
 		...(recoverableRunIds.length === 0
 			? []
 			: [
-					`reconcile ${runList(recoverableRunIds)}: call reconcilePgTransitionRun(pool, runId) or run \`dbsp reconcile --db <url> <run-id>\` once per run`,
+					`reconcile ${runList(recoverableRunIds)}: call reconcilePgTransitionRun(pool, runId) or run \`dbsp reconcile --db <database> <run-id>\` once per run`,
 				]),
 		...(unmappedExecutionIds.length === 0
 			? []
@@ -190,7 +190,7 @@ async function refuseForLiveReservations(
 		...(unreadableJournalAttributionExecutionIds.length === 0
 			? []
 			: [
-					`journal attribution for ${executionList(unreadableJournalAttributionExecutionIds)} could not be read (SQLSTATE 42501); grant this role read access to the transition journal or have its owner reconcile the ${unreadableJournalAttributionExecutionIds.length === 1 ? 'run' : 'runs'}`,
+					`journal attribution for ${executionList(unreadableJournalAttributionExecutionIds)} could not be read (SQLSTATE 42501); the journal owner must resolve it`,
 				]),
 	].join('; ');
 	throw new PgConvergeRefusalError(
@@ -942,10 +942,10 @@ function describeFkAutoIndexSpecs(
  * relation the model creates fails when that step runs.
  * Before comparison, converge refuses while its target ledger home has a live
  * reservation: wait for a run that is still executing, reconcile a run whose
- * lock is free with reconcilePgTransitionRun or `dbsp reconcile --db <url>
- * <run-id>`, and have the ledger owner resolve an unmapped reservation. A
- * reservation whose journal attribution cannot be read needs transition-journal
- * read access or reconciliation by the journal owner, then call converge again.
+ * lock is free with reconcilePgTransitionRun or `dbsp reconcile --db
+ * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
+ * and the journal owner one whose journal attribution cannot be read, then call
+ * converge again.
  * Each converge step is transactional, so an interrupted converge leaves no
  * open claim. Converge runs are not journaled.
  */
