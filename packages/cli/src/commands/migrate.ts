@@ -42,7 +42,11 @@ export const MIGRATE_OUTCOME_CONTRACT = [
 		65,
 		'admitted operation has ambiguous transport outcome',
 	],
-	['invalid-options', 70, 'options are malformed or cannot be admitted'],
+	[
+		'invalid-options',
+		70,
+		'an --external-index or --format value is malformed, or convergePg refused its options',
+	],
 	['ledger-absent', 71, 'convergence ledger is not initialized'],
 	['incompatible-ledger', 72, 'ledger version is unsupported'],
 	['unsupported-server', 73, 'PostgreSQL server is unsupported'],
@@ -373,9 +377,8 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 		);
 	if (safe.outcome === 'recovery-required')
 		lines.push(
-			...(safe.runIds ?? []).map(
-				(runId) => `dbsp reconcile --db <database> ${diagnostic(runId)}`,
-			),
+			'dbsp reconcile --db <database> <run-id>',
+			...(safe.runIds ?? []).map((runId) => `run id: ${diagnostic(runId)}`),
 		);
 	if (safe.outcome === 'ledger-absent')
 		lines.push(
@@ -402,14 +405,17 @@ export const migrateCommand = new Command('migrate')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--schema <name>', 'Database schema name', 'public')
 	.option(
-		'--external-index <table:index>',
-		'Physical index to leave alone; repeatable. The table part cannot contain : (the index part can).',
-		(value: string, previous: readonly string[] = []) => [...previous, value],
+		'--external-index <model-table:index>',
+		'Physical index to leave alone; the table is the model name (before dbCasing maps it), then the index by its exact PostgreSQL name; the table part cannot contain :; repeatable.',
+		(value: string, previous: string[] = []) => {
+			previous.push(value);
+			return previous;
+		},
 	)
 	.option('--format <format>', 'Output format: text or json', 'text')
 	.addHelpText(
 		'after',
-		`\nOutcome contract:\n${MIGRATE_OUTCOME_CONTRACT.map(([outcome, exitCode, description]) => `  ${outcome} (${exitCode}): ${description}`).join('\n')}`,
+		`\nOutcome contract:\n${MIGRATE_OUTCOME_CONTRACT.map(([outcome, exitCode, description]) => `  ${outcome} (${exitCode}): ${description}`).join('\n')}\nCommand-line syntax errors (an unknown option, a missing --db or schema file) exit 1 with { status, error } under --format json, as for every dbsp command.`,
 	)
 	.exitOverride()
 	.configureOutput({ writeErr: () => {} })

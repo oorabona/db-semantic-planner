@@ -1,4 +1,5 @@
 import {
+	escapeDiagnosticText,
 	type PgConvergeRefusal,
 	PgConvergeRefusalError,
 	type PgConvergeResult,
@@ -12,6 +13,7 @@ import {
 	formatMigrateJson,
 	MIGRATE_OUTCOME_CONTRACT,
 	type MigrateDeps,
+	migrateCommand,
 	runMigrate,
 } from './migrate.js';
 
@@ -272,7 +274,8 @@ describe('dbsp migrate outcomes', () => {
 		);
 	});
 
-	it('prints reconcile instructions per recovery run and escapes terminal controls', async () => {
+	it('prints a reconcile placeholder and labeled escaped recovery run ids', async () => {
+		const runIds = ['run-1', 'run;$(x) y', 'run\nid'];
 		const { value } = await migrate(
 			{ kind: 'no-drift', applied: [] },
 			{
@@ -283,15 +286,55 @@ describe('dbsp migrate outcomes', () => {
 							'recovery-required',
 							[],
 							'detail\nnext',
-							['run:one\ntwo', 'run:three'],
+							runIds,
 						),
 					),
 			},
 		);
 		const text = formatMigrateHuman(value, db);
-		expect(text).toContain('dbsp reconcile --db <database> run:one\\ntwo');
-		expect(text).toContain('dbsp reconcile --db <database> run:three');
+		const reconcileLines = text
+			.split('\n')
+			.filter((line) => line.startsWith('dbsp reconcile'));
+		expect(reconcileLines).toEqual(['dbsp reconcile --db <database> <run-id>']);
+		for (const runId of runIds) {
+			expect(reconcileLines[0]).not.toContain(runId);
+			expect(text.split('\n')).toContain(
+				`run id: ${escapeDiagnosticText(runId)}`,
+			);
+		}
 		expect(text).toContain('detail\\nnext');
+	});
+
+	it('documents external index operands and syntax errors in help', () => {
+		const write = vi
+			.spyOn(process.stdout, 'write')
+			.mockImplementation(() => true);
+		migrateCommand.outputHelp();
+		const help = write.mock.calls.map(([text]) => String(text)).join('');
+		expect(help).toContain('--external-index <model-table:index>');
+		expect(help).toMatch(/the table\s+is the model name/);
+		expect(help).toContain(
+			'Command-line syntax errors (an unknown option, a missing --db or schema file) exit 1 with { status, error } under --format json, as for every dbsp command.',
+		);
+		expect(help).toContain(
+			'invalid-options (70): an --external-index or --format value is malformed, or convergePg refused its options',
+		);
+	});
+
+	it('collects external index operands in order', () => {
+		migrateCommand.parseOptions([
+			'--external-index',
+			'users:users_email_idx',
+			'--external-index',
+			'orders:orders_number_idx',
+			'--external-index',
+			'audit:audit_event_idx',
+		]);
+		expect(migrateCommand.opts().externalIndex).toEqual([
+			'users:users_email_idx',
+			'orders:orders_number_idx',
+			'audit:audit_event_idx',
+		]);
 	});
 
 	it('redacts both URL and authority password from all renderer diagnostic fields', async () => {
