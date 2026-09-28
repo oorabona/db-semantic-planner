@@ -31,6 +31,7 @@ import {
 	PgCommitAcknowledgementAmbiguousError,
 	PgCommitDeterministicFailureError,
 	readPgOutcomeRecoveryReadBack,
+	readPgOutcomeSessionCompromise,
 	readPgPairedReaddressObserved,
 	recoverPgOutcomeClaim,
 	withPgOutcomeSession,
@@ -1223,6 +1224,79 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			),
 		).rejects.toBe(error);
 		expect(release).toHaveBeenCalledWith(error);
+	});
+
+	it('marks an unacknowledged BEGIN as compromised before its caller returns', async () => {
+		const error = new Error('BEGIN acknowledgement lost');
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-acknowledgement-lost'),
+				resolution: {
+					eventId: 'begin-acknowledgement-lost-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'BEGIN acknowledgement lost',
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('keeps a SQLSTATE-confirmed BEGIN refusal usable', async () => {
+		const error = Object.assign(new Error('BEGIN rejected'), { code: '25001' });
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await runAdmitted(executor as never, {
+			...request('begin-server-rejected'),
+			resolution: {
+				eventId: 'begin-server-rejected-observed',
+				eventKind: 'observed',
+			},
+			vacancy: async () => ({ kind: 'vacant' as const }),
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBeUndefined();
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('rolls back when SET LOCAL fails after BEGIN', async () => {
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement.startsWith('SET LOCAL'))
+					throw new Error('lock timeout failed');
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-lock-timeout-failed'),
+				resolution: {
+					eventId: 'begin-lock-timeout-failed-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'lock timeout failed',
+		});
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
 	});
 
 	/* Direct-runner cases are re-pointed to persisted real-PG coverage. */

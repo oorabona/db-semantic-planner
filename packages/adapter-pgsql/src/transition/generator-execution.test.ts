@@ -1630,7 +1630,32 @@ describe('generator execution fixture shim', () => {
 		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
 			expect.objectContaining({ outcome: 'execution-failed' }),
 		);
-		expect(executor.query.mock.calls.map(([sql]) => sql)).toContain('ROLLBACK');
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
+	});
+
+	it('marks an unacknowledged atomic group BEGIN without rolling back', async () => {
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql === 'BEGIN') throw new Error('BEGIN acknowledgement lost');
+			return { rows: [] };
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({
+				outcome: 'execution-failed',
+				detail: 'BEGIN acknowledgement lost',
+			}),
+		);
+		expect(readPgOutcomeSessionCompromise(executor)).toBeInstanceOf(Error);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+		]);
 	});
 
 	it('marks an atomic session compromised when rollback is server-rejected', async () => {

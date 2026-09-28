@@ -44,14 +44,13 @@ import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
+	beginPgOutcome,
 	commitPgOutcome,
 	executePgAdmittedOperation,
-	openPgOutcomeGroup,
 	PgCommitAcknowledgementAmbiguousError,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
 	rollbackPgOutcomeGroup,
-	setPgTransitionLockTimeout,
 	withPgOutcomeSession,
 } from './outcome-protocol.js';
 import { executePgPersistedTableReaddress } from './readdress.js';
@@ -112,13 +111,17 @@ function validateAtomicCreationGroup(
 ): string | undefined {
 	if (!keys || keys.length === 0) return undefined;
 	const steps = managedSteps(manifest);
-	const stepByKey = new Map(steps.map((step) => [step.stepKey, step]));
+	const stepByKey = new Map(
+		steps.map((step, manifestIndex) => [step.stepKey, { step, manifestIndex }]),
+	);
 	const seen = new Set<string>();
+	const positions: number[] = [];
 	for (const key of keys) {
 		if (seen.has(key)) return `atomic creation group repeats step ${key}`;
 		seen.add(key);
-		const step = stepByKey.get(key);
-		if (!step) return `atomic creation group names unknown step ${key}`;
+		const entry = stepByKey.get(key);
+		if (!entry) return `atomic creation group names unknown step ${key}`;
+		const { step, manifestIndex } = entry;
 		if (step.classification !== 'non-destructive')
 			return `atomic creation group step ${key} is not non-destructive`;
 		if (
@@ -126,10 +129,8 @@ function validateAtomicCreationGroup(
 			step.lifecycle?.kind === 'readdress'
 		)
 			return `atomic creation group step ${key} has unsupported lifecycle ${step.lifecycle.kind}`;
+		positions.push(manifestIndex);
 	}
-	const positions = keys.map((key) =>
-		steps.findIndex((step) => step.stepKey === key),
-	);
 	const first = positions[0];
 	if (
 		first === undefined ||
@@ -580,9 +581,8 @@ export async function executeGeneratorPlan(input: {
 				return { kind: 'failed' as const, detail };
 			};
 			try {
-				await openPgOutcomeGroup(session);
+				await beginPgOutcome(session, undefined);
 				transactionOpen = true;
-				await setPgTransitionLockTimeout(session);
 				for (const step of steps) {
 					if (step.statementBundle.statements.length === 0) continue;
 					const address = step.address ?? step.closure?.root;

@@ -225,13 +225,6 @@ export function readPgOutcomeSessionCompromise(
 	return compromisedPgOutcomeSessions.get(session as object);
 }
 
-/** Opens a caller-owned group transaction; the caller supplies its lock bound. */
-export async function openPgOutcomeGroup(
-	executor: TransitionJournalQueryable,
-): Promise<void> {
-	await executor.query('BEGIN');
-}
-
 /**
  * Rolls back a caller-owned group transaction. Any rollback failure makes the
  * session unsafe to return to the pool, including a server-confirmed failure.
@@ -1515,10 +1508,23 @@ async function admitPgOutcomeClaim(
 async function begin(
 	executor: TransitionJournalQueryable,
 	timeout: number | undefined,
-) {
-	await executor.query('BEGIN');
-	await setPgTransitionLockTimeout(executor, timeout);
+): Promise<void> {
+	try {
+		await executor.query('BEGIN');
+	} catch (error) {
+		markPgOutcomeSessionCompromised(executor, error);
+		throw error;
+	}
+	try {
+		await setPgTransitionLockTimeout(executor, timeout);
+	} catch (error) {
+		await rollback(executor);
+		throw error;
+	}
 }
+
+/** Package-internal transaction setup shared by multi-step execution. */
+export { begin as beginPgOutcome };
 
 async function rollback(executor: TransitionJournalQueryable): Promise<void> {
 	try {
