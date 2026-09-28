@@ -29,7 +29,7 @@ database.
 ### `dbsp migrate` is its command-line entry point
 
 `dbsp migrate <schema-file> --db <url>` loads the schema file and calls `convergePg` with `--schema`,
-the file's `dbCasing` export and each `--external-index <table:index>`, then reports the result or
+the file's `dbCasing` export and each `--external-index <model-table:index>`, then reports the result or
 the refusal as a named outcome with its own exit code. It asks for no confirmation and has no dry run:
 `convergePg` plans and executes in one call, and the reviewed path stays `dbsp plan` then
 `dbsp apply`. Exit codes that mean the same as one of `dbsp apply`'s reuse its number.

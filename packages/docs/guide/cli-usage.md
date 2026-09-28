@@ -46,9 +46,12 @@ schema file adds, adopts the tables it marks `adopt: true`, and refuses any
 other change before sending DDL. It asks for no confirmation and has no dry
 run; review a change with `dbsp plan` instead. The schema needs its ledger
 first, from `dbsp preflight --reinitialize`. Name each index you manage
-yourself with `--external-index <table>:<index>`; the table part cannot
-contain `:`. Every result and refusal is a named outcome with its own exit
-code, listed by `dbsp migrate --help`; `no-drift` and `applied` exit 0.
+yourself with `--external-index <model-table>:<index>`: the table as the model
+names it, before `dbCasing` maps it, then the index by its exact PostgreSQL
+name; the table part cannot contain `:`. Every result and refusal is a named
+outcome with its own exit code, listed by `dbsp migrate --help`; `no-drift` and
+`applied` exit 0. A command-line syntax error, such as a missing `--db`, exits 1
+like every `dbsp` command.
 
 ## Other local tools
 
