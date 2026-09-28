@@ -98,7 +98,7 @@ same call commits on its own and can remain after a failure.
 
 | `result.kind` | Meaning |
 |---|---|
-| `no-drift` | Nothing to apply for the declared tables and sequences. |
+| `no-drift` | Nothing to apply: no change for the declared tables and sequences, and no enum difference. |
 | `applied` | Every planned step committed; `applied` lists their change kinds. |
 | `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
@@ -108,8 +108,8 @@ same call commits on its own and can remain after a failure.
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
 `changes` carries planning context and can be empty. An error raised before execution starts — an
 invalid model, a connection failure, a database error while planning — is thrown as it is. A failure
-during execution becomes `execution-refused`, or a `partially-applied` or `transport-ambiguous`
-result.
+during execution becomes an `execution-refused` or `adoption-refused` refusal, or a
+`partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
