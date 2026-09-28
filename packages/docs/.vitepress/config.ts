@@ -146,6 +146,7 @@ export default withMermaid(
 							{ text: 'DDL Helpers', link: '/guide/ddl-helpers' },
 							{ text: 'DDL Provisioning', link: '/guide/ddl-provisioning' },
 							{ text: 'Schema Versioning', link: '/guide/schema-versioning' },
+							{ text: 'Startup Convergence', link: '/guide/converge' },
 							{ text: 'RLS Policies', link: '/guide/rls-policies' },
 							{ text: 'Multi-tenant', link: '/guide/multi-tenant' },
 							{ text: 'Production', link: '/guide/production' },
