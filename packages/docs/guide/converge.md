@@ -80,8 +80,7 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
 or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
-create enums or extensions: those the model uses must already exist. It cannot yet create a table
-with an enum-typed column ([#819](https://github.com/oorabona/db-semantic-planner/issues/819)).
+create enums or extensions: those the model uses must already exist.
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
