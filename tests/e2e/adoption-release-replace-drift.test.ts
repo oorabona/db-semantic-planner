@@ -160,10 +160,10 @@ async function adoptionDefaultSchemaFile(input: {
 		path,
 		[
 			"import { schema } from '@dbsp/core';",
-			`export default schema({ ${input.table}: { ${input.column}: { type: 'bigint', default: 0 } } }, { ${input.table}: { adopt: true } });`,
+			`export default schema({ ${input.table}: { ${input.column}: { type: 'text', default: { sql: "'active'" } } } }, { ${input.table}: { adopt: true } });`,
 			...(input.dbCasing === undefined
 				? []
-				: [`export const dbCasing = '${input.dbCasing}' as const;`]),
+				: [`export const dbCasing = '${input.dbCasing}';`]),
 			'',
 		].join('\n'),
 		'utf8',
@@ -547,15 +547,19 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 	});
 
 	it('replays canonicalized and snake_case declared adoptions through public apply', async () => {
-		const { pool, schemas: names } = await fixture();
-		const schema = names[0]!;
+		const { pool, schemas: names } = await fixture(
+			unique('canonical_default'),
+			unique('snake_default'),
+		);
 		for (const scenario of [
 			{
+				schema: names[0]!,
 				table: 'canonical_default',
 				declaredColumn: 'value',
 				liveColumn: 'value',
 			},
 			{
+				schema: names[1]!,
 				table: 'snake_default',
 				declaredColumn: 'camelValue',
 				liveColumn: 'camel_value',
@@ -563,7 +567,7 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			},
 		]) {
 			await pool.query(
-				`CREATE TABLE ${quote(schema)}.${quote(scenario.table)} (${quote(scenario.liveColumn)} bigint NOT NULL DEFAULT '0'::bigint)`,
+				`CREATE TABLE ${quote(scenario.schema)}.${quote(scenario.table)} (${quote(scenario.liveColumn)} text NOT NULL DEFAULT 'active')`,
 			);
 			const schemaFile = await adoptionDefaultSchemaFile({
 				table: scenario.table,
@@ -574,7 +578,7 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			});
 			const planned = await runGeneratorPlan({
 				db: process.env.DATABASE_URL!,
-				schema,
+				schema: scenario.schema,
 				schemaFile,
 			});
 			generatorSchemaFiles.set(planned, schemaFile);
@@ -587,7 +591,7 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			});
 			await expect(
 				pool.query(
-					`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
+					`SELECT event_kind FROM ${quote(scenario.schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
 					[scenario.table],
 				),
 			).resolves.toMatchObject({ rows: [{ event_kind: 'adopt' }] });
