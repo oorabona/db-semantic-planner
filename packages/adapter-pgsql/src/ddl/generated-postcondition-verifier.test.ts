@@ -808,6 +808,7 @@ describe('generated postcondition verifier', () => {
 										relation_kind: 'r',
 										column_name: 'id',
 										column_type: 'integer',
+										column_type_schema: 'pg_catalog',
 										is_not_null: true,
 										column_default: null,
 										generated_sequence_default: false,
@@ -820,6 +821,7 @@ describe('generated postcondition verifier', () => {
 										relation_kind: 'r',
 										column_name: 'id',
 										column_type: 'text',
+										column_type_schema: 'pg_catalog',
 										is_not_null: false,
 										column_default: null,
 										generated_sequence_default: false,
@@ -1474,6 +1476,7 @@ describe('generated postcondition verifier', () => {
 						relation_kind: 'r',
 						column_name: 'id',
 						column_type: 'integer',
+						column_type_schema: 'pg_catalog',
 						is_not_null: true,
 						column_default: null,
 						generated_sequence_default: false,
@@ -1524,6 +1527,7 @@ describe('generated postcondition verifier', () => {
 						relation_kind: 'r',
 						column_name: 'id',
 						column_type: 'integer',
+						column_type_schema: 'pg_catalog',
 						is_not_null: true,
 						column_default: null,
 						generated_sequence_default: false,
@@ -1672,6 +1676,7 @@ describe('generated postcondition verifier', () => {
 						relation_kind: 'r',
 						column_name: 'id',
 						column_type: 'integer',
+						column_type_schema: 'pg_catalog',
 						is_not_null: true,
 						column_default: null,
 						generated_sequence_default: false,
@@ -1830,6 +1835,7 @@ describe('generated postcondition verifier', () => {
 							relation_kind: 'r',
 							column_name: 'id',
 							column_type: 'integer',
+							column_type_schema: 'pg_catalog',
 							is_not_null: true,
 							column_default: null,
 							generated_sequence_default: false,
@@ -2541,6 +2547,7 @@ describe('generated postcondition verifier', () => {
 										relation_kind: 'r',
 										column_name: 'id',
 										column_type: 'integer',
+										column_type_schema: 'pg_catalog',
 										is_not_null: true,
 										column_default: "nextval('accounts_id_seq'::regclass)",
 										generated_sequence_default: true,
@@ -2668,11 +2675,27 @@ describe('generated postcondition verifier', () => {
 		).rejects.toBeInstanceOf(GeneratedPostconditionBindingResolutionError);
 	});
 
-	it('refuses incomplete table fields plus declared collation and identity mismatches', async () => {
+	it('refuses incomplete table projections plus declared collation and identity mismatches', async () => {
 		await expect(
 			verifyGeneratedTablePostcondition({
 				session: tableSession([
 					{ column_name: 'id', column_type: 'integer', is_not_null: 't' },
+				]),
+				postcondition: v3Table([
+					{ name: 'id', type: 'integer', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('complete projection');
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'id',
+						column_type: 'integer',
+						column_type_schema: undefined,
+						is_not_null: true,
+					},
 				]),
 				postcondition: v3Table([
 					{ name: 'id', type: 'integer', nullable: false },
@@ -2783,6 +2806,7 @@ describe('generated postcondition verifier', () => {
 										relation_kind: 'r',
 										column_name: 'id',
 										column_type: 'integer',
+										column_type_schema: 'pg_catalog',
 										is_not_null: true,
 										column_default: '5',
 										generated_sequence_default: false,

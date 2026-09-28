@@ -1541,13 +1541,10 @@ async function stabilizeGeneratedPostconditionBinding(input: {
 function tableColumnProjection(
 	row: Record<string, unknown>,
 ): LiveTableColumnProjection {
-	const typeSchema =
-		typeof row.column_type_schema === 'string'
-			? row.column_type_schema
-			: 'pg_catalog';
 	if (
 		typeof row.column_name !== 'string' ||
 		typeof row.column_type !== 'string' ||
+		typeof row.column_type_schema !== 'string' ||
 		typeof row.is_not_null !== 'boolean' ||
 		(typeof row.column_default !== 'string' && row.column_default !== null) ||
 		(typeof row.collation_name !== 'string' && row.collation_name !== null) ||
@@ -1563,7 +1560,7 @@ function tableColumnProjection(
 		// This spelling becomes the recorded observed payload, so preserve
 		// format_type exactly as it was returned by the live catalog.
 		type: row.column_type,
-		typeSchema,
+		typeSchema: row.column_type_schema,
 		nullable: !row.is_not_null,
 		default: row.column_default === null ? undefined : row.column_default,
 		generatedSequenceDefault: row.generated_sequence_default === true,

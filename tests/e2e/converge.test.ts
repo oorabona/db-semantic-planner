@@ -679,6 +679,45 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('refuses adding a nullable enum column whose type names the target schema', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'add_mood_819_items';
+		const typeName = 'mood_819_nullable';
+		const initial = model([
+			{
+				name,
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		const desired = model([enumColumnTable(name, schema, true, typeName)]);
+		await pool.query(
+			`CREATE TYPE "${schema}"."${typeName}" AS ENUM ('calm', 'busy')`,
+		);
+		await expect(convergePg(pool, initial, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		await expect(
+			pool.query(
+				'SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+				[schema, name, 'mood'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+		const tableAddress = address(databaseId, 'table', name);
+		const chain = await readPgLedgerAddressChain(
+			pool,
+			{ scope: 'schema', schema },
+			address(databaseId, 'column', 'mood', tableAddress),
+		);
+		expect(chain.events).toEqual([]);
+	});
+
 	it('converges a mixed-case enum schema when it is off search_path', async () => {
 		const mixedSchema = 'Mixed_Case_819';
 		const name = 'mixed_mood_819_items';
