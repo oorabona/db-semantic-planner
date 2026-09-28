@@ -83,25 +83,19 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		}
 	});
 
-	async function apply(
-		modelToApply: ModelIR,
-		dbCasing?: 'snake_case',
-	): Promise<void> {
+	async function apply(modelToApply: ModelIR): Promise<void> {
 		const current = await adapter.introspect({ schema: SCHEMA });
 		const statements = generateMigrationSQL(
-			compareSchemata(modelToApply, current, {
-				...(dbCasing === undefined ? {} : { dbCasing }),
-			}),
+			compareSchemata(modelToApply, current),
 			{ includeDestructive: false, schemaName: SCHEMA },
 		) as readonly string[];
 		const pool = await getTestPool();
 		for (const statement of statements) await pool.query(statement);
 	}
 
-	async function changes(modelToCompare: ModelIR, dbCasing?: 'snake_case') {
+	async function changes(modelToCompare: ModelIR) {
 		return comparePgsqlDatabaseSchema(adapter, modelToCompare, {
 			schema: SCHEMA,
-			...(dbCasing === undefined ? {} : { dbCasing }),
 			ignoreUnmanagedExtensions: true,
 		});
 	}
@@ -191,29 +185,6 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 
 		await apply(desired);
 		expect((await changes(desired)).changes).toEqual([]);
-	});
-
-	it('creates snake_case free-standing sequences without rewriting raw nextval defaults', async () => {
-		const desired = model(
-			[
-				table('orderRecords', [
-					column('id', 'integer', {
-						default: { sql: `nextval('${SCHEMA}.order_number_seq')` },
-					}),
-				]),
-			],
-			undefined,
-			[{ name: 'orderNumberSeq' }],
-		);
-
-		await apply(desired, 'snake_case');
-		const live = await adapter.introspect({ schema: SCHEMA });
-		expect(
-			Array.from(live.sequences?.values() ?? []).map(
-				(sequence) => sequence.name,
-			),
-		).toContain('order_number_seq');
-		expect((await changes(desired, 'snake_case')).changes).toEqual([]);
 	});
 
 	it('still reports a live SERIAL column against a plain integer declaration', async () => {

@@ -4143,68 +4143,6 @@ describe('Sequences', () => {
 		expect(change?.destructive).toBe(false);
 	});
 
-	it('maps declared sequence names to snake_case before comparing with the database', () => {
-		const schema = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
-		const db = makeModelWithSequences([{ name: 'order_number_seq' }]);
-
-		expect(
-			changeKinds(
-				compareSchemata(schema, db, { dbCasing: 'snake_case' }).changes,
-			),
-		).toEqual([]);
-	});
-
-	it('uses the mapped sequence name in create metadata and generated SQL', () => {
-		const diff = compareSchemata(
-			makeModelWithSequences([{ name: 'orderNumberSeq' }]),
-			makeModel([]),
-			{ dbCasing: 'snake_case' },
-		);
-
-		expect(diff.changes).toMatchObject([
-			{
-				kind: 'create_sequence',
-				details: 'Create sequence "order_number_seq"',
-				meta: { sequence: { name: 'order_number_seq' } },
-			},
-		]);
-		expect(generateMigrationSQL(diff)).toEqual([
-			'CREATE SEQUENCE "order_number_seq";',
-		]);
-	});
-
-	it('refuses two declared sequence names that map to one physical name', () => {
-		const schema = new ModelIRImpl(
-			new Map(),
-			new Map(),
-			undefined,
-			undefined,
-			new Map([
-				['orderNumberSeq', { name: 'orderNumberSeq' }],
-				['order_number_seq', { name: 'order_number_seq' }],
-			]),
-		);
-
-		expect(() =>
-			compareSchemata(schema, makeModel([]), { dbCasing: 'snake_case' }),
-		).toThrow('Sequence name collision after database casing');
-	});
-
-	it('keeps declared sequence names raw without a casing plugin', () => {
-		const diff = compareSchemata(
-			makeModelWithSequences([{ name: 'orderNumberSeq' }]),
-			makeModelWithSequences([{ name: 'order_number_seq' }]),
-		);
-
-		expect(changeKinds(diff.changes)).toEqual([
-			'create_sequence',
-			'drop_sequence',
-		]);
-		expect(diff.changes[0]?.meta?.sequence).toMatchObject({
-			name: 'orderNumberSeq',
-		});
-	});
-
 	it('should detect dropped sequence', () => {
 		const seq: SequenceIR = { name: 'order_seq', startWith: 1 };
 		const schema = makeModel([]);

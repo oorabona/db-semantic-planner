@@ -803,7 +803,7 @@ function assertDeclaredSequenceNamesPreserved(
 				throw refusal(
 					'unsupported-change',
 					[],
-					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}`,
+					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}; see #803`,
 				);
 		}
 	}

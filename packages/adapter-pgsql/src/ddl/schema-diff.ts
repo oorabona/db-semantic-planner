@@ -293,7 +293,7 @@ export function compareSchemata(
 
 	// 0b. Compare sequences (schema-level, before tables)
 	if (sup(caps?.supportsDDLSequences)) {
-		compareSequences(schema, db, changes, plugin);
+		compareSequences(schema, db, changes);
 	}
 
 	// 1. Tables that exist in schema but not in DB → create_table
@@ -1830,11 +1830,8 @@ function compareSequences(
 	schema: ModelIR,
 	db: ModelIR,
 	changes: SchemaChange[],
-	plugin?: NamingPlugin,
 ): void {
-	const schemaSeqs = plugin
-		? normalizeSequenceMap(schema.sequences ?? new Map(), plugin)
-		: (schema.sequences ?? new Map<string, SequenceIR>());
+	const schemaSeqs = schema.sequences ?? new Map<string, SequenceIR>();
 	const dbSeqs = db.sequences ?? new Map<string, SequenceIR>();
 
 	// Sequences in schema but not in DB → create
@@ -1883,25 +1880,6 @@ function compareSequences(
 			});
 		}
 	}
-}
-
-function normalizeSequenceMap(
-	sequences: ReadonlyMap<string, SequenceIR>,
-	plugin: NamingPlugin,
-): Map<string, SequenceIR> {
-	const result = new Map<string, SequenceIR>();
-	for (const [name, sequence] of sequences) {
-		const dbName = plugin.toDatabase(name);
-		if (result.has(dbName))
-			throw new Error(
-				`Sequence name collision after database casing: ${name} maps to ${dbName}`,
-			);
-		result.set(dbName, {
-			...sequence,
-			name: plugin.toDatabase(sequence.name),
-		});
-	}
-	return result;
 }
 
 // ============================================================================
