@@ -305,6 +305,95 @@ describe('dbsp migrate outcomes', () => {
 		expect(text).toContain('detail\\nnext');
 	});
 
+	it('prints execution-only recovery guidance without a reconcile command', async () => {
+		const executionIds = ['execution:one\ntwo'];
+		const { value } = await migrate(
+			{ kind: 'no-drift', applied: [] },
+			{
+				converge: vi
+					.fn()
+					.mockRejectedValue(
+						new PgConvergeRefusalError(
+							'recovery-required',
+							[],
+							undefined,
+							undefined,
+							executionIds,
+						),
+					),
+			},
+		);
+		const lines = formatMigrateHuman(value, db).split('\n');
+		expect(lines.some((line) => line.startsWith('dbsp reconcile'))).toBe(false);
+		for (const executionId of executionIds)
+			expect(lines).toContain(
+				`execution id: ${escapeDiagnosticText(executionId)}`,
+			);
+		expect(lines).toContain(
+			'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
+		);
+	});
+
+	it('prints busy-only recovery guidance without a reconcile command', async () => {
+		const busyRunIds = ['run:busy\nnext', 'run:still-busy'];
+		const { value } = await migrate(
+			{ kind: 'no-drift', applied: [] },
+			{
+				converge: vi
+					.fn()
+					.mockRejectedValue(
+						new PgConvergeRefusalError(
+							'recovery-required',
+							[],
+							undefined,
+							undefined,
+							undefined,
+							busyRunIds,
+						),
+					),
+			},
+		);
+		const lines = formatMigrateHuman(value, db).split('\n');
+		expect(lines.some((line) => line.startsWith('dbsp reconcile'))).toBe(false);
+		for (const busyRunId of busyRunIds)
+			expect(lines).toContain(
+				`busy run id: ${escapeDiagnosticText(busyRunId)}`,
+			);
+		expect(lines).toContain('these runs are still executing; retry later');
+	});
+
+	it('orders all recovery guidance by actionable identifier type', async () => {
+		const runIds = ['run:one'];
+		const executionIds = ['execution:one'];
+		const busyRunIds = ['run:busy'];
+		const { value } = await migrate(
+			{ kind: 'no-drift', applied: [] },
+			{
+				converge: vi
+					.fn()
+					.mockRejectedValue(
+						new PgConvergeRefusalError(
+							'recovery-required',
+							[],
+							undefined,
+							runIds,
+							executionIds,
+							busyRunIds,
+						),
+					),
+			},
+		);
+		expect(formatMigrateHuman(value, db).split('\n')).toEqual([
+			'recovery-required: public',
+			'dbsp reconcile --db <database> <run-id>',
+			'run id: run:one',
+			'busy run id: run:busy',
+			'these runs are still executing; retry later',
+			'execution id: execution:one',
+			'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
+		]);
+	});
+
 	it('documents external index operands and syntax errors in help', () => {
 		const write = vi
 			.spyOn(process.stdout, 'write')

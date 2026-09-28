@@ -375,11 +375,27 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 		lines.push(
 			...safe.changes.map((change) => diagnostic(JSON.stringify(change))),
 		);
-	if (safe.outcome === 'recovery-required')
-		lines.push(
-			'dbsp reconcile --db <database> <run-id>',
-			...(safe.runIds ?? []).map((runId) => `run id: ${diagnostic(runId)}`),
-		);
+	if (safe.outcome === 'recovery-required') {
+		if (safe.runIds?.length)
+			lines.push(
+				'dbsp reconcile --db <database> <run-id>',
+				...safe.runIds.map((runId) => `run id: ${diagnostic(runId)}`),
+			);
+		if (safe.busyRunIds?.length)
+			lines.push(
+				...safe.busyRunIds.map(
+					(busyRunId) => `busy run id: ${diagnostic(busyRunId)}`,
+				),
+				'these runs are still executing; retry later',
+			);
+		if (safe.executionIds?.length)
+			lines.push(
+				...safe.executionIds.map(
+					(executionId) => `execution id: ${diagnostic(executionId)}`,
+				),
+				'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
+			);
+	}
 	if (safe.outcome === 'ledger-absent')
 		lines.push(
 			'dbsp preflight --reinitialize --db <database> --schema-file <schema-file> --scope <schema> --out <adoption-file>',
