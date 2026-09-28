@@ -83,7 +83,8 @@ The preflight runs once per schema, as in step 1 above. `dbsp migrate` reads `db
 schema file, takes each external index as `--external-index <model-table>:<index>` (the same naming as
 `externalIndexes` below), and prints the result
 or refusal below as its outcome, with an exit code `dbsp migrate --help` lists (`no-drift` and
-`applied` exit 0). A `recovery-required` refusal prints the `dbsp reconcile` command for each run.
+`applied` exit 0). A `recovery-required` refusal lists the run ids to pass to `dbsp reconcile`, the
+runs still executing, and the execution ids only the ledger owner can resolve.
 
 ## What converge applies
 
