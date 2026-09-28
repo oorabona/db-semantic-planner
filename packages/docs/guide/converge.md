@@ -4,10 +4,10 @@ title: Startup Convergence
 
 # How to converge a schema at application start
 
-`convergePg` brings a PostgreSQL schema to your declared model from inside your application, at
-every start, with no plan to review. It applies only additions that are safe to run unattended, and
-it refuses the changes it does not apply before writing anything. Use `dbsp plan` and `dbsp apply`
-for those. The decision and its limits are recorded in
+`convergePg` applies the additions your declared model needs to a PostgreSQL schema, from inside
+your application, at every start, with no plan to review. It compares only the tables and sequences
+the model declares. Changes it does not apply unattended are refused while planning; plan those with
+`dbsp plan` and `dbsp apply`. The decision and its limits are recorded in
 [ADR 0007](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0007-startup-convergence.md).
 
 ## When
@@ -20,9 +20,9 @@ for those. The decision and its limits are recorded in
 
 1. **Once per database, with a role allowed to create schemas and tables:**
    `runPgReinitializePreflight` creates and owns the `dbsp_meta` schema, the schema's ledger and the
-   transition journal. It reports a scope it could not prepare as `failed` or `not-attempted` instead
-   of throwing, so check its report. `convergePg` never creates these tables and refuses
-   `ledger-absent` without them.
+   transition journal. A scope it could not prepare is reported as `failed` or `not-attempted` in the
+   returned report; connection and database errors reject the promise. `convergePg` never creates
+   these tables and refuses `ledger-absent` without them.
 2. **At every start, as the same role:** `convergePg(pool, model, { schema })`. When several
    instances start together, one converges and the others get `busy`: retry `busy` after a delay, or
    converge from a single instance.
@@ -68,53 +68,57 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
 
 ## What converge applies
 
-- **New tables and sequences.** Indexes, CHECK constraints and foreign keys are created only on
-  tables the same call creates. A foreign key also needs both of its tables created by the call, its
-  referenced columns covered by a primary key, a unique column or a declared unique index that is
-  neither partial nor on an expression, and, for a single-column key, a declared index on its column.
-- **New columns on tables dbsp already manages:** nullable without a default, or NOT NULL with a
-  boolean, finite-number or string literal default (not a function call such as `now()`). A column
-  with a default must use a PostgreSQL built-in type or an enum. Adding a column takes an
-  `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
+- **New tables**, with the indexes, CHECK constraints and foreign keys declared on them.
+- **New sequences.** A sequence's declared name must be its physical name: a name `dbCasing` would
+  change is refused.
+- **New columns on tables dbsp already manages**, within the rules below.
 - **Adoption** of existing tables you mark `adopt: true` (see
   [Adopting an existing install](#adopting-an-existing-install)).
+
+It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
+or foreign keys to a table that already exists, and it refuses `replace` and `readdress`.
+
+- A foreign key needs both of its tables created by the same call, its referenced columns covered by
+  a primary key, a unique column or a declared unique index that is neither partial nor on an
+  expression, and, for a single-column key, a declared index on its referencing column.
+- A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
+  finite-number or string literal default (not a function call such as `now()`). A column with a
+  default must use a PostgreSQL built-in type or an enum. Adding a column takes an
+  `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
 
 The tables a call creates and every change on them commit in one transaction: if one of them fails,
 none of them remains and the next call starts again from absent tables. A sequence created by the
 same call commits on its own and can remain after a failure.
 
-Converge never drops, alters or renames anything, and it refuses a table declared with `replace` or
-`readdress`.
-
 ## Results
 
 | `result.kind` | Meaning |
 |---|---|
-| `no-drift` | The schema already matches the model. |
+| `no-drift` | Nothing to apply for the declared tables and sequences. |
 | `applied` | Every planned step committed; `applied` lists their change kinds. |
 | `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
 
 ## Refusals
 
-A refusal throws `PgConvergeRefusalError`: `refusal` names the case, `changes` lists the changes
-involved, and `detail` explains. Invalid models, connection failures and unexpected database errors
-are thrown as they are, not as refusals.
+A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
+`changes` carries planning context and can be empty. Invalid models, connection failures and
+unexpected database errors are thrown as they are, not as refusals.
 
-| `refusal` | Cause | What to do |
-|---|---|---|
-| `invalid-options` | `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. | Fix the option. |
-| `ledger-absent` | The schema has no ledger. | Run `runPgReinitializePreflight` first. |
-| `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. | Read `detail`; [ADR 0006](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0006-managed-state-ledger.md) ("Lineage") covers a ledger restored or copied from another database. |
-| `unsupported-server` | PostgreSQL is older than 15. | Upgrade PostgreSQL. |
-| `busy` | Another converge call or transition writer holds the schema's ledger lock, or every open claim belongs to a run still executing (`busyRunIds`). | Retry after a delay. |
-| `recovery-required` | An earlier run left an open claim. | Reconcile each run in `runIds` with `reconcilePgTransitionRun(pool, runId)` (the pool must allow two connections) or `dbsp reconcile --db <database> <run-id>`; `executionIds` lists claims no readable journal run explains, which the ledger or journal owner must resolve. Then call converge again. |
-| `unsupported-change` | The model asks for something converge does not apply: a removal, an alteration, a child on an existing table, a column outside the rules above, `replace` or `readdress`. | Plan it with `dbsp plan` and `dbsp apply`, or change the model. |
-| `unmanaged-object` | A declared table or sequence exists but dbsp does not manage it. | Adopt the table (`adopt: true`). Converge cannot adopt a sequence: rename it or remove it after checking what uses it. |
-| `unmanaged-parent` | A change targets a table dbsp does not manage. | Adopt the table first. |
-| `concurrent-drift` | A declared object disappeared while converge was planning. | Call converge again. |
-| `adoption-refused` | A table marked `adopt: true` is absent, differs from its declaration, or has ledger history that forbids adoption (for example, it was managed, then dropped and recreated). | Make the live table match the declaration, or leave it unadopted. |
-| `execution-refused` | The executor refused or failed a step. | Read `detail`, fix the cause, call converge again. |
+| `refusal` | Meaning |
+|---|---|
+| `invalid-options` | `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `ledger-absent` | The schema has no ledger: run `runPgReinitializePreflight`. |
+| `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
+| `unsupported-server` | PostgreSQL is older than 15. |
+| `busy` | Another converge call or transition writer holds the schema's ledger lock, or every open claim belongs to a run still executing. Retry after a delay. |
+| `recovery-required` | Earlier runs left open claims. Reconcile each run in `runIds` with `reconcilePgTransitionRun(pool, runId)` (the pool must allow two connections) or `dbsp reconcile --db <database> <run-id>`; `busyRunIds` lists runs still executing. `executionIds` lists claims no readable journal run explains; no public operation resolves a claim by execution id, so they need the ledger owner. Call converge again once no claim is open. |
+| `unsupported-change` | The model asks for a change converge does not apply. Plan it with `dbsp plan` and `dbsp apply`, or change the model. |
+| `unmanaged-object` | A live object at an address converge would manage is not managed by dbsp: an existing table or sequence, or an object created while converge was running. |
+| `unmanaged-parent` | A change targets a table dbsp does not manage. |
+| `concurrent-drift` | A declared object disappeared while converge was planning. |
+| `adoption-refused` | A table marked `adopt: true` could not be adopted: it is absent, differs from its declaration, or its ledger state is not unknown. A managed table that was dropped and recreated is in that last case, and converge offers no way to take it over. |
+| `execution-refused` | The executor refused or failed a step; `detail` says why. |
 
 ## Adopting an existing install
 
@@ -122,14 +126,15 @@ If an earlier version of your application created its tables without dbsp, `conv
 them as `unmanaged-object`. Take them into management with one pass in which the model marks each
 table `adopt: true`, then drop the flag:
 
-- A table is adopted only if it exists and matches its declaration exactly, columns, types,
-  defaults, keys and indexes included (after [External indexes](#external-indexes) masking). A
-  mismatch found while planning refuses `adoption-refused` before anything is written.
+- A table is adopted only if it exists, its ledger state is unknown, and it matches its declaration
+  exactly, columns, types, defaults, keys and indexes included (after
+  [External indexes](#external-indexes) masking). A mismatch found while planning refuses
+  `adoption-refused` before anything is written.
 - Each table is adopted in its own transaction. A table that changes while its adoption runs is
   refused, and tables adopted earlier in the same call stay adopted; the next call skips them.
 - `adopt: true` on a table that does not exist is refused, so do not set it on a fresh install.
 - An install that lags the model, for example a missing column, must be brought to the model before
-  the adoption pass; adopting a table and then adding its columns in the same call is not offered.
+  the adoption pass.
 
 ```typescript
 // doctest: real-db-only — adopts a table created outside dbsp
@@ -182,10 +187,9 @@ await convergePg(pool, model, {
 ```
 
 Each entry names a declared table and the exact physical index name. Converge never drops a live
-index named here and does not report it as drift. A name that is also a declared index is refused as
-`invalid-options`.
+index named here and does not report it as drift.
 
 ## Running alongside `dbsp apply`
 
-`convergePg` and `dbsp apply` take the same ledger lock without waiting, so on the same schema at the
-same time whichever reaches it second gets `busy` and stops. Run them one after the other.
+`convergePg` and `dbsp apply` take the same ledger lock without waiting: on the same schema at the
+same time, whichever reaches it second gets `busy`. Run them one after the other.

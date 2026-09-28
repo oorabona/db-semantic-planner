@@ -27,34 +27,37 @@ database.
 
 ### It admits only startup-safe additions
 
-- Tables and sequences that do not exist yet. Indexes, CHECK constraints and foreign keys only on
-  tables created by the same call. A foreign key also needs both of its tables created by the call,
-  its referenced columns covered by a primary key, a unique column or a declared unique index that is
-  neither partial nor on an expression, and, for a single-column key, a declared index on its column.
+- Tables and sequences that do not exist yet; a sequence's declared name must be its physical name.
+  Indexes, CHECK constraints and foreign keys only on tables created by the same call. A foreign key
+  also needs both of its tables created by the call, its referenced columns covered by a primary key,
+  a unique column or a declared unique index that is neither partial nor on an expression, and, for a
+  single-column key, a declared index on its referencing column.
 - Columns added to managed tables: nullable without a default, or NOT NULL with a boolean,
   finite-number or non-function string literal default; a defaulted column's type must be a
   PostgreSQL built-in base type or an enum.
 - Indexes the caller manages itself, named in `externalIndexes`, are never dropped and are not
   reported as drift.
 
-Everything else — removals, alterations, children on an existing table, `replace`, `readdress` —
-refuses before converge writes anything.
+Everything else — removals, changes to existing definitions, indexes, CHECK constraints or foreign
+keys on an existing table, `replace`, `readdress` — is refused while planning, before converge writes
+anything.
 
 ### The tables a call creates commit atomically
 
 The `create_table` steps of a call and every change on those tables run in one transaction: a
 failure rolls back their DDL, claims and terminals together, so the next call starts from absent
 tables. A sequence created by the same call commits on its own and can remain after a failure.
-Admitting children on an existing table by ledger provenance was rejected: a table's catalogue
-identity is its OID, which proves neither emptiness nor unchanged shape.
+Admitting indexes, CHECK constraints or foreign keys on an existing table by ledger provenance was
+rejected: a table's catalogue identity is its OID, which proves neither emptiness nor unchanged shape.
 
 ### Its runs are not journaled, and it never starts over another writer's open claim
 
 Every step converge emits is transactional, so an interrupted call leaves no open claim; recording
 its run would keep evidence no recovery reads. Before comparing, converge refuses while the target
-schema's ledger has a live reservation: `busy` when the owning run still holds its lock,
-`recovery-required` otherwise, carrying the run ids to reconcile (`reconcilePgTransitionRun` or
-`dbsp reconcile`) and the executions no readable journal run explains.
+schema's ledger has a live reservation: `busy` when every reservation belongs to a run that still
+holds its lock, `recovery-required` otherwise, carrying the run ids to reconcile
+(`reconcilePgTransitionRun` or `dbsp reconcile`), the runs still executing, and the executions no
+readable journal run explains.
 
 ### The ledger and journal come from a separate preflight
 
@@ -91,8 +94,8 @@ CLI still presents adoption in the reviewed plan.
   `busy` from one another the same way. Open on #769 (issuecomment-5860782599).
 - An install whose tables lag the model cannot be adopted as it is: adopting a table and then adding
   its missing columns is not offered.
-- A new index, CHECK or foreign key on an existing managed table is refused; the caller either
-  creates it as an external index or plans it through `dbsp apply`.
+- A new index, CHECK constraint or foreign key on an existing managed table is refused; the caller
+  plans it through `dbsp apply`, or creates an index itself and names it in `externalIndexes`.
 - `dbsp apply` re-checks an adoption with a weaker comparison than `dbsp plan` (#815); converge does
   not share that gap.
 - Recording converge runs is revisited when converge emits a non-transactional step or a claim can
