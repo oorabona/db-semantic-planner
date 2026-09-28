@@ -19,11 +19,6 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => ({
 	readPgCatalogueIdentity: generator.readPgCatalogueIdentity,
 }));
 
-vi.mock(
-	'@dbsp/adapter-pgsql/internal',
-	() => import('../../../adapter-pgsql/src/ddl/managed-step-manifest.js'),
-);
-
 vi.mock('../utils/db-utils.js', () => ({
 	createDbConnection: generator.createDbConnection,
 }));
