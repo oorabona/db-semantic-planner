@@ -57,6 +57,8 @@ import { executePgPersistedTableReaddress } from './readdress.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 import { readPgRemovalEffectsClosure } from './removal-containment.js';
 
+type GeneratorExecutionExecutor = Pool | Pick<PoolClient, 'query' | 'release'>;
+
 function managedSteps(manifest: ValidatedManagedStepManifest) {
 	return manifest.steps;
 }
@@ -265,7 +267,9 @@ async function databaseId(
 type LedgerQueryable = Parameters<typeof readPgLedgerAddressChain>[0];
 
 /** A checked-out client owns its session and must never be checked out again. */
-function isPoolQueryable(executor: Pool | PoolClient): executor is Pool {
+function isPoolQueryable(
+	executor: GeneratorExecutionExecutor,
+): executor is Pool {
 	return (
 		'connect' in executor &&
 		typeof executor.connect === 'function' &&
@@ -456,7 +460,7 @@ export async function executeGeneratorPlan(input: {
 	 * deliberately unsupported: although session-pinned, it has no release(),
 	 * and the pool/client distinction must not try to connect it again.
 	 */
-	readonly pool: Pool | PoolClient;
+	readonly pool: GeneratorExecutionExecutor;
 	/** Bound by apply after validating the persisted durable manifest. */
 	readonly manifest?: ValidatedManagedStepManifest;
 	/** @deprecated Compatibility shim for direct fixtures; it is validated before use. */
@@ -473,6 +477,15 @@ export async function executeGeneratorPlan(input: {
 	readonly observer?: PgOutcomeCheckpointObserver;
 	/** Contiguous fresh-object steps that must commit as one PostgreSQL transaction. */
 	readonly atomicCreationGroup?: readonly string[];
+	/**
+	 * Converge supplies its lock-holding canonical comparison here.  The
+	 * callback receives both the preflight executor and the executor inside the
+	 * admitted outcome transaction, so adoption never escapes that session.
+	 */
+	readonly verifyDeclaredAdoptionShape?: (
+		executor: TransitionJournalQueryable,
+		step: NormalizedManagedStep,
+	) => Promise<boolean>;
 	/** @deprecated Compatibility shim for old direct fixtures. */
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
@@ -658,7 +671,7 @@ export async function executeGeneratorPlan(input: {
 				};
 			const lifecycle = step.lifecycle;
 			if (lifecycle?.kind !== 'adoption') continue;
-			if (!adoptionPool)
+			if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 				return {
 					outcome: 'execution-failed',
 					detail: `adoption step ${step.stepKey} requires a pool executor for live shape introspection`,
@@ -679,8 +692,14 @@ export async function executeGeneratorPlan(input: {
 				address,
 				declaration: step.expectedDeclaration,
 				expectedCatalogueIdentity: step.expectedCatalogueIdentity,
-				shapeMatches: () =>
-					adoptionShapeMatches(adoptionPool, input.schema, lifecycle.shape),
+				shapeMatches: (executor) =>
+					input.verifyDeclaredAdoptionShape
+						? input.verifyDeclaredAdoptionShape(executor, step)
+						: adoptionShapeMatches(
+								adoptionPool!,
+								input.schema,
+								lifecycle.shape,
+							),
 			});
 			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
 				return preflight.outcome === 'adoption-refused'
@@ -747,7 +766,7 @@ export async function executeGeneratorPlan(input: {
 			if (step.lifecycle?.kind === 'adoption-refused') continue;
 			if (step.lifecycle?.kind === 'adoption') {
 				const lifecycle = step.lifecycle;
-				if (!adoptionPool)
+				if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 					return {
 						outcome: 'execution-failed',
 						detail: `adoption step ${step.stepKey} requires a pool executor for live shape introspection`,
@@ -774,8 +793,14 @@ export async function executeGeneratorPlan(input: {
 					address,
 					declaration: step.expectedDeclaration,
 					expectedCatalogueIdentity: step.expectedCatalogueIdentity,
-					shapeMatches: () =>
-						adoptionShapeMatches(adoptionPool, input.schema, lifecycle.shape),
+					shapeMatches: (executor) =>
+						input.verifyDeclaredAdoptionShape
+							? input.verifyDeclaredAdoptionShape(executor, step)
+							: adoptionShapeMatches(
+									adoptionPool!,
+									input.schema,
+									lifecycle.shape,
+								),
 					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {
@@ -783,7 +808,9 @@ export async function executeGeneratorPlan(input: {
 					continue;
 				}
 				if (adopted.outcome === 'adoption-refused')
-					return { outcome: 'adoption-refused', detail: adopted.detail };
+					return completedStepKeys.length === 0
+						? { outcome: 'adoption-refused', detail: adopted.detail }
+						: partial(adopted.detail);
 				if (adopted.outcome === 'recovery-required') return adopted;
 				if (adopted.outcome === 'transport-ambiguous') return adopted;
 				return { outcome: 'execution-failed', detail: adopted.detail };

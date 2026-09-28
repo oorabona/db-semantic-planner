@@ -418,6 +418,35 @@ afterEach(() => {
 });
 
 describe('convergePg refusal boundary', () => {
+	it('refuses a declared adoption mismatch before invoking the executor', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'add_column',
+					table: 'legacy_items',
+					column: 'missing',
+					destructive: false,
+					details: 'Add column missing',
+					meta: { column: { name: 'missing', type: 'integer' } },
+				},
+			],
+		});
+		const desired = modelWithTables([
+			{
+				name: 'legacy_items',
+				adopt: true,
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		await expect(convergePg(poolFor(), desired)).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+			changes: [expect.objectContaining({ kind: 'add_column' })],
+		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
 	it('continues unchanged when its ledger home has no live reservation', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 

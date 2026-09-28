@@ -75,6 +75,20 @@ function table(name: string, includeNickname = true): TableIR {
 	};
 }
 
+function legacyTable(name: string, adopt = true): TableIR {
+	return {
+		name,
+		...(adopt ? { adopt: true as const } : {}),
+		columns: [
+			{ name: 'id', type: 'integer', nullable: false },
+			{ name: 'code', type: 'integer', nullable: false },
+		],
+		primaryKey: 'id',
+		foreignKeys: [],
+		indexes: [{ name: `${name}_code_index`, columns: ['code'] }],
+	};
+}
+
 async function database(): Promise<string> {
 	const pool = await getTestPool();
 	return String(
@@ -133,6 +147,186 @@ describe('convergePg', () => {
 				await closeTestDb();
 			}
 		}
+	});
+
+	it('adopts an exact unmanaged declared table without changing its OID', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'legacy_items';
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "${name}_code_index" ON "${schema}"."${name}" ("code")`,
+		);
+		const oid = String(
+			(
+				await pool.query('SELECT $1::regclass::oid AS oid', [
+					`${schema}.${name}`,
+				])
+			).rows[0]?.oid,
+		);
+		await expect(
+			convergePg(pool, model([legacyTable(name, false)]), { schema }),
+		).rejects.toMatchObject({
+			refusal: 'unmanaged-object',
+		});
+		await expect(
+			convergePg(pool, model([legacyTable(name)]), { schema }),
+		).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(managed(address(databaseId, 'table', name))).resolves.toBe(
+			true,
+		);
+		await expect(
+			pool.query('SELECT $1::regclass::oid::text AS oid', [
+				`${schema}.${name}`,
+			]),
+		).resolves.toMatchObject({ rows: [{ oid }] });
+		await expect(
+			convergePg(pool, model([legacyTable(name)]), { schema }),
+		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
+	it('refuses an absent declared adoption without recording a ledger terminal', async () => {
+		const pool = await getTestPool();
+		const name = 'legacy_absent';
+		await expect(
+			convergePg(pool, model([legacyTable(name)]), { schema }),
+		).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+		});
+		await expect(
+			pool.query('SELECT to_regclass($1) AS relation', [`${schema}.${name}`]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
+		await expect(
+			pool.query(
+				`SELECT count(*)::int AS count FROM "${schema}".dbsp_ledger_event WHERE address_kind = 'table' AND address_name = $1`,
+				[name],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+	});
+
+	it('refuses a declared adoption with a missing live column before DDL', async () => {
+		const pool = await getTestPool();
+		const name = 'legacy_missing_column';
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY)`,
+		);
+		await expect(
+			convergePg(pool, model([legacyTable(name)]), { schema }),
+		).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+		});
+		await expect(
+			pool.query(
+				'SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+				[schema, name, 'code'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+	});
+
+	it('adopts a PostgreSQL-canonicalized bigint default', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'legacy_default';
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "count" bigint NOT NULL DEFAULT 0)`,
+		);
+		const desired: TableIR = {
+			name,
+			adopt: true,
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{
+					name: 'count',
+					type: 'bigint',
+					nullable: false,
+					default: { sql: '0' },
+				},
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		await expect(
+			convergePg(pool, model([desired]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(managed(address(databaseId, 'table', name))).resolves.toBe(
+			true,
+		);
+	});
+
+	it('masks a caller-named external index while adopting', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'legacy_external_index';
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "${name}_extra_index" ON "${schema}"."${name}" ("code")`,
+		);
+		const desired = { ...legacyTable(name), indexes: [] };
+		await expect(
+			convergePg(pool, model([desired]), {
+				schema,
+				externalIndexes: [{ table: name, name: `${name}_extra_index` }],
+			}),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(managed(address(databaseId, 'table', name))).resolves.toBe(
+			true,
+		);
+	});
+
+	it('uses the physical snake_case table address for adoption', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		await pool.query(
+			`CREATE TABLE "${schema}"."legacy_orders" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "legacy_orders_code_index" ON "${schema}"."legacy_orders" ("code")`,
+		);
+		await expect(
+			convergePg(pool, model([legacyTable('legacyOrders')]), {
+				schema,
+				dbCasing: 'snake_case',
+			}),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(
+			managed(address(databaseId, 'table', 'legacy_orders')),
+		).resolves.toBe(true);
+	});
+
+	it('refuses a snake_case declared adoption mismatch without a ledger row or DDL', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE "${schema}"."legacy_shipments" ("id" integer NOT NULL PRIMARY KEY)`,
+		);
+		const desired = { ...legacyTable('legacyShipments'), indexes: [] };
+		await expect(
+			convergePg(pool, model([desired]), {
+				schema,
+				dbCasing: 'snake_case',
+			}),
+		).rejects.toMatchObject({ refusal: 'adoption-refused' });
+		await expect(
+			pool.query(
+				`SELECT count(*)::int AS count FROM "${schema}".dbsp_ledger_event WHERE address_kind = 'table' AND address_name = $1`,
+				['legacy_shipments'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+		await expect(
+			pool.query(
+				'SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+				[schema, 'legacy_shipments', 'code'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 	});
 
 	it('creates a declared table and nullable column with a managed table terminal', async () => {

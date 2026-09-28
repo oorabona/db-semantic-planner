@@ -7,6 +7,10 @@
  */
 
 export {
+	createPgsqlDeclaredAdoptionStep,
+	pgsqlDeclaredAdoptionDeclaration,
+} from './ddl/managed-step-manifest.js';
+export {
 	convergePg,
 	PgConvergeRefusalError,
 	type PgConvergeResult,

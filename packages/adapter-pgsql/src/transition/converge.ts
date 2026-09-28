@@ -27,7 +27,10 @@ import {
 	generateMigrationSQL,
 	type SchemaChange,
 } from '../ddl/index.js';
-import { addressForChange } from '../ddl/managed-step-manifest.js';
+import {
+	addressForChange,
+	createPgsqlDeclaredAdoptionStep,
+} from '../ddl/managed-step-manifest.js';
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
@@ -63,7 +66,8 @@ export type PgConvergeRefusal =
 	| 'unsupported-server'
 	| 'busy'
 	| 'recovery-required'
-	| 'execution-refused';
+	| 'execution-refused'
+	| 'adoption-refused';
 
 /**
  * Unsupported-change, ledger and ownership refusals occur before converge commits
@@ -364,6 +368,68 @@ function masksExternalIndexDrop(
 	return externalIndexKeys.has(externalIndexKey(change.table, index.name));
 }
 
+/**
+ * Converge has one declaration-scoped, external-index-masked comparison.  The
+ * same function is used before planning and again while the adoption claim is
+ * open, preventing its admission check from drifting from the initial plan.
+ */
+async function compareConvergeMaskedSchema(input: {
+	readonly executor: PoolClient;
+	readonly model: ModelIR;
+	readonly schema: string;
+	readonly casing: DbCasing;
+	readonly externalIndexes: ReadonlySet<string>;
+}) {
+	const naming = getNamingPluginForDbCasing(input.casing);
+	const adapter = createPgsqlAdapter(input.executor, {
+		borrowedClient: true,
+		managedTransactions: true,
+		dbCasing: input.casing,
+	});
+	const declaredTables = [...input.model.tables.values()].map((table) =>
+		naming.toDatabase(table.name),
+	);
+	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+	const declarationScopedAdapter = new Proxy(adapter, {
+		get(target, property, receiver) {
+			if (property === 'introspect')
+				return (
+					introspectionOptions?: Parameters<typeof target.introspect>[0],
+				) =>
+					target
+						.introspect({
+							...introspectionOptions,
+							include: declaredTables,
+							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
+						})
+						.then((introspected) => ({
+							...introspected,
+							sequences: new Map(
+								[...(introspected.sequences ?? [])].filter(([name]) =>
+									declaredSequences.has(name),
+								),
+							),
+						}));
+			return Reflect.get(target, property, receiver);
+		},
+	});
+	const compared = await comparePgsqlDatabaseSchema(
+		declarationScopedAdapter,
+		input.model,
+		{
+			schema: input.schema,
+			dbCasing: input.casing,
+			ignoreUnmanagedExtensions: true,
+		},
+	);
+	return {
+		...compared,
+		changes: compared.changes.filter(
+			(change) => !masksExternalIndexDrop(change, input.externalIndexes),
+		),
+	};
+}
+
 function startupSafeAddColumn(change: SchemaChange): boolean {
 	if (change.kind !== 'add_column' || !change.meta?.column) return false;
 	const column = change.meta.column;
@@ -646,7 +712,8 @@ async function assertExistingDeclaredTablesManaged(
 	schema: string,
 	model: ModelIR,
 	casing: DbCasing,
-	changedTables: ReadonlySet<string>,
+	createdTables: ReadonlySet<string>,
+	adoptedTables: ReadonlySet<string>,
 ): Promise<void> {
 	const naming = getNamingPluginForDbCasing(casing);
 	for (const table of model.tables.values()) {
@@ -658,9 +725,10 @@ async function assertExistingDeclaredTablesManaged(
 			kind: 'table',
 			name: naming.toDatabase(table.name),
 		};
-		// Reaching this loop means comparison saw the table: an absent table would
-		// produce create_table, put it in changedTables, and skip this check.
-		if (changedTables.has(address.name)) continue;
+		// An absent table has a create_table change and is admitted as fresh work;
+		// an adoption step separately owns the sole unmanaged-table exception.
+		if (createdTables.has(address.name) || adoptedTables.has(address.name))
+			continue;
 		const managed = await isManagedCurrent(client, address);
 		if (managed === 'absent')
 			throw refusal(
@@ -950,6 +1018,10 @@ function describeFkAutoIndexSpecs(
  * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
  * and the journal owner one whose journal attribution cannot be read, then call
  * converge again.
+ * A declared table with `adopt: true` is taken into management when it exists,
+ * is unmanaged, and exactly matches the declaration after `externalIndexes`
+ * masking. Otherwise converge refuses `adoption-refused` before writing
+ * anything; set `adopt` only for the one pass over an existing install.
  * Tables a run creates and every change on those tables commit together or not
  * at all. A sequence created by the same run commits on its own and can remain
  * after a failure. After a transport-ambiguous outcome, the next call observes
@@ -1016,56 +1088,53 @@ export async function convergePg(
 			destroyReason = 'converge could not confirm predecessor run lock release';
 		});
 		const database = await databaseId(client);
-		const adapter = createPgsqlAdapter(client, {
-			borrowedClient: true,
-			dbCasing: casing,
-		});
 		assertDeclaredSequenceNamesPreserved(model, naming);
-		const declaredTables = [...model.tables.values()].map((table) =>
-			naming.toDatabase(table.name),
-		);
-		const declaredSequences = new Set(model.sequences?.keys() ?? []);
-		const declarationScopedAdapter = new Proxy(adapter, {
-			get(target, property, receiver) {
-				if (property === 'introspect') {
-					return (
-						introspectionOptions?: Parameters<typeof target.introspect>[0],
-					) =>
-						target
-							.introspect({
-								...introspectionOptions,
-								include: declaredTables,
-								// `include: []` means all tables to the introspector. An empty
-								// declaration must instead compare no live tables.
-								...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
-							})
-							.then((introspected) => ({
-								...introspected,
-								sequences: new Map(
-									[...(introspected.sequences ?? [])].filter(([name]) =>
-										declaredSequences.has(name),
-									),
-								),
-							}));
-				}
-				return Reflect.get(target, property, receiver);
-			},
-		});
-		const compared = await comparePgsqlDatabaseSchema(
-			declarationScopedAdapter,
+		const diff = await compareConvergeMaskedSchema({
+			executor: client,
 			model,
-			{
+			schema,
+			casing,
+			externalIndexes,
+		});
+		const adoptionSteps: NormalizedManagedStep[] = [];
+		for (const table of model.tables.values()) {
+			if (table.adopt !== true) continue;
+			const physicalName = naming.toDatabase(table.name);
+			const adoptionChanges = diff.changes.filter(
+				(change) => change.table === physicalName,
+			);
+			if (adoptionChanges.length > 0)
+				throw refusal(
+					'adoption-refused',
+					adoptionChanges,
+					`declared adoption for ${physicalName} refuses live shape mismatch`,
+				);
+			const address = {
+				scope: 'schema' as const,
+				engine: 'postgresql',
+				database,
 				schema,
-				dbCasing: casing,
-				ignoreUnmanagedExtensions: true,
-			},
-		);
-		const diff = {
-			...compared,
-			changes: compared.changes.filter(
-				(change) => !masksExternalIndexDrop(change, externalIndexes),
-			),
-		};
+				kind: 'table' as const,
+				name: physicalName,
+			};
+			if ((await isManagedCurrent(client, address)) === 'managed') continue;
+			const live = await readPgCatalogueIdentity(client, address);
+			if (!live?.catalogueIdentity)
+				throw refusal(
+					'adoption-refused',
+					[],
+					`declared adoption for ${physicalName} refuses absent live identity`,
+				);
+			adoptionSteps.push(
+				createPgsqlDeclaredAdoptionStep({
+					address,
+					table,
+					stepKey: `converge:${adoptionSteps.length}:adoption`,
+					order: adoptionSteps.length,
+					catalogueIdentity: live.catalogueIdentity,
+				}),
+			);
+		}
 		const createdTableAddresses = new Set(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_table') return [];
@@ -1125,9 +1194,19 @@ export async function convergePg(
 			schema,
 			model,
 			casing,
-			new Set(diff.changes.map((change) => naming.toDatabase(change.table))),
+			new Set(
+				diff.changes
+					.filter((change) => change.kind === 'create_table')
+					.map((change) => naming.toDatabase(change.table)),
+			),
+			new Set(
+				adoptionSteps
+					.map((step) => step.address?.name)
+					.filter((name): name is string => name !== undefined),
+			),
 		);
-		if (diff.changes.length === 0) return { kind: 'no-drift', applied: [] };
+		if (diff.changes.length === 0 && adoptionSteps.length === 0)
+			return { kind: 'no-drift', applied: [] };
 		const phaseOrderedChanges = [...diff.changes].sort(
 			(left, right) => convergePhase(left) - convergePhase(right),
 		);
@@ -1163,21 +1242,23 @@ export async function convergePg(
 		const createTableStepKeys = new Map<string, string>();
 		const createIndexStepKeys = new Map<SchemaChange, string>();
 		for (const [order, change] of orderedChanges.entries()) {
+			const stepOrder = adoptionSteps.length + order;
 			if (change.kind === 'create_table') {
 				const address = generatedAddress(change, database, schema);
 				createTableStepKeys.set(
 					canonicalJsonDigest(address),
-					`converge:${order}`,
+					`converge:${stepOrder}`,
 				);
 			}
 			if (change.kind === 'create_index')
-				createIndexStepKeys.set(change, `converge:${order}`);
+				createIndexStepKeys.set(change, `converge:${stepOrder}`);
 		}
 		const assembled: {
 			readonly change: SchemaChange;
 			readonly step: NormalizedManagedStep;
 		}[] = [];
 		for (const [order, change] of orderedChanges.entries()) {
+			const stepOrder = adoptionSteps.length + order;
 			const address = generatedAddress(change, database, schema);
 			const parent = parentAddress(address);
 			const dependencies = new Set<string>();
@@ -1223,23 +1304,24 @@ export async function convergePg(
 				change,
 				database,
 				schema,
-				stepKey: `converge:${order}`,
-				order,
+				stepKey: `converge:${stepOrder}`,
+				order: stepOrder,
 				dependencyOrder: [...dependencies],
 				statements,
 			});
 			assembled.push({ change, step });
 		}
-		const manifest = validateNormalizedManagedStepManifest(
-			assembled.map(({ step }) => step),
-		);
+		const manifest = validateNormalizedManagedStepManifest([
+			...adoptionSteps,
+			...assembled.map(({ step }) => step),
+		]);
 		if (!manifest.ok)
 			throw new Error(`converge manifest is invalid: ${manifest.detail}`);
 		const atomicCreationGroup = assembled
 			.filter(({ change }) => atomicCreationChanges.has(change))
 			.map(({ step }) => step.stepKey);
 		const atomicCreationGroupKeys = new Set(atomicCreationGroup);
-		for (const { step } of assembled)
+		for (const step of [...adoptionSteps, ...assembled.map(({ step }) => step)])
 			if (
 				!atomicCreationGroupKeys.has(step.stepKey) &&
 				step.dependencyOrder.some((key) => atomicCreationGroupKeys.has(key))
@@ -1286,12 +1368,33 @@ export async function convergePg(
 			run: mintPgConvergeLockedRun(client, run),
 			runId: run.runId,
 			recordAttempt: async () => undefined,
+			verifyDeclaredAdoptionShape: async (executor, step) => {
+				if (executor !== client)
+					throw new Error(
+						'converge adoption verifier received an unexpected executor',
+					);
+				const compared = await compareConvergeMaskedSchema({
+					executor: client,
+					model,
+					schema,
+					casing,
+					externalIndexes,
+				});
+				const address = step.address;
+				return (
+					address?.kind === 'table' &&
+					!compared.changes.some((change) => change.table === address.name)
+				);
+			},
 			...(atomicCreationGroup.length === 0 ? {} : { atomicCreationGroup }),
 		});
 		if (outcome.outcome === 'completed')
 			return {
 				kind: 'applied',
-				applied: orderedChanges.map((change) => change.kind),
+				applied: [
+					...adoptionSteps.map(() => 'adopt_table'),
+					...orderedChanges.map((change) => change.kind),
+				],
 			};
 		if (outcome.outcome === 'partially-applied')
 			return {
@@ -1304,7 +1407,13 @@ export async function convergePg(
 			destroyReason = 'converge received a transport-ambiguous outcome';
 			return { kind: 'transport-ambiguous', detail: outcome.detail };
 		}
-		throw refusal('execution-refused', diff.changes, outcome.detail);
+		throw refusal(
+			outcome.outcome === 'adoption-refused'
+				? 'adoption-refused'
+				: 'execution-refused',
+			diff.changes,
+			outcome.detail,
+		);
 	} finally {
 		lockedConvergeClients.delete(client);
 		if (locked) {

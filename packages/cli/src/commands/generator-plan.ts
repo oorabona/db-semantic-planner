@@ -21,10 +21,13 @@ import {
 	renderPgTableReaddressStatements,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
+import {
+	createPgsqlDeclaredAdoptionStep,
+	pgsqlDeclaredAdoptionDeclaration,
+} from '@dbsp/adapter-pgsql/internal';
 import type { InProcessProvenPlan } from '@dbsp/core';
 import {
 	acquireTransitionLease,
-	canonicalJson,
 	canonicalJsonDigest,
 	transitionPlanDigest,
 	validateNormalizedManagedStepManifest,
@@ -78,15 +81,6 @@ export interface GeneratorPlanMaterial {
 export type GeneratorDurablePlan = InProcessProvenPlan & {
 	readonly generator: GeneratorPlanMaterial;
 };
-
-function adoptionDeclaration(table: TableIR): LedgerPayload {
-	// The live differ is the shape comparator. Persist the exact authored table
-	// shape, rather than a boolean that could later be reinterpreted.
-	const value = JSON.parse(
-		canonicalJson({ kind: 'table', name: table.name, shape: table }),
-	) as LedgerPayload['value'];
-	return { value, digest: canonicalJsonDigest(value) };
-}
 
 function replacementStatements(table: TableIR, schema: string) {
 	const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -515,7 +509,7 @@ export async function runGeneratorPlan(input: {
 						details: `Adopt existing table "${table.name}" after live shape match`,
 						statements: [],
 						adoption: {
-							declaration: adoptionDeclaration(table),
+							declaration: pgsqlDeclaredAdoptionDeclaration(table),
 							shape: table,
 							catalogueIdentity: requiredAdoptionIdentity(
 								adoptionIdentities,
@@ -661,15 +655,19 @@ export async function runGeneratorPlan(input: {
 			}
 			if (change.kind === 'adopt_table' && change.adoption) {
 				lifecycleSteps.push(
-					lifecycleStep({
-						...base,
+					createPgsqlDeclaredAdoptionStep({
+						address: {
+							scope: 'schema',
+							engine: 'postgresql',
+							database,
+							schema,
+							kind: 'table',
+							name: change.table,
+						},
+						table: change.adoption.shape,
 						stepKey: `generator:${base.order}:adoption`,
-						classification: 'non-destructive',
-						selection: { kind: 'adoption', selector: `table:${change.table}` },
-						expectedDeclaration: change.adoption.declaration,
-						expectedCatalogueIdentity: change.adoption.catalogueIdentity,
-						claimKind: 'adopt-intent',
-						lifecycle: { kind: 'adoption', shape: change.adoption.shape },
+						order: base.order,
+						catalogueIdentity: change.adoption.catalogueIdentity,
 					}),
 				);
 				continue;
