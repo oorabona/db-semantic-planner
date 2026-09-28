@@ -894,7 +894,7 @@ describe('generated postcondition verifier', () => {
 
 		expect(queries).toHaveLength(1);
 		expect(queries[0]).toContain(
-			"element_type.oid = CASE WHEN column_type.typsubscript = 'pg_catalog.array_subscript_handler'::pg_catalog.regproc THEN NULLIF(column_type.typelem, 0) END",
+			'element_type.oid = NULLIF(column_type.typelem, 0) AND element_type.typarray = column_type.oid',
 		);
 		expect(queries[0]).toContain(
 			'COALESCE(element_type.typnamespace, column_type.typnamespace)',
