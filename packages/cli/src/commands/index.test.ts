@@ -170,6 +170,29 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toBe('');
 	});
 
+	it('emits exactly one JSON document for migrate required-option failures', () => {
+		const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));
+		const repositoryRoot = fileURLToPath(
+			new URL('../../../../', import.meta.url),
+		);
+		const completed = spawnSync(
+			process.execPath,
+			['--import', 'tsx', cliPath, 'migrate', 'schema.ts', '--format', 'json'],
+			{
+				cwd: repositoryRoot,
+				encoding: 'utf8',
+				env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: undefined },
+			},
+		);
+		expect(completed.status).toBe(1);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			status: 'error',
+			error: expect.stringContaining("required option '-d, --db <url>'"),
+		});
+		expect(completed.stdout.trim().startsWith('{')).toBe(true);
+		expect(completed.stderr).toBe('');
+	});
+
 	it.each([
 		[
 			'apply',
@@ -396,7 +419,7 @@ describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
 		expect(completed.stderr).toContain("unknown command 'plna'");
 	});
 
-	it.each(['push', 'migrate'] as const)(
+	it.each(['push'] as const)(
 		'SC-63: %s remains an unknown command after the greenfield surface removal',
 		(command) => {
 			const cliPath = fileURLToPath(new URL('../index.ts', import.meta.url));

@@ -69,6 +69,23 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
 }
 ```
 
+## From the command line
+
+`dbsp migrate` runs the same convergence from a schema file, for a deployment step that runs before
+the application starts:
+
+```bash
+dbsp preflight --reinitialize --db "$DATABASE_URL" --schema-file ./schema.ts --scope app --out ./adoption.json
+dbsp migrate ./schema.ts --db "$DATABASE_URL" --schema app
+```
+
+The preflight runs once per schema, as in step 1 above. `dbsp migrate` reads `dbCasing` from the
+schema file, takes each external index as `--external-index <model-table>:<index>` (the same naming as
+`externalIndexes` below), and prints the result
+or refusal below as its outcome, with an exit code `dbsp migrate --help` lists (`no-drift` and
+`applied` exit 0). A `recovery-required` refusal lists the run ids to pass to `dbsp reconcile`, the
+runs still executing, and the execution ids no dbsp command resolves, whose owner its detail names.
+
 ## What converge applies
 
 - **New tables**, with the indexes, CHECK constraints and foreign keys declared on them.

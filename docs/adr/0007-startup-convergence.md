@@ -4,7 +4,8 @@
 
 Accepted (2026-09-28). It records the decisions taken on #769 (issuecomment-5840677018,
 issuecomment-5858590586, issuecomment-5860057918) and shipped in #805, #808, #809, #811, #812,
-#813, #814 and #816. It supersedes two rules of ADR 0006, named in "What ADR 0006 no longer says".
+#813, #814 and #816, and the `dbsp migrate` command #769 names. It supersedes three rules of ADR
+0006, named in "What ADR 0006 no longer says".
 
 ## Context
 
@@ -24,6 +25,14 @@ outcome protocol as `dbsp apply`: token-gated managed DDL, a ledger claim and te
 differs from `dbsp apply` in what it admits and in what it records: planning and execution happen in
 one call, nothing is written to the transition journal, and every call plans again from the live
 database.
+
+### `dbsp migrate` is its command-line entry point
+
+`dbsp migrate <schema-file> --db <url>` loads the schema file and calls `convergePg` with `--schema`,
+the file's `dbCasing` export and each `--external-index <model-table:index>`, then reports the result or
+the refusal as a named outcome with its own exit code. It asks for no confirmation and has no dry run:
+`convergePg` plans and executes in one call, and the reviewed path stays `dbsp plan` then
+`dbsp apply`. Exit codes that mean the same as one of `dbsp apply`'s reuse its number.
 
 ### It admits only startup-safe additions
 
@@ -83,8 +92,13 @@ from two entry points: the reviewed `dbsp apply`, and `convergePg`, which admits
 and adoptions above.
 
 **Adoption's grant "belongs in the reviewed plan."** Through `convergePg`, the grant is the caller's
-`adopt: true` declaration, compared and re-verified as above; no plan is presented for review. The
-CLI still presents adoption in the reviewed plan.
+`adopt: true` declaration, compared and re-verified as above; no plan is presented for review.
+`dbsp apply` still presents adoption in the reviewed plan; `dbsp migrate` passes the schema file's
+`adopt: true` to `convergePg` without one.
+
+**"`migrate` is deleted with `push`."** The file-based `migrate apply` and `migrate rollback` stay
+deleted with their migration files. The name returns as `dbsp migrate`, the command-line entry point
+to `convergePg`.
 
 ## Consequences
 

@@ -6,8 +6,9 @@ Accepted. It decides what ADR 0005 left open: the recorded-state model, the atom
 change/record couple, and — because they turn out to be the same decision — how many commands may
 write DDL. It supersedes three rules of ADR 0005, named in "What ADR 0005 no longer says".
 
-> ADR 0007 (Accepted) replaces two rules of this ADR for `convergePg`: that managed DDL has one
-> apply path, and that adoption's grant belongs in the reviewed plan.
+> ADR 0007 (Accepted) replaces three rules of this ADR for `convergePg`: that managed DDL has one
+> apply path, that adoption's grant belongs in the reviewed plan, and that `migrate` is deleted (the
+> name returns as `dbsp migrate`, the command-line entry point to `convergePg`).
 
 Implementation status (#567): accepted and implemented — v3 is the current generated-postcondition
 wire format; persisted v1 and v2 values are refused as `REPLAN_REQUIRED` and must be re-planned.

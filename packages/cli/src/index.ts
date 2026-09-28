@@ -12,6 +12,7 @@ import { applyCommand } from './commands/apply.js';
 import { generateCommand } from './commands/generate.js';
 import { inspectCommand } from './commands/inspect.js';
 import { introspectCommand } from './commands/introspect.js';
+import { migrateCommand } from './commands/migrate.js';
 import { planCommand } from './commands/plan.js';
 import { preflightCommand } from './commands/preflight.js';
 import { reconcileCommand } from './commands/reconcile.js';
@@ -31,6 +32,7 @@ const jsonFormatCommands = new Set([
 	'apply',
 	'inspect',
 	'plan',
+	'migrate',
 	'recover',
 	'reconcile',
 	'release',
@@ -72,6 +74,7 @@ program
 program.addCommand(generateCommand);
 program.addCommand(introspectCommand);
 program.addCommand(planCommand);
+program.addCommand(migrateCommand);
 program.addCommand(preflightCommand);
 program.addCommand(applyCommand);
 program.addCommand(inspectCommand);
