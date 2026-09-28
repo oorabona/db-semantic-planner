@@ -1638,6 +1638,29 @@ describe('generator execution fixture shim', () => {
 		]);
 	});
 
+	it('marks the atomic session compromised when setup rollback is rejected', async () => {
+		const rollbackError = Object.assign(new Error('rollback interrupted'), {
+			code: '57014',
+		});
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql.startsWith('SET LOCAL')) throw new Error('lock timeout failed');
+			if (sql === 'ROLLBACK') throw rollbackError;
+			return { rows: [] };
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(readPgOutcomeSessionCompromise(executor)).toBe(rollbackError);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
+	});
+
 	it('marks an unacknowledged atomic group BEGIN without rolling back', async () => {
 		const executor = atomicExecutor(async (sql) => {
 			if (sql.startsWith('SELECT current_database'))
@@ -1696,23 +1719,31 @@ describe('generator execution fixture shim', () => {
 		expect(executor.query).not.toHaveBeenCalled();
 	});
 
-	it('does not roll back after an acknowledgement-ambiguous atomic COMMIT', async () => {
-		const executor = atomicExecutor(async (sql) => {
-			if (sql.startsWith('SELECT current_database'))
-				return { rows: [{ database_id: 'app' }] };
-			if (sql === 'COMMIT') throw new Error('acknowledgement lost');
-			return { rows: [] };
-		});
-		executePgAdmittedOperation.mockResolvedValue({
-			kind: 'executed-outcome-claim',
-		});
-		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
-			expect.objectContaining({ outcome: 'transport-ambiguous' }),
-		);
-		expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContain(
-			'ROLLBACK',
-		);
-	});
+	it.each([undefined, '40003', '08006'])(
+		'returns transport-ambiguous without rollback after atomic COMMIT %s',
+		async (code) => {
+			const commitError = new Error('acknowledgement unknown');
+			if (code) Object.assign(commitError, { code });
+			const executor = atomicExecutor(async (sql) => {
+				if (sql.startsWith('SELECT current_database'))
+					return { rows: [{ database_id: 'app' }] };
+				if (sql === 'COMMIT') throw commitError;
+				return { rows: [] };
+			});
+			executePgAdmittedOperation.mockResolvedValue({
+				kind: 'executed-outcome-claim',
+			});
+			await expect(
+				executeGeneratorPlan(atomicInput(executor)),
+			).resolves.toEqual(
+				expect.objectContaining({ outcome: 'transport-ambiguous' }),
+			);
+			expect(readPgOutcomeSessionCompromise(executor)).toBe(commitError);
+			expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContain(
+				'ROLLBACK',
+			);
+		},
+	);
 
 	it('treats a server-rejected atomic COMMIT as a deterministic failed group', async () => {
 		const executor = atomicExecutor(async (sql) => {

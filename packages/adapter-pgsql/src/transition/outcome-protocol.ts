@@ -202,9 +202,18 @@ function pgSqlState(error: unknown): string | undefined {
 		: undefined;
 }
 
-/** A SQLSTATE is a server acknowledgement, except for known dead backends. */
+/**
+ * A SQLSTATE is a server acknowledgement, except for `40003`, class `08`,
+ * and dead-backend states `57P01` through `57P03`.
+ */
 function isConfirmedPgServerError(error: unknown): boolean {
-	return pgSqlState(error) !== undefined && !isDeadPgConnectionError(error);
+	const sqlState = pgSqlState(error);
+	return (
+		sqlState !== undefined &&
+		sqlState !== '40003' &&
+		!sqlState.startsWith('08') &&
+		!isDeadPgConnectionError(error)
+	);
 }
 
 function markPgOutcomeSessionCompromised(
@@ -1518,7 +1527,7 @@ async function begin(
 	try {
 		await setPgTransitionLockTimeout(executor, timeout);
 	} catch (error) {
-		await rollback(executor);
+		await rollbackPgOutcomeGroup(executor);
 		throw error;
 	}
 }

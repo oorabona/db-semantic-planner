@@ -1186,22 +1186,44 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
 	});
 
+	it.each(['40003', '08006'])(
+		'keeps COMMIT SQLSTATE %s acknowledgement-ambiguous',
+		async (code) => {
+			const sql: string[] = [];
+			const error = Object.assign(new Error('COMMIT acknowledgement unknown'), {
+				code,
+			});
+			const executor = {
+				query: vi.fn(async (statement: string) => {
+					sql.push(statement);
+					if (statement === 'COMMIT') throw error;
+					return { rows: [] };
+				}),
+			};
+			await expect(
+				withPgTransitionTransaction(executor, async () => 'completed'),
+			).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+			expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+			expect(sql).toEqual(['BEGIN', 'COMMIT']);
+		},
+	);
+
 	it('keeps a SQLSTATE-confirmed COMMIT refusal deterministic', async () => {
 		const sql: string[] = [];
+		const error = Object.assign(new Error('deferred constraint violation'), {
+			code: '23505',
+		});
 		const executor = {
 			query: vi.fn(async (statement: string) => {
 				sql.push(statement);
-				if (statement === 'COMMIT') {
-					const error = new Error('deferred constraint violation');
-					Object.assign(error, { code: '23514' });
-					throw error;
-				}
+				if (statement === 'COMMIT') throw error;
 				return { rows: [] };
 			}),
 		};
 		await expect(
 			withPgTransitionTransaction(executor, async () => 'completed'),
 		).rejects.toBeInstanceOf(PgCommitDeterministicFailureError);
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBeUndefined();
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
 	});
 
@@ -1246,6 +1268,33 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		).resolves.toMatchObject({
 			kind: 'outcome-protocol-refused',
 			reason: 'BEGIN acknowledgement lost',
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('marks a statement-completion-unknown BEGIN as compromised', async () => {
+		const error = Object.assign(new Error('BEGIN completion unknown'), {
+			code: '40003',
+		});
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-completion-unknown'),
+				resolution: {
+					eventId: 'begin-completion-unknown-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'BEGIN completion unknown',
 		});
 		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
 		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
