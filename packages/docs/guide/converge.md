@@ -5,8 +5,9 @@ title: Startup Convergence
 # How to converge a schema at application start
 
 `convergePg` applies the additions your declared model needs to a PostgreSQL schema, from inside
-your application, at every start, with no plan to review. It compares only the tables and sequences
-the model declares. Changes it does not apply unattended are refused while planning; plan those with
+your application, at every start, with no plan to review. It compares the tables and sequences the
+model declares, and the schema's enums. Changes it does not apply unattended are refused while
+planning; plan those with
 `dbsp plan` and `dbsp apply`. The decision and its limits are recorded in
 [ADR 0007](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0007-startup-convergence.md).
 
@@ -20,9 +21,9 @@ the model declares. Changes it does not apply unattended are refused while plann
 
 1. **Once per database, with a role allowed to create schemas and tables:**
    `runPgReinitializePreflight` creates and owns the `dbsp_meta` schema, the schema's ledger and the
-   transition journal. A scope it could not prepare is reported as `failed` or `not-attempted` in the
-   returned report; connection and database errors reject the promise. `convergePg` never creates
-   these tables and refuses `ledger-absent` without them.
+   transition journal. Check both channels it fails through: scopes reported as `failed` or
+   `not-attempted` in the returned report, and a rejected promise. `convergePg` never creates these
+   tables and refuses `ledger-absent` without them.
 2. **At every start, as the same role:** `convergePg(pool, model, { schema })`. When several
    instances start together, one converges and the others get `busy`: retry `busy` after a delay, or
    converge from a single instance.
@@ -76,7 +77,10 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
   [Adopting an existing install](#adopting-an-existing-install)).
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
-or foreign keys to a table that already exists, and it refuses `replace` and `readdress`.
+or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
+create enums or extensions: those the model uses must already exist. An enum in the schema that the
+model does not declare also makes it refuse `unsupported-change`
+([#817](https://github.com/oorabona/db-semantic-planner/issues/817)).
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
@@ -102,8 +106,10 @@ same call commits on its own and can remain after a failure.
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
-`changes` carries planning context and can be empty. Invalid models, connection failures and
-unexpected database errors are thrown as they are, not as refusals.
+`changes` carries planning context and can be empty. An error raised before execution starts — an
+invalid model, a connection failure, a database error while planning — is thrown as it is. A failure
+during execution becomes `execution-refused`, or a `partially-applied` or `transport-ambiguous`
+result.
 
 | `refusal` | Meaning |
 |---|---|
