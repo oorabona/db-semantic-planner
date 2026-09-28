@@ -38,6 +38,7 @@ import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
+import { classifyPgDatabaseWritability } from './database-writability.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import { readTransitionRunIdsForExecutionIds } from './journal.js';
 import {
@@ -66,6 +67,7 @@ export type PgConvergeRefusal =
 	| 'unsupported-server'
 	| 'busy'
 	| 'recovery-required'
+	| 'database-read-only'
 	| 'execution-refused'
 	| 'adoption-refused';
 
@@ -1439,6 +1441,14 @@ export async function convergePg(
 			if (change.kind === 'create_table' && step.address)
 				previouslyCreatedAddresses.add(canonicalJsonDigest(step.address));
 		}
+		const writability = await classifyPgDatabaseWritability(client);
+		if (writability.kind === 'database-read-only')
+			throw new PgConvergeRefusalError(
+				'database-read-only',
+				[],
+				writability.detail,
+			);
+		if (writability.kind === 'unavailable') throw new Error(writability.detail);
 		const planDigest = canonicalJsonDigest({
 			kind: 'postgresql-additive-converge-v1',
 			database,

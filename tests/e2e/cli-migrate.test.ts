@@ -19,6 +19,12 @@ function quoteIdent(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
 }
 
+function readOnlyDatabaseUrl(databaseUrl: string): string {
+	const url = new URL(databaseUrl);
+	url.searchParams.set('options', '-c default_transaction_read_only=on');
+	return url.toString();
+}
+
 function execute(directory: string, args: readonly string[]) {
 	const cliPath = fileURLToPath(
 		new URL('../../packages/cli/src/index.ts', import.meta.url),
@@ -160,6 +166,32 @@ describe('dbsp migrate CLI convergence', { concurrent: false }, () => {
 		expect(JSON.parse(completed.stdout)).toMatchObject({
 			outcome: 'ledger-absent',
 			exitCode: 71,
+		});
+		const table = await pool.query('SELECT to_regclass($1) AS table_name', [
+			`${schema}.cli_migrate_parent`,
+		]);
+		expect(table.rows[0]?.table_name).toBeNull();
+	});
+
+	it('reports database-read-only before creating declared tables', async () => {
+		const { databaseUrl, directory, pool, schema } = await prepared();
+		const completed = execute(directory, [
+			'migrate',
+			'./schema.ts',
+			'--db',
+			readOnlyDatabaseUrl(databaseUrl),
+			'--schema',
+			schema,
+			'--format',
+			'json',
+		]);
+
+		expect(completed.status, `${completed.stdout}\n${completed.stderr}`).toBe(
+			34,
+		);
+		expect(JSON.parse(completed.stdout)).toMatchObject({
+			outcome: 'database-read-only',
+			exitCode: 34,
 		});
 		const table = await pool.query('SELECT to_regclass($1) AS table_name', [
 			`${schema}.cli_migrate_parent`,

@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+import {
+	convergePg,
+	PgConvergeRefusalError,
+	runPgReinitializePreflight,
+} from '@dbsp/adapter-pgsql';
 import type { ModelIR } from '@dbsp/core';
 import pg from 'pg';
 import { expect, it } from 'vitest';
@@ -32,13 +36,37 @@ function readOnlyDatabaseUrl(): string {
 	return url.toString();
 }
 
-function enumModel(schema: string): ModelIR {
+function enumModel(
+	schema: string,
+	values: readonly string[] = ['active', 'pending'],
+): ModelIR {
 	return {
 		tables: new Map(),
 		relations: new Map(),
-		enums: new Map([
-			['status', { name: 'status', schema, values: ['active', 'pending'] }],
+		enums: new Map([['status', { name: 'status', schema, values }]]),
+		getTable: () => undefined,
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function tableModel(table: string): ModelIR {
+	return {
+		tables: new Map([
+			[
+				table,
+				{
+					name: table,
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
 		]),
+		relations: new Map(),
 		getTable: () => undefined,
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
@@ -191,6 +219,16 @@ describeWithE2eCapabilities(
 					standbyState.rows[0]?.recovery,
 					'the topology must still be a physical streaming standby',
 				).toBe(true);
+				await expect(
+					convergePg(
+						topology.standbyPool,
+						tableModel(unique('standby_converge')),
+						{ schema },
+					),
+				).rejects.toMatchObject({
+					name: PgConvergeRefusalError.name,
+					refusal: 'database-read-only',
+				});
 				await expectReadOnlyCommandOutcomes(
 					topology.standbyPool,
 					standbyRun,
@@ -223,6 +261,30 @@ describeWithE2eCapabilities(
 				} finally {
 					client.release();
 				}
+				const missingTable = unique('session_converge');
+				await expect(
+					convergePg(pool, tableModel(missingTable), {
+						schema: sessionSchema,
+					}),
+				).rejects.toMatchObject({
+					name: PgConvergeRefusalError.name,
+					refusal: 'database-read-only',
+				});
+				const absentTable = await pool.query<{ table_name: string | null }>(
+					'SELECT to_regclass($1) AS table_name',
+					[`${sessionSchema}.${missingTable}`],
+				);
+				expect(absentTable.rows[0]?.table_name).toBeNull();
+				const ledgerRows = await pool.query<{ count: number }>(
+					`SELECT ((SELECT count(*) FROM ${quoteIdent(sessionSchema)}.${quoteIdent('dbsp_ledger_event')} WHERE address_name = $1) + (SELECT count(*) FROM ${quoteIdent(sessionSchema)}.${quoteIdent('dbsp_ledger_reservation')} WHERE address_name = $1))::int AS count`,
+					[missingTable],
+				);
+				expect(ledgerRows.rows[0]?.count).toBe(0);
+				await expect(
+					convergePg(pool, enumModel(sessionSchema, ['active']), {
+						schema: sessionSchema,
+					}),
+				).resolves.toEqual({ kind: 'no-drift', applied: [] });
 				await expectReadOnlyCommandOutcomes(pool, sessionRun, sessionSchema);
 				await expect(
 					runRelease('never_seen', {
@@ -233,6 +295,7 @@ describeWithE2eCapabilities(
 					outcome: 'database-read-only',
 					detail: expect.stringContaining('target session is read-only'),
 				});
+				await pool.query('RESET default_transaction_read_only');
 			} finally {
 				await pool
 					.query(`DROP SCHEMA IF EXISTS ${quoteIdent(sessionSchema)} CASCADE`)

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
+import type { PgDatabaseWritability } from './database-writability.js';
 import type {
 	executeGeneratorPlan,
 	GeneratorExecutionResult,
@@ -31,6 +32,9 @@ const mocks = vi.hoisted(() => {
 		lock: vi.fn(async () => ({ kind: 'acquired' })),
 		unlock: vi.fn(async () => true),
 		currency: vi.fn(async () => ({ kind: 'current' })),
+		writability: vi.fn<() => Promise<PgDatabaseWritability>>(async () => ({
+			kind: 'writable',
+		})),
 		introspect,
 		adapter: { introspect },
 	};
@@ -60,6 +64,10 @@ vi.mock('./catalogue-identity.js', () => ({
 }));
 vi.mock('./chain-reader.js', () => ({
 	readPgLedgerAddressChain: (...args: unknown[]) => forward(mocks.chain, args),
+}));
+vi.mock('./database-writability.js', () => ({
+	classifyPgDatabaseWritability: (...args: unknown[]) =>
+		forward(mocks.writability, args),
 }));
 vi.mock('./ledger.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./ledger.js')>()),
@@ -424,6 +432,7 @@ afterEach(() => {
 	mocks.lock.mockResolvedValue({ kind: 'acquired' });
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
+	mocks.writability.mockResolvedValue({ kind: 'writable' });
 	mocks.reservations.mockResolvedValue([]);
 	mocks.runIds.mockResolvedValue(new Map());
 	mocks.introspect.mockResolvedValue(emptyModel());
@@ -559,6 +568,56 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.reservations).toHaveBeenCalledOnce();
 		expect(mocks.runIds).not.toHaveBeenCalled();
+	});
+
+	it('refuses a planned mutation on a read-only database before execution', async () => {
+		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mocks.writability.mockResolvedValue({
+			kind: 'database-read-only',
+			detail: 'target session is read-only',
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'database-read-only',
+			detail: 'target session is read-only',
+		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('surfaces an unavailable writability classification as an error', async () => {
+		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		mocks.writability.mockResolvedValue({
+			kind: 'unavailable',
+			detail: 'PostgreSQL writability could not be read',
+		});
+
+		const error = await convergePg(poolFor(), emptyModel()).catch(
+			(caught: unknown) => caught,
+		);
+		expect(error).toBeInstanceOf(Error);
+		expect(error).not.toBeInstanceOf(PgConvergeRefusalError);
+		expect((error as Error).message).toBe(
+			'PostgreSQL writability could not be read',
+		);
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('does not classify writability when there is no drift', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		expect(mocks.writability).not.toHaveBeenCalled();
 	});
 
 	it('refuses busy before comparison when a mapped predecessor run lock is held', async () => {
