@@ -5,8 +5,8 @@ title: Startup Convergence
 # How to converge a schema at application start
 
 `convergePg` applies the additions your declared model needs to a PostgreSQL schema, from inside
-your application, at every start, with no plan to review. It compares the tables and sequences the
-model declares, and the schema's enums. Changes it does not apply unattended are refused while
+your application, at every start, with no plan to review. It compares the tables, sequences and
+enums the model declares. Changes it does not apply unattended are refused while
 planning; plan those with
 `dbsp plan` and `dbsp apply`. The decision and its limits are recorded in
 [ADR 0007](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0007-startup-convergence.md).
@@ -80,9 +80,8 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
 or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
-create enums or extensions: those the model uses must already exist. An enum in the schema that the
-model does not declare also makes it refuse `unsupported-change`
-([#817](https://github.com/oorabona/db-semantic-planner/issues/817)).
+create enums or extensions: those the model uses must already exist. It cannot yet create a table
+with an enum-typed column ([#819](https://github.com/oorabona/db-semantic-planner/issues/819)).
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
@@ -100,7 +99,7 @@ same call commits on its own and can remain after a failure.
 
 | `result.kind` | Meaning |
 |---|---|
-| `no-drift` | Nothing to apply: no change for the declared tables and sequences, and no enum difference. |
+| `no-drift` | Nothing to apply for the declared tables, sequences and enums. |
 | `applied` | Every planned step committed; `applied` lists their change kinds. |
 | `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |

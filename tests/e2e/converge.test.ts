@@ -17,6 +17,7 @@ import {
 	transitionPlanDigest,
 } from '@dbsp/core';
 import type {
+	EnumIR,
 	LedgerAddress,
 	LedgerReservationRow,
 	ModelIR,
@@ -44,11 +45,15 @@ const domain = 'converge_step_type';
 function model(
 	tables: readonly TableIR[],
 	sequences: readonly SequenceIR[] = [],
+	enums: readonly EnumIR[] = [],
 ): ModelIR {
 	const byName = new Map(tables.map((table) => [table.name, table]));
 	return {
 		tables: byName,
 		sequences: new Map(sequences.map((sequence) => [sequence.name, sequence])),
+		...(enums.length === 0
+			? {}
+			: { enums: new Map(enums.map((enumDef) => [enumDef.name, enumDef])) }),
 		relations: new Map(),
 		getTable: (name) => byName.get(name),
 		getRelation: () => undefined,
@@ -741,6 +746,55 @@ describe('convergePg', () => {
 				`${schema}.undeclared_sequence`,
 			]),
 		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('ignores an undeclared live enum while creating a declared table', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		await pool.query(
+			`CREATE TYPE "${schema}"."unrelated_mood" AS ENUM ('calm', 'busy')`,
+		);
+
+		await expect(
+			convergePg(pool, model([table('enum_scope_items', false)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(
+			managed(address(databaseId, 'table', 'enum_scope_items')),
+		).resolves.toBe(true);
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists', [
+				`${schema}.enum_scope_items`,
+			]),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+		await expect(
+			pool.query(
+				'SELECT enum.enumlabel FROM pg_catalog.pg_enum enum JOIN pg_catalog.pg_type type ON type.oid = enum.enumtypid JOIN pg_catalog.pg_namespace namespace ON namespace.oid = type.typnamespace WHERE namespace.nspname = $1 AND type.typname = $2 ORDER BY enum.enumsortorder',
+				[schema, 'unrelated_mood'],
+			),
+		).resolves.toMatchObject({
+			rows: [{ enumlabel: 'calm' }, { enumlabel: 'busy' }],
+		});
+		await expect(
+			convergePg(pool, model([table('enum_scope_items', false)]), { schema }),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+	});
+
+	it('refuses declared enum label differences', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TYPE "${schema}"."declared_mood" AS ENUM ('calm', 'busy')`,
+		);
+
+		await expect(
+			convergePg(
+				pool,
+				model([], [], [{ name: 'declared_mood', values: ['calm'] }]),
+				{ schema },
+			),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('drop_enum'),
+		});
 	});
 
 	it('creates cyclic foreign keys after both fresh tables', async () => {
