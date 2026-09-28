@@ -198,6 +198,33 @@ const dataDestructiveStep: NormalizedManagedStep = {
 	replayPolicy: 'recorded',
 };
 
+function declaredAdoptionStep(
+	stepKey: string,
+	order: number,
+): NormalizedManagedStep {
+	return {
+		...dataDestructiveStep,
+		stepKey,
+		order,
+		segmentId: `generator-segment-${order}`,
+		claimKind: 'adopt-intent',
+		plannedClaimKeys: [`${stepKey}:root`],
+		statementBundle: { statements: [] },
+		classification: 'non-destructive',
+		selection: { kind: 'adoption', selector: 'table:accounts' },
+		lifecycle: {
+			kind: 'adoption',
+			shape: { name: 'accounts', columns: [], foreignKeys: [], indexes: [] },
+		},
+		expectedDeclaration: { value: { kind: 'table' }, digest: 'declared' },
+		expectedCatalogueIdentity: {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		},
+	};
+}
+
 /** Every generated fixture uses the address-free v3 declaration contract. */
 function v3<const Declaration extends Record<string, unknown>>(
 	declaration: Declaration,
@@ -595,6 +622,113 @@ describe('generator execution fixture shim', () => {
 			outcome: 'execution-failed',
 			detail:
 				'adoption step adoption:0 requires a pool executor for live shape introspection',
+		});
+	});
+
+	it('uses the supplied verifier on the pinned executor before and during adoption', async () => {
+		preflightPgDeclaredAdoption.mockImplementation(async (input) => {
+			await input.shapeMatches(input.executor);
+			return { outcome: 'ready' };
+		});
+		executePgDeclaredAdoption.mockImplementation(async (input) => {
+			await input.shapeMatches(input.executor);
+			return { outcome: 'completed' };
+		});
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			release: vi.fn(),
+		};
+		const verifier = vi.fn(async () => true);
+		await expect(
+			executeGeneratorPlan({
+				pool: executor,
+				run: {} as never,
+				plan: { steps: [declaredAdoptionStep('adoption:0', 0)] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: verifier,
+			}),
+		).resolves.toEqual({ outcome: 'completed' });
+		expect(verifier).toHaveBeenCalledTimes(2);
+		expect(verifier).toHaveBeenNthCalledWith(
+			1,
+			executor,
+			expect.objectContaining({ stepKey: 'adoption:0' }),
+		);
+		expect(verifier).toHaveBeenNthCalledWith(
+			2,
+			executor,
+			expect.objectContaining({ stepKey: 'adoption:0' }),
+		);
+	});
+
+	it('returns adoption-refused when the supplied locked verifier refuses', async () => {
+		preflightPgDeclaredAdoption.mockImplementation(async (input) => {
+			await input.shapeMatches(input.executor);
+			return { outcome: 'ready' };
+		});
+		executePgDeclaredAdoption.mockImplementation(async (input) => ({
+			outcome: (await input.shapeMatches(input.executor))
+				? 'completed'
+				: 'adoption-refused',
+			detail: 'live shape mismatch',
+		}));
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			release: vi.fn(),
+		};
+		const verifier = vi.fn(async () => verifier.mock.calls.length === 1);
+		await expect(
+			executeGeneratorPlan({
+				pool: executor,
+				run: {} as never,
+				plan: { steps: [declaredAdoptionStep('adoption:0', 0)] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: verifier,
+			}),
+		).resolves.toEqual({
+			outcome: 'adoption-refused',
+			detail: 'live shape mismatch',
+		});
+		expect(verifier).toHaveBeenCalledTimes(2);
+	});
+
+	it('returns adoption-refused when a later adoption refuses after completion', async () => {
+		preflightPgDeclaredAdoption.mockResolvedValue({ outcome: 'ready' });
+		executePgDeclaredAdoption
+			.mockResolvedValueOnce({ outcome: 'completed' })
+			.mockResolvedValueOnce({
+				outcome: 'adoption-refused',
+				detail: 'live shape mismatch',
+			});
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			release: vi.fn(),
+		};
+		await expect(
+			executeGeneratorPlan({
+				pool: executor,
+				run: {} as never,
+				plan: {
+					steps: [
+						declaredAdoptionStep('adoption:0', 0),
+						declaredAdoptionStep('adoption:1', 1),
+					],
+				},
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: async () => true,
+			}),
+		).resolves.toEqual({
+			outcome: 'adoption-refused',
+			detail: 'live shape mismatch',
 		});
 	});
 

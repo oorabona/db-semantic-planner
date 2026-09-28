@@ -1,8 +1,12 @@
 import { createHash } from 'node:crypto';
+import { canonicalJson, canonicalJsonDigest } from '@dbsp/core';
 import type {
+	CatalogueIdentity,
 	DeclarableResourceAddress,
 	LedgerClaimKind,
+	LedgerPayload,
 	NormalizedManagedStep,
+	TableIR,
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
 import { splitCheckConstraintState } from '../check-expression.js';
@@ -1172,5 +1176,49 @@ export function createPgsqlGeneratedManagedStep(input: {
 		requiresVacancy: createsAddress(input.change),
 		...(expectedDeclaration === undefined ? {} : { expectedDeclaration }),
 		replayPolicy: classification === 'removal' ? 'fresh-live-only' : 'recorded',
+	};
+}
+
+/**
+ * The live differ is the shape comparator. Persist the exact authored table
+ * shape, rather than a boolean that could later be reinterpreted.
+ */
+export function pgsqlDeclaredAdoptionDeclaration(
+	table: TableIR,
+): LedgerPayload {
+	const value = JSON.parse(
+		canonicalJson({ kind: 'table', name: table.name, shape: table }),
+	) as LedgerPayload['value'];
+	return { value, digest: canonicalJsonDigest(value) };
+}
+
+/**
+ * Create the persisted, token-gated declaration that admits an already-live
+ * table into the managed ledger.  It intentionally mirrors the historical
+ * generator lifecycle material so CLI plans retain their byte representation.
+ */
+export function createPgsqlDeclaredAdoptionStep(input: {
+	readonly address: Address;
+	readonly table: TableIR;
+	readonly stepKey: string;
+	readonly order: number;
+	readonly catalogueIdentity: CatalogueIdentity;
+}): NormalizedManagedStep {
+	return {
+		stepKey: input.stepKey,
+		order: input.order,
+		segmentId: `generator-segment-${input.order}`,
+		dependencyOrder: [],
+		address: input.address,
+		claimKind: 'adopt-intent',
+		plannedClaimKeys: [`${input.stepKey}:root`],
+		statementBundle: { statements: [] },
+		classification: 'non-destructive',
+		requiresVacancy: false,
+		selection: { kind: 'adoption', selector: `table:${input.table.name}` },
+		expectedDeclaration: pgsqlDeclaredAdoptionDeclaration(input.table),
+		expectedCatalogueIdentity: input.catalogueIdentity,
+		lifecycle: { kind: 'adoption', shape: input.table },
+		replayPolicy: 'recorded',
 	};
 }

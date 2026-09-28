@@ -8,6 +8,7 @@ const generator = vi.hoisted(() => ({
 	createPgsqlAdapter: vi.fn(),
 	generateMigrationSQL: vi.fn(),
 	loadSchema: vi.fn(),
+	readPgCatalogueIdentity: vi.fn(),
 }));
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => ({
@@ -15,6 +16,7 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => ({
 	comparePgsqlDatabaseSchema: generator.comparePgsqlDatabaseSchema,
 	createPgsqlAdapter: generator.createPgsqlAdapter,
 	generateMigrationSQL: generator.generateMigrationSQL,
+	readPgCatalogueIdentity: generator.readPgCatalogueIdentity,
 }));
 
 vi.mock('../utils/db-utils.js', () => ({
@@ -102,6 +104,115 @@ describe('generated managed-step dependencies', () => {
 		).rejects.toThrow(
 			'generator planning refuses create_table table.primaryKey: missing typed columns',
 		);
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
+	it('emits the a08db11d adoption step byte-for-byte', async () => {
+		const pool = {
+			end: vi.fn(),
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+		};
+		const shape = {
+			name: 'legacy_orders',
+			adopt: true as const,
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'code', type: 'integer', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		generator.loadSchema.mockResolvedValue({
+			model: { tables: new Map([[shape.name, shape]]) },
+		});
+		generator.createDbConnection.mockResolvedValue({ pool });
+		generator.createPgsqlAdapter.mockReturnValue({});
+		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+			changes: [],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		});
+		generator.readPgCatalogueIdentity.mockResolvedValue({
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '42' },
+			},
+		});
+
+		const result = await runGeneratorPlan({
+			db: 'postgres://unused',
+			schemaFile: 'schema.ts',
+			dryRun: true,
+		});
+
+		expect(result.plan?.steps).toEqual([
+			{
+				stepKey: 'generator:0:adoption',
+				order: 0,
+				segmentId: 'generator-segment-0',
+				dependencyOrder: [],
+				address: {
+					scope: 'schema',
+					engine: 'postgresql',
+					database: 'app',
+					schema: 'public',
+					kind: 'table',
+					name: 'legacy_orders',
+				},
+				claimKind: 'adopt-intent',
+				plannedClaimKeys: ['generator:0:adoption:root'],
+				statementBundle: { statements: [] },
+				classification: 'non-destructive',
+				requiresVacancy: false,
+				selection: { kind: 'adoption', selector: 'table:legacy_orders' },
+				expectedDeclaration: {
+					value: {
+						kind: 'table',
+						name: 'legacy_orders',
+						shape: {
+							name: 'legacy_orders',
+							adopt: true,
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'code', type: 'integer', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+					digest:
+						'59b6dac697de619f3bd777db71859ead244ec0a76b3bdb6a22a19ce601f0dd34',
+				},
+				expectedCatalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
+				lifecycle: {
+					kind: 'adoption',
+					shape: {
+						name: 'legacy_orders',
+						adopt: true,
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'code', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+				replayPolicy: 'recorded',
+			},
+		]);
 		expect(pool.end).toHaveBeenCalledOnce();
 	});
 
