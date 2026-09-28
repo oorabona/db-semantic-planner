@@ -550,24 +550,35 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 		const { pool, schemas: names } = await fixture(
 			unique('canonical_default'),
 			unique('snake_default'),
+			unique('snake_physical_table'),
 		);
 		for (const scenario of [
 			{
 				schema: names[0]!,
 				table: 'canonical_default',
+				liveTable: 'canonical_default',
 				declaredColumn: 'value',
 				liveColumn: 'value',
 			},
 			{
 				schema: names[1]!,
 				table: 'snake_default',
+				liveTable: 'snake_default',
 				declaredColumn: 'camelValue',
 				liveColumn: 'camel_value',
 				dbCasing: 'snake_case' as const,
 			},
+			{
+				schema: names[2]!,
+				table: 'legacyOrders',
+				liveTable: 'legacy_orders',
+				declaredColumn: 'orderCode',
+				liveColumn: 'order_code',
+				dbCasing: 'snake_case' as const,
+			},
 		]) {
 			await pool.query(
-				`CREATE TABLE ${quote(scenario.schema)}.${quote(scenario.table)} (${quote(scenario.liveColumn)} text NOT NULL DEFAULT 'active')`,
+				`CREATE TABLE ${quote(scenario.schema)}.${quote(scenario.liveTable)} (${quote(scenario.liveColumn)} text NOT NULL DEFAULT 'active')`,
 			);
 			const schemaFile = await adoptionDefaultSchemaFile({
 				table: scenario.table,
@@ -584,7 +595,10 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			generatorSchemaFiles.set(planned, schemaFile);
 			const reviewed = generatorPlan(planned);
 			expect(reviewed.plan.generator.changes).toContainEqual(
-				expect.objectContaining({ kind: 'adopt_table', table: scenario.table }),
+				expect.objectContaining({
+					kind: 'adopt_table',
+					table: scenario.liveTable,
+				}),
 			);
 			await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
 				outcome: 'completed',
@@ -592,7 +606,7 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			await expect(
 				pool.query(
 					`SELECT event_kind FROM ${quote(scenario.schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
-					[scenario.table],
+					[scenario.liveTable],
 				),
 			).resolves.toMatchObject({ rows: [{ event_kind: 'adopt' }] });
 		}

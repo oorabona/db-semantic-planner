@@ -17,6 +17,7 @@ import {
 	createPgTransitionRunPersister,
 	generatedPostconditionForChange,
 	generateMigrationSQL,
+	getNamingPluginForDbCasing,
 	readPgCatalogueIdentity,
 	renderPgTableReaddressStatements,
 	type SchemaDiff,
@@ -324,6 +325,69 @@ function changeTargetsDeclaredTable(
 	]).has(change.kind);
 }
 
+/** Keep generator persistence in the same phase order as PostgreSQL migration SQL. */
+function getGeneratorPhase(
+	kind: SchemaDiff['changes'][number]['kind'],
+): number {
+	switch (kind) {
+		case 'drop_foreign_key':
+		case 'drop_check_constraint':
+			return 0;
+		case 'drop_index':
+			return 1;
+		case 'drop_column':
+			return 2;
+		case 'drop_primary_key':
+			return 3;
+		case 'drop_table':
+		case 'drop_enum':
+		case 'drop_extension':
+		case 'drop_sequence':
+			return 4;
+		case 'create_enum':
+		case 'create_extension':
+		case 'create_sequence':
+			return 5;
+		case 'create_table':
+		case 'readdress_table':
+			return 6;
+		case 'add_column':
+			return 7;
+		case 'alter_sequence':
+		case 'alter_column_type':
+		case 'alter_column_nullable':
+		case 'alter_column_default':
+		case 'alter_column_collation':
+		case 'alter_column_identity':
+		case 'alter_column_auto_increment':
+			return 8;
+		case 'alter_column_unique':
+		case 'add_primary_key':
+			return 9;
+		case 'create_index':
+			return 10;
+		case 'add_foreign_key':
+			return 11;
+		case 'alter_foreign_key':
+			return 12;
+		case 'add_check_constraint':
+			return 13;
+		case 'alter_enum_add_value':
+			return 14;
+		case 'add_comment':
+		case 'drop_comment':
+			return 15;
+		case 'validate_constraint':
+			return 16;
+		case 'enable_rls':
+		case 'disable_rls':
+			return 17;
+		case 'create_policy':
+		case 'drop_policy':
+			return 18;
+	}
+}
+
 function requiredAdoptionIdentity(
 	identities: ReadonlyMap<string, CatalogueIdentity>,
 	table: string,
@@ -401,10 +465,19 @@ export async function runGeneratorPlan(input: {
 	readonly dryRun?: boolean;
 }): Promise<PlanResult> {
 	const loaded = await loadSchema(input.schemaFile);
+	const dbCasing = loaded.dbCasing ?? 'preserve';
+	const naming = getNamingPluginForDbCasing(dbCasing);
+	for (const table of loaded.model.tables.values()) {
+		if (table.replace !== true) continue;
+		const physicalName = naming.toDatabase(table.name);
+		if (physicalName !== table.name)
+			throw new Error(
+				`generator planning refuses replacement ${table.name}: dbCasing addresses physical table ${physicalName}; replacement requires preserve casing`,
+			);
+	}
 	const { pool } = await createDbConnection(input.db);
 	try {
 		const schema = input.schema ?? 'public';
-		const dbCasing = loaded.dbCasing ?? 'preserve';
 		const diff = await comparePgsqlDatabaseSchema(
 			createPgsqlAdapter(pool),
 			loaded.model,
@@ -451,33 +524,42 @@ export async function runGeneratorPlan(input: {
 				planDigest: null,
 			};
 		}
+		const adoptionPhysicalNames = new Map<string, string>();
 		const adoptionMismatches = new Set<string>();
 		for (const table of loaded.model.tables.values()) {
 			if (table.adopt !== true) continue;
+			const physicalName = naming.toDatabase(table.name);
+			adoptionPhysicalNames.set(table.name, physicalName);
 			const compared = await comparePgsqlDeclaredAdoptionSchema({
 				executor: pool,
 				model: modelForDeclaredAdoption(table),
 				schema,
 				dbCasing,
 			});
-			if (compared.changes.length > 0) adoptionMismatches.add(table.name);
+			if (compared.changes.length > 0) adoptionMismatches.add(physicalName);
 		}
 		const database = await databaseId(pool);
 		const adoptionIdentities = new Map<string, CatalogueIdentity>();
 		for (const table of loaded.model.tables.values()) {
-			if (table.adopt !== true || adoptionMismatches.has(table.name)) continue;
+			const physicalName = adoptionPhysicalNames.get(table.name);
+			if (
+				table.adopt !== true ||
+				physicalName === undefined ||
+				adoptionMismatches.has(physicalName)
+			)
+				continue;
 			const live = await readPgCatalogueIdentity(pool, {
 				engine: 'postgresql',
 				database,
 				schema: input.schema ?? 'public',
 				kind: 'table',
-				name: table.name,
+				name: physicalName,
 			});
 			if (!live?.catalogueIdentity)
 				throw new Error(
-					`declared adoption for ${table.name} refuses absent live identity`,
+					`declared adoption for ${physicalName} refuses absent live identity`,
 				);
-			adoptionIdentities.set(table.name, live.catalogueIdentity);
+			adoptionIdentities.set(physicalName, live.catalogueIdentity);
 		}
 		// A declared lifecycle request owns every change at that address. Adoption
 		// is a refusal rather than a mutation; replacement is its own reviewed
@@ -489,11 +571,20 @@ export async function runGeneratorPlan(input: {
 					![...loaded.model.tables.values()].some(
 						(table) =>
 							(table.adopt === true || table.replace === true) &&
-							changeTargetsDeclaredTable(change, table.name),
+							changeTargetsDeclaredTable(
+								change,
+								table.adopt === true
+									? (adoptionPhysicalNames.get(table.name) ?? table.name)
+									: table.name,
+							),
 					),
 			),
 		};
-		const ordinaryChanges = executableDiff.changes.map((change) => ({
+		const phaseOrderedChanges = [...executableDiff.changes].sort(
+			(left, right) =>
+				getGeneratorPhase(left.kind) - getGeneratorPhase(right.kind),
+		);
+		const ordinaryChanges = phaseOrderedChanges.map((change) => ({
 			kind: change.kind,
 			table: change.table,
 			...(change.column ? { column: change.column } : {}),
@@ -520,41 +611,54 @@ export async function runGeneratorPlan(input: {
 			...(dbCasing === 'preserve' ? {} : { dbCasing }),
 			changes: [
 				...ordinaryChanges,
-				...[...loaded.model.tables.values()]
-					.filter((table) => adoptionMismatches.has(table.name))
-					.map((table) => ({
-						kind: 'adoption_refused',
-						table: table.name,
-						classification: 'non-destructive' as const,
-						details: `Refuse adoption of table "${table.name}": live shape does not match declaration`,
-						statements: [],
-					})),
+				...[...loaded.model.tables.values()].flatMap((table) => {
+					const physicalName = adoptionPhysicalNames.get(table.name);
+					if (
+						physicalName === undefined ||
+						!adoptionMismatches.has(physicalName)
+					)
+						return [];
+					return [
+						{
+							kind: 'adoption_refused',
+							table: physicalName,
+							classification: 'non-destructive' as const,
+							details: `Refuse adoption of table "${physicalName}": live shape does not match declaration`,
+							statements: [],
+						},
+					];
+				}),
 				// `comparePgsqlDatabaseSchema` has just compared each side through
 				// the established live canonicalisation path. An adopted table is
 				// admitted only when that comparison has no remaining change for it.
-				...[...loaded.model.tables.values()]
-					.filter(
-						(table) =>
-							table.adopt === true &&
-							!diff.changes.some((change) =>
-								changeTargetsDeclaredTable(change, table.name),
-							),
+				...[...loaded.model.tables.values()].flatMap((table) => {
+					const physicalName = adoptionPhysicalNames.get(table.name);
+					if (
+						table.adopt !== true ||
+						physicalName === undefined ||
+						diff.changes.some((change) =>
+							changeTargetsDeclaredTable(change, physicalName),
+						)
 					)
-					.map((table) => ({
-						kind: 'adopt_table',
-						table: table.name,
-						classification: 'non-destructive' as const,
-						details: `Adopt existing table "${table.name}" after live shape match`,
-						statements: [],
-						adoption: {
-							declaration: pgsqlDeclaredAdoptionDeclaration(table),
-							shape: table,
-							catalogueIdentity: requiredAdoptionIdentity(
-								adoptionIdentities,
-								table.name,
-							),
+						return [];
+					return [
+						{
+							kind: 'adopt_table',
+							table: physicalName,
+							classification: 'non-destructive' as const,
+							details: `Adopt existing table "${physicalName}" after live shape match`,
+							statements: [],
+							adoption: {
+								declaration: pgsqlDeclaredAdoptionDeclaration(table),
+								shape: table,
+								catalogueIdentity: requiredAdoptionIdentity(
+									adoptionIdentities,
+									physicalName,
+								),
+							},
 						},
-					})),
+					];
+				}),
 				...[...loaded.model.tables.values()]
 					.filter((table) => table.replace === true)
 					.map((table) => ({
@@ -575,7 +679,7 @@ export async function runGeneratorPlan(input: {
 			step: NormalizedManagedStep;
 			change: SchemaDiff['changes'][number];
 		}> = [];
-		for (const [changeIndex, change] of executableDiff.changes.entries()) {
+		for (const [changeIndex, change] of phaseOrderedChanges.entries()) {
 			const generated = ordinaryChanges[changeIndex];
 			if (!generated)
 				throw new Error(
@@ -692,22 +796,27 @@ export async function runGeneratorPlan(input: {
 				continue;
 			}
 			if (change.kind === 'adopt_table' && change.adoption) {
-				lifecycleSteps.push(
-					createPgsqlDeclaredAdoptionStep({
-						address: {
-							scope: 'schema',
-							engine: 'postgresql',
-							database,
-							schema,
-							kind: 'table',
-							name: change.table,
-						},
-						table: change.adoption.shape,
-						stepKey: `generator:${base.order}:adoption`,
-						order: base.order,
-						catalogueIdentity: change.adoption.catalogueIdentity,
-					}),
-				);
+				const adoptionStep = createPgsqlDeclaredAdoptionStep({
+					address: {
+						scope: 'schema',
+						engine: 'postgresql',
+						database,
+						schema,
+						kind: 'table',
+						name: change.table,
+					},
+					table: change.adoption.shape,
+					stepKey: `generator:${base.order}:adoption`,
+					order: base.order,
+					catalogueIdentity: change.adoption.catalogueIdentity,
+				});
+				lifecycleSteps.push({
+					...adoptionStep,
+					selection: {
+						kind: 'adoption',
+						selector: `table:${change.table}`,
+					},
+				});
 				continue;
 			}
 			lifecycleSteps.push(
