@@ -3801,6 +3801,26 @@ describe('FK enhancements — migration SQL', () => {
 		);
 	});
 
+	it('uses the same physical sequence statement as generateDDL', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['orderNumberSeq', { name: 'orderNumberSeq' }]]),
+		);
+
+		const ddl = generateDDL(schema, { naming: camelCaseNaming });
+		const migration = generateMigrationSQL(
+			compareSchemata(schema, new ModelIRImpl(new Map(), new Map()), {
+				dbCasing: 'snake_case',
+			}),
+		);
+
+		expect(ddl).toContain('CREATE SEQUENCE "order_number_seq";');
+		expect(migration).toContain('CREATE SEQUENCE "order_number_seq";');
+	});
+
 	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {
 		const table = makeTable('orders', [
 			makeCol({ name: 'user_id', type: 'integer' }),

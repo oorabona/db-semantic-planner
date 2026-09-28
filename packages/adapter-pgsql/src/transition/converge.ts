@@ -17,6 +17,7 @@ import type {
 	LedgerHome,
 	ModelIR,
 	NormalizedManagedStep,
+	SequenceIR,
 	TableIR,
 	TransitionRunMetadata,
 } from '@dbsp/types';
@@ -37,6 +38,7 @@ import {
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import { physicalizeDeclaredSequences } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
@@ -754,10 +756,10 @@ async function assertExistingDeclaredSequencesManaged(
 	client: PoolClient,
 	database: string,
 	schema: string,
-	model: ModelIR,
+	sequences: ReadonlyMap<string, SequenceIR>,
 	createdSequenceAddresses: ReadonlySet<string>,
 ): Promise<void> {
-	for (const sequence of model.sequences?.values() ?? []) {
+	for (const sequence of sequences.values()) {
 		const address = generatedAddress(
 			{
 				kind: 'create_sequence',
@@ -789,24 +791,8 @@ async function assertExistingDeclaredSequencesManaged(
 function assertDeclaredSequenceNamesPreserved(
 	model: ModelIR,
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
-): void {
-	for (const [key, sequence] of model.sequences ?? []) {
-		if (key !== sequence.name)
-			throw refusal(
-				'unsupported-change',
-				[],
-				`converge refuses declared sequence map key ${key}: SequenceIR.name is ${sequence.name}`,
-			);
-		for (const name of [key, sequence.name]) {
-			const physicalName = naming.toDatabase(name);
-			if (physicalName !== name)
-				throw refusal(
-					'unsupported-change',
-					[],
-					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}; see #803`,
-				);
-		}
-	}
+): Map<string, SequenceIR> {
+	return physicalizeDeclaredSequences(model.sequences, naming);
 }
 
 function sameColumnSet(
@@ -1113,7 +1099,10 @@ export async function convergePg(
 				);
 		}
 		const database = await databaseId(client);
-		assertDeclaredSequenceNamesPreserved(model, naming);
+		const declaredSequences = assertDeclaredSequenceNamesPreserved(
+			model,
+			naming,
+		);
 		const diff = await compareConvergeMaskedSchema({
 			executor: client,
 			model,
@@ -1178,7 +1167,7 @@ export async function convergePg(
 			client,
 			database,
 			schema,
-			model,
+			declaredSequences,
 			createdSequenceAddresses,
 		);
 		const rejected = diff.changes.filter(

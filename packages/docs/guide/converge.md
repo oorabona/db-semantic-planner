@@ -89,8 +89,12 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
 ## What converge applies
 
 - **New tables**, with the indexes, CHECK constraints and foreign keys declared on them.
-- **New sequences.** A sequence's declared name must be its physical name: a name `dbCasing` would
-  change is refused.
+- **New sequences.** A sequence is created under its physical name, the declared name mapped through
+  `dbCasing` like a table's (`orderNumberSeq` becomes `order_number_seq` under `snake_case`). A raw
+  `nextval(...)` default is not rewritten, so it names the physical sequence. When a live sequence
+  still carries the raw declared name from an earlier version and the physical one does not exist,
+  converge throws before writing anything; the error message gives the schema-qualified
+  `ALTER SEQUENCE … RENAME TO …` that fixes it.
 - **New columns on tables dbsp already manages**, within the rules below.
 - **Adoption** of existing tables you mark `adopt: true` (see
   [Adopting an existing install](#adopting-an-existing-install)).

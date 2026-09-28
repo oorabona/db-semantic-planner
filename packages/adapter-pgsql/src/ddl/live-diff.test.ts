@@ -132,6 +132,16 @@ function makeModelWithEnums(
 	);
 }
 
+function makeModelWithSequences(names: readonly string[]): ModelIR {
+	return new ModelIRImpl(
+		new Map(),
+		new Map(),
+		undefined,
+		undefined,
+		new Map(names.map((name) => [name, { name }])),
+	);
+}
+
 function normalizeSql(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
@@ -151,6 +161,7 @@ class FakeLiveDiffClient {
 		readonly adoptionColumns?: readonly Record<string, unknown>[],
 		readonly adoptionForeignKeys: readonly Record<string, unknown>[] = [],
 		readonly adoptionIndexes: readonly Record<string, unknown>[] = [],
+		readonly adoptionSequences: readonly Record<string, unknown>[] = [],
 	) {}
 
 	async query(
@@ -241,6 +252,12 @@ class FakeLiveDiffClient {
 			return {
 				rows: this.adoptionIndexes,
 				rowCount: this.adoptionIndexes.length,
+			};
+		}
+		if (normalized.includes('FROM pg_sequences s')) {
+			return {
+				rows: this.adoptionSequences,
+				rowCount: this.adoptionSequences.length,
 			};
 		}
 
@@ -498,6 +515,111 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
+	it('retains only a legacy raw declared sequence when its physical name is absent', async () => {
+		const desired = makeModelWithSequences(['orderNumberSeq']);
+		const sequence = (name: string) => ({
+			name,
+			start_value: '1',
+			increment_by: '1',
+			min_value: '1',
+			max_value: '9223372036854775807',
+			cycle: false,
+		});
+		const compare = (sequences: readonly Record<string, unknown>[]) =>
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: new FakeLiveDiffPool(
+					new FakeLiveDiffClient('', false, [], [], [], sequences),
+				),
+				model: desired,
+				schema: 'tenant_a',
+				dbCasing: 'snake_case',
+			});
+
+		await expect(compare([sequence('orderNumberSeq')])).rejects.toThrow(
+			'ALTER SEQUENCE "tenant_a"."orderNumberSeq" RENAME TO "order_number_seq"',
+		);
+		await expect(
+			compare([sequence('orderNumberSeq'), sequence('order_number_seq')]),
+		).resolves.toMatchObject({ changes: [] });
+		await expect(
+			compare([sequence('order_number_seq')]),
+		).resolves.toMatchObject({
+			changes: [],
+		});
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: new FakeLiveDiffPool(
+					new FakeLiveDiffClient(
+						'',
+						false,
+						[],
+						[],
+						[],
+						[sequence('orderNumberSeq')],
+					),
+				),
+				model: desired,
+				schema: 'tenant_a',
+				dbCasing: 'preserve',
+			}),
+		).resolves.toMatchObject({ changes: [] });
+	});
+
+	it('adds the default schema only to legacy sequence errors', async () => {
+		const desired = makeModelWithSequences(['orderNumberSeq']);
+		const legacyAdapter = adapterForPool(
+			new FakeLiveDiffPool(
+				new FakeLiveDiffClient(
+					'',
+					false,
+					[],
+					[],
+					[],
+					[
+						{
+							name: 'orderNumberSeq',
+							start_value: '1',
+							increment_by: '1',
+							min_value: '1',
+							max_value: '9223372036854775807',
+							cycle: false,
+						},
+					],
+				),
+			),
+		);
+		await expect(
+			comparePgsqlDatabaseSchema(legacyAdapter, desired, {
+				canonicalizeExpressions: false,
+				dbCasing: 'snake_case',
+			}),
+		).rejects.toThrow(
+			'ALTER SEQUENCE "public"."orderNumberSeq" RENAME TO "order_number_seq"',
+		);
+
+		const nonLegacyAdapter = adapterForPool(
+			new FakeLiveDiffPool(new FakeLiveDiffClient('', false)),
+		);
+		const original = new Error('comparison failure');
+		const malformed = makeModelWithSequences([]);
+		Object.defineProperty(malformed, 'sequences', {
+			value: new Proxy(new Map(), {
+				get(target, property) {
+					if (property === Symbol.iterator)
+						return () => {
+							throw original;
+						};
+					return Reflect.get(target, property, target);
+				},
+			}),
+		});
+		await expect(
+			comparePgsqlDatabaseSchema(nonLegacyAdapter, malformed, {
+				canonicalizeExpressions: false,
+			}),
+		).rejects.toBe(original);
+	});
+
 	it('uses the declaration-scoped adoption comparison for canonical defaults and casing', async () => {
 		const bigintColumn = {
 			table_name: 'legacy',

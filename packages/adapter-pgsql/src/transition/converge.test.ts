@@ -1,9 +1,14 @@
-import type { ModelIR, TableIR } from '@dbsp/types';
+import type { DbCasing, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
+import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import {
+	physicalizeDeclaredSequences,
+	SequenceNameMapKeyMismatchError,
+} from '../sequence-name.js';
 import type { PgDatabaseWritability } from './database-writability.js';
 import type {
 	executeGeneratorPlan,
@@ -57,7 +62,7 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 		const input = args[0] as {
 			readonly model: ModelIR;
 			readonly schema: string;
-			readonly dbCasing: string;
+			readonly dbCasing: DbCasing;
 			readonly externalIndexMask?: ReadonlySet<string>;
 		};
 		const declaredTables = new Set(
@@ -70,7 +75,21 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 					: table.name,
 			),
 		);
-		const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+		const naming = getNamingPluginForDbCasing(input.dbCasing);
+		const declaredSequences = new Set(
+			physicalizeDeclaredSequences(input.model.sequences, naming).keys(),
+		);
+		const legacyRawSequenceNames = new Set(
+			[...(input.model.sequences?.values() ?? [])]
+				.filter((sequence) => {
+					const databaseName = naming.toDatabase(sequence.name);
+					return (
+						databaseName !== sequence.name &&
+						!declaredSequences.has(sequence.name)
+					);
+				})
+				.map((sequence) => sequence.name),
+		);
 		const declaredEnums = new Set(input.model.enums?.keys() ?? []);
 		const adapter = new Proxy(mocks.adapter, {
 			get(target, property, receiver) {
@@ -85,8 +104,11 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 								),
 							),
 							sequences: new Map(
-								[...(introspected.sequences ?? [])].filter(([name]) =>
-									declaredSequences.has(name),
+								[...(introspected.sequences ?? [])].filter(
+									([name]) =>
+										declaredSequences.has(name) ||
+										(legacyRawSequenceNames.has(name) &&
+											!introspected.sequences?.has(naming.toDatabase(name))),
 								),
 							),
 							enums: new Map(
@@ -1794,17 +1816,23 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('refuses a sequence whose declared name changes under snake_case before comparison', async () => {
+	it('admits a sequence whose declared name changes under snake_case', async () => {
+		const sequenceChange = {
+			...change('create_sequence', {
+				sequence: { name: 'order_number' },
+			}),
+			table: '',
+			column: undefined,
+		};
+		mocks.compare.mockResolvedValue({ changes: [sequenceChange] });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
 		await expect(
 			convergePg(poolFor(), modelWithSequences(['orderNumber']), {
 				dbCasing: 'snake_case',
 			}),
-		).rejects.toMatchObject({
-			refusal: 'unsupported-change',
-			detail: expect.stringContaining('order_number'),
-		});
-		expect(mocks.compare).not.toHaveBeenCalled();
-		expect(mocks.execute).not.toHaveBeenCalled();
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(mocks.compare).toHaveBeenCalledOnce();
 	});
 
 	it.each([
@@ -1820,10 +1848,7 @@ describe('convergePg refusal boundary', () => {
 
 			await expect(
 				convergePg(poolFor(), model, { dbCasing: 'snake_case' }),
-			).rejects.toMatchObject({
-				refusal: 'unsupported-change',
-				detail: expect.stringContaining('order_number'),
-			});
+			).rejects.toBeInstanceOf(SequenceNameMapKeyMismatchError);
 			expect(mocks.compare).not.toHaveBeenCalled();
 		},
 	);
@@ -1834,10 +1859,9 @@ describe('convergePg refusal boundary', () => {
 			sequences: new Map([['order_sequence', { name: 'actual_sequence' }]]),
 		};
 
-		await expect(convergePg(poolFor(), model)).rejects.toMatchObject({
-			refusal: 'unsupported-change',
-			detail: expect.stringContaining('actual_sequence'),
-		});
+		await expect(convergePg(poolFor(), model)).rejects.toBeInstanceOf(
+			SequenceNameMapKeyMismatchError,
+		);
 		expect(mocks.compare).not.toHaveBeenCalled();
 	});
 

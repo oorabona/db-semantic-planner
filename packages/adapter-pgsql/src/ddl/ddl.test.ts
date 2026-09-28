@@ -15,6 +15,10 @@ import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { markEngineCanonicalCheck } from '../expression-provenance.js';
 import { camelCaseNaming } from '../naming-plugin.js';
+import {
+	SequenceNameCollisionError,
+	SequenceNameMapKeyMismatchError,
+} from '../sequence-name.js';
 import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -1877,6 +1881,66 @@ describe('Column enhancements in DDL', () => {
 // ============================================================================
 
 describe('Extensions and sequences in DDL', () => {
+	it('uses the physical sequence name under camelCase naming', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['orderNumberSeq', { name: 'orderNumberSeq' }]]),
+		);
+
+		expect(generateDDL(schema, { naming: camelCaseNaming })).toContain(
+			'CREATE SEQUENCE "order_number_seq";',
+		);
+	});
+
+	it('maps a sequence exactly once for a non-idempotent naming plugin', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			new Map([['orderSeq', { name: 'orderSeq' }]]),
+		);
+		const suffixNaming = {
+			toDatabase: (name: string) => `${name}_physical`,
+			toModel: (name: string) => name,
+		};
+
+		expect(generateDDL(schema, { naming: suffixNaming })).toContain(
+			'CREATE SEQUENCE "orderSeq_physical";',
+		);
+	});
+
+	it.each([
+		[
+			'key/name mismatch',
+			new Map([['a', { name: 'b' }]]),
+			SequenceNameMapKeyMismatchError,
+		],
+		[
+			'physical-name collision',
+			new Map([
+				['orderSeq', { name: 'orderSeq' }],
+				['order_seq', { name: 'order_seq' }],
+			]),
+			SequenceNameCollisionError,
+		],
+	] as const)('refuses a declared sequence %s', (_, sequences, error) => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			sequences,
+		);
+
+		expect(() => generateDDL(schema, { naming: camelCaseNaming })).toThrow(
+			error,
+		);
+	});
+
 	it('should emit CREATE EXTENSION before tables', () => {
 		const model = new ModelIRImpl(
 			new Map([

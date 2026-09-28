@@ -27,6 +27,10 @@ import {
 	identityNaming,
 } from '../naming-plugin.js';
 import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
+import {
+	LegacySequenceNameError,
+	physicalizeDeclaredSequences,
+} from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
@@ -164,7 +168,20 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			naming.toDatabase(table.name),
 		),
 	);
-	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+	const declaredSequences = new Set(
+		physicalizeDeclaredSequences(input.model.sequences, naming).keys(),
+	);
+	const legacyRawSequenceNames = new Set(
+		[...(input.model.sequences?.values() ?? [])]
+			.filter((sequence) => {
+				const databaseName = naming.toDatabase(sequence.name);
+				return (
+					databaseName !== sequence.name &&
+					!declaredSequences.has(sequence.name)
+				);
+			})
+			.map((sequence) => sequence.name),
+	);
 	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
 	const declarationScopedAdapter = new Proxy(adapter, {
 		get(target, property, receiver) {
@@ -201,8 +218,11 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 							),
 							externalTables,
 							sequences: new Map(
-								[...(introspected.sequences ?? [])].filter(([name]) =>
-									declaredSequences.has(name),
+								[...(introspected.sequences ?? [])].filter(
+									([name]) =>
+										declaredSequences.has(name) ||
+										(legacyRawSequenceNames.has(name) &&
+											!introspected.sequences?.has(naming.toDatabase(name))),
 								),
 							),
 							enums: new Map(
@@ -446,16 +466,31 @@ export async function comparePgsqlDatabaseSchema(
 			);
 		}
 	}
-	const diff = compareSchemata(
-		desiredForCompare,
-		dbModelForCompare,
-		toCompareOptions(options, {
-			delegateExpressionCanonicalization:
-				options?.requireExpressionCanonicalization === true &&
-				!useCanonicalizer &&
-				compareCheckConstraints,
-		}),
-	);
+	let diff: SchemaDiff;
+	try {
+		diff = compareSchemata(
+			desiredForCompare,
+			dbModelForCompare,
+			toCompareOptions(options, {
+				delegateExpressionCanonicalization:
+					options?.requireExpressionCanonicalization === true &&
+					!useCanonicalizer &&
+					compareCheckConstraints,
+			}),
+		);
+	} catch (error) {
+		if (
+			error instanceof LegacySequenceNameError &&
+			error.schema === undefined
+		) {
+			throw new LegacySequenceNameError(
+				error.authoredName,
+				error.databaseName,
+				options?.schema ?? 'public',
+			);
+		}
+		throw error;
+	}
 	assertNoRejectedIndexPredicates(
 		canonicalModels.indexPredicateOutcomes ?? [],
 		diff,
