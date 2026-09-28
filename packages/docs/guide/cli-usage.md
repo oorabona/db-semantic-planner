@@ -8,8 +8,8 @@ title: CLI Usage
 plan a change, then apply it: a no-argument `apply` creates, persists, and
 presents a fresh managed run, and an `apply <run-id>` executes exactly that
 replayable recorded run. `dbsp migrate` converges a schema file without review
-and admits only additions and declared adoptions. There is no file-based
-execution command.
+and admits only additions and declared adoptions. There is no migration-file
+`apply` or `rollback` workflow.
 
 ## Managed workflow
 
