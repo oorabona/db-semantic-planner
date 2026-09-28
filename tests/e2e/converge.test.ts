@@ -192,6 +192,32 @@ describe('convergePg', () => {
 		});
 	});
 
+	it('refuses a dropped and recreated managed declared adoption during planning', async () => {
+		const pool = await getTestPool();
+		const name = 'legacy_replaced_after_management';
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "${name}_code_index" ON "${schema}"."${name}" ("code")`,
+		);
+		await expect(
+			convergePg(pool, model([legacyTable(name)]), { schema }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await pool.query(`DROP TABLE "${schema}"."${name}"`);
+		await pool.query(
+			`CREATE TABLE "${schema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "${name}_code_index" ON "${schema}"."${name}" ("code")`,
+		);
+
+		for (let attempt = 0; attempt < 2; attempt += 1)
+			await expect(
+				convergePg(pool, model([legacyTable(name)]), { schema }),
+			).rejects.toMatchObject({ refusal: 'adoption-refused' });
+	});
+
 	it('refuses an absent declared adoption without recording a ledger terminal', async () => {
 		const pool = await getTestPool();
 		const name = 'legacy_absent';

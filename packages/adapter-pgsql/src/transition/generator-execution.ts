@@ -808,9 +808,7 @@ export async function executeGeneratorPlan(input: {
 					continue;
 				}
 				if (adopted.outcome === 'adoption-refused')
-					return completedStepKeys.length === 0
-						? { outcome: 'adoption-refused', detail: adopted.detail }
-						: partial(adopted.detail);
+					return { outcome: 'adoption-refused', detail: adopted.detail };
 				if (adopted.outcome === 'recovery-required') return adopted;
 				if (adopted.outcome === 'transport-ambiguous') return adopted;
 				return { outcome: 'execution-failed', detail: adopted.detail };

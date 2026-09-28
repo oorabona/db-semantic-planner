@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
-import type { GeneratorExecutionResult } from './generator-execution.js';
+import type {
+	executeGeneratorPlan,
+	GeneratorExecutionResult,
+} from './generator-execution.js';
 
 const mocks = vi.hoisted(() => {
 	const introspect = vi.fn<(...args: unknown[]) => Promise<unknown>>(
@@ -16,9 +19,11 @@ const mocks = vi.hoisted(() => {
 		generate: vi.fn<(...args: unknown[]) => readonly string[]>(() => [
 			'CREATE TABLE "users" ()',
 		]),
-		execute: vi.fn<(...args: unknown[]) => Promise<GeneratorExecutionResult>>(
-			async () => ({ outcome: 'completed' }),
-		),
+		execute: vi.fn<
+			(
+				input: Parameters<typeof executeGeneratorPlan>[0],
+			) => Promise<GeneratorExecutionResult>
+		>(async () => ({ outcome: 'completed' })),
 		identity: vi.fn(),
 		chain: vi.fn(async () => ({ events: [] })),
 		reservations: vi.fn(async () => []),
@@ -445,6 +450,97 @@ describe('convergePg refusal boundary', () => {
 			changes: [expect.objectContaining({ kind: 'add_column' })],
 		});
 		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('refuses declared replace before comparison or execution', async () => {
+		const testClient = client();
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const desired = modelWithTables([
+			{
+				name: 'legacy_replace',
+				adopt: true,
+				replace: true,
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+
+		await expect(
+			convergePg(poolFor(testClient), desired),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('replace for legacy_replace'),
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(testClient.query).not.toHaveBeenCalledWith(
+			'SELECT current_database() AS database_id',
+		);
+	});
+
+	it('refuses declared readdress before comparison or execution', async () => {
+		const desired = modelWithTables([
+			{
+				name: 'legacy_readdress',
+				readdress: {
+					from: { name: 'legacy_source' },
+					to: { name: 'legacy_readdress' },
+				},
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+
+		await expect(convergePg(poolFor(), desired)).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining('readdress for legacy_readdress'),
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('uses only the adopting table for the claim-time comparison', async () => {
+		const catalogueIdentity = {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		};
+		const desired = modelWithTables([
+			{
+				name: 'legacy_adoption',
+				adopt: true,
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+			{
+				name: 'unrelated_table',
+				adopt: true,
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue({ catalogueIdentity });
+		mocks.chain.mockResolvedValue({ events: [] });
+		mocks.execute.mockImplementation(async (input) => {
+			const step = input.manifest?.steps[0];
+			if (!step || !input.verifyDeclaredAdoptionShape)
+				throw new Error('expected a declared adoption step and verifier');
+			await input.verifyDeclaredAdoptionShape(input.pool, step);
+			return { outcome: 'completed' };
+		});
+
+		await expect(convergePg(poolFor(), desired)).resolves.toEqual({
+			kind: 'applied',
+			applied: ['adopt_table', 'adopt_table'],
+		});
+		expect(mocks.compare).toHaveBeenCalledTimes(2);
+		const verificationModel = mocks.compare.mock.calls[1]?.[1];
+		expect([...verificationModel.tables.keys()]).toEqual(['legacy_adoption']);
 	});
 
 	it('continues unchanged when its ledger home has no live reservation', async () => {

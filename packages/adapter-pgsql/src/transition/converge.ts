@@ -632,6 +632,17 @@ async function databaseId(client: Queryable): Promise<string> {
 
 type ManagedCurrent = 'managed' | 'unmanaged' | 'absent';
 
+type DeclaredAdoptionAdmission =
+	| { readonly kind: 'managed' }
+	| {
+			readonly kind: 'unknown';
+			readonly catalogueIdentity: NonNullable<
+				LedgerAddress['catalogueIdentity']
+			>;
+	  }
+	| { readonly kind: 'absent' }
+	| { readonly kind: 'refused' };
+
 /** Read one catalogue identity and classify its corresponding ledger terminal. */
 async function isManagedCurrent(
 	client: PoolClient,
@@ -653,6 +664,65 @@ async function isManagedCurrent(
 		)
 		? 'managed'
 		: 'unmanaged';
+}
+
+/**
+ * Admission for a declared adoption is deliberately narrower than ordinary
+ * ownership: adopt-intent opens only from a projected unknown ledger state.
+ */
+async function declaredAdoptionAdmission(
+	client: PoolClient,
+	address: LedgerAddress,
+): Promise<DeclaredAdoptionAdmission> {
+	const live = await readPgCatalogueIdentity(client, address);
+	if (!live?.catalogueIdentity) return { kind: 'absent' };
+	const chain = await readPgLedgerAddressChain(
+		client,
+		addressHome(address),
+		address,
+	);
+	const state = projectLedgerChain(chain);
+	if (state.kind !== 'projected-ledger-chain') return { kind: 'refused' };
+	if (state.stableState === 'unknown')
+		return { kind: 'unknown', catalogueIdentity: live.catalogueIdentity };
+	if (
+		state.stableState === 'managed' &&
+		isDeepStrictEqual(
+			chain.terminalMember?.catalogueIdentity,
+			live.catalogueIdentity,
+		)
+	)
+		return { kind: 'managed' };
+	return { kind: 'refused' };
+}
+
+function modelForDeclaredAdoption(table: TableIR): ModelIR {
+	const tables = new Map([[table.name, table]]);
+	const relations = new Map();
+	return {
+		tables,
+		relations,
+		getTable: (name) => tables.get(name),
+		getRelation: (name) => relations.get(name),
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function declaredAdoptionTable(
+	model: ModelIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	address: LedgerAddress,
+): TableIR {
+	const table = [...model.tables.values()].find(
+		(candidate) => naming.toDatabase(candidate.name) === address.name,
+	);
+	if (!table)
+		throw new Error(
+			`converge adoption step for ${address.name} has no declared table`,
+		);
+	return table;
 }
 
 async function assertOwnedChange(
@@ -1019,9 +1089,12 @@ function describeFkAutoIndexSpecs(
  * and the journal owner one whose journal attribution cannot be read, then call
  * converge again.
  * A declared table with `adopt: true` is taken into management when it exists,
- * is unmanaged, and exactly matches the declaration after `externalIndexes`
- * masking. Otherwise converge refuses `adoption-refused` before writing
- * anything; set `adopt` only for the one pass over an existing install.
+ * the ledger projects its address as unknown (the only state an adoption claim
+ * opens from), and it matches the declaration exactly after `externalIndexes`
+ * masking. A mismatch found while planning refuses
+ * `adoption-refused` before anything is written. A table that changes while
+ * its adoption runs is refused under its claim and the ledger records that
+ * refused adoption; tables adopted earlier in the same call stay adopted.
  * Tables a run creates and every change on those tables commit together or not
  * at all. A sequence created by the same run commits on its own and can remain
  * after a failure. After a transport-ambiguous outcome, the next call observes
@@ -1087,6 +1160,20 @@ export async function convergePg(
 		await refuseForLiveReservations(client, schema, () => {
 			destroyReason = 'converge could not confirm predecessor run lock release';
 		});
+		for (const table of model.tables.values()) {
+			const directive =
+				table.replace === true
+					? 'replace'
+					: table.readdress === undefined
+						? undefined
+						: 'readdress';
+			if (directive)
+				throw refusal(
+					'unsupported-change',
+					[],
+					`converge refuses declared ${directive} for ${table.name}`,
+				);
+		}
 		const database = await databaseId(client);
 		assertDeclaredSequenceNamesPreserved(model, naming);
 		const diff = await compareConvergeMaskedSchema({
@@ -1117,13 +1204,13 @@ export async function convergePg(
 				kind: 'table' as const,
 				name: physicalName,
 			};
-			if ((await isManagedCurrent(client, address)) === 'managed') continue;
-			const live = await readPgCatalogueIdentity(client, address);
-			if (!live?.catalogueIdentity)
+			const admission = await declaredAdoptionAdmission(client, address);
+			if (admission.kind === 'managed') continue;
+			if (admission.kind !== 'unknown')
 				throw refusal(
 					'adoption-refused',
 					[],
-					`declared adoption for ${physicalName} refuses absent live identity`,
+					`declared adoption for ${physicalName} refuses ledger admission`,
 				);
 			adoptionSteps.push(
 				createPgsqlDeclaredAdoptionStep({
@@ -1131,7 +1218,7 @@ export async function convergePg(
 					table,
 					stepKey: `converge:${adoptionSteps.length}:adoption`,
 					order: adoptionSteps.length,
-					catalogueIdentity: live.catalogueIdentity,
+					catalogueIdentity: admission.catalogueIdentity,
 				}),
 			);
 		}
@@ -1373,17 +1460,19 @@ export async function convergePg(
 					throw new Error(
 						'converge adoption verifier received an unexpected executor',
 					);
+				const address = step.address;
+				if (address?.kind !== 'table') return false;
 				const compared = await compareConvergeMaskedSchema({
 					executor: client,
-					model,
+					model: modelForDeclaredAdoption(
+						declaredAdoptionTable(model, naming, address),
+					),
 					schema,
 					casing,
 					externalIndexes,
 				});
-				const address = step.address;
-				return (
-					address?.kind === 'table' &&
-					!compared.changes.some((change) => change.table === address.name)
+				return !compared.changes.some(
+					(change) => change.table === address.name,
 				);
 			},
 			...(atomicCreationGroup.length === 0 ? {} : { atomicCreationGroup }),

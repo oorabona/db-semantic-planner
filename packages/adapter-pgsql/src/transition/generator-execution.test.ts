@@ -698,7 +698,7 @@ describe('generator execution fixture shim', () => {
 		expect(verifier).toHaveBeenCalledTimes(2);
 	});
 
-	it('reports a partial result when a later adoption refuses after completion', async () => {
+	it('returns adoption-refused when a later adoption refuses after completion', async () => {
 		preflightPgDeclaredAdoption.mockResolvedValue({ outcome: 'ready' });
 		executePgDeclaredAdoption
 			.mockResolvedValueOnce({ outcome: 'completed' })
@@ -727,10 +727,8 @@ describe('generator execution fixture shim', () => {
 				verifyDeclaredAdoptionShape: async () => true,
 			}),
 		).resolves.toEqual({
-			outcome: 'partially-applied',
+			outcome: 'adoption-refused',
 			detail: 'live shape mismatch',
-			completedStepKeys: ['adoption:0'],
-			notStartedStepKeys: ['adoption:1'],
 		});
 	});
 
