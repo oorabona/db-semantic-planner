@@ -844,6 +844,63 @@ describe('generated postcondition verifier', () => {
 		expect(structuralParams).toEqual([[...boundIdentity]]);
 	});
 
+	it('uses the element namespace in column projections only for true arrays', async () => {
+		const queries: string[] = [];
+		const query = vi.fn(async (sql: string) => {
+			if (sql.startsWith('LOCK TABLE ONLY')) return { rows: [] };
+			if (
+				sql.startsWith('SELECT pg_catalog.current_database()') &&
+				sql.includes('attribute.attnum')
+			)
+				return {
+					rows: [
+						{
+							database_name: 'app',
+							relation_kind: 'r',
+							relation_oid: '101',
+							column_name: 'id',
+							attribute_number: 1,
+						},
+					],
+				};
+			if (sql.includes('attribute.attnum = $2')) {
+				queries.push(sql);
+				return {
+					rows: [
+						{
+							relation_kind: 'r',
+							column_name: 'id',
+							column_type: 'integer',
+							column_type_schema: 'pg_catalog',
+							is_not_null: true,
+							column_default: null,
+							generated_sequence_default: false,
+							collation_name: null,
+							identity_kind: '',
+						},
+					],
+				};
+			}
+			return { rows: [] };
+		});
+
+		await expect(
+			verifyGeneratedColumnPostcondition({
+				session: mintGeneratedPostconditionSession({ query }),
+				postcondition: v3Column({ type: 'integer', nullable: false }),
+				address: columnAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'column' });
+
+		expect(queries).toHaveLength(1);
+		expect(queries[0]).toContain(
+			"element_type.oid = CASE WHEN column_type.typsubscript = 'pg_catalog.array_subscript_handler'::pg_catalog.regproc THEN NULLIF(column_type.typelem, 0) END",
+		);
+		expect(queries[0]).toContain(
+			'COALESCE(element_type.typnamespace, column_type.typnamespace)',
+		);
+	});
+
 	it('refuses mismatched scopes before acquiring a relation lock', async () => {
 		const query = vi.fn(async (_sql: string) => ({ rows: [] }));
 		await expect(
