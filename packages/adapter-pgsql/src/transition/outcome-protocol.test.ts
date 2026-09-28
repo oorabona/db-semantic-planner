@@ -1300,7 +1300,27 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
 	});
 
-	it('keeps a SQLSTATE-confirmed BEGIN refusal usable', async () => {
+	it('marks an aborted-transaction BEGIN refusal as compromised', async () => {
+		const error = Object.assign(new Error('BEGIN rejected'), { code: '25P02' });
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await runAdmitted(executor as never, {
+			...request('begin-aborted-transaction'),
+			resolution: {
+				eventId: 'begin-aborted-transaction-observed',
+				eventKind: 'observed',
+			},
+			vacancy: async () => ({ kind: 'vacant' as const }),
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('marks a SQLSTATE-confirmed BEGIN refusal as compromised', async () => {
 		const error = Object.assign(new Error('BEGIN rejected'), { code: '25001' });
 		const executor = {
 			query: vi.fn(async (statement: string) => {
@@ -1316,7 +1336,7 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			},
 			vacancy: async () => ({ kind: 'vacant' as const }),
 		});
-		expect(readPgOutcomeSessionCompromise(executor as never)).toBeUndefined();
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
 		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
 	});
 

@@ -1823,4 +1823,24 @@ describe('generator execution fixture shim', () => {
 			expect(executor.query).not.toHaveBeenCalled();
 		},
 	);
+
+	it('refuses an adoption-refused member before recording or opening an atomic group', async () => {
+		const executor = atomicExecutor();
+		const recordAttempt = vi.fn(async () => undefined);
+		const step: NormalizedManagedStep = {
+			...atomicStep('atomic:0', 0),
+			statementBundle: { statements: [] },
+			lifecycle: { kind: 'adoption-refused' },
+		};
+		await expect(
+			executeGeneratorPlan({
+				...atomicInput(executor, [step]),
+				recordAttempt,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(executor.query).not.toHaveBeenCalled();
+		expect(recordAttempt).not.toHaveBeenCalled();
+	});
 });

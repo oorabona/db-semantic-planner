@@ -124,10 +124,7 @@ function validateAtomicCreationGroup(
 		const { step, manifestIndex } = entry;
 		if (step.classification !== 'non-destructive')
 			return `atomic creation group step ${key} is not non-destructive`;
-		if (
-			step.lifecycle?.kind === 'adoption' ||
-			step.lifecycle?.kind === 'readdress'
-		)
+		if (step.lifecycle)
 			return `atomic creation group step ${key} has unsupported lifecycle ${step.lifecycle.kind}`;
 		positions.push(manifestIndex);
 	}
@@ -535,7 +532,6 @@ export async function executeGeneratorPlan(input: {
 			requiresVacancy: step.requiresVacancy,
 		};
 		return {
-			claim,
 			request: {
 				plan: claim,
 				reservations: [

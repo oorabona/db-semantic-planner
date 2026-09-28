@@ -1521,7 +1521,10 @@ async function begin(
 	try {
 		await executor.query('BEGIN');
 	} catch (error) {
-		markPgOutcomeSessionCompromised(executor, error);
+		compromisedPgOutcomeSessions.set(
+			executor as object,
+			asPgSessionReleaseError(error),
+		);
 		throw error;
 	}
 	try {
