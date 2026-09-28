@@ -30,7 +30,10 @@ import {
 	readGeneratedPostcondition,
 	readGeneratedPostconditionReadBack,
 } from '../ddl/generated-postcondition-reader.js';
-import { withGeneratedPostconditionSession } from '../ddl/generated-postcondition-verifier.js';
+import {
+	type GeneratedPostconditionSession,
+	withGeneratedPostconditionSession,
+} from '../ddl/generated-postcondition-verifier.js';
 import { compareSchemata } from '../ddl/schema-diff.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import {
@@ -41,9 +44,15 @@ import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import type { TransitionJournalQueryable } from './journal.js';
 import {
+	commitPgOutcome,
 	executePgAdmittedOperation,
+	openPgOutcomeGroup,
+	PgCommitAcknowledgementAmbiguousError,
 	type PgLockedRun,
 	type PgOutcomeCheckpointObserver,
+	rollbackPgOutcomeGroup,
+	setPgTransitionLockTimeout,
+	withPgOutcomeSession,
 } from './outcome-protocol.js';
 import { executePgPersistedTableReaddress } from './readdress.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
@@ -96,6 +105,39 @@ export type GeneratorExecutionResult =
 	  }
 	| { readonly outcome: 'transport-ambiguous'; readonly detail: string }
 	| { readonly outcome: 'execution-failed'; readonly detail: string };
+
+function validateAtomicCreationGroup(
+	manifest: ValidatedManagedStepManifest,
+	keys: readonly string[] | undefined,
+): string | undefined {
+	if (!keys || keys.length === 0) return undefined;
+	const steps = managedSteps(manifest);
+	const stepByKey = new Map(steps.map((step) => [step.stepKey, step]));
+	const seen = new Set<string>();
+	for (const key of keys) {
+		if (seen.has(key)) return `atomic creation group repeats step ${key}`;
+		seen.add(key);
+		const step = stepByKey.get(key);
+		if (!step) return `atomic creation group names unknown step ${key}`;
+		if (step.classification !== 'non-destructive')
+			return `atomic creation group step ${key} is not non-destructive`;
+		if (
+			step.lifecycle?.kind === 'adoption' ||
+			step.lifecycle?.kind === 'readdress'
+		)
+			return `atomic creation group step ${key} has unsupported lifecycle ${step.lifecycle.kind}`;
+	}
+	const positions = keys.map((key) =>
+		steps.findIndex((step) => step.stepKey === key),
+	);
+	const first = positions[0];
+	if (
+		first === undefined ||
+		positions.some((position, index) => position !== first + index)
+	)
+		return 'atomic creation group must be contiguous in manifest order';
+	return undefined;
+}
 
 function modelForAdoption(table: TableIR): ModelIR {
 	const tables = new Map([[table.name, table]]);
@@ -431,6 +473,8 @@ export async function executeGeneratorPlan(input: {
 	readonly recordAttempt: (executionId: string) => Promise<void>;
 	/** Test-only admitted-path observation; absent from every CLI invocation. */
 	readonly observer?: PgOutcomeCheckpointObserver;
+	/** Contiguous fresh-object steps that must commit as one PostgreSQL transaction. */
+	readonly atomicCreationGroup?: readonly string[];
 	/** @deprecated Compatibility shim for old direct fixtures. */
 	readonly accepts?: readonly string[];
 	readonly replaces?: readonly string[];
@@ -444,6 +488,14 @@ export async function executeGeneratorPlan(input: {
 	if (!validation.ok)
 		return { outcome: 'execution-failed', detail: validation.detail };
 	const manifest = validation.manifest;
+	const atomicCreationGroupError = validateAtomicCreationGroup(
+		manifest,
+		input.atomicCreationGroup,
+	);
+	if (atomicCreationGroupError)
+		return { outcome: 'execution-failed', detail: atomicCreationGroupError };
+	const atomicCreationGroup = input.atomicCreationGroup ?? [];
+	const atomicCreationKeys = new Set(atomicCreationGroup);
 	const approval: ScopedApprovalSet = input.approval ?? {
 		approvals: (input.accepts ?? []).map((value) => ({ class: value })),
 	};
@@ -461,6 +513,139 @@ export async function executeGeneratorPlan(input: {
 						.filter((step) => !completedStepKeys.includes(step.stepKey))
 						.map((step) => step.stepKey),
 				};
+	const buildCreationOutcome = (
+		step: NormalizedManagedStep,
+		address: LedgerAddress,
+		plannedClaimKey: string,
+		executionId: string,
+		transactionOpen = false,
+	) => {
+		const rootClaimId = outcomeClaimId(executionId, plannedClaimKey, address);
+		const claim = {
+			claimId: rootClaimId,
+			claimSpecies: 'sql-bearing' as const,
+			executionId,
+			plannedClaimKey,
+			claimGroupId: rootClaimId,
+			rootClaimId,
+			address,
+			claimKind: step.claimKind,
+			statementBundle: step.statementBundle,
+			requiresVacancy: step.requiresVacancy,
+		};
+		return {
+			claim,
+			request: {
+				plan: claim,
+				reservations: [
+					{
+						address,
+						claimKind: step.claimKind,
+						executionId,
+						rootClaimId: claim.claimId,
+						homeLedger: home(address),
+					},
+				],
+				resolution: {
+					eventId: outcomeClaimEventId(claim.claimId, 'observed'),
+					eventKind: 'observed' as const,
+				},
+				readBack: async (executor: GeneratedPostconditionSession) =>
+					readGeneratedPostcondition(executor, step, address),
+				recordCatalogueIdentity: true,
+				...(transactionOpen ? { transactionOpen: true } : {}),
+				...(input.observer === undefined ? {} : { observer: input.observer }),
+				vacancy: async (executor: LedgerQueryable) =>
+					(await readPgCatalogueIdentity(executor, address))
+						? {
+								kind: 'occupied' as const,
+								reason: `creation claim ${claim.claimId} refuses occupied live address ${address.name}`,
+							}
+						: { kind: 'vacant' as const },
+			},
+		};
+	};
+	const executeAtomicCreationGroup = async (
+		steps: readonly NormalizedManagedStep[],
+		executionId: string,
+	): Promise<
+		| { readonly kind: 'committed' }
+		| { readonly kind: 'failed'; readonly detail: string }
+		| { readonly kind: 'ambiguous'; readonly detail: string }
+	> =>
+		withPgOutcomeSession(input.pool, async (session) => {
+			let transactionOpen = false;
+			const fail = async (detail: string) => {
+				if (transactionOpen) await rollbackPgOutcomeGroup(session);
+				return { kind: 'failed' as const, detail };
+			};
+			try {
+				await openPgOutcomeGroup(session);
+				transactionOpen = true;
+				await setPgTransitionLockTimeout(session);
+				for (const step of steps) {
+					if (step.statementBundle.statements.length === 0) continue;
+					const address = step.address ?? step.closure?.root;
+					if (!address)
+						return fail(`managed step ${step.stepKey} has no address`);
+					const plannedClaimKey = step.plannedClaimKeys[0];
+					if (!plannedClaimKey)
+						return fail(
+							`managed step ${step.stepKey} has no planned claim key`,
+						);
+					if (
+						step.requiresVacancy &&
+						(await alreadyAppliedCreation(session, address))
+					)
+						continue;
+					const { request } = buildCreationOutcome(
+						step,
+						address,
+						plannedClaimKey,
+						executionId,
+						true,
+					);
+					const result = await executePgAdmittedOperation(session, {
+						run: input.run,
+						approval,
+						manifest,
+						recomputedPlanDigest: input.planDigest,
+						operation: {
+							kind: 'single-outcome',
+							request,
+						},
+					});
+					if (result.kind !== 'executed-outcome-claim')
+						return fail(
+							'reason' in result
+								? result.reason
+								: `atomic creation group step ${step.stepKey} did not execute`,
+						);
+				}
+				try {
+					await commitPgOutcome(session, input.observer);
+					transactionOpen = false;
+					return { kind: 'committed' as const };
+				} catch (error) {
+					transactionOpen = false;
+					if (error instanceof PgCommitAcknowledgementAmbiguousError)
+						return { kind: 'ambiguous' as const, detail: error.message };
+					return {
+						kind: 'failed' as const,
+						detail:
+							error instanceof Error
+								? error.message
+								: 'atomic creation group commit failed',
+					};
+				}
+			} catch (error) {
+				return fail(
+					error instanceof Error
+						? error.message
+						: 'atomic creation group execution failed',
+				);
+			}
+		});
 	try {
 		const database = await databaseId(input.pool);
 		// The attempt id is random, journaled before any step, and is the namespace
@@ -541,7 +726,28 @@ export async function executeGeneratorPlan(input: {
 				detail:
 					'replacement selection does not cover every reviewed replacement',
 			};
-		for (const step of steps) {
+		for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+			const step = steps[stepIndex]!;
+			if (
+				atomicCreationKeys.has(step.stepKey) &&
+				step.stepKey === atomicCreationGroup[0]
+			) {
+				const groupSteps = steps.slice(
+					stepIndex,
+					stepIndex + atomicCreationGroup.length,
+				);
+				const group = await executeAtomicCreationGroup(groupSteps, executionId);
+				if (group.kind === 'ambiguous')
+					return { outcome: 'transport-ambiguous', detail: group.detail };
+				if (group.kind === 'failed') return partial(group.detail);
+				completedStepKeys.push(...atomicCreationGroup);
+				stepIndex += atomicCreationGroup.length - 1;
+				continue;
+			}
+			if (atomicCreationKeys.has(step.stepKey))
+				throw new Error(
+					`atomic creation group ${step.stepKey} was not reached at its first member`,
+				);
 			if (step.lifecycle?.kind === 'adoption-refused') continue;
 			if (step.lifecycle?.kind === 'adoption') {
 				const lifecycle = step.lifecycle;
@@ -629,6 +835,35 @@ export async function executeGeneratorPlan(input: {
 				completedStepKeys.push(step.stepKey);
 				continue;
 			}
+			if (step.classification === 'non-destructive') {
+				const { request } = buildCreationOutcome(
+					step,
+					address,
+					plannedClaimKey,
+					executionId,
+				);
+				const result = await executePgAdmittedOperation(input.pool, {
+					run: input.run,
+					approval,
+					manifest,
+					recomputedPlanDigest: input.planDigest,
+					operation: {
+						kind: 'single-outcome',
+						request,
+					},
+				});
+				if (result.kind === 'outcome-recovery-required')
+					return {
+						outcome: 'recovery-required',
+						claimId: result.claimId,
+						detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
+					};
+				if (result.kind === 'outcome-transport-ambiguous')
+					return { outcome: 'transport-ambiguous', detail: result.reason };
+				if ('reason' in result) return partial(result.reason);
+				completedStepKeys.push(step.stepKey);
+				continue;
+			}
 			const claimKind: LedgerClaimKind = step.claimKind;
 			const rootClaimId = outcomeClaimId(executionId, plannedClaimKey, address);
 			const claim = {
@@ -650,51 +885,6 @@ export async function executeGeneratorPlan(input: {
 				rootClaimId: claim.claimId,
 				homeLedger: home(address),
 			};
-			if (step.classification === 'non-destructive') {
-				const result = await executePgAdmittedOperation(input.pool, {
-					run: input.run,
-					approval,
-					manifest,
-					recomputedPlanDigest: input.planDigest,
-					operation: {
-						kind: 'single-outcome',
-						request: {
-							plan: claim,
-							reservations: [baseReservation],
-							resolution: {
-								eventId: outcomeClaimEventId(claim.claimId, 'observed'),
-								eventKind: 'observed',
-							},
-							// Transactional DDL is visible only on the admitted session until
-							// its terminal ledger fact commits with it.
-							readBack: async (session) =>
-								readGeneratedPostcondition(session, step, address),
-							recordCatalogueIdentity: true,
-							...(input.observer === undefined
-								? {}
-								: { observer: input.observer }),
-							vacancy: async (executor: LedgerQueryable) =>
-								(await readPgCatalogueIdentity(executor, address))
-									? {
-											kind: 'occupied',
-											reason: `creation claim ${claim.claimId} refuses occupied live address ${address.name}`,
-										}
-									: { kind: 'vacant' },
-						},
-					},
-				});
-				if (result.kind === 'outcome-recovery-required')
-					return {
-						outcome: 'recovery-required',
-						claimId: result.claimId,
-						detail: `claim ${result.claimId} remains open and requires recovery: ${result.reason}`,
-					};
-				if (result.kind === 'outcome-transport-ambiguous')
-					return { outcome: 'transport-ambiguous', detail: result.reason };
-				if ('reason' in result) return partial(result.reason);
-				completedStepKeys.push(step.stepKey);
-				continue;
-			}
 			const containment =
 				step.classification === 'removal'
 					? await removalContainment(input.pool, address)

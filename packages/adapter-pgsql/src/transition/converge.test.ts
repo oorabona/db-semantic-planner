@@ -76,6 +76,7 @@ vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 }));
 
 import { convergePg, PgConvergeRefusalError } from './converge.js';
+import { rollbackPgOutcomeGroup } from './outcome-protocol.js';
 
 function emptyModel(): ModelIR {
 	return {
@@ -2069,6 +2070,14 @@ describe('convergePg refusal boundary', () => {
 		});
 		const executionInput = mocks.execute.mock.calls[0]?.[0];
 		expect(executionInput).toBeDefined();
+		expect(executionInput).toMatchObject({
+			atomicCreationGroup: [
+				'converge:0',
+				'converge:1',
+				'converge:2',
+				'converge:3',
+			],
+		});
 		const steps = (
 			executionInput as {
 				readonly manifest: {
@@ -2466,5 +2475,79 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'execution-refused',
 			detail: 'the executor detail',
 		});
+	});
+
+	it('passes no atomic group when converge creates no table', async () => {
+		mocks.introspect.mockResolvedValue(emptyModel());
+		compareIntrospectedSchema();
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+		await expect(
+			convergePg(poolFor(), modelWithSequences(['declared_sequence'])),
+		).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		expect(mocks.execute.mock.calls[0]?.[0]).not.toHaveProperty(
+			'atomicCreationGroup',
+		);
+	});
+
+	it('adds the creating-table dependency to a fresh add_column', async () => {
+		const createTable: SchemaChange = {
+			kind: 'create_table',
+			table: 'users',
+			destructive: false,
+			details: 'create users',
+			meta: {
+				table: { name: 'users', columns: [], foreignKeys: [], indexes: [] },
+			},
+		};
+		const addColumn: SchemaChange = {
+			kind: 'add_column',
+			table: 'users',
+			column: 'email',
+			destructive: false,
+			details: 'add email',
+			meta: { column: { name: 'email', type: 'integer', nullable: true } },
+		};
+		mocks.compare.mockResolvedValue({ changes: [addColumn, createTable] });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		expect(mocks.execute.mock.calls[0]?.[0]).toMatchObject({
+			atomicCreationGroup: ['converge:0', 'converge:1'],
+			manifest: {
+				steps: [
+					{ address: { kind: 'table', name: 'users' } },
+					{ dependencyOrder: ['converge:0'] },
+				],
+			},
+		});
+	});
+
+	it('releases a converge client with its outcome-session compromise marker', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'ROLLBACK')
+					throw Object.assign(new Error('rollback rejected'), {
+						code: 'XX000',
+					});
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql === 'SELECT current_database() AS database_id')
+					return { rows: [{ database_id: 'app' }] };
+				return { rows: [] };
+			},
+		);
+		await rollbackPgOutcomeGroup(testClient);
+		mocks.compare.mockResolvedValue({ changes: [] });
+		await convergePg(poolFor(testClient), emptyModel());
+		expect(testClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'rollback rejected' }),
+		);
 	});
 });

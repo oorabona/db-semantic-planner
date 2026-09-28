@@ -218,6 +218,37 @@ function markPgOutcomeSessionCompromised(
 	);
 }
 
+/** Returns the release marker recorded for a session whose outcome is unknown. */
+export function readPgOutcomeSessionCompromise(
+	session: TransitionJournalQueryable,
+): Error | undefined {
+	return compromisedPgOutcomeSessions.get(session as object);
+}
+
+/** Opens a caller-owned group transaction; the caller supplies its lock bound. */
+export async function openPgOutcomeGroup(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	await executor.query('BEGIN');
+}
+
+/**
+ * Rolls back a caller-owned group transaction. Any rollback failure makes the
+ * session unsafe to return to the pool, including a server-confirmed failure.
+ */
+export async function rollbackPgOutcomeGroup(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	try {
+		await executor.query('ROLLBACK');
+	} catch (error) {
+		compromisedPgOutcomeSessions.set(
+			executor as object,
+			asPgSessionReleaseError(error),
+		);
+	}
+}
+
 /**
  * The sole explicit-transition bracket for managed ledger work.  It checks a
  * client out once when given a Pool, never checks out recursively, and keeps
@@ -304,7 +335,7 @@ async function checkpoint(
 	if (observer) await observer(point);
 }
 
-async function commitPgOutcome(
+export async function commitPgOutcome(
 	executor: TransitionJournalQueryable,
 	observer?: PgOutcomeCheckpointObserver,
 ): Promise<void> {

@@ -168,6 +168,64 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({ rows: [] });
 	});
 
+	it('rolls back a fresh table and its colliding index as one converge transaction', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const desired = model([
+			{
+				name: 'atomic_parent',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'code', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [{ name: 'atomic_collision', columns: ['code'] }],
+			},
+		]);
+		const parent = address(databaseId, 'table', 'atomic_parent');
+		const index = address(databaseId, 'index', 'atomic_collision', parent);
+		await pool.query(
+			`CREATE VIEW "${schema}"."atomic_collision" AS SELECT 1 AS one`,
+		);
+
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			name: 'PgConvergeRefusalError',
+			refusal: 'execution-refused',
+			message: expect.stringContaining('already exists'),
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.atomic_parent`,
+			]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
+		await expect(managed(parent)).resolves.toBe(false);
+		await expect(
+			pool.query(
+				`SELECT count(*)::int AS count FROM "${schema}"."dbsp_ledger_reservation" WHERE address_name = $1`,
+				['atomic_parent'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+
+		await pool.query(`DROP VIEW "${schema}"."atomic_collision"`);
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'applied',
+			applied: ['create_table', 'create_index'],
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists', [
+				`${schema}.atomic_parent`,
+			]),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists', [
+				`${schema}.atomic_collision`,
+			]),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+		await expect(managed(parent)).resolves.toBe(true);
+		await expect(managed(index)).resolves.toBe(true);
+	});
+
 	it('requires reconciliation of a seeded predecessor claim before convergence', async () => {
 		const pool = await getTestPool();
 		const databaseId = await database();
