@@ -571,7 +571,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 				data_type: 'integer',
 				udt_name: 'int4',
 				is_nullable: 'NO',
-				column_default: null,
+				column_default: "'0'::integer",
 				collation_name: null,
 				is_identity: 'NO',
 				identity_generation: null,
@@ -598,6 +598,39 @@ describe('comparePgsqlDatabaseSchema', () => {
 				is_identity: 'NO',
 				identity_generation: null,
 			},
+			{
+				table_name: 'cycle_left',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'cycle_left',
+				column_name: 'right_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'cycle_right',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
 		];
 		const liveForeignKey = {
 			constraint_name: 'orders_customer_id_fkey',
@@ -615,7 +648,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 			[
 				makeTable({
 					name: 'orders',
-					columns: [makeCol('id'), makeCol('customer_id')],
+					columns: [{ ...makeCol('id'), default: 0 }, makeCol('customer_id')],
 					foreignKeys: [
 						{
 							columns: ['customer_id'],
@@ -626,9 +659,24 @@ describe('comparePgsqlDatabaseSchema', () => {
 			],
 			['customers'],
 		);
+		const unrelatedForeignKey = {
+			constraint_name: 'cycle_left_right_id_fkey',
+			source_table: 'cycle_left',
+			source_column: 'right_id',
+			target_schema: 'public',
+			target_table: 'cycle_right',
+			target_column: 'id',
+			delete_rule: 'NO ACTION',
+			update_rule: 'NO ACTION',
+			is_deferrable: 'NO',
+			initially_deferred: 'NO',
+		};
 		const matching = await comparePgsqlDeclaredAdoptionSchema({
 			executor: new FakeLiveDiffPool(
-				new FakeLiveDiffClient('', false, columns, [liveForeignKey]),
+				new FakeLiveDiffClient('', false, columns, [
+					liveForeignKey,
+					unrelatedForeignKey,
+				]),
 			),
 			model: declaredWithForeignKey,
 			schema: 'public',
@@ -638,7 +686,10 @@ describe('comparePgsqlDatabaseSchema', () => {
 
 		const undeclaredForeignKey = await comparePgsqlDeclaredAdoptionSchema({
 			executor: new FakeLiveDiffPool(
-				new FakeLiveDiffClient('', false, columns, [liveForeignKey]),
+				new FakeLiveDiffClient('', false, columns, [
+					liveForeignKey,
+					unrelatedForeignKey,
+				]),
 			),
 			model: makeModel([
 				makeTable({

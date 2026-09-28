@@ -72,9 +72,10 @@ export interface ComparePgsqlDatabaseSchemaOptions
 
 /**
  * Compare the declared shape of an adopted table against its live PostgreSQL
- * counterpart. The supplied model is deliberately declaration-scoped: live
- * introspection is restricted to its physical table names so unrelated drift
- * cannot refuse an otherwise valid adoption.
+ * counterpart. The supplied model is deliberately declaration-scoped: the whole
+ * schema is introspected, so an adopted table's foreign keys to any table are
+ * seen, and the comparison then keeps only the declared physical tables (with
+ * the relations between them), so drift on other tables is not reported.
  */
 export interface ComparePgsqlDeclaredAdoptionSchemaInput {
 	readonly executor: PgsqlAdoptionComparisonExecutor;
@@ -171,24 +172,46 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 				return (
 					introspectionOptions?: Parameters<typeof target.introspect>[0],
 				) =>
-					target.introspect(introspectionOptions).then((introspected) => ({
-						...introspected,
-						tables: new Map(
+					target.introspect(introspectionOptions).then((introspected) => {
+						const tables = new Map(
 							[...introspected.tables].filter(([name]) =>
 								declaredTables.has(name),
 							),
-						),
-						sequences: new Map(
-							[...(introspected.sequences ?? [])].filter(([name]) =>
-								declaredSequences.has(name),
+						);
+						const externalTables = new Set(
+							[...(introspected.externalTables ?? [])].filter(
+								(name) => !tables.has(name),
 							),
-						),
-						enums: new Map(
-							[...(introspected.enums ?? [])].filter(([name]) =>
-								declaredEnums.has(name),
+						);
+						for (const table of tables.values()) {
+							for (const foreignKey of table.foreignKeys) {
+								if (!tables.has(foreignKey.references.table)) {
+									externalTables.add(foreignKey.references.table);
+								}
+							}
+						}
+						return {
+							...introspected,
+							tables,
+							relations: new Map(
+								[...introspected.relations].filter(
+									([, relation]) =>
+										tables.has(relation.source) && tables.has(relation.target),
+								),
 							),
-						),
-					}));
+							externalTables,
+							sequences: new Map(
+								[...(introspected.sequences ?? [])].filter(([name]) =>
+									declaredSequences.has(name),
+								),
+							),
+							enums: new Map(
+								[...(introspected.enums ?? [])].filter(([name]) =>
+									declaredEnums.has(name),
+								),
+							),
+						};
+					});
 			return Reflect.get(target, property, receiver);
 		},
 	});
