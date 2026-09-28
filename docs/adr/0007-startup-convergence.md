@@ -90,8 +90,9 @@ CLI still presents adoption in the reviewed plan.
 
 - Converge holds the schema ledger's session lock for its whole call, and transition writers take
   that lock without waiting, so a `dbsp apply` run that reaches its next ledger transaction while
-  converge runs gets `busy` and stops there; several application instances starting together get
-  `busy` from one another the same way. Open on #769 (issuecomment-5860782599).
+  converge runs stops at that step (`execution-failed`, or `partially-applied` after earlier steps);
+  application instances starting together make one another's `convergePg` refuse `busy`. Open on
+  #769 (issuecomment-5860782599).
 - An install whose tables lag the model cannot be adopted as it is: adopting a table and then adding
   its missing columns is not offered.
 - A new index, CHECK constraint or foreign key on an existing managed table is refused; the caller

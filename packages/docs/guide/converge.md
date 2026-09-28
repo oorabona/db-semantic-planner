@@ -19,16 +19,18 @@ planning; plan those with
 
 ## The startup sequence
 
-1. **Once per database, with a role allowed to create schemas and tables:**
-   `runPgReinitializePreflight` creates and owns the `dbsp_meta` schema, the schema's ledger and the
-   transition journal. Check both channels it fails through: scopes reported as `failed` or
-   `not-attempted` in the returned report, and a rejected promise. `convergePg` never creates these
-   tables and refuses `ledger-absent` without them.
+1. **Before the first `convergePg` call on a schema, with a role allowed to create schemas and
+   tables:** `runPgReinitializePreflight` creates and owns the `dbsp_meta` schema, the ledger of each
+   schema it is given, and the transition journal. Run it again when you add a schema to converge.
+   Check both channels it fails through: scopes reported as `failed` or `not-attempted` in the
+   returned report, and a rejected promise. `convergePg` never creates these tables, and refuses
+   `ledger-absent` when the schema has no ledger.
 2. **At every start, as the same role:** `convergePg(pool, model, { schema })`. When several
    instances start together, one converges and the others get `busy`: retry `busy` after a delay, or
    converge from a single instance.
-3. **After converge:** create or repair the indexes you manage yourself (see
-   [External indexes](#external-indexes)).
+3. **After converge, from a single instance:** create or repair the indexes you manage yourself (see
+   [External indexes](#external-indexes)). The ledger lock is released when `convergePg` returns, so
+   it does not serialize this step.
 
 The ledger needs PostgreSQL 15 or later.
 
@@ -46,7 +48,7 @@ const app = schema({
 
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
 
-// Once per database, before the first convergePg call.
+// Before the first convergePg call on this schema.
 const report = await runPgReinitializePreflight({
   pool,
   schemas: ['converge_guide'],
@@ -197,5 +199,7 @@ index named here and does not report it as drift.
 
 ## Running alongside `dbsp apply`
 
-`convergePg` and `dbsp apply` take the same ledger lock without waiting: on the same schema at the
-same time, whichever reaches it second gets `busy`. Run them one after the other.
+`convergePg` and `dbsp apply` take the same ledger lock without waiting. On the same schema at the
+same time, a `convergePg` call that finds the lock taken refuses `busy`, and a `dbsp apply` run stops
+at the contested step with `execution-failed`, or `partially-applied` after earlier steps. Run them
+one after the other.
