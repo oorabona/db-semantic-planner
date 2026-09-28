@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import type { CheckConstraintIR, EnumIR, IndexIR, ModelIR } from '@dbsp/types';
+import type {
+	CheckConstraintIR,
+	DbCasing,
+	EnumIR,
+	IndexIR,
+	ModelIR,
+	TableIR,
+} from '@dbsp/types';
+import type { Pool, PoolClient } from 'pg';
 import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
 import {
 	type CanonicalizeExpressionSurfacesOptions,
@@ -18,7 +26,7 @@ import {
 	getNamingPluginForDbCasing,
 	identityNaming,
 } from '../naming-plugin.js';
-import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
@@ -60,6 +68,148 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	 * expression-surface drift appears again after re-introspection.
 	 */
 	readonly previouslyAppliedDiff?: SchemaDiff;
+}
+
+/**
+ * Compare the declared shape of an adopted table against its live PostgreSQL
+ * counterpart. The supplied model is deliberately declaration-scoped: live
+ * introspection is restricted to its physical table names so unrelated drift
+ * cannot refuse an otherwise valid adoption.
+ */
+export interface ComparePgsqlDeclaredAdoptionSchemaInput {
+	readonly executor: PgsqlAdoptionComparisonExecutor;
+	readonly model: ModelIR;
+	readonly schema: string;
+	readonly dbCasing: DbCasing;
+	/** Physical [table, index] JSON keys whose drop drift is unmanaged. */
+	readonly externalIndexMask?: ReadonlySet<string>;
+}
+
+/** Minimal pool surface retained so callers can keep their executor opaque. */
+export interface PgsqlAdoptionComparisonExecutor {
+	query(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<{ readonly rows: readonly Record<string, unknown>[] }>;
+}
+
+/** Builds the declaration-scoped model used by every adoption shape check. */
+export function modelForDeclaredAdoption(table: TableIR): ModelIR {
+	const tables = new Map([[table.name, table]]);
+	const relations = new Map();
+	return {
+		tables,
+		relations,
+		getTable: (name) => tables.get(name),
+		getRelation: (name) => relations.get(name),
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function isPoolClient(
+	executor: PgsqlAdoptionComparisonExecutor,
+): executor is PoolClient {
+	return 'release' in executor && typeof executor.release === 'function';
+}
+
+function isPool(executor: PgsqlAdoptionComparisonExecutor): executor is Pool {
+	return (
+		'connect' in executor &&
+		typeof executor.connect === 'function' &&
+		'totalCount' in executor &&
+		typeof executor.totalCount === 'number' &&
+		!isPoolClient(executor)
+	);
+}
+
+function indexNameForChange(change: SchemaChange): string | undefined {
+	if (change.kind !== 'drop_index') return undefined;
+	const index = change.meta?.index;
+	if (!index || typeof index !== 'object' || Array.isArray(index))
+		return undefined;
+	return 'name' in index && typeof index.name === 'string'
+		? index.name
+		: undefined;
+}
+
+/**
+ * PostgreSQL-aware comparison used to admit a declared table adoption. A
+ * claimed session remains pinned by constructing a borrowed, transaction-aware
+ * adapter from that exact executor.
+ */
+export async function comparePgsqlDeclaredAdoptionSchema(
+	input: ComparePgsqlDeclaredAdoptionSchemaInput,
+): Promise<SchemaDiff> {
+	const adapter = isPoolClient(input.executor)
+		? createPgsqlAdapter(input.executor, {
+				borrowedClient: true,
+				managedTransactions: true,
+				dbCasing: input.dbCasing,
+			})
+		: isPool(input.executor)
+			? createPgsqlAdapter(input.executor, {
+					dbCasing: input.dbCasing,
+				})
+			: (() => {
+					throw new Error(
+						'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
+					);
+				})();
+	const naming = getNamingPluginForDbCasing(input.dbCasing);
+	const declaredTables = [...input.model.tables.values()].map((table) =>
+		naming.toDatabase(table.name),
+	);
+	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
+	const declarationScopedAdapter = new Proxy(adapter, {
+		get(target, property, receiver) {
+			if (property === 'introspect')
+				return (
+					introspectionOptions?: Parameters<typeof target.introspect>[0],
+				) =>
+					target
+						.introspect({
+							...introspectionOptions,
+							include: declaredTables,
+							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
+						})
+						.then((introspected) => ({
+							...introspected,
+							sequences: new Map(
+								[...(introspected.sequences ?? [])].filter(([name]) =>
+									declaredSequences.has(name),
+								),
+							),
+							enums: new Map(
+								[...(introspected.enums ?? [])].filter(([name]) =>
+									declaredEnums.has(name),
+								),
+							),
+						}));
+			return Reflect.get(target, property, receiver);
+		},
+	});
+	const compared = await comparePgsqlDatabaseSchema(
+		declarationScopedAdapter,
+		input.model,
+		{
+			schema: input.schema,
+			dbCasing: input.dbCasing,
+			ignoreUnmanagedExtensions: true,
+		},
+	);
+	return {
+		...compared,
+		changes: compared.changes.filter((change) => {
+			const indexName = indexNameForChange(change);
+			return (
+				indexName === undefined ||
+				!input.externalIndexMask?.has(JSON.stringify([change.table, indexName]))
+			);
+		}),
+	};
 }
 
 export type NonConvergentSchemaDiffSurface =

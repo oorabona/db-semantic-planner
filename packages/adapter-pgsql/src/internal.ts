@@ -7,6 +7,12 @@
  */
 
 export {
+	type ComparePgsqlDeclaredAdoptionSchemaInput,
+	comparePgsqlDeclaredAdoptionSchema,
+	modelForDeclaredAdoption,
+	type PgsqlAdoptionComparisonExecutor,
+} from './ddl/live-diff.js';
+export {
 	createPgsqlDeclaredAdoptionStep,
 	pgsqlDeclaredAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';

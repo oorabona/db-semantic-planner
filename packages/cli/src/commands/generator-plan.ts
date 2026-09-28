@@ -22,7 +22,9 @@ import {
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import {
+	comparePgsqlDeclaredAdoptionSchema,
 	createPgsqlDeclaredAdoptionStep,
+	modelForDeclaredAdoption,
 	pgsqlDeclaredAdoptionDeclaration,
 } from '@dbsp/adapter-pgsql/internal';
 import type { InProcessProvenPlan } from '@dbsp/core';
@@ -51,6 +53,8 @@ export interface GeneratorPlanMaterial {
 	readonly kind: 'schema-differ-generator';
 	/** Digest-covered execution context captured with the reviewed generator run. */
 	readonly planningSchema?: string;
+	/** Omitted for preserve so historical plan bytes and digests remain unchanged. */
+	readonly dbCasing?: 'snake_case' | 'camelCase';
 	/** Diagnostic provenance only. Execution reads plan.steps, never this list. */
 	readonly changes: readonly {
 		readonly kind: string;
@@ -81,6 +85,38 @@ export interface GeneratorPlanMaterial {
 export type GeneratorDurablePlan = InProcessProvenPlan & {
 	readonly generator: GeneratorPlanMaterial;
 };
+
+export type DecodedGeneratorPlanMaterial = Omit<
+	GeneratorPlanMaterial,
+	'dbCasing'
+> & {
+	readonly dbCasing: 'snake_case' | 'camelCase' | 'preserve';
+};
+
+/** Decode persisted generator-only context without rewriting historical material. */
+export function decodeGeneratorPlanMaterial(
+	material: unknown,
+): DecodedGeneratorPlanMaterial {
+	if (
+		material === null ||
+		typeof material !== 'object' ||
+		Array.isArray(material) ||
+		!('kind' in material) ||
+		material.kind !== 'schema-differ-generator'
+	)
+		throw new Error('persisted generator material has an invalid kind');
+	const dbCasing = 'dbCasing' in material ? material.dbCasing : undefined;
+	if (
+		dbCasing !== undefined &&
+		dbCasing !== 'snake_case' &&
+		dbCasing !== 'camelCase'
+	)
+		throw new Error('persisted generator material has an invalid dbCasing');
+	return {
+		...(material as GeneratorPlanMaterial),
+		dbCasing: dbCasing ?? 'preserve',
+	};
+}
 
 function replacementStatements(table: TableIR, schema: string) {
 	const quote = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -368,6 +404,7 @@ export async function runGeneratorPlan(input: {
 	const { pool } = await createDbConnection(input.db);
 	try {
 		const schema = input.schema ?? 'public';
+		const dbCasing = loaded.dbCasing ?? 'preserve';
 		const diff = await comparePgsqlDatabaseSchema(
 			createPgsqlAdapter(pool),
 			loaded.model,
@@ -414,17 +451,17 @@ export async function runGeneratorPlan(input: {
 				planDigest: null,
 			};
 		}
-		const adoptionMismatches = new Set(
-			[...loaded.model.tables.values()]
-				.filter(
-					(table) =>
-						table.adopt === true &&
-						diff.changes.some((change) =>
-							changeTargetsDeclaredTable(change, table.name),
-						),
-				)
-				.map((table) => table.name),
-		);
+		const adoptionMismatches = new Set<string>();
+		for (const table of loaded.model.tables.values()) {
+			if (table.adopt !== true) continue;
+			const compared = await comparePgsqlDeclaredAdoptionSchema({
+				executor: pool,
+				model: modelForDeclaredAdoption(table),
+				schema,
+				dbCasing,
+			});
+			if (compared.changes.length > 0) adoptionMismatches.add(table.name);
+		}
 		const database = await databaseId(pool);
 		const adoptionIdentities = new Map<string, CatalogueIdentity>();
 		for (const table of loaded.model.tables.values()) {
@@ -480,6 +517,7 @@ export async function runGeneratorPlan(input: {
 		const material: GeneratorPlanMaterial = {
 			kind: 'schema-differ-generator',
 			planningSchema: schema,
+			...(dbCasing === 'preserve' ? {} : { dbCasing }),
 			changes: [
 				...ordinaryChanges,
 				...[...loaded.model.tables.values()]

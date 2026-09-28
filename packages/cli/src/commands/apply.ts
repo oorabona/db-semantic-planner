@@ -16,9 +16,11 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	applyPgTransitionRun,
+	comparePgsqlDeclaredAdoptionSchema,
 	executeGeneratorPlan,
 	type GeneratorExecutionResult,
 	lockPgJournalRun,
+	modelForDeclaredAdoption,
 } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireExclusiveTransitionLease,
@@ -47,8 +49,9 @@ import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
 import { printCliJson } from '../utils/output.js';
-import type { GeneratorDurablePlan } from './generator-plan.js';
 import {
+	decodeGeneratorPlanMaterial,
+	type GeneratorDurablePlan,
 	persistedLifecycleDirectiveError,
 	runGeneratorPlan,
 } from './generator-plan.js';
@@ -1328,7 +1331,15 @@ async function runApplyInternal(
 						throw new Error(
 							'persisted run no longer contains a generator plan',
 						);
-					const recordedSchema = current.plan.generator.planningSchema;
+					let material: ReturnType<typeof decodeGeneratorPlanMaterial>;
+					try {
+						material = decodeGeneratorPlanMaterial(current.plan.generator);
+					} catch (error) {
+						throw new RecordedPlanDigestMismatchError(
+							`persisted generator material is invalid: ${errorDetail(error)}`,
+						);
+					}
+					const recordedSchema = material.planningSchema;
 					if (!recordedSchema)
 						throw new Error(
 							'persisted generator run has no recorded planning schema and is non-resumable',
@@ -1400,6 +1411,18 @@ async function runApplyInternal(
 							} finally {
 								await journalLease.release();
 							}
+						},
+						verifyDeclaredAdoptionShape: async (executor, step) => {
+							if (step.lifecycle?.kind !== 'adoption') return false;
+							const compared = await comparePgsqlDeclaredAdoptionSchema({
+								// Outcome protocol provides its claimed pg session here. It is
+								// intentionally not the outer pool held by runApply.
+								executor,
+								model: modelForDeclaredAdoption(step.lifecycle.shape),
+								schema: recordedSchema,
+								dbCasing: material.dbCasing,
+							});
+							return compared.changes.length === 0;
 						},
 						...(options.replace === undefined
 							? {}

@@ -8,6 +8,7 @@ import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
+	comparePgsqlDeclaredAdoptionSchema,
 	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
@@ -133,6 +134,7 @@ class FakeLiveDiffClient {
 	constructor(
 		readonly databaseCheckExpression: string,
 		readonly failCanonicalization: boolean,
+		readonly adoptionColumns?: readonly Record<string, unknown>[],
 	) {}
 
 	async query(
@@ -174,10 +176,19 @@ class FakeLiveDiffClient {
 				rowCount: names.length,
 			};
 		}
+		if (normalized.startsWith('SELECT source, pg_get_expr(')) {
+			return {
+				rows: [
+					{ source: 'desired', expression: "'0'::bigint" },
+					{ source: 'database', expression: "'0'::bigint" },
+				],
+				rowCount: 2,
+			};
+		}
 
 		if (normalized.includes('FROM information_schema.columns')) {
 			return {
-				rows: [
+				rows: this.adoptionColumns ?? [
 					{
 						table_name: 'users',
 						column_name: 'id',
@@ -335,6 +346,7 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 }
 
 class FakeLiveDiffPool {
+	readonly totalCount = 0;
 	readonly connect = vi.fn(async () => this.client as unknown as PoolClient);
 	readonly query = vi.fn(async (sql: string, parameters?: readonly unknown[]) =>
 		this.client.query(sql, parameters),
@@ -458,6 +470,88 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
+	it('uses the declaration-scoped adoption comparison for canonical defaults and casing', async () => {
+		const bigintColumn = {
+			table_name: 'legacy',
+			column_name: 'count',
+			data_type: 'bigint',
+			udt_name: 'int8',
+			is_nullable: 'NO',
+			column_default: "'0'::bigint",
+			collation_name: null,
+			is_identity: 'NO',
+			identity_generation: null,
+		};
+		const client = new FakeLiveDiffClient('', false, [bigintColumn]);
+		const pool = new FakeLiveDiffPool(client);
+		const defaultShape = makeModel([
+			makeTable({
+				name: 'legacy',
+				columns: [
+					{ name: 'count', type: 'bigint', nullable: false, default: 0 },
+				],
+			}),
+		]);
+
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: pool,
+				model: defaultShape,
+				schema: 'public',
+				dbCasing: 'preserve',
+			}),
+		).resolves.toMatchObject({ changes: [] });
+
+		const snakeClient = new FakeLiveDiffClient('', false, [
+			{ ...bigintColumn, column_name: 'camel_case', column_default: null },
+		]);
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: new FakeLiveDiffPool(snakeClient),
+				model: makeModel([
+					makeTable({
+						name: 'legacy',
+						columns: [{ name: 'camelCase', type: 'bigint', nullable: false }],
+					}),
+				]),
+				schema: 'public',
+				dbCasing: 'snake_case',
+			}),
+		).resolves.toMatchObject({ changes: [] });
+
+		const missingColumn = await comparePgsqlDeclaredAdoptionSchema({
+			executor: pool,
+			model: makeModel([
+				makeTable({
+					name: 'legacy',
+					columns: [{ name: 'missing', type: 'bigint', nullable: false }],
+				}),
+			]),
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(missingColumn.changes).toEqual(
+			expect.arrayContaining([expect.objectContaining({ kind: 'add_column' })]),
+		);
+	});
+
+	it('refuses an executor that is neither a pool nor a checked-out client', async () => {
+		const unsupportedExecutor = {
+			query: async () => ({ rows: [] }),
+			connect: async () => undefined,
+		};
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: unsupportedExecutor,
+				model: makeModel([]),
+				schema: 'public',
+				dbCasing: 'preserve',
+			}),
+		).rejects.toThrow(
+			'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
+		);
+	});
+
 	it('rejects a missing desired extension predicate in strict and non-strict modes', async () => {
 		const desired = makeModel(
 			[

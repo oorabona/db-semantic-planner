@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 const generator = vi.hoisted(() => ({
 	comparePgsqlDatabaseSchema: vi.fn(),
+	comparePgsqlDeclaredAdoptionSchema: vi.fn(),
 	createDbConnection: vi.fn(),
 	createPgsqlAdapter: vi.fn(),
 	generateMigrationSQL: vi.fn(),
@@ -19,6 +20,12 @@ vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => ({
 	readPgCatalogueIdentity: generator.readPgCatalogueIdentity,
 }));
 
+vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => ({
+	...(await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>()),
+	comparePgsqlDeclaredAdoptionSchema:
+		generator.comparePgsqlDeclaredAdoptionSchema,
+}));
+
 vi.mock('../utils/db-utils.js', () => ({
 	createDbConnection: generator.createDbConnection,
 }));
@@ -28,6 +35,8 @@ vi.mock('../utils/schema-loader.js', () => ({
 }));
 
 import {
+	decodeGeneratorPlanMaterial,
+	type GeneratorDurablePlan,
 	linearizeGeneratedManagedStepDependencies,
 	persistedLifecycleDirectiveError,
 	runGeneratorPlan,
@@ -91,6 +100,9 @@ describe('generated managed-step dependencies', () => {
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
 		});
+		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+			changes: [],
+		});
 		generator.generateMigrationSQL.mockReturnValue([
 			'CREATE TABLE "public"."orders" ("id" INTEGER)',
 		]);
@@ -137,6 +149,9 @@ describe('generated managed-step dependencies', () => {
 				indexes: { added: 0, dropped: 0 },
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
+		});
+		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+			changes: [],
 		});
 		generator.readPgCatalogueIdentity.mockResolvedValue({
 			catalogueIdentity: {
@@ -214,6 +229,80 @@ describe('generated managed-step dependencies', () => {
 			},
 		]);
 		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
+	it('persists non-preserve casing in digest-covered generator material', async () => {
+		const pool = {
+			end: vi.fn(),
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+		};
+		const shape = {
+			name: 'legacy_orders',
+			adopt: true as const,
+			columns: [{ name: 'orderCode', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		generator.createDbConnection.mockResolvedValue({ pool });
+		generator.createPgsqlAdapter.mockReturnValue({});
+		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+			changes: [],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		});
+		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+			changes: [],
+		});
+		generator.readPgCatalogueIdentity.mockResolvedValue({
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '42' },
+			},
+		});
+		generator.loadSchema.mockResolvedValue({
+			model: { tables: new Map([[shape.name, shape]]) },
+			dbCasing: 'snake_case',
+		});
+		const snake = await runGeneratorPlan({
+			db: 'postgres://unused',
+			schemaFile: 'schema.ts',
+			dryRun: true,
+		});
+		generator.loadSchema.mockResolvedValue({
+			model: { tables: new Map([[shape.name, shape]]) },
+		});
+		const preserve = await runGeneratorPlan({
+			db: 'postgres://unused',
+			schemaFile: 'schema.ts',
+			dryRun: true,
+		});
+
+		const snakeMaterial = (snake.plan as GeneratorDurablePlan).generator;
+		const preserveMaterial = (preserve.plan as GeneratorDurablePlan).generator;
+		expect(snakeMaterial).toMatchObject({ dbCasing: 'snake_case' });
+		expect(preserveMaterial).not.toHaveProperty('dbCasing');
+		expect(preserve.planDigest).toBe(
+			'f2ad370f29b9a6d0f58aa9aa9d732d708406b175d9f0201c0f988ce5b0a65e61',
+		);
+		expect(snake.planDigest).not.toBe(preserve.planDigest);
+	});
+
+	it('decodes omitted casing as preserve and refuses an invalid value', () => {
+		expect(
+			decodeGeneratorPlanMaterial({ kind: 'schema-differ-generator' }).dbCasing,
+		).toBe('preserve');
+		expect(() =>
+			decodeGeneratorPlanMaterial({
+				kind: 'schema-differ-generator',
+				dbCasing: 'upper_case',
+			}),
+		).toThrow('invalid dbCasing');
 	});
 
 	it('SC-59/61 linearizes a replacement-bearing manifest using emitted step keys', () => {

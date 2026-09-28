@@ -46,11 +46,82 @@ function forward(fn: unknown, args: readonly unknown[]): unknown {
 
 vi.mock('../ddl/index.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/index.js')>()),
-	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
-		forward(mocks.compare, args),
 	createPgsqlGeneratedManagedStep: (...args: unknown[]) =>
 		forward(mocks.createStep, args),
 	generateMigrationSQL: (...args: unknown[]) => forward(mocks.generate, args),
+}));
+
+vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../ddl/live-diff.js')>()),
+	comparePgsqlDeclaredAdoptionSchema: async (...args: unknown[]) => {
+		const input = args[0] as {
+			readonly model: ModelIR;
+			readonly schema: string;
+			readonly dbCasing: string;
+			readonly externalIndexMask?: ReadonlySet<string>;
+		};
+		const declaredTables = [...input.model.tables.values()].map((table) =>
+			input.dbCasing === 'snake_case'
+				? table.name.replace(
+						/[A-Z]/g,
+						(character) => `_${character.toLowerCase()}`,
+					)
+				: table.name,
+		);
+		const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+		const declaredEnums = new Set(input.model.enums?.keys() ?? []);
+		const adapter = new Proxy(mocks.adapter, {
+			get(target, property, receiver) {
+				if (property === 'introspect')
+					return async (options?: Record<string, unknown>) => {
+						const introspected = (await target.introspect({
+							...options,
+							include: declaredTables,
+							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
+						})) as ModelIR;
+						return {
+							...introspected,
+							sequences: new Map(
+								[...(introspected.sequences ?? [])].filter(([name]) =>
+									declaredSequences.has(name),
+								),
+							),
+							enums: new Map(
+								[...(introspected.enums ?? [])].filter(([name]) =>
+									declaredEnums.has(name),
+								),
+							),
+						};
+					};
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		const compared = (await forward(mocks.compare, [
+			adapter,
+			input.model,
+			{
+				schema: input.schema,
+				dbCasing: input.dbCasing,
+				ignoreUnmanagedExtensions: true,
+			},
+		])) as { readonly changes: readonly SchemaChange[] };
+		return {
+			...compared,
+			changes: compared.changes.filter((change) => {
+				if (change.kind !== 'drop_index') return true;
+				const index = change.meta?.index;
+				if (!index || typeof index !== 'object' || Array.isArray(index))
+					return true;
+				return !(
+					'name' in index &&
+					typeof index.name === 'string' &&
+					input.externalIndexMask?.has(
+						JSON.stringify([change.table, index.name]),
+					)
+				);
+			}),
+		};
+	},
 }));
 vi.mock('../pgsql-adapter.js', () => ({
 	createPgsqlAdapter: () => mocks.adapter,

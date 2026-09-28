@@ -150,6 +150,28 @@ async function schemaFile(
 	return path;
 }
 
+async function adoptionDefaultSchemaFile(input: {
+	readonly table: string;
+	readonly column: string;
+	readonly dbCasing?: 'snake_case';
+}): Promise<string> {
+	const path = `${process.cwd()}/.unit13-${unique(input.table)}.mjs`;
+	await writeFile(
+		path,
+		[
+			"import { schema } from '@dbsp/core';",
+			`export default schema({ ${input.table}: { ${input.column}: { type: 'bigint', default: 0 } } }, { ${input.table}: { adopt: true } });`,
+			...(input.dbCasing === undefined
+				? []
+				: [`export const dbCasing = '${input.dbCasing}' as const;`]),
+			'',
+		].join('\n'),
+		'utf8',
+	);
+	schemaFiles.push(path);
+	return path;
+}
+
 async function bootstrapSchemaFile(): Promise<string> {
 	const path = `${process.cwd()}/.unit13-${unique('initial-bootstrap')}.mjs`;
 	await writeFile(
@@ -522,6 +544,52 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			),
 		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		void databaseId;
+	});
+
+	it('replays canonicalized and snake_case declared adoptions through public apply', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schema = names[0]!;
+		for (const scenario of [
+			{
+				table: 'canonical_default',
+				declaredColumn: 'value',
+				liveColumn: 'value',
+			},
+			{
+				table: 'snake_default',
+				declaredColumn: 'camelValue',
+				liveColumn: 'camel_value',
+				dbCasing: 'snake_case' as const,
+			},
+		]) {
+			await pool.query(
+				`CREATE TABLE ${quote(schema)}.${quote(scenario.table)} (${quote(scenario.liveColumn)} bigint NOT NULL DEFAULT '0'::bigint)`,
+			);
+			const planned = await runGeneratorPlan({
+				db: process.env.DATABASE_URL!,
+				schema,
+				schemaFile: await adoptionDefaultSchemaFile({
+					table: scenario.table,
+					column: scenario.declaredColumn,
+					...(scenario.dbCasing === undefined
+						? {}
+						: { dbCasing: scenario.dbCasing }),
+				}),
+			});
+			const reviewed = generatorPlan(planned);
+			expect(reviewed.plan.generator.changes).toContainEqual(
+				expect.objectContaining({ kind: 'adopt_table', table: scenario.table }),
+			);
+			await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+				outcome: 'completed',
+			});
+			await expect(
+				pool.query(
+					`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
+					[scenario.table],
+				),
+			).resolves.toMatchObject({ rows: [{ event_kind: 'adopt' }] });
+		}
 	});
 
 	it('restores the complete initial-schema bootstrap through the persisted generator path', async () => {
