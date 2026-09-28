@@ -124,8 +124,10 @@ to `convergePg`.
   its missing columns is not offered.
 - A new index, CHECK constraint or foreign key on an existing managed table is refused; the caller
   plans it through `dbsp apply`, or creates an index itself and names it in `externalIndexes`.
-- `dbsp apply` re-checks an adoption with a weaker comparison than `dbsp plan` (#815); converge does
-  not share that gap.
+- `dbsp plan`, `dbsp apply` and converge decide an adoption with one comparison: canonicalized, under
+  the declared `dbCasing`, and repeated after the adoption claim opens. A generator plan persists its
+  `dbCasing` when it is not `preserve`, so `dbsp apply <run-id>` re-checks under the casing it was
+  planned with.
 - Recording converge runs is revisited when converge emits a non-transactional step or a claim can
   outlive its transaction, when a caller needs to resume a converge run after a crash, or when mapping
   an execution id to a durable converge run becomes necessary for recovery or audit.

@@ -104,7 +104,8 @@ create enums or extensions: those the model uses must already exist.
   expression, and, for a single-column key, a declared index on its referencing column.
 - A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
   finite-number or string literal default (not a function call such as `now()`). A column with a
-  default must use a PostgreSQL built-in type or an enum. A new column whose type names its schema
+  default must use a PostgreSQL built-in base type or an enum, whether it is declared by a neutral type
+  or by `originalDbType`; a range such as `daterange` is refused. A new column whose type names its schema
   (`originalDbTypeSchema`), as an enum column in a non-public schema does, is refused. Adding a
   column takes an `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
 
