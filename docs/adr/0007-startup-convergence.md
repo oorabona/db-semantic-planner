@@ -75,6 +75,15 @@ ledger or the transition journal. `runPgReinitializePreflight` creates and owns 
 runs as the same PostgreSQL role, so it can read the journal. The ledger requires PostgreSQL 15
 (`unsupported-server` below it).
 
+### A target refusing writes is refused before the first write
+
+When a call has something to apply, converge classifies the target with the classifier every managed
+writer uses and refuses `database-read-only` on a standby or a read-only session before its first
+ledger write, as ADR 0006 requires. A call with nothing to apply writes nothing and returns `no-drift`
+on such a target. A target that turns read-only between that check and the first write is reported
+`execution-refused`: the outcome protocol reduces the typed error to a refusal reason before converge
+sees it, and carrying the type through the protocol is not done.
+
 ### Adoption is declared by the caller's model
 
 A table the model marks `adopt: true` is taken into management when it exists, the ledger projects

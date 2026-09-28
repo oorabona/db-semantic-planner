@@ -135,6 +135,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `ledger-absent` | The schema has no ledger: run `runPgReinitializePreflight`. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
 | `unsupported-server` | PostgreSQL is older than 15. |
+| `database-read-only` | The target refuses writes (a standby, or a session whose transactions are read-only) and the call has something to apply; nothing was written. A call with nothing to apply returns `no-drift` on such a target. A target that becomes read-only while converge executes is reported `execution-refused`, with the reason in `detail`. |
 | `busy` | Another converge call or transition writer holds the schema's ledger lock, or every open claim belongs to a run still executing. Retry after a delay. |
 | `recovery-required` | Earlier runs left open claims. Reconcile each run in `runIds` with `reconcilePgTransitionRun(pool, runId)` (the pool must allow two connections) or `dbsp reconcile --db <database> <run-id>`; `busyRunIds` lists runs still executing. `executionIds` lists claims no readable journal run explains; no public operation resolves a claim by execution id, so they need the ledger owner. Call converge again once no claim is open. |
 | `unsupported-change` | The model asks for a change converge does not apply. Plan it with `dbsp plan` and `dbsp apply`, or change the model. |
