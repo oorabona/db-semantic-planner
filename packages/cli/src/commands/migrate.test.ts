@@ -13,6 +13,7 @@ import {
 	formatMigrateJson,
 	MIGRATE_OUTCOME_CONTRACT,
 	type MigrateDeps,
+	type MigrateResult,
 	migrateCommand,
 	runMigrate,
 } from './migrate.js';
@@ -305,8 +306,11 @@ describe('dbsp migrate outcomes', () => {
 		expect(text).toContain('detail\\nnext');
 	});
 
-	it('prints execution-only recovery guidance without a reconcile command', async () => {
-		const executionIds = ['execution:one\ntwo'];
+	it('defers execution-id ownership guidance to the adapter detail', async () => {
+		const executionId = 'execution:one';
+		const executionIds = [executionId];
+		const detail =
+			'converge found live ledger reservations; journal attribution for execution execution:one could not be read (SQLSTATE 42501); the journal owner must resolve it';
 		const { value } = await migrate(
 			{ kind: 'no-drift', applied: [] },
 			{
@@ -316,7 +320,7 @@ describe('dbsp migrate outcomes', () => {
 						new PgConvergeRefusalError(
 							'recovery-required',
 							[],
-							undefined,
+							detail,
 							undefined,
 							executionIds,
 						),
@@ -325,13 +329,14 @@ describe('dbsp migrate outcomes', () => {
 		);
 		const lines = formatMigrateHuman(value, db).split('\n');
 		expect(lines.some((line) => line.startsWith('dbsp reconcile'))).toBe(false);
-		for (const executionId of executionIds)
-			expect(lines).toContain(
-				`execution id: ${escapeDiagnosticText(executionId)}`,
-			);
-		expect(lines).toContain(
-			'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
-		);
+		expect(lines).toEqual([
+			'recovery-required: public',
+			detail,
+			`execution id: ${escapeDiagnosticText(executionId)}`,
+			'no dbsp command resolves a claim by execution id; the owner named in the detail above must resolve these claims',
+		]);
+		expect(lines.join('\n')).toContain('journal owner must resolve it');
+		expect(lines.join('\n')).not.toContain('ledger owner');
 	});
 
 	it('prints busy-only recovery guidance without a reconcile command', async () => {
@@ -390,9 +395,90 @@ describe('dbsp migrate outcomes', () => {
 			'busy run id: run:busy',
 			'these runs are still executing; retry later',
 			'execution id: execution:one',
-			'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
+			'no dbsp command resolves a claim by execution id; the owner named in the detail above must resolve these claims',
 		]);
 	});
+
+	it.each([
+		[
+			'applied',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'applied',
+				exitCode: 0,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				applied: entries,
+			}),
+			'entry:',
+		],
+		[
+			'changes',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'unsupported-change',
+				exitCode: 74,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				changes: entries.map((details) => ({ kind: 'create_index', details })),
+			}),
+			'{"kind":"create_index","details":"entry:',
+		],
+		[
+			'runIds',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'recovery-required',
+				exitCode: 64,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				runIds: entries,
+			}),
+			'run id: entry:',
+		],
+		[
+			'busyRunIds',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'recovery-required',
+				exitCode: 64,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				busyRunIds: entries,
+			}),
+			'busy run id: entry:',
+		],
+		[
+			'executionIds',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'recovery-required',
+				exitCode: 64,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				executionIds: entries,
+			}),
+			'execution id: entry:',
+		],
+		[
+			'result.applied',
+			(entries: readonly string[]): MigrateResult => ({
+				outcome: 'cleanup-failed',
+				exitCode: 79,
+				schema: 'public',
+				schemaFile: 'schema.ts',
+				result: { kind: 'applied', applied: entries },
+			}),
+			'entry:',
+		],
+	] as const)(
+		'renders 200,000 %s entries without expanding a push call',
+		(source, createResult, entryPrefix) => {
+			const entries = Array.from(
+				{ length: 200_000 },
+				(_, index) => `entry:${index}`,
+			);
+			const renderedEntries = formatMigrateHuman(createResult(entries), db)
+				.split('\n')
+				.filter((line) => line.startsWith(entryPrefix));
+			expect(renderedEntries, `${source} entries`).toHaveLength(entries.length);
+		},
+	);
 
 	it('documents external index operands and syntax errors in help', () => {
 		const write = vi

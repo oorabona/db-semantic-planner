@@ -363,7 +363,8 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 	const safe = redactedResult(result, db);
 	const diagnostic = (value: string) => escapeDiagnosticText(value);
 	const lines = [`${diagnostic(safe.outcome)}: ${diagnostic(safe.schema)}`];
-	if (safe.applied?.length) lines.push(...safe.applied.map(diagnostic));
+	if (safe.applied?.length)
+		for (const applied of safe.applied) lines.push(diagnostic(applied));
 	if (safe.outcome === 'partially-applied') {
 		const stepKeys = (entries: readonly string[] | undefined) =>
 			entries?.length ? entries.map(diagnostic).join(', ') : 'none';
@@ -372,29 +373,26 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 	}
 	if (safe.detail !== undefined) lines.push(diagnostic(safe.detail));
 	if (safe.changes?.length)
-		lines.push(
-			...safe.changes.map((change) => diagnostic(JSON.stringify(change))),
-		);
+		for (const change of safe.changes)
+			lines.push(diagnostic(JSON.stringify(change)));
 	if (safe.outcome === 'recovery-required') {
-		if (safe.runIds?.length)
+		if (safe.runIds?.length) {
+			lines.push('dbsp reconcile --db <database> <run-id>');
+			for (const runId of safe.runIds)
+				lines.push(`run id: ${diagnostic(runId)}`);
+		}
+		if (safe.busyRunIds?.length) {
+			for (const busyRunId of safe.busyRunIds)
+				lines.push(`busy run id: ${diagnostic(busyRunId)}`);
+			lines.push('these runs are still executing; retry later');
+		}
+		if (safe.executionIds?.length) {
+			for (const executionId of safe.executionIds)
+				lines.push(`execution id: ${diagnostic(executionId)}`);
 			lines.push(
-				'dbsp reconcile --db <database> <run-id>',
-				...safe.runIds.map((runId) => `run id: ${diagnostic(runId)}`),
+				'no dbsp command resolves a claim by execution id; the owner named in the detail above must resolve these claims',
 			);
-		if (safe.busyRunIds?.length)
-			lines.push(
-				...safe.busyRunIds.map(
-					(busyRunId) => `busy run id: ${diagnostic(busyRunId)}`,
-				),
-				'these runs are still executing; retry later',
-			);
-		if (safe.executionIds?.length)
-			lines.push(
-				...safe.executionIds.map(
-					(executionId) => `execution id: ${diagnostic(executionId)}`,
-				),
-				'no dbsp command resolves a claim by execution id; the ledger owner must resolve these claims',
-			);
+		}
 	}
 	if (safe.outcome === 'ledger-absent')
 		lines.push(
@@ -405,7 +403,8 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 	if (safe.outcome === 'cleanup-failed' && safe.result !== undefined) {
 		lines.push(`convergence: ${diagnostic(safe.result.kind)}`);
 		if ('applied' in safe.result && safe.result.applied.length)
-			lines.push(...safe.result.applied.map(diagnostic));
+			for (const applied of safe.result.applied)
+				lines.push(diagnostic(applied));
 	}
 	if (safe.error !== undefined) lines.push(diagnostic(safe.error));
 	if (safe.cleanupError !== undefined)
