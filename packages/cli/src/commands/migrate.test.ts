@@ -235,6 +235,43 @@ describe('dbsp migrate outcomes', () => {
 		});
 	});
 
+	it('prints completed and not-started partial application keys as escaped text', async () => {
+		const { value } = await migrate({
+			kind: 'partially-applied',
+			completedStepKeys: ['step:one\ntwo', 'step:three'],
+			notStartedStepKeys: ['step:four', 'step:five'],
+			detail: 'step failed',
+		});
+		expect(formatMigrateHuman(value, db)).toContain(
+			'completed: step:one\\ntwo, step:three\nnot started: step:four, step:five\nstep failed',
+		);
+
+		const { value: empty } = await migrate({
+			kind: 'partially-applied',
+			completedStepKeys: [],
+			notStartedStepKeys: [],
+			detail: 'step failed',
+		});
+		expect(formatMigrateHuman(empty, db)).toContain(
+			'completed: none\nnot started: none',
+		);
+	});
+
+	it('prints cleanup convergence details before the cleanup error', async () => {
+		const pool = new pg.Pool();
+		vi.spyOn(pool, 'end').mockRejectedValue(new Error('close failed'));
+		const deps = dependencies({
+			createDbConnection: vi.fn().mockResolvedValue({ pool }),
+			converge: vi
+				.fn()
+				.mockResolvedValue({ kind: 'applied', applied: ['create\ntable'] }),
+		});
+		const value = await runMigrate('schema.ts', { db }, deps);
+		expect(formatMigrateHuman(value, db)).toContain(
+			'convergence: applied\ncreate\\ntable\nConnection cleanup failed: close failed',
+		);
+	});
+
 	it('prints reconcile instructions per recovery run and escapes terminal controls', async () => {
 		const { value } = await migrate(
 			{ kind: 'no-drift', applied: [] },
@@ -257,7 +294,7 @@ describe('dbsp migrate outcomes', () => {
 		expect(text).toContain('detail\\nnext');
 	});
 
-	it('redacts both URL and password from all renderer diagnostic fields', async () => {
+	it('redacts both URL and authority password from all renderer diagnostic fields', async () => {
 		const { value } = await migrate(
 			{ kind: 'no-drift', applied: [] },
 			{ converge: vi.fn().mockRejectedValue(new Error(`${db} top-secret`)) },
@@ -272,7 +309,70 @@ describe('dbsp migrate outcomes', () => {
 		}
 	});
 
-	it('prints ledger preflight instruction with path and effective schema but no URL', async () => {
+	it('redacts decoded and raw password query values from diagnostics only', async () => {
+		const queryDb =
+			'postgres://user@host/db?password=query%20secret&password=second';
+		const pool = new pg.Pool();
+		vi.spyOn(pool, 'end').mockRejectedValue(
+			new Error('query secret query%20secret second'),
+		);
+		const cleanup = await runMigrate(
+			'schema.ts',
+			{ db: queryDb },
+			dependencies({
+				createDbConnection: vi.fn().mockResolvedValue({ pool }),
+				converge: vi.fn().mockResolvedValue({
+					kind: 'transport-ambiguous',
+					detail: 'query secret query%20secret second',
+				}),
+			}),
+		);
+		const failed = await migrate(
+			{ kind: 'no-drift', applied: [] },
+			{
+				converge: vi
+					.fn()
+					.mockRejectedValue(new Error('query secret query%20secret second')),
+			},
+			{ db: queryDb },
+		);
+		for (const value of [cleanup, failed.value])
+			for (const rendered of [
+				JSON.stringify(formatMigrateJson(value, queryDb)),
+				formatMigrateHuman(value, queryDb),
+			]) {
+				expect(rendered).not.toContain('query secret');
+				expect(rendered).not.toContain('query%20secret');
+				expect(rendered).not.toContain('second');
+				expect(rendered).toContain('<redacted>');
+			}
+	});
+
+	it('leaves changes untouched when a password matches a table name', async () => {
+		const passwordDb = 'postgres://user@host/db?password=accounts';
+		const { value } = await migrate(
+			{ kind: 'no-drift', applied: [] },
+			{
+				converge: vi
+					.fn()
+					.mockRejectedValue(
+						new PgConvergeRefusalError('unsupported-change', [
+							{ kind: 'create_index', table: 'accounts', details: 'unsafe' },
+						]),
+					),
+			},
+			{ db: passwordDb },
+		);
+		expect(formatMigrateJson(value, passwordDb).changes).toEqual([
+			{ kind: 'create_index', table: 'accounts', details: 'unsafe' },
+		]);
+		expect(formatMigrateHuman(value, passwordDb)).toContain(
+			'"table":"accounts"',
+		);
+	});
+
+	it('prints ledger preflight placeholders and labeled escaped values but no URL', async () => {
+		const schemaFile = 'schema file; $(x).ts';
 		const { value } = await migrate(
 			{ kind: 'no-drift', applied: [] },
 			{
@@ -280,10 +380,19 @@ describe('dbsp migrate outcomes', () => {
 					.fn()
 					.mockRejectedValue(new PgConvergeRefusalError('ledger-absent', [])),
 			},
-			{ schema: 'tenant' },
+			{ schema: 'tenant\nschema' },
 		);
-		const text = formatMigrateHuman(value, db);
-		expect(text).toContain('--schema-file schema.ts --scope tenant');
+		const withPath = { ...value, schemaFile };
+		const text = formatMigrateHuman(withPath, db);
+		expect(text).toContain(
+			'dbsp preflight --reinitialize --db <database> --schema-file <schema-file> --scope <schema> --out <adoption-file>',
+		);
+		expect(text).toContain('schema file: schema file; $(x).ts');
+		expect(text).toContain('schema: tenant\\nschema');
+		expect(text).toContain('ledger-absent: tenant\\nschema');
+		expect(text.split(schemaFile)).toHaveLength(2);
+		expect(text).not.toContain('--schema-file schema file; $(x).ts');
+		expect(text).not.toContain('--scope tenant\\nschema');
 		expect(text).not.toContain(db);
 	});
 

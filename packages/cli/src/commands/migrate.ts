@@ -295,12 +295,21 @@ export async function runMigrate(
 function redactDiagnostic(value: string, db: string): string {
 	const sensitive = new Set([db]);
 	try {
-		const password = new URL(db).password;
+		const url = new URL(db);
+		const password = url.password;
 		if (password) {
 			sensitive.add(password);
 			try {
 				sensitive.add(decodeURIComponent(password));
 			} catch {}
+		}
+		for (const password of url.searchParams.getAll('password'))
+			sensitive.add(password);
+		for (const pair of url.search.slice(1).split('&')) {
+			const separator = pair.indexOf('=');
+			const name = separator === -1 ? pair : pair.slice(0, separator);
+			if (name !== 'password') continue;
+			if (separator !== -1) sensitive.add(pair.slice(separator + 1));
 		}
 	} catch {
 		const match = /:\/\/[^/:]+:([^@]+)@/.exec(db);
@@ -351,6 +360,12 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 	const diagnostic = (value: string) => escapeDiagnosticText(value);
 	const lines = [`${diagnostic(safe.outcome)}: ${diagnostic(safe.schema)}`];
 	if (safe.applied?.length) lines.push(...safe.applied.map(diagnostic));
+	if (safe.outcome === 'partially-applied') {
+		const stepKeys = (entries: readonly string[] | undefined) =>
+			entries?.length ? entries.map(diagnostic).join(', ') : 'none';
+		lines.push(`completed: ${stepKeys(safe.completedStepKeys)}`);
+		lines.push(`not started: ${stepKeys(safe.notStartedStepKeys)}`);
+	}
 	if (safe.detail !== undefined) lines.push(diagnostic(safe.detail));
 	if (safe.changes?.length)
 		lines.push(
@@ -364,8 +379,15 @@ export function formatMigrateHuman(result: MigrateResult, db: string): string {
 		);
 	if (safe.outcome === 'ledger-absent')
 		lines.push(
-			`dbsp preflight --reinitialize --db <database> --schema-file ${diagnostic(safe.schemaFile)} --scope ${diagnostic(safe.schema)} --out <adoption-file>`,
+			'dbsp preflight --reinitialize --db <database> --schema-file <schema-file> --scope <schema> --out <adoption-file>',
+			`schema file: ${diagnostic(safe.schemaFile)}`,
+			`schema: ${diagnostic(safe.schema)}`,
 		);
+	if (safe.outcome === 'cleanup-failed' && safe.result !== undefined) {
+		lines.push(`convergence: ${diagnostic(safe.result.kind)}`);
+		if ('applied' in safe.result && safe.result.applied.length)
+			lines.push(...safe.result.applied.map(diagnostic));
+	}
 	if (safe.error !== undefined) lines.push(diagnostic(safe.error));
 	if (safe.cleanupError !== undefined)
 		lines.push(`Connection cleanup failed: ${diagnostic(safe.cleanupError)}`);
