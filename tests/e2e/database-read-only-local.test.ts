@@ -75,6 +75,35 @@ function tableModel(table: string): ModelIR {
 	};
 }
 
+function canonicalDefaultTableModel(table: string): ModelIR {
+	return {
+		tables: new Map([
+			[
+				table,
+				{
+					name: table,
+					columns: [
+						{
+							name: 'status',
+							type: 'text',
+							nullable: true,
+							default: { sql: "'active'" },
+						},
+					],
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]),
+		relations: new Map(),
+		getTable: () => undefined,
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
 async function planEnumAdd(
 	pool: pg.Pool,
 	schema: string,
@@ -255,6 +284,10 @@ describeWithE2eCapabilities(
 					writeAdoptionFile: async () => {},
 				});
 				const sessionRun = await planEnumAdd(pool, sessionSchema);
+				const canonicalDefaultTable = unique('session_default');
+				await pool.query(
+					`CREATE TABLE ${quoteIdent(sessionSchema)}.${quoteIdent(canonicalDefaultTable)} (status text DEFAULT 'active')`,
+				);
 				const client = await pool.connect();
 				try {
 					await client.query('SET default_transaction_read_only = on');
@@ -284,7 +317,18 @@ describeWithE2eCapabilities(
 					convergePg(pool, enumModel(sessionSchema, ['active']), {
 						schema: sessionSchema,
 					}),
-				).resolves.toEqual({ kind: 'no-drift', applied: [] });
+				).rejects.toMatchObject({
+					name: PgConvergeRefusalError.name,
+					refusal: 'database-read-only',
+				});
+				await expect(
+					convergePg(pool, canonicalDefaultTableModel(canonicalDefaultTable), {
+						schema: sessionSchema,
+					}),
+				).rejects.toMatchObject({
+					name: PgConvergeRefusalError.name,
+					refusal: 'database-read-only',
+				});
 				await expectReadOnlyCommandOutcomes(pool, sessionRun, sessionSchema);
 				await expect(
 					runRelease('never_seen', {
