@@ -209,11 +209,11 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 			`ALTER SEQUENCE "orderNumberSeq" RENAME TO "order_number_seq"`,
 		);
 		await expect(
-			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
-				`${SCHEMA}.orderNumberSeq`,
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS present', [
+				`"${SCHEMA}"."orderNumberSeq"`,
 			]),
 		).resolves.toMatchObject({
-			rows: [{ relation: `${SCHEMA}.orderNumberSeq` }],
+			rows: [{ present: true }],
 		});
 	});
 
