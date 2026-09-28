@@ -107,6 +107,20 @@ function makeModel(
 	);
 }
 
+function makeDeclaredAdoptionModel(
+	tables: readonly TableIR[],
+	externalTables: readonly string[],
+): ModelIR {
+	return new ModelIRImpl(
+		new Map(tables.map((table) => [table.name, table])),
+		new Map(),
+		undefined,
+		undefined,
+		undefined,
+		externalTables,
+	);
+}
+
 function makeModelWithEnums(
 	tables: readonly TableIR[],
 	enums: readonly EnumIR[],
@@ -135,6 +149,8 @@ class FakeLiveDiffClient {
 		readonly databaseCheckExpression: string,
 		readonly failCanonicalization: boolean,
 		readonly adoptionColumns?: readonly Record<string, unknown>[],
+		readonly adoptionForeignKeys: readonly Record<string, unknown>[] = [],
+		readonly adoptionIndexes: readonly Record<string, unknown>[] = [],
 	) {}
 
 	async query(
@@ -213,6 +229,18 @@ class FakeLiveDiffClient {
 					},
 				],
 				rowCount: 2,
+			};
+		}
+		if (normalized.includes("WHERE c.contype = 'f'")) {
+			return {
+				rows: this.adoptionForeignKeys,
+				rowCount: this.adoptionForeignKeys.length,
+			};
+		}
+		if (normalized.includes('FROM pg_index ix')) {
+			return {
+				rows: this.adoptionIndexes,
+				rowCount: this.adoptionIndexes.length,
 			};
 		}
 
@@ -533,6 +561,149 @@ describe('comparePgsqlDatabaseSchema', () => {
 		expect(missingColumn.changes).toEqual(
 			expect.arrayContaining([expect.objectContaining({ kind: 'add_column' })]),
 		);
+	});
+
+	it('keeps outbound foreign keys while projecting adoption tables after whole-schema introspection', async () => {
+		const columns = [
+			{
+				table_name: 'orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'orders',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'customers',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+		];
+		const liveForeignKey = {
+			constraint_name: 'orders_customer_id_fkey',
+			source_table: 'orders',
+			source_column: 'customer_id',
+			target_schema: 'public',
+			target_table: 'customers',
+			target_column: 'id',
+			delete_rule: 'NO ACTION',
+			update_rule: 'NO ACTION',
+			is_deferrable: 'NO',
+			initially_deferred: 'NO',
+		};
+		const declaredWithForeignKey = makeDeclaredAdoptionModel(
+			[
+				makeTable({
+					name: 'orders',
+					columns: [makeCol('id'), makeCol('customer_id')],
+					foreignKeys: [
+						{
+							columns: ['customer_id'],
+							references: { table: 'customers', columns: ['id'] },
+						},
+					],
+				}),
+			],
+			['customers'],
+		);
+		const matching = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient('', false, columns, [liveForeignKey]),
+			),
+			model: declaredWithForeignKey,
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(matching.changes).toEqual([]);
+
+		const undeclaredForeignKey = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient('', false, columns, [liveForeignKey]),
+			),
+			model: makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol('id'), makeCol('customer_id')],
+				}),
+			]),
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(undeclaredForeignKey.changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'drop_foreign_key', table: 'orders' }),
+			]),
+		);
+	});
+
+	it('masks external indexes after whole-schema introspection under snake_case', async () => {
+		const columns = [
+			{
+				table_name: 'legacy_orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+		];
+		const compared = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient(
+					'',
+					false,
+					columns,
+					[],
+					[
+						{
+							index_name: 'idx_legacy_orders_id',
+							table_name: 'legacy_orders',
+							columns: ['id'],
+							include_columns: null,
+							expressions_text: null,
+							opclass_names: null,
+							opclass_cols: null,
+							is_unique: false,
+							is_valid: true,
+							is_ready: true,
+							method: 'btree',
+							predicate: null,
+							reloptions: null,
+						},
+					],
+				),
+			),
+			model: makeModel([makeTable({ name: 'legacyOrders' })]),
+			schema: 'public',
+			dbCasing: 'snake_case',
+			externalIndexMask: new Set([
+				JSON.stringify(['legacy_orders', 'idx_legacy_orders_id']),
+			]),
+		});
+		expect(compared.changes).toEqual([]);
 	});
 
 	it('refuses an executor that is neither a pool nor a checked-out client', async () => {

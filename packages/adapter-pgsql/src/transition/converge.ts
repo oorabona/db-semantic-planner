@@ -1090,6 +1090,14 @@ export async function convergePg(
 		await refuseForLiveReservations(client, schema, () => {
 			destroyReason = 'converge could not confirm predecessor run lock release';
 		});
+		const writability = await classifyPgDatabaseWritability(client);
+		if (writability.kind === 'database-read-only')
+			throw new PgConvergeRefusalError(
+				'database-read-only',
+				[],
+				writability.detail,
+			);
+		if (writability.kind === 'unavailable') throw new Error(writability.detail);
 		for (const table of model.tables.values()) {
 			const directive =
 				table.replace === true
@@ -1362,14 +1370,6 @@ export async function convergePg(
 			if (change.kind === 'create_table' && step.address)
 				previouslyCreatedAddresses.add(canonicalJsonDigest(step.address));
 		}
-		const writability = await classifyPgDatabaseWritability(client);
-		if (writability.kind === 'database-read-only')
-			throw new PgConvergeRefusalError(
-				'database-read-only',
-				[],
-				writability.detail,
-			);
-		if (writability.kind === 'unavailable') throw new Error(writability.detail);
 		const planDigest = canonicalJsonDigest({
 			kind: 'postgresql-additive-converge-v1',
 			database,

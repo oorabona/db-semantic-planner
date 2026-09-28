@@ -628,17 +628,13 @@ export async function runGeneratorPlan(input: {
 						},
 					];
 				}),
-				// `comparePgsqlDatabaseSchema` has just compared each side through
-				// the established live canonicalisation path. An adopted table is
-				// admitted only when that comparison has no remaining change for it.
+				// Adoption is admitted only by its declaration-scoped comparison.
 				...[...loaded.model.tables.values()].flatMap((table) => {
 					const physicalName = adoptionPhysicalNames.get(table.name);
 					if (
 						table.adopt !== true ||
 						physicalName === undefined ||
-						diff.changes.some((change) =>
-							changeTargetsDeclaredTable(change, physicalName),
-						)
+						adoptionMismatches.has(physicalName)
 					)
 						return [];
 					return [

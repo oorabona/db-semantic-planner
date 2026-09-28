@@ -158,8 +158,10 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 					);
 				})();
 	const naming = getNamingPluginForDbCasing(input.dbCasing);
-	const declaredTables = [...input.model.tables.values()].map((table) =>
-		naming.toDatabase(table.name),
+	const declaredTables = new Set(
+		[...input.model.tables.values()].map((table) =>
+			naming.toDatabase(table.name),
+		),
 	);
 	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
 	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
@@ -169,25 +171,24 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 				return (
 					introspectionOptions?: Parameters<typeof target.introspect>[0],
 				) =>
-					target
-						.introspect({
-							...introspectionOptions,
-							include: declaredTables,
-							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
-						})
-						.then((introspected) => ({
-							...introspected,
-							sequences: new Map(
-								[...(introspected.sequences ?? [])].filter(([name]) =>
-									declaredSequences.has(name),
-								),
+					target.introspect(introspectionOptions).then((introspected) => ({
+						...introspected,
+						tables: new Map(
+							[...introspected.tables].filter(([name]) =>
+								declaredTables.has(name),
 							),
-							enums: new Map(
-								[...(introspected.enums ?? [])].filter(([name]) =>
-									declaredEnums.has(name),
-								),
+						),
+						sequences: new Map(
+							[...(introspected.sequences ?? [])].filter(([name]) =>
+								declaredSequences.has(name),
 							),
-						}));
+						),
+						enums: new Map(
+							[...(introspected.enums ?? [])].filter(([name]) =>
+								declaredEnums.has(name),
+							),
+						),
+					}));
 			return Reflect.get(target, property, receiver);
 		},
 	});

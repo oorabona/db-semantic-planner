@@ -75,14 +75,16 @@ ledger or the transition journal. `runPgReinitializePreflight` creates and owns 
 runs as the same PostgreSQL role, so it can read the journal. The ledger requires PostgreSQL 15
 (`unsupported-server` below it).
 
-### A target refusing writes is refused before the first write
+### A target refusing writes is refused before comparing
 
-When a call has something to apply, converge classifies the target with the classifier every managed
-writer uses and refuses `database-read-only` on a standby or a read-only session before its first
-ledger write, as ADR 0006 requires. A call with nothing to apply writes nothing and returns `no-drift`
-on such a target. A target that turns read-only between that check and the first write is reported
-`execution-refused`: the outcome protocol reduces the typed error to a refusal reason before converge
-sees it, and carrying the type through the protocol is not done.
+After its ledger checks and before comparing, converge classifies the target with the classifier
+every managed writer uses and refuses `database-read-only` on a standby or a read-only session, as
+ADR 0006 requires. It does so even when the model already matches: the comparison canonicalizes
+expressions with scratch DDL that a read-only target rejects, so converge cannot establish `no-drift`
+there. A target that turns read-only after that check and before the first write is reported
+`execution-refused`, and `partially-applied` after earlier steps committed: the outcome protocol
+reduces the typed error to a refusal reason before converge sees it, and carrying the type through
+the protocol is not done.
 
 ### Adoption is declared by the caller's model
 
@@ -118,8 +120,8 @@ to `convergePg`.
   `convergePg` refuse `busy`. This is kept: an application start is never blocked by an apply run,
   and the two are run one after the other on a schema (#769 issuecomment-5874396889). Supporting both
   at once would take an admission gate, a shared session lock each apply run holds for its whole
-  execution and `convergePg` takes exclusively without waiting, which makes application starts wait
-  for apply runs.
+  execution and `convergePg` takes exclusively without waiting, so an application start would refuse
+  `busy` while an apply run holds it.
 - An install whose tables lag the model cannot be adopted as it is: adopting a table and then adding
   its missing columns is not offered.
 - A new index, CHECK constraint or foreign key on an existing managed table is refused; the caller

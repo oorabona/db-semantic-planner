@@ -60,13 +60,15 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 			readonly dbCasing: string;
 			readonly externalIndexMask?: ReadonlySet<string>;
 		};
-		const declaredTables = [...input.model.tables.values()].map((table) =>
-			input.dbCasing === 'snake_case'
-				? table.name.replace(
-						/[A-Z]/g,
-						(character) => `_${character.toLowerCase()}`,
-					)
-				: table.name,
+		const declaredTables = new Set(
+			[...input.model.tables.values()].map((table) =>
+				input.dbCasing === 'snake_case'
+					? table.name.replace(
+							/[A-Z]/g,
+							(character) => `_${character.toLowerCase()}`,
+						)
+					: table.name,
+			),
 		);
 		const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
 		const declaredEnums = new Set(input.model.enums?.keys() ?? []);
@@ -74,13 +76,14 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 			get(target, property, receiver) {
 				if (property === 'introspect')
 					return async (options?: Record<string, unknown>) => {
-						const introspected = (await target.introspect({
-							...options,
-							include: declaredTables,
-							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
-						})) as ModelIR;
+						const introspected = (await target.introspect(options)) as ModelIR;
 						return {
 							...introspected,
+							tables: new Map(
+								[...introspected.tables].filter(([name]) =>
+									declaredTables.has(name),
+								),
+							),
 							sequences: new Map(
 								[...(introspected.sequences ?? [])].filter(([name]) =>
 									declaredSequences.has(name),
@@ -641,12 +644,7 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.runIds).not.toHaveBeenCalled();
 	});
 
-	it('refuses a planned mutation on a read-only database before execution', async () => {
-		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
-		mocks.createStep.mockImplementation(
-			({ change: input }: { change: Record<string, unknown> }) =>
-				stepFor(input),
-		);
+	it('refuses a read-only database before comparison', async () => {
 		mocks.writability.mockResolvedValue({
 			kind: 'database-read-only',
 			detail: 'target session is read-only',
@@ -656,15 +654,11 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'database-read-only',
 			detail: 'target session is read-only',
 		});
+		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('surfaces an unavailable writability classification as an error', async () => {
-		mocks.compare.mockResolvedValue({ changes: [change('create_table')] });
-		mocks.createStep.mockImplementation(
-			({ change: input }: { change: Record<string, unknown> }) =>
-				stepFor(input),
-		);
+	it('surfaces an unavailable writability classification before comparison', async () => {
 		mocks.writability.mockResolvedValue({
 			kind: 'unavailable',
 			detail: 'PostgreSQL writability could not be read',
@@ -678,17 +672,19 @@ describe('convergePg refusal boundary', () => {
 		expect((error as Error).message).toBe(
 			'PostgreSQL writability could not be read',
 		);
+		expect(mocks.compare).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('does not classify writability when there is no drift', async () => {
+	it('returns no-drift after a writable matching comparison', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
 			kind: 'no-drift',
 			applied: [],
 		});
-		expect(mocks.writability).not.toHaveBeenCalled();
+		expect(mocks.writability).toHaveBeenCalledOnce();
+		expect(mocks.compare).toHaveBeenCalledOnce();
 	});
 
 	it('refuses busy before comparison when a mapped predecessor run lock is held', async () => {
@@ -2021,7 +2017,7 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('ignores an undeclared live table while comparing declared physical names', async () => {
+	it('projects declared physical names after whole-schema introspection', async () => {
 		const model = {
 			...emptyModel(),
 			tables: new Map([
@@ -2080,11 +2076,10 @@ describe('convergePg refusal boundary', () => {
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 		expect(mocks.introspect).toHaveBeenCalledWith({
 			schema: 'public',
-			include: ['user_profile'],
 		});
 	});
 
-	it('excludes every live table for an empty declaration', async () => {
+	it('projects every live table out of an empty declaration', async () => {
 		mocks.compare.mockImplementation(
 			async (adapter: {
 				introspect: (options?: unknown) => Promise<unknown>;
@@ -2100,8 +2095,6 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.introspect).toHaveBeenCalledWith({
 			schema: 'public',
-			include: [],
-			exclude: ['*'],
 		});
 	});
 

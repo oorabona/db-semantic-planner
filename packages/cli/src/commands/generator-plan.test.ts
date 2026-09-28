@@ -582,22 +582,11 @@ describe('generated managed-step dependencies', () => {
 		});
 
 		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
-			changes: [
-				{
-					kind: 'add_column',
-					table: 'legacy_orders',
-					column: 'missing',
-					destructive: false,
-					details: 'missing column',
-					meta: {
-						column: { name: 'missing', type: 'integer', nullable: true },
-					},
-				},
-			],
+			changes: [],
 			hasDestructive: false,
 			summary: {
 				tables: { added: 0, dropped: 0 },
-				columns: { added: 1, dropped: 0, altered: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
 				indexes: { added: 0, dropped: 0 },
 				constraints: { added: 0, dropped: 0, altered: 0 },
 			},
@@ -623,6 +612,128 @@ describe('generated managed-step dependencies', () => {
 				address: { name: 'legacy_orders' },
 				lifecycle: { kind: 'adoption-refused' },
 			},
+		]);
+		expect(generator.readPgCatalogueIdentity).not.toHaveBeenCalled();
+	});
+
+	it('uses the declaration-scoped comparison as the sole adoption verdict', async () => {
+		const pool = {
+			end: vi.fn(),
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+		};
+		const adopted = {
+			name: 'legacy_orders',
+			adopt: true as const,
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const unrelated = {
+			name: 'unrelated',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		generator.loadSchema.mockResolvedValue({
+			model: {
+				tables: new Map([
+					[adopted.name, adopted],
+					[unrelated.name, unrelated],
+				]),
+			},
+		});
+		generator.createDbConnection.mockResolvedValue({ pool });
+		generator.createPgsqlAdapter.mockReturnValue({});
+		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+			changes: [
+				{
+					kind: 'add_column',
+					table: 'legacy_orders',
+					column: 'missing',
+					destructive: false,
+					details: 'missing column',
+					meta: {
+						column: { name: 'missing', type: 'integer', nullable: true },
+					},
+				},
+				{
+					kind: 'add_column',
+					table: 'unrelated',
+					column: 'missing',
+					destructive: false,
+					details: 'missing column',
+					meta: {
+						column: { name: 'missing', type: 'integer', nullable: true },
+					},
+				},
+			],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 2, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		});
+		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+			changes: [],
+		});
+		generator.generateMigrationSQL.mockReturnValue(['ALTER TABLE']);
+		generator.readPgCatalogueIdentity.mockResolvedValue({
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '42' },
+			},
+		});
+
+		const admitted = await runGeneratorPlan({
+			db: 'postgres://unused',
+			schemaFile: 'schema.ts',
+			dryRun: true,
+		});
+		const admittedChanges = (admitted.plan as GeneratorDurablePlan).generator
+			.changes;
+		expect(admittedChanges).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: 'adopt_table',
+					table: 'legacy_orders',
+				}),
+				expect.objectContaining({ kind: 'add_column', table: 'unrelated' }),
+			]),
+		);
+		expect(admittedChanges).not.toContainEqual(
+			expect.objectContaining({ kind: 'add_column', table: 'legacy_orders' }),
+		);
+
+		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+			changes: [],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		});
+		generator.comparePgsqlDeclaredAdoptionSchema.mockResolvedValue({
+			changes: [{ kind: 'add_column' }],
+		});
+		generator.readPgCatalogueIdentity.mockClear();
+
+		const refused = await runGeneratorPlan({
+			db: 'postgres://unused',
+			schemaFile: 'schema.ts',
+			dryRun: true,
+		});
+		const refusedChanges = (refused.plan as GeneratorDurablePlan).generator
+			.changes;
+		expect(refusedChanges).toEqual([
+			expect.objectContaining({
+				kind: 'adoption_refused',
+				table: 'legacy_orders',
+			}),
 		]);
 		expect(generator.readPgCatalogueIdentity).not.toHaveBeenCalled();
 	});
