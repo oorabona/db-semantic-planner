@@ -80,16 +80,16 @@ if (result.kind !== 'applied' && result.kind !== 'no-drift') {
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
 or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
-create enums or extensions: those the model uses must already exist. It cannot yet create a table
-with an enum-typed column ([#819](https://github.com/oorabona/db-semantic-planner/issues/819)).
+create enums or extensions: those the model uses must already exist.
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
   expression, and, for a single-column key, a declared index on its referencing column.
 - A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
   finite-number or string literal default (not a function call such as `now()`). A column with a
-  default must use a PostgreSQL built-in type or an enum. Adding a column takes an
-  `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
+  default must use a PostgreSQL built-in type or an enum. A new column whose type names its schema
+  (`originalDbTypeSchema`), as an enum column in a non-public schema does, is refused. Adding a
+  column takes an `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
 
 The tables a call creates and every change on them commit in one transaction: if one of them fails,
 none of them remains and the next call starts again from absent tables. A sequence created by the

@@ -2,6 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import {
 	appendIntentJournal,
+	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	createPgTransitionRunPersister,
 	readPgLedgerAddressChain,
 	reconcilePgTransitionRun,
@@ -91,6 +93,31 @@ function legacyTable(name: string, adopt = true): TableIR {
 		primaryKey: 'id',
 		foreignKeys: [],
 		indexes: [{ name: `${name}_code_index`, columns: ['code'] }],
+	};
+}
+
+function enumColumnTable(
+	name: string,
+	typeSchema: string,
+	nullable = false,
+	typeName = 'mood_819',
+): TableIR {
+	return {
+		name,
+		columns: [
+			{ name: 'id', type: 'integer', nullable: false },
+			{
+				name: 'mood',
+				type: 'string',
+				nullable,
+				originalDbType: typeName,
+				originalDbTypeSchema: typeSchema,
+				originalDbTypeSchemaScope: 'target',
+			},
+		],
+		primaryKey: 'id',
+		foreignKeys: [],
+		indexes: [],
 	};
 }
 
@@ -575,6 +602,184 @@ describe('convergePg', () => {
 			).resolves.toMatchObject({ rows: [{ uses_domain: true }] });
 		} finally {
 			await dedicatedPool.end();
+		}
+	});
+
+	it('converges a declared enum column when the target schema is off search_path', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=pg_catalog',
+		});
+		const name = 'mood_819_items';
+		const typeName = 'mood_819_scalar';
+		const desired = model(
+			[enumColumnTable(name, schema, false, typeName)],
+			[],
+			[{ name: typeName, values: ['calm', 'busy'] }],
+		);
+		try {
+			await dedicatedPool.query(
+				`CREATE TYPE "${schema}"."${typeName}" AS ENUM ('calm', 'busy')`,
+			);
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toMatchObject({
+				kind: 'applied',
+			});
+			const databaseId = await database();
+			const tableAddress = address(databaseId, 'table', name);
+			await expect(managed(tableAddress)).resolves.toBe(true);
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toEqual({
+				kind: 'no-drift',
+				applied: [],
+			});
+			const { changes } = await comparePgsqlDatabaseSchema(
+				createPgsqlAdapter(dedicatedPool),
+				desired,
+				{ schema },
+			);
+			expect(changes.filter((change) => change.table === name)).toEqual([]);
+		} finally {
+			await dedicatedPool.end();
+		}
+	});
+
+	it('converges an undeclared enum column when the target schema is off search_path', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=pg_catalog',
+		});
+		const name = 'undeclared_mood_819_items';
+		const typeName = 'mood_819_undeclared';
+		const desired = model([enumColumnTable(name, schema, false, typeName)]);
+		try {
+			await dedicatedPool.query(
+				`CREATE TYPE "${schema}"."${typeName}" AS ENUM ('calm', 'busy')`,
+			);
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toMatchObject({
+				kind: 'applied',
+			});
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toEqual({
+				kind: 'no-drift',
+				applied: [],
+			});
+			const { changes } = await comparePgsqlDatabaseSchema(
+				createPgsqlAdapter(dedicatedPool),
+				desired,
+				{ schema },
+			);
+			expect(changes.filter((change) => change.table === name)).toEqual([]);
+		} finally {
+			await dedicatedPool.end();
+		}
+	});
+
+	it('converges a declared enum array column when the target schema is off search_path', async () => {
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=pg_catalog',
+		});
+		const name = 'mood_819_array_items';
+		const desired = model(
+			[enumColumnTable(name, schema, false, 'mood_819[]')],
+			[],
+			[{ name: 'mood_819', values: ['calm', 'busy'] }],
+		);
+		try {
+			await dedicatedPool.query(
+				`CREATE TYPE "${schema}"."mood_819" AS ENUM ('calm', 'busy')`,
+			);
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(dedicatedPool, desired, { schema }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dedicatedPool.end();
+		}
+	});
+
+	it('refuses adding a nullable enum column whose type names the target schema', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const name = 'add_mood_819_items';
+		const typeName = 'mood_819_nullable';
+		const initial = model([
+			{
+				name,
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		const desired = model([enumColumnTable(name, schema, true, typeName)]);
+		await pool.query(
+			`CREATE TYPE "${schema}"."${typeName}" AS ENUM ('calm', 'busy')`,
+		);
+		await expect(convergePg(pool, initial, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		await expect(
+			pool.query(
+				'SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+				[schema, name, 'mood'],
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
+		const tableAddress = address(databaseId, 'table', name);
+		const chain = await readPgLedgerAddressChain(
+			pool,
+			{ scope: 'schema', schema },
+			address(databaseId, 'column', 'mood', tableAddress),
+		);
+		expect(chain.events).toEqual([]);
+	});
+
+	it('converges a mixed-case enum schema when it is off search_path', async () => {
+		const mixedSchema = `Mixed_Case_819_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const name = 'mixed_mood_819_items';
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=pg_catalog',
+		});
+		let createdMixedSchema = false;
+		const desired = model(
+			[enumColumnTable(name, mixedSchema)],
+			[],
+			[{ name: 'mood_819', values: ['calm', 'busy'] }],
+		);
+		try {
+			await dedicatedPool.query(`CREATE SCHEMA "${mixedSchema}"`);
+			createdMixedSchema = true;
+			await runPreflight([mixedSchema], { writeAdoptionFile: async () => {} });
+			await dedicatedPool.query(
+				`CREATE TYPE "${mixedSchema}"."mood_819" AS ENUM ('calm', 'busy')`,
+			);
+			await expect(
+				convergePg(dedicatedPool, desired, { schema: mixedSchema }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(dedicatedPool, desired, { schema: mixedSchema }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+			const { changes } = await comparePgsqlDatabaseSchema(
+				createPgsqlAdapter(dedicatedPool),
+				desired,
+				{ schema: mixedSchema },
+			);
+			expect(changes.filter((change) => change.table === name)).toEqual([]);
+		} finally {
+			await dedicatedPool.end();
+			if (createdMixedSchema) await dropSchema(mixedSchema);
 		}
 	});
 
