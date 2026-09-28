@@ -71,6 +71,11 @@
 			"real-db-only": 0,
 			"heuristic-fragment": 0
 		},
+		"packages/docs/guide/converge.md": {
+			"explicit-skip": 1,
+			"real-db-only": 2,
+			"heuristic-fragment": 0
+		},
 		"packages/docs/guide/ddl-helpers.md": {
 			"explicit-skip": 10,
 			"real-db-only": 2,
