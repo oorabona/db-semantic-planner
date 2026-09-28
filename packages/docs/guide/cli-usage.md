@@ -4,10 +4,12 @@ title: CLI Usage
 
 # CLI usage
 
-`dbsp` has one managed DDL execution path: plan a change, then apply it. A
-no-argument `apply` creates, persists, and presents a fresh managed run; an
-`apply <run-id>` executes exactly that replayable recorded run. There is no
-direct schema execution command or file-based execution command.
+`dbsp` reaches one managed DDL executor from two commands. The reviewed path is
+plan a change, then apply it: a no-argument `apply` creates, persists, and
+presents a fresh managed run, and an `apply <run-id>` executes exactly that
+replayable recorded run. `dbsp migrate` converges a schema file without review
+and admits only additions and declared adoptions. There is no file-based
+execution command.
 
 ## Managed workflow
 
@@ -19,6 +21,7 @@ direct schema execution command or file-based execution command.
 | `dbsp reconcile <run-id>` | Classify a previously recorded run against live state. |
 | `dbsp release <address>` | Release managed authority when its safety checks permit it. |
 | `dbsp preflight --reinitialize` | Check and explicitly reinitialize a managed ledger when allowed. |
+| `dbsp migrate <schema-file>` | Converge the schema to the file without review, through `convergePg`. |
 
 ```bash
 dbsp plan ./schema.ts --db "$DATABASE_URL" --schema "$DBSP_SCHEMA"
@@ -31,6 +34,21 @@ dbsp inspect table:users --db "$DATABASE_URL" --schema "$DBSP_SCHEMA" --format j
 digest printed by `plan` or `apply`: a recorded `apply <run-id>` is available
 only for replayable runs. A declined removal is not replayable; re-plan it when
 you are ready to proceed. `--yes` accepts the presentation step.
+
+## Startup convergence
+
+```bash
+dbsp migrate ./schema.ts --db "$DATABASE_URL" --schema "$DBSP_SCHEMA" --format json
+```
+
+`dbsp migrate` runs [`convergePg`](./converge.md) once: it creates what the
+schema file adds, adopts the tables it marks `adopt: true`, and refuses any
+other change before sending DDL. It asks for no confirmation and has no dry
+run; review a change with `dbsp plan` instead. The schema needs its ledger
+first, from `dbsp preflight --reinitialize`. Name each index you manage
+yourself with `--external-index <table>:<index>`; the table part cannot
+contain `:`. Every result and refusal is a named outcome with its own exit
+code, listed by `dbsp migrate --help`; `no-drift` and `applied` exit 0.
 
 ## Other local tools
 

@@ -56,6 +56,7 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 | `dbsp verify` | Compare schema against live database; exit code 1 on drift |
 | `dbsp plan` | Prove and record a managed schema transition |
 | `dbsp apply [run-id]` | Persist-and-present or execute exactly one recorded plan |
+| `dbsp migrate <schema-file>` | Converge the schema to the file without review (additions and declared adoptions only) |
 | `dbsp generate ddl` | Generate SQL CREATE TABLE statements for provisioning |
 | `dbsp introspect` | Generate schema.ts from database introspection |
 
