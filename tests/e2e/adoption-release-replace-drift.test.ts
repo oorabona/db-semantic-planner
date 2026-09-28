@@ -565,17 +565,19 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			await pool.query(
 				`CREATE TABLE ${quote(schema)}.${quote(scenario.table)} (${quote(scenario.liveColumn)} bigint NOT NULL DEFAULT '0'::bigint)`,
 			);
+			const schemaFile = await adoptionDefaultSchemaFile({
+				table: scenario.table,
+				column: scenario.declaredColumn,
+				...(scenario.dbCasing === undefined
+					? {}
+					: { dbCasing: scenario.dbCasing }),
+			});
 			const planned = await runGeneratorPlan({
 				db: process.env.DATABASE_URL!,
 				schema,
-				schemaFile: await adoptionDefaultSchemaFile({
-					table: scenario.table,
-					column: scenario.declaredColumn,
-					...(scenario.dbCasing === undefined
-						? {}
-						: { dbCasing: scenario.dbCasing }),
-				}),
+				schemaFile,
 			});
+			generatorSchemaFiles.set(planned, schemaFile);
 			const reviewed = generatorPlan(planned);
 			expect(reviewed.plan.generator.changes).toContainEqual(
 				expect.objectContaining({ kind: 'adopt_table', table: scenario.table }),
