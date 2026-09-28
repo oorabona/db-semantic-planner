@@ -7,6 +7,7 @@
  * @module ddl/phases/sequences
  */
 
+import { physicalizeDeclaredSequences } from '../../sequence-name.js';
 import { buildSequenceClause } from '../migration-sql.js';
 import { type PhaseContext, sup } from './types.js';
 import { quoteIdent as quoteId } from './utils.js';
@@ -23,7 +24,8 @@ export function generateSequencesPhase(ctx: PhaseContext): string[] {
 		return [];
 	}
 	const statements: string[] = [];
-	for (const [, seq] of schema.sequences) {
+	const sequences = physicalizeDeclaredSequences(schema.sequences, ctx.naming);
+	for (const [, seq] of sequences) {
 		const seqName = schemaName
 			? `${quoteId(schemaName, 'schema')}.${quoteId(seq.name, 'table')}`
 			: quoteId(seq.name, 'table');

@@ -47,6 +47,7 @@ import {
 	type NamingPlugin,
 } from './naming-plugin.js';
 import type { RollbackOnlyPgsqlScope } from './pgsql-adapter.js';
+import { physicalizeDeclaredSequences } from './sequence-name.js';
 import { escapeDiagnosticText, validateCheckExpression } from './validate.js';
 
 export interface CheckConstraintCanonicalizationWarning {
@@ -2142,7 +2143,11 @@ async function createMissingDesiredSequences(
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<unknown | undefined> {
-	const missingSequences = missingDesiredSequences(desired, dbModel);
+	const missingSequences = missingDesiredSequences(
+		desired,
+		dbModel,
+		namingForOptions(options),
+	);
 	if (missingSequences.size === 0) return undefined;
 	const sequenceModel = new ModelIRImpl(
 		new Map(),
@@ -2155,7 +2160,7 @@ async function createMissingDesiredSequences(
 		schema: sequenceModel,
 		tables: [],
 		schemaName: options?.schemaName,
-		naming: namingForOptions(options),
+		naming: identityNaming,
 		caps: options?.dialectCapabilities,
 		fkAutoIndex: false,
 		includeDropStatements: false,
@@ -2173,9 +2178,13 @@ async function createMissingDesiredSequences(
 function missingDesiredSequences(
 	desired: ModelIR,
 	dbModel: ModelIR,
+	naming: NamingPlugin,
 ): Map<string, SequenceIR> {
 	const missing = new Map<string, SequenceIR>();
-	for (const [name, sequence] of desired.sequences ?? []) {
+	for (const [name, sequence] of physicalizeDeclaredSequences(
+		desired.sequences,
+		naming,
+	)) {
 		if (!dbModel.sequences?.has(name)) missing.set(name, sequence);
 	}
 	return missing;

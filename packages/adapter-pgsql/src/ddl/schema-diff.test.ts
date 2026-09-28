@@ -10,6 +10,11 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import {
+	LegacySequenceNameError,
+	SequenceNameCollisionError,
+	SequenceNameMapKeyMismatchError,
+} from '../sequence-name.js';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
 	type CompareSchemataOptions,
@@ -4141,6 +4146,84 @@ describe('Sequences', () => {
 		const change = diff.changes.find((c) => c.kind === 'create_sequence');
 		expect(change?.meta?.sequence).toMatchObject({ name: 'order_seq' });
 		expect(change?.destructive).toBe(false);
+	});
+
+	it('uses the physical sequence name in comparison metadata and migration SQL', () => {
+		const diff = compareSchemata(
+			makeModelWithSequences([{ name: 'orderNumberSeq' }]),
+			makeModel([]),
+			{ dbCasing: 'snake_case' },
+		);
+
+		expect(diff.changes).toMatchObject([
+			{
+				kind: 'create_sequence',
+				details: 'Create sequence "order_number_seq"',
+				meta: { sequence: { name: 'order_number_seq' } },
+			},
+		]);
+		expect(generateMigrationSQL(diff)).toContain(
+			'CREATE SEQUENCE "order_number_seq";',
+		);
+	});
+
+	it('matches an authored sequence against its physical live name', () => {
+		const schema = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
+		const db = makeModelWithSequences([{ name: 'order_number_seq' }]);
+
+		expect(
+			compareSchemata(schema, db, { dbCasing: 'snake_case' }).changes,
+		).toEqual([]);
+	});
+
+	it('keeps the raw sequence name without a casing option', () => {
+		const diff = compareSchemata(
+			makeModelWithSequences([{ name: 'orderNumberSeq' }]),
+			makeModel([]),
+		);
+
+		expect(diff.changes[0]?.meta?.sequence).toMatchObject({
+			name: 'orderNumberSeq',
+		});
+	});
+
+	it('refuses a legacy raw sequence instead of planning a destructive replacement', () => {
+		const schema = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
+		const db = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
+
+		expect(() =>
+			compareSchemata(schema, db, { dbCasing: 'snake_case' }),
+		).toThrow(LegacySequenceNameError);
+		expect(() =>
+			compareSchemata(schema, db, { dbCasing: 'snake_case' }),
+		).toThrow('ALTER SEQUENCE "orderNumberSeq" RENAME TO "order_number_seq"');
+	});
+
+	it.each([
+		[
+			'key/name mismatch',
+			new Map([['a', { name: 'b' }]]),
+			SequenceNameMapKeyMismatchError,
+		],
+		[
+			'physical name collision',
+			new Map([
+				['orderSeq', { name: 'orderSeq' }],
+				['order_seq', { name: 'order_seq' }],
+			]),
+			SequenceNameCollisionError,
+		],
+	] as const)('refuses a declared sequence %s', (_, sequences, error) => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			undefined,
+			undefined,
+			sequences,
+		);
+		expect(() =>
+			compareSchemata(schema, makeModel([]), { dbCasing: 'snake_case' }),
+		).toThrow(error);
 	});
 
 	it('should detect dropped sequence', () => {

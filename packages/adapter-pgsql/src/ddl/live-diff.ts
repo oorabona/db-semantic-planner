@@ -27,6 +27,7 @@ import {
 	identityNaming,
 } from '../naming-plugin.js';
 import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
+import { physicalizeDeclaredSequences } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
@@ -164,7 +165,9 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			naming.toDatabase(table.name),
 		),
 	);
-	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+	const declaredSequences = new Set(
+		physicalizeDeclaredSequences(input.model.sequences, naming).keys(),
+	);
 	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
 	const declarationScopedAdapter = new Proxy(adapter, {
 		get(target, property, receiver) {

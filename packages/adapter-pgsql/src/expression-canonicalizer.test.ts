@@ -24,6 +24,7 @@ import {
 	isEngineCanonicalSqlDefault,
 	markEngineCanonicalCheck,
 } from './expression-provenance.js';
+import * as namingPlugin from './naming-plugin.js';
 import { PgsqlAdapter } from './pgsql-adapter.js';
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
@@ -3136,6 +3137,136 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			);
 		},
 	);
+
+	it('checks physical sequence names before staging a snake_case declaration', async () => {
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('counter', {
+							default: { sql: "nextval('counter_seq'::regclass)" },
+						}),
+					],
+				}),
+			],
+			undefined,
+			undefined,
+			[{ name: 'counterSeq' }],
+		);
+		const liveWithPhysicalSequence = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('counter', { default: { sql: 'old default' } }),
+					],
+				}),
+			],
+			undefined,
+			undefined,
+			[{ name: 'counter_seq' }],
+		);
+
+		const presentClient = new FakePgClient();
+		await adapterForPool(new FakePgPool(presentClient)).withScratchScope(
+			(scratch) =>
+				canonicalizeExpressionSurfaces(
+					scratch,
+					desired,
+					liveWithPhysicalSequence,
+					{ dbCasing: 'snake_case' },
+				),
+		);
+		expect(
+			presentClient.queries.some((query) =>
+				normalizeSql(query.sql).startsWith('CREATE SEQUENCE'),
+			),
+		).toBe(false);
+
+		const absentClient = new FakePgClient();
+		await adapterForPool(new FakePgPool(absentClient)).withScratchScope(
+			(scratch) =>
+				canonicalizeExpressionSurfaces(
+					scratch,
+					desired,
+					makeModel([
+						makeTable({
+							name: 'jobs',
+							columns: [
+								makeCol('id'),
+								makeCol('counter', {
+									default: { sql: 'old default' },
+								}),
+							],
+						}),
+					]),
+					{ dbCasing: 'snake_case' },
+				),
+		);
+		expect(
+			absentClient.queries.map((query) => normalizeSql(query.sql)),
+		).toContain('CREATE SEQUENCE "counter_seq";');
+	});
+
+	it('stages a sequence exactly once for a non-idempotent naming plugin', async () => {
+		const naming = vi
+			.spyOn(namingPlugin, 'getNamingPluginForDbCasing')
+			.mockReturnValue({
+				toDatabase: (name) => `${name}_physical`,
+				toModel: (name) => name,
+			});
+		try {
+			const client = new FakePgClient();
+			const desired = makeModel(
+				[
+					makeTable({
+						name: 'jobs',
+						columns: [
+							makeCol('id'),
+							makeCol('counter', {
+								default: {
+									sql: "nextval('counterSeq_physical'::regclass)",
+								},
+							}),
+						],
+					}),
+				],
+				undefined,
+				undefined,
+				[{ name: 'counterSeq' }],
+			);
+
+			await adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
+				canonicalizeExpressionSurfaces(
+					scratch,
+					desired,
+					makeModel([
+						makeTable({
+							name: 'jobs_physical',
+							columns: [
+								makeCol('id_physical'),
+								makeCol('counter_physical', {
+									default: { sql: 'old default' },
+								}),
+							],
+						}),
+					]),
+					{ dbCasing: 'snake_case' },
+				),
+			);
+			expect(client.queries.map((query) => normalizeSql(query.sql))).toContain(
+				'CREATE SEQUENCE "counterSeq_physical";',
+			);
+			expect(
+				client.queries.map((query) => normalizeSql(query.sql)),
+			).not.toContain('CREATE SEQUENCE "counterSeq_physical_physical";');
+		} finally {
+			naming.mockRestore();
+		}
+	});
 
 	it('does not stage an unused missing sequence when the migration excludes sequence DDL', async () => {
 		const client = new FakePgClient();

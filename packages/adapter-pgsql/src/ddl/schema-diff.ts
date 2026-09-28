@@ -45,6 +45,11 @@ import {
 	identityNaming,
 	type NamingPlugin,
 } from '../naming-plugin.js';
+import {
+	getSequenceDatabaseName,
+	LegacySequenceNameError,
+	physicalizeDeclaredSequences,
+} from '../sequence-name.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
 import {
 	normalizeOptionalBoolean,
@@ -293,7 +298,7 @@ export function compareSchemata(
 
 	// 0b. Compare sequences (schema-level, before tables)
 	if (sup(caps?.supportsDDLSequences)) {
-		compareSequences(schema, db, changes);
+		compareSequences(schema, db, changes, schemaNaming);
 	}
 
 	// 1. Tables that exist in schema but not in DB → create_table
@@ -1830,9 +1835,20 @@ function compareSequences(
 	schema: ModelIR,
 	db: ModelIR,
 	changes: SchemaChange[],
+	naming: NamingPlugin,
 ): void {
-	const schemaSeqs = schema.sequences ?? new Map<string, SequenceIR>();
+	const schemaSeqs = physicalizeDeclaredSequences(schema.sequences, naming);
 	const dbSeqs = db.sequences ?? new Map<string, SequenceIR>();
+
+	for (const sequence of schema.sequences?.values() ?? []) {
+		const databaseName = getSequenceDatabaseName(sequence, naming);
+		if (
+			databaseName !== sequence.name &&
+			dbSeqs.has(sequence.name) &&
+			!dbSeqs.has(databaseName)
+		)
+			throw new LegacySequenceNameError(sequence.name, databaseName);
+	}
 
 	// Sequences in schema but not in DB → create
 	for (const [name, seq] of schemaSeqs) {

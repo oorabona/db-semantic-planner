@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
+import { SequenceNameMapKeyMismatchError } from '../sequence-name.js';
 import type { PgDatabaseWritability } from './database-writability.js';
 import type {
 	executeGeneratorPlan,
@@ -1794,17 +1795,23 @@ describe('convergePg refusal boundary', () => {
 		);
 	});
 
-	it('refuses a sequence whose declared name changes under snake_case before comparison', async () => {
+	it('admits a sequence whose declared name changes under snake_case', async () => {
+		const sequenceChange = {
+			...change('create_sequence', {
+				sequence: { name: 'order_number' },
+			}),
+			table: '',
+			column: undefined,
+		};
+		mocks.compare.mockResolvedValue({ changes: [sequenceChange] });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
 		await expect(
 			convergePg(poolFor(), modelWithSequences(['orderNumber']), {
 				dbCasing: 'snake_case',
 			}),
-		).rejects.toMatchObject({
-			refusal: 'unsupported-change',
-			detail: expect.stringContaining('order_number'),
-		});
-		expect(mocks.compare).not.toHaveBeenCalled();
-		expect(mocks.execute).not.toHaveBeenCalled();
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(mocks.compare).toHaveBeenCalledOnce();
 	});
 
 	it.each([
@@ -1820,10 +1827,7 @@ describe('convergePg refusal boundary', () => {
 
 			await expect(
 				convergePg(poolFor(), model, { dbCasing: 'snake_case' }),
-			).rejects.toMatchObject({
-				refusal: 'unsupported-change',
-				detail: expect.stringContaining('order_number'),
-			});
+			).rejects.toBeInstanceOf(SequenceNameMapKeyMismatchError);
 			expect(mocks.compare).not.toHaveBeenCalled();
 		},
 	);
@@ -1834,10 +1838,9 @@ describe('convergePg refusal boundary', () => {
 			sequences: new Map([['order_sequence', { name: 'actual_sequence' }]]),
 		};
 
-		await expect(convergePg(poolFor(), model)).rejects.toMatchObject({
-			refusal: 'unsupported-change',
-			detail: expect.stringContaining('actual_sequence'),
-		});
+		await expect(convergePg(poolFor(), model)).rejects.toBeInstanceOf(
+			SequenceNameMapKeyMismatchError,
+		);
 		expect(mocks.compare).not.toHaveBeenCalled();
 	});
 

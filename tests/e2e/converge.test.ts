@@ -873,6 +873,29 @@ describe('convergePg', () => {
 		).resolves.toBe(true);
 	});
 
+	it('converges a camelCase declared sequence to its snake_case ledger address', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		const desired = model([], [{ name: 'orderNumberSeq' }]);
+
+		await expect(
+			convergePg(pool, desired, { schema, dbCasing: 'snake_case' }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(
+			convergePg(pool, desired, { schema, dbCasing: 'snake_case' }),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.order_number_seq`,
+			]),
+		).resolves.toMatchObject({
+			rows: [{ relation: `${schema}.order_number_seq` }],
+		});
+		await expect(
+			managed(address(databaseId, 'sequence', 'order_number_seq')),
+		).resolves.toBe(true);
+	});
+
 	it.each([
 		[
 			'partial unique index',

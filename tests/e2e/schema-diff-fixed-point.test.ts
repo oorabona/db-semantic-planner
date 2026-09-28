@@ -11,6 +11,7 @@ import {
 import { ModelIRImpl } from '@dbsp/core';
 import type {
 	ColumnIR,
+	DbCasing,
 	EnumIR,
 	ModelIR,
 	SequenceIR,
@@ -83,19 +84,25 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		}
 	});
 
-	async function apply(modelToApply: ModelIR): Promise<void> {
+	async function apply(
+		modelToApply: ModelIR,
+		dbCasing?: DbCasing,
+	): Promise<void> {
 		const current = await adapter.introspect({ schema: SCHEMA });
 		const statements = generateMigrationSQL(
-			compareSchemata(modelToApply, current),
+			compareSchemata(modelToApply, current, {
+				...(dbCasing === undefined ? {} : { dbCasing }),
+			}),
 			{ includeDestructive: false, schemaName: SCHEMA },
 		) as readonly string[];
 		const pool = await getTestPool();
 		for (const statement of statements) await pool.query(statement);
 	}
 
-	async function changes(modelToCompare: ModelIR) {
+	async function changes(modelToCompare: ModelIR, dbCasing?: DbCasing) {
 		return comparePgsqlDatabaseSchema(adapter, modelToCompare, {
 			schema: SCHEMA,
+			...(dbCasing === undefined ? {} : { dbCasing }),
 			ignoreUnmanagedExtensions: true,
 		});
 	}
@@ -160,6 +167,54 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect(
 			(await changes(desired)).changes.map((change) => change.kind),
 		).not.toContain('create_sequence');
+	});
+
+	it('uses the physical sequence name consistently under snake_case', async () => {
+		const desired = model(
+			[
+				table('orders', [
+					column('orderNumber', 'integer', {
+						default: {
+							sql: `nextval('${SCHEMA}.order_number_seq')`,
+						},
+					}),
+				]),
+			],
+			undefined,
+			[{ name: 'orderNumberSeq' }],
+		);
+		const current = await adapter.introspect({ schema: SCHEMA });
+		const diff = compareSchemata(desired, current, {
+			dbCasing: 'snake_case',
+		});
+		const statements = generateMigrationSQL(diff, {
+			includeDestructive: false,
+			schemaName: SCHEMA,
+		});
+
+		expect(statements).toContain(
+			`CREATE SEQUENCE "${SCHEMA}"."order_number_seq";`,
+		);
+		const pool = await getTestPool();
+		for (const statement of statements) await pool.query(statement);
+		expect((await changes(desired, 'snake_case')).changes).toEqual([]);
+	});
+
+	it('refuses a legacy raw sequence under snake_case without changing it', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SEQUENCE "${SCHEMA}"."orderNumberSeq"`);
+		const desired = model([], undefined, [{ name: 'orderNumberSeq' }]);
+
+		await expect(changes(desired, 'snake_case')).rejects.toThrow(
+			`ALTER SEQUENCE "orderNumberSeq" RENAME TO "order_number_seq"`,
+		);
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${SCHEMA}.orderNumberSeq`,
+			]),
+		).resolves.toMatchObject({
+			rows: [{ relation: `${SCHEMA}.orderNumberSeq` }],
+		});
 	});
 
 	it('creates a qualifying unique index before its referencing foreign key and re-diffs empty', async () => {
