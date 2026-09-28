@@ -28,10 +28,12 @@ database.
 ### It admits only startup-safe additions
 
 - Tables and sequences that do not exist yet. Indexes, CHECK constraints and foreign keys only on
-  tables created by the same call (for a foreign key, both tables). A single-column foreign key needs
-  a declared index on its column.
+  tables created by the same call. A foreign key also needs both of its tables created by the call,
+  its referenced columns covered by a primary key, a unique column or a declared unique index that is
+  neither partial nor on an expression, and, for a single-column key, a declared index on its column.
 - Columns added to managed tables: nullable without a default, or NOT NULL with a boolean,
-  finite-number or non-function string literal default, of a PostgreSQL built-in base type or an enum.
+  finite-number or non-function string literal default; a defaulted column's type must be a
+  PostgreSQL built-in base type or an enum.
 - Indexes the caller manages itself, named in `externalIndexes`, are never dropped and are not
   reported as drift.
 
@@ -66,8 +68,10 @@ runs as the same PostgreSQL role, so it can read the journal. The ledger require
 A table the model marks `adopt: true` is taken into management when it exists, the ledger projects
 its address as unknown, and it matches the declaration exactly after `externalIndexes` masking,
 using the comparison converge plans with, re-run on the locked session inside the adoption claim. A
-mismatch found while planning refuses `adoption-refused` before anything is written. The caller sets
-`adopt` for the one pass over an existing install and omits it afterwards.
+mismatch found while planning refuses `adoption-refused` before anything is written. Each table is
+adopted in its own transaction, so a table that changes while its adoption runs is refused after
+earlier tables of the same call were adopted; the next call skips those. The caller sets `adopt` for
+the one pass over an existing install and omits it afterwards.
 
 ## What ADR 0006 no longer says
 
@@ -82,9 +86,9 @@ CLI still presents adoption in the reviewed plan.
 ## Consequences
 
 - Converge holds the schema ledger's session lock for its whole call, and transition writers take
-  that lock without waiting. A `dbsp apply` run between two ledger transactions when converge starts
-  therefore gets `busy` on its next step; after DDL it ends `recovery-required`, which
-  `dbsp reconcile` resolves. Open on #769 (issuecomment-5860782599).
+  that lock without waiting, so a `dbsp apply` run that reaches its next ledger transaction while
+  converge runs gets `busy` and stops there; several application instances starting together get
+  `busy` from one another the same way. Open on #769 (issuecomment-5860782599).
 - An install whose tables lag the model cannot be adopted as it is: adopting a table and then adding
   its missing columns is not offered.
 - A new index, CHECK or foreign key on an existing managed table is refused; the caller either
