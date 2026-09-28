@@ -36,7 +36,8 @@ the refusal as a named outcome with its own exit code. It asks for no confirmati
 
 ### It admits only startup-safe additions
 
-- Tables and sequences that do not exist yet; a sequence's declared name must be its physical name.
+- Tables and sequences that do not exist yet; a sequence's physical name is its declared name mapped
+  through `dbCasing`, as a table's is (#803).
   Indexes, CHECK constraints and foreign keys only on tables created by the same call. A foreign key
   also needs both of its tables created by the call, its referenced columns covered by a primary key,
   a unique column or a declared unique index that is neither partial nor on an expression, and, for a
