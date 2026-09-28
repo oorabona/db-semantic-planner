@@ -75,6 +75,17 @@ ledger or the transition journal. `runPgReinitializePreflight` creates and owns 
 runs as the same PostgreSQL role, so it can read the journal. The ledger requires PostgreSQL 15
 (`unsupported-server` below it).
 
+### A target refusing writes is refused before comparing
+
+After its ledger checks and before comparing, converge classifies the target with the classifier
+every managed writer uses and refuses `database-read-only` on a standby or a read-only session, as
+ADR 0006 requires. It does so even when the model already matches: the comparison canonicalizes
+expressions with scratch DDL that a read-only target rejects, so converge cannot establish `no-drift`
+there. A target that turns read-only after that check and before the first write is reported
+`execution-refused`, and `partially-applied` after earlier steps committed: the outcome protocol
+reduces the typed error to a refusal reason before converge sees it, and carrying the type through
+the protocol is not done.
+
 ### Adoption is declared by the caller's model
 
 A table the model marks `adopt: true` is taken into management when it exists, the ledger projects
@@ -104,15 +115,21 @@ to `convergePg`.
 
 - Converge holds the schema ledger's session lock for its whole call, and transition writers take
   that lock without waiting, so a `dbsp apply` run that reaches its next ledger transaction while
-  converge runs stops at that step (`execution-failed`, or `partially-applied` after earlier steps);
-  application instances starting together make one another's `convergePg` refuse `busy`. Open on
-  #769 (issuecomment-5860782599).
+  converge runs stops at that step (`execution-failed`, or `partially-applied` after earlier steps),
+  and `dbsp reconcile` resolves it; application instances starting together make one another's
+  `convergePg` refuse `busy`. This is kept: an application start is never blocked by an apply run,
+  and the two are run one after the other on a schema (#769 issuecomment-5874396889). Supporting both
+  at once would take an admission gate, a shared session lock each apply run holds for its whole
+  execution and `convergePg` takes exclusively without waiting, so an application start would refuse
+  `busy` while an apply run holds it.
 - An install whose tables lag the model cannot be adopted as it is: adopting a table and then adding
   its missing columns is not offered.
 - A new index, CHECK constraint or foreign key on an existing managed table is refused; the caller
   plans it through `dbsp apply`, or creates an index itself and names it in `externalIndexes`.
-- `dbsp apply` re-checks an adoption with a weaker comparison than `dbsp plan` (#815); converge does
-  not share that gap.
+- `dbsp plan`, `dbsp apply` and converge decide an adoption with one comparison: canonicalized, under
+  the declared `dbCasing`, and repeated after the adoption claim opens. A generator plan persists its
+  `dbCasing` when it is not `preserve`, so `dbsp apply <run-id>` re-checks under the casing it was
+  planned with.
 - Recording converge runs is revisited when converge emits a non-transactional step or a claim can
   outlive its transaction, when a caller needs to resume a converge run after a crash, or when mapping
   an execution id to a durable converge run becomes necessary for recovery or audit.

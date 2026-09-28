@@ -8,6 +8,7 @@ import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
+	comparePgsqlDeclaredAdoptionSchema,
 	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
@@ -106,6 +107,20 @@ function makeModel(
 	);
 }
 
+function makeDeclaredAdoptionModel(
+	tables: readonly TableIR[],
+	externalTables: readonly string[],
+): ModelIR {
+	return new ModelIRImpl(
+		new Map(tables.map((table) => [table.name, table])),
+		new Map(),
+		undefined,
+		undefined,
+		undefined,
+		externalTables,
+	);
+}
+
 function makeModelWithEnums(
 	tables: readonly TableIR[],
 	enums: readonly EnumIR[],
@@ -133,6 +148,9 @@ class FakeLiveDiffClient {
 	constructor(
 		readonly databaseCheckExpression: string,
 		readonly failCanonicalization: boolean,
+		readonly adoptionColumns?: readonly Record<string, unknown>[],
+		readonly adoptionForeignKeys: readonly Record<string, unknown>[] = [],
+		readonly adoptionIndexes: readonly Record<string, unknown>[] = [],
 	) {}
 
 	async query(
@@ -174,10 +192,19 @@ class FakeLiveDiffClient {
 				rowCount: names.length,
 			};
 		}
+		if (normalized.startsWith('SELECT source, pg_get_expr(')) {
+			return {
+				rows: [
+					{ source: 'desired', expression: "'0'::bigint" },
+					{ source: 'database', expression: "'0'::bigint" },
+				],
+				rowCount: 2,
+			};
+		}
 
 		if (normalized.includes('FROM information_schema.columns')) {
 			return {
-				rows: [
+				rows: this.adoptionColumns ?? [
 					{
 						table_name: 'users',
 						column_name: 'id',
@@ -202,6 +229,18 @@ class FakeLiveDiffClient {
 					},
 				],
 				rowCount: 2,
+			};
+		}
+		if (normalized.includes("WHERE c.contype = 'f'")) {
+			return {
+				rows: this.adoptionForeignKeys,
+				rowCount: this.adoptionForeignKeys.length,
+			};
+		}
+		if (normalized.includes('FROM pg_index ix')) {
+			return {
+				rows: this.adoptionIndexes,
+				rowCount: this.adoptionIndexes.length,
 			};
 		}
 
@@ -335,6 +374,7 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 }
 
 class FakeLiveDiffPool {
+	readonly totalCount = 0;
 	readonly connect = vi.fn(async () => this.client as unknown as PoolClient);
 	readonly query = vi.fn(async (sql: string, parameters?: readonly unknown[]) =>
 		this.client.query(sql, parameters),
@@ -458,6 +498,282 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
+	it('uses the declaration-scoped adoption comparison for canonical defaults and casing', async () => {
+		const bigintColumn = {
+			table_name: 'legacy',
+			column_name: 'count',
+			data_type: 'bigint',
+			udt_name: 'int8',
+			is_nullable: 'NO',
+			column_default: "'0'::bigint",
+			collation_name: null,
+			is_identity: 'NO',
+			identity_generation: null,
+		};
+		const client = new FakeLiveDiffClient('', false, [bigintColumn]);
+		const pool = new FakeLiveDiffPool(client);
+		const defaultShape = makeModel([
+			makeTable({
+				name: 'legacy',
+				columns: [
+					{ name: 'count', type: 'bigint', nullable: false, default: 0 },
+				],
+			}),
+		]);
+
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: pool,
+				model: defaultShape,
+				schema: 'public',
+				dbCasing: 'preserve',
+			}),
+		).resolves.toMatchObject({ changes: [] });
+
+		const snakeClient = new FakeLiveDiffClient('', false, [
+			{ ...bigintColumn, column_name: 'camel_case', column_default: null },
+		]);
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: new FakeLiveDiffPool(snakeClient),
+				model: makeModel([
+					makeTable({
+						name: 'legacy',
+						columns: [{ name: 'camelCase', type: 'bigint', nullable: false }],
+					}),
+				]),
+				schema: 'public',
+				dbCasing: 'snake_case',
+			}),
+		).resolves.toMatchObject({ changes: [] });
+
+		const missingColumn = await comparePgsqlDeclaredAdoptionSchema({
+			executor: pool,
+			model: makeModel([
+				makeTable({
+					name: 'legacy',
+					columns: [{ name: 'missing', type: 'bigint', nullable: false }],
+				}),
+			]),
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(missingColumn.changes).toEqual(
+			expect.arrayContaining([expect.objectContaining({ kind: 'add_column' })]),
+		);
+	});
+
+	it('keeps outbound foreign keys while projecting adoption tables after whole-schema introspection', async () => {
+		const columns = [
+			{
+				table_name: 'orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: "'0'::integer",
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'orders',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'customers',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'cycle_left',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'cycle_left',
+				column_name: 'right_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'cycle_right',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+		];
+		const liveForeignKey = {
+			constraint_name: 'orders_customer_id_fkey',
+			source_table: 'orders',
+			source_column: 'customer_id',
+			target_schema: 'public',
+			target_table: 'customers',
+			target_column: 'id',
+			delete_rule: 'NO ACTION',
+			update_rule: 'NO ACTION',
+			is_deferrable: 'NO',
+			initially_deferred: 'NO',
+		};
+		const declaredWithForeignKey = makeDeclaredAdoptionModel(
+			[
+				makeTable({
+					name: 'orders',
+					columns: [{ ...makeCol('id'), default: 0 }, makeCol('customer_id')],
+					foreignKeys: [
+						{
+							columns: ['customer_id'],
+							references: { table: 'customers', columns: ['id'] },
+						},
+					],
+				}),
+			],
+			['customers'],
+		);
+		const unrelatedForeignKey = {
+			constraint_name: 'cycle_left_right_id_fkey',
+			source_table: 'cycle_left',
+			source_column: 'right_id',
+			target_schema: 'public',
+			target_table: 'cycle_right',
+			target_column: 'id',
+			delete_rule: 'NO ACTION',
+			update_rule: 'NO ACTION',
+			is_deferrable: 'NO',
+			initially_deferred: 'NO',
+		};
+		const matching = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient('', false, columns, [
+					liveForeignKey,
+					unrelatedForeignKey,
+				]),
+			),
+			model: declaredWithForeignKey,
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(matching.changes).toEqual([]);
+
+		const undeclaredForeignKey = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient('', false, columns, [
+					liveForeignKey,
+					unrelatedForeignKey,
+				]),
+			),
+			model: makeModel([
+				makeTable({
+					name: 'orders',
+					columns: [makeCol('id'), makeCol('customer_id')],
+				}),
+			]),
+			schema: 'public',
+			dbCasing: 'preserve',
+		});
+		expect(undeclaredForeignKey.changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'drop_foreign_key', table: 'orders' }),
+			]),
+		);
+	});
+
+	it('masks external indexes after whole-schema introspection under snake_case', async () => {
+		const columns = [
+			{
+				table_name: 'legacy_orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+		];
+		const compared = await comparePgsqlDeclaredAdoptionSchema({
+			executor: new FakeLiveDiffPool(
+				new FakeLiveDiffClient(
+					'',
+					false,
+					columns,
+					[],
+					[
+						{
+							index_name: 'idx_legacy_orders_id',
+							table_name: 'legacy_orders',
+							columns: ['id'],
+							include_columns: null,
+							expressions_text: null,
+							opclass_names: null,
+							opclass_cols: null,
+							is_unique: false,
+							is_valid: true,
+							is_ready: true,
+							method: 'btree',
+							predicate: null,
+							reloptions: null,
+						},
+					],
+				),
+			),
+			model: makeModel([makeTable({ name: 'legacyOrders' })]),
+			schema: 'public',
+			dbCasing: 'snake_case',
+			externalIndexMask: new Set([
+				JSON.stringify(['legacy_orders', 'idx_legacy_orders_id']),
+			]),
+		});
+		expect(compared.changes).toEqual([]);
+	});
+
+	it('refuses an executor that is neither a pool nor a checked-out client', async () => {
+		const unsupportedExecutor = {
+			query: async () => ({ rows: [] }),
+			connect: async () => undefined,
+		};
+		await expect(
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: unsupportedExecutor,
+				model: makeModel([]),
+				schema: 'public',
+				dbCasing: 'preserve',
+			}),
+		).rejects.toThrow(
+			'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
+		);
+	});
+
 	it('rejects a missing desired extension predicate in strict and non-strict modes', async () => {
 		const desired = makeModel(
 			[

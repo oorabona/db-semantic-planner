@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
+import type { PgDatabaseWritability } from './database-writability.js';
 import type {
 	executeGeneratorPlan,
 	GeneratorExecutionResult,
@@ -31,6 +32,9 @@ const mocks = vi.hoisted(() => {
 		lock: vi.fn(async () => ({ kind: 'acquired' })),
 		unlock: vi.fn(async () => true),
 		currency: vi.fn(async () => ({ kind: 'current' })),
+		writability: vi.fn<() => Promise<PgDatabaseWritability>>(async () => ({
+			kind: 'writable',
+		})),
 		introspect,
 		adapter: { introspect },
 	};
@@ -42,11 +46,85 @@ function forward(fn: unknown, args: readonly unknown[]): unknown {
 
 vi.mock('../ddl/index.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/index.js')>()),
-	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
-		forward(mocks.compare, args),
 	createPgsqlGeneratedManagedStep: (...args: unknown[]) =>
 		forward(mocks.createStep, args),
 	generateMigrationSQL: (...args: unknown[]) => forward(mocks.generate, args),
+}));
+
+vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../ddl/live-diff.js')>()),
+	comparePgsqlDeclaredAdoptionSchema: async (...args: unknown[]) => {
+		const input = args[0] as {
+			readonly model: ModelIR;
+			readonly schema: string;
+			readonly dbCasing: string;
+			readonly externalIndexMask?: ReadonlySet<string>;
+		};
+		const declaredTables = new Set(
+			[...input.model.tables.values()].map((table) =>
+				input.dbCasing === 'snake_case'
+					? table.name.replace(
+							/[A-Z]/g,
+							(character) => `_${character.toLowerCase()}`,
+						)
+					: table.name,
+			),
+		);
+		const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+		const declaredEnums = new Set(input.model.enums?.keys() ?? []);
+		const adapter = new Proxy(mocks.adapter, {
+			get(target, property, receiver) {
+				if (property === 'introspect')
+					return async (options?: Record<string, unknown>) => {
+						const introspected = (await target.introspect(options)) as ModelIR;
+						return {
+							...introspected,
+							tables: new Map(
+								[...introspected.tables].filter(([name]) =>
+									declaredTables.has(name),
+								),
+							),
+							sequences: new Map(
+								[...(introspected.sequences ?? [])].filter(([name]) =>
+									declaredSequences.has(name),
+								),
+							),
+							enums: new Map(
+								[...(introspected.enums ?? [])].filter(([name]) =>
+									declaredEnums.has(name),
+								),
+							),
+						};
+					};
+				return Reflect.get(target, property, receiver);
+			},
+		});
+		const compared = (await forward(mocks.compare, [
+			adapter,
+			input.model,
+			{
+				schema: input.schema,
+				dbCasing: input.dbCasing,
+				ignoreUnmanagedExtensions: true,
+			},
+		])) as { readonly changes: readonly SchemaChange[] };
+		return {
+			...compared,
+			changes: compared.changes.filter((change) => {
+				if (change.kind !== 'drop_index') return true;
+				const index = change.meta?.index;
+				if (!index || typeof index !== 'object' || Array.isArray(index))
+					return true;
+				return !(
+					'name' in index &&
+					typeof index.name === 'string' &&
+					input.externalIndexMask?.has(
+						JSON.stringify([change.table, index.name]),
+					)
+				);
+			}),
+		};
+	},
 }));
 vi.mock('../pgsql-adapter.js', () => ({
 	createPgsqlAdapter: () => mocks.adapter,
@@ -60,6 +138,10 @@ vi.mock('./catalogue-identity.js', () => ({
 }));
 vi.mock('./chain-reader.js', () => ({
 	readPgLedgerAddressChain: (...args: unknown[]) => forward(mocks.chain, args),
+}));
+vi.mock('./database-writability.js', () => ({
+	classifyPgDatabaseWritability: (...args: unknown[]) =>
+		forward(mocks.writability, args),
 }));
 vi.mock('./ledger.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./ledger.js')>()),
@@ -424,6 +506,7 @@ afterEach(() => {
 	mocks.lock.mockResolvedValue({ kind: 'acquired' });
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
+	mocks.writability.mockResolvedValue({ kind: 'writable' });
 	mocks.reservations.mockResolvedValue([]);
 	mocks.runIds.mockResolvedValue(new Map());
 	mocks.introspect.mockResolvedValue(emptyModel());
@@ -559,6 +642,49 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.reservations).toHaveBeenCalledOnce();
 		expect(mocks.runIds).not.toHaveBeenCalled();
+	});
+
+	it('refuses a read-only database before comparison', async () => {
+		mocks.writability.mockResolvedValue({
+			kind: 'database-read-only',
+			detail: 'target session is read-only',
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'database-read-only',
+			detail: 'target session is read-only',
+		});
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('surfaces an unavailable writability classification before comparison', async () => {
+		mocks.writability.mockResolvedValue({
+			kind: 'unavailable',
+			detail: 'PostgreSQL writability could not be read',
+		});
+
+		const error = await convergePg(poolFor(), emptyModel()).catch(
+			(caught: unknown) => caught,
+		);
+		expect(error).toBeInstanceOf(Error);
+		expect(error).not.toBeInstanceOf(PgConvergeRefusalError);
+		expect((error as Error).message).toBe(
+			'PostgreSQL writability could not be read',
+		);
+		expect(mocks.compare).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('returns no-drift after a writable matching comparison', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		expect(mocks.writability).toHaveBeenCalledOnce();
+		expect(mocks.compare).toHaveBeenCalledOnce();
 	});
 
 	it('refuses busy before comparison when a mapped predecessor run lock is held', async () => {
@@ -1012,12 +1138,15 @@ describe('convergePg refusal boundary', () => {
 		['finite number', 0],
 		['string', 'unknown'],
 	])('admits a NOT NULL column with a %s default', async (_kind, value) => {
-		await expectAdmittedAddColumn({
-			name: 'value',
-			type: 'string',
-			nullable: false,
-			default: value,
-		});
+		await expectAdmittedAddColumn(
+			{
+				name: 'value',
+				type: 'string',
+				nullable: false,
+				default: value,
+			},
+			{ typtype: 'b', is_pg_catalog: true },
+		);
 	});
 
 	it.each([
@@ -1136,22 +1265,43 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('does not classify a defaulted column without originalDbType', async () => {
-		const testClient = client();
-		await expectAdmittedAddColumn(
-			{
-				name: 'value',
-				type: 'integer',
-				nullable: false,
-				default: 1,
-			},
-			undefined,
-			testClient,
+	it('classifies defaulted neutral types without originalDbType', async () => {
+		const rangeClient = client({ typtype: 'r', is_pg_catalog: false });
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'coverage',
+					type: 'daterange',
+					nullable: false,
+					default: '[2026-01-01,2026-01-02)',
+				},
+			}),
+			'unsupported-change',
+			rangeClient,
 		);
-		expect(testClient.query).not.toHaveBeenCalledWith(
-			typeClassificationQuery,
-			expect.anything(),
-		);
+		expect(rangeClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+			'DATERANGE',
+		]);
+
+		for (const [column, typeName] of [
+			[
+				{ name: 'count', type: 'integer', nullable: false, default: 1 },
+				'INTEGER',
+			],
+			[
+				{ name: 'label', type: 'string', nullable: false, default: 'draft' },
+				'VARCHAR(255)',
+			],
+		] as const) {
+			const builtInClient = await expectAdmittedAddColumn(column, {
+				typtype: 'b',
+				is_pg_catalog: true,
+			});
+			expect(builtInClient.query).toHaveBeenCalledWith(
+				typeClassificationQuery,
+				[typeName],
+			);
+		}
 	});
 
 	it('refuses a column with a default', async () => {
@@ -1867,7 +2017,7 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('ignores an undeclared live table while comparing declared physical names', async () => {
+	it('projects declared physical names after whole-schema introspection', async () => {
 		const model = {
 			...emptyModel(),
 			tables: new Map([
@@ -1926,11 +2076,10 @@ describe('convergePg refusal boundary', () => {
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 		expect(mocks.introspect).toHaveBeenCalledWith({
 			schema: 'public',
-			include: ['user_profile'],
 		});
 	});
 
-	it('excludes every live table for an empty declaration', async () => {
+	it('projects every live table out of an empty declaration', async () => {
 		mocks.compare.mockImplementation(
 			async (adapter: {
 				introspect: (options?: unknown) => Promise<unknown>;
@@ -1946,8 +2095,6 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.introspect).toHaveBeenCalledWith({
 			schema: 'public',
-			include: [],
-			exclude: ['*'],
 		});
 	});
 

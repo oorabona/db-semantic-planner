@@ -162,6 +162,31 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		).not.toContain('create_sequence');
 	});
 
+	it('creates a qualifying unique index before its referencing foreign key and re-diffs empty', async () => {
+		const desired = model([
+			table('parents', [column('external_id', 'string')], {
+				indexes: [
+					{
+						name: 'parents_external_id_unique',
+						columns: ['external_id'],
+						unique: true,
+					},
+				],
+			}),
+			table('children', [column('parent_external_id', 'string')], {
+				foreignKeys: [
+					{
+						columns: ['parent_external_id'],
+						references: { table: 'parents', columns: ['external_id'] },
+					},
+				],
+			}),
+		]);
+
+		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+	});
+
 	it('still reports a live SERIAL column against a plain integer declaration', async () => {
 		const pool = await getTestPool();
 		await pool.query(`CREATE TABLE ${SCHEMA}.projects (id SERIAL PRIMARY KEY)`);

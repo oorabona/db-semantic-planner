@@ -22,11 +22,14 @@ import type {
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import {
-	comparePgsqlDatabaseSchema,
 	createPgsqlGeneratedManagedStep,
 	generateMigrationSQL,
 	type SchemaChange,
 } from '../ddl/index.js';
+import {
+	comparePgsqlDeclaredAdoptionSchema,
+	modelForDeclaredAdoption,
+} from '../ddl/live-diff.js';
 import {
 	addressForChange,
 	createPgsqlDeclaredAdoptionStep,
@@ -34,10 +37,10 @@ import {
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
-import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
+import { classifyPgDatabaseWritability } from './database-writability.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import { readTransitionRunIdsForExecutionIds } from './journal.js';
 import {
@@ -66,6 +69,7 @@ export type PgConvergeRefusal =
 	| 'unsupported-server'
 	| 'busy'
 	| 'recovery-required'
+	| 'database-read-only'
 	| 'execution-refused'
 	| 'adoption-refused';
 
@@ -358,16 +362,6 @@ function validateExternalIndexes(
 	return externalIndexKeys;
 }
 
-function masksExternalIndexDrop(
-	change: SchemaChange,
-	externalIndexKeys: ReadonlySet<string>,
-): boolean {
-	if (change.kind !== 'drop_index') return false;
-	const index = indexForChange(change);
-	if (typeof index?.name !== 'string') return false;
-	return externalIndexKeys.has(externalIndexKey(change.table, index.name));
-}
-
 /**
  * Converge has one declaration-scoped, external-index-masked comparison.  The
  * same function is used before planning and again while the adoption claim is
@@ -380,60 +374,13 @@ async function compareConvergeMaskedSchema(input: {
 	readonly casing: DbCasing;
 	readonly externalIndexes: ReadonlySet<string>;
 }) {
-	const naming = getNamingPluginForDbCasing(input.casing);
-	const adapter = createPgsqlAdapter(input.executor, {
-		borrowedClient: true,
-		managedTransactions: true,
+	return comparePgsqlDeclaredAdoptionSchema({
+		executor: input.executor,
+		model: input.model,
+		schema: input.schema,
 		dbCasing: input.casing,
+		externalIndexMask: input.externalIndexes,
 	});
-	const declaredTables = [...input.model.tables.values()].map((table) =>
-		naming.toDatabase(table.name),
-	);
-	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
-	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
-	const declarationScopedAdapter = new Proxy(adapter, {
-		get(target, property, receiver) {
-			if (property === 'introspect')
-				return (
-					introspectionOptions?: Parameters<typeof target.introspect>[0],
-				) =>
-					target
-						.introspect({
-							...introspectionOptions,
-							include: declaredTables,
-							...(declaredTables.length === 0 ? { exclude: ['*'] } : {}),
-						})
-						.then((introspected) => ({
-							...introspected,
-							sequences: new Map(
-								[...(introspected.sequences ?? [])].filter(([name]) =>
-									declaredSequences.has(name),
-								),
-							),
-							enums: new Map(
-								[...(introspected.enums ?? [])].filter(([name]) =>
-									declaredEnums.has(name),
-								),
-							),
-						}));
-			return Reflect.get(target, property, receiver);
-		},
-	});
-	const compared = await comparePgsqlDatabaseSchema(
-		declarationScopedAdapter,
-		input.model,
-		{
-			schema: input.schema,
-			dbCasing: input.casing,
-			ignoreUnmanagedExtensions: true,
-		},
-	);
-	return {
-		...compared,
-		changes: compared.changes.filter(
-			(change) => !masksExternalIndexDrop(change, input.externalIndexes),
-		),
-	};
 }
 
 function startupSafeAddColumn(change: SchemaChange): boolean {
@@ -493,11 +440,7 @@ async function assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
 		const column = change.meta.column;
 		if (typeof column !== 'object' || Array.isArray(column)) continue;
 		const record = column as Record<string, unknown>;
-		if (
-			record.default === undefined ||
-			typeof record.originalDbType !== 'string'
-		)
-			continue;
+		if (record.default === undefined) continue;
 
 		const typeName = mapColumnType(column as ColumnIR, schema);
 		const type = (
@@ -700,20 +643,6 @@ async function declaredAdoptionAdmission(
 	)
 		return { kind: 'managed' };
 	return { kind: 'refused' };
-}
-
-function modelForDeclaredAdoption(table: TableIR): ModelIR {
-	const tables = new Map([[table.name, table]]);
-	const relations = new Map();
-	return {
-		tables,
-		relations,
-		getTable: (name) => tables.get(name),
-		getRelation: (name) => relations.get(name),
-		getRelationsFrom: () => [],
-		getRelationsTo: () => [],
-		isAmbiguous: () => ({ ambiguous: false, options: [] }),
-	};
 }
 
 function declaredAdoptionTable(
@@ -1054,12 +983,6 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 	return qualifyingIndexes;
 }
 
-function convergePhase(change: SchemaChange): number {
-	if (change.kind === 'create_index') return getPhase('add_foreign_key');
-	if (change.kind === 'add_foreign_key') return getPhase('create_index');
-	return getPhase(change.kind);
-}
-
 function describeFkAutoIndexSpecs(
 	specs: ReturnType<typeof collectFkAutoIndexSpecs>,
 ): string {
@@ -1167,6 +1090,14 @@ export async function convergePg(
 		await refuseForLiveReservations(client, schema, () => {
 			destroyReason = 'converge could not confirm predecessor run lock release';
 		});
+		const writability = await classifyPgDatabaseWritability(client);
+		if (writability.kind === 'database-read-only')
+			throw new PgConvergeRefusalError(
+				'database-read-only',
+				[],
+				writability.detail,
+			);
+		if (writability.kind === 'unavailable') throw new Error(writability.detail);
 		for (const table of model.tables.values()) {
 			const directive =
 				table.replace === true
@@ -1302,7 +1233,7 @@ export async function convergePg(
 		if (diff.changes.length === 0 && adoptionSteps.length === 0)
 			return { kind: 'no-drift', applied: [] };
 		const phaseOrderedChanges = [...diff.changes].sort(
-			(left, right) => convergePhase(left) - convergePhase(right),
+			(left, right) => getPhase(left.kind) - getPhase(right.kind),
 		);
 		const atomicCreationChanges = new Set(
 			phaseOrderedChanges.filter((change) => {

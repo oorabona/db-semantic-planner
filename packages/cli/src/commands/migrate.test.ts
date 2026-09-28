@@ -94,6 +94,7 @@ describe('dbsp migrate outcomes', () => {
 		'unsupported-server',
 		'busy',
 		'recovery-required',
+		'database-read-only',
 		'execution-refused',
 		'adoption-refused',
 	] satisfies readonly PgConvergeRefusal[])(
@@ -635,6 +636,11 @@ describe('dbsp migrate outcomes', () => {
 	});
 
 	it('defines every outcome once and reserves exit zero for success', () => {
+		expect(MIGRATE_OUTCOME_CONTRACT).toContainEqual([
+			'database-read-only',
+			34,
+			'target cannot accept managed writes',
+		]);
 		expect(
 			new Set(MIGRATE_OUTCOME_CONTRACT.map(([outcome]) => outcome)).size,
 		).toBe(MIGRATE_OUTCOME_CONTRACT.length);

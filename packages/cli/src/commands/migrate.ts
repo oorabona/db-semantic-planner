@@ -29,6 +29,7 @@ export const MIGRATE_OUTCOME_CONTRACT = [
 	['applied', 0, 'admitted additions or adoptions applied'],
 	['partially-applied', 11, 'some target effects may be durable'],
 	['busy', 21, 'ledger lock or claims are busy; retry later'],
+	['database-read-only', 34, 'target cannot accept managed writes'],
 	['load-failed', 27, 'schema file could not be loaded'],
 	['migrate-failed', 29, 'migration, connection, or planning failure'],
 	['adoption-refused', 62, 'declared adoption no longer matches live object'],
@@ -79,6 +80,7 @@ const refusalOutcomes = {
 	'unsupported-server': 'unsupported-server',
 	busy: 'busy',
 	'recovery-required': 'recovery-required',
+	'database-read-only': 'database-read-only',
 	'execution-refused': 'execution-refused',
 	'adoption-refused': 'adoption-refused',
 } as const satisfies Record<PgConvergeRefusal, MigrateOutcome>;

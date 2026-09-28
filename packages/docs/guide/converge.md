@@ -104,7 +104,8 @@ create enums or extensions: those the model uses must already exist.
   expression, and, for a single-column key, a declared index on its referencing column.
 - A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
   finite-number or string literal default (not a function call such as `now()`). A column with a
-  default must use a PostgreSQL built-in type or an enum. A new column whose type names its schema
+  default must use a PostgreSQL built-in base type or an enum, whether it is declared by a neutral type
+  or by `originalDbType`; a range such as `daterange` is refused. A new column whose type names its schema
   (`originalDbTypeSchema`), as an enum column in a non-public schema does, is refused. Adding a
   column takes an `ACCESS EXCLUSIVE` lock on its table, bounded by a five-second `lock_timeout`.
 
@@ -135,6 +136,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `ledger-absent` | The schema has no ledger: run `runPgReinitializePreflight`. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
 | `unsupported-server` | PostgreSQL is older than 15. |
+| `database-read-only` | The target refuses writes (a standby, or a session whose transactions are read-only); converge checks this before comparing and writes nothing, even when the model already matches. A target that becomes read-only after that check and before converge's first write is reported `execution-refused`, with the reason in `detail`; after earlier steps committed, the result is `partially-applied`. |
 | `busy` | Another converge call or transition writer holds the schema's ledger lock, or every open claim belongs to a run still executing. Retry after a delay. |
 | `recovery-required` | Earlier runs left open claims. Reconcile each run in `runIds` with `reconcilePgTransitionRun(pool, runId)` (the pool must allow two connections) or `dbsp reconcile --db <database> <run-id>`; `busyRunIds` lists runs still executing. `executionIds` lists claims no readable journal run explains; no public operation resolves a claim by execution id, so they need the ledger owner. Call converge again once no claim is open. |
 | `unsupported-change` | The model asks for a change converge does not apply. Plan it with `dbsp plan` and `dbsp apply`, or change the model. |

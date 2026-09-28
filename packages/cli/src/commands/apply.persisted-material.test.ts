@@ -39,6 +39,7 @@ const fixture = vi.hoisted(() => {
 });
 
 const executeGeneratorPlan = vi.hoisted(() => vi.fn());
+const comparePgsqlDeclaredAdoptionSchema = vi.hoisted(() => vi.fn());
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
@@ -65,6 +66,7 @@ vi.mock('@dbsp/adapter-pgsql/internal', async (importOriginal) => {
 		await importOriginal<typeof import('@dbsp/adapter-pgsql/internal')>();
 	return {
 		...actual,
+		comparePgsqlDeclaredAdoptionSchema,
 		executeGeneratorPlan,
 	};
 });
@@ -130,6 +132,60 @@ function prepareReplayableGeneratorJournal(): void {
 }
 
 describe('apply persisted generator material', () => {
+	it('uses the claimed executor for its persisted adoption verifier', async () => {
+		const previous = {
+			events: fixture.journal.events,
+			plan: fixture.journal.plan,
+			planDigest: fixture.journal.run.planDigest,
+		};
+		prepareReplayableGeneratorJournal();
+		const claimedExecutor = { query: vi.fn() };
+		comparePgsqlDeclaredAdoptionSchema.mockResolvedValueOnce({ changes: [] });
+		executeGeneratorPlan.mockImplementationOnce(async (input) => {
+			if (!input.verifyDeclaredAdoptionShape)
+				throw new Error('expected persisted adoption verifier');
+			await input.verifyDeclaredAdoptionShape(
+				claimedExecutor as never,
+				{
+					lifecycle: {
+						kind: 'adoption',
+						shape: {
+							name: 'accounts',
+							columns: [],
+							foreignKeys: [],
+							indexes: [],
+						},
+					},
+				} as never,
+			);
+			return { outcome: 'completed' };
+		});
+		try {
+			await expect(
+				runApply(
+					fixture.journal.run.runId,
+					{
+						db: 'postgres://must-not-connect',
+						planDigest: fixture.journal.run.planDigest,
+					},
+					{} as never,
+				),
+			).resolves.toMatchObject({ outcome: 'completed' });
+			expect(comparePgsqlDeclaredAdoptionSchema).toHaveBeenCalledWith(
+				expect.objectContaining({
+					executor: claimedExecutor,
+					dbCasing: 'preserve',
+				}),
+			);
+		} finally {
+			executeGeneratorPlan.mockReset();
+			comparePgsqlDeclaredAdoptionSchema.mockReset();
+			fixture.journal.events = previous.events;
+			fixture.journal.plan = previous.plan;
+			fixture.journal.run.planDigest = previous.planDigest;
+		}
+	});
+
 	it('refuses a recorded generator attempt with a ledger reservation and directs recovery', async () => {
 		const previous = {
 			events: fixture.journal.events,

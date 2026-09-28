@@ -150,6 +150,51 @@ async function schemaFile(
 	return path;
 }
 
+async function adoptionDefaultSchemaFile(input: {
+	readonly table: string;
+	readonly column: string;
+	readonly dbCasing?: 'snake_case';
+}): Promise<string> {
+	const path = `${process.cwd()}/.unit13-${unique(input.table)}.mjs`;
+	await writeFile(
+		path,
+		[
+			"import { schema } from '@dbsp/core';",
+			`export default schema({ ${input.table}: { ${input.column}: { type: 'text', default: { sql: "'active'" } } } }, { ${input.table}: { adopt: true } });`,
+			...(input.dbCasing === undefined
+				? []
+				: [`export const dbCasing = '${input.dbCasing}';`]),
+			'',
+		].join('\n'),
+		'utf8',
+	);
+	schemaFiles.push(path);
+	return path;
+}
+
+async function adoptionForeignKeySchemaFile(input: {
+	readonly childHasForeignKey: boolean;
+}): Promise<string> {
+	const path = `${process.cwd()}/.unit13-${unique('adoption-foreign-key')}.mjs`;
+	await writeFile(
+		path,
+		[
+			"import { ref, schema } from '@dbsp/core';",
+			'export default schema(',
+			'  {',
+			"    customers: { id: { type: 'integer', primaryKey: true } },",
+			`    orders: { id: { type: 'integer', primaryKey: true }, customer_id: ${input.childHasForeignKey ? "ref('customers', { nullable: true })" : "{ type: 'integer', nullable: true }"} },`,
+			'  },',
+			'  { customers: { adopt: true }, orders: { adopt: true } },',
+			');',
+			'',
+		].join('\n'),
+		'utf8',
+	);
+	schemaFiles.push(path);
+	return path;
+}
+
 async function bootstrapSchemaFile(): Promise<string> {
 	const path = `${process.cwd()}/.unit13-${unique('initial-bootstrap')}.mjs`;
 	await writeFile(
@@ -522,6 +567,158 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			),
 		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		void databaseId;
+	});
+
+	it('replays canonicalized and snake_case declared adoptions through public apply', async () => {
+		const { pool, schemas: names } = await fixture(
+			unique('canonical_default'),
+			unique('snake_default'),
+			unique('snake_physical_table'),
+		);
+		for (const scenario of [
+			{
+				schema: names[0]!,
+				table: 'canonical_default',
+				liveTable: 'canonical_default',
+				declaredColumn: 'value',
+				liveColumn: 'value',
+			},
+			{
+				schema: names[1]!,
+				table: 'snake_default',
+				liveTable: 'snake_default',
+				declaredColumn: 'camelValue',
+				liveColumn: 'camel_value',
+				dbCasing: 'snake_case' as const,
+			},
+			{
+				schema: names[2]!,
+				table: 'legacyOrders',
+				liveTable: 'legacy_orders',
+				declaredColumn: 'orderCode',
+				liveColumn: 'order_code',
+				dbCasing: 'snake_case' as const,
+			},
+		]) {
+			await pool.query(
+				`CREATE TABLE ${quote(scenario.schema)}.${quote(scenario.liveTable)} (${quote(scenario.liveColumn)} text NOT NULL DEFAULT 'active')`,
+			);
+			const schemaFile = await adoptionDefaultSchemaFile({
+				table: scenario.table,
+				column: scenario.declaredColumn,
+				...(scenario.dbCasing === undefined
+					? {}
+					: { dbCasing: scenario.dbCasing }),
+			});
+			const planned = await runGeneratorPlan({
+				db: process.env.DATABASE_URL!,
+				schema: scenario.schema,
+				schemaFile,
+			});
+			generatorSchemaFiles.set(planned, schemaFile);
+			const reviewed = generatorPlan(planned);
+			expect(reviewed.plan.generator.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'adopt_table',
+					table: scenario.liveTable,
+				}),
+			);
+			await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+				outcome: 'completed',
+			});
+			await expect(
+				pool.query(
+					`SELECT event_kind FROM ${quote(scenario.schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
+					[scenario.liveTable],
+				),
+			).resolves.toMatchObject({ rows: [{ event_kind: 'adopt' }] });
+		}
+	});
+
+	it('adopts declared parent and child tables with their matching foreign key', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schema = names[0]!;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.customers (id integer PRIMARY KEY); CREATE TABLE ${quote(schema)}.orders (id integer PRIMARY KEY, customer_id integer REFERENCES ${quote(schema)}.customers(id))`,
+		);
+		const schemaFile = await adoptionForeignKeySchemaFile({
+			childHasForeignKey: true,
+		});
+		const planned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema,
+			schemaFile,
+		});
+		generatorSchemaFiles.set(planned, schemaFile);
+		const reviewed = generatorPlan(planned);
+		expect(reviewed.plan.generator.changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'adopt_table', table: 'customers' }),
+				expect.objectContaining({ kind: 'adopt_table', table: 'orders' }),
+			]),
+		);
+		const applied = await runApply(
+			reviewed.runId,
+			{ db: process.env.DATABASE_URL!, planDigest: reviewed.planDigest },
+			pool,
+		);
+		expect(applied).toMatchObject({ outcome: 'completed' });
+	});
+
+	it('refuses child adoption when its live foreign key is undeclared', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schema = names[0]!;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.customers (id integer PRIMARY KEY); CREATE TABLE ${quote(schema)}.orders (id integer PRIMARY KEY, customer_id integer REFERENCES ${quote(schema)}.customers(id))`,
+		);
+		const schemaFile = await adoptionForeignKeySchemaFile({
+			childHasForeignKey: false,
+		});
+		const planned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema,
+			schemaFile,
+		});
+		generatorSchemaFiles.set(planned, schemaFile);
+		const reviewed = generatorPlan(planned);
+		expect(reviewed.plan.generator.changes).toContainEqual(
+			expect.objectContaining({ kind: 'adoption_refused', table: 'orders' }),
+		);
+	});
+
+	it('refuses child adoption when a foreign key appears after review', async () => {
+		const { pool, schemas: names } = await fixture();
+		const schema = names[0]!;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.customers (id integer PRIMARY KEY); CREATE TABLE ${quote(schema)}.orders (id integer PRIMARY KEY, customer_id integer)`,
+		);
+		const schemaFile = await adoptionForeignKeySchemaFile({
+			childHasForeignKey: false,
+		});
+		const planned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema,
+			schemaFile,
+		});
+		generatorSchemaFiles.set(planned, schemaFile);
+		const reviewed = generatorPlan(planned);
+		expect(reviewed.plan.generator.changes).toContainEqual(
+			expect.objectContaining({ kind: 'adopt_table', table: 'orders' }),
+		);
+		await pool.query(
+			`ALTER TABLE ${quote(schema)}.orders ADD CONSTRAINT orders_customer_id_fkey FOREIGN KEY (customer_id) REFERENCES ${quote(schema)}.customers(id)`,
+		);
+		const applied = await runApply(
+			reviewed.runId,
+			{ db: process.env.DATABASE_URL!, planDigest: reviewed.planDigest },
+			pool,
+		);
+		expect(applied).toMatchObject({ outcome: 'adoption-refused' });
+		await expect(
+			pool.query(
+				`SELECT count(*)::int AS count FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = 'orders' AND event_kind = 'adopt'`,
+			),
+		).resolves.toMatchObject({ rows: [{ count: 0 }] });
 	});
 
 	it('restores the complete initial-schema bootstrap through the persisted generator path', async () => {
