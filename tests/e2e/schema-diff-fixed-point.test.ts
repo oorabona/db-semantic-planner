@@ -206,7 +206,7 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		const desired = model([], undefined, [{ name: 'orderNumberSeq' }]);
 
 		await expect(changes(desired, 'snake_case')).rejects.toThrow(
-			`ALTER SEQUENCE "orderNumberSeq" RENAME TO "order_number_seq"`,
+			`ALTER SEQUENCE "${SCHEMA}"."orderNumberSeq" RENAME TO "order_number_seq"`,
 		);
 		await expect(
 			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS present', [

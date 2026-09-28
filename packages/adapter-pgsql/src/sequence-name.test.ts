@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { camelCaseNaming, identityNaming } from './naming-plugin.js';
 import {
 	getSequenceDatabaseName,
+	LegacySequenceNameError,
 	physicalizeDeclaredSequences,
 	SequenceNameCollisionError,
 	SequenceNameMapKeyMismatchError,
@@ -39,5 +40,41 @@ describe('declared sequence physical names', () => {
 				identityNaming,
 			),
 		).toThrow(SequenceNameMapKeyMismatchError);
+	});
+
+	it('prints legacy sequence SQL only with valid schema-qualified identifiers', () => {
+		expect(
+			new LegacySequenceNameError('orderNumberSeq', 'order_number_seq').message,
+		).toContain(
+			'Rename "orderNumberSeq" to "order_number_seq" before comparing',
+		);
+		expect(
+			new LegacySequenceNameError('orderNumberSeq', 'order_number_seq').message,
+		).not.toContain('ALTER SEQUENCE');
+		expect(
+			new LegacySequenceNameError(
+				'orderNumberSeq',
+				'order_number_seq',
+				'tenant_a',
+			).message,
+		).toContain(
+			'ALTER SEQUENCE "tenant_a"."orderNumberSeq" RENAME TO "order_number_seq"',
+		);
+		expect(
+			new LegacySequenceNameError('bad"name', 'order_number_seq', 'tenant_a')
+				.message,
+		).not.toContain('ALTER SEQUENCE');
+	});
+
+	it('escapes hostile sequence identifiers in single-line diagnostics', () => {
+		const name = 'bad\\name\nnext';
+		for (const error of [
+			new SequenceNameMapKeyMismatchError(name, name),
+			new SequenceNameCollisionError(name, name, name),
+			new LegacySequenceNameError(name, name),
+		]) {
+			expect(error.message).not.toMatch(/[\r\n]/u);
+			expect(error.message).toContain('bad\\\\name\\nnext');
+		}
 	});
 });

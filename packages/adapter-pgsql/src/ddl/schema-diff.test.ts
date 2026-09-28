@@ -4196,7 +4196,7 @@ describe('Sequences', () => {
 		).toThrow(LegacySequenceNameError);
 		expect(() =>
 			compareSchemata(schema, db, { dbCasing: 'snake_case' }),
-		).toThrow('ALTER SEQUENCE "orderNumberSeq" RENAME TO "order_number_seq"');
+		).toThrow('Rename "orderNumberSeq" to "order_number_seq" before comparing');
 	});
 
 	it.each([

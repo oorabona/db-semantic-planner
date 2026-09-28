@@ -1,5 +1,7 @@
 import type { SequenceIR } from '@dbsp/types';
+import { quoteIdent } from './ddl/phases/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
+import { escapeDiagnosticText } from './validate.js';
 
 export class SequenceNameMapKeyMismatchError extends Error {
 	constructor(
@@ -7,8 +9,8 @@ export class SequenceNameMapKeyMismatchError extends Error {
 		public readonly sequenceName: string,
 	) {
 		super(
-			`Declared sequence map key "${mapKey}" differs from SequenceIR.name ` +
-				`"${sequenceName}". Use the same authored name for both.`,
+			`Declared sequence map key "${escapeDiagnosticText(mapKey)}" differs from SequenceIR.name ` +
+				`"${escapeDiagnosticText(sequenceName)}". Use the same authored name for both.`,
 		);
 		this.name = 'SequenceNameMapKeyMismatchError';
 	}
@@ -21,9 +23,9 @@ export class SequenceNameCollisionError extends Error {
 		public readonly databaseName: string,
 	) {
 		super(
-			`Sequence name collision: authored sequences "${firstAuthoredName}" and ` +
-				`"${secondAuthoredName}" both resolve to physical name ` +
-				`"${databaseName}". Rename one of the sequences.`,
+			`Sequence name collision: authored sequences "${escapeDiagnosticText(firstAuthoredName)}" and ` +
+				`"${escapeDiagnosticText(secondAuthoredName)}" both resolve to physical name ` +
+				`"${escapeDiagnosticText(databaseName)}". Rename one of the sequences.`,
 		);
 		this.name = 'SequenceNameCollisionError';
 	}
@@ -33,14 +35,35 @@ export class LegacySequenceNameError extends Error {
 	constructor(
 		public readonly authoredName: string,
 		public readonly databaseName: string,
+		public readonly schema?: string,
 	) {
+		const remediation = legacySequenceNameRemediation(
+			authoredName,
+			databaseName,
+			schema,
+		);
 		super(
-			`Declared sequence "${authoredName}" resolves to physical name ` +
-				`"${databaseName}", but only the legacy raw sequence exists. ` +
-				`Rename it before comparing: ALTER SEQUENCE "${authoredName}" ` +
-				`RENAME TO "${databaseName}".`,
+			`Declared sequence "${escapeDiagnosticText(authoredName)}" resolves to physical name ` +
+				`"${escapeDiagnosticText(databaseName)}", but only the legacy raw sequence exists. ` +
+				`${remediation}.`,
 		);
 		this.name = 'LegacySequenceNameError';
+	}
+}
+
+function legacySequenceNameRemediation(
+	authoredName: string,
+	databaseName: string,
+	schema: string | undefined,
+): string {
+	const wordOnly =
+		`Rename "${escapeDiagnosticText(authoredName)}" to ` +
+		`"${escapeDiagnosticText(databaseName)}" before comparing`;
+	if (schema === undefined) return wordOnly;
+	try {
+		return `Rename it before comparing: ALTER SEQUENCE ${quoteIdent(schema, 'schema')}.${quoteIdent(authoredName)} RENAME TO ${quoteIdent(databaseName)}`;
+	} catch {
+		return wordOnly;
 	}
 }
 

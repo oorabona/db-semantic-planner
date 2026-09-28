@@ -896,6 +896,28 @@ describe('convergePg', () => {
 		).resolves.toBe(true);
 	});
 
+	it('refuses a legacy raw sequence instead of creating a second snake_case counter', async () => {
+		const pool = await getTestPool();
+		const desired = model([], [{ name: 'invoiceNumberSeq' }]);
+		await pool.query(`CREATE SEQUENCE "${schema}"."invoiceNumberSeq"`);
+
+		await expect(
+			convergePg(pool, desired, { schema, dbCasing: 'snake_case' }),
+		).rejects.toThrow(
+			`ALTER SEQUENCE "${schema}"."invoiceNumberSeq" RENAME TO "invoice_number_seq"`,
+		);
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS present', [
+				`"${schema}"."invoiceNumberSeq"`,
+			]),
+		).resolves.toMatchObject({ rows: [{ present: true }] });
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) IS NOT NULL AS present', [
+				`"${schema}"."invoice_number_seq"`,
+			]),
+		).resolves.toMatchObject({ rows: [{ present: false }] });
+	});
+
 	it.each([
 		[
 			'partial unique index',
