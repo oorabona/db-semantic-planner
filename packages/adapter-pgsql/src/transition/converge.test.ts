@@ -102,6 +102,13 @@ function modelWithSequences(names: readonly string[]): ModelIR {
 	};
 }
 
+function modelWithEnums(names: readonly string[]): ModelIR {
+	return {
+		...emptyModel(),
+		enums: new Map(names.map((name) => [name, { name, values: ['pending'] }])),
+	};
+}
+
 function modelWithTable(
 	name: string,
 	indexes: readonly TableIR['indexes'][number][] = [],
@@ -869,6 +876,24 @@ describe('convergePg refusal boundary', () => {
 	it('does not compare an undeclared live sequence when the model declares none', async () => {
 		mocks.introspect.mockResolvedValue(modelWithSequences(['live_sequence']));
 		compareIntrospectedSchema();
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
+	it('does not pass undeclared live enums to the comparison', async () => {
+		mocks.introspect.mockResolvedValue(modelWithEnums(['live_enum']));
+		mocks.compare.mockImplementation(
+			async (adapter: {
+				introspect: (options?: unknown) => Promise<ModelIR>;
+			}) => {
+				const introspected = await adapter.introspect({ schema: 'public' });
+				expect([...(introspected.enums?.keys() ?? [])]).toEqual([]);
+				return { changes: [] };
+			},
+		);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toEqual({
 			kind: 'no-drift',

@@ -390,6 +390,7 @@ async function compareConvergeMaskedSchema(input: {
 		naming.toDatabase(table.name),
 	);
 	const declaredSequences = new Set(input.model.sequences?.keys() ?? []);
+	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
 	const declarationScopedAdapter = new Proxy(adapter, {
 		get(target, property, receiver) {
 			if (property === 'introspect')
@@ -407,6 +408,11 @@ async function compareConvergeMaskedSchema(input: {
 							sequences: new Map(
 								[...(introspected.sequences ?? [])].filter(([name]) =>
 									declaredSequences.has(name),
+								),
+							),
+							enums: new Map(
+								[...(introspected.enums ?? [])].filter(([name]) =>
+									declaredEnums.has(name),
 								),
 							),
 						}));
@@ -1076,8 +1082,9 @@ function describeFkAutoIndexSpecs(
  * ledger terminal. A no-rewrite default is therefore not non-blocking.
  *
  * Converge mutates only declared additions whose target and existing parent pass
- * managed admission. It compares structural shape; it does not audit the
- * provenance of an exact-matching child already present on a managed table.
+ * managed admission. It compares the declared tables, sequences, and enums'
+ * structural shape; it does not audit the provenance of an exact-matching child
+ * already present on a managed table.
  * `externalIndexes` accepts exact physical index names on logical model tables;
  * entries are validated before the ledger lock or any query, and converge
  * never drops a matching live index. A name that collides with another
