@@ -98,6 +98,9 @@ function testSession(
 							? { relation_kind: 'r', constraint_name: params?.[2] }
 							: { relation_kind: 'r' }),
 					...(sql.includes('attribute.attnum') ? { attribute_number: 1 } : {}),
+					...(sql.includes('column_type_schema')
+						? { column_type_schema: 'pg_catalog' }
+						: {}),
 					...(sql.includes('index_relation.oid') ||
 					sql.includes('constraint_item.oid')
 						? { object_oid: '102' }
@@ -272,6 +275,7 @@ function tableSession(
 		return {
 			rows: rows.map((row) => ({
 				relation_kind: 'r',
+				column_type_schema: 'pg_catalog',
 				column_default: null,
 				generated_sequence_default: String(row.column_default).startsWith(
 					"nextval('",
@@ -285,6 +289,163 @@ function tableSession(
 }
 
 describe('generated postcondition verifier', () => {
+	it('compares user-defined column types by their catalog namespace while preserving format_type in projections', async () => {
+		for (const example of [
+			{
+				columnType: 'tenant.mood',
+				typeSchema: 'tenant',
+				expectedType: '"tenant".mood',
+			},
+			{
+				columnType: 'mood',
+				typeSchema: 'public',
+				expectedType: '"public".mood',
+			},
+		]) {
+			const row = {
+				column_name: 'mood',
+				column_type: example.columnType,
+				column_type_schema: example.typeSchema,
+				is_not_null: true,
+			};
+			const expected = { type: example.expectedType, nullable: false };
+			await expect(
+				verifyGeneratedTablePostcondition({
+					session: tableSession([row]),
+					postcondition: v3Table([{ name: 'mood', ...expected }]),
+					address: tableAddress,
+				}),
+			).resolves.toMatchObject({
+				projection: { columns: [{ type: example.columnType }] },
+			});
+			await expect(
+				verifyGeneratedColumnPostcondition({
+					session: testSession(async (sql) =>
+						sql.includes(
+							'attribute.attname AS column_name FROM pg_catalog.pg_namespace',
+						)
+							? { rows: [{ column_name: 'mood' }] }
+							: {
+									rows: [
+										{
+											relation_kind: 'r',
+											...row,
+											column_default: null,
+											generated_sequence_default: false,
+											collation_name: null,
+											identity_kind: '',
+										},
+									],
+								},
+					),
+					postcondition: v3Column(expected),
+					address: { ...columnAddress, name: 'mood' },
+				}),
+			).resolves.toMatchObject({
+				projection: { type: example.columnType },
+			});
+		}
+
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'mood',
+						column_type: 'mood',
+						column_type_schema: 'other_tenant',
+						is_not_null: true,
+					},
+				]),
+				postcondition: v3Table([
+					{ name: 'mood', type: '"tenant".mood', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).rejects.toThrow('columns[0].type');
+
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'mood',
+						column_type: '"Mixed_Case".mood',
+						column_type_schema: 'Mixed_Case',
+						is_not_null: true,
+					},
+				]),
+				postcondition: v3Table([
+					{ name: 'mood', type: '"Mixed_Case".mood', nullable: false },
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({ kind: 'table' });
+
+		for (const expected of ['mood', '"public".mood'])
+			await expect(
+				verifyGeneratedTablePostcondition({
+					session: tableSession([
+						{
+							column_name: 'mood',
+							column_type: 'mood',
+							column_type_schema: 'public',
+							is_not_null: true,
+						},
+					]),
+					postcondition: v3Table([
+						{ name: 'mood', type: expected, nullable: false },
+					]),
+					address: tableAddress,
+				}),
+			).resolves.toMatchObject({ kind: 'table' });
+
+		await expect(
+			verifyGeneratedTablePostcondition({
+				session: tableSession([
+					{
+						column_name: 'moods',
+						column_type: 'tenant.mood[]',
+						column_type_schema: 'tenant',
+						is_not_null: true,
+					},
+					{
+						column_name: 'state',
+						column_type: 'tenant.state_domain',
+						column_type_schema: 'tenant',
+						is_not_null: true,
+					},
+					{
+						column_name: 'embedding',
+						column_type: 'extensions.vector(768)',
+						column_type_schema: 'extensions',
+						is_not_null: true,
+					},
+				]),
+				postcondition: v3Table([
+					{ name: 'moods', type: '"tenant".mood[]', nullable: false },
+					{
+						name: 'state',
+						type: '"tenant".state_domain',
+						nullable: false,
+					},
+					{
+						name: 'embedding',
+						type: '"extensions".vector(768)',
+						nullable: false,
+					},
+				]),
+				address: tableAddress,
+			}),
+		).resolves.toMatchObject({
+			projection: {
+				columns: [
+					{ type: 'tenant.mood[]' },
+					{ type: 'tenant.state_domain' },
+					{ type: 'extensions.vector(768)' },
+				],
+			},
+		});
+	});
+
 	it('narrows every resolvable ledger-address topology for v3 binding', () => {
 		const addresses: readonly LedgerAddress[] = [
 			tableAddress,

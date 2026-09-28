@@ -1,6 +1,10 @@
 import type { LedgerAddress, ResourceAddress } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
-import { dbTypesEqual } from '../db-type.js';
+import {
+	dbTypesEqual,
+	quoteTypeSchemaIdentifier,
+	stripDbTypeSchema,
+} from '../db-type.js';
 import { identityNaming } from '../naming-plugin.js';
 import {
 	lockPgRelation,
@@ -581,11 +585,22 @@ type TableColumnProjection = {
 	readonly identity: 'always' | 'byDefault' | null;
 };
 
+/**
+ * Catalogue-only type evidence used while comparing a column postcondition.
+ * It is deliberately omitted from the observed projection persisted after the
+ * proof: v3 postcondition payloads keep their established shape.
+ */
+type LiveTableColumnProjection = TableColumnProjection & {
+	/** The namespace of the type itself, or of an array's element type. */
+	readonly typeSchema: string;
+};
+
 type TableProjection = {
 	readonly columns: readonly TableColumnProjection[];
 };
 
 type GeneratedColumnProjection = Omit<TableColumnProjection, 'name'>;
+type LiveGeneratedColumnProjection = Omit<LiveTableColumnProjection, 'name'>;
 
 let scratchSequence = 0;
 
@@ -1525,7 +1540,11 @@ async function stabilizeGeneratedPostconditionBinding(input: {
  */
 function tableColumnProjection(
 	row: Record<string, unknown>,
-): TableColumnProjection {
+): LiveTableColumnProjection {
+	const typeSchema =
+		typeof row.column_type_schema === 'string'
+			? row.column_type_schema
+			: 'pg_catalog';
 	if (
 		typeof row.column_name !== 'string' ||
 		typeof row.column_type !== 'string' ||
@@ -1541,7 +1560,10 @@ function tableColumnProjection(
 		);
 	return {
 		name: row.column_name,
+		// This spelling becomes the recorded observed payload, so preserve
+		// format_type exactly as it was returned by the live catalog.
 		type: row.column_type,
+		typeSchema,
 		nullable: !row.is_not_null,
 		default: row.column_default === null ? undefined : row.column_default,
 		generatedSequenceDefault: row.generated_sequence_default === true,
@@ -1560,10 +1582,11 @@ function tableColumnProjection(
 function generatedColumnProjection(
 	row: Record<string, unknown>,
 	name: string,
-): GeneratedColumnProjection {
+): LiveGeneratedColumnProjection {
 	const projection = tableColumnProjection({ ...row, column_name: name });
 	return {
 		type: projection.type,
+		typeSchema: projection.typeSchema,
 		nullable: projection.nullable,
 		default: projection.default,
 		generatedSequenceDefault: projection.generatedSequenceDefault,
@@ -1581,7 +1604,7 @@ const GENERATED_SEQUENCE_EVIDENCE_SQL = `${generatedSequenceDefaultPredicate({
 	attrdef: 'default_value',
 })} AS generated_sequence_default`;
 
-const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
+const TABLE_COLUMN_PROJECTION_SELECT = `SELECT relation.relkind AS relation_kind, attribute.attname AS column_name, pg_catalog.format_type(attribute.atttypid, attribute.atttypmod) AS column_type, type_namespace.nspname AS column_type_schema, attribute.attnotnull AS is_not_null, pg_catalog.pg_get_expr(default_value.adbin, default_value.adrelid) AS column_default, ${GENERATED_SEQUENCE_EVIDENCE_SQL}, column_collation.collname AS collation_name, attribute.attidentity AS identity_kind FROM pg_catalog.pg_namespace namespace JOIN pg_catalog.pg_class relation ON relation.relnamespace = namespace.oid LEFT JOIN pg_catalog.pg_attribute attribute ON attribute.attrelid = relation.oid AND attribute.attnum > 0 AND NOT attribute.attisdropped LEFT JOIN pg_catalog.pg_attrdef default_value ON default_value.adrelid = attribute.attrelid AND default_value.adnum = attribute.attnum LEFT JOIN pg_catalog.pg_type column_type ON column_type.oid = attribute.atttypid LEFT JOIN pg_catalog.pg_type element_type ON element_type.oid = NULLIF(column_type.typelem, 0) LEFT JOIN pg_catalog.pg_namespace type_namespace ON type_namespace.oid = COALESCE(element_type.typnamespace, column_type.typnamespace) LEFT JOIN pg_catalog.pg_collation column_collation ON column_collation.oid = attribute.attcollation`;
 
 function isGeneratedSequenceDefault(
 	specification: GeneratedColumnPostcondition,
@@ -1687,13 +1710,13 @@ async function defaultPostconditionMatches(
 }
 
 async function columnPostconditionMatches(
-	actual: GeneratedColumnProjection,
+	actual: LiveGeneratedColumnProjection,
 	specification: GeneratedColumnPostcondition,
 	stagedDefaults: ReadonlyMap<string, string>,
 ): Promise<ColumnPostconditionMismatch | undefined> {
 	if (
 		specification.type !== undefined &&
-		!dbTypesEqual(actual.type, specification.type)
+		!columnDbTypesEqual(actual, specification.type)
 	)
 		return 'type';
 	if (
@@ -1716,6 +1739,28 @@ async function columnPostconditionMatches(
 	)
 		return 'identity';
 	return undefined;
+}
+
+function columnDbTypesEqual(
+	actual: LiveGeneratedColumnProjection,
+	expected: string,
+): boolean {
+	const catalogRendering =
+		actual.typeSchema === 'pg_catalog'
+			? actual.type
+			: `${quoteTypeSchemaIdentifier(actual.typeSchema)}.${stripDbTypeSchema(actual.type)}`;
+	if (dbTypesEqual(catalogRendering, expected)) return true;
+	// The catalog retains a public type's namespace but not whether the authored
+	// model used target or absolute scope.  Both are valid emitted spellings.
+	if (
+		actual.typeSchema === 'public' &&
+		dbTypesEqual(stripDbTypeSchema(catalogRendering), expected)
+	)
+		return true;
+	// A legacy authored type has no structural schema identity in the v3 payload.
+	// Preserve its existing format_type comparison, including its search_path
+	// semantics, rather than guessing an identity that was never authored.
+	return dbTypesEqual(actual.type, expected);
 }
 
 /**
@@ -1788,7 +1833,20 @@ async function verifyTableStructure(input: {
 								: `columns[${ordinal}].${mismatch}`,
 					);
 			}
-			return { kind: 'table' as const, projection: { columns: live } };
+			return {
+				kind: 'table' as const,
+				projection: {
+					columns: live.map((column) => ({
+						name: column.name,
+						type: column.type,
+						nullable: column.nullable,
+						default: column.default,
+						generatedSequenceDefault: column.generatedSequenceDefault,
+						collation: column.collation,
+						identity: column.identity,
+					})),
+				},
+			};
 		};
 		return verify();
 	})(input.session);
@@ -1827,7 +1885,7 @@ async function verifyColumnStructure(input: {
 				throw structuralMismatch(
 					`generated column ${input.target.name} projection names another column`,
 				);
-			let projection: GeneratedColumnProjection;
+			let projection: LiveGeneratedColumnProjection;
 			try {
 				projection = generatedColumnProjection(row, input.target.name);
 			} catch {
@@ -1849,7 +1907,17 @@ async function verifyColumnStructure(input: {
 				throw structuralMismatch(
 					`generated column ${input.target.name} ${mismatch} postcondition differs`,
 				);
-			return { kind: 'column' as const, projection };
+			return {
+				kind: 'column' as const,
+				projection: {
+					type: projection.type,
+					nullable: projection.nullable,
+					default: projection.default,
+					generatedSequenceDefault: projection.generatedSequenceDefault,
+					collation: projection.collation,
+					identity: projection.identity,
+				},
+			};
 		};
 		return verify();
 	})(input.session);
