@@ -19,6 +19,7 @@ import {
 	generatedPostconditionForChange,
 } from '../ddl/managed-step-manifest.js';
 import { executeGeneratorPlan } from './generator-execution.js';
+import { readPgOutcomeSessionCompromise } from './outcome-protocol.js';
 
 const executePgAdmittedOperation = vi.hoisted(() => vi.fn());
 const preflightPgDeclaredAdoption = vi.hoisted(() => vi.fn());
@@ -1514,5 +1515,332 @@ describe('generator execution fixture shim', () => {
 			outcome: 'transport-ambiguous',
 			detail: 'terminal commit acknowledgement lost',
 		});
+	});
+
+	function atomicStep(stepKey: string, order: number): NormalizedManagedStep {
+		return {
+			...dataDestructiveStep,
+			stepKey,
+			order,
+			plannedClaimKeys: [`${stepKey}:root`],
+			classification: 'non-destructive',
+			requiresVacancy: false,
+			statementBundle: {
+				statements: [
+					{ ordinal: 0, sql: `CREATE TABLE tenant.${stepKey} (id integer)` },
+				],
+			},
+		};
+	}
+
+	function atomicExecutor(
+		onQuery?: (sql: string) => Promise<{
+			readonly rows: readonly Record<string, unknown>[];
+		}>,
+	) {
+		const query = vi.fn(
+			onQuery ??
+				(async (sql: string) =>
+					sql.startsWith('SELECT current_database')
+						? { rows: [{ database_id: 'app' }] }
+						: { rows: [] }),
+		);
+		return { query, release: vi.fn() };
+	}
+
+	function atomicInput(
+		executor: ReturnType<typeof atomicExecutor>,
+		steps = [atomicStep('atomic:0', 0), atomicStep('atomic:1', 1)],
+	) {
+		return {
+			pool: executor as never,
+			run: {} as never,
+			plan: { steps },
+			planDigest: 'atomic-plan',
+			schema: 'tenant',
+			runId: 'atomic-run',
+			recordAttempt: async () => undefined,
+			atomicCreationGroup: steps.map((step) => step.stepKey),
+		};
+	}
+
+	it('commits a three-member atomic creation group only after every member executes', async () => {
+		const executor = atomicExecutor();
+		const steps = [
+			atomicStep('atomic:0', 0),
+			atomicStep('atomic:1', 1),
+			atomicStep('atomic:2', 2),
+		];
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'executed-outcome-claim',
+		});
+
+		await expect(
+			executeGeneratorPlan(atomicInput(executor, steps)),
+		).resolves.toEqual({
+			outcome: 'completed',
+		});
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'COMMIT',
+		]);
+		expect(executePgAdmittedOperation).toHaveBeenCalledTimes(3);
+		for (const [, input] of executePgAdmittedOperation.mock.calls)
+			expect(input.operation.request.transactionOpen).toBe(true);
+	});
+
+	it('rolls back every atomic member when a member refuses', async () => {
+		const executor = atomicExecutor();
+		executePgAdmittedOperation
+			.mockResolvedValueOnce({ kind: 'executed-outcome-claim' })
+			.mockResolvedValueOnce({ kind: 'outcome-refusal', reason: 'occupied' });
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({
+				outcome: 'execution-failed',
+				detail: 'occupied',
+			}),
+		);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toContain('ROLLBACK');
+		expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContain(
+			'COMMIT',
+		);
+	});
+
+	it('rolls back every atomic member when a member throws', async () => {
+		const executor = atomicExecutor();
+		executePgAdmittedOperation.mockRejectedValue(new Error('member exploded'));
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({
+				outcome: 'execution-failed',
+				detail: 'member exploded',
+			}),
+		);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toContain('ROLLBACK');
+	});
+
+	it('rolls back when setting the atomic group lock timeout fails', async () => {
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql.startsWith('SET LOCAL')) throw new Error('lock timeout failed');
+			return { rows: [] };
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
+	});
+
+	it('marks the atomic session compromised when setup rollback is rejected', async () => {
+		const rollbackError = Object.assign(new Error('rollback interrupted'), {
+			code: '57014',
+		});
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql.startsWith('SET LOCAL')) throw new Error('lock timeout failed');
+			if (sql === 'ROLLBACK') throw rollbackError;
+			return { rows: [] };
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(readPgOutcomeSessionCompromise(executor)).toBe(rollbackError);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
+	});
+
+	it('marks an unacknowledged atomic group BEGIN without rolling back', async () => {
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql === 'BEGIN') throw new Error('BEGIN acknowledgement lost');
+			return { rows: [] };
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({
+				outcome: 'execution-failed',
+				detail: 'BEGIN acknowledgement lost',
+			}),
+		);
+		expect(readPgOutcomeSessionCompromise(executor)).toBeInstanceOf(Error);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'SELECT current_database() AS database_id',
+			'BEGIN',
+		]);
+	});
+
+	it('marks an atomic session compromised when rollback is server-rejected', async () => {
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql === 'ROLLBACK')
+				throw Object.assign(new Error('rollback rejected'), { code: 'XX000' });
+			return { rows: [] };
+		});
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'outcome-refusal',
+			reason: 'occupied',
+		});
+		await executeGeneratorPlan(atomicInput(executor));
+		expect(readPgOutcomeSessionCompromise(executor)).toBeInstanceOf(Error);
+	});
+
+	it.each([
+		['duplicate', ['atomic:0', 'atomic:0']],
+		['unknown', ['atomic:0', 'missing']],
+		['non-contiguous', ['atomic:0', 'atomic:2']],
+	])('refuses a %s atomic group before it sends SQL', async (_name, keys) => {
+		const executor = atomicExecutor();
+		const steps = [
+			atomicStep('atomic:0', 0),
+			atomicStep('atomic:1', 1),
+			atomicStep('atomic:2', 2),
+		];
+		await expect(
+			executeGeneratorPlan({
+				...atomicInput(executor, steps),
+				atomicCreationGroup: keys,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(executor.query).not.toHaveBeenCalled();
+	});
+
+	it.each([undefined, '40003', '08006'])(
+		'returns transport-ambiguous without rollback after atomic COMMIT %s',
+		async (code) => {
+			const commitError = new Error('acknowledgement unknown');
+			if (code) Object.assign(commitError, { code });
+			const executor = atomicExecutor(async (sql) => {
+				if (sql.startsWith('SELECT current_database'))
+					return { rows: [{ database_id: 'app' }] };
+				if (sql === 'COMMIT') throw commitError;
+				return { rows: [] };
+			});
+			executePgAdmittedOperation.mockResolvedValue({
+				kind: 'executed-outcome-claim',
+			});
+			await expect(
+				executeGeneratorPlan(atomicInput(executor)),
+			).resolves.toEqual(
+				expect.objectContaining({ outcome: 'transport-ambiguous' }),
+			);
+			expect(readPgOutcomeSessionCompromise(executor)).toBe(commitError);
+			expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContain(
+				'ROLLBACK',
+			);
+		},
+	);
+
+	it('treats a server-rejected atomic COMMIT as a deterministic failed group', async () => {
+		const executor = atomicExecutor(async (sql) => {
+			if (sql.startsWith('SELECT current_database'))
+				return { rows: [{ database_id: 'app' }] };
+			if (sql === 'COMMIT')
+				throw Object.assign(new Error('commit rejected'), { code: 'XX000' });
+			return { rows: [] };
+		});
+		executePgAdmittedOperation.mockResolvedValue({
+			kind: 'executed-outcome-claim',
+		});
+		await expect(executeGeneratorPlan(atomicInput(executor))).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(executor.query.mock.calls.map(([sql]) => sql)).not.toContain(
+			'ROLLBACK',
+		);
+	});
+
+	it('reports only a pre-group completed step when the atomic group fails', async () => {
+		const executor = atomicExecutor();
+		const before = atomicStep('before:0', 0);
+		const first = atomicStep('atomic:1', 1);
+		const second = atomicStep('atomic:2', 2);
+		executePgAdmittedOperation
+			.mockResolvedValueOnce({ kind: 'executed-outcome-claim' })
+			.mockResolvedValueOnce({ kind: 'outcome-refusal', reason: 'occupied' });
+		await expect(
+			executeGeneratorPlan({
+				...atomicInput(executor, [before, first, second]),
+				atomicCreationGroup: [first.stepKey, second.stepKey],
+			}),
+		).resolves.toEqual({
+			outcome: 'partially-applied',
+			detail: 'occupied',
+			completedStepKeys: ['before:0'],
+			notStartedStepKeys: ['atomic:1', 'atomic:2'],
+		});
+	});
+
+	it.each([
+		[
+			'destructive',
+			{
+				...atomicStep('atomic:0', 0),
+				classification: 'data-destructive' as const,
+			},
+		],
+		[
+			'adoption',
+			{
+				...atomicStep('atomic:0', 0),
+				lifecycle: {
+					kind: 'adoption' as const,
+					shape: {
+						name: 'atomic',
+						columns: [],
+						foreignKeys: [],
+						indexes: [],
+					},
+				},
+			},
+		],
+	] as const)(
+		'refuses a %s member before opening an atomic group',
+		async (_name, step) => {
+			const executor = atomicExecutor();
+			await expect(
+				executeGeneratorPlan({
+					...atomicInput(executor, [step]),
+					atomicCreationGroup: [step.stepKey],
+				}),
+			).resolves.toEqual(
+				expect.objectContaining({ outcome: 'execution-failed' }),
+			);
+			expect(executor.query).not.toHaveBeenCalled();
+		},
+	);
+
+	it('refuses an adoption-refused member before recording or opening an atomic group', async () => {
+		const executor = atomicExecutor();
+		const recordAttempt = vi.fn(async () => undefined);
+		const step: NormalizedManagedStep = {
+			...atomicStep('atomic:0', 0),
+			statementBundle: { statements: [] },
+			lifecycle: { kind: 'adoption-refused' },
+		};
+		await expect(
+			executeGeneratorPlan({
+				...atomicInput(executor, [step]),
+				recordAttempt,
+			}),
+		).resolves.toEqual(
+			expect.objectContaining({ outcome: 'execution-failed' }),
+		);
+		expect(executor.query).not.toHaveBeenCalled();
+		expect(recordAttempt).not.toHaveBeenCalled();
 	});
 });

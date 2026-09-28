@@ -31,6 +31,7 @@ import {
 	PgCommitAcknowledgementAmbiguousError,
 	PgCommitDeterministicFailureError,
 	readPgOutcomeRecoveryReadBack,
+	readPgOutcomeSessionCompromise,
 	readPgPairedReaddressObserved,
 	recoverPgOutcomeClaim,
 	withPgOutcomeSession,
@@ -1185,22 +1186,44 @@ describe('PostgreSQL outcome protocol compositions', () => {
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
 	});
 
+	it.each(['40003', '08006'])(
+		'keeps COMMIT SQLSTATE %s acknowledgement-ambiguous',
+		async (code) => {
+			const sql: string[] = [];
+			const error = Object.assign(new Error('COMMIT acknowledgement unknown'), {
+				code,
+			});
+			const executor = {
+				query: vi.fn(async (statement: string) => {
+					sql.push(statement);
+					if (statement === 'COMMIT') throw error;
+					return { rows: [] };
+				}),
+			};
+			await expect(
+				withPgTransitionTransaction(executor, async () => 'completed'),
+			).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+			expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+			expect(sql).toEqual(['BEGIN', 'COMMIT']);
+		},
+	);
+
 	it('keeps a SQLSTATE-confirmed COMMIT refusal deterministic', async () => {
 		const sql: string[] = [];
+		const error = Object.assign(new Error('deferred constraint violation'), {
+			code: '23505',
+		});
 		const executor = {
 			query: vi.fn(async (statement: string) => {
 				sql.push(statement);
-				if (statement === 'COMMIT') {
-					const error = new Error('deferred constraint violation');
-					Object.assign(error, { code: '23514' });
-					throw error;
-				}
+				if (statement === 'COMMIT') throw error;
 				return { rows: [] };
 			}),
 		};
 		await expect(
 			withPgTransitionTransaction(executor, async () => 'completed'),
 		).rejects.toBeInstanceOf(PgCommitDeterministicFailureError);
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBeUndefined();
 		expect(sql).toEqual(['BEGIN', 'COMMIT']);
 	});
 
@@ -1223,6 +1246,126 @@ describe('PostgreSQL outcome protocol compositions', () => {
 			),
 		).rejects.toBe(error);
 		expect(release).toHaveBeenCalledWith(error);
+	});
+
+	it('marks an unacknowledged BEGIN as compromised before its caller returns', async () => {
+		const error = new Error('BEGIN acknowledgement lost');
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-acknowledgement-lost'),
+				resolution: {
+					eventId: 'begin-acknowledgement-lost-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'BEGIN acknowledgement lost',
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('marks a statement-completion-unknown BEGIN as compromised', async () => {
+		const error = Object.assign(new Error('BEGIN completion unknown'), {
+			code: '40003',
+		});
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-completion-unknown'),
+				resolution: {
+					eventId: 'begin-completion-unknown-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'BEGIN completion unknown',
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('marks an aborted-transaction BEGIN refusal as compromised', async () => {
+		const error = Object.assign(new Error('BEGIN rejected'), { code: '25P02' });
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await runAdmitted(executor as never, {
+			...request('begin-aborted-transaction'),
+			resolution: {
+				eventId: 'begin-aborted-transaction-observed',
+				eventKind: 'observed',
+			},
+			vacancy: async () => ({ kind: 'vacant' as const }),
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('marks a SQLSTATE-confirmed BEGIN refusal as compromised', async () => {
+		const error = Object.assign(new Error('BEGIN rejected'), { code: '25001' });
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === 'BEGIN') throw error;
+				return { rows: [] };
+			}),
+		};
+		await runAdmitted(executor as never, {
+			...request('begin-server-rejected'),
+			resolution: {
+				eventId: 'begin-server-rejected-observed',
+				eventKind: 'observed',
+			},
+			vacancy: async () => ({ kind: 'vacant' as const }),
+		});
+		expect(readPgOutcomeSessionCompromise(executor as never)).toBe(error);
+		expect(executor.query).toHaveBeenCalledExactlyOnceWith('BEGIN');
+	});
+
+	it('rolls back when SET LOCAL fails after BEGIN', async () => {
+		const executor = {
+			query: vi.fn(async (statement: string) => {
+				if (statement.startsWith('SET LOCAL'))
+					throw new Error('lock timeout failed');
+				return { rows: [] };
+			}),
+		};
+		await expect(
+			runAdmitted(executor as never, {
+				...request('begin-lock-timeout-failed'),
+				resolution: {
+					eventId: 'begin-lock-timeout-failed-observed',
+					eventKind: 'observed',
+				},
+				vacancy: async () => ({ kind: 'vacant' as const }),
+			}),
+		).resolves.toMatchObject({
+			kind: 'outcome-protocol-refused',
+			reason: 'lock timeout failed',
+		});
+		expect(executor.query.mock.calls.map(([sql]) => sql)).toEqual([
+			'BEGIN',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
+		]);
 	});
 
 	/* Direct-runner cases are re-pointed to persisted real-PG coverage. */

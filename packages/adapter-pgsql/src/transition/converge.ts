@@ -45,7 +45,11 @@ import {
 	releasePgLedgerSessionLock,
 } from './ledger.js';
 import { advisoryKey } from './lessor.js';
-import { lockPgJournalRun, type PgLockedRun } from './outcome-protocol.js';
+import {
+	lockPgJournalRun,
+	type PgLockedRun,
+	readPgOutcomeSessionCompromise,
+} from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
 
 export type PgConvergeRefusal =
@@ -946,8 +950,10 @@ function describeFkAutoIndexSpecs(
  * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
  * and the journal owner one whose journal attribution cannot be read, then call
  * converge again.
- * Each converge step is transactional, so an interrupted converge leaves no
- * open claim. Converge runs are not journaled.
+ * Tables a run creates and every change on those tables commit together or not
+ * at all. A sequence created by the same run commits on its own and can remain
+ * after a failure. After a transport-ambiguous outcome, the next call observes
+ * whichever state PostgreSQL holds. Converge runs are not journaled.
  */
 export async function convergePg(
 	pool: Pool,
@@ -1122,9 +1128,38 @@ export async function convergePg(
 			new Set(diff.changes.map((change) => naming.toDatabase(change.table))),
 		);
 		if (diff.changes.length === 0) return { kind: 'no-drift', applied: [] };
-		const orderedChanges = [...diff.changes].sort(
+		const phaseOrderedChanges = [...diff.changes].sort(
 			(left, right) => convergePhase(left) - convergePhase(right),
 		);
+		const atomicCreationChanges = new Set(
+			phaseOrderedChanges.filter((change) => {
+				if (change.kind === 'create_table') return true;
+				const parent = parentAddress(
+					generatedAddress(change, database, schema),
+				);
+				return (
+					parent !== undefined &&
+					createdTableAddresses.has(canonicalJsonDigest(parent))
+				);
+			}),
+		);
+		const firstCreationTable = phaseOrderedChanges.findIndex(
+			(change) => change.kind === 'create_table',
+		);
+		const orderedChanges =
+			firstCreationTable === -1
+				? phaseOrderedChanges
+				: [
+						...phaseOrderedChanges
+							.slice(0, firstCreationTable)
+							.filter((change) => !atomicCreationChanges.has(change)),
+						...phaseOrderedChanges.filter((change) =>
+							atomicCreationChanges.has(change),
+						),
+						...phaseOrderedChanges
+							.slice(firstCreationTable)
+							.filter((change) => !atomicCreationChanges.has(change)),
+					];
 		const createTableStepKeys = new Map<string, string>();
 		const createIndexStepKeys = new Map<SchemaChange, string>();
 		for (const [order, change] of orderedChanges.entries()) {
@@ -1150,14 +1185,15 @@ export async function convergePg(
 				parent &&
 				(change.kind === 'create_index' ||
 					change.kind === 'add_check_constraint' ||
-					change.kind === 'add_foreign_key')
+					change.kind === 'add_foreign_key' ||
+					change.kind === 'add_column')
 			) {
 				const dependency = createTableStepKeys.get(canonicalJsonDigest(parent));
-				if (!dependency)
+				if (dependency) dependencies.add(dependency);
+				else if (change.kind !== 'add_column')
 					throw new Error(
 						`converge admitted ${change.kind} without a creating table step`,
 					);
-				dependencies.add(dependency);
 			}
 			if (change.kind === 'add_foreign_key') {
 				const referenced = referencedTableAddress(change, database, schema);
@@ -1199,6 +1235,18 @@ export async function convergePg(
 		);
 		if (!manifest.ok)
 			throw new Error(`converge manifest is invalid: ${manifest.detail}`);
+		const atomicCreationGroup = assembled
+			.filter(({ change }) => atomicCreationChanges.has(change))
+			.map(({ step }) => step.stepKey);
+		const atomicCreationGroupKeys = new Set(atomicCreationGroup);
+		for (const { step } of assembled)
+			if (
+				!atomicCreationGroupKeys.has(step.stepKey) &&
+				step.dependencyOrder.some((key) => atomicCreationGroupKeys.has(key))
+			)
+				throw new Error(
+					`converge non-group step ${step.stepKey} depends on atomic creation group step`,
+				);
 		const previouslyCreatedAddresses = new Set<string>();
 		const laterCreatedAddresses = new Set(createdTableAddresses);
 		for (const { change, step } of assembled) {
@@ -1238,6 +1286,7 @@ export async function convergePg(
 			run: mintPgConvergeLockedRun(client, run),
 			runId: run.runId,
 			recordAttempt: async () => undefined,
+			...(atomicCreationGroup.length === 0 ? {} : { atomicCreationGroup }),
 		});
 		if (outcome.outcome === 'completed')
 			return {
@@ -1267,7 +1316,9 @@ export async function convergePg(
 			}
 		}
 		client.release(
-			destroyReason === undefined ? undefined : new Error(destroyReason),
+			destroyReason === undefined
+				? readPgOutcomeSessionCompromise(client)
+				: new Error(destroyReason),
 		);
 	}
 }

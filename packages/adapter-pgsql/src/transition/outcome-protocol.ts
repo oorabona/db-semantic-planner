@@ -202,9 +202,18 @@ function pgSqlState(error: unknown): string | undefined {
 		: undefined;
 }
 
-/** A SQLSTATE is a server acknowledgement, except for known dead backends. */
+/**
+ * A SQLSTATE is a server acknowledgement, except for `40003`, class `08`,
+ * and dead-backend states `57P01` through `57P03`.
+ */
 function isConfirmedPgServerError(error: unknown): boolean {
-	return pgSqlState(error) !== undefined && !isDeadPgConnectionError(error);
+	const sqlState = pgSqlState(error);
+	return (
+		sqlState !== undefined &&
+		sqlState !== '40003' &&
+		!sqlState.startsWith('08') &&
+		!isDeadPgConnectionError(error)
+	);
 }
 
 function markPgOutcomeSessionCompromised(
@@ -216,6 +225,30 @@ function markPgOutcomeSessionCompromised(
 		session as object,
 		asPgSessionReleaseError(error),
 	);
+}
+
+/** Returns the release marker recorded for a session whose outcome is unknown. */
+export function readPgOutcomeSessionCompromise(
+	session: TransitionJournalQueryable,
+): Error | undefined {
+	return compromisedPgOutcomeSessions.get(session as object);
+}
+
+/**
+ * Rolls back a caller-owned group transaction. Any rollback failure makes the
+ * session unsafe to return to the pool, including a server-confirmed failure.
+ */
+export async function rollbackPgOutcomeGroup(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	try {
+		await executor.query('ROLLBACK');
+	} catch (error) {
+		compromisedPgOutcomeSessions.set(
+			executor as object,
+			asPgSessionReleaseError(error),
+		);
+	}
 }
 
 /**
@@ -304,7 +337,7 @@ async function checkpoint(
 	if (observer) await observer(point);
 }
 
-async function commitPgOutcome(
+export async function commitPgOutcome(
 	executor: TransitionJournalQueryable,
 	observer?: PgOutcomeCheckpointObserver,
 ): Promise<void> {
@@ -1484,10 +1517,26 @@ async function admitPgOutcomeClaim(
 async function begin(
 	executor: TransitionJournalQueryable,
 	timeout: number | undefined,
-) {
-	await executor.query('BEGIN');
-	await setPgTransitionLockTimeout(executor, timeout);
+): Promise<void> {
+	try {
+		await executor.query('BEGIN');
+	} catch (error) {
+		compromisedPgOutcomeSessions.set(
+			executor as object,
+			asPgSessionReleaseError(error),
+		);
+		throw error;
+	}
+	try {
+		await setPgTransitionLockTimeout(executor, timeout);
+	} catch (error) {
+		await rollbackPgOutcomeGroup(executor);
+		throw error;
+	}
 }
+
+/** Package-internal transaction setup shared by multi-step execution. */
+export { begin as beginPgOutcome };
 
 async function rollback(executor: TransitionJournalQueryable): Promise<void> {
 	try {
