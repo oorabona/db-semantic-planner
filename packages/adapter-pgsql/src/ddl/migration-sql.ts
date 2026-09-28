@@ -599,9 +599,9 @@ export function generateMigrationSQL(
 		[], // 7: add column
 		[], // 8: alter column
 		[], // 9: add PK / column UNIQUE constraint
-		[], // 10: add FK
-		[], // 11: alter FK (drop + re-add)
-		[], // 12: create index
+		[], // 10: create index
+		[], // 11: add FK
+		[], // 12: alter FK (drop + re-add)
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value (must be after CREATE TABLE, outside transaction)
 		[], // 15: COMMENT ON TABLE / COLUMN
@@ -707,11 +707,11 @@ export function getPhase(kind: SchemaChange['kind']): number {
 		case 'alter_column_unique':
 		case 'add_primary_key':
 			return 9;
-		case 'add_foreign_key':
-			return 10;
-		case 'alter_foreign_key':
-			return 11;
 		case 'create_index':
+			return 10;
+		case 'add_foreign_key':
+			return 11;
+		case 'alter_foreign_key':
 			return 12;
 		case 'add_check_constraint':
 			return 13;
@@ -1756,7 +1756,7 @@ function changeToDownSQL(
  * Generate ordered DOWN SQL statements from a SchemaDiff.
  *
  * Reverses the topological order used in UP migrations:
- * phases run in descending order (11, 10, 9, ..., 0).
+ * phases run in descending order (18, 17, ..., 0).
  *
  * Irreversible changes (drops that lose data) produce SQL WARNING comments.
  */
@@ -1793,9 +1793,9 @@ export function generateDownMigrationSQL(
 		[], // 7: add column
 		[], // 8: alter column
 		[], // 9: add PK / column UNIQUE constraint
-		[], // 10: add FK
-		[], // 11: alter FK (drop + re-add)
-		[], // 12: create index
+		[], // 10: create index
+		[], // 11: add FK
+		[], // 12: alter FK (drop + re-add)
 		[], // 13: add CHECK constraint
 		[], // 14: alter ENUM add value
 		[], // 15: comments

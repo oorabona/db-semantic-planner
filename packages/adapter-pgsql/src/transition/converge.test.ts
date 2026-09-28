@@ -1071,12 +1071,15 @@ describe('convergePg refusal boundary', () => {
 		['finite number', 0],
 		['string', 'unknown'],
 	])('admits a NOT NULL column with a %s default', async (_kind, value) => {
-		await expectAdmittedAddColumn({
-			name: 'value',
-			type: 'string',
-			nullable: false,
-			default: value,
-		});
+		await expectAdmittedAddColumn(
+			{
+				name: 'value',
+				type: 'string',
+				nullable: false,
+				default: value,
+			},
+			{ typtype: 'b', is_pg_catalog: true },
+		);
 	});
 
 	it.each([
@@ -1195,22 +1198,43 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
-	it('does not classify a defaulted column without originalDbType', async () => {
-		const testClient = client();
-		await expectAdmittedAddColumn(
-			{
-				name: 'value',
-				type: 'integer',
-				nullable: false,
-				default: 1,
-			},
-			undefined,
-			testClient,
+	it('classifies defaulted neutral types without originalDbType', async () => {
+		const rangeClient = client({ typtype: 'r', is_pg_catalog: false });
+		await expectRefusal(
+			change('add_column', {
+				column: {
+					name: 'coverage',
+					type: 'daterange',
+					nullable: false,
+					default: '[2026-01-01,2026-01-02)',
+				},
+			}),
+			'unsupported-change',
+			rangeClient,
 		);
-		expect(testClient.query).not.toHaveBeenCalledWith(
-			typeClassificationQuery,
-			expect.anything(),
-		);
+		expect(rangeClient.query).toHaveBeenCalledWith(typeClassificationQuery, [
+			'DATERANGE',
+		]);
+
+		for (const [column, typeName] of [
+			[
+				{ name: 'count', type: 'integer', nullable: false, default: 1 },
+				'INTEGER',
+			],
+			[
+				{ name: 'label', type: 'string', nullable: false, default: 'draft' },
+				'VARCHAR(255)',
+			],
+		] as const) {
+			const builtInClient = await expectAdmittedAddColumn(column, {
+				typtype: 'b',
+				is_pg_catalog: true,
+			});
+			expect(builtInClient.query).toHaveBeenCalledWith(
+				typeClassificationQuery,
+				[typeName],
+			);
+		}
 	});
 
 	it('refuses a column with a default', async () => {

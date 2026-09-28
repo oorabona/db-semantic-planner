@@ -83,19 +83,25 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		}
 	});
 
-	async function apply(modelToApply: ModelIR): Promise<void> {
+	async function apply(
+		modelToApply: ModelIR,
+		dbCasing?: 'snake_case',
+	): Promise<void> {
 		const current = await adapter.introspect({ schema: SCHEMA });
 		const statements = generateMigrationSQL(
-			compareSchemata(modelToApply, current),
+			compareSchemata(modelToApply, current, {
+				...(dbCasing === undefined ? {} : { dbCasing }),
+			}),
 			{ includeDestructive: false, schemaName: SCHEMA },
 		) as readonly string[];
 		const pool = await getTestPool();
 		for (const statement of statements) await pool.query(statement);
 	}
 
-	async function changes(modelToCompare: ModelIR) {
+	async function changes(modelToCompare: ModelIR, dbCasing?: 'snake_case') {
 		return comparePgsqlDatabaseSchema(adapter, modelToCompare, {
 			schema: SCHEMA,
+			...(dbCasing === undefined ? {} : { dbCasing }),
 			ignoreUnmanagedExtensions: true,
 		});
 	}
@@ -160,6 +166,54 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect(
 			(await changes(desired)).changes.map((change) => change.kind),
 		).not.toContain('create_sequence');
+	});
+
+	it('creates a qualifying unique index before its referencing foreign key and re-diffs empty', async () => {
+		const desired = model([
+			table('parents', [column('external_id', 'string')], {
+				indexes: [
+					{
+						name: 'parents_external_id_unique',
+						columns: ['external_id'],
+						unique: true,
+					},
+				],
+			}),
+			table('children', [column('parent_external_id', 'string')], {
+				foreignKeys: [
+					{
+						columns: ['parent_external_id'],
+						references: { table: 'parents', columns: ['external_id'] },
+					},
+				],
+			}),
+		]);
+
+		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+	});
+
+	it('creates snake_case free-standing sequences without rewriting raw nextval defaults', async () => {
+		const desired = model(
+			[
+				table('orderRecords', [
+					column('id', 'integer', {
+						default: { sql: `nextval('${SCHEMA}.order_number_seq')` },
+					}),
+				]),
+			],
+			undefined,
+			[{ name: 'orderNumberSeq' }],
+		);
+
+		await apply(desired, 'snake_case');
+		const live = await adapter.introspect({ schema: SCHEMA });
+		expect(
+			Array.from(live.sequences?.values() ?? []).map(
+				(sequence) => sequence.name,
+			),
+		).toContain('order_number_seq');
+		expect((await changes(desired, 'snake_case')).changes).toEqual([]);
 	});
 
 	it('still reports a live SERIAL column against a plain integer declaration', async () => {

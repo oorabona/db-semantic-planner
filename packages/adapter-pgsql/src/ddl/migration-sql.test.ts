@@ -1063,7 +1063,7 @@ describe('generateMigrationSQL', () => {
 			expect(createTableIdx).toBeLessThan(addFKIdx);
 		});
 
-		it('should order CREATE INDEX after ADD FK', () => {
+		it('should order CREATE INDEX before ADD FK', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],
 				references: { table: 'users', columns: ['id'] },
@@ -1095,7 +1095,7 @@ describe('generateMigrationSQL', () => {
 
 			const addFKIdx = sql.findIndex((s) => s.includes('ADD CONSTRAINT'));
 			const createIndexIdx = sql.findIndex((s) => s.includes('CREATE INDEX'));
-			expect(addFKIdx).toBeLessThan(createIndexIdx);
+			expect(createIndexIdx).toBeLessThan(addFKIdx);
 		});
 	});
 
@@ -2361,7 +2361,7 @@ describe('generateDownSQL', () => {
 	});
 
 	describe('topological order', () => {
-		it('SC-08: should reverse phase order (index first, then FK, then table)', () => {
+		it('SC-08: reverses phase order (FK first, then index, then table)', () => {
 			const table = makeTable('users', [
 				makeCol({ name: 'id', type: 'integer' }),
 			]);
@@ -2419,12 +2419,14 @@ describe('generateDownSQL', () => {
 				]),
 			);
 
-			// Reversed order: index(11) → FK(9) → PK(8) → alter(7) → column(6) → table(5)
+			// Reversed order: FK(11) → index(10) → PK(9) → alter(8) → column(7) → table(6)
 			expect(sql.length).toBe(5);
-			// Index DROP first
-			expect(sql[0]).toContain('DROP INDEX');
-			// FK DROP second
-			expect(sql[1]).toContain('DROP CONSTRAINT IF EXISTS "fk_orders_user_id"');
+			// FK DROP first
+			expect(sql[0]).toBe(
+				'ALTER TABLE "orders" DROP CONSTRAINT IF EXISTS "fk_orders_user_id" CASCADE;',
+			);
+			// Index DROP second
+			expect(sql[1]).toBe('DROP INDEX IF EXISTS "idx_orders_user_id";');
 			// PK DROP third
 			expect(sql[2]).toContain('DROP CONSTRAINT IF EXISTS "pk_users"');
 			// Column DROP fourth
@@ -2680,14 +2682,14 @@ describe('generateDownSQL', () => {
 
 			expect(createIdx).toBeGreaterThanOrEqual(0);
 			expect(idxIdx).toBeGreaterThanOrEqual(0);
-			// CREATE TABLE (phase 5) must come before CREATE INDEX (phase 11)
+			// CREATE TABLE (phase 6) must come before CREATE INDEX (phase 10)
 			expect(idxIdx).toBeGreaterThan(createIdx);
 			expect(sql[idxIdx]).toBe(
 				'CREATE UNIQUE INDEX "idx_users_email" ON "users" ("email");',
 			);
 		});
 
-		it('emits CREATE TABLE → FK (phase 9) → INDEX (phase 11) in topological order', () => {
+		it('emits CREATE TABLE → INDEX → FK in topological order', () => {
 			const usersTable = makeFullTable(
 				'users',
 				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
@@ -2728,9 +2730,102 @@ describe('generateDownSQL', () => {
 			expect(createIdx).toBeGreaterThanOrEqual(0);
 			expect(fkIdx).toBeGreaterThanOrEqual(0);
 			expect(idxIdx).toBeGreaterThanOrEqual(0);
-			// Phase order: 5 (create_table) < 9 (add_foreign_key) < 11 (create_index)
-			expect(fkIdx).toBeGreaterThan(createIdx);
-			expect(idxIdx).toBeGreaterThan(fkIdx);
+			// Phase order: create_table < create_index < add_foreign_key
+			expect(idxIdx).toBeGreaterThan(createIdx);
+			expect(fkIdx).toBeGreaterThan(idxIdx);
+		});
+
+		it('creates a declared unique index before its referencing foreign key and reverses it in DOWN', () => {
+			const schema = makeModel([
+				makeFullTable(
+					'parents',
+					[makeCol({ name: 'external_id', type: 'string', nullable: false })],
+					{
+						indexes: [
+							{
+								name: 'parents_external_id_unique',
+								columns: ['external_id'],
+								unique: true,
+							},
+						],
+					},
+				),
+				makeFullTable(
+					'children',
+					[
+						makeCol({
+							name: 'parent_external_id',
+							type: 'string',
+							nullable: false,
+						}),
+					],
+					{
+						foreignKeys: [
+							{
+								columns: ['parent_external_id'],
+								references: {
+									table: 'parents',
+									columns: ['external_id'],
+								},
+							},
+						],
+					},
+				),
+			]);
+			const diff = compareSchemata(schema, makeModel([]));
+
+			expect(generateMigrationSQL(diff, { schemaName: 'app' })).toEqual([
+				'CREATE TABLE "app"."parents" (\n  "external_id" VARCHAR(255) NOT NULL\n);',
+				'CREATE TABLE "app"."children" (\n  "parent_external_id" VARCHAR(255) NOT NULL\n);',
+				'CREATE UNIQUE INDEX "parents_external_id_unique" ON "app"."parents" ("external_id");',
+				'ALTER TABLE "app"."children" ADD CONSTRAINT "fk_children_parent_external_id" FOREIGN KEY ("parent_external_id") REFERENCES "app"."parents" ("external_id");',
+				'CREATE INDEX "idx_children_parent_external_id" ON "app"."children" ("parent_external_id");',
+			]);
+			expect(generateDownSQL(diff, { schemaName: 'app' })).toEqual([
+				'ALTER TABLE "app"."children" DROP CONSTRAINT IF EXISTS "fk_children_parent_external_id" CASCADE;',
+				'DROP INDEX IF EXISTS "app"."parents_external_id_unique";',
+				'DROP TABLE IF EXISTS "app"."parents" CASCADE;',
+				'DROP TABLE IF EXISTS "app"."children" CASCADE;',
+			]);
+		});
+
+		it('creates an index before an altered foreign key and reverses the pair in DOWN', () => {
+			const oldFk: ForeignKeyIR = {
+				columns: ['parent_external_id'],
+				references: { table: 'parents', columns: ['external_id'] },
+			};
+			const fk: ForeignKeyIR = { ...oldFk, onDelete: 'CASCADE' };
+			const diff = makeDiff([
+				{
+					kind: 'alter_foreign_key',
+					table: 'children',
+					destructive: false,
+					details: '',
+					meta: { fk, oldFk },
+				},
+				{
+					kind: 'create_index',
+					table: 'parents',
+					destructive: false,
+					details: '',
+					meta: {
+						index: {
+							name: 'parents_external_id_unique',
+							columns: ['external_id'],
+							unique: true,
+						},
+					},
+				},
+			]);
+
+			expect(generateMigrationSQL(diff)).toEqual([
+				'CREATE UNIQUE INDEX "parents_external_id_unique" ON "parents" ("external_id");',
+				'ALTER TABLE "children" DROP CONSTRAINT IF EXISTS "fk_children_parent_external_id";\nALTER TABLE "children" ADD CONSTRAINT "fk_children_parent_external_id" FOREIGN KEY ("parent_external_id") REFERENCES "parents" ("external_id") ON DELETE CASCADE;',
+			]);
+			expect(generateDownSQL(diff)).toEqual([
+				'ALTER TABLE "children" DROP CONSTRAINT IF EXISTS "fk_children_parent_external_id";\nALTER TABLE "children" ADD CONSTRAINT "fk_children_parent_external_id" FOREIGN KEY ("parent_external_id") REFERENCES "parents" ("external_id");',
+				'DROP INDEX IF EXISTS "parents_external_id_unique";',
+			]);
 		});
 
 		it('does not emit FK/index changes for existing tables (regression: existing diff path unchanged)', () => {

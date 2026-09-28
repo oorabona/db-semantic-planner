@@ -495,11 +495,7 @@ async function assertDefaultedColumnsUseBuiltInBaseTypesOrEnums(
 		const column = change.meta.column;
 		if (typeof column !== 'object' || Array.isArray(column)) continue;
 		const record = column as Record<string, unknown>;
-		if (
-			record.default === undefined ||
-			typeof record.originalDbType !== 'string'
-		)
-			continue;
+		if (record.default === undefined) continue;
 
 		const typeName = mapColumnType(column as ColumnIR, schema);
 		const type = (
@@ -876,7 +872,7 @@ function assertDeclaredSequenceNamesPreserved(
 				throw refusal(
 					'unsupported-change',
 					[],
-					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}; see #803`,
+					`converge refuses declared sequence ${name}: configured naming gives physical name ${physicalName}`,
 				);
 		}
 	}
@@ -1054,12 +1050,6 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 		);
 	}
 	return qualifyingIndexes;
-}
-
-function convergePhase(change: SchemaChange): number {
-	if (change.kind === 'create_index') return getPhase('add_foreign_key');
-	if (change.kind === 'add_foreign_key') return getPhase('create_index');
-	return getPhase(change.kind);
 }
 
 function describeFkAutoIndexSpecs(
@@ -1304,7 +1294,7 @@ export async function convergePg(
 		if (diff.changes.length === 0 && adoptionSteps.length === 0)
 			return { kind: 'no-drift', applied: [] };
 		const phaseOrderedChanges = [...diff.changes].sort(
-			(left, right) => convergePhase(left) - convergePhase(right),
+			(left, right) => getPhase(left.kind) - getPhase(right.kind),
 		);
 		const atomicCreationChanges = new Set(
 			phaseOrderedChanges.filter((change) => {
