@@ -84,7 +84,7 @@ schema file, takes each external index as `--external-index <model-table>:<index
 `externalIndexes` below), and prints the result
 or refusal below as its outcome, with an exit code `dbsp migrate --help` lists (`no-drift` and
 `applied` exit 0). A `recovery-required` refusal lists the run ids to pass to `dbsp reconcile`, the
-runs still executing, and the execution ids only the ledger owner can resolve.
+runs still executing, and the execution ids no dbsp command resolves, whose owner its detail names.
 
 ## What converge applies
 
