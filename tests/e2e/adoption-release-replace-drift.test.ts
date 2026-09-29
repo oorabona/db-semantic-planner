@@ -740,7 +740,14 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 				true,
 			);
 		}
-		await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+		const replayPlanned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema,
+			schemaFile,
+		});
+		generatorSchemaFiles.set(replayPlanned, schemaFile);
+		const replay = generatorPlan(replayPlanned);
+		await expect(applyReviewedGenerator(replay)).resolves.toEqual({
 			outcome: 'completed',
 		});
 	});
