@@ -395,21 +395,30 @@ function reportInitializationFailure(
 	);
 }
 
+type DeclaredRelationNames = Readonly<{
+	tables: ReadonlySet<string>;
+	sequences: ReadonlySet<string>;
+}>;
+
 async function declaredRelationNames(
 	client: PoolClient,
 	schema: string,
 	names: readonly string[],
-): Promise<ReadonlySet<string>> {
-	if (names.length === 0) return new Set();
+): Promise<DeclaredRelationNames> {
+	if (names.length === 0) return { tables: new Set(), sequences: new Set() };
 	const result = await client.query(
-		`SELECT relation.relname AS name FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[])`,
+		`SELECT relation.relname AS name, relation.relkind AS kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND relation.relkind IN ('r', 'p', 'f', 'S')`,
 		[schema, names],
 	);
-	return new Set(
-		result.rows
-			.map((row) => row.name)
-			.filter((name): name is string => typeof name === 'string'),
-	);
+	const tables = new Set<string>();
+	const sequences = new Set<string>();
+	for (const row of result.rows) {
+		if (typeof row.name !== 'string') continue;
+		if (row.kind === 'r' || row.kind === 'p' || row.kind === 'f')
+			tables.add(row.name);
+		else if (row.kind === 'S') sequences.add(row.name);
+	}
+	return { tables, sequences };
 }
 
 function declaredIndexNames(
@@ -1344,7 +1353,7 @@ export async function convergePg(
 			if (
 				standingAdoptionRelations === undefined
 					? table.adopt !== true
-					: !standingAdoptionRelations.has(physicalName)
+					: !standingAdoptionRelations.tables.has(physicalName)
 			)
 				continue;
 			const adoptionChanges = diff.changes.filter(
@@ -1386,7 +1395,7 @@ export async function convergePg(
 			if (
 				standingAdoptionRelations === undefined
 					? sequence.adopt !== true
-					: !standingAdoptionRelations.has(physicalName)
+					: !standingAdoptionRelations.sequences.has(physicalName)
 			)
 				continue;
 			if (sequence.schema !== undefined && sequence.schema !== schema)

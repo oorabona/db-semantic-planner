@@ -400,13 +400,10 @@ describe('reinitialize-preflight pure decisions', () => {
 				return { rows: [] };
 			return { rows: [] };
 		});
+		const connect = vi.fn(async () => ({ query, release: vi.fn() }));
+		const pool = { connect };
 		const report = await runPgConvergeInitializationPreflight({
-			pool: {
-				connect: async () => ({
-					query,
-					release: vi.fn(),
-				}),
-			},
+			pool,
 			schema: 'tenant_a',
 		});
 
@@ -429,7 +426,98 @@ describe('reinitialize-preflight pure decisions', () => {
 		expect(query.mock.calls.map(([sql]) => sql)).not.toContainEqual(
 			expect.stringContaining('ALTER TABLE'),
 		);
+		expect(report.scopes).toContainEqual({
+			ledger: { scope: 'schema', schema: 'tenant_a' },
+			outcome: 'not-attempted',
+			marker: { kind: 'absent' },
+		});
+		expect(connect).toHaveBeenCalledTimes(2);
+
+		connect.mockClear();
+		const reinitializeReport = await runPgReinitializePreflight({
+			pool,
+			schemas: ['tenant_a'],
+			declarations: { version: 1, digest: 'empty', declarations: [] },
+			writeAdoptionFile: async () => {},
+		});
+		expect(reinitializeReport.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'schema', schema: 'tenant_a' },
+			}),
+		);
+		expect(connect).toHaveBeenCalledTimes(3);
 	});
+
+	it.each([
+		['advisory lock', 'reinitialize-preflight-advisory-lock'],
+		['other home failure', 'reinitialize-preflight-failed'],
+	] as const)(
+		'reports the schema not-attempted when the database home has a %s failure',
+		async (failure, code) => {
+			const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
+				if (sql.startsWith('SELECT to_regclass'))
+					return {
+						rows: [
+							{
+								relation:
+									typeof values?.[0] === 'string' &&
+									values[0].startsWith('"dbsp_meta"')
+										? 'dbsp_meta.dbsp_ledger_marker'
+										: null,
+							},
+						],
+					};
+				if (sql.startsWith('SELECT version FROM'))
+					return { rows: [{ version: 1 }] };
+				if (sql.startsWith('SELECT cluster_system_identifier'))
+					return {
+						rows: [
+							{
+								cluster_system_identifier: 'cluster',
+								database_oid: 'database',
+								namespace_oid: 'namespace',
+							},
+						],
+					};
+				if (sql.includes('pg_is_in_recovery')) {
+					if (failure === 'other home failure')
+						throw new Error('database writability probe failed');
+					return {
+						rows: [
+							{
+								in_recovery: false,
+								default_transaction_read_only: 'off',
+								transaction_read_only: 'off',
+							},
+						],
+					};
+				}
+				if (sql.includes('pg_try_advisory_xact_lock'))
+					return { rows: [{ locked: false }] };
+				return { rows: [] };
+			});
+			const connect = vi.fn(async () => ({ query, release: vi.fn() }));
+
+			const report = await runPgConvergeInitializationPreflight({
+				pool: { connect },
+				schema: 'tenant_a',
+			});
+
+			expect(report.scopes).toContainEqual(
+				expect.objectContaining({
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					refusal: expect.objectContaining({ code }),
+				}),
+			);
+			expect(report.scopes).toContainEqual({
+				ledger: { scope: 'schema', schema: 'tenant_a' },
+				outcome: 'not-attempted',
+				marker: { kind: 'absent' },
+			});
+			expect(connect).toHaveBeenCalledTimes(2);
+		},
+	);
 
 	it('renders creation ownership and PUBLIC revocations without tenant grants', () => {
 		const sql = renderReinitializePreflightCreationGrantSql({

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1184,6 +1185,21 @@ describe('SC-15b #837 converge initialization lineage refusal', () => {
 				step: 'identity',
 			},
 		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.${DBSP_LEDGER_MARKER_TABLE}`,
+			]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
+		await expect(
+			convergePg(pool, emptyModel, { schema, initialize: 'pristine' }),
+		).rejects.toMatchObject({
+			refusal: 'initialization-refused',
+			initialization: {
+				home: { scope: 'database' },
+				code: 'reinitialize-preflight-lineage',
+				step: 'identity',
+			},
+		});
 		expect(await archiveCount()).toBe(0);
 
 		const report = await runPreflight([schema]);
@@ -1194,5 +1210,63 @@ describe('SC-15b #837 converge initialization lineage refusal', () => {
 			}),
 		);
 		expect(await archiveCount()).toBeGreaterThan(0);
+	});
+
+	it('waits for the database-home preflight lock before initializing the schema ledger', async () => {
+		const schema = uniqueName('converge_lock_refusal');
+		schemas.push(schema);
+		await createSchema(schema);
+		const pool = await getTestPool();
+		const tables: ModelIR['tables'] = new Map([
+			[
+				'initialized_after_lock',
+				{
+					name: 'initialized_after_lock',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]);
+		const desired: ModelIR = {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		};
+		const lockKey = createHash('sha256')
+			.update('dbsp.managed-ledger.lock.v1:\0')
+			.update(DBSP_META_SCHEMA)
+			.digest()
+			.readBigInt64BE(0)
+			.toString();
+		const holder = await pool.connect();
+		try {
+			await holder.query('BEGIN');
+			await expect(
+				holder.query(
+					'SELECT pg_catalog.pg_try_advisory_xact_lock($1::bigint) AS locked',
+					[lockKey],
+				),
+			).resolves.toMatchObject({ rows: [{ locked: true }] });
+			await expect(
+				convergePg(pool, desired, { schema, initialize: 'pristine' }),
+			).rejects.toMatchObject({ refusal: 'busy' });
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${schema}.${DBSP_LEDGER_MARKER_TABLE}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
+		} finally {
+			await holder.query('ROLLBACK');
+			holder.release();
+		}
+		await expect(
+			convergePg(pool, desired, { schema, initialize: 'pristine' }),
+		).resolves.toMatchObject({ kind: 'applied' });
 	});
 });

@@ -34,8 +34,9 @@ planning; plan those with
    `dbsp_meta` ledger whose identity no longer matches the database (a restored or cloned database)
    is refused `initialization-refused`; reinitialize those explicitly with `runPgReinitializePreflight`. When several instances start
    together, one converges and the others get `busy`: retry `busy` after a delay, or converge from a
-   single instance. To prepare the ledger with a different, privileged role instead, run
-   `runPgReinitializePreflight` once with that role and keep `initialize: 'never'`.
+   single instance. To prepare the ledger in a separate setup step instead, run
+   `runPgReinitializePreflight` once and keep `initialize: 'never'`; it must run as the same role as
+   every later `convergePg` call, since the ledger's owner is the only role converge admits.
 3. **After converge, from a single instance:** create or repair the indexes you manage yourself (see
    [External indexes](#external-indexes)). The ledger lock is released when `convergePg` returns, so
    it does not serialize this step.
@@ -76,7 +77,8 @@ dbsp preflight --reinitialize --db "$DATABASE_URL" --schema-file ./schema.ts --s
 dbsp migrate ./schema.ts --db "$DATABASE_URL" --schema app
 ```
 
-The preflight runs once per schema, as in step 1 above. `dbsp migrate` reads `dbCasing` from the
+`dbsp migrate` passes no `initialize`, so the preflight shown above must run once per schema before
+it, as the role `dbsp migrate` uses. `dbsp migrate` reads `dbCasing` from the
 schema file, takes each external index as `--external-index <model-table>:<index>` (the same naming as
 `externalIndexes` below), and prints the result
 or refusal below as its outcome, with an exit code `dbsp migrate --help` lists (`no-drift` and
@@ -93,7 +95,8 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
   converge throws before writing anything; the error message gives the schema-qualified
   `ALTER SEQUENCE … RENAME TO …` that fixes it.
 - **New columns on tables dbsp already manages**, within the rules below.
-- **Adoption** of existing tables and standalone sequences you mark `adopt: true` (see
+- **Adoption** of existing tables and standalone sequences you mark `adopt: true`, or of every
+  existing declared one under `initialize: 'adopt-existing'` (see
   [Adopting an existing install](#adopting-an-existing-install)).
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
@@ -160,7 +163,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 |---|---|
 | `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
-| `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, the preflight's refusal code, its step and its detail. |
+| `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, the preflight's refusal code, its step and its detail. The schema's ledger is created only after `dbsp_meta` is ready, so a refused `dbsp_meta` leaves the schema without a ledger and the next call refuses again; a refusal of the schema itself can leave `dbsp_meta` prepared, which the next call reuses. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
 | `unsupported-server` | PostgreSQL is older than 15. |
 | `database-read-only` | The target refuses writes (a standby, or a session whose transactions are read-only); converge checks this before comparing and writes nothing, even when the model already matches. A target that becomes read-only after that check and before converge's first write is reported `execution-refused`, with the reason in `detail`; after earlier steps committed, the result is `partially-applied`. |
@@ -170,7 +173,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `unmanaged-object` | A live object at an address converge would manage is not managed by dbsp: an existing table or sequence, or an object created while converge was running. |
 | `unmanaged-parent` | A change targets a table dbsp does not manage. |
 | `concurrent-drift` | A declared object disappeared while converge was planning. |
-| `adoption-refused` | A table or sequence marked `adopt: true` could not be adopted. With an unknown ledger state, it is absent or differs from its declaration; a sequence is also refused when it is owned by a column (`OWNED BY`, serial or identity), is not `bigint` with cache 1, or is declared in another schema. An object already managed under the same catalogue identity is skipped, and its drift follows the ordinary rules (for example `unsupported-change`). Any other ledger state is refused, which includes a managed object that was dropped and recreated; converge offers no way to take it over. |
+| `adoption-refused` | A table or sequence marked `adopt: true`, or treated as marked under `initialize: 'adopt-existing'`, could not be adopted. With an unknown ledger state, it is absent or differs from its declaration; a sequence is also refused when it is owned by a column (`OWNED BY`, serial or identity), is not `bigint` with cache 1, or is declared in another schema. An object already managed under the same catalogue identity is skipped, and its drift follows the ordinary rules (for example `unsupported-change`). Any other ledger state is refused, which includes a managed object that was dropped and recreated; converge offers no way to take it over. |
 | `execution-refused` | The executor refused or failed a step; `detail` says why. |
 
 ## Adopting an existing install
@@ -200,7 +203,7 @@ them as `unmanaged-object`. Two ways take them into management:
   the adoption pass.
 
 A sequence created outside dbsp is refused as `unmanaged-object` too. Declare it with `adopt: true`
-in the schema's `sequences` for the same pass:
+in the schema's `sequences` for the same pass, or converge with `initialize: 'adopt-existing'`:
 
 - It is adopted only if it is a standalone sequence (not owned by a column through `OWNED BY`, serial
   or identity), `bigint` with cache 1, in the schema converge targets, its ledger state is unknown,

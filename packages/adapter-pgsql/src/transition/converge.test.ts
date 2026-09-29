@@ -945,6 +945,40 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
+	it('does not treat a view as an existing declared table for standing adoption', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql === 'SELECT current_database() AS database_id')
+					return { rows: [{ database_id: 'app' }] };
+				if (sql.includes('FROM pg_catalog.pg_class relation'))
+					return { rows: [{ name: 'legacy_view', kind: 'v' }] };
+				return { rows: [] };
+			},
+		);
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		const desired = modelWithTables([
+			{
+				name: 'legacy_view',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		await expect(
+			convergePg(poolFor(testClient), desired, { initialize: 'never' }),
+		).rejects.toMatchObject({ refusal: 'concurrent-drift' });
+		await expect(
+			convergePg(poolFor(testClient), desired, {
+				initialize: 'adopt-existing',
+			}),
+		).rejects.toMatchObject({ refusal: 'concurrent-drift' });
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
 	it('converges a managed declared table change instead of re-adopting it', async () => {
 		const table = {
 			name: 'managed_items',

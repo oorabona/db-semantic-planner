@@ -968,6 +968,14 @@ async function runPgReinitializePreflightInternal(
 		home: LedgerHome,
 	) => Promise<void>,
 	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
+	processScopes: (
+		inspections: readonly ReinitializePreflightScopeInspection[],
+		process: (
+			inspection: ReinitializePreflightScopeInspection,
+		) => Promise<ReinitializePreflightScopeReport>,
+	) => Promise<
+		readonly ReinitializePreflightScopeReport[]
+	> = processReinitializePreflightScopes,
 ): Promise<ReinitializePreflightReport> {
 	const homes = homesFor(options.schemas);
 	const inspectionClient = await options.pool.connect();
@@ -1045,17 +1053,15 @@ async function runPgReinitializePreflightInternal(
 			adoptionCandidates: [],
 		};
 	}
-	const scopes = await processReinitializePreflightScopes(
-		inspections,
-		(inspection) =>
-			processScope(
-				options.pool,
-				inspection,
-				options.observer,
-				beforeFirstWrite,
-				lineageMismatchPolicy,
-			),
-	);
+	const process = (inspection: ReinitializePreflightScopeInspection) =>
+		processScope(
+			options.pool,
+			inspection,
+			options.observer,
+			beforeFirstWrite,
+			lineageMismatchPolicy,
+		);
+	const scopes = await processScopes(inspections, process);
 	if (scopes.some((scope) => scope.outcome === 'failed'))
 		return { scopes, adoptionCandidates: [] };
 	try {
@@ -1114,7 +1120,39 @@ export function runPgConvergeInitializationPreflight(
 						options.pristineRelationNames ?? [],
 					),
 		'refuse',
+		processConvergeInitializationScopes,
 	);
+}
+
+async function processConvergeInitializationScopes(
+	inspections: readonly ReinitializePreflightScopeInspection[],
+	process: (
+		inspection: ReinitializePreflightScopeInspection,
+	) => Promise<ReinitializePreflightScopeReport>,
+): Promise<readonly ReinitializePreflightScopeReport[]> {
+	const [databaseInspection, ...schemaInspections] = inspections;
+	if (!databaseInspection) throw new Error('missing database ledger home');
+	const [databaseScope] = await processReinitializePreflightScopes(
+		[databaseInspection],
+		process,
+	);
+	if (!databaseScope) throw new Error('missing database ledger scope report');
+	if (
+		databaseScope.outcome === 'current' ||
+		databaseScope.outcome === 'unchanged'
+	)
+		return [
+			databaseScope,
+			...(await processReinitializePreflightScopes(schemaInspections, process)),
+		];
+	return [
+		databaseScope,
+		...schemaInspections.map((inspection) => ({
+			ledger: inspection.home,
+			outcome: 'not-attempted' as const,
+			marker: inspection.marker,
+		})),
+	];
 }
 
 /**

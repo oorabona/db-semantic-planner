@@ -2136,6 +2136,36 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('does not treat a declared-table view as standing adoption', async () => {
+		const initializedSchema = `converge_adopt_view_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'legacy_view';
+		await createSchema(initializedSchema);
+		try {
+			await runPreflight([initializedSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await pool.query(
+				`CREATE VIEW "${initializedSchema}"."${name}" AS SELECT 1::integer AS "id", 7::integer AS "code"`,
+			);
+			const desired = model([legacyTable(name, false)]);
+			const never = await convergePg(pool, desired, {
+				schema: initializedSchema,
+				mode: 'check',
+				initialize: 'never',
+			});
+			await expect(
+				convergePg(pool, desired, {
+					schema: initializedSchema,
+					mode: 'check',
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual(never);
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
 	it('converges nullable columns on managed tables under standing and explicit adoption', async () => {
 		const initializedSchema = `converge_adopt_evolve_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const pool = await getTestPool();
