@@ -151,6 +151,64 @@ claims it, can still refuse that apply. The options type is `ConvergePgCheckOpti
 [ADR 0008](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0008-convergence-program.md)
 records the decision.
 
+## Application steps
+
+Work the model cannot declare (a backfill, a function or trigger you maintain yourself, dropping an
+obsolete table) goes in `steps`, and converge runs it under its lock and records it in the ledger.
+A step must not create or change what converge compares on a declared table: its columns, keys,
+foreign keys, CHECK constraints and indexes (other than [external indexes](#external-indexes)). The
+next call would compare that object against the model and refuse the difference as
+`unsupported-change` before any step runs. Functions, triggers, data, and tables the model does not
+declare are outside the comparison.
+
+```typescript
+// doctest: skip — illustrates the option only
+await convergePg(pool, model, {
+  schema: 'app',
+  initialize: 'adopt-existing',
+  steps: [
+    {
+      kind: 'once',
+      id: 'backfill-project-state',
+      digest: 'v1',
+      phase: 'after-generated-ddl',
+      apply: async (tx) => {
+        await tx.query('INSERT INTO app.project_state (project_id) SELECT id FROM app.projects ON CONFLICT DO NOTHING');
+      },
+    },
+    {
+      kind: 'assert',
+      id: 'files-touch-trigger',
+      digest: 'v3',
+      phase: 'after-generated-ddl',
+      inspect: async (tx) => ((await tx.query(/* read pg_trigger and pg_proc */)).rowCount === 1 ? 'healthy' : 'unhealthy'),
+      apply: async (tx) => {
+        /* CREATE OR REPLACE the function, drop and re-create the trigger */
+      },
+    },
+  ],
+});
+```
+
+- A `once` runs the first time and is recorded with its `digest`; later calls skip it. Changing its
+  body needs a new `id`: the same `id` with another `digest` refuses `application-step-changed`.
+- An `assert` runs `inspect` on every call. When it answers `'unhealthy'`, converge runs `apply`,
+  inspects again, and records the run only if the database is now healthy; otherwise it refuses
+  `application-step-failed`.
+- `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
+  `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
+- Each step is one transaction on converge's connection. `tx.query` refuses transaction-control
+  statements (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, …); this guards against mistakes, not against
+  code that runs with the same role. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
+  `statement_timeout` applies only if the step sets `statementTimeoutMs`.
+- An error in a step rolls it back and records nothing; converge stops with
+  `application-step-failed`, and what committed before stays committed. The next call retries it.
+- A recorded run appears in `applied` as `application-step:<id>`. `no-drift` means no generated
+  change, every `once` recorded and every `assert` healthy. Check mode runs `inspect` read-only,
+  never `apply`, and lists pending steps as `application-step` entries of `steps`.
+- dbsp cannot compare function bodies: the `digest` is your statement that a step changed.
+- Steps apply to the converged schema only; `scope: 'database'` is refused.
+
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
@@ -163,7 +221,9 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a non-positive timeout, a missing `inspect` or `apply`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
+| `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
 | `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, a refusal code, the step and the detail; the `'pristine'` guard's code is `pristine-live-relations`, other failures carry the preflight's code. The schema's ledger is created only after `dbsp_meta` is ready, so a refused `dbsp_meta` leaves the schema without a ledger and the next call refuses again; a refusal of the schema itself can leave `dbsp_meta` prepared, which the next call reuses. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |

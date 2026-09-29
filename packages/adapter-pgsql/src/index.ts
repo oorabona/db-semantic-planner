@@ -252,6 +252,12 @@ export {
 	generateCursorName,
 	type StreamConfig,
 } from './streaming/index.js';
+export type {
+	PgApplicationStepTx,
+	PgConvergeApplicationStep,
+	PgConvergeAssertStep,
+	PgConvergeOnceStep,
+} from './transition/application-step.js';
 // Startup convergence
 export {
 	type ConvergePgBaseOptions,

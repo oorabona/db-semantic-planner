@@ -19,6 +19,12 @@ export {
 	pgsqlDeclaredSequenceAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';
 export { collectReferencedKeyRemovalConflicts } from './ddl/schema-diff.js';
+export type {
+	PgApplicationStepTx,
+	PgConvergeApplicationStep,
+	PgConvergeAssertStep,
+	PgConvergeOnceStep,
+} from './transition/application-step.js';
 export {
 	type ConvergePgBaseOptions,
 	type ConvergePgCheckOptions,

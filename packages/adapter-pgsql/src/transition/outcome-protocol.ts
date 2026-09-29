@@ -840,9 +840,7 @@ async function runPgDestructiveOutcome(
 				...(admission.plan.claimGroupId === undefined
 					? {}
 					: { claimGroupId: admission.plan.claimGroupId }),
-				...(admission.plan.rootClaimId === undefined
-					? {}
-					: { rootClaimId: admission.plan.rootClaimId }),
+				...rootClaimMember(admission.plan),
 				address: admission.plan.address,
 				eventKind: 'executing',
 				predecessor,
@@ -1549,6 +1547,15 @@ async function rollback(executor: TransitionJournalQueryable): Promise<void> {
 	}
 }
 
+function rootClaimMember(plan: OutcomeClaimPlan): {
+	readonly rootClaimId?: string;
+} {
+	if (plan.claimSpecies === 'application-step') return {};
+	return plan.rootClaimId === undefined
+		? {}
+		: { rootClaimId: plan.rootClaimId };
+}
+
 function claimMember(
 	request: PgOutcomeClaimRequest,
 	predecessor: string | undefined,
@@ -1564,9 +1571,7 @@ function claimMember(
 		...(request.plan.claimGroupId === undefined
 			? {}
 			: { claimGroupId: request.plan.claimGroupId }),
-		...(request.plan.rootClaimId === undefined
-			? {}
-			: { rootClaimId: request.plan.rootClaimId }),
+		...rootClaimMember(request.plan),
 		address: request.plan.address,
 		eventKind: request.plan.claimKind,
 		...(predecessor === undefined ? {} : { predecessor }),
@@ -1595,9 +1600,7 @@ function resolutionMember(
 		...(claim.plan.claimGroupId === undefined
 			? {}
 			: { claimGroupId: claim.plan.claimGroupId }),
-		...(claim.plan.rootClaimId === undefined
-			? {}
-			: { rootClaimId: claim.plan.rootClaimId }),
+		...rootClaimMember(claim.plan),
 		address: claim.plan.address,
 		eventKind: resolution.eventKind,
 		predecessor,
@@ -3123,9 +3126,7 @@ async function runPgNonTransactionalOutcomeOnSession(
 			...(admission.plan.claimGroupId === undefined
 				? {}
 				: { claimGroupId: admission.plan.claimGroupId }),
-			...(admission.plan.rootClaimId === undefined
-				? {}
-				: { rootClaimId: admission.plan.rootClaimId }),
+			...rootClaimMember(admission.plan),
 			address: request.plan.address,
 			eventKind: 'executing',
 			predecessor: executingPredecessor,

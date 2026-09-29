@@ -115,6 +115,13 @@ function bundleRefusal(
 			);
 		return undefined;
 	}
+	if (plan.claimSpecies === 'application-step') {
+		if (plan.claimKind !== 'intent' || statements.length !== 0)
+			return refusal(
+				`application-step claim ${plan.claimId} has an invalid statement bundle`,
+			);
+		return undefined;
+	}
 	if (statements.length === 0)
 		return refusal(`claim ${plan.claimId} has an empty statement bundle`);
 	for (let index = 0; index < statements.length; index += 1) {
@@ -220,6 +227,56 @@ export function admitOutcomeClaim(
 		return refusal(
 			`claim ${plan.claimId} refuses open claim ${projection.openClaim.event.eventId}`,
 		);
+	if (plan.claimSpecies === 'application-step') {
+		if (plan.applicationStep === 'once' && projection.stableState !== 'unknown')
+			return refusal(
+				`application-step once ${plan.claimId} cannot open from stable state ${projection.stableState}`,
+			);
+		if (
+			plan.applicationStep === 'assert' &&
+			projection.stableState !== 'unknown' &&
+			projection.stableState !== 'managed'
+		)
+			return refusal(
+				`application-step assert ${plan.claimId} cannot open from stable state ${projection.stableState}`,
+			);
+		if (projection.stableState === 'managed') {
+			const terminal = findUniqueLedgerTerminal(projection.events);
+			if (!terminal)
+				return refusal(
+					`claim ${plan.claimId} refuses managed chain without terminal`,
+				);
+			const currentController = input.currentController;
+			const controllerOid = (
+				terminal as LedgerChainMember & {
+					readonly controllerOid?: string;
+				}
+			).controllerOid;
+			if (!currentController)
+				return refusal(
+					`claim ${plan.claimId} refuses unreadable current controller identity`,
+				);
+			if (!controllerOid)
+				return refusal(
+					`claim ${plan.claimId} refuses managed controller without recorded OID`,
+				);
+			if (
+				!sameControllerIdentity(
+					{ name: terminal.controller, oid: controllerOid },
+					currentController,
+				)
+			)
+				return refusal(
+					`claim ${plan.claimId} refuses managed-by-other controller ${terminal.controller}`,
+				);
+		}
+		return {
+			kind: 'admitted-outcome-claim',
+			plan,
+			stableStateBeforeClaim: projection.stableState,
+			token: mintClaimToken(plan),
+		};
+	}
 	const column = LEDGER_LIFECYCLE_GRAMMAR[plan.claimKind];
 	if (!column.opensFrom.includes(projection.stableState))
 		return refusal(
