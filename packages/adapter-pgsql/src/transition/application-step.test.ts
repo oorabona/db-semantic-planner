@@ -38,6 +38,10 @@ import {
 	runPgApplicationSteps,
 	validatePgConvergeApplicationSteps,
 } from './application-step.js';
+import {
+	PgCommitAcknowledgementAmbiguousError,
+	readPgOutcomeSessionCompromise,
+} from './outcome-protocol.js';
 
 const apply = async () => undefined;
 
@@ -183,10 +187,59 @@ describe('converge application steps', () => {
 	it('refuses transaction control through the callback facade', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		const tx = createPgApplicationStepTx({ query } as never);
-		await expect(tx.query('BEGIN')).rejects.toThrow('transaction control');
-		await expect(tx.query('  rollback')).rejects.toThrow('transaction control');
+		for (const statement of [
+			'BEGIN',
+			'  rollback',
+			'/* x */ COMMIT',
+			'-- x\nROLLBACK',
+			'START TRANSACTION',
+			"PREPARE TRANSACTION 'x'",
+			'SET TRANSACTION READ ONLY',
+			'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
+			'DISCARD ALL',
+		])
+			await expect(tx.query(statement)).rejects.toThrow('transaction control');
+		expect(query).not.toHaveBeenCalled();
 		await tx.query('SELECT 1');
-		expect(query).toHaveBeenCalledWith('SELECT 1', []);
+		expect(query).toHaveBeenCalledWith({
+			text: 'SELECT 1',
+			values: [],
+			queryMode: 'extended',
+		});
+	});
+
+	it.each([Number.MAX_SAFE_INTEGER, 2_147_483_648, 1.5])(
+		'refuses an out-of-range application-step timeout: %s',
+		(timeout) => {
+			expect(() =>
+				validatePgConvergeApplicationSteps([
+					{
+						kind: 'once',
+						id: 'one',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						statementTimeoutMs: timeout,
+						apply,
+					},
+				]),
+			).toThrow();
+		},
+	);
+
+	it('accepts PostgreSQL’s maximum application-step timeout', () => {
+		expect(
+			validatePgConvergeApplicationSteps([
+				{
+					kind: 'once',
+					id: 'one',
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					lockTimeoutMs: 2_147_483_647,
+					statementTimeoutMs: 2_147_483_647,
+					apply,
+				},
+			]),
+		).toHaveLength(1);
 	});
 
 	it('rolls back and identifies a planning inspection failure', async () => {
@@ -218,8 +271,43 @@ describe('converge application steps', () => {
 		});
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
+			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
 		]);
+	});
+
+	it('keeps a planning inspection failure when its rollback fails', async () => {
+		const inspectionError = new Error('inspection failed');
+		const rollbackError = new Error('ROLLBACK acknowledgement lost');
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'ROLLBACK') throw rollbackError;
+			return queryWithCurrentController(statement);
+		});
+		const client = { query };
+		await expect(
+			planPgApplicationSteps({
+				client: client as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'state-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => {
+							throw inspectionError;
+						},
+						apply,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			stepId: 'state-check',
+			message: 'inspection failed',
+		});
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(rollbackError);
 	});
 
 	it('refuses an inspection status outside the public contract', async () => {
@@ -248,7 +336,47 @@ describe('converge application steps', () => {
 		});
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
+			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
+		]);
+	});
+
+	it('bounds planning inspections with the step timeouts', async () => {
+		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+		await expect(
+			planPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'state-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						lockTimeoutMs: 25,
+						statementTimeoutMs: 50,
+						inspect: async (tx) => {
+							await tx.query('SELECT pg_catalog.pg_sleep(1)');
+							return 'healthy' as const;
+						},
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([]);
+		expect(query.mock.calls).toEqual([
+			['BEGIN READ ONLY'],
+			["SET LOCAL lock_timeout = '25ms'"],
+			["SET LOCAL statement_timeout = '50ms'"],
+			[
+				{
+					text: 'SELECT pg_catalog.pg_sleep(1)',
+					values: [],
+					queryMode: 'extended',
+				},
+			],
+			['ROLLBACK'],
 		]);
 	});
 
@@ -281,6 +409,103 @@ describe('converge application steps', () => {
 		expect(inspect).toHaveBeenCalledTimes(2);
 		expect(mocks.appendResolution).not.toHaveBeenCalled();
 		expect(query.mock.calls.map(([text]) => text)).toContain('ROLLBACK');
+	});
+
+	it('classifies a server-rejected application-step COMMIT as failed', async () => {
+		const commitError = Object.assign(new Error('deferred constraint'), {
+			code: '23505',
+		});
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'COMMIT') throw commitError;
+			return queryWithCurrentController(statement);
+		});
+		await expect(
+			runPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'once',
+						id: 'commit-failure',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			stepId: 'commit-failure',
+		});
+		expect(query.mock.calls.map(([statement]) => statement)).not.toContain(
+			'ROLLBACK',
+		);
+	});
+
+	it('keeps an unacknowledged application-step COMMIT transport-ambiguous', async () => {
+		const commitError = new Error('COMMIT acknowledgement lost');
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'COMMIT') throw commitError;
+			return queryWithCurrentController(statement);
+		});
+		const client = { query };
+		await expect(
+			runPgApplicationSteps({
+				client: client as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'once',
+						id: 'commit-ambiguous',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).rejects.toBeInstanceOf(PgCommitAcknowledgementAmbiguousError);
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(commitError);
+		expect(query.mock.calls.map(([statement]) => statement)).not.toContain(
+			'ROLLBACK',
+		);
+	});
+
+	it('keeps the callback failure when an application-step rollback fails', async () => {
+		const callbackError = new Error('callback failed');
+		const rollbackError = new Error('ROLLBACK acknowledgement lost');
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'ROLLBACK') throw rollbackError;
+			return queryWithCurrentController(statement);
+		});
+		const client = { query };
+		await expect(
+			runPgApplicationSteps({
+				client: client as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'once',
+						id: 'rollback-failure',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async () => {
+							throw callbackError;
+						},
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			stepId: 'rollback-failure',
+			message: 'callback failed',
+		});
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(rollbackError);
 	});
 
 	it('treats a completed once with its recorded digest as complete in apply and check mode', async () => {

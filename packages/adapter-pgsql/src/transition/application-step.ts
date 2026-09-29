@@ -6,7 +6,7 @@ import {
 } from '@dbsp/core';
 import { admitOutcomeClaim } from '@dbsp/core/internal';
 import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
-import type { PoolClient } from 'pg';
+import type { PoolClient, QueryConfig } from 'pg';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import {
 	acquirePgLedgerLocks,
@@ -14,8 +14,10 @@ import {
 	appendPgLedgerResolution,
 } from './ledger.js';
 import {
+	beginPgOutcome,
+	commitPgOutcome,
 	PgCommitAcknowledgementAmbiguousError,
-	setPgTransitionLockTimeout,
+	rollbackPgOutcomeGroup,
 } from './outcome-protocol.js';
 
 /** The intentionally narrow query facade passed to application callbacks. */
@@ -136,12 +138,14 @@ export function validatePgConvergeApplicationSteps(
 		for (const timeout of ['lockTimeoutMs', 'statementTimeoutMs'] as const)
 			if (
 				step[timeout] !== undefined &&
-				(!Number.isInteger(step[timeout]) || (step[timeout] as number) <= 0)
+				(!Number.isSafeInteger(step[timeout]) ||
+					(step[timeout] as number) < 1 ||
+					(step[timeout] as number) > 2_147_483_647)
 			)
 				throw new PgApplicationStepError(
 					'application-step-failed',
 					'',
-					'converge step timeout must be a positive integer',
+					'converge step timeout must be a safe integer from 1 to 2147483647 milliseconds',
 				);
 		if (typeof step.apply !== 'function')
 			throw new PgApplicationStepError(
@@ -222,32 +226,70 @@ function recordedDigest(
 		: undefined;
 }
 
+const APPLICATION_STEP_TRANSACTION_CONTROL_MESSAGE =
+	'application step transaction control is refused';
+
+function withoutLeadingSqlComments(text: string): string {
+	let remaining = text;
+	while (true) {
+		remaining = remaining.trimStart();
+		if (remaining.startsWith('--')) {
+			const lineEnd = remaining.indexOf('\n');
+			remaining = lineEnd === -1 ? '' : remaining.slice(lineEnd + 1);
+			continue;
+		}
+		if (remaining.startsWith('/*')) {
+			const commentEnd = remaining.indexOf('*/', 2);
+			if (commentEnd === -1) return remaining;
+			remaining = remaining.slice(commentEnd + 2);
+			continue;
+		}
+		return remaining;
+	}
+}
+
+function refusesApplicationStepTransactionControl(text: string): boolean {
+	const statement = withoutLeadingSqlComments(text);
+	const keyword = statement.match(/^([A-Za-z]+)/)?.[1]?.toUpperCase();
+	if (
+		keyword &&
+		[
+			'BEGIN',
+			'START',
+			'COMMIT',
+			'END',
+			'ROLLBACK',
+			'ABORT',
+			'SAVEPOINT',
+			'RELEASE',
+			'PREPARE',
+			'DISCARD',
+		].includes(keyword)
+	)
+		return true;
+	if (keyword !== 'SET') return false;
+	return /^SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:TRANSACTION\b|SESSION\s+CHARACTERISTICS\b)/iu.test(
+		statement,
+	);
+}
+
 export function createPgApplicationStepTx(
 	client: PoolClient,
 ): PgApplicationStepTx {
 	return {
 		query: (text: string, values?: readonly unknown[]) => {
-			const keyword = text
-				.trimStart()
-				.match(/^([A-Za-z]+)/)?.[1]
-				?.toUpperCase();
-			if (
-				keyword &&
-				[
-					'BEGIN',
-					'COMMIT',
-					'ROLLBACK',
-					'SAVEPOINT',
-					'RELEASE',
-					'SET',
-					'END',
-					'ABORT',
-				].includes(keyword)
-			)
+			if (refusesApplicationStepTransactionControl(text))
 				return Promise.reject(
-					new Error('application step transaction control is refused'),
+					new Error(APPLICATION_STEP_TRANSACTION_CONTROL_MESSAGE),
 				);
-			return client.query(text, values === undefined ? [] : [...values]);
+			const query: QueryConfig<unknown[]> & {
+				readonly queryMode: 'extended';
+			} = {
+				text,
+				values: values === undefined ? [] : [...values],
+				queryMode: 'extended',
+			};
+			return client.query(query);
 		},
 	};
 }
@@ -372,6 +414,14 @@ async function inspectPgApplicationStep(
 	return status;
 }
 
+async function setPgApplicationStepStatementTimeout(
+	client: PoolClient,
+	timeout: number | undefined,
+): Promise<void> {
+	if (timeout === undefined) return;
+	await client.query(`SET LOCAL statement_timeout = '${timeout}ms'`);
+}
+
 /** Reads no durable state in check mode beyond the chain itself. */
 export async function planPgApplicationSteps(input: {
 	readonly client: PoolClient;
@@ -381,8 +431,14 @@ export async function planPgApplicationSteps(input: {
 }): Promise<readonly PgPlannedApplicationStep[]> {
 	const planned: PgPlannedApplicationStep[] = [];
 	for (const step of input.steps) {
-		await input.client.query('BEGIN READ ONLY');
+		let begun = false;
 		try {
+			await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+			begun = true;
+			await setPgApplicationStepStatementTimeout(
+				input.client,
+				step.statementTimeoutMs,
+			);
 			const state = await admission(
 				input.client,
 				input.database,
@@ -402,7 +458,7 @@ export async function planPgApplicationSteps(input: {
 					step: step.kind,
 				});
 		} finally {
-			await input.client.query('ROLLBACK');
+			if (begun) await rollbackPgOutcomeGroup(input.client);
 		}
 	}
 	return planned;
@@ -419,14 +475,14 @@ export async function runPgApplicationSteps(input: {
 	for (const step of input.steps) {
 		if (step.phase !== input.phase) continue;
 		let begun = false;
+		let commitAttempted = false;
 		try {
-			await input.client.query('BEGIN');
+			await beginPgOutcome(input.client, step.lockTimeoutMs);
 			begun = true;
-			await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
-			if (step.statementTimeoutMs !== undefined)
-				await input.client.query(
-					`SET LOCAL statement_timeout = '${step.statementTimeoutMs}ms'`,
-				);
+			await setPgApplicationStepStatementTimeout(
+				input.client,
+				step.statementTimeoutMs,
+			);
 			const lock = await acquirePgLedgerLocks(input.client, [
 				home(input.schema),
 			]);
@@ -439,7 +495,7 @@ export async function runPgApplicationSteps(input: {
 				step,
 			);
 			if (state.complete) {
-				await input.client.query('ROLLBACK');
+				await rollbackPgOutcomeGroup(input.client);
 				begun = false;
 				continue;
 			}
@@ -448,7 +504,7 @@ export async function runPgApplicationSteps(input: {
 				step.kind === 'assert' &&
 				(await inspectPgApplicationStep(step, tx)) === 'healthy'
 			) {
-				await input.client.query('ROLLBACK');
+				await rollbackPgOutcomeGroup(input.client);
 				begun = false;
 				continue;
 			}
@@ -515,15 +571,12 @@ export async function runPgApplicationSteps(input: {
 				claimId,
 				[{ address: claim.address }],
 			);
-			try {
-				await input.client.query('COMMIT');
-			} catch (error) {
-				throw new PgCommitAcknowledgementAmbiguousError(error);
-			}
+			commitAttempted = true;
+			await commitPgOutcome(input.client);
 			begun = false;
 			applied.push(`application-step:${step.id}`);
 		} catch (error) {
-			if (begun) await input.client.query('ROLLBACK').catch(() => undefined);
+			if (begun && !commitAttempted) await rollbackPgOutcomeGroup(input.client);
 			if (error instanceof PgCommitAcknowledgementAmbiguousError) throw error;
 			if (error instanceof PgApplicationStepError) throw error;
 			throw new PgApplicationStepError(

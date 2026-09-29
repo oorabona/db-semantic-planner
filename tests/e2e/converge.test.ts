@@ -666,6 +666,64 @@ describe('convergePg', () => {
 		expect(await ledgerRowCounts(pool)).toEqual(before);
 	});
 
+	it('refuses a multi-statement application callback without recording its step', async () => {
+		const pool = await getTestPool();
+		const id = `multi-statement-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							await tx.query('SELECT 1; COMMIT');
+						},
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
+	it('bounds planning inspections with the application-step statement timeout', async () => {
+		const pool = await getTestPool();
+		const id = `inspect-timeout-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						statementTimeoutMs: 50,
+						inspect: async (tx) => {
+							await tx.query('SELECT pg_catalog.pg_sleep(1)');
+							return 'healthy' as const;
+						},
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
 	it('reports no drift in check mode for healthy asserts and completed once steps', async () => {
 		const pool = await getTestPool();
 		const prefix = `complete-${randomUUID().replaceAll('-', '').slice(0, 12)}`;

@@ -1515,9 +1515,10 @@ async function admitPgOutcomeClaim(
 async function begin(
 	executor: TransitionJournalQueryable,
 	timeout: number | undefined,
+	statement = 'BEGIN',
 ): Promise<void> {
 	try {
-		await executor.query('BEGIN');
+		await executor.query(statement);
 	} catch (error) {
 		compromisedPgOutcomeSessions.set(
 			executor as object,

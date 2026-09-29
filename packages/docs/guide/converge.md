@@ -178,12 +178,17 @@ await convergePg(pool, model, {
     },
     {
       kind: 'assert',
-      id: 'files-touch-trigger',
+      id: 'touch-function',
       digest: 'v3',
       phase: 'after-generated-ddl',
-      inspect: async (tx) => ((await tx.query(/* read pg_trigger and pg_proc */)).rowCount === 1 ? 'healthy' : 'unhealthy'),
+      inspect: async (tx) => {
+        const { rows } = await tx.query<{ readonly ok: boolean }>(
+          "SELECT coalesce(position('-- touch v3' IN pg_get_functiondef(to_regprocedure('app.touch()'))) > 0, false) AS ok",
+        );
+        return rows[0]?.ok === true ? 'healthy' : 'unhealthy';
+      },
       apply: async (tx) => {
-        /* CREATE OR REPLACE the function, drop and re-create the trigger */
+        await tx.query('CREATE OR REPLACE FUNCTION app.touch() RETURNS integer LANGUAGE sql AS $$ SELECT 1 -- touch v3 $$');
       },
     },
   ],

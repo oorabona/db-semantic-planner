@@ -72,7 +72,7 @@
 			"heuristic-fragment": 0
 		},
 		"packages/docs/guide/converge.md": {
-			"explicit-skip": 1,
+			"explicit-skip": 2,
 			"real-db-only": 2,
 			"heuristic-fragment": 0
 		},
