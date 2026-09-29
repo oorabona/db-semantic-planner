@@ -149,7 +149,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `unmanaged-object` | A live object at an address converge would manage is not managed by dbsp: an existing table or sequence, or an object created while converge was running. |
 | `unmanaged-parent` | A change targets a table dbsp does not manage. |
 | `concurrent-drift` | A declared object disappeared while converge was planning. |
-| `adoption-refused` | A table or sequence marked `adopt: true` could not be adopted: it is absent, differs from its declaration, or its ledger state is not unknown; a sequence is also refused when it is owned by a column (`OWNED BY`, serial or identity), is not `bigint` with cache 1, or is declared in another schema. A managed object that was dropped and recreated is in the ledger-state case, and converge offers no way to take it over. |
+| `adoption-refused` | A table or sequence marked `adopt: true` could not be adopted. With an unknown ledger state, it is absent or differs from its declaration; a sequence is also refused when it is owned by a column (`OWNED BY`, serial or identity), is not `bigint` with cache 1, or is declared in another schema. An object already managed under the same catalogue identity is skipped, and its drift follows the ordinary rules (for example `unsupported-change`). Any other ledger state is refused, which includes a managed object that was dropped and recreated; converge offers no way to take it over. |
 | `execution-refused` | The executor refused or failed a step; `detail` says why. |
 
 ## Adopting an existing install
