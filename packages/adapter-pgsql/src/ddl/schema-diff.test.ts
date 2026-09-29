@@ -1482,6 +1482,53 @@ describe('compareSchemata', () => {
 			);
 		});
 
+		it('drops a plain auto-index beside a declared partial FK-column index', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const partialIndex: IndexIR = {
+				name: 'idx_posts_user_id_partial',
+				columns: ['user_id'],
+				where: 'id > 0',
+			};
+			const users = makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+				primaryKey: 'id',
+			});
+			const posts = makeTable({
+				name: 'posts',
+				columns: [
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'user_id', type: 'integer' }),
+				],
+				primaryKey: 'id',
+				foreignKeys: [fk],
+				indexes: [partialIndex],
+			});
+			const dbPosts = {
+				...posts,
+				indexes: [
+					partialIndex,
+					{ name: 'idx_posts_user_id', columns: ['user_id'] },
+				],
+			};
+
+			expect(
+				compareSchemata(makeModel([users, posts]), makeModel([users, dbPosts]))
+					.changes,
+			).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'idx_posts_user_id' }),
+					}),
+				}),
+			]);
+		});
+
 		it('should match indexes by columns+unique, not name', () => {
 			const schemaIdx: IndexIR = {
 				name: 'new_name',

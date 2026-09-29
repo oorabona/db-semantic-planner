@@ -20,9 +20,9 @@ import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
 import {
-	createAutoFkIndexNameAllocator,
+	getAutoFkIndexName,
 	getResolvedIndexName,
-	hasDeclaredFkIndexCoverage,
+	shouldEmitAutoFkIndex,
 } from './fk-index-coverage.js';
 import { normalizeOptionalBoolean } from './generated-source-normalizers.js';
 import {
@@ -213,16 +213,6 @@ function collectGeneratedCreateIndexSpecs(
 	const specs: IndexRenderSpec[] = [];
 	for (const table of tables) {
 		const dbTableName = naming.toDatabase(table.name);
-		const autoIndexNames = createAutoFkIndexNameAllocator(
-			dbTableName,
-			table.indexes.map((idx) =>
-				getResolvedIndexName(
-					dbTableName,
-					idx.columns.map((column) => naming.toDatabase(column)),
-					idx.name,
-				),
-			),
-		);
 		for (const idx of table.indexes) {
 			specs.push(buildIndexRenderSpec(table.name, idx, schemaName, naming));
 		}
@@ -232,14 +222,14 @@ function collectGeneratedCreateIndexSpecs(
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				!hasDeclaredFkIndexCoverage(table, fkCol)
+				shouldEmitAutoFkIndex(table, fkCol)
 			) {
 				const dbFkCol = naming.toDatabase(fkCol);
 				specs.push(
 					buildIndexRenderSpec(
 						table.name,
 						{
-							name: autoIndexNames.allocate(dbFkCol),
+							name: getAutoFkIndexName(dbTableName, dbFkCol),
 							columns: [fkCol],
 							unique: false,
 						},

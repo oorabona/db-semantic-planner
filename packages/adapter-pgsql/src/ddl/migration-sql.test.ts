@@ -3936,7 +3936,7 @@ describe('FK enhancements — migration SQL', () => {
 		expect(autoIndexCount).toBe(0);
 	});
 
-	it('should generate an FK auto-index when only a partial index covers the FK column', () => {
+	it('should not generate an FK auto-index when only a partial index is declared on the FK column', () => {
 		const usersTable = makeTable(
 			'users',
 			[makeCol({ name: 'id', type: 'integer' })],
@@ -3977,7 +3977,7 @@ describe('FK enhancements — migration SQL', () => {
 		expect(sql).toContain(
 			'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
 		);
-		expect(sql).toContain(
+		expect(sql).not.toContain(
 			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
 		);
 	});
@@ -4002,8 +4002,8 @@ describe('FK enhancements — migration SQL', () => {
 			},
 		],
 	] satisfies readonly [string, IndexIR][])(
-		'allocates the same distinct FK auto-index name as generateDDL after a %s',
-		(_description, declaredIndex) => {
+		'generates only the declared %s and no FK auto-index',
+		(description, declaredIndex) => {
 			const users: TableIR = {
 				...makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
 			};
@@ -4029,10 +4029,7 @@ describe('FK enhancements — migration SQL', () => {
 					.map((statement) => statement.match(/^CREATE INDEX "([^"]+)"/)?.[1])
 					.filter((name): name is string => name !== undefined);
 
-			expect(names(migration)).toEqual([
-				'idx_posts_user_id',
-				'idx_posts_user_id_fk',
-			]);
+			expect(names(migration), description).toEqual(['idx_posts_user_id']);
 			expect(names(migration)).toEqual(names(generateDDL(schema)));
 		},
 	);

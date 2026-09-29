@@ -14,9 +14,8 @@
 import type { IndexIR } from '@dbsp/types';
 import { generateCreateIndex } from '../ddl-generator.js';
 import {
-	createAutoFkIndexNameAllocator,
-	getResolvedIndexName,
-	hasDeclaredFkIndexCoverage,
+	getAutoFkIndexName,
+	shouldEmitAutoFkIndex,
 } from '../fk-index-coverage.js';
 import type { PhaseContext } from './types.js';
 
@@ -33,16 +32,6 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 
 	for (const table of tables) {
 		const dbTableName = naming.toDatabase(table.name);
-		const autoIndexNames = createAutoFkIndexNameAllocator(
-			dbTableName,
-			table.indexes.map((idx) =>
-				getResolvedIndexName(
-					dbTableName,
-					idx.columns.map((column) => naming.toDatabase(column)),
-					idx.name,
-				),
-			),
-		);
 		// Explicit indexes
 		for (const idx of table.indexes) {
 			statements.push(
@@ -50,21 +39,19 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 			);
 		}
 
-		// Auto-generate indexes for single-column FKs without a covering declared key.
+		// Auto-generate indexes for single-column FKs without a declared
+		// single-column key or another covering declared key.
 		if (fkAutoIndex) {
 			for (const fk of table.foreignKeys) {
 				const fkCol = fk.columns[0];
 				if (
 					fk.columns.length === 1 &&
 					fkCol &&
-					!hasDeclaredFkIndexCoverage(table, fkCol)
+					shouldEmitAutoFkIndex(table, fkCol)
 				) {
 					const dbFkCol = naming.toDatabase(fkCol);
 					const autoIdx: IndexIR = {
-						// Auto-index names are derived from emitted DB identifiers. Existing
-						// old-style names do not churn because compareIndexes tracks auto-FK
-						// identity structurally (columns + unique), not by index name.
-						name: autoIndexNames.allocate(dbFkCol),
+						name: getAutoFkIndexName(dbTableName, dbFkCol),
 						columns: [fkCol],
 						unique: false,
 					};

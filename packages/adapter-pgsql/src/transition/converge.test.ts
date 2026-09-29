@@ -1772,14 +1772,16 @@ describe('convergePg refusal boundary', () => {
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 	});
 
-	it('refuses a fresh single-column FK without a declared index before execution', async () => {
+	it('refuses a fresh single-column FK without a covering declared key before execution', async () => {
 		mocks.compare.mockResolvedValue({
 			changes: [createTableWithForeignKey('posts', ['author_id'])],
 		});
 
 		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
 			refusal: 'unsupported-change',
-			detail: expect.stringContaining('posts.author_id (idx_posts_author_id)'),
+			detail: expect.stringContaining(
+				'converge refuses fresh foreign keys without a covering declared key: posts.author_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
+			),
 			changes: [
 				expect.objectContaining({ kind: 'create_table', table: 'posts' }),
 			],
@@ -1866,6 +1868,9 @@ describe('convergePg refusal boundary', () => {
 
 			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
 				refusal: 'unsupported-change',
+				detail: expect.stringContaining(
+					'converge refuses fresh foreign keys without a covering declared key: posts.author_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
+				),
 			});
 		},
 	);

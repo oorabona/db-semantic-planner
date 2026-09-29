@@ -190,7 +190,7 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 
-	it('converges an unnamed partial FK index alongside its automatic index', async () => {
+	it('converges an unnamed partial FK index without an automatic index', async () => {
 		const desired = model([
 			table('fk_auto_index_users', [column('id', 'integer')], {
 				primaryKey: 'id',
@@ -215,6 +215,15 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		]);
 
 		await apply(desired);
+		const pool = await getTestPool();
+		const indexes = await pool.query(
+			'SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY indexname',
+			[SCHEMA, 'fk_auto_index_posts'],
+		);
+		expect(indexes.rows).toEqual([
+			{ indexname: 'idx_fk_auto_index_posts_user_id' },
+			{ indexname: 'pk_fk_auto_index_posts' },
+		]);
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 

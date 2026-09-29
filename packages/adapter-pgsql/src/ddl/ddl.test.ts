@@ -697,7 +697,7 @@ describe('DDL Generator', () => {
 			expect(autoIndex).toContain('ON "posts" ("user_id")');
 		});
 
-		it('should add an auto-index when an FK column has only a partial index', () => {
+		it('does not add an auto-index when an FK column has a partial index', () => {
 			const schema = {
 				tables: new Map([
 					[
@@ -746,7 +746,6 @@ describe('DDL Generator', () => {
 				'CREATE TABLE "orders" (\n  "id" INTEGER NOT NULL,\n  "user_id" INTEGER NOT NULL,\n  "deleted_at" TIMESTAMPTZ,\n  CONSTRAINT "pk_orders" PRIMARY KEY ("id")\n);',
 				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
 				'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
-				'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
 			]);
 		});
 
@@ -770,8 +769,8 @@ describe('DDL Generator', () => {
 				},
 			],
 		] satisfies readonly [string, IndexIR][])(
-			'allocates a distinct FK auto-index name after a %s',
-			(_description, declaredIndex) => {
+			'does not generate an FK auto-index after a declared %s',
+			(description, declaredIndex) => {
 				const users: TableIR = {
 					name: 'users',
 					columns: [{ name: 'id', type: 'integer', nullable: false }],
@@ -806,21 +805,17 @@ describe('DDL Generator', () => {
 					statement.startsWith('CREATE INDEX'),
 				);
 
-				expect(indexStatements).toHaveLength(2);
+				expect(indexStatements, description).toHaveLength(1);
 				expect(
 					indexStatements.some((statement) =>
 						statement.includes('CREATE INDEX "idx_posts_user_id"'),
 					),
 				).toBe(true);
-				expect(
-					indexStatements.some((statement) =>
-						statement.includes('CREATE INDEX "idx_posts_user_id_fk"'),
-					),
-				).toBe(true);
+				expect(indexStatements[0]).toContain('"idx_posts_user_id"');
 			},
 		);
 
-		it('does not allocate an FK auto-index when a declared index covers it', () => {
+		it('does not generate an FK auto-index when a declared index covers it', () => {
 			const users: TableIR = {
 				name: 'users',
 				columns: [{ name: 'id', type: 'integer', nullable: false }],

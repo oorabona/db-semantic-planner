@@ -35,9 +35,9 @@ import {
 	generateCreateIndex,
 } from './ddl-generator.js';
 import {
-	createAutoFkIndexNameAllocator,
+	getAutoFkIndexName,
 	getResolvedIndexName,
-	hasDeclaredFkIndexCoverage,
+	shouldEmitAutoFkIndex,
 } from './fk-index-coverage.js';
 import {
 	assertNonZeroSequenceIncrement,
@@ -503,25 +503,19 @@ export function collectFkAutoIndexSpecs(
 		if (change.kind !== 'create_table') continue;
 		const table = change.meta?.table as TableIR | undefined;
 		if (!table) continue;
-		const autoIndexNames = createAutoFkIndexNameAllocator(
-			table.name,
-			table.indexes.map((idx) =>
-				getResolvedIndexName(table.name, idx.columns, idx.name),
-			),
-		);
 		for (const fk of table.foreignKeys) {
 			const fkCol = fk.columns[0];
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				!hasDeclaredFkIndexCoverage(table, fkCol)
+				shouldEmitAutoFkIndex(table, fkCol)
 			) {
 				specs.push(
 					buildFkAutoIndexSpec(
 						table,
 						fkCol,
 						schemaName,
-						autoIndexNames.allocate(fkCol),
+						getAutoFkIndexName(table.name, fkCol),
 					),
 				);
 			}

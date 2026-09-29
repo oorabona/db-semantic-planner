@@ -1184,7 +1184,7 @@ describe('convergePg', () => {
 		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
-				'fk_auto_index_refusal_child.parent_id (idx_fk_auto_index_refusal_child_parent_id)',
+				'converge refuses fresh foreign keys without a covering declared key: fk_auto_index_refusal_child.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
 			),
 		});
 		for (const tableName of [
@@ -1197,6 +1197,49 @@ describe('convergePg', () => {
 				]),
 			).resolves.toMatchObject({ rows: [{ relation: null }] });
 	});
+
+	it.each([
+		['partial', { columns: ['parent_id'], where: 'id > 0' }],
+		[
+			'expression',
+			{ columns: ['parent_id'], expressions: ['(parent_id + 1)'] },
+		],
+		['gin', { columns: ['parent_id'], method: 'gin' }],
+		['hash', { columns: ['parent_id'], method: 'hash' }],
+	] satisfies readonly [string, TableIR['indexes'][number]][])(
+		'refuses a fresh single-column FK with a non-covering declared %s index',
+		async (kind, index) => {
+			const pool = await getTestPool();
+			const parent = `fk_coverage_refusal_${kind}_parent`;
+			const child = `fk_coverage_refusal_${kind}_child`;
+			const desired = model([
+				table(parent, false),
+				{
+					...table(child, false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'parent_id', type: 'integer', nullable: false },
+					],
+					foreignKeys: [
+						{
+							columns: ['parent_id'],
+							references: { table: parent, columns: ['id'] },
+						},
+					],
+					indexes: [index],
+				},
+			]);
+
+			await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject(
+				{
+					refusal: 'unsupported-change',
+					detail: expect.stringContaining(
+						`converge refuses fresh foreign keys without a covering declared key: ${child}.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is`,
+					),
+				},
+			);
+		},
+	);
 
 	it('converges FKs covered by a primary key and a leading composite index', async () => {
 		const pool = await getTestPool();

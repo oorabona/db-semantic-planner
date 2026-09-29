@@ -360,7 +360,7 @@ describe('generateIndexesPhase', () => {
 					{ name: 'posts_user_id', columns: ['user_id'], where: 'id > 0' },
 				],
 			},
-			true,
+			false,
 		],
 		[
 			'an expression index',
@@ -373,7 +373,7 @@ describe('generateIndexesPhase', () => {
 					},
 				],
 			},
-			true,
+			false,
 		],
 		[
 			'a gin index',
@@ -382,7 +382,7 @@ describe('generateIndexesPhase', () => {
 					{ name: 'posts_user_id', columns: ['user_id'], method: 'gin' },
 				],
 			},
-			true,
+			false,
 		],
 		[
 			'a hash index',
@@ -391,10 +391,10 @@ describe('generateIndexesPhase', () => {
 					{ name: 'posts_user_id', columns: ['user_id'], method: 'hash' },
 				],
 			},
-			true,
+			false,
 		],
 	] as const)(
-		'generates an auto-index only when covered by %s is %s',
+		'generates an auto-index only when the declared key permits it: %s is %s',
 		(_reason, overrides, expected) => {
 			const posts = makeTable('posts', {
 				foreignKeys: [

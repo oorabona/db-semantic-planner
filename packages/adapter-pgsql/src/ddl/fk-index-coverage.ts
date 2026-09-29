@@ -18,35 +18,6 @@ export function getAutoFkIndexName(
 }
 
 /**
- * Allocate automatic FK-index names without colliding with declared indexes
- * or automatic indexes allocated earlier for the same table.
- */
-export function createAutoFkIndexNameAllocator(
-	tableName: string,
-	declaredIndexNames: Iterable<string>,
-): { allocate(columnName: string): string } {
-	const usedNames = new Set(declaredIndexNames);
-
-	return {
-		allocate(columnName: string): string {
-			const baseName = getAutoFkIndexName(tableName, columnName);
-			if (!usedNames.has(baseName)) {
-				usedNames.add(baseName);
-				return baseName;
-			}
-
-			for (let suffix = 1; ; suffix++) {
-				const candidate = `${baseName}_fk${suffix === 1 ? '' : suffix}`;
-				if (!usedNames.has(candidate)) {
-					usedNames.add(candidate);
-					return candidate;
-				}
-			}
-		},
-	};
-}
-
-/**
  * Whether a declared key can serve lookups through a single-column foreign key.
  *
  * This deliberately preserves key order. It is not a uniqueness check and must
@@ -86,6 +57,23 @@ export function hasDeclaredSingleColumnFkIndex(
 ): boolean {
 	return table.indexes.some(
 		(index) => index.columns.length === 1 && index.columns[0] === fkColumn,
+	);
+}
+
+/**
+ * Whether generation should emit an automatic index for a single-column FK.
+ *
+ * A declared single-column index suppresses automatic generation even when it
+ * is not a covering lookup key. This preserves the pre-#830 emission rule;
+ * coverage remains available to callers that need to enforce lookup safety.
+ */
+export function shouldEmitAutoFkIndex(
+	table: TableIR,
+	fkColumn: string,
+): boolean {
+	return (
+		!hasDeclaredFkIndexCoverage(table, fkColumn) &&
+		!hasDeclaredSingleColumnFkIndex(table, fkColumn)
 	);
 }
 
