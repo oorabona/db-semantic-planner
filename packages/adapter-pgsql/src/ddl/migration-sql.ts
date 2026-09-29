@@ -55,7 +55,9 @@ import {
 } from './phases/utils.js';
 import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 import {
+	collectReferencedKeyRemovalConflicts,
 	getAutoFkIndexName,
+	ReferencedKeyRemovalError,
 	type SchemaChange,
 	type SchemaDiff,
 } from './schema-diff.js';
@@ -579,6 +581,9 @@ export function generateMigrationSQL(
 	assertNoAutoIncrementTransitions(diff, 'up');
 	const schemaName = options?.schemaName;
 	const changes = changesAppliedByUp(diff, options);
+	const referencedKeyConflicts = collectReferencedKeyRemovalConflicts(changes);
+	if (referencedKeyConflicts.length > 0)
+		throw new ReferencedKeyRemovalError(referencedKeyConflicts);
 	const indexContext = indexContextFromOptions(options);
 	const createIndexSpecs = collectUpCreateIndexSpecs(
 		changes,

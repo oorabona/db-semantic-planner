@@ -83,6 +83,9 @@ export {
 	compareSchemata,
 	type DiffSummary,
 	ExpressionCanonicalizationUnavailableError,
+	type ReferencedKeyKind,
+	type ReferencedKeyRemovalConflict,
+	ReferencedKeyRemovalError,
 	type SchemaChange,
 	type SchemaDiff,
 } from './schema-diff.js';

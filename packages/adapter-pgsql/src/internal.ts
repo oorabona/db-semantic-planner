@@ -16,6 +16,7 @@ export {
 	createPgsqlDeclaredAdoptionStep,
 	pgsqlDeclaredAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';
+export { collectReferencedKeyRemovalConflicts } from './ddl/schema-diff.js';
 export {
 	convergePg,
 	PgConvergeRefusalError,

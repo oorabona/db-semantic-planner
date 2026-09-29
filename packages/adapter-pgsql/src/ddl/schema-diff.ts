@@ -51,11 +51,17 @@ import {
 	LegacySequenceNameError,
 	physicalizeDeclaredSequences,
 } from '../sequence-name.js';
+import { escapeDiagnosticText } from '../validate.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
 import {
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
+import {
+	canonicalColumnSet,
+	isQualifyingUniqueIndex,
+	sameColumnSet,
+} from './key-column-set.js';
 
 // ============================================================================
 // Types
@@ -146,6 +152,8 @@ export interface SchemaDiff {
 // ============================================================================
 
 export interface CompareSchemataOptions {
+	/** Schema represented by the compared models (default: `public`). */
+	readonly schema?: string;
 	/**
 	 * Database naming convention.
 	 * When set, schema model names (camelCase) are converted to DB format
@@ -201,6 +209,36 @@ export class ExpressionCanonicalizationUnavailableError extends Error {
 				'Inspect the surfaces field for their identities.',
 		);
 		this.name = 'ExpressionCanonicalizationUnavailableError';
+	}
+}
+
+export type ReferencedKeyKind =
+	| 'unique_index'
+	| 'primary_key'
+	| 'column_unique';
+
+export interface ReferencedKeyRemovalConflict {
+	readonly keyKind: ReferencedKeyKind;
+	readonly table: string;
+	readonly keyColumns: readonly string[];
+	readonly keyName?: string;
+	readonly referencingTable: string;
+	readonly foreignKeyColumns: readonly string[];
+}
+
+/**
+ * Refusal raised when executable UP SQL would remove a key a foreign key may
+ * depend on. Only foreign keys visible in the compared model are detected, so
+ * a single-schema comparison cannot see a foreign key whose source table is in
+ * another schema. A hand-built `SchemaDiff` without the comparison annotation
+ * is not covered.
+ */
+export class ReferencedKeyRemovalError extends Error {
+	constructor(
+		public readonly conflicts: readonly ReferencedKeyRemovalConflict[],
+	) {
+		super(conflicts.map(formatReferencedKeyRemovalConflict).join('\n'));
+		this.name = 'ReferencedKeyRemovalError';
 	}
 }
 
@@ -498,11 +536,150 @@ export function compareSchemata(
 		...change,
 		destructive: change.destructive,
 	}));
+	const annotatedChanges = annotateReferencedKeyRemovals(
+		classifiedChanges,
+		db,
+		options?.schema,
+	);
 	return {
-		changes: classifiedChanges,
-		hasDestructive: classifiedChanges.some((c) => c.destructive),
-		summary: buildSummary(classifiedChanges),
+		changes: annotatedChanges,
+		hasDestructive: annotatedChanges.some((c) => c.destructive),
+		summary: buildSummary(annotatedChanges),
 	};
+}
+
+function annotateReferencedKeyRemovals(
+	changes: readonly SchemaChange[],
+	db: ModelIR,
+	comparedSchema = 'public',
+): readonly SchemaChange[] {
+	return changes.map((change) => {
+		const removal = referencedKeyRemovalForChange(change);
+		if (removal === undefined) return change;
+
+		const conflicts: ReferencedKeyRemovalConflict[] = [];
+		for (const referencingTable of db.tables.values()) {
+			for (const foreignKey of referencingTable.foreignKeys) {
+				if (
+					foreignKey.references.table !== removal.table ||
+					(foreignKey.references.schema !== undefined &&
+						foreignKey.references.schema !== comparedSchema) ||
+					!sameColumnSet(foreignKey.references.columns, removal.keyColumns)
+				)
+					continue;
+				conflicts.push({
+					...removal,
+					referencingTable: referencingTable.name,
+					foreignKeyColumns: foreignKey.columns,
+				});
+			}
+		}
+		if (conflicts.length === 0) return change;
+		return {
+			...change,
+			meta: { ...change.meta, referencedBy: conflicts },
+		};
+	});
+}
+
+type ReferencedKeyRemoval = Omit<
+	ReferencedKeyRemovalConflict,
+	'referencingTable' | 'foreignKeyColumns'
+>;
+
+function referencedKeyRemovalForChange(
+	change: SchemaChange,
+): ReferencedKeyRemoval | undefined {
+	if (change.kind === 'drop_index') {
+		const index = indexForChange(change);
+		if (index === undefined || !isQualifyingUniqueIndex(index, index.columns))
+			return undefined;
+		const keyColumns = canonicalColumnSet(index.columns);
+		return keyColumns === undefined
+			? undefined
+			: {
+					keyKind: 'unique_index',
+					table: change.table,
+					keyColumns: index.columns,
+					...(index.name === undefined ? {} : { keyName: index.name }),
+				};
+	}
+
+	if (change.kind === 'drop_primary_key') {
+		const columns = change.meta?.columns;
+		if (
+			!Array.isArray(columns) ||
+			!columns.every((column) => typeof column === 'string')
+		)
+			return undefined;
+		return canonicalColumnSet(columns) === undefined
+			? undefined
+			: { keyKind: 'primary_key', table: change.table, keyColumns: columns };
+	}
+
+	if (change.kind === 'alter_column_unique' && change.meta?.unique === false) {
+		return change.column === undefined
+			? undefined
+			: {
+					keyKind: 'column_unique',
+					table: change.table,
+					keyColumns: [change.column],
+					...(typeof change.meta.constraintName === 'string'
+						? { keyName: change.meta.constraintName }
+						: {}),
+				};
+	}
+
+	return undefined;
+}
+
+/** Collect comparison annotations from the changes an executable path selected. */
+export function collectReferencedKeyRemovalConflicts(
+	changes: readonly SchemaChange[],
+): readonly ReferencedKeyRemovalConflict[] {
+	return changes.flatMap((change) => {
+		const referencedBy = change.meta?.referencedBy;
+		return Array.isArray(referencedBy)
+			? (referencedBy as readonly ReferencedKeyRemovalConflict[])
+			: [];
+	});
+}
+
+function indexForChange(change: SchemaChange): IndexIR | undefined {
+	const index = change.meta?.index;
+	return index && typeof index === 'object' && !Array.isArray(index)
+		? (index as IndexIR)
+		: undefined;
+}
+
+function formatReferencedKeyRemovalConflict(
+	conflict: ReferencedKeyRemovalConflict,
+): string {
+	const key = {
+		unique_index: 'unique index',
+		primary_key: 'primary key',
+		column_unique: 'unique constraint',
+	}[conflict.keyKind];
+	const namedKey =
+		conflict.keyName === undefined
+			? key
+			: `${key} ${formatDiagnosticIdentifier(conflict.keyName)}`;
+	return (
+		`Refusing to remove or replace ${namedKey} on ${formatDiagnosticIdentifier(conflict.table)} ` +
+		`${formatDiagnosticColumns(conflict.keyColumns)}: foreign key ` +
+		`${formatDiagnosticIdentifier(conflict.referencingTable)}${formatDiagnosticColumns(conflict.foreignKeyColumns)} ` +
+		'may depend on it. dbsp cannot address or retarget that foreign key because its constraint name and backing key are not modeled (#319). ' +
+		'Keep the key unchanged, or run a reviewed manual migration that drops the foreign key, changes the key and recreates the foreign key, then plan again. ' +
+		'Do not retry with CASCADE.'
+	);
+}
+
+function formatDiagnosticIdentifier(identifier: string): string {
+	return `"${escapeDiagnosticText(identifier)}"`;
+}
+
+function formatDiagnosticColumns(columns: readonly string[]): string {
+	return `(${columns.map(formatDiagnosticIdentifier).join(', ')})`;
 }
 
 // ============================================================================

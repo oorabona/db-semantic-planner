@@ -3215,6 +3215,303 @@ describe('compareSchemata', () => {
 	});
 });
 
+describe('referenced key removals', () => {
+	const parentColumns = [
+		makeCol({ name: 'id', type: 'integer' }),
+		makeCol({ name: 'tenant', type: 'integer' }),
+		makeCol({ name: 'external_id' }),
+		makeCol({ name: 'name' }),
+	];
+	const childForeignKey: ForeignKeyIR = {
+		columns: ['parent_external_id'],
+		references: { table: 'parents', columns: ['external_id'] },
+	};
+	const children = (foreignKeys: readonly ForeignKeyIR[] = [childForeignKey]) =>
+		makeTable({
+			name: 'children',
+			columns: [makeCol({ name: 'parent_external_id' })],
+			foreignKeys,
+		});
+	const parent = (overrides: Partial<TableIR> = {}) =>
+		makeTable({ name: 'parents', columns: parentColumns, ...overrides });
+	const referencedBy = (change: SchemaChange | undefined) =>
+		change?.meta?.referencedBy;
+	const changeOfKind = (
+		diff: ReturnType<typeof compareSchemata>,
+		kind: string,
+	) => {
+		const change = diff.changes.find((candidate) => candidate.kind === kind);
+		expect(change).toBeDefined();
+		return change;
+	};
+
+	it('annotates a qualifying unique-index replacement, but not unrelated index changes', () => {
+		const liveIndex: IndexIR = {
+			name: 'parents_external_id_unique',
+			columns: ['external_id'],
+			unique: true,
+		};
+		const desiredIndex: IndexIR = { ...liveIndex, include: ['name'] };
+		const db = makeModel([parent({ indexes: [liveIndex] }), children()]);
+		const schema = makeModel([parent({ indexes: [desiredIndex] }), children()]);
+		const diff = compareSchemata(schema, db);
+		expect(referencedBy(changeOfKind(diff, 'drop_index'))).toEqual([
+			{
+				keyKind: 'unique_index',
+				table: 'parents',
+				keyColumns: ['external_id'],
+				keyName: 'parents_external_id_unique',
+				referencingTable: 'children',
+				foreignKeyColumns: ['parent_external_id'],
+			},
+		]);
+
+		expect(
+			changeKinds(
+				compareSchemata(
+					makeModel([parent({ indexes: [desiredIndex] })]),
+					makeModel([parent({ indexes: [liveIndex] })]),
+				).changes,
+			),
+		).toEqual(['create_index', 'drop_index']);
+		for (const index of [
+			{ ...liveIndex, unique: false },
+			{ ...liveIndex, where: 'external_id IS NOT NULL' },
+		]) {
+			const unrelated = compareSchemata(
+				makeModel([
+					parent({ indexes: [{ ...index, include: ['name'] }] }),
+					children(),
+				]),
+				makeModel([parent({ indexes: [index] }), children()]),
+			);
+			expect(
+				changeOfKind(unrelated, 'drop_index')?.meta ?? {},
+			).not.toHaveProperty('referencedBy');
+		}
+	});
+
+	it('annotates a qualifying unique-index drop under a live foreign key', () => {
+		const db = makeModel([
+			parent({
+				indexes: [
+					{
+						name: 'parents_external_id_unique',
+						columns: ['external_id'],
+						unique: true,
+					},
+				],
+			}),
+			children(),
+		]);
+		const diff = compareSchemata(makeModel([parent(), children()]), db);
+		expect(referencedBy(changeOfKind(diff, 'drop_index'))).toMatchObject([
+			{ keyKind: 'unique_index' },
+		]);
+	});
+
+	it('annotates a primary-key replacement under a live foreign key but preserves unreferenced behavior', () => {
+		const pkChildren = makeTable({
+			name: 'children',
+			columns: [makeCol({ name: 'parent_id', type: 'integer' })],
+			foreignKeys: [
+				{
+					columns: ['parent_id'],
+					references: { table: 'parents', columns: ['id'] },
+				},
+			],
+		});
+		const db = makeModel([parent({ primaryKey: 'id' }), pkChildren]);
+		const schema = makeModel([
+			parent({ primaryKey: ['id', 'tenant'] }),
+			pkChildren,
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(referencedBy(changeOfKind(diff, 'drop_primary_key'))).toMatchObject([
+			{ keyKind: 'primary_key', keyColumns: ['id'] },
+		]);
+		expect(
+			changeKinds(
+				compareSchemata(
+					makeModel([parent({ primaryKey: ['id', 'tenant'] })]),
+					makeModel([parent({ primaryKey: 'id' })]),
+				).changes,
+			),
+		).toEqual(['drop_primary_key', 'add_primary_key']);
+	});
+
+	it('annotates removing a single-column UNIQUE under a live foreign key', () => {
+		const db = makeModel([
+			parent({
+				columns: parentColumns.map((column) =>
+					column.name === 'external_id' ? { ...column, unique: true } : column,
+				),
+			}),
+			children(),
+		]);
+		const schema = makeModel([parent(), children()]);
+		const diff = compareSchemata(schema, db);
+		expect(
+			referencedBy(changeOfKind(diff, 'alter_column_unique')),
+		).toMatchObject([{ keyKind: 'column_unique' }]);
+		const unreferenced = compareSchemata(
+			makeModel([parent()]),
+			makeModel([db.tables.get('parents')!]),
+		);
+		expect(
+			changeOfKind(unreferenced, 'alter_column_unique')?.meta ?? {},
+		).not.toHaveProperty('referencedBy');
+	});
+
+	it('matches column sets unordered, excludes another schema, and includes self references', () => {
+		const compositeIndex: IndexIR = {
+			name: 'parents_b_a_unique',
+			columns: ['a', 'b'],
+			unique: true,
+		};
+		const compositeParent = (foreignKeys: readonly ForeignKeyIR[] = []) =>
+			makeTable({
+				name: 'parents',
+				columns: [makeCol({ name: 'a' }), makeCol({ name: 'b' })],
+				indexes: [compositeIndex],
+				foreignKeys,
+			});
+		const reorderedFk: ForeignKeyIR = {
+			columns: ['parent_b', 'parent_a'],
+			references: { table: 'parents', columns: ['b', 'a'] },
+		};
+		const compositeChildren = (foreignKey: ForeignKeyIR) =>
+			makeTable({
+				name: 'children',
+				columns: [makeCol({ name: 'parent_a' }), makeCol({ name: 'parent_b' })],
+				foreignKeys: [foreignKey],
+			});
+		const parentWithoutCompositeIndex = makeTable({
+			name: 'parents',
+			columns: [makeCol({ name: 'a' }), makeCol({ name: 'b' })],
+			indexes: [],
+		});
+		const reordered = compareSchemata(
+			makeModel([parentWithoutCompositeIndex, compositeChildren(reorderedFk)]),
+			makeModel([compositeParent(), compositeChildren(reorderedFk)]),
+		);
+		expect(referencedBy(changeOfKind(reordered, 'drop_index'))).toHaveLength(1);
+		const differentColumnSetFk: ForeignKeyIR = {
+			...reorderedFk,
+			references: { table: 'parents', columns: ['id'] },
+		};
+		const differentColumns = compareSchemata(
+			makeModel([
+				parentWithoutCompositeIndex,
+				compositeChildren(differentColumnSetFk),
+			]),
+			makeModel([compositeParent(), compositeChildren(differentColumnSetFk)]),
+		);
+		expect(
+			changeOfKind(differentColumns, 'drop_index')?.meta ?? {},
+		).not.toHaveProperty('referencedBy');
+		const otherSchema = compareSchemata(
+			makeModel([
+				parent({ indexes: [] }),
+				children([
+					{
+						...childForeignKey,
+						references: {
+							schema: 'other',
+							table: 'parents',
+							columns: ['external_id'],
+						},
+					},
+				]),
+			]),
+			makeModel([
+				parent({
+					indexes: [
+						{
+							name: 'parents_external_id_unique',
+							columns: ['external_id'],
+							unique: true,
+						},
+					],
+				}),
+				children([
+					{
+						...childForeignKey,
+						references: {
+							schema: 'other',
+							table: 'parents',
+							columns: ['external_id'],
+						},
+					},
+				]),
+			]),
+		);
+		expect(
+			changeOfKind(otherSchema, 'drop_index')?.meta ?? {},
+		).not.toHaveProperty('referencedBy');
+		const selfReference = compareSchemata(
+			makeModel([parentWithoutCompositeIndex]),
+			makeModel([
+				compositeParent([
+					{
+						columns: ['a', 'b'],
+						references: { table: 'parents', columns: ['b', 'a'] },
+					},
+				]),
+			]),
+		);
+		expect(
+			referencedBy(changeOfKind(selfReference, 'drop_index')),
+		).toHaveLength(1);
+	});
+
+	it('annotates every conflict without adding the field to unrelated changes', () => {
+		const db = makeModel([
+			parent({
+				indexes: [
+					{
+						name: 'parents_external_id_unique',
+						columns: ['external_id'],
+						unique: true,
+					},
+				],
+			}),
+			children(),
+			makeTable({
+				name: 'audit\nchildren',
+				columns: [makeCol({ name: 'parent_external_id' })],
+				foreignKeys: [childForeignKey],
+			}),
+		]);
+		const diff = compareSchemata(
+			makeModel([
+				parent(),
+				children(),
+				...Array.from(db.tables.values()).slice(2),
+			]),
+			db,
+		);
+		expect(referencedBy(changeOfKind(diff, 'drop_index'))).toEqual([
+			{
+				keyKind: 'unique_index',
+				table: 'parents',
+				keyColumns: ['external_id'],
+				keyName: 'parents_external_id_unique',
+				referencingTable: 'children',
+				foreignKeyColumns: ['parent_external_id'],
+			},
+			{
+				keyKind: 'unique_index',
+				table: 'parents',
+				keyColumns: ['external_id'],
+				keyName: 'parents_external_id_unique',
+				referencingTable: 'audit\nchildren',
+				foreignKeyColumns: ['parent_external_id'],
+			},
+		]);
+	});
+});
+
 describe('CHECK constraints', () => {
 	it('should detect added CHECK constraint', () => {
 		const schema = makeModel([
