@@ -25,6 +25,7 @@ import type {
 } from '@dbsp/types';
 import { checkDelta } from './check-delta.js';
 import { enumAddDelta } from './enum-delta.js';
+import { assertDeclaredEnumMapIdentity } from './enum-name.js';
 import { semanticArtifactId } from './ids.js';
 import {
 	defaultIndexName,
@@ -420,7 +421,7 @@ function normalizeCurrentModelForComparison(
 	const externalTables = model.externalTables
 		? new Set([...model.externalTables].map((table) => normalize(table)))
 		: undefined;
-	const enums = normalizeNamedMap<EnumIR>(model.enums, normalize, 'enum');
+	const enums = normalizeNamedMap<EnumIR>(model.enums, (name) => name, 'enum');
 	const sequences = normalizeNamedMap<SequenceIR>(
 		model.sequences,
 		normalize,
@@ -1314,6 +1315,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 			current: ModelIR,
 			context?: EquivalenceContext,
 		): CompareOutcome {
+			assertDeclaredEnumMapIdentity(desired.enums);
 			const engine =
 				context?.engine ??
 				registry.allRules()[0]?.support.engine ??

@@ -8,6 +8,7 @@
  */
 
 import { validateSchemaIndexOptions } from '@dbsp/core';
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	ColumnIR,
@@ -286,6 +287,7 @@ export function compareSchemata(
 	);
 	// 0. Compare ENUM types (schema-level, before tables)
 	if (sup(caps?.supportsDDLEnumTypes)) {
+		assertDeclaredEnumMapIdentity(schema.enums);
 		compareEnums(schema, db, changes);
 	}
 

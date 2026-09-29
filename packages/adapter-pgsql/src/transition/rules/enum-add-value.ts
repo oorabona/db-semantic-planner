@@ -19,7 +19,6 @@ import type {
 	TransitionRule,
 } from '@dbsp/types';
 import type { NamingPlugin } from '../../naming-plugin.js';
-import { identityNaming } from '../../naming-plugin.js';
 import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
@@ -46,14 +45,17 @@ export interface EnumAddValueMatch {
 	readonly assumptions?: readonly Assumption[];
 }
 
+export interface EnumAddValueRuleOptions {
+	/**
+	 * @deprecated Ignored because declared enum names are physical identifiers (#825).
+	 */
+	readonly naming?: NamingPlugin;
+}
+
 type ResolvedEnumAddValueMatch = EnumAddValueMatch & {
 	readonly schema: string;
 	readonly database: string;
 };
-
-export interface EnumAddValueRuleOptions {
-	readonly naming?: NamingPlugin;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -380,7 +382,7 @@ export function satisfiesPgEnumLabelVisibleCompositionFact(
 export function createEnumAddValueRule(
 	options: EnumAddValueRuleOptions = {},
 ): TransitionRule<EnumAddValueMatch> {
-	const naming = options.naming ?? identityNaming;
+	void options;
 	return {
 		id: ENUM_ADD_VALUE_RULE_ID,
 		artifact: PG_RULE_PACK_ARTIFACT,
@@ -416,7 +418,7 @@ export function createEnumAddValueRule(
 				if (delta.after !== undefined) {
 					validatePgEnumLabel(delta.after, 'enum AFTER position');
 				}
-				const type = naming.toDatabase(desiredEnum.name);
+				const type = desiredEnum.name;
 				const schema = resolvedDesiredEnum.schema ?? resolvedCurrentEnum.schema;
 				return {
 					recognized: true,

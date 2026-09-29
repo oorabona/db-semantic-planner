@@ -3,6 +3,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ModelIRImpl } from '@dbsp/core';
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	DbCasing,
@@ -27,7 +28,7 @@ import {
 import { generateColumnDef } from './ddl/ddl-generator.js';
 import { generateEnumTypesPhase } from './ddl/phases/enum-types.js';
 import { generateSequencesPhase } from './ddl/phases/sequences.js';
-import type { PhaseContext } from './ddl/phases/types.js';
+import { type PhaseContext, sup } from './ddl/phases/types.js';
 import {
 	formatSqlDefault,
 	quoteCollation,
@@ -2096,6 +2097,14 @@ async function createMissingDesiredEnumTypes(
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<unknown | undefined> {
+	if (
+		!sup(
+			options?.dialectCapabilities,
+			options?.dialectCapabilities?.supportsDDLEnumTypes,
+		)
+	) {
+		return undefined;
+	}
 	const missingEnums = missingDesiredEnums(desired, dbModel);
 	if (missingEnums.size === 0) return undefined;
 	const enumModel = new ModelIRImpl(new Map(), new Map(), missingEnums);
@@ -2122,6 +2131,7 @@ function missingDesiredEnums(
 	desired: ModelIR,
 	dbModel: ModelIR,
 ): Map<string, EnumIR> {
+	assertDeclaredEnumMapIdentity(desired.enums);
 	const missing = new Map<string, EnumIR>();
 	for (const [name, enumDef] of desired.enums ?? []) {
 		if (!dbModel.enums?.has(name)) missing.set(name, enumDef);

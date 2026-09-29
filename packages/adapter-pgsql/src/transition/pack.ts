@@ -189,7 +189,7 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 			}),
 			createSetNotNullRule({ naming }),
 			createAddCheckRule({ naming }),
-			createEnumAddValueRule({ naming }),
+			createEnumAddValueRule(),
 			createCreateUniqueIndexConcurrentlyRule({ naming }),
 		],
 		operationSemantics,

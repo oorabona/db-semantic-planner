@@ -323,7 +323,13 @@ export interface SequenceIR {
 }
 
 export interface EnumIR {
-	/** Enum type name */
+	/**
+	 * Raw PostgreSQL catalog type name (`pg_type.typname`): no identifier
+	 * quotes, schema, modifiers or array suffix. It is physical: `dbCasing`
+	 * never maps it. A column refers to it through the rendered spelling in
+	 * `originalDbType` (`status`, `"Status"`, `status[]`), with the schema in
+	 * `originalDbTypeSchema`. Its `ModelIR.enums` key must be this same string.
+	 */
 	readonly name: string;
 
 	/** Ordered list of enum values */
@@ -335,6 +341,7 @@ export interface EnumIR {
 
 export interface RequiredEnumLabelIR {
 	readonly schema?: string;
+	/** Physical enum type name, as in `EnumIR.name`; `dbCasing` never maps it. */
 	readonly type: string;
 	readonly label: string;
 }
@@ -633,7 +640,10 @@ export interface ModelIR {
 	/** Relation definitions indexed by "source.name" */
 	readonly relations: ReadonlyMap<string, RelationIR>;
 
-	/** ENUM type definitions indexed by name */
+	/**
+	 * ENUM type definitions keyed by `EnumIR.name`, the physical type name. A key
+	 * that differs from its value's `name` is refused wherever enums are handled.
+	 */
 	readonly enums?: ReadonlyMap<string, EnumIR>;
 
 	/** Extension names to ensure (CREATE EXTENSION IF NOT EXISTS) */

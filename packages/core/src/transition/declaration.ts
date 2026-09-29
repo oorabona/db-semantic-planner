@@ -10,6 +10,7 @@ import type {
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
 import { canonicalJson, canonicalJsonDigest } from './canonical-json.js';
+import { assertDeclaredEnumMapIdentity } from './enum-name.js';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import { stableJson } from './stable-json.js';
@@ -23,7 +24,10 @@ export interface DeclarationAddressContext {
 /**
  * The declaration layer deliberately depends on this small structural naming
  * boundary rather than an adapter package. Callers pass the same strategy that
- * comparison and proof use for the target database.
+ * comparison and proof use for the target database. It maps table, column,
+ * index, constraint and sequence names. A declared enum name is never passed
+ * through it: it is the physical catalog type name that columns reference in
+ * `originalDbType`, which no strategy maps (#825).
  */
 export interface DeclarationNamingStrategy {
 	toDatabase(identifier: string): string;
@@ -169,6 +173,7 @@ export function declarationSetFromModel(
 	context: DeclarationAddressContext,
 	naming: DeclarationNamingStrategy = identityDeclarationNaming,
 ): DeclarationSet {
+	assertDeclaredEnumMapIdentity(model.enums);
 	const declarations: ManagedDeclaration[] = [];
 	const toDatabase = (identifier: string) => naming.toDatabase(identifier);
 	for (const [tableKey, table] of [...model.tables].sort(([a], [b]) =>
@@ -303,8 +308,8 @@ export function declarationSetFromModel(
 			declaration(
 				context,
 				'enum',
-				toDatabase(name),
-				{ ...item, name: toDatabase(item.name) },
+				name,
+				{ ...item, name: item.name },
 				`schema.enums[${JSON.stringify(name)}]`,
 			),
 		);

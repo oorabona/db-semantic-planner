@@ -200,6 +200,23 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired, 'snake_case')).changes).toEqual([]);
 	});
 
+	it('keeps a declared mixed-case enum physical under snake_case', async () => {
+		const desired = model(
+			[
+				table('moods', [
+					column('mood', 'string', {
+						originalDbType: '"moodType"',
+						originalDbTypeSchema: SCHEMA,
+						originalDbTypeSchemaScope: 'target',
+					}),
+				]),
+			],
+			[{ name: 'moodType', values: ['happy', 'sad'] }],
+		);
+		await apply(desired, 'snake_case');
+		expect((await changes(desired, 'snake_case')).changes).toEqual([]);
+	});
+
 	it('refuses a legacy raw sequence under snake_case without changing it', async () => {
 		const pool = await getTestPool();
 		await pool.query(`CREATE SEQUENCE "${SCHEMA}"."orderNumberSeq"`);

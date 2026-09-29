@@ -101,7 +101,9 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
 or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
-create enums or extensions: those the model uses must already exist.
+create enums or extensions: those the model uses must already exist. An enum's declared name is its
+physical PostgreSQL type name under every `dbCasing`, the name its columns' types refer to, so
+declare `mood_type` to match a live `mood_type`.
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an

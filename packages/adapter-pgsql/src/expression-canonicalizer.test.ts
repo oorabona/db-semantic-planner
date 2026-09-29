@@ -1,4 +1,5 @@
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type {
 	ColumnIR,
 	EnumIR,
@@ -374,6 +375,95 @@ function createdTempTableNames(client: FakePgClient): string[] {
 }
 
 describe('canonicalizeCheckConstraints', () => {
+	it('refuses an enum key/name mismatch before scratch enum staging', async () => {
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['a', { name: 'b\n', values: ['happy'] }]]),
+		);
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(new FakePgClient())),
+				desired,
+				makeModel([]),
+			),
+		).rejects.toThrow(EnumNameMapKeyMismatchError);
+	});
+
+	it('skips a mismatched enum map when enum staging is disabled', async () => {
+		const client = new FakePgClient();
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['happy'] }]]),
+		);
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				makeModel([]),
+				{
+					dialectCapabilities: {
+						...POSTGRESQL_CAPABILITIES,
+						supportsDDLEnumTypes: false,
+					},
+				},
+			),
+		).resolves.toBeDefined();
+		expect(client.queries.some((query) => /CREATE TYPE/u.test(query.sql))).toBe(
+			false,
+		);
+	});
+
+	it('skips a mismatched enum map when enum staging support is undeclared', async () => {
+		const client = new FakePgClient();
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['happy'] }]]),
+		);
+		const dialectCapabilities = { ...POSTGRESQL_CAPABILITIES };
+		delete dialectCapabilities.supportsDDLEnumTypes;
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				makeModel([]),
+				{ dialectCapabilities },
+			),
+		).resolves.toBeDefined();
+		expect(client.queries.some((query) => /CREATE TYPE/u.test(query.sql))).toBe(
+			false,
+		);
+	});
+
 	it.each([
 		['single-quoted', "state = 'pending'"],
 		['dollar-quoted', 'state = $$pending$$'],

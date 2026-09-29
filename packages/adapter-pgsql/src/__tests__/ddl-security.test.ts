@@ -464,7 +464,7 @@ describe('SEC-004 (phases): identifier validation in DDL phase modules', () => {
 		const enumDef = { name: 'bad"enum', values: ['a', 'b'] };
 		const model: any = {
 			tables: new Map(),
-			enums: new Map([['bad_enum', enumDef]]),
+			enums: new Map([['bad"enum', enumDef]]),
 			sequences: new Map(),
 			extensions: [],
 			getTable: () => undefined,

@@ -11,6 +11,7 @@ import type {
 	TableIR,
 } from '@dbsp/core';
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { markEngineCanonicalCheck } from '../expression-provenance.js';
@@ -23,6 +24,16 @@ import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 describe('DDL Generator', () => {
+	it('refuses a declared enum map key that differs from its physical name', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			new Map([['a', { name: 'b\n', values: ['active'] }]]),
+		);
+		expect(() => generateDDL(schema)).toThrow(EnumNameMapKeyMismatchError);
+		expect(() => generateDDL(schema)).toThrow('"b\\n"');
+	});
+
 	it('makes a canonical CHECK literal independent of standard_conforming_strings', () => {
 		const schema = {
 			tables: new Map([
@@ -2215,6 +2226,31 @@ describe('DDL Generation with Capabilities (CAPS-003)', () => {
 		expect(stmts.some((s) => s.includes('CREATE TYPE'))).toBe(false);
 		// CREATE TABLE must still be present
 		expect(stmts.some((s) => s.includes('CREATE TABLE'))).toBe(true);
+	});
+
+	it('skips a mismatched enum map when supportsDDLEnumTypes is false', () => {
+		const model = new ModelIRImpl(
+			new Map<string, TableIR>([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [],
+					},
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['active'] }]]),
+		);
+
+		const statements = generateDDL(model, { dialectCapabilities: noEnumCaps });
+
+		expect(statements).toHaveLength(1);
+		expect(statements[0]).toContain('CREATE TABLE');
 	});
 
 	// SC-10: PG generates everything
