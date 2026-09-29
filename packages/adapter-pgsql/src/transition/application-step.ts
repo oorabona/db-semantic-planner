@@ -254,8 +254,8 @@ function skipSqlWhitespaceAndComments(text: string, offset = 0): number {
 	while (true) {
 		while (index < text.length && /\s/u.test(text[index]!)) index += 1;
 		if (text.startsWith('--', index)) {
-			const lineEnd = text.indexOf('\n', index + 2);
-			index = lineEnd === -1 ? text.length : lineEnd + 1;
+			const lineEnd = text.slice(index + 2).search(/[\r\n]/u);
+			index = lineEnd === -1 ? text.length : index + 2 + lineEnd;
 			continue;
 		}
 		if (!text.startsWith('/*', index)) return index;

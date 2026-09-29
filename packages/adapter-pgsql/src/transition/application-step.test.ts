@@ -203,13 +203,18 @@ describe('converge application steps', () => {
 			"PREPARE /* c */ TRANSACTION 'x'",
 			"PREPARE/**/TRANSACTION 'x'",
 			"PREPARE /* outer /* inner */ outer */ TRANSACTION 'x'",
+			"PREPARE -- c\rTRANSACTION 'x'",
+			"PREPARE -- c\r\nTRANSACTION 'x'",
 			'SET TRANSACTION READ ONLY',
 			'SET -- c\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
+			'SET -- c\rTRANSACTION ISOLATION LEVEL SERIALIZABLE',
+			'SET -- c\r\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
 			'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
 		])
 			await expect(tx.query(statement)).rejects.toThrow('transaction control');
 		expect(query).not.toHaveBeenCalled();
 		await tx.query('PREPARE q AS SELECT 1');
+		await tx.query('SELECT 1 -- c\r');
 		await tx.query('DISCARD PLANS');
 		await tx.query('SELECT 1');
 		expect(query).toHaveBeenLastCalledWith({

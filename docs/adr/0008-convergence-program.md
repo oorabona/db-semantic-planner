@@ -34,7 +34,7 @@ re-verification at claim time, lock timeouts) do not run.
 
 - `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
 - `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only; every apply
-  runs it by the assert's phase, and a check runs it when no earlier pending work can change its answer.
+  runs it by the assert's phase, and a check runs it only when nothing else is pending.
   `apply` runs in apply mode when inspection reports the database unhealthy.
 
 How they are recorded and run:

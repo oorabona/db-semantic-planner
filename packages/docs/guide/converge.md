@@ -200,7 +200,7 @@ await convergePg(pool, model, {
 - Every apply call inspects each `assert` by the time its phase comes. When it answers
   `'unhealthy'`, converge runs `apply`, inspects again, and records the run only if the database is
   now healthy; otherwise it refuses `application-step-failed`. A check inspects an assert only when
-  no earlier pending work can change the answer (see below).
+  nothing else is pending (see below).
 - `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
   `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
 - Each step is one transaction on converge's connection. `tx.query` sends one statement per call
