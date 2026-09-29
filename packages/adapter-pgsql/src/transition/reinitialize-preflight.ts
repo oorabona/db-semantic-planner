@@ -114,6 +114,30 @@ export interface PgReinitializePreflightOptions {
 	readonly observer?: ReinitializePreflightObserver;
 }
 
+/** Internal converge entry: it retains preflight's database effects but has no output side effect. */
+export interface PgConvergeInitializationPreflightOptions {
+	readonly pool: PgReinitializePreflightPool;
+	readonly schema: string;
+	readonly pristineRelationNames?: readonly string[];
+}
+
+type ReinitializePreflightScopeOptions = Pick<
+	PgReinitializePreflightOptions,
+	'pool' | 'schemas' | 'observer'
+>;
+
+type ReinitializePreflightOutput = Pick<
+	PgReinitializePreflightOptions,
+	'declarations' | 'writeAdoptionFile'
+>;
+
+type ReinitializePreflightScopeOnlyReport = Pick<
+	ReinitializePreflightReport,
+	'scopes'
+>;
+
+type LineageMismatchPolicy = 'archive' | 'refuse';
+
 const LEDGER_TABLES = DBSP_LEDGER_TABLES;
 const TRANSITION_JOURNAL_TABLES = [
 	DBSP_TRANSITION_RUN_TABLE,
@@ -727,6 +751,11 @@ async function processScope(
 	pool: PgReinitializePreflightPool,
 	inspection: ReinitializePreflightScopeInspection,
 	observer: ReinitializePreflightObserver | undefined,
+	beforeFirstWrite?: (
+		client: PgReinitializePreflightClient,
+		home: LedgerHome,
+	) => Promise<void>,
+	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
 ): Promise<ReinitializePreflightScopeReport> {
 	const client = await pool.connect();
 	let begun = false;
@@ -770,6 +799,10 @@ async function processScope(
 				markerRefusal(current.marker),
 				'marker',
 			);
+		}
+		if (beforeFirstWrite && current.marker.kind === 'absent') {
+			failureStep = 'create';
+			await beforeFirstWrite(client, current.home);
 		}
 		const preexistingLedger =
 			current.marker.kind !== 'current' &&
@@ -831,6 +864,17 @@ async function processScope(
 					outcome: initializedTransitionJournal ? 'current' : 'unchanged',
 					marker: current.marker,
 				};
+			}
+			if (lineageMismatchPolicy === 'refuse') {
+				await client.query('ROLLBACK');
+				begun = false;
+				return refusal(
+					current.home,
+					current.marker,
+					'reinitialize-preflight-lineage',
+					`reinitialize-preflight refuses ledger lineage mismatch for ${schemaFor(current.home)}`,
+					'identity',
+				);
 			}
 			// A lineage mismatch remains a current ledger only after the same
 			// physical-shape and ownership admission checks as the unchanged path.
@@ -911,6 +955,233 @@ async function processScope(
 	} finally {
 		releasePreflightClient(client, failed, releaseFailure, rollbackFailed);
 	}
+}
+
+async function refuseNonPristineRelations(
+	client: PgReinitializePreflightClient,
+	home: LedgerHome,
+	names: readonly string[],
+): Promise<void> {
+	if (home.scope !== 'schema' || names.length === 0) return;
+	const relations = await client.query(
+		`SELECT relation.relname AS name FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND relation.relkind IN ('r', 'p', 'f', 'S') ORDER BY relation.relname`,
+		[home.schema, names],
+	);
+	const found = relations.rows
+		.map((row) => row.name)
+		.filter((name): name is string => typeof name === 'string');
+	if (found.length > 0)
+		throw new Error(
+			`converge pristine initialization refuses declared live relation${found.length === 1 ? '' : 's'} ${found.join(', ')}`,
+		);
+}
+
+function runPgReinitializePreflightInternal(
+	options: ReinitializePreflightScopeOptions,
+	output: ReinitializePreflightOutput,
+): Promise<ReinitializePreflightReport>;
+function runPgReinitializePreflightInternal(
+	options: ReinitializePreflightScopeOptions,
+	output: undefined,
+	beforeFirstWrite?: (
+		client: PgReinitializePreflightClient,
+		home: LedgerHome,
+	) => Promise<void>,
+	lineageMismatchPolicy?: LineageMismatchPolicy,
+	processScopes?: (
+		inspections: readonly ReinitializePreflightScopeInspection[],
+		process: (
+			inspection: ReinitializePreflightScopeInspection,
+		) => Promise<ReinitializePreflightScopeReport>,
+	) => Promise<readonly ReinitializePreflightScopeReport[]>,
+): Promise<ReinitializePreflightScopeOnlyReport>;
+async function runPgReinitializePreflightInternal(
+	options: ReinitializePreflightScopeOptions,
+	output: ReinitializePreflightOutput | undefined,
+	beforeFirstWrite?: (
+		client: PgReinitializePreflightClient,
+		home: LedgerHome,
+	) => Promise<void>,
+	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
+	processScopes: (
+		inspections: readonly ReinitializePreflightScopeInspection[],
+		process: (
+			inspection: ReinitializePreflightScopeInspection,
+		) => Promise<ReinitializePreflightScopeReport>,
+	) => Promise<
+		readonly ReinitializePreflightScopeReport[]
+	> = processReinitializePreflightScopes,
+): Promise<ReinitializePreflightReport | ReinitializePreflightScopeOnlyReport> {
+	const homes = homesFor(options.schemas);
+	const inspectionClient = await options.pool.connect();
+	let inspections: readonly ReinitializePreflightScopeInspection[];
+	let inspectionBegun = false;
+	let failed = false;
+	let releaseFailure: unknown;
+	let rollbackFailed = false;
+	try {
+		await inspectionClient.query('BEGIN');
+		inspectionBegun = true;
+		await inspectionClient.query(REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL);
+		inspections = [];
+		for (const home of homes) {
+			await inspectionClient.query(
+				'SAVEPOINT reinitialize_preflight_inspection',
+			);
+			inspections = [
+				...inspections,
+				await inspectScope(inspectionClient, home),
+			];
+			await inspectionClient.query(
+				'ROLLBACK TO SAVEPOINT reinitialize_preflight_inspection',
+			);
+			await inspectionClient.query(
+				'RELEASE SAVEPOINT reinitialize_preflight_inspection',
+			);
+		}
+		await inspectionClient.query('COMMIT');
+		inspectionBegun = false;
+	} catch (error) {
+		failed = true;
+		releaseFailure = error;
+		if (inspectionBegun) {
+			try {
+				await inspectionClient.query('ROLLBACK');
+			} catch (rollbackError) {
+				rollbackFailed = true;
+				releaseFailure = rollbackError;
+			}
+		}
+		throw error;
+	} finally {
+		releasePreflightClient(
+			inspectionClient,
+			failed,
+			releaseFailure,
+			rollbackFailed,
+		);
+	}
+	const markerFailure = inspections.find(
+		({ marker }) =>
+			marker.kind === 'older' ||
+			marker.kind === 'future' ||
+			marker.kind === 'mixed' ||
+			marker.kind === 'unreadable',
+	);
+	if (markerFailure) {
+		const scopes = inspections.map((inspection) =>
+			inspection === markerFailure
+				? refusal(
+						inspection.home,
+						inspection.marker,
+						'reinitialize-preflight-marker-not-current',
+						markerRefusal(inspection.marker),
+						'marker',
+					)
+				: {
+						ledger: inspection.home,
+						outcome: 'not-attempted' as const,
+						marker: inspection.marker,
+					},
+		);
+		return output ? { scopes, adoptionCandidates: [] } : { scopes };
+	}
+	const process = (inspection: ReinitializePreflightScopeInspection) =>
+		processScope(
+			options.pool,
+			inspection,
+			options.observer,
+			beforeFirstWrite,
+			lineageMismatchPolicy,
+		);
+	const scopes = await processScopes(inspections, process);
+	if (scopes.some((scope) => scope.outcome === 'failed'))
+		return output ? { scopes, adoptionCandidates: [] } : { scopes };
+	if (!output) return { scopes };
+	try {
+		const chains = await readChainAddresses(options.pool, homes);
+		const adoptionCandidates = selectReinitializeAdoptionCandidates(
+			output.declarations,
+			chains,
+		);
+		const report = { scopes, adoptionCandidates };
+		await checkpoint(options.observer, 'output');
+		await output.writeAdoptionFile(report);
+		return report;
+	} catch (error) {
+		return {
+			scopes: scopes.map((scope) =>
+				scope.outcome === 'current' || scope.outcome === 'unchanged'
+					? {
+							...scope,
+							outcome: 'failed' as const,
+							refusal: {
+								code: 'reinitialize-preflight-failed' as const,
+								detail: errorDetail(error),
+							},
+							reason: {
+								step: 'output' as const,
+								message: errorDetail(error),
+							},
+						}
+					: scope,
+			),
+			adoptionCandidates: [],
+		};
+	}
+}
+
+export function runPgConvergeInitializationPreflight(
+	options: PgConvergeInitializationPreflightOptions,
+): Promise<ReinitializePreflightScopeOnlyReport> {
+	return runPgReinitializePreflightInternal(
+		{
+			pool: options.pool,
+			schemas: [options.schema],
+		},
+		undefined,
+		options.pristineRelationNames === undefined
+			? undefined
+			: (client, home) =>
+					refuseNonPristineRelations(
+						client,
+						home,
+						options.pristineRelationNames ?? [],
+					),
+		'refuse',
+		processConvergeInitializationScopes,
+	);
+}
+
+async function processConvergeInitializationScopes(
+	inspections: readonly ReinitializePreflightScopeInspection[],
+	process: (
+		inspection: ReinitializePreflightScopeInspection,
+	) => Promise<ReinitializePreflightScopeReport>,
+): Promise<readonly ReinitializePreflightScopeReport[]> {
+	const [databaseInspection, ...schemaInspections] = inspections;
+	if (!databaseInspection) throw new Error('missing database ledger home');
+	const [databaseScope] = await processReinitializePreflightScopes(
+		[databaseInspection],
+		process,
+	);
+	if (!databaseScope) throw new Error('missing database ledger scope report');
+	if (
+		databaseScope.outcome === 'current' ||
+		databaseScope.outcome === 'unchanged'
+	)
+		return [
+			databaseScope,
+			...(await processReinitializePreflightScopes(schemaInspections, process)),
+		];
+	return [
+		databaseScope,
+		...schemaInspections.map((inspection) => ({
+			ledger: inspection.home,
+			outcome: 'not-attempted' as const,
+			marker: inspection.marker,
+		})),
+	];
 }
 
 /**
@@ -1080,121 +1351,8 @@ async function readChainAddresses(
 export async function runPgReinitializePreflight(
 	options: PgReinitializePreflightOptions,
 ): Promise<ReinitializePreflightReport> {
-	const homes = homesFor(options.schemas);
-	const inspectionClient = await options.pool.connect();
-	let inspections: readonly ReinitializePreflightScopeInspection[];
-	let inspectionBegun = false;
-	let failed = false;
-	let releaseFailure: unknown;
-	let rollbackFailed = false;
-	try {
-		await inspectionClient.query('BEGIN');
-		inspectionBegun = true;
-		await inspectionClient.query(REINITIALIZE_PREFLIGHT_LOCK_TIMEOUT_SQL);
-		inspections = [];
-		for (const home of homes) {
-			await inspectionClient.query(
-				'SAVEPOINT reinitialize_preflight_inspection',
-			);
-			inspections = [
-				...inspections,
-				await inspectScope(inspectionClient, home),
-			];
-			// An inspection-time PostgreSQL error aborts this transaction until a
-			// savepoint rollback. Always roll back the read-only scope work so a
-			// denied schema cannot prevent inspecting its later siblings.
-			await inspectionClient.query(
-				'ROLLBACK TO SAVEPOINT reinitialize_preflight_inspection',
-			);
-			await inspectionClient.query(
-				'RELEASE SAVEPOINT reinitialize_preflight_inspection',
-			);
-		}
-		await inspectionClient.query('COMMIT');
-		inspectionBegun = false;
-	} catch (error) {
-		failed = true;
-		releaseFailure = error;
-		if (inspectionBegun) {
-			try {
-				await inspectionClient.query('ROLLBACK');
-			} catch (rollbackError) {
-				rollbackFailed = true;
-				releaseFailure = rollbackError;
-				// The original PostgreSQL error remains the useful failure.
-			}
-		}
-		throw error;
-	} finally {
-		releasePreflightClient(
-			inspectionClient,
-			failed,
-			releaseFailure,
-			rollbackFailed,
-		);
-	}
-	const markerFailure = inspections.find(
-		({ marker }) =>
-			marker.kind === 'older' ||
-			marker.kind === 'future' ||
-			marker.kind === 'mixed' ||
-			marker.kind === 'unreadable',
-	);
-	if (markerFailure) {
-		return {
-			scopes: inspections.map((inspection) =>
-				inspection === markerFailure
-					? refusal(
-							inspection.home,
-							inspection.marker,
-							'reinitialize-preflight-marker-not-current',
-							markerRefusal(inspection.marker),
-							'marker',
-						)
-					: {
-							ledger: inspection.home,
-							outcome: 'not-attempted',
-							marker: inspection.marker,
-						},
-			),
-			adoptionCandidates: [],
-		};
-	}
-	const scopes = await processReinitializePreflightScopes(
-		inspections,
-		(inspection) => processScope(options.pool, inspection, options.observer),
-	);
-	if (scopes.some((scope) => scope.outcome === 'failed'))
-		return { scopes, adoptionCandidates: [] };
-	try {
-		const chains = await readChainAddresses(options.pool, homes);
-		const adoptionCandidates = selectReinitializeAdoptionCandidates(
-			options.declarations,
-			chains,
-		);
-		const report = { scopes, adoptionCandidates };
-		await checkpoint(options.observer, 'output');
-		await options.writeAdoptionFile(report);
-		return report;
-	} catch (error) {
-		return {
-			scopes: scopes.map((scope) =>
-				scope.outcome === 'current' || scope.outcome === 'unchanged'
-					? {
-							...scope,
-							outcome: 'failed' as const,
-							refusal: {
-								code: 'reinitialize-preflight-failed' as const,
-								detail: errorDetail(error),
-							},
-							reason: {
-								step: 'output' as const,
-								message: errorDetail(error),
-							},
-						}
-					: scope,
-			),
-			adoptionCandidates: [],
-		};
-	}
+	return runPgReinitializePreflightInternal(options, {
+		declarations: options.declarations,
+		writeAdoptionFile: options.writeAdoptionFile,
+	});
 }

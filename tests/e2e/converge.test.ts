@@ -3,14 +3,16 @@ import { randomUUID } from 'node:crypto';
 import {
 	appendIntentJournal,
 	comparePgsqlDatabaseSchema,
+	convergePg,
 	createPgsqlAdapter,
 	createPgTransitionRunPersister,
+	DBSP_LEDGER_MARKER_TABLE,
+	PG_LEDGER_SHAPE_VERSION,
 	readPgLedgerAddressChain,
 	reconcilePgTransitionRun,
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerClaim,
-	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
 import {
@@ -37,7 +39,10 @@ import {
 	dropSchema,
 	getTestPool,
 } from './testkit/index.js';
-import { runPreflight } from './transition-reinitialize-preflight-testkit.js';
+import {
+	quoteIdent,
+	runPreflight,
+} from './transition-reinitialize-preflight-testkit.js';
 
 const schema = `converge_e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 const typesSchema = `${schema}_types`;
@@ -2044,6 +2049,470 @@ describe('convergePg', () => {
 			expect(await relationCount()).toBe(before);
 		} finally {
 			await dropSchema(absentLedgerSchema);
+		}
+	});
+
+	it('initializes a fresh schema through convergePg, then reports no drift', async () => {
+		const initializedSchema = `converge_pristine_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'fresh_items';
+		await createSchema(initializedSchema);
+		try {
+			await expect(
+				convergePg(pool, model([table(name)]), {
+					schema: initializedSchema,
+					initialize: 'pristine',
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${initializedSchema}.dbsp_ledger_marker`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: expect.any(String) }] });
+			await expect(
+				convergePg(pool, model([table(name)]), {
+					schema: initializedSchema,
+					initialize: 'pristine',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('adopts legacy tables and sequences, including a standing adoption', async () => {
+		const initializedSchema = `converge_adopt_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const first = 'legacy_first';
+		const second = 'legacy_second';
+		const sequence = 'legacy_sequence';
+		await createSchema(initializedSchema);
+		try {
+			for (const name of [first, second])
+				await pool.query(
+					`CREATE TABLE "${initializedSchema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${name}_code_index" ON "${initializedSchema}"."${name}" ("code")`,
+				);
+			await pool.query(`CREATE SEQUENCE "${initializedSchema}"."${sequence}"`);
+			await pool.query(
+				`INSERT INTO "${initializedSchema}"."${first}" VALUES (1, 7)`,
+			);
+			const firstModel = model(
+				[legacyTable(first, false)],
+				[{ name: sequence }],
+			);
+			await expect(
+				convergePg(pool, firstModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({
+				kind: 'applied',
+				applied: ['adopt_table', 'adopt_sequence'],
+			});
+			await expect(
+				pool.query(
+					`SELECT "code"::text AS code FROM "${initializedSchema}"."${first}"`,
+				),
+			).resolves.toMatchObject({ rows: [{ code: '7' }] });
+			await expect(
+				convergePg(pool, firstModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+
+			const expanded = model([
+				legacyTable(first, false),
+				legacyTable(second, false),
+			]);
+			await expect(
+				convergePg(pool, expanded, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['adopt_table'] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('does not treat a declared-table view as standing adoption', async () => {
+		const initializedSchema = `converge_adopt_view_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'legacy_view';
+		await createSchema(initializedSchema);
+		try {
+			await runPreflight([initializedSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await pool.query(
+				`CREATE VIEW "${initializedSchema}"."${name}" AS SELECT 1::integer AS "id", 7::integer AS "code"`,
+			);
+			const desired = model([legacyTable(name, false)]);
+			const settle = async (initialize: 'never' | 'adopt-existing') => {
+				try {
+					return {
+						kind: (
+							await convergePg(pool, desired, {
+								schema: initializedSchema,
+								mode: 'check',
+								initialize,
+							})
+						).kind,
+					};
+				} catch (error) {
+					if (!(error instanceof PgConvergeRefusalError)) throw error;
+					return { refusal: error.refusal };
+				}
+			};
+			const never = await settle('never');
+			const adoptExisting = await settle('adopt-existing');
+
+			expect(adoptExisting).toEqual(never);
+			expect(adoptExisting).not.toEqual({
+				refusal: 'adoption-refused',
+			});
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('converges nullable columns on managed tables under standing and explicit adoption', async () => {
+		const initializedSchema = `converge_adopt_evolve_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const adopted = 'adopted_items';
+		const created = 'created_items';
+		const evolve = (name: string, column: string): TableIR => {
+			const base = legacyTable(name);
+			return {
+				...base,
+				columns: [
+					...base.columns,
+					{ name: column, type: 'string', nullable: true },
+				],
+			};
+		};
+		await createSchema(initializedSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${adopted}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${adopted}_code_index" ON "${initializedSchema}"."${adopted}" ("code")`,
+			);
+			const adoptedModel = model([legacyTable(adopted)]);
+			await expect(
+				convergePg(pool, adoptedModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['adopt_table'] });
+			await expect(
+				convergePg(pool, adoptedModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+
+			const adoptedEvolved = model([evolve(adopted, 'nickname')]);
+			const standingCheck = await convergePg(pool, adoptedEvolved, {
+				schema: initializedSchema,
+				initialize: 'adopt-existing',
+				mode: 'check',
+			});
+			expect(standingCheck).toMatchObject({
+				kind: 'would-apply',
+				steps: [{ kind: 'add_column' }],
+			});
+			if (standingCheck.kind === 'would-apply')
+				expect(standingCheck.steps.map(({ kind }) => kind)).toEqual([
+					'add_column',
+				]);
+			await expect(
+				convergePg(pool, adoptedEvolved, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+			await expect(
+				convergePg(pool, adoptedEvolved, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+
+			const createdModel = model([legacyTable(created)]);
+			await expect(
+				convergePg(pool, createdModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			const createdEvolved = model([evolve(created, 'description')]);
+			const explicitCheck = await convergePg(pool, createdEvolved, {
+				schema: initializedSchema,
+				mode: 'check',
+				initialize: 'never',
+			});
+			expect(explicitCheck).toMatchObject({
+				kind: 'would-apply',
+				steps: [{ kind: 'add_column' }],
+			});
+			if (explicitCheck.kind === 'would-apply')
+				expect(explicitCheck.steps.map(({ kind }) => kind)).toEqual([
+					'add_column',
+				]);
+			await expect(
+				convergePg(pool, createdEvolved, {
+					schema: initializedSchema,
+					initialize: 'never',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+			await expect(
+				convergePg(pool, createdEvolved, {
+					schema: initializedSchema,
+					initialize: 'never',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('keeps normal unmanaged-object behavior and refuses a non-pristine schema', async () => {
+		const initializedSchema = `converge_guard_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'raw_items';
+		await createSchema(initializedSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${name}_code_index" ON "${initializedSchema}"."${name}" ("code")`,
+			);
+			await expect(
+				convergePg(pool, model([legacyTable(name, false)]), {
+					schema: initializedSchema,
+					initialize: 'pristine',
+				}),
+			).rejects.toMatchObject({
+				refusal: 'initialization-refused',
+				detail: expect.stringContaining(name),
+			});
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${initializedSchema}.dbsp_ledger_marker`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
+			await expect(
+				convergePg(pool, model([legacyTable(name, false)]), {
+					schema: initializedSchema,
+				}),
+			).rejects.toMatchObject({ refusal: 'ledger-absent' });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('refuses a later unmanaged table once initialize is back to never', async () => {
+		const initializedSchema = `converge_never_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const first = 'managed_first';
+		const second = 'unmanaged_second';
+		await createSchema(initializedSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${first}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${first}_code_index" ON "${initializedSchema}"."${first}" ("code")`,
+			);
+			await expect(
+				convergePg(pool, model([legacyTable(first, false)]), {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${second}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${second}_code_index" ON "${initializedSchema}"."${second}" ("code")`,
+			);
+			await expect(
+				convergePg(
+					pool,
+					model([legacyTable(first, false), legacyTable(second, false)]),
+					{
+						schema: initializedSchema,
+						initialize: 'never',
+					},
+				),
+			).rejects.toMatchObject({ refusal: 'unmanaged-object' });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('allows concurrent pristine initializers to settle only as applied, no-drift, or busy', async () => {
+		const initializedSchema = `converge_pristine_race_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'race_items';
+		await createSchema(initializedSchema);
+		try {
+			const settled = await Promise.allSettled(
+				Array.from({ length: 3 }, () =>
+					convergePg(pool, model([table(name)]), {
+						schema: initializedSchema,
+						initialize: 'pristine',
+					}),
+				),
+			);
+			for (const outcome of settled) {
+				if (outcome.status === 'fulfilled') {
+					expect(['applied', 'no-drift']).toContain(outcome.value.kind);
+					continue;
+				}
+				if (!(outcome.reason instanceof PgConvergeRefusalError))
+					throw outcome.reason;
+				expect(outcome.reason.refusal).toBe('busy');
+			}
+			const followUp = await convergePg(pool, model([table(name)]), {
+				schema: initializedSchema,
+				initialize: 'pristine',
+			});
+			const concurrentApply = settled.some(
+				(outcome) =>
+					outcome.status === 'fulfilled' && outcome.value.kind === 'applied',
+			);
+			if (concurrentApply)
+				expect(followUp).toEqual({ kind: 'no-drift', applied: [] });
+			else
+				expect(followUp).toEqual({
+					kind: 'applied',
+					applied: ['create_table'],
+				});
+			await expect(
+				convergePg(pool, model([table(name)]), {
+					schema: initializedSchema,
+					initialize: 'pristine',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+			await expect(
+				pool.query<{ readonly count: string }>(
+					`SELECT count(*)::text AS count FROM "${initializedSchema}".${quoteIdent(DBSP_LEDGER_MARKER_TABLE)}`,
+				),
+			).resolves.toMatchObject({ rows: [{ count: '1' }] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('refuses adopt-existing when a declared live table shape differs after initialization', async () => {
+		const initializedSchema = `converge_adopt_mismatch_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'legacy_mismatch';
+		await createSchema(initializedSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${name}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL, "extra" text NOT NULL); CREATE INDEX "${name}_code_index" ON "${initializedSchema}"."${name}" ("code"); INSERT INTO "${initializedSchema}"."${name}" VALUES (1, 7, 'preserve')`,
+			);
+			await expect(
+				convergePg(pool, model([legacyTable(name, false)]), {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).rejects.toMatchObject({ refusal: 'adoption-refused' });
+			await expect(
+				pool.query(
+					`SELECT "id"::text AS id, "code"::text AS code, "extra" FROM "${initializedSchema}"."${name}"`,
+				),
+			).resolves.toMatchObject({
+				rows: [{ id: '1', code: '7', extra: 'preserve' }],
+			});
+			await expect(
+				pool.query<{ readonly count: number }>(
+					'SELECT count(*)::int AS count FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2',
+					[initializedSchema, name],
+				),
+			).resolves.toMatchObject({ rows: [{ count: 3 }] });
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${initializedSchema}.${DBSP_LEDGER_MARKER_TABLE}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: expect.any(String) }] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('creates an absent adopt:true table through adopt-existing instead of adopting it', async () => {
+		const initializedSchema = `converge_adopt_create_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'declared_absent';
+		await createSchema(initializedSchema);
+		try {
+			const result = await convergePg(pool, model([legacyTable(name)]), {
+				schema: initializedSchema,
+				initialize: 'adopt-existing',
+			});
+			expect(result.kind).toBe('applied');
+			if (result.kind !== 'applied')
+				throw new Error('adopt-existing did not create the absent table');
+			expect(result.applied).toContain('create_table');
+			expect(result.applied).not.toContain('adopt_table');
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${initializedSchema}.${name}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: expect.any(String) }] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('refuses adopt-existing on a non-current ledger without archiving relations', async () => {
+		const initializedSchema = `converge_adopt_marker_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		await createSchema(initializedSchema);
+		try {
+			await runPreflight([initializedSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await pool.query(
+				`UPDATE "${initializedSchema}".${quoteIdent(DBSP_LEDGER_MARKER_TABLE)} SET version = $1`,
+				[PG_LEDGER_SHAPE_VERSION + 1],
+			);
+			await expect(
+				convergePg(pool, model([]), {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).rejects.toMatchObject({ refusal: 'incompatible-ledger' });
+			await expect(
+				pool.query<{ readonly count: string }>(
+					'SELECT count(*)::text AS count FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND left(relation.relname, 9) = $2',
+					[initializedSchema, '_archive_'],
+				),
+			).resolves.toMatchObject({ rows: [{ count: '0' }] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
+	it('refuses pristine initialization for an absent schema without creating it', async () => {
+		const absentSchema = `converge_missing_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const schemaExists = async () =>
+			(
+				await pool.query<{ readonly exists: boolean }>(
+					'SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1) AS exists',
+					[absentSchema],
+				)
+			).rows[0]?.exists;
+		try {
+			expect(await schemaExists()).toBe(false);
+			const failure = await convergePg(pool, model([]), {
+				schema: absentSchema,
+				initialize: 'pristine',
+			}).catch((error: unknown) => error);
+			if (!(failure instanceof PgConvergeRefusalError)) throw failure;
+			expect(failure).toMatchObject({
+				refusal: 'initialization-refused',
+				initialization: { home: { scope: 'schema', schema: absentSchema } },
+			});
+			expect(await schemaExists()).toBe(false);
+		} finally {
+			await dropSchema(absentSchema);
 		}
 	});
 });

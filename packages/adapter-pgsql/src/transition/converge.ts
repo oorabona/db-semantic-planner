@@ -65,7 +65,11 @@ import {
 	type PgLockedRun,
 	readPgOutcomeSessionCompromise,
 } from './outcome-protocol.js';
-import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
+import {
+	type PgLedgerScopeCurrency,
+	readPgLedgerScopeCurrency,
+	runPgConvergeInitializationPreflight,
+} from './reinitialize-preflight.js';
 import { pgDeclaredSequenceAdoptionShapeMatches } from './sequence-adoption.js';
 
 export type PgConvergeRefusal =
@@ -81,7 +85,15 @@ export type PgConvergeRefusal =
 	| 'recovery-required'
 	| 'database-read-only'
 	| 'execution-refused'
-	| 'adoption-refused';
+	| 'adoption-refused'
+	| 'initialization-refused';
+
+export interface PgConvergeInitializationFailure {
+	readonly home: LedgerHome;
+	readonly code: string;
+	readonly step: string;
+	readonly detail: string;
+}
 
 /**
  * Unsupported-change, ledger and ownership refusals occur before converge commits
@@ -99,6 +111,7 @@ export class PgConvergeRefusalError extends Error {
 		readonly runIds?: readonly string[],
 		readonly executionIds?: readonly string[],
 		readonly busyRunIds?: readonly string[],
+		readonly initialization?: PgConvergeInitializationFailure,
 	) {
 		super(detail ?? `converge refuses ${refusal}`);
 		this.name = 'PgConvergeRefusalError';
@@ -267,9 +280,16 @@ export type PgConvergeCheckResult =
 			readonly steps: readonly PgConvergePlannedStep[];
 	  };
 
-interface ConvergePgBaseOptions {
+export interface ConvergePgBaseOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
+	/**
+	 * In apply mode, create a ledger for an absent schema ledger. `pristine`
+	 * refuses declared live tables or standalone sequences; `adopt-existing`
+	 * also adopts matching declared relations on every converge call. The schema
+	 * itself must already exist. Defaults to `never`.
+	 */
+	readonly initialize?: 'never' | 'pristine' | 'adopt-existing';
 	/**
 	 * Exact physical PostgreSQL index names that converge must leave alone on
 	 * declared model tables. Each table name uses the model's naming, while the
@@ -328,6 +348,77 @@ function refusal(
 
 function invalidOptions(detail: string): PgConvergeRefusalError {
 	return new PgConvergeRefusalError('invalid-options', [], detail);
+}
+
+function initializationFailure(
+	home: LedgerHome,
+	code: string,
+	step: string,
+	detail: string,
+): PgConvergeRefusalError {
+	return new PgConvergeRefusalError(
+		'initialization-refused',
+		[],
+		`converge initialization refuses ${home.scope === 'database' ? 'database' : home.schema}: ${detail}`,
+		undefined,
+		undefined,
+		undefined,
+		{ home, code, step, detail },
+	);
+}
+
+function reportInitializationFailure(
+	report: Awaited<ReturnType<typeof runPgConvergeInitializationPreflight>>,
+): PgConvergeRefusalError | undefined {
+	const failed = report.scopes.find((scope) => scope.outcome === 'failed');
+	if (failed) {
+		const code = failed.refusal?.code ?? 'reinitialize-preflight-failed';
+		const detail = failed.refusal?.detail ?? failed.reason.message;
+		if (code === 'reinitialize-preflight-advisory-lock')
+			return new PgConvergeRefusalError('busy', [], detail);
+		return initializationFailure(
+			failed.ledger,
+			code,
+			failed.reason.step,
+			detail,
+		);
+	}
+	const notAttempted = report.scopes.find(
+		(scope) => scope.outcome === 'not-attempted',
+	);
+	if (!notAttempted) return undefined;
+	return initializationFailure(
+		notAttempted.ledger,
+		'reinitialize-preflight-failed',
+		'output',
+		'reinitialize-preflight did not attempt this scope',
+	);
+}
+
+type DeclaredRelationNames = Readonly<{
+	tables: ReadonlySet<string>;
+	sequences: ReadonlySet<string>;
+}>;
+
+async function declaredRelationNames(
+	client: PoolClient,
+	schema: string,
+	names: readonly string[],
+): Promise<DeclaredRelationNames> {
+	if (names.length === 0) return { tables: new Set(), sequences: new Set() };
+	const result = await client.query(
+		`SELECT relation.relname AS name, relation.relkind AS kind FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND relation.relkind IN ('r', 'p', 'f', 'S')`,
+		[schema, names],
+	);
+	const tables = new Set<string>();
+	const sequences = new Set<string>();
+	for (const row of result.rows) {
+		if (typeof row.name !== 'string') continue;
+		if (row.kind === 'r' || row.kind === 'p' || row.kind === 'f')
+			tables.add(row.name);
+		else if (row.kind === 'S') sequences.add(row.name);
+	}
+	return { tables, sequences };
 }
 
 function declaredIndexNames(
@@ -1084,6 +1175,10 @@ function projectCheckedPlan(
  * a later apply will succeed, because other sessions can change the database
  * and execution-time ledger physical-shape integrity, claim-time adoption
  * re-verification, vacancy, and lock-timeout checks are not reproduced.
+ * `initialize` defaults to `never`. `pristine` creates an absent ledger only
+ * when declared tables and standalone sequences are absent, while
+ * `adopt-existing` creates an absent ledger and adopts matching declared
+ * relations on every call. The target schema must already exist.
  */
 export function convergePg(
 	pool: Pool,
@@ -1103,12 +1198,62 @@ export async function convergePg(
 	const mode: unknown = options.mode;
 	if (mode !== undefined && mode !== 'apply' && mode !== 'check')
 		throw invalidOptions('converge mode must be apply or check');
+	const initialize: unknown = options.initialize;
+	if (
+		initialize !== undefined &&
+		initialize !== 'never' &&
+		initialize !== 'pristine' &&
+		initialize !== 'adopt-existing'
+	)
+		throw invalidOptions(
+			'converge initialize must be never, pristine, or adopt-existing',
+		);
 	validateDeclarationModel(model);
 	const check = mode === 'check';
+	const initialization = initialize ?? 'never';
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
 	const naming = getNamingPluginForDbCasing(casing);
 	const externalIndexes = validateExternalIndexes(model, options, naming);
+	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
+	if (!check && initialization !== 'never') {
+		const initializationClient = await pool.connect();
+		let initializationCurrency: PgLedgerScopeCurrency | undefined;
+		let initializationError: unknown;
+		try {
+			initializationCurrency = await readPgLedgerScopeCurrency(
+				initializationClient,
+				schemaHome(schema),
+			);
+		} catch (error) {
+			initializationError = error;
+			throw error;
+		} finally {
+			initializationClient.release(
+				initializationError instanceof Error ? initializationError : undefined,
+			);
+		}
+		if (initializationCurrency?.kind === 'absent') {
+			const report = await runPgConvergeInitializationPreflight({
+				pool,
+				schema,
+				...(initialization === 'pristine'
+					? {
+							pristineRelationNames: [
+								...model.tables.values(),
+								...declaredSequences.keys(),
+							].map((value) =>
+								typeof value === 'string'
+									? value
+									: naming.toDatabase(value.name),
+							),
+						}
+					: {}),
+			});
+			const preflightFailure = reportInitializationFailure(report);
+			if (preflightFailure) throw preflightFailure;
+		}
+	}
 	const client = await pool.connect();
 	let destroyReason:
 		| 'converge could not determine ledger lock acquisition'
@@ -1182,10 +1327,19 @@ export async function convergePg(
 				);
 		}
 		const database = await databaseId(client);
-		const declaredSequences = assertDeclaredSequenceNamesPreserved(
-			model,
-			naming,
-		);
+		const standingAdoptionRelations =
+			initialization === 'adopt-existing'
+				? await declaredRelationNames(
+						client,
+						schema,
+						[...model.tables.values(), ...declaredSequences.keys()].map(
+							(value) =>
+								typeof value === 'string'
+									? value
+									: naming.toDatabase(value.name),
+						),
+					)
+				: undefined;
 		const diff = await compareConvergeMaskedSchema({
 			executor: client,
 			model,
@@ -1195,17 +1349,16 @@ export async function convergePg(
 		});
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
-			if (table.adopt !== true) continue;
 			const physicalName = naming.toDatabase(table.name);
+			if (
+				standingAdoptionRelations === undefined
+					? table.adopt !== true
+					: !standingAdoptionRelations.tables.has(physicalName)
+			)
+				continue;
 			const adoptionChanges = diff.changes.filter(
 				(change) => change.table === physicalName,
 			);
-			if (adoptionChanges.length > 0)
-				throw refusal(
-					'adoption-refused',
-					adoptionChanges,
-					`declared adoption for ${physicalName} refuses live shape mismatch`,
-				);
 			const address = {
 				scope: 'schema' as const,
 				engine: 'postgresql',
@@ -1222,6 +1375,12 @@ export async function convergePg(
 					[],
 					`declared adoption for ${physicalName} refuses ledger admission`,
 				);
+			if (adoptionChanges.length > 0)
+				throw refusal(
+					'adoption-refused',
+					adoptionChanges,
+					`declared adoption for ${physicalName} refuses live shape mismatch`,
+				);
 			adoptionSteps.push(
 				createPgsqlDeclaredAdoptionStep({
 					address,
@@ -1233,7 +1392,12 @@ export async function convergePg(
 			);
 		}
 		for (const [physicalName, sequence] of declaredSequences) {
-			if (sequence.adopt !== true) continue;
+			if (
+				standingAdoptionRelations === undefined
+					? sequence.adopt !== true
+					: !standingAdoptionRelations.sequences.has(physicalName)
+			)
+				continue;
 			if (sequence.schema !== undefined && sequence.schema !== schema)
 				throw refusal(
 					'adoption-refused',

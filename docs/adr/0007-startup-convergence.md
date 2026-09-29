@@ -74,8 +74,9 @@ readable journal run explains.
 
 ### The ledger and journal come from a separate preflight
 
-Converge requires the schema's ledger and refuses `ledger-absent` without it; it never creates the
-ledger or the transition journal. `runPgReinitializePreflight` creates and owns both, and converge
+Converge requires the schema's ledger and refuses `ledger-absent` without it, unless ADR 0008's
+`initialize` option asks it to create an absent ledger through the same preflight code.
+`runPgReinitializePreflight` creates and owns the ledger and the transition journal, and converge
 runs as the same PostgreSQL role, so it can read the journal. The ledger requires PostgreSQL 15
 (`unsupported-server` below it).
 
@@ -98,7 +99,9 @@ using the comparison converge plans with, re-run on the locked session inside th
 mismatch found while planning refuses `adoption-refused` before anything is written. Each table is
 adopted in its own transaction, so a table that changes while its adoption runs is refused after
 earlier tables of the same call were adopted; the next call skips those. The caller sets `adopt` for
-the one pass over an existing install and omits it afterwards.
+the one pass over an existing install and omits it afterwards. ADR 0008 adds a standing alternative:
+under `initialize: 'adopt-existing'`, every declared table and standalone sequence that exists is
+treated as marked on every call, whatever its declared flag, through the same admission and checks.
 
 A sequence the model marks `adopt: true` is adopted the same way when it is standalone (no
 `OWNED BY`, serial or identity link), `bigint` with cache 1, in the target schema, and its start,

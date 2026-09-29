@@ -38,6 +38,16 @@ const mocks = vi.hoisted(() => {
 		lock: vi.fn(async () => ({ kind: 'acquired' })),
 		unlock: vi.fn(async () => true),
 		currency: vi.fn(async () => ({ kind: 'current' })),
+		preflight: vi.fn(async () => ({
+			scopes: [
+				{
+					ledger: { scope: 'schema', schema: 'public' },
+					outcome: 'current',
+					marker: { kind: 'absent' },
+				},
+			],
+			adoptionCandidates: [],
+		})),
 		writability: vi.fn<() => Promise<PgDatabaseWritability>>(async () => ({
 			kind: 'writable',
 		})),
@@ -184,6 +194,8 @@ vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./reinitialize-preflight.js')>()),
 	readPgLedgerScopeCurrency: (...args: unknown[]) =>
 		forward(mocks.currency, args),
+	runPgConvergeInitializationPreflight: (...args: unknown[]) =>
+		forward(mocks.preflight, args),
 }));
 vi.mock('./sequence-adoption.js', () => ({
 	pgDeclaredSequenceAdoptionShapeMatches: (...args: unknown[]) =>
@@ -569,6 +581,16 @@ afterEach(() => {
 	mocks.lock.mockResolvedValue({ kind: 'acquired' });
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
+	mocks.preflight.mockResolvedValue({
+		scopes: [
+			{
+				ledger: { scope: 'schema', schema: 'public' },
+				outcome: 'current',
+				marker: { kind: 'absent' },
+			},
+		],
+		adoptionCandidates: [],
+	});
 	mocks.writability.mockResolvedValue({ kind: 'writable' });
 	mocks.sequenceShape.mockResolvedValue(true);
 	mocks.reservations.mockResolvedValue([]);
@@ -658,6 +680,120 @@ describe('convergePg refusal boundary', () => {
 			message: 'converge mode must be apply or check',
 		});
 		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it.each(['once', Object.create(null)])(
+		'refuses an invalid initialize value before validating or connecting',
+		async (initialize) => {
+			const pool = poolFor();
+			const error = await Promise.resolve(
+				Reflect.apply(convergePg, undefined, [
+					pool,
+					emptyModel(),
+					{ initialize },
+				]),
+			).catch((caught: unknown) => caught);
+
+			expect(error).toMatchObject({
+				refusal: 'invalid-options',
+				message:
+					'converge initialize must be never, pristine, or adopt-existing',
+			});
+			expect(pool.connect).not.toHaveBeenCalled();
+		},
+	);
+
+	it('maps preflight failures into structured initialization refusals', async () => {
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		mocks.preflight.mockResolvedValue({
+			scopes: [
+				{
+					ledger: { scope: 'database' },
+					outcome: 'failed',
+					marker: { kind: 'absent' },
+					refusal: { code: 'reinitialize-preflight-failed', detail: 'denied' },
+					reason: { step: 'create', message: 'denied' },
+				},
+				{
+					ledger: { scope: 'schema', schema: 'public' },
+					outcome: 'not-attempted',
+					marker: { kind: 'absent' },
+				},
+			],
+			adoptionCandidates: [],
+		} as never);
+
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'pristine' }),
+		).rejects.toMatchObject({
+			refusal: 'initialization-refused',
+			initialization: {
+				home: { scope: 'database' },
+				code: 'reinitialize-preflight-failed',
+				step: 'create',
+				detail: 'denied',
+			},
+		});
+	});
+
+	it('maps a preflight advisory lock refusal to busy', async () => {
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		mocks.preflight.mockResolvedValue({
+			scopes: [
+				{
+					ledger: { scope: 'schema', schema: 'public' },
+					outcome: 'failed',
+					marker: { kind: 'absent' },
+					refusal: {
+						code: 'reinitialize-preflight-advisory-lock',
+						detail: 'locked',
+					},
+					reason: { step: 'advisory-lock', message: 'locked' },
+				},
+			],
+			adoptionCandidates: [],
+		} as never);
+
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'pristine' }),
+		).rejects.toMatchObject({ refusal: 'busy', detail: 'locked' });
+	});
+
+	it('rethows a rejected initialization preflight unchanged', async () => {
+		const rejected = new Error('preflight transport failure');
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		mocks.preflight.mockRejectedValue(rejected);
+
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'pristine' }),
+		).rejects.toBe(rejected);
+	});
+
+	it('does not preflight in check mode or for non-absent currency', async () => {
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		mocks.compare.mockResolvedValue({ changes: [] });
+		await expect(
+			convergePg(poolFor(), emptyModel(), {
+				mode: 'check',
+				initialize: 'pristine',
+			}),
+		).rejects.toMatchObject({ refusal: 'ledger-absent' });
+		expect(mocks.preflight).not.toHaveBeenCalled();
+
+		mocks.currency.mockResolvedValue({
+			kind: 'not-current',
+			reason: 'marker',
+		} as never);
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'pristine' }),
+		).rejects.toMatchObject({ refusal: 'incompatible-ledger' });
+		expect(mocks.preflight).not.toHaveBeenCalled();
+
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'never' }),
+		).rejects.toMatchObject({ refusal: 'ledger-absent' });
+		expect(mocks.preflight).not.toHaveBeenCalled();
 	});
 
 	it('checks a validated manifest without executing and returns its projection', async () => {
@@ -773,6 +909,14 @@ describe('convergePg refusal boundary', () => {
 	});
 
 	it('refuses a declared adoption mismatch before invoking the executor', async () => {
+		mocks.identity.mockResolvedValue({
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '1' },
+			},
+		});
+		mocks.chain.mockResolvedValue({ events: [] });
 		mocks.compare.mockResolvedValue({
 			changes: [
 				{
@@ -799,6 +943,78 @@ describe('convergePg refusal boundary', () => {
 			changes: [expect.objectContaining({ kind: 'add_column' })],
 		});
 		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('does not treat a view as an existing declared table for standing adoption', async () => {
+		const testClient = client();
+		(testClient.query as ReturnType<typeof vi.fn>).mockImplementation(
+			async (sql: string) => {
+				if (sql === 'SHOW server_version_num')
+					return { rows: [{ server_version_num: '150000' }] };
+				if (sql === 'SELECT current_database() AS database_id')
+					return { rows: [{ database_id: 'app' }] };
+				if (sql.includes('FROM pg_catalog.pg_class relation'))
+					return { rows: [{ name: 'legacy_view', kind: 'v' }] };
+				return { rows: [] };
+			},
+		);
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		const desired = modelWithTables([
+			{
+				name: 'legacy_view',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		await expect(
+			convergePg(poolFor(testClient), desired, { initialize: 'never' }),
+		).rejects.toMatchObject({ refusal: 'concurrent-drift' });
+		await expect(
+			convergePg(poolFor(testClient), desired, {
+				initialize: 'adopt-existing',
+			}),
+		).rejects.toMatchObject({ refusal: 'concurrent-drift' });
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('converges a managed declared table change instead of re-adopting it', async () => {
+		const table = {
+			name: 'managed_items',
+			adopt: true as const,
+			columns: [],
+			foreignKeys: [],
+			indexes: [],
+		};
+		mockManagedObjects();
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'add_column',
+					table: table.name,
+					column: 'nickname',
+					destructive: false,
+					details: 'Add column nickname',
+					meta: {
+						column: {
+							name: 'nickname',
+							type: 'string',
+							nullable: true,
+						},
+					},
+				},
+			],
+		});
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+
+		await expect(
+			convergePg(poolFor(), modelWithTables([table])),
+		).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+		expect(mocks.execute).toHaveBeenCalledTimes(1);
 	});
 
 	it('skips declared sequence adoption checks after matching managed admission', async () => {

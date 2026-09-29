@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+	convergePg,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -15,7 +17,7 @@ import {
 	ensureTransitionJournal,
 	PG_LEDGER_SHAPE_VERSION,
 } from '@dbsp/adapter-pgsql';
-import type { ReinitializePreflightReport } from '@dbsp/types';
+import type { ModelIR, ReinitializePreflightReport } from '@dbsp/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeAdoptionFileAtomically } from '../../packages/cli/src/commands/preflight.js';
 import {
@@ -23,7 +25,7 @@ import {
 	describeWithE2eCapabilities,
 	spawnCheckpointChild,
 } from './harness/index.js';
-import { dropSchema, getTestPool } from './testkit/index.js';
+import { createSchema, dropSchema, getTestPool } from './testkit/index.js';
 import {
 	corruptLedgerIdentity,
 	createPreflightSchema,
@@ -1134,5 +1136,137 @@ describe('OBL-REC11 reinitialize preflight statement capture', () => {
 					transitionJournalTables.some((table) => sql.includes(table))),
 		);
 		expect(writes).toEqual([]);
+	});
+});
+
+describe('SC-15b #837 converge initialization lineage refusal', () => {
+	const schemas: string[] = [];
+
+	beforeEach(resetDbspMeta);
+
+	afterEach(async () => {
+		for (const schema of schemas.splice(0)) await dropSchema(schema);
+		await resetDbspMeta();
+	});
+
+	it('refuses a mismatched database home without archiving, while reinitialize still archives it', async () => {
+		const schema = uniqueName('converge_lineage_refusal');
+		schemas.push(schema);
+		await createSchema(schema);
+		await runPreflight([]);
+		await corruptLedgerIdentity(DBSP_META_SCHEMA);
+		const pool = await getTestPool();
+		const emptyModel: ModelIR = {
+			tables: new Map(),
+			relations: new Map(),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		};
+		const archiveCount = async () =>
+			Number(
+				(
+					await pool.query<{ readonly count: string }>(
+						'SELECT count(*)::text AS count FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname LIKE $2',
+						[DBSP_META_SCHEMA, '%_archive_%'],
+					)
+				).rows[0]?.count,
+			);
+
+		await expect(
+			convergePg(pool, emptyModel, { schema, initialize: 'pristine' }),
+		).rejects.toMatchObject({
+			refusal: 'initialization-refused',
+			initialization: {
+				home: { scope: 'database' },
+				code: 'reinitialize-preflight-lineage',
+				step: 'identity',
+			},
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.${DBSP_LEDGER_MARKER_TABLE}`,
+			]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
+		await expect(
+			convergePg(pool, emptyModel, { schema, initialize: 'pristine' }),
+		).rejects.toMatchObject({
+			refusal: 'initialization-refused',
+			initialization: {
+				home: { scope: 'database' },
+				code: 'reinitialize-preflight-lineage',
+				step: 'identity',
+			},
+		});
+		expect(await archiveCount()).toBe(0);
+
+		const report = await runPreflight([schema]);
+		expect(report.scopes).toContainEqual(
+			expect.objectContaining({
+				ledger: { scope: 'database' },
+				outcome: 'current',
+			}),
+		);
+		expect(await archiveCount()).toBeGreaterThan(0);
+	});
+
+	it('waits for the database-home preflight lock before initializing the schema ledger', async () => {
+		const schema = uniqueName('converge_lock_refusal');
+		schemas.push(schema);
+		await createSchema(schema);
+		const pool = await getTestPool();
+		const tables: ModelIR['tables'] = new Map([
+			[
+				'initialized_after_lock',
+				{
+					name: 'initialized_after_lock',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]);
+		const desired: ModelIR = {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		};
+		const lockKey = createHash('sha256')
+			.update('dbsp.managed-ledger.lock.v1:\0')
+			.update(DBSP_META_SCHEMA)
+			.digest()
+			.readBigInt64BE(0)
+			.toString();
+		const holder = await pool.connect();
+		try {
+			await holder.query('BEGIN');
+			await expect(
+				holder.query(
+					'SELECT pg_catalog.pg_try_advisory_xact_lock($1::bigint) AS locked',
+					[lockKey],
+				),
+			).resolves.toMatchObject({ rows: [{ locked: true }] });
+			await expect(
+				convergePg(pool, desired, { schema, initialize: 'pristine' }),
+			).rejects.toMatchObject({ refusal: 'busy' });
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${schema}.${DBSP_LEDGER_MARKER_TABLE}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
+		} finally {
+			await holder.query('ROLLBACK');
+			holder.release();
+		}
+		await expect(
+			convergePg(pool, desired, { schema, initialize: 'pristine' }),
+		).resolves.toMatchObject({ kind: 'applied' });
 	});
 });

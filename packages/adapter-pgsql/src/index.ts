@@ -254,10 +254,12 @@ export {
 } from './streaming/index.js';
 // Startup convergence
 export {
+	type ConvergePgBaseOptions,
 	type ConvergePgCheckOptions,
 	type ConvergePgOptions,
 	convergePg,
 	type PgConvergeCheckResult,
+	type PgConvergeInitializationFailure,
 	type PgConvergePlannedStep,
 	type PgConvergeRefusal,
 	PgConvergeRefusalError,
