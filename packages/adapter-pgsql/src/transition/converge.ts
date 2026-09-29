@@ -39,6 +39,7 @@ import {
 import {
 	addressForChange,
 	createPgsqlDeclaredAdoptionStep,
+	createPgsqlDeclaredSequenceAdoptionStep,
 } from '../ddl/managed-step-manifest.js';
 import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
@@ -64,6 +65,7 @@ import {
 	readPgOutcomeSessionCompromise,
 } from './outcome-protocol.js';
 import { readPgLedgerScopeCurrency } from './reinitialize-preflight.js';
+import { pgDeclaredSequenceAdoptionShapeMatches } from './sequence-adoption.js';
 
 export type PgConvergeRefusal =
 	| 'invalid-options'
@@ -763,6 +765,7 @@ async function assertExistingDeclaredSequencesManaged(
 	schema: string,
 	sequences: ReadonlyMap<string, SequenceIR>,
 	createdSequenceAddresses: ReadonlySet<string>,
+	adoptedSequenceAddresses: ReadonlySet<string>,
 ): Promise<void> {
 	for (const sequence of sequences.values()) {
 		const address = generatedAddress(
@@ -776,7 +779,11 @@ async function assertExistingDeclaredSequencesManaged(
 			database,
 			schema,
 		);
-		if (createdSequenceAddresses.has(canonicalJsonDigest(address))) continue;
+		if (
+			createdSequenceAddresses.has(canonicalJsonDigest(address)) ||
+			adoptedSequenceAddresses.has(canonicalJsonDigest(address))
+		)
+			continue;
 		const managed = await isManagedCurrent(client, address);
 		if (managed === 'absent')
 			throw refusal(
@@ -1127,6 +1134,62 @@ export async function convergePg(
 				}),
 			);
 		}
+		for (const [physicalName, sequence] of declaredSequences) {
+			if (sequence.adopt !== true) continue;
+			const sequenceChanges = diff.changes.filter((change) => {
+				if (
+					change.kind !== 'create_sequence' &&
+					change.kind !== 'alter_sequence'
+				)
+					return false;
+				const declared = change.meta?.sequence as SequenceIR | undefined;
+				return declared?.name === physicalName;
+			});
+			if (sequenceChanges.length > 0)
+				throw refusal(
+					'adoption-refused',
+					sequenceChanges,
+					`declared sequence adoption for ${physicalName} refuses ${sequenceChanges.map((change) => change.kind).join(', ')}`,
+				);
+			const address = {
+				scope: 'schema' as const,
+				engine: 'postgresql',
+				database,
+				schema,
+				kind: 'sequence' as const,
+				name: physicalName,
+			};
+			if (
+				!(await pgDeclaredSequenceAdoptionShapeMatches(
+					client,
+					schema,
+					physicalName,
+					sequence,
+				))
+			)
+				throw refusal(
+					'adoption-refused',
+					[],
+					`declared sequence adoption for ${physicalName} refuses live shape mismatch`,
+				);
+			const admission = await declaredAdoptionAdmission(client, address);
+			if (admission.kind === 'managed') continue;
+			if (admission.kind !== 'unknown')
+				throw refusal(
+					'adoption-refused',
+					[],
+					`declared sequence adoption for ${physicalName} refuses ledger admission`,
+				);
+			adoptionSteps.push(
+				createPgsqlDeclaredSequenceAdoptionStep({
+					address,
+					sequence,
+					stepKey: `converge:${adoptionSteps.length}:sequence-adoption`,
+					order: adoptionSteps.length,
+					catalogueIdentity: admission.catalogueIdentity,
+				}),
+			);
+		}
 		const createdTableAddresses = new Set(
 			diff.changes.flatMap((change) => {
 				if (change.kind !== 'create_table') return [];
@@ -1147,6 +1210,13 @@ export async function convergePg(
 			schema,
 			declaredSequences,
 			createdSequenceAddresses,
+			new Set(
+				adoptionSteps.flatMap((step) =>
+					step.lifecycle?.kind === 'sequence-adoption' && step.address
+						? [canonicalJsonDigest(step.address)]
+						: [],
+				),
+			),
 		);
 		const rejected = diff.changes.filter(
 			(change) =>
@@ -1193,6 +1263,7 @@ export async function convergePg(
 			),
 			new Set(
 				adoptionSteps
+					.filter((step) => step.address?.kind === 'table')
 					.map((step) => step.address?.name)
 					.filter((name): name is string => name !== undefined),
 			),
@@ -1366,6 +1437,18 @@ export async function convergePg(
 						'converge adoption verifier received an unexpected executor',
 					);
 				const address = step.address;
+				if (address?.kind === 'sequence') {
+					const sequence = declaredSequences.get(address.name);
+					return (
+						sequence !== undefined &&
+						pgDeclaredSequenceAdoptionShapeMatches(
+							executor,
+							schema,
+							address.name,
+							sequence,
+						)
+					);
+				}
 				if (address?.kind !== 'table') return false;
 				const compared = await compareConvergeMaskedSchema({
 					executor: client,
@@ -1386,7 +1469,11 @@ export async function convergePg(
 			return {
 				kind: 'applied',
 				applied: [
-					...adoptionSteps.map(() => 'adopt_table'),
+					...adoptionSteps.map((step) =>
+						step.lifecycle?.kind === 'sequence-adoption'
+							? 'adopt_sequence'
+							: 'adopt_table',
+					),
 					...orderedChanges.map((change) => change.kind),
 				],
 			};

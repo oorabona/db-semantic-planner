@@ -251,6 +251,8 @@ export interface SchemaExtras {
 			minValue?: number | string;
 			maxValue?: number | string;
 			cycle?: boolean;
+			/** Explicitly bring an existing standalone sequence under managed state. */
+			adopt?: true;
 		}
 	>;
 }
@@ -799,10 +801,17 @@ export function schemaToModelIR(
 	const extensions = extras?.extensions;
 	const sequenceMap = extras?.sequences
 		? new Map(
-				Object.entries(extras.sequences).map(([name, seq]) => [
-					name,
-					{ name, ...seq },
-				]),
+				Object.entries(extras.sequences).map(([name, seq]) => {
+					const { adopt, ...shape } = seq;
+					return [
+						name,
+						{
+							name,
+							...shape,
+							...(adopt === true ? { adopt: true as const } : {}),
+						},
+					];
+				}),
 			)
 		: undefined;
 

@@ -656,7 +656,19 @@ export async function executeGeneratorPlan(input: {
 					detail: `declared adoption for ${step.address?.name ?? step.stepKey} refuses live shape mismatch`,
 				};
 			const lifecycle = step.lifecycle;
-			if (lifecycle?.kind !== 'adoption') continue;
+			if (
+				lifecycle?.kind !== 'adoption' &&
+				lifecycle?.kind !== 'sequence-adoption'
+			)
+				continue;
+			if (
+				lifecycle.kind === 'sequence-adoption' &&
+				!input.verifyDeclaredAdoptionShape
+			)
+				return {
+					outcome: 'execution-failed',
+					detail: `sequence adoption step ${step.stepKey} requires a declared shape verifier`,
+				};
 			if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 				return {
 					outcome: 'execution-failed',
@@ -681,11 +693,13 @@ export async function executeGeneratorPlan(input: {
 				shapeMatches: (executor) =>
 					input.verifyDeclaredAdoptionShape
 						? input.verifyDeclaredAdoptionShape(executor, step)
-						: adoptionShapeMatches(
-								adoptionPool!,
-								input.schema,
-								lifecycle.shape,
-							),
+						: lifecycle.kind === 'adoption'
+							? adoptionShapeMatches(
+									adoptionPool!,
+									input.schema,
+									lifecycle.shape,
+								)
+							: Promise.resolve(false),
 			});
 			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
 				return preflight.outcome === 'adoption-refused'
@@ -750,8 +764,19 @@ export async function executeGeneratorPlan(input: {
 					`atomic creation group ${step.stepKey} was not reached at its first member`,
 				);
 			if (step.lifecycle?.kind === 'adoption-refused') continue;
-			if (step.lifecycle?.kind === 'adoption') {
+			if (
+				step.lifecycle?.kind === 'adoption' ||
+				step.lifecycle?.kind === 'sequence-adoption'
+			) {
 				const lifecycle = step.lifecycle;
+				if (
+					lifecycle.kind === 'sequence-adoption' &&
+					!input.verifyDeclaredAdoptionShape
+				)
+					return {
+						outcome: 'execution-failed',
+						detail: `sequence adoption step ${step.stepKey} requires a declared shape verifier`,
+					};
 				if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 					return {
 						outcome: 'execution-failed',
@@ -782,11 +807,13 @@ export async function executeGeneratorPlan(input: {
 					shapeMatches: (executor) =>
 						input.verifyDeclaredAdoptionShape
 							? input.verifyDeclaredAdoptionShape(executor, step)
-							: adoptionShapeMatches(
-									adoptionPool!,
-									input.schema,
-									lifecycle.shape,
-								),
+							: lifecycle.kind === 'adoption'
+								? adoptionShapeMatches(
+										adoptionPool!,
+										input.schema,
+										lifecycle.shape,
+									)
+								: Promise.resolve(false),
 					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {

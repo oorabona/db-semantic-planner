@@ -14,6 +14,7 @@ import { normalizeSequenceInteger } from './generated-source-normalizers.js';
 import {
 	addressForChange,
 	assertDeclarableChangeKind,
+	createPgsqlDeclaredSequenceAdoptionStep,
 	createPgsqlGeneratedManagedStep,
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
@@ -32,6 +33,36 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('persists physical sequence adoption material without the adopt directive', () => {
+		const step = createPgsqlDeclaredSequenceAdoptionStep({
+			address: {
+				scope: 'schema',
+				engine: 'postgresql',
+				database: 'app',
+				schema: 'tenant',
+				kind: 'sequence',
+				name: 'union_group_seq',
+			},
+			sequence: { name: 'union_group_seq', adopt: true },
+			stepKey: 'sequence-adoption:0',
+			order: 0,
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '42' },
+			},
+		});
+		expect(step.selection).toEqual({
+			kind: 'adoption',
+			selector: 'sequence:union_group_seq',
+		});
+		expect(step.lifecycle).toEqual({
+			kind: 'sequence-adoption',
+			shape: { name: 'union_group_seq' },
+		});
+		expect(JSON.stringify(step.expectedDeclaration)).not.toContain('adopt');
+	});
+
 	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
 		const sequence = { name: 'orders_id_seq', startWith: '9007199254740993' };
 		expect(

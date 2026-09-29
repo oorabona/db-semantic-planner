@@ -172,6 +172,27 @@ describe('managed declaration slicing', () => {
 		expect(JSON.stringify(declarations)).not.toContain('postId');
 	});
 
+	it('does not include sequence adoption intent in the declaration digest', () => {
+		const plain = declarationSetFromModel(
+			{
+				...model(table()),
+				sequences: new Map([['union_group_seq', { name: 'union_group_seq' }]]),
+			},
+			context,
+		);
+		const adopted = declarationSetFromModel(
+			{
+				...model(table()),
+				sequences: new Map([
+					['union_group_seq', { name: 'union_group_seq', adopt: true }],
+				]),
+			},
+			context,
+		);
+		expect(adopted.digest).toBe(plain.digest);
+		expect(JSON.stringify(adopted)).not.toContain('adopt');
+	});
+
 	it('refuses a declared enum map key that differs from its physical name', () => {
 		expect(() =>
 			declarationSetFromModel(

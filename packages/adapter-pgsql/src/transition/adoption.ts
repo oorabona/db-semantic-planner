@@ -138,7 +138,8 @@ export async function executePgDeclaredAdoption(
 		const lifecycle = input.step.lifecycle;
 		const plannedClaimKey = input.step.plannedClaimKeys[0];
 		if (
-			lifecycle?.kind !== 'adoption' ||
+			(lifecycle?.kind !== 'adoption' &&
+				lifecycle?.kind !== 'sequence-adoption') ||
 			!plannedClaimKey ||
 			input.step.claimKind !== 'adopt-intent' ||
 			input.step.classification !== 'non-destructive' ||

@@ -16,7 +16,11 @@
  * - Journal record stepIds are consistent with intent.stepId; ApplyResult.observations is a superset of every ObservedOutcomeRecord.observations.
  */
 
-import type { TableIR, TableReaddressDeclaration } from '../model-ir.js';
+import type {
+	SequenceIR,
+	TableIR,
+	TableReaddressDeclaration,
+} from '../model-ir.js';
 import type { DeclarationSet } from './declaration.js';
 import type { ExecutionContract } from './execution-contract.js';
 import type { FingerprintManifest } from './fingerprint.js';
@@ -73,6 +77,10 @@ export type ManagedStepLifecycle =
 	| {
 			readonly kind: 'adoption';
 			readonly shape: TableIR;
+	  }
+	| {
+			readonly kind: 'sequence-adoption';
+			readonly shape: SequenceIR;
 	  }
 	| {
 			readonly kind: 'adoption-refused';
