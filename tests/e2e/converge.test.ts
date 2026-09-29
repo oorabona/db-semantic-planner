@@ -1326,7 +1326,7 @@ describe('convergePg', () => {
 		}
 	});
 
-	it('refuses a fresh single-column FK without a declared index before creating either table', async () => {
+	it('refuses fresh single-column FKs without declared foreign key indexes before creating either table', async () => {
 		const pool = await getTestPool();
 		const desired = model([
 			table('fk_auto_index_refusal_parent', false),
@@ -1351,7 +1351,7 @@ describe('convergePg', () => {
 		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
-				'converge refuses fresh foreign keys without a covering declared key: fk_auto_index_refusal_child.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
+				'converge refuses fresh foreign keys without a declared foreign key index: fk_auto_index_refusal_child.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
 			),
 		});
 		for (const tableName of [
@@ -1365,27 +1365,24 @@ describe('convergePg', () => {
 			).resolves.toMatchObject({ rows: [{ relation: null }] });
 	});
 
-	it.each([
-		['partial', { columns: ['parent_id'], where: 'id > 0' }],
-		[
-			'expression',
-			{ columns: ['parent_id'], expressions: ['(parent_id + 1)'] },
-		],
-		['gin', { columns: ['parent_id'], method: 'gin' }],
-		['hash', { columns: ['parent_id'], method: 'hash' }],
-	] satisfies readonly [string, TableIR['indexes'][number]][])(
-		'refuses a fresh single-column FK with a non-covering declared %s index',
-		async (kind, index) => {
-			const pool = await getTestPool();
-			const parent = `fk_coverage_refusal_${kind}_parent`;
-			const child = `fk_coverage_refusal_${kind}_child`;
-			const desired = model([
+	it('admits a partial FK index when the only unindexed fresh FK is declared', async () => {
+		const pool = await getTestPool();
+		const parent = 'fk_admission_parent';
+		const partialChild = 'fk_admission_partial_child';
+		const unindexedChild = 'fk_admission_unindexed_child';
+		const partialIndex = {
+			name: `${partialChild}_parent_id_index`,
+			columns: ['parent_id'],
+			where: 'parent_id IS NOT NULL',
+		} satisfies TableIR['indexes'][number];
+		const desired = (unindexedIndexes: TableIR['indexes'] = []) =>
+			model([
 				table(parent, false),
 				{
-					...table(child, false),
+					...table(partialChild, false),
 					columns: [
 						{ name: 'id', type: 'integer', nullable: false },
-						{ name: 'parent_id', type: 'integer', nullable: false },
+						{ name: 'parent_id', type: 'integer', nullable: true },
 					],
 					foreignKeys: [
 						{
@@ -1393,20 +1390,51 @@ describe('convergePg', () => {
 							references: { table: parent, columns: ['id'] },
 						},
 					],
-					indexes: [index],
+					indexes: [partialIndex],
+				},
+				{
+					...table(unindexedChild, false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'parent_id', type: 'integer', nullable: true },
+					],
+					foreignKeys: [
+						{
+							columns: ['parent_id'],
+							references: { table: parent, columns: ['id'] },
+						},
+					],
+					indexes: unindexedIndexes,
 				},
 			]);
 
-			await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject(
-				{
-					refusal: 'unsupported-change',
-					detail: expect.stringContaining(
-						`converge refuses fresh foreign keys without a covering declared key: ${child}.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is`,
-					),
-				},
-			);
-		},
-	);
+		await expect(convergePg(pool, desired(), { schema })).rejects.toMatchObject(
+			{
+				refusal: 'unsupported-change',
+				detail: expect.stringContaining(
+					`converge refuses fresh foreign keys without a declared foreign key index: ${unindexedChild}.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
+				),
+			},
+		);
+		await expect(
+			convergePg(
+				pool,
+				desired([
+					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
+				]),
+				{ schema },
+			),
+		).resolves.toMatchObject({ kind: 'applied' });
+		await expect(
+			convergePg(
+				pool,
+				desired([
+					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
+				]),
+				{ schema },
+			),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+	});
 
 	it('converges FKs covered by a primary key and a leading composite index', async () => {
 		const pool = await getTestPool();

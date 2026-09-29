@@ -22,7 +22,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
-import { hasDeclaredFkIndexCoverage } from '../ddl/fk-index-coverage.js';
+import { hasDeclaredFkIndexAdmission } from '../ddl/fk-index-coverage.js';
 import {
 	createPgsqlGeneratedManagedStep,
 	generateMigrationSQL,
@@ -966,7 +966,7 @@ function uncoveredFreshFkColumns(
 			const column = foreignKey.columns[0];
 			return foreignKey.columns.length === 1 &&
 				column !== undefined &&
-				!hasDeclaredFkIndexCoverage(table, column)
+				!hasDeclaredFkIndexAdmission(table, column)
 				? [{ table: change.table, column }]
 				: [];
 		});
@@ -1264,7 +1264,7 @@ export async function convergePg(
 					(change) =>
 						change.kind === 'create_table' && tables.has(change.table),
 				),
-				`converge refuses fresh foreign keys without a covering declared key: ${uncoveredFkColumns.map(({ table, column }) => `${table}.${column}`).join(', ')}; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is`,
+				`converge refuses fresh foreign keys without a declared foreign key index: ${uncoveredFkColumns.map(({ table, column }) => `${table}.${column}`).join(', ')}; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
 			);
 		}
 		await assertExistingDeclaredTablesManaged(

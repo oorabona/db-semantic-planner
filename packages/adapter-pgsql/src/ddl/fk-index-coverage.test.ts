@@ -1,6 +1,10 @@
 import type { IndexIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { hasDeclaredFkIndexCoverage } from './fk-index-coverage.js';
+import {
+	hasDeclaredFkIndexAdmission,
+	hasDeclaredFkIndexCoverage,
+	shouldEmitAutoFkIndex,
+} from './fk-index-coverage.js';
 
 function table(overrides: Partial<TableIR> = {}): TableIR {
 	return {
@@ -70,4 +74,70 @@ describe('hasDeclaredFkIndexCoverage', () => {
 			),
 		).toBe(false);
 	});
+});
+
+describe('hasDeclaredFkIndexAdmission', () => {
+	it.each([
+		[
+			'leading primary-key column',
+			table({ primaryKey: ['project_id', 'path'] }),
+		],
+		['single-column primary key', table({ primaryKey: 'project_id' })],
+		[
+			'leading composite index',
+			table({ indexes: [{ columns: ['project_id', 'path'] }] }),
+		],
+		[
+			'index with INCLUDE columns',
+			table({ indexes: [{ columns: ['project_id'], include: ['metadata'] }] }),
+		],
+		[
+			'unique index',
+			table({ indexes: [{ columns: ['project_id'], unique: true }] }),
+		],
+		[
+			'unique column',
+			table({
+				columns: [
+					{
+						name: 'project_id',
+						type: 'integer',
+						nullable: false,
+						unique: true,
+					},
+				],
+			}),
+		],
+		[
+			'non-leading composite index',
+			table({ indexes: [{ columns: ['path', 'project_id'] }] }),
+		],
+		[
+			'partial index',
+			table({
+				indexes: [{ columns: ['project_id'], where: 'path IS NOT NULL' }],
+			}),
+		],
+		[
+			'expression index',
+			table({
+				indexes: [{ columns: ['project_id'], expressions: ['lower(path)'] }],
+			}),
+		],
+		[
+			'gin index',
+			table({ indexes: [{ columns: ['project_id'], method: 'gin' }] }),
+		],
+		[
+			'hash index',
+			table({ indexes: [{ columns: ['project_id'], method: 'hash' }] }),
+		],
+	] as const)(
+		'matches automatic FK-index suppression for %s',
+		(_reason, declared) => {
+			expect(shouldEmitAutoFkIndex(declared, 'project_id') === false).toBe(
+				hasDeclaredFkIndexAdmission(declared, 'project_id'),
+			);
+		},
+	);
 });
