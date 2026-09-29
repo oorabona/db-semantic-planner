@@ -330,6 +330,115 @@ describe('reinitialize-preflight pure decisions', () => {
 		expect(release).toHaveBeenCalledTimes(2);
 	});
 
+	it('records the typed pristine live-relations refusal for the schema scope', async () => {
+		ledger.validatePgLedgerPhysicalShape.mockResolvedValue(undefined);
+		journal.verifyTransitionJournalShape.mockResolvedValue(undefined);
+		const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
+			if (sql.includes('pg_is_in_recovery')) {
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'off',
+							transaction_read_only: 'off',
+						},
+					],
+				};
+			}
+			if (sql.startsWith('SELECT to_regclass'))
+				return {
+					rows: [
+						{
+							relation:
+								typeof values?.[0] === 'string' &&
+								values[0].startsWith('"dbsp_meta"')
+									? 'dbsp_meta.dbsp_ledger_marker'
+									: null,
+						},
+					],
+				};
+			if (sql.startsWith('SELECT version FROM'))
+				return { rows: [{ version: 1 }] };
+			if (sql.startsWith('SELECT cluster_system_identifier')) {
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'cluster',
+							database_oid: 'database',
+							namespace_oid: 'recorded',
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_control_system')) {
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'cluster',
+							database_oid: 'database',
+							namespace_oid: 'recorded',
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_try_advisory_xact_lock'))
+				return { rows: [{ locked: true }] };
+			if (sql.includes("relation.relkind IN ('r', 'p', 'f', 'S')"))
+				return { rows: [{ name: 'legacy_items' }] };
+			if (sql === 'SELECT current_user AS role')
+				return { rows: [{ role: 'deployer' }] };
+			if (sql.includes('pg_catalog.pg_get_userbyid(n.nspowner)'))
+				return { rows: [{ owner: 'deployer', widened: false }] };
+			if (sql.includes('pg_catalog.pg_get_userbyid(c.relowner)')) {
+				const names = Array.isArray(values?.[1]) ? values[1] : [];
+				return {
+					rows: names.map((relname) => ({
+						relname,
+						owner: 'deployer',
+						widened: false,
+						column_widened: false,
+					})),
+				};
+			}
+			if (sql.startsWith('SELECT c.relname FROM')) {
+				return {
+					rows: [
+						'dbsp_transition_run',
+						'dbsp_transition_run_plan',
+						'dbsp_transition_journal',
+						'dbsp_transition_authorization',
+					].map((relname) => ({ relname })),
+				};
+			}
+			if (sql.includes('FROM pg_catalog.pg_index index_definition'))
+				return { rows: [] };
+			if (sql.includes('FROM pg_catalog.pg_class relation CROSS JOIN LATERAL'))
+				return { rows: [] };
+			return { rows: [] };
+		});
+		const report = await runPgConvergeInitializationPreflight({
+			pool: { connect: async () => ({ query, release: vi.fn() }) },
+			schema: 'tenant_a',
+			pristineRelationNames: ['legacy_items'],
+		});
+
+		expect(report.scopes).toContainEqual({
+			ledger: { scope: 'schema', schema: 'tenant_a' },
+			outcome: 'failed',
+			marker: { kind: 'absent' },
+			refusal: {
+				code: 'pristine-live-relations',
+				detail:
+					'converge pristine initialization refuses declared live relation legacy_items',
+			},
+			reason: {
+				step: 'create',
+				message:
+					'converge pristine initialization refuses declared live relation legacy_items',
+			},
+		});
+	});
+
 	it('refuses a lineage mismatch during converge initialization without archiving it', async () => {
 		ledger.validatePgLedgerPhysicalShape.mockResolvedValue(undefined);
 		const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {

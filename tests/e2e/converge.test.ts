@@ -2298,6 +2298,9 @@ describe('convergePg', () => {
 				}),
 			).rejects.toMatchObject({
 				refusal: 'initialization-refused',
+				initialization: {
+					code: 'pristine-live-relations',
+				},
 				detail: expect.stringContaining(name),
 			});
 			await expect(

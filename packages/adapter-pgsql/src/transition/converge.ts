@@ -1293,7 +1293,7 @@ export async function convergePg(
 			throw new PgConvergeRefusalError(
 				'ledger-absent',
 				[],
-				`converge requires a current schema ledger for ${schema}; runPgReinitializePreflight creates one`,
+				`converge requires a current schema ledger for ${schema}; pass initialize: 'pristine' or 'adopt-existing' in apply mode, or run runPgReinitializePreflight`,
 			);
 		if (currency.kind === 'not-current')
 			throw new PgConvergeRefusalError(
