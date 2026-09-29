@@ -249,28 +249,44 @@ const APPLICATION_STEP_TRANSACTION_CONTROL_MESSAGE =
 const APPLICATION_STEP_TX_REVOKED_MESSAGE =
 	'application step transaction facade is no longer active';
 
-function withoutLeadingSqlComments(text: string): string {
-	let remaining = text;
+function skipSqlWhitespaceAndComments(text: string, offset = 0): number {
+	let index = offset;
 	while (true) {
-		remaining = remaining.trimStart();
-		if (remaining.startsWith('--')) {
-			const lineEnd = remaining.indexOf('\n');
-			remaining = lineEnd === -1 ? '' : remaining.slice(lineEnd + 1);
+		while (index < text.length && /\s/u.test(text[index]!)) index += 1;
+		if (text.startsWith('--', index)) {
+			const lineEnd = text.indexOf('\n', index + 2);
+			index = lineEnd === -1 ? text.length : lineEnd + 1;
 			continue;
 		}
-		if (remaining.startsWith('/*')) {
-			const commentEnd = remaining.indexOf('*/', 2);
-			if (commentEnd === -1) return remaining;
-			remaining = remaining.slice(commentEnd + 2);
-			continue;
+		if (!text.startsWith('/*', index)) return index;
+		index += 2;
+		let depth = 1;
+		while (index < text.length && depth > 0) {
+			if (text.startsWith('/*', index)) {
+				depth += 1;
+				index += 2;
+			} else if (text.startsWith('*/', index)) {
+				depth -= 1;
+				index += 2;
+			} else index += 1;
 		}
-		return remaining;
 	}
 }
 
+function readSqlKeyword(
+	text: string,
+	offset = 0,
+): { readonly keyword: string; readonly end: number } | undefined {
+	const start = skipSqlWhitespaceAndComments(text, offset);
+	const match = /^[A-Za-z]+/u.exec(text.slice(start));
+	return match === null
+		? undefined
+		: { keyword: match[0].toUpperCase(), end: start + match[0].length };
+}
+
 function refusesApplicationStepTransactionControl(text: string): boolean {
-	const statement = withoutLeadingSqlComments(text);
-	const keyword = statement.match(/^([A-Za-z]+)/)?.[1]?.toUpperCase();
+	const first = readSqlKeyword(text);
+	const keyword = first?.keyword;
 	if (
 		keyword &&
 		[
@@ -285,12 +301,20 @@ function refusesApplicationStepTransactionControl(text: string): boolean {
 		].includes(keyword)
 	)
 		return true;
-	if (keyword === 'PREPARE')
-		return /^PREPARE\s+TRANSACTION\b/iu.test(statement);
-	if (keyword !== 'SET') return false;
-	return /^SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:TRANSACTION\b|SESSION\s+CHARACTERISTICS\b)/iu.test(
-		statement,
-	);
+	if (first?.keyword === 'PREPARE')
+		return readSqlKeyword(text, first.end)?.keyword === 'TRANSACTION';
+	if (first?.keyword !== 'SET') return false;
+	let next = readSqlKeyword(text, first.end);
+	if (next?.keyword === 'LOCAL') next = readSqlKeyword(text, next.end);
+	if (next?.keyword === 'TRANSACTION') return true;
+	if (next?.keyword === 'SESSION') {
+		const afterSession = readSqlKeyword(text, next.end);
+		return (
+			afterSession?.keyword === 'TRANSACTION' ||
+			afterSession?.keyword === 'CHARACTERISTICS'
+		);
+	}
+	return false;
 }
 
 interface RevocablePgApplicationStepTx extends PgApplicationStepTx {
@@ -493,6 +517,70 @@ async function setPgApplicationStepStatementTimeout(
 	await client.query(`SET LOCAL statement_timeout = '${timeout}ms'`);
 }
 
+async function admitPgApplicationStepDuringPlanning(
+	input: {
+		readonly client: PoolClient;
+		readonly database: string;
+		readonly schema: string;
+	},
+	step: PgConvergeApplicationStep,
+) {
+	let begun = false;
+	let completed = false;
+	try {
+		await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+		begun = true;
+		await setPgApplicationStepStatementTimeout(
+			input.client,
+			step.statementTimeoutMs,
+		);
+		const state = await admission(
+			input.client,
+			input.database,
+			input.schema,
+			step,
+		);
+		completed = true;
+		return state;
+	} finally {
+		if (begun) {
+			await rollbackPgOutcomeGroup(input.client);
+			if (completed) assertPgApplicationStepSessionHealthy(input.client, step);
+		}
+	}
+}
+
+async function inspectPgApplicationStepDuringPlanning(
+	input: {
+		readonly client: PoolClient;
+		readonly onApplicationStepCallback?: () => void;
+	},
+	step: PgConvergeAssertStep,
+): Promise<'healthy' | 'unhealthy'> {
+	let begun = false;
+	let completed = false;
+	try {
+		await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+		begun = true;
+		await setPgApplicationStepStatementTimeout(
+			input.client,
+			step.statementTimeoutMs,
+		);
+		const status = await inspectPgApplicationStep(
+			step,
+			input.client,
+			input.onApplicationStepCallback,
+		);
+		completed = true;
+		return status;
+	} finally {
+		if (begun) {
+			await rollbackPgOutcomeGroup(input.client);
+			if (completed) assertPgApplicationStepSessionHealthy(input.client, step);
+		}
+	}
+}
+
 /** Reads no durable state in check mode beyond the chain itself. */
 export async function planPgApplicationSteps(input: {
 	readonly client: PoolClient;
@@ -503,89 +591,42 @@ export async function planPgApplicationSteps(input: {
 	readonly check?: boolean;
 	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly PgPlannedApplicationStep[]> {
-	const planned: PgPlannedApplicationStep[] = [];
-	const onceSteps = input.steps.filter(
-		(step): step is PgConvergeOnceStep => step.kind === 'once',
-	);
-	for (const step of onceSteps) {
-		let begun = false;
-		let completed = false;
-		try {
-			await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
-			begun = true;
-			await setPgApplicationStepStatementTimeout(
-				input.client,
-				step.statementTimeoutMs,
-			);
-			const state = await admission(
-				input.client,
-				input.database,
-				input.schema,
-				step,
-			);
-			if (!state.complete)
-				planned.push({
-					kind: 'application-step',
-					id: step.id,
-					step: step.kind,
-				});
-			completed = true;
-		} finally {
-			if (begun) {
-				await rollbackPgOutcomeGroup(input.client);
-				if (completed)
-					assertPgApplicationStepSessionHealthy(input.client, step);
-			}
-		}
-	}
-	if (input.hasPendingGeneratedWork || planned.length > 0) {
-		if (input.check)
-			planned.push(
-				...input.steps
-					.filter(
-						(step): step is PgConvergeAssertStep => step.kind === 'assert',
-					)
-					.map((step) => ({
-						kind: 'application-step' as const,
-						id: step.id,
-						step: 'assert' as const,
-						inspected: false,
-					})),
-			);
-		return planned;
-	}
+	const pendingOnceIds = new Set<string>();
 	for (const step of input.steps) {
-		if (step.kind !== 'assert') continue;
-		let begun = false;
-		let completed = false;
-		try {
-			await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
-			begun = true;
-			await setPgApplicationStepStatementTimeout(
-				input.client,
-				step.statementTimeoutMs,
-			);
-			await admission(input.client, input.database, input.schema, step);
-			if (
-				(await inspectPgApplicationStep(
-					step,
-					input.client,
-					input.onApplicationStepCallback,
-				)) === 'unhealthy'
-			)
+		const state = await admitPgApplicationStepDuringPlanning(input, step);
+		if (step.kind === 'once' && !state.complete) pendingOnceIds.add(step.id);
+	}
+	const planned: PgPlannedApplicationStep[] = [];
+	const deferAssertInspection =
+		input.hasPendingGeneratedWork === true || pendingOnceIds.size > 0;
+	let unhealthyAssertFound = false;
+	for (const step of input.steps) {
+		if (step.kind === 'once') {
+			if (pendingOnceIds.has(step.id))
+				planned.push({ kind: 'application-step', id: step.id, step: 'once' });
+			continue;
+		}
+		if (deferAssertInspection || unhealthyAssertFound) {
+			if (input.check)
 				planned.push({
 					kind: 'application-step',
 					id: step.id,
 					step: 'assert',
-					inspected: true,
+					inspected: false,
 				});
-			completed = true;
-		} finally {
-			if (begun) {
-				await rollbackPgOutcomeGroup(input.client);
-				if (completed)
-					assertPgApplicationStepSessionHealthy(input.client, step);
-			}
+			continue;
+		}
+		if (
+			(await inspectPgApplicationStepDuringPlanning(input, step)) ===
+			'unhealthy'
+		) {
+			unhealthyAssertFound = true;
+			planned.push({
+				kind: 'application-step',
+				id: step.id,
+				step: 'assert',
+				inspected: true,
+			});
 		}
 	}
 	return planned;

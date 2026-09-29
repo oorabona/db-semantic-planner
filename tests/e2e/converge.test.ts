@@ -573,6 +573,61 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('runs chained after-DDL asserts after a repaired function is dropped', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const functionName = `assert_chain_${suffix}`;
+		const createFunction = async (tx: PgApplicationStepTx, value: number) => {
+			await tx.query(
+				`CREATE OR REPLACE FUNCTION "${schema}"."${functionName}"() RETURNS integer LANGUAGE sql AS $$ SELECT ${value} $$`,
+			);
+		};
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `${functionName}-exists`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					const result = await tx.query<{ readonly exists: boolean }>(
+						'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc procedure JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = $1 AND procedure.proname = $2) AS exists',
+						[schema, functionName],
+					);
+					return result.rows[0]?.exists ? 'healthy' : 'unhealthy';
+				},
+				apply: async (tx: PgApplicationStepTx) => createFunction(tx, 1),
+			},
+			{
+				kind: 'assert' as const,
+				id: `${functionName}-value`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					const result = await tx.query<{ readonly value: number }>(
+						`SELECT "${schema}"."${functionName}"() AS value`,
+					);
+					return result.rows[0]?.value === 2 ? 'healthy' : 'unhealthy';
+				},
+				apply: async (tx: PgApplicationStepTx) => createFunction(tx, 2),
+			},
+		];
+		await convergePg(pool, model([]), {
+			schema,
+			initialize: 'pristine',
+			steps,
+		});
+		await pool.query(`DROP FUNCTION "${schema}"."${functionName}"()`);
+		await expect(
+			convergePg(pool, model([]), { schema, steps }),
+		).resolves.toEqual({
+			kind: 'applied',
+			applied: [
+				`application-step:${functionName}-exists`,
+				`application-step:${functionName}-value`,
+			],
+		});
+	});
+
 	it('refuses planning inspection errors in apply and check mode without recording a step', async () => {
 		const pool = await getTestPool();
 		const id = `inspect-error-${randomUUID().replaceAll('-', '').slice(0, 12)}`;

@@ -200,7 +200,11 @@ describe('converge application steps', () => {
 			'-- x\nROLLBACK',
 			'START TRANSACTION',
 			"PREPARE TRANSACTION 'x'",
+			"PREPARE /* c */ TRANSACTION 'x'",
+			"PREPARE/**/TRANSACTION 'x'",
+			"PREPARE /* outer /* inner */ outer */ TRANSACTION 'x'",
 			'SET TRANSACTION READ ONLY',
+			'SET -- c\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
 			'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
 		])
 			await expect(tx.query(statement)).rejects.toThrow('transaction control');
@@ -298,14 +302,21 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
+			'BEGIN READ ONLY',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
 		]);
 	});
 
 	it('keeps a planning inspection failure when its rollback fails', async () => {
 		const inspectionError = new Error('inspection failed');
 		const rollbackError = new Error('ROLLBACK acknowledgement lost');
+		let rollbackCalls = 0;
 		const query = vi.fn(async (statement: string) => {
-			if (statement === 'ROLLBACK') throw rollbackError;
+			if (statement === 'ROLLBACK') {
+				rollbackCalls += 1;
+				if (rollbackCalls === 2) throw rollbackError;
+			}
 			return queryWithCurrentController(statement);
 		});
 		const client = { query };
@@ -394,6 +405,9 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
+			'BEGIN READ ONLY',
+			"SET LOCAL lock_timeout = '5000ms'",
+			'ROLLBACK',
 		]);
 	});
 
@@ -422,6 +436,10 @@ describe('converge application steps', () => {
 			}),
 		).resolves.toEqual([]);
 		expect(query.mock.calls).toEqual([
+			['BEGIN READ ONLY'],
+			["SET LOCAL lock_timeout = '25ms'"],
+			["SET LOCAL statement_timeout = '50ms'"],
+			['ROLLBACK'],
 			['BEGIN READ ONLY'],
 			["SET LOCAL lock_timeout = '25ms'"],
 			["SET LOCAL statement_timeout = '50ms'"],
@@ -465,6 +483,134 @@ describe('converge application steps', () => {
 			},
 		]);
 		expect(inspect).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])(
+		'admits a deferred assert before generated work in %s mode',
+		async (check) => {
+			const inspect = vi.fn(async () => 'unhealthy' as const);
+			const apply = vi.fn(async () => undefined);
+			mocks.chain.mockImplementation(async (ledger, address) => ({
+				ledger,
+				address,
+				events: [
+					{
+						eventId: 'open-claim',
+						address,
+						eventKind: 'intent',
+						declared: { value: { id: 'deferred-check' }, digest: 'v1' },
+						controller: 'owner',
+						controllerOid: '10',
+					},
+				],
+			}));
+			await expect(
+				planPgApplicationSteps({
+					client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+					database: 'app',
+					schema: 'public',
+					hasPendingGeneratedWork: true,
+					check,
+					steps: [
+						{
+							kind: 'assert',
+							id: 'deferred-check',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							inspect,
+							apply,
+						},
+					],
+				}),
+			).rejects.toMatchObject({
+				refusal: 'recovery-required',
+				stepId: 'deferred-check',
+			});
+			expect(inspect).not.toHaveBeenCalled();
+			expect(apply).not.toHaveBeenCalled();
+		},
+	);
+
+	it('does not inspect asserts after the first unhealthy planning result', async () => {
+		const secondInspect = vi.fn(async () => {
+			throw new Error('second inspect must not run');
+		});
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				check: true,
+				steps: [
+					{
+						kind: 'assert',
+						id: 'first-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'unhealthy' as const,
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'second-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: secondInspect,
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'first-check',
+				step: 'assert',
+				inspected: true,
+			},
+			{
+				kind: 'application-step',
+				id: 'second-check',
+				step: 'assert',
+				inspected: false,
+			},
+		]);
+		expect(secondInspect).not.toHaveBeenCalled();
+	});
+
+	it('keeps mixed application steps in declaration order in check plans', async () => {
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				check: true,
+				steps: [
+					{
+						kind: 'assert',
+						id: 'assert-first',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'unhealthy' as const,
+						apply,
+					},
+					{
+						kind: 'once',
+						id: 'once-second',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'assert-first',
+				step: 'assert',
+				inspected: false,
+			},
+			{ kind: 'application-step', id: 'once-second', step: 'once' },
+		]);
 	});
 
 	it('verifies an assert after applying it before recording the ledger row', async () => {
