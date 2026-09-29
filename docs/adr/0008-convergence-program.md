@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-29). It records the decision taken on #837. The check mode ships first; the other
-parts of the decision are listed under "Deliveries" with their state.
+Accepted (2026-09-29). It records the decision taken on #837. Only the check mode is shipped; the
+program signature below is the accepted target, and "Deliveries" gives the state of each part.
 
 ## Context
 
@@ -20,9 +20,9 @@ dbsp owns one convergence program: `convergePg(pool, program, { mode, initialize
 holds the model, the schema, `dbCasing`, the external indexes and the application's declared steps. dbsp
 computes every fingerprint and records every step in its ledger under its lock.
 
-### `check` plans without writing
+### `check` plans without committing
 
-`mode: 'check'` runs the same path as `apply` (the ledger lock, the version and ledger checks,
+`mode: 'check'` runs the path `apply` runs before executing (the ledger lock, the version and ledger checks,
 `database-read-only` before the comparison, every planning refusal, manifest validation) and returns
 `{ kind: 'no-drift' }` or `{ kind: 'would-apply', planDigest, steps }` instead of executing. It writes
 nothing durable: the comparison's expression canonicalisation runs in a transaction that is always
@@ -50,9 +50,10 @@ application should not run as.
 ## Deliveries
 
 1. `check` mode on `convergePg` (`ConvergePgCheckOptions`, `PgConvergeCheckResult`): shipped.
-2. Initialisation and adoption as a library operation.
-3. `once` and `assert` steps.
-4. Composition into the program signature.
+2. Initialisation and adoption as a library operation: not shipped.
+3. `once` and `assert` steps: not shipped.
+4. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
+   and check mode is selected with `ConvergePgCheckOptions`.
 
 ## Consequences
 
