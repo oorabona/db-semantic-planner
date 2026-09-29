@@ -10,6 +10,7 @@ import {
 	comparePgsqlDatabaseSchema,
 	comparePgsqlDeclaredAdoptionSchema,
 	IndexPredicateCanonicalizationError,
+	modelForDeclaredAdoption,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
 import type { SchemaDiff } from './schema-diff.js';
@@ -120,6 +121,47 @@ function makeDeclaredAdoptionModel(
 		externalTables,
 	);
 }
+
+describe('modelForDeclaredAdoption', () => {
+	it('marks a foreign-key target external without marking the adopted table', () => {
+		const adoption = modelForDeclaredAdoption(
+			makeTable({
+				name: 'project_state',
+				foreignKeys: [
+					{
+						columns: ['project_id'],
+						references: { table: 'projects', columns: ['id'] },
+					},
+				],
+			}),
+		);
+
+		expect(adoption.externalTables).toEqual(new Set(['projects']));
+		expect(adoption.externalTables?.has('project_state')).toBe(false);
+	});
+
+	it('does not externalize a self-referencing foreign key', () => {
+		const adoption = modelForDeclaredAdoption(
+			makeTable({
+				name: 'projects',
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: { table: 'projects', columns: ['id'] },
+					},
+				],
+			}),
+		);
+
+		expect(adoption.externalTables).toBeUndefined();
+	});
+
+	it('omits external tables when no foreign keys exist', () => {
+		expect(
+			modelForDeclaredAdoption(makeTable({ name: 'projects' })).externalTables,
+		).toBeUndefined();
+	});
+});
 
 function makeModelWithEnums(
 	tables: readonly TableIR[],
@@ -683,6 +725,76 @@ describe('comparePgsqlDatabaseSchema', () => {
 		expect(missingColumn.changes).toEqual(
 			expect.arrayContaining([expect.objectContaining({ kind: 'add_column' })]),
 		);
+	});
+
+	it('admits separately declared foreign-key-linked table adoptions after projection', async () => {
+		const columns = [
+			{
+				table_name: 'projects',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+			{
+				table_name: 'project_state',
+				column_name: 'project_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: "'0'::integer",
+				collation_name: null,
+				is_identity: 'NO',
+				identity_generation: null,
+			},
+		];
+		const foreignKeys = [
+			{
+				constraint_name: 'project_state_project_id_fkey',
+				source_table: 'project_state',
+				source_column: 'project_id',
+				target_schema: 'public',
+				target_table: 'projects',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+		const projects = makeTable({ name: 'projects' });
+		const projectState = makeTable({
+			name: 'project_state',
+			columns: [{ ...makeCol('project_id'), default: 0 }],
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: 'projects', columns: ['id'] },
+				},
+			],
+		});
+
+		await expect(
+			Promise.all(
+				[projects, projectState].map((table) =>
+					comparePgsqlDeclaredAdoptionSchema({
+						executor: new FakeLiveDiffPool(
+							new FakeLiveDiffClient('', false, columns, foreignKeys),
+						),
+						model: modelForDeclaredAdoption(table),
+						schema: 'public',
+						dbCasing: 'preserve',
+					}),
+				),
+			),
+		).resolves.toEqual([
+			expect.objectContaining({ changes: [] }),
+			expect.objectContaining({ changes: [] }),
+		]);
 	});
 
 	it('keeps outbound foreign keys while projecting adoption tables after whole-schema introspection', async () => {

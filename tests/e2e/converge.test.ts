@@ -96,6 +96,32 @@ function legacyTable(name: string, adopt = true): TableIR {
 	};
 }
 
+function adoptedProjectTables(): readonly TableIR[] {
+	return [
+		{
+			name: 'projects',
+			adopt: true,
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		},
+		{
+			name: 'project_state',
+			adopt: true,
+			columns: [{ name: 'project_id', type: 'integer', nullable: false }],
+			primaryKey: 'project_id',
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: 'projects', columns: ['id'] },
+				},
+			],
+			indexes: [],
+		},
+	];
+}
+
 function enumColumnTable(
 	name: string,
 	typeSchema: string,
@@ -219,6 +245,30 @@ describe('convergePg', () => {
 		await expect(
 			convergePg(pool, model([legacyTable(name)]), { schema }),
 		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
+	it('adopts foreign-key-linked declared tables and converges them without drift', async () => {
+		const pool = await getTestPool();
+		const databaseId = await database();
+		await pool.query(
+			`CREATE TABLE "${schema}"."projects" ("id" integer PRIMARY KEY); CREATE TABLE "${schema}"."project_state" ("project_id" integer PRIMARY KEY REFERENCES "${schema}"."projects"("id"))`,
+		);
+		const desired = model(adoptedProjectTables());
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'applied',
+			applied: ['adopt_table', 'adopt_table'],
+		});
+		await expect(
+			managed(address(databaseId, 'table', 'projects')),
+		).resolves.toBe(true);
+		await expect(
+			managed(address(databaseId, 'table', 'project_state')),
+		).resolves.toBe(true);
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
 			kind: 'no-drift',
 			applied: [],
 		});

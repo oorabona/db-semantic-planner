@@ -103,9 +103,15 @@ export interface PgsqlAdoptionComparisonExecutor {
 export function modelForDeclaredAdoption(table: TableIR): ModelIR {
 	const tables = new Map([[table.name, table]]);
 	const relations = new Map();
+	const externalTables = new Set(
+		table.foreignKeys
+			.map((foreignKey) => foreignKey.references.table)
+			.filter((referencedTable) => referencedTable !== table.name),
+	);
 	return {
 		tables,
 		relations,
+		...(externalTables.size > 0 ? { externalTables } : {}),
 		getTable: (name) => tables.get(name),
 		getRelation: (name) => relations.get(name),
 		getRelationsFrom: () => [],

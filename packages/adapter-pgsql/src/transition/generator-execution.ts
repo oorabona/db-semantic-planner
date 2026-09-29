@@ -19,7 +19,6 @@ import type {
 	LedgerClaimKind,
 	LedgerHome,
 	LedgerPayload,
-	ModelIR,
 	NormalizedManagedStep,
 	ScopedApprovalSet,
 	TableIR,
@@ -34,6 +33,7 @@ import {
 	type GeneratedPostconditionSession,
 	withGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
+import { modelForDeclaredAdoption } from '../ddl/live-diff.js';
 import { compareSchemata } from '../ddl/schema-diff.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import {
@@ -139,20 +139,6 @@ function validateAtomicCreationGroup(
 	return undefined;
 }
 
-function modelForAdoption(table: TableIR): ModelIR {
-	const tables = new Map([[table.name, table]]);
-	const relations = new Map();
-	return {
-		tables,
-		relations,
-		getTable: (name) => tables.get(name),
-		getRelation: (name) => relations.get(name),
-		getRelationsFrom: () => [],
-		getRelationsTo: () => [],
-		isAmbiguous: () => ({ ambiguous: false, options: [] }),
-	};
-}
-
 /** Adoption uses the established schema differ; it has no bespoke comparator. */
 async function adoptionShapeMatches(
 	pool: Pool,
@@ -160,7 +146,7 @@ async function adoptionShapeMatches(
 	shape: TableIR,
 ): Promise<boolean> {
 	const live = await createPgsqlAdapter(pool).introspect({ schema });
-	const diff = compareSchemata(modelForAdoption(shape), live);
+	const diff = compareSchemata(modelForDeclaredAdoption(shape), live);
 	return !diff.changes.some((change) => change.table === shape.name);
 }
 
