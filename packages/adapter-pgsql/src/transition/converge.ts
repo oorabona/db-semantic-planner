@@ -1220,7 +1220,9 @@ function projectCheckedPlan(
  * when declared tables and standalone sequences are absent, while
  * `adopt-existing` creates an absent ledger and adopts matching declared
  * relations on every call. The target schema must already exist. Application
- * steps run with the target schema first in `search_path`.
+ * steps run with `search_path` set to `pg_catalog`, the target schema,
+ * `pg_temp`, then the connection's entries: an unqualified name found in the
+ * target schema resolves there, one absent from it continues down that path.
  */
 export function convergePg(
 	pool: Pool,

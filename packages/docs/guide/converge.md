@@ -212,10 +212,14 @@ await convergePg(pool, model, {
   `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
   `apply`. Both are whole milliseconds from 1 to 2147483647.
 - Each step transaction sets `search_path` to `pg_catalog`, the converged schema, `pg_temp`, then
-  the connection's own entries, so unqualified names in a step resolve in `options.schema` whatever
-  the pool's default is, and a session temporary table cannot shadow a table of that schema.
-  A step's timeouts apply to the transactions that run its `inspect` or `apply`, including the
-  ledger reads and writes converge makes in them; converge's planning admission runs without them.
+  the connection's own entries. An unqualified name that exists in `options.schema` resolves there
+  whatever the pool's default is, and a session temporary table cannot shadow it; a name absent from
+  `options.schema` continues down the path, like any query your application runs with that path, so
+  schema-qualify names that live elsewhere.
+- `lockTimeoutMs` and `statementTimeoutMs` set PostgreSQL's `lock_timeout` and `statement_timeout`
+  in the transactions that run the step's `inspect` or `apply`, so they limit each lock wait and
+  each statement there, converge's ledger statements included. They do not limit how long the
+  callback takes overall. Converge's planning admission runs without them.
 - Use `SET LOCAL`, not `SET`: session-level effects (`SET`, `SET ROLE`, `LISTEN`, `PREPARE`,
   temporary tables, session advisory locks) are not part of the step and can affect the rest of that
   converge call. Converge closes its connection instead of returning it to the pool whenever a step
