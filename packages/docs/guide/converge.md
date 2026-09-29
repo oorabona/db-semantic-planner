@@ -203,7 +203,10 @@ await convergePg(pool, model, {
   nothing else is pending (see below).
 - `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
   `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
-- Each step is one transaction on converge's connection. `tx.query` sends one statement per call
+- Each step runs in one transaction on converge's connection: its admission, `inspect`, `apply`,
+  re-inspection and ledger record commit or roll back together. An `assert` inspected during
+  planning is inspected there in a separate read-only transaction that is rolled back, then again
+  in its execution transaction. `tx.query` sends one statement per call
   and refuses transaction-control statements (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`,
   `SAVEPOINT`, `RELEASE`, `SET TRANSACTION`, `SET SESSION CHARACTERISTICS`); this guards against
   mistakes, not against code that runs with the same role. `PREPARE TRANSACTION` is not checked: a
@@ -211,11 +214,14 @@ await convergePg(pool, model, {
   (`pg_advisory_unlock_all()` and the like): converge's own lock lives on the same connection. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
   `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
   `apply`. Both are whole milliseconds from 1 to 2147483647.
-- Each step transaction sets `search_path` to `pg_catalog`, the converged schema, `pg_temp`, then
-  the connection's own entries. An unqualified name that exists in `options.schema` resolves there
-  whatever the pool's default is, and a session temporary table cannot shadow it; a name absent from
-  `options.schema` continues down the path, like any query your application runs with that path, so
-  schema-qualify names that live elsewhere.
+- Each step transaction sets `search_path` to the converged schema, `pg_temp`, then the
+  connection's own entries, so `current_schema()` is `options.schema` and an unqualified
+  `CREATE TABLE` or `CREATE FUNCTION` lands there whatever the pool's default is. PostgreSQL still
+  searches `pg_catalog` first, so a built-in name wins over a same-named object in `options.schema`.
+  Otherwise a name that exists in `options.schema` resolves there and a session temporary table
+  cannot shadow it; a name absent from it continues down the path, like any query your application
+  runs with that path, so schema-qualify names that live elsewhere. A schema literally named `$user`
+  cannot host steps (`invalid-options`).
 - `lockTimeoutMs` and `statementTimeoutMs` set PostgreSQL's `lock_timeout` and `statement_timeout`
   in the transactions that run the step's `inspect` or `apply`, so they limit each lock wait and
   each statement there, converge's ledger statements included. They do not limit how long the

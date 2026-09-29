@@ -387,6 +387,9 @@ function invalidOptions(detail: string): PgConvergeRefusalError {
 	return new PgConvergeRefusalError('invalid-options', [], detail);
 }
 
+const APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE =
+	'converge application steps do not support schema $user';
+
 function initializationFailure(
 	home: LedgerHome,
 	code: string,
@@ -1220,9 +1223,9 @@ function projectCheckedPlan(
  * when declared tables and standalone sequences are absent, while
  * `adopt-existing` creates an absent ledger and adopts matching declared
  * relations on every call. The target schema must already exist. Application
- * steps run with `search_path` set to `pg_catalog`, the target schema,
- * `pg_temp`, then the connection's entries: an unqualified name found in the
- * target schema resolves there, one absent from it continues down that path.
+ * steps run with `search_path` set to the target schema, `pg_temp`, then the
+ * connection's entries, so `current_schema()` is the target. Lookup goes through
+ * `pg_catalog` (implicit, first), the target, `pg_temp`, then those entries.
  */
 export function convergePg(
 	pool: Pool,
@@ -1269,6 +1272,8 @@ export async function convergePg(
 				: 'converge steps are invalid',
 		);
 	}
+	if (applicationSteps.length > 0 && schema === '$user')
+		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
 	if (!check && initialization !== 'never') {
 		const initializationClient = await pool.connect();

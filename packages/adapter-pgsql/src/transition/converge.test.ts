@@ -692,6 +692,38 @@ describe('convergePg refusal boundary', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
+	it('refuses application steps targeting schema $user before connecting', async () => {
+		const pool = poolFor();
+		await expect(
+			convergePg(pool, emptyModel(), {
+				schema: '$user',
+				steps: [
+					{
+						kind: 'once',
+						id: 'step',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'invalid-options',
+			detail: 'converge application steps do not support schema $user',
+		});
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('allows schema $user without application steps', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		await expect(
+			convergePg(poolFor(), emptyModel(), {
+				mode: 'check',
+				schema: '$user',
+			}),
+		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
 	it('keeps an unexpected step getter error out of invalid-options detail', async () => {
 		const pool = poolFor();
 		const step = {

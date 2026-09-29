@@ -492,6 +492,13 @@ describe('convergePg', () => {
 				digest: 'v1',
 				phase: 'after-generated-ddl' as const,
 				apply: async (tx: PgApplicationStepTx) => {
+					const currentSchema = await tx.query<{
+						readonly current_schema: string;
+					}>('SELECT current_schema() AS current_schema');
+					expect(currentSchema.rows).toEqual([
+						{ current_schema: targetSchema },
+					]);
+					await tx.query('CREATE TABLE step_made (id integer)');
 					await tx.query('INSERT INTO widgets (id) VALUES (1)');
 				},
 			},
@@ -534,6 +541,12 @@ describe('convergePg', () => {
 					`SELECT count(*)::text AS count FROM "${targetSchema}".widgets`,
 				),
 			).resolves.toMatchObject({ rows: [{ count: '1' }] });
+			await expect(
+				dedicatedPool.query(
+					"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class AS relation JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = 'step_made') AS exists",
+					[targetSchema],
+				),
+			).resolves.toMatchObject({ rows: [{ exists: true }] });
 			await expect(
 				dedicatedPool.query(
 					"SELECT pg_catalog.to_regclass('public.widgets') AS relation",
