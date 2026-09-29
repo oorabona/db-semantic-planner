@@ -18,11 +18,13 @@ import {
 	generatedPostconditionForChange,
 	generateMigrationSQL,
 	getNamingPluginForDbCasing,
+	ReferencedKeyRemovalError,
 	readPgCatalogueIdentity,
 	renderPgTableReaddressStatements,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
 import {
+	collectReferencedKeyRemovalConflicts,
 	comparePgsqlDeclaredAdoptionSchema,
 	createPgsqlDeclaredAdoptionStep,
 	modelForDeclaredAdoption,
@@ -584,6 +586,10 @@ export async function runGeneratorPlan(input: {
 			(left, right) =>
 				getGeneratorPhase(left.kind) - getGeneratorPhase(right.kind),
 		);
+		const referencedKeyConflicts =
+			collectReferencedKeyRemovalConflicts(phaseOrderedChanges);
+		if (referencedKeyConflicts.length > 0)
+			throw new ReferencedKeyRemovalError(referencedKeyConflicts);
 		const ordinaryChanges = phaseOrderedChanges.map((change) => ({
 			kind: change.kind,
 			table: change.table,

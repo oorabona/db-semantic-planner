@@ -119,6 +119,75 @@ describe('generated managed-step dependencies', () => {
 		expect(pool.end).toHaveBeenCalledOnce();
 	});
 
+	it('refuses all referenced key removals before rendering or writing a manifest', async () => {
+		const pool = {
+			end: vi.fn(),
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+		};
+		const conflicts = [
+			{
+				keyKind: 'unique_index',
+				table: 'parents',
+				keyColumns: ['external_id'],
+				keyName: 'parents_external_id_unique',
+				referencingTable: 'children',
+				foreignKeyColumns: ['parent_external_id'],
+			},
+			{
+				keyKind: 'primary_key',
+				table: 'accounts',
+				keyColumns: ['id'],
+				referencingTable: 'invoices',
+				foreignKeyColumns: ['account_id'],
+			},
+		];
+		generator.loadSchema.mockResolvedValue({ model: { tables: new Map() } });
+		generator.createDbConnection.mockResolvedValue({ pool });
+		generator.createPgsqlAdapter.mockReturnValue({});
+		generator.comparePgsqlDatabaseSchema.mockResolvedValue({
+			changes: [
+				{
+					kind: 'drop_index',
+					table: 'parents',
+					destructive: true,
+					details: '',
+					meta: { referencedBy: [conflicts[0]] },
+				},
+				{
+					kind: 'drop_primary_key',
+					table: 'accounts',
+					destructive: true,
+					details: '',
+					meta: { referencedBy: [conflicts[1]] },
+				},
+			],
+			hasDestructive: true,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 1 },
+				constraints: { added: 0, dropped: 1, altered: 0 },
+			},
+		});
+		generator.generateMigrationSQL.mockClear();
+
+		await expect(
+			runGeneratorPlan({
+				db: 'postgres://unused',
+				schemaFile: 'schema.ts',
+				dryRun: false,
+			}),
+		).rejects.toMatchObject({
+			name: 'ReferencedKeyRemovalError',
+			conflicts,
+		});
+		expect(generator.generateMigrationSQL).not.toHaveBeenCalled();
+		expect(pool.query).toHaveBeenCalledWith(
+			'SELECT current_database() AS database_id',
+		);
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
 	it('emits the a08db11d adoption step byte-for-byte', async () => {
 		const pool = {
 			end: vi.fn(),

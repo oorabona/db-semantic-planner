@@ -28,6 +28,11 @@ import {
 	type SchemaChange,
 } from '../ddl/index.js';
 import {
+	canonicalColumnSet,
+	isQualifyingUniqueIndex,
+	sameColumnSet,
+} from '../ddl/key-column-set.js';
+import {
 	comparePgsqlDeclaredAdoptionSchema,
 	modelForDeclaredAdoption,
 } from '../ddl/live-diff.js';
@@ -795,21 +800,6 @@ function assertDeclaredSequenceNamesPreserved(
 	return physicalizeDeclaredSequences(model.sequences, naming);
 }
 
-function sameColumnSet(
-	left: readonly string[],
-	right: readonly string[],
-): boolean {
-	const leftKey = canonicalColumnSet(left);
-	const rightKey = canonicalColumnSet(right);
-	return leftKey !== undefined && leftKey === rightKey;
-}
-
-/** A unique-key column set, with duplicates rejected and names encoded unambiguously. */
-function canonicalColumnSet(columns: readonly string[]): string | undefined {
-	if (new Set(columns).size !== columns.length) return undefined;
-	return JSON.stringify([...columns].sort());
-}
-
 function referencedUniqueKey(
 	table: LedgerAddress,
 	columns: readonly string[],
@@ -864,18 +854,6 @@ function tableHasInlineUniqueKey(
 		table.columns.some(
 			(column) => column.name === columns[0] && column.unique === true,
 		)
-	);
-}
-
-function isQualifyingUniqueIndex(
-	index: IndexIR | undefined,
-	columns: readonly string[],
-): boolean {
-	return (
-		index?.unique === true &&
-		index.where === undefined &&
-		(index.expressions === undefined || index.expressions.length === 0) &&
-		sameColumnSet(index.columns, columns)
 	);
 }
 

@@ -30,6 +30,7 @@ import {
 } from './migration-sql.js';
 import {
 	compareSchemata,
+	ReferencedKeyRemovalError,
 	type SchemaChange,
 	type SchemaDiff,
 } from './schema-diff.js';
@@ -1100,6 +1101,71 @@ describe('generateMigrationSQL', () => {
 	});
 
 	describe('destructive filtering', () => {
+		it('refuses every referenced key removal before UP rendering but leaves report-only and DOWN paths available', () => {
+			const conflicts = [
+				{
+					keyKind: 'unique_index' as const,
+					table: 'parents',
+					keyColumns: ['external_id'],
+					keyName: 'parents_external_id_unique',
+					referencingTable: 'children',
+					foreignKeyColumns: ['parent_external_id'],
+				},
+				{
+					keyKind: 'primary_key' as const,
+					table: 'accounts',
+					keyColumns: ['id'],
+					referencingTable: 'invoices',
+					foreignKeyColumns: ['account_id'],
+				},
+			];
+			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'parents',
+					destructive: true,
+					details: '',
+					meta: {
+						index: {
+							name: 'parents_external_id_unique',
+							columns: ['external_id'],
+							unique: true,
+						},
+						referencedBy: [conflicts[0]],
+					},
+				},
+				{
+					kind: 'drop_primary_key',
+					table: 'accounts',
+					destructive: true,
+					details: '',
+					meta: { columns: ['id'], referencedBy: [conflicts[1]] },
+				},
+				{
+					kind: 'add_column',
+					table: 'parents',
+					column: 'name',
+					destructive: false,
+					details: '',
+					meta: { column: makeCol({ name: 'name', type: 'string' }) },
+				},
+			]);
+
+			try {
+				generateMigrationSQL(diff, { includeDestructive: true });
+				throw new Error('Expected referenced key removal refusal');
+			} catch (error) {
+				expect(error).toBeInstanceOf(ReferencedKeyRemovalError);
+				expect((error as ReferencedKeyRemovalError).conflicts).toEqual(
+					conflicts,
+				);
+			}
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				['ALTER TABLE "parents" ADD COLUMN "name" VARCHAR(255) NOT NULL;'],
+			);
+			expect(() => generateDownSQL(diff)).not.toThrow();
+		});
+
 		it.each([false, true])(
 			'refuses an auto-increment transition before UP rendering when includeDestructive=%s',
 			(includeDestructive) => {

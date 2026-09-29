@@ -7,6 +7,7 @@ import {
 	comparePgsqlDatabaseSchema,
 	compareSchemata,
 	generateMigrationSQL,
+	ReferencedKeyRemovalError,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl } from '@dbsp/core';
 import type {
@@ -257,6 +258,155 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 
 		await apply(desired);
 		expect((await changes(desired)).changes).toEqual([]);
+	});
+
+	it('annotates then refuses rendering a live foreign key backing unique index', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE "${SCHEMA}"."parents" ("external_id" text NOT NULL, "name" text NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE UNIQUE INDEX "parents_external_id_unique" ON "${SCHEMA}"."parents" ("external_id")`,
+		);
+		await pool.query(
+			`CREATE TABLE "${SCHEMA}"."children" ("parent_external_id" text NOT NULL, CONSTRAINT "children_parent_external_id_fkey" FOREIGN KEY ("parent_external_id") REFERENCES "${SCHEMA}"."parents" ("external_id"))`,
+		);
+		const desired = model([
+			table(
+				'parents',
+				[column('external_id', 'string'), column('name', 'string')],
+				{
+					indexes: [
+						{
+							name: 'parents_external_id_unique',
+							columns: ['external_id'],
+							unique: true,
+							include: ['name'],
+						},
+					],
+				},
+			),
+			table('children', [column('parent_external_id', 'string')], {
+				foreignKeys: [
+					{
+						columns: ['parent_external_id'],
+						references: { table: 'parents', columns: ['external_id'] },
+					},
+				],
+			}),
+		]);
+
+		const observable = await changes(desired);
+		expect(
+			observable.changes.find((change) => change.kind === 'drop_index')?.meta
+				?.referencedBy,
+		).toEqual([
+			{
+				keyKind: 'unique_index',
+				table: 'parents',
+				keyColumns: ['external_id'],
+				keyName: 'parents_external_id_unique',
+				referencingTable: 'children',
+				foreignKeyColumns: ['parent_external_id'],
+			},
+		]);
+		expect(() =>
+			generateMigrationSQL(observable, { includeDestructive: true }),
+		).toThrow(ReferencedKeyRemovalError);
+		expect(() =>
+			generateMigrationSQL(observable, { includeDestructive: true }),
+		).toThrow('unique index "parents_external_id_unique"');
+		expect(() =>
+			generateMigrationSQL(observable, { includeDestructive: true }),
+		).toThrow('foreign key "children"("parent_external_id")');
+		const live = await adapter.introspect({ schema: SCHEMA });
+		expect(
+			compareSchemata(desired, live, { schema: SCHEMA }).changes.find(
+				(change) => change.kind === 'drop_index',
+			)?.meta?.referencedBy,
+		).toEqual(
+			observable.changes.find((change) => change.kind === 'drop_index')?.meta
+				?.referencedBy,
+		);
+		await expect(
+			pool.query(
+				`SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = 'parents' AND indexname = 'parents_external_id_unique'`,
+				[SCHEMA],
+			),
+		).resolves.toMatchObject({
+			rows: [{ indexname: 'parents_external_id_unique' }],
+		});
+		await expect(
+			pool.query(
+				`SELECT conname FROM pg_catalog.pg_constraint WHERE conrelid = $1::regclass AND contype = 'f'`,
+				[`${SCHEMA}.children`],
+			),
+		).resolves.toMatchObject({
+			rows: [{ conname: 'children_parent_external_id_fkey' }],
+		});
+	});
+
+	it('annotates then refuses rendering a primary-key replacement under a live foreign key', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE "${SCHEMA}"."parents" ("id" integer NOT NULL, "tenant" integer NOT NULL, PRIMARY KEY ("id"))`,
+		);
+		await pool.query(
+			`CREATE TABLE "${SCHEMA}"."children" ("parent_id" integer NOT NULL, CONSTRAINT "children_parent_id_fkey" FOREIGN KEY ("parent_id") REFERENCES "${SCHEMA}"."parents" ("id"))`,
+		);
+		const desired = model([
+			table('parents', [column('id', 'integer'), column('tenant', 'integer')], {
+				primaryKey: ['id', 'tenant'],
+			}),
+			table('children', [column('parent_id', 'integer')], {
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: { table: 'parents', columns: ['id'] },
+					},
+				],
+			}),
+		]);
+
+		const observable = await changes(desired);
+		expect(
+			observable.changes.find((change) => change.kind === 'drop_primary_key')
+				?.meta?.referencedBy,
+		).toEqual([
+			{
+				keyKind: 'primary_key',
+				table: 'parents',
+				keyColumns: ['id'],
+				referencingTable: 'children',
+				foreignKeyColumns: ['parent_id'],
+			},
+		]);
+		expect(() =>
+			generateMigrationSQL(observable, { includeDestructive: true }),
+		).toThrow(ReferencedKeyRemovalError);
+		const live = await adapter.introspect({ schema: SCHEMA });
+		expect(
+			compareSchemata(desired, live, { schema: SCHEMA }).changes.find(
+				(change) => change.kind === 'drop_primary_key',
+			)?.meta?.referencedBy,
+		).toEqual(
+			observable.changes.find((change) => change.kind === 'drop_primary_key')
+				?.meta?.referencedBy,
+		);
+		await expect(
+			pool.query(
+				`SELECT conname FROM pg_catalog.pg_constraint WHERE conrelid = $1::regclass AND contype = 'p'`,
+				[`${SCHEMA}.parents`],
+			),
+		).resolves.toMatchObject({ rows: [{ conname: 'parents_pkey' }] });
+		await expect(
+			pool.query(
+				`SELECT conname FROM pg_catalog.pg_constraint WHERE conrelid = $1::regclass AND contype = 'f'`,
+				[`${SCHEMA}.children`],
+			),
+		).resolves.toMatchObject({
+			rows: [{ conname: 'children_parent_id_fkey' }],
+		});
 	});
 
 	it('still reports a live SERIAL column against a plain integer declaration', async () => {

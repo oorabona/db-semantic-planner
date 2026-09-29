@@ -1131,6 +1131,7 @@ function toCompareOptions(
 	},
 ): CompareSchemataOptions {
 	return {
+		...(options?.schema !== undefined ? { schema: options.schema } : {}),
 		...(options?.dbCasing !== undefined ? { dbCasing: options.dbCasing } : {}),
 		...(options?.dialectCapabilities !== undefined
 			? { dialectCapabilities: options.dialectCapabilities }
