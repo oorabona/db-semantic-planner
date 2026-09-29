@@ -329,7 +329,7 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
-			"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+			"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
 		]);
@@ -432,7 +432,7 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
-			"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+			"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
 		]);
@@ -535,7 +535,7 @@ describe('converge application steps', () => {
 			['ROLLBACK'],
 			['BEGIN READ ONLY'],
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 				['public'],
 			],
 			["SET LOCAL lock_timeout = '25ms'"],
@@ -591,15 +591,15 @@ describe('converge application steps', () => {
 			query.mock.calls.filter(
 				([text]) =>
 					text ===
-					"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+					"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 			),
 		).toEqual([
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 				['Mixed Case'],
 			],
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 				['Mixed Case'],
 			],
 		]);

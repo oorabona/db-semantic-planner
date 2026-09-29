@@ -525,7 +525,7 @@ async function setPgApplicationStepSearchPath(
 	schema: string,
 ): Promise<void> {
 	await client.query(
-		"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::text, pg_catalog.current_setting('search_path')), true)",
+		"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 		[schema],
 	);
 }

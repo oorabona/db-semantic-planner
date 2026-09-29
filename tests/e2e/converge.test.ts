@@ -576,6 +576,15 @@ describe('convergePg', () => {
 			await dedicatedPool.query(
 				`CREATE FUNCTION "${evilSchema}".set_config(text, text, boolean) RETURNS text LANGUAGE sql AS $$ SELECT 'hijacked' $$`,
 			);
+			await dedicatedPool.query(
+				`CREATE TABLE ${evilSchema}.calls (query text)`,
+			);
+			await dedicatedPool.query(
+				`CREATE FUNCTION ${evilSchema}.record_call() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN INSERT INTO ${evilSchema}.calls (query) VALUES (pg_catalog.current_query()); RETURN true; END $$`,
+			);
+			await dedicatedPool.query(
+				`CREATE DOMAIN ${evilSchema}.text AS pg_catalog.text CHECK (${evilSchema}.record_call())`,
+			);
 			await dedicatedPool.query(`SET search_path = ${evilSchema}, pg_catalog`);
 			await createSchema(targetSchema);
 			createdTargetSchema = true;
@@ -606,6 +615,11 @@ describe('convergePg', () => {
 				kind: 'applied',
 				applied: ['application-step:search-path-not-hijacked'],
 			});
+			await expect(
+				dedicatedPool.query<{ readonly count: number }>(
+					`SELECT count(*)::integer AS count FROM ${evilSchema}.calls WHERE query LIKE '%set_config%'`,
+				),
+			).resolves.toMatchObject({ rows: [{ count: 0 }] });
 		} finally {
 			await dedicatedPool.end();
 			if (createdTargetSchema) await dropSchema(targetSchema);
