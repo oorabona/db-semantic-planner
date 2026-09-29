@@ -202,7 +202,7 @@ describe('validated managed-step manifests', () => {
 		});
 	});
 
-	it('refuses incomplete and address-mismatched adoption material', () => {
+	it('refuses incomplete and address-mismatched adoption-selected material', () => {
 		const missingLifecycle = addressedStep({
 			claimKind: 'adopt-intent',
 			classification: 'non-destructive',
@@ -228,7 +228,23 @@ describe('validated managed-step manifests', () => {
 			]),
 		).toMatchObject({ ok: false });
 
-		const sequenceOnTable = addressedStep({
+		const lifecycleLessAdoptIntent = addressedStep({
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [{ ordinal: 0, sql: 'SELECT 1' }] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+		});
+		expect(Reflect.deleteProperty(lifecycleLessAdoptIntent, 'selection')).toBe(
+			true,
+		);
+		expect(
+			validateNormalizedManagedStepManifest([lifecycleLessAdoptIntent]),
+		).toMatchObject({ ok: true });
+
+		const sequenceAddress = { ...root, kind: 'sequence' as const };
+		const tableLifecycleOnSequence = addressedStep({
+			address: sequenceAddress,
 			claimKind: 'adopt-intent',
 			classification: 'non-destructive',
 			statementBundle: { statements: [] },
@@ -236,15 +252,14 @@ describe('validated managed-step manifests', () => {
 			replayPolicy: 'recorded',
 			selection: { kind: 'adoption', selector: 'sequence:orders' },
 			lifecycle: {
-				kind: 'sequence-adoption',
-				shape: { name: 'orders' },
+				kind: 'adoption',
+				shape: { name: 'orders' } as never,
 			},
 		});
 		expect(
-			validateNormalizedManagedStepManifest([sequenceOnTable]),
+			validateNormalizedManagedStepManifest([tableLifecycleOnSequence]),
 		).toMatchObject({ ok: false });
 
-		const sequenceAddress = { ...root, kind: 'sequence' as const };
 		const shapeWithDifferentName = addressedStep({
 			address: sequenceAddress,
 			claimKind: 'adopt-intent',

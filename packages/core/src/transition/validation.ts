@@ -453,13 +453,12 @@ function validateLifecycleCoupling(
 ): string | undefined {
 	const lifecycle = step.lifecycle;
 	if (
-		(step.claimKind === 'adopt-intent' ||
-			step.selection?.kind === 'adoption') &&
+		step.selection?.kind === 'adoption' &&
 		(!lifecycle ||
-			(lifecycle.kind === 'adoption' && step.address?.kind !== 'table') ||
-			(lifecycle.kind === 'sequence-adoption' &&
-				step.address?.kind !== 'sequence') ||
-			(lifecycle.kind !== 'adoption' && lifecycle.kind !== 'sequence-adoption'))
+			(step.address?.kind === 'table' && lifecycle.kind !== 'adoption') ||
+			(step.address?.kind === 'sequence' &&
+				lifecycle.kind !== 'sequence-adoption') ||
+			(step.address?.kind !== 'table' && step.address?.kind !== 'sequence'))
 	)
 		return `adoption step ${step.stepKey} has invalid lifecycle coupling`;
 	if (step.selection?.kind === 'replacement') {
