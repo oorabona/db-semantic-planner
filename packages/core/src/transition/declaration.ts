@@ -24,7 +24,10 @@ export interface DeclarationAddressContext {
 /**
  * The declaration layer deliberately depends on this small structural naming
  * boundary rather than an adapter package. Callers pass the same strategy that
- * comparison and proof use for the target database.
+ * comparison and proof use for the target database. It maps table, column,
+ * index, constraint and sequence names. A declared enum name is never passed
+ * through it: it is the type name columns spell in `originalDbType`, which no
+ * strategy maps (#825).
  */
 export interface DeclarationNamingStrategy {
 	toDatabase(identifier: string): string;

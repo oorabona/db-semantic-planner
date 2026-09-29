@@ -81,7 +81,9 @@ export interface OperationObservation {
 export interface ComparatorNameNormalizer {
 	/**
 	 * Normalize identifiers from the observed/current model into the namespace
-	 * used by authored desired models before comparator matching runs.
+	 * used by authored desired models before comparator matching runs. Enum
+	 * names are not normalized: a declared enum name is the physical type name
+	 * columns spell in `originalDbType` (#825).
 	 */
 	normalizeCurrentIdentifier(identifier: string): string;
 }
