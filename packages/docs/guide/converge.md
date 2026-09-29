@@ -197,15 +197,17 @@ await convergePg(pool, model, {
 
 - A `once` runs the first time and is recorded with its `digest`; later calls skip it. Changing its
   body needs a new `id`: the same `id` with another `digest` refuses `application-step-changed`.
-- An `assert` runs `inspect` on every call. When it answers `'unhealthy'`, converge runs `apply`,
-  inspects again, and records the run only if the database is now healthy; otherwise it refuses
-  `application-step-failed`.
+- Every apply call inspects each `assert` by the time its phase comes. When it answers
+  `'unhealthy'`, converge runs `apply`, inspects again, and records the run only if the database is
+  now healthy; otherwise it refuses `application-step-failed`. A check inspects an assert only when
+  nothing else is pending (see below).
 - `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
   `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
 - Each step is one transaction on converge's connection. `tx.query` sends one statement per call
   and refuses transaction-control statements (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`,
-  `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`, `SET TRANSACTION`); this guards against mistakes, not
-  against code that runs with the same role. A step must not release advisory locks
+  `SAVEPOINT`, `RELEASE`, `SET TRANSACTION`, `SET SESSION CHARACTERISTICS`); this guards against
+  mistakes, not against code that runs with the same role. `PREPARE TRANSACTION` is not checked: a
+  step must not use it. A step must not release advisory locks
   (`pg_advisory_unlock_all()` and the like): converge's own lock lives on the same connection. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
   `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
   `apply`. Both are whole milliseconds from 1 to 2147483647.
@@ -221,9 +223,11 @@ await convergePg(pool, model, {
 - A recorded run appears in `applied` as `application-step:<id>`. `no-drift` means no generated
   change, every `once` recorded and every `assert` healthy.
 - An `assert` is inspected before anything runs only when nothing else is pending (no generated
-  change, every `once` recorded), since only then does its answer decide `no-drift`. Otherwise it is
-  inspected when its phase comes, so an `after-generated-ddl` assert can read tables the same call
-  creates. Check mode never runs `apply` and lists pending steps as `application-step` entries of
+  change, every `once` recorded, no earlier assert found unhealthy), since only then does its answer
+  decide `no-drift`. Otherwise it is inspected when its phase comes, so an `after-generated-ddl`
+  assert can read tables the same call creates, or what an earlier assert repaired. Every step's
+  ledger record is still checked before anything runs, so a malformed or foreign record refuses
+  before any step commits. Check mode never runs `apply` and lists pending steps as `application-step` entries of
   `steps`: each unrecorded `once`, and each `assert` either with `inspected: true` (inspected read-only
   and unhealthy) or, when other work is pending, with `inspected: false` (not inspected; apply will).
 - dbsp cannot compare function bodies: the `digest` is your statement that a step changed.

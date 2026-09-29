@@ -33,8 +33,9 @@ re-verification at claim time, lock timeouts) do not run.
 ### Application steps are transactional and recorded in the ledger
 
 - `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
-- `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only and runs on
-  every check; `apply` runs in apply mode when inspection reports the database unhealthy.
+- `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only; every apply
+  runs it by the assert's phase, and a check runs it only when nothing else is pending.
+  `apply` runs in apply mode when inspection reports the database unhealthy.
 
 How they are recorded and run:
 
@@ -56,8 +57,9 @@ How they are recorded and run:
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
   every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is
-  pending, since only then does its answer decide `no-drift`; otherwise it is inspected at its phase,
-  so it can read what earlier steps and generated DDL made. Check mode never runs `apply` and lists an
+  pending and no earlier assert is unhealthy, since only then does its answer decide `no-drift`;
+  otherwise it is inspected at its phase, so it can read what earlier steps and generated DDL made.
+  Every step's ledger admission still runs before anything executes. Check mode never runs `apply` and lists an
   assert it could not inspect ahead of pending work with `inspected: false`. A step must not release
   advisory locks: converge's session lock lives on the same connection.
 - **The digest is the caller's contract.** dbsp cannot hash a function: a `once` whose body changes
