@@ -1,3 +1,4 @@
+import { canonicalJsonDigest } from '@dbsp/core';
 import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -189,7 +190,14 @@ vi.mock('./sequence-adoption.js', () => ({
 		forward(mocks.sequenceShape, args),
 }));
 
-import { convergePg, PgConvergeRefusalError } from './converge.js';
+import {
+	type ConvergePgCheckOptions,
+	type ConvergePgOptions,
+	convergePg,
+	type PgConvergeCheckResult,
+	PgConvergeRefusalError,
+	type PgConvergeResult,
+} from './converge.js';
 import { rollbackPgOutcomeGroup } from './outcome-protocol.js';
 
 function emptyModel(): ModelIR {
@@ -569,6 +577,150 @@ afterEach(() => {
 });
 
 describe('convergePg refusal boundary', () => {
+	it('selects its result overload from the converge mode', async () => {
+		const applyOptions: ConvergePgOptions = { mode: 'apply' };
+		const checkOptions: ConvergePgCheckOptions = { mode: 'check' };
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const applyResult: Promise<PgConvergeResult> = convergePg(
+			poolFor(),
+			emptyModel(),
+			applyOptions,
+		);
+		const checkResult: Promise<PgConvergeCheckResult> = convergePg(
+			poolFor(),
+			emptyModel(),
+			checkOptions,
+		);
+
+		await expect(applyResult).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		await expect(checkResult).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('refuses an invalid runtime mode before connecting', async () => {
+		const pool = poolFor();
+		const runtimeOptions = JSON.parse('{"mode":"preview"}');
+
+		await expect(
+			convergePg(pool, emptyModel(), runtimeOptions),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('checks a validated manifest without executing and returns its projection', async () => {
+		const catalogueIdentity = {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		};
+		const adopted = {
+			name: 'legacy_items',
+			adopt: true as const,
+			columns: [],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const created = {
+			name: 'new_items',
+			columns: [],
+			foreignKeys: [],
+			indexes: [{ name: 'new_items_index', columns: ['id'] }],
+		};
+		const createTable: SchemaChange = {
+			kind: 'create_table',
+			table: created.name,
+			destructive: false,
+			details: 'create new_items',
+			meta: { table: created },
+		};
+		const createIndex: SchemaChange = {
+			kind: 'create_index',
+			table: created.name,
+			destructive: false,
+			details: 'create new_items_index',
+			meta: { index: created.indexes[0] },
+		};
+		mocks.compare.mockResolvedValue({ changes: [createTable, createIndex] });
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+		mocks.identity.mockImplementation(
+			async (_client: unknown, address: { readonly name?: string }) =>
+				address.name === adopted.name ? { catalogueIdentity } : undefined,
+		);
+		mocks.chain.mockResolvedValue({ events: [] });
+
+		const checkedClient = client();
+		const checked = await convergePg(
+			poolFor(checkedClient),
+			modelWithTables([adopted, created]),
+			{ mode: 'check' },
+		);
+
+		expect(mocks.execute).not.toHaveBeenCalled();
+		expect(checkedClient.release).toHaveBeenCalled();
+		expect(checked).toMatchObject({
+			kind: 'would-apply',
+			steps: [
+				{ kind: 'adopt_table' },
+				{
+					kind: 'create_table',
+					table: 'new_items',
+					details: 'create new_items',
+				},
+				{
+					kind: 'create_index',
+					table: 'new_items',
+					details: 'create new_items_index',
+				},
+			],
+		});
+
+		let applyInput: Parameters<typeof executeGeneratorPlan>[0] | undefined;
+		mocks.execute.mockImplementation(async (input) => {
+			applyInput = input;
+			return { outcome: 'completed' };
+		});
+		await expect(
+			convergePg(poolFor(), modelWithTables([adopted, created])),
+		).resolves.toEqual({
+			kind: 'applied',
+			applied: ['adopt_table', 'create_table', 'create_index'],
+		});
+		expect(applyInput).toBeDefined();
+		if (checked.kind !== 'would-apply' || !applyInput?.manifest) return;
+		expect(checked.planDigest).toBe(
+			canonicalJsonDigest({
+				kind: 'postgresql-additive-converge-v1',
+				database: 'app',
+				schema: 'public',
+				steps: applyInput.manifest.steps,
+			}),
+		);
+		expect(checked.steps.map(({ kind }) => kind)).toEqual([
+			'adopt_table',
+			'create_table',
+			'create_index',
+		]);
+		expect(
+			checked.steps.map(({ stepKey, order, dependencyOrder, address }) => ({
+				stepKey,
+				order,
+				dependencyOrder,
+				address,
+			})),
+		).toEqual(
+			applyInput.manifest.steps.map(
+				({ stepKey, order, dependencyOrder, address }) => ({
+					stepKey,
+					order,
+					dependencyOrder,
+					address,
+				}),
+			),
+		);
+	});
+
 	it('refuses a declared adoption mismatch before invoking the executor', async () => {
 		mocks.compare.mockResolvedValue({
 			changes: [

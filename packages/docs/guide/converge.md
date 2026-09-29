@@ -130,6 +130,24 @@ same call commits on its own and can remain after a failure.
 | `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
 
+## Checking without applying
+
+`convergePg(pool, model, { schema, mode: 'check' })` takes the ledger lock, runs every check and
+planning refusal that an apply runs, and returns without executing:
+
+| `result.kind` | Meaning |
+|---|---|
+| `no-drift` | An apply would find nothing to do. |
+| `would-apply` | `steps` lists, in execution order, the steps an apply would run: each has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. `planDigest` identifies that plan. |
+
+A check refuses exactly as an apply would (`busy`, `ledger-absent`, `database-read-only`,
+`unsupported-change`, …) and writes nothing to the database or the ledger. Its answer holds for the
+moment it was taken: another session can change the database before your next apply, and checks the
+executor makes only while executing, such as re-verifying an adopted table when it claims it, do not
+run. The options type is `ConvergePgCheckOptions` and the result type `PgConvergeCheckResult`;
+[ADR 0008](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0008-convergence-program.md)
+records the decision.
+
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
