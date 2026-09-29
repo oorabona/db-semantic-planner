@@ -10,6 +10,7 @@ import type {
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
 import { canonicalJson, canonicalJsonDigest } from './canonical-json.js';
+import { assertDeclaredEnumMapIdentity } from './enum-name.js';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import { stableJson } from './stable-json.js';
@@ -169,6 +170,7 @@ export function declarationSetFromModel(
 	context: DeclarationAddressContext,
 	naming: DeclarationNamingStrategy = identityDeclarationNaming,
 ): DeclarationSet {
+	assertDeclaredEnumMapIdentity(model.enums);
 	const declarations: ManagedDeclaration[] = [];
 	const toDatabase = (identifier: string) => naming.toDatabase(identifier);
 	for (const [tableKey, table] of [...model.tables].sort(([a], [b]) =>
@@ -303,8 +305,8 @@ export function declarationSetFromModel(
 			declaration(
 				context,
 				'enum',
-				toDatabase(name),
-				{ ...item, name: toDatabase(item.name) },
+				name,
+				{ ...item, name: item.name },
 				`schema.enums[${JSON.stringify(name)}]`,
 			),
 		);

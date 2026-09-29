@@ -11,6 +11,7 @@ import type {
 	TableIR,
 } from '@dbsp/core';
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { markEngineCanonicalCheck } from '../expression-provenance.js';
@@ -23,6 +24,16 @@ import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 describe('DDL Generator', () => {
+	it('refuses a declared enum map key that differs from its physical name', () => {
+		const schema = new ModelIRImpl(
+			new Map(),
+			new Map(),
+			new Map([['a', { name: 'b\n', values: ['active'] }]]),
+		);
+		expect(() => generateDDL(schema)).toThrow(EnumNameMapKeyMismatchError);
+		expect(() => generateDDL(schema)).toThrow('"b\\n"');
+	});
+
 	it('makes a canonical CHECK literal independent of standard_conforming_strings', () => {
 		const schema = {
 			tables: new Map([

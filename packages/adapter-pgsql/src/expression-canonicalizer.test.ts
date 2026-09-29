@@ -1,4 +1,5 @@
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type {
 	ColumnIR,
 	EnumIR,
@@ -374,6 +375,30 @@ function createdTempTableNames(client: FakePgClient): string[] {
 }
 
 describe('canonicalizeCheckConstraints', () => {
+	it('refuses an enum key/name mismatch before scratch enum staging', async () => {
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['a', { name: 'b\n', values: ['happy'] }]]),
+		);
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(new FakePgClient())),
+				desired,
+				makeModel([]),
+			),
+		).rejects.toThrow(EnumNameMapKeyMismatchError);
+	});
+
 	it.each([
 		['single-quoted', "state = 'pending'"],
 		['dollar-quoted', 'state = $$pending$$'],

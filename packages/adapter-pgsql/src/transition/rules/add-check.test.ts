@@ -16,6 +16,7 @@ import type {
 	TransitionLessor,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { camelCaseNaming } from '../../naming-plugin.js';
 import {
 	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
@@ -380,10 +381,10 @@ describe('postgresql.table.add-check rule', () => {
 	});
 
 	it('declares enum-label visibility dependencies from authored CHECK metadata', () => {
-		const rule = createAddCheckRule();
+		const rule = createAddCheckRule({ naming: camelCaseNaming });
 		const required = {
 			schema: 'public',
-			type: 'status',
+			type: 'moodType',
 			label: 'pending',
 		} as const;
 		const recognition = rule.recognize(
@@ -410,13 +411,13 @@ describe('postgresql.table.add-check rule', () => {
 				kind: ENUM_LABEL_VISIBLE_OBSERVATION,
 				resource: {
 					kind: 'type',
-					name: 'status',
+					name: 'moodType',
 					schema: 'public',
 					qualifiedBy: ['enum'],
 				},
 				detail: {
 					schema: 'public',
-					type: 'status',
+					type: 'moodType',
 					label: 'pending',
 				},
 			},
@@ -447,13 +448,13 @@ describe('postgresql.table.add-check rule', () => {
 				kind: ENUM_LABEL_VISIBLE_OBSERVATION,
 				resource: {
 					kind: 'type',
-					name: 'status',
+					name: 'moodType',
 					schema: 'public',
 					qualifiedBy: ['enum'],
 				},
 				detail: {
 					schema: 'public',
-					type: 'status',
+					type: 'moodType',
 					label: 'pending',
 				},
 			},

@@ -14,7 +14,7 @@ function enumModel(values: readonly string[]): ModelIR {
 		tables: new Map(),
 		relations: new Map(),
 		enums: new Map([
-			['status', { name: 'status', schema: schemaName, values }],
+			['moodType', { name: 'moodType', schema: schemaName, values }],
 		]),
 		getTable: () => undefined,
 		getRelation: () => undefined,
@@ -43,16 +43,16 @@ describe('dbsp plan: enum-add-value', () => {
 			plannedRunId = undefined;
 		}
 		await pool.query(
-			`DROP TYPE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent('status')} CASCADE`,
+			`DROP TYPE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent('moodType')} CASCADE`,
 		);
 	});
 
 	afterAll(async () => dropSchema(schemaName));
 
-	it('proves and retains exactly one run and plan row without changing the target enum', async () => {
+	it('plans a physical mixed-case enum under snake_case without changing it', async () => {
 		const planningPool = await getTestPool();
 		await planningPool.query(
-			`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent('status')} AS ENUM ('inactive', 'active')`,
+			`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent('moodType')} AS ENUM ('happy', 'sad')`,
 		);
 		const result = await runPlan(
 			{
@@ -66,9 +66,10 @@ describe('dbsp plan: enum-add-value', () => {
 					release: () => Promise.resolve(),
 				}),
 				loadSchema: async () => ({
-					model: enumModel(['inactive', 'pending', 'active']),
+					model: enumModel(['happy', 'sad', 'calm']),
 					definition: {},
 					tableNames: [],
+					dbCasing: 'snake_case',
 				}),
 			},
 		);
@@ -76,6 +77,11 @@ describe('dbsp plan: enum-add-value', () => {
 		expect(result.proveKind).toBe('proven');
 		expect(result.persisted).toBe(true);
 		expect(result.runId).toBeTruthy();
+		expect(result.plan?.declarations?.declarations).toContainEqual(
+			expect.objectContaining({
+				address: expect.objectContaining({ kind: 'enum', name: 'moodType' }),
+			}),
+		);
 		const runId = result.runId!;
 		plannedRunId = runId;
 		const verificationPool = await getTestPool();
@@ -95,8 +101,8 @@ describe('dbsp plan: enum-add-value', () => {
 				'JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace ' +
 				'JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid ' +
 				'WHERE n.nspname = $1 AND t.typname = $2 ORDER BY e.enumsortorder',
-			[schemaName, 'status'],
+			[schemaName, 'moodType'],
 		);
-		expect(labels.rows.map((row) => row.label)).toEqual(['inactive', 'active']);
+		expect(labels.rows.map((row) => row.label)).toEqual(['happy', 'sad']);
 	});
 });

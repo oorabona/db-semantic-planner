@@ -15,6 +15,7 @@ import type {
 	ObservationRequest,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { camelCaseNaming } from '../../naming-plugin.js';
 import {
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
@@ -488,6 +489,23 @@ class FakeEnumPool {
 }
 
 describe('postgresql.enum.add-value rule', () => {
+	it('keeps a declared enum type physical under a naming plugin', () => {
+		const rule = createEnumAddValueRule({ naming: camelCaseNaming });
+		const desired = model([
+			{ name: 'moodType', values: ['happy', 'sad', 'calm'] },
+		]);
+		const current = model([{ name: 'moodType', values: ['happy', 'sad'] }]);
+
+		const recognized = rule.recognize(desired, current, {
+			context: { engine: 'postgresql', targetSchema: 'tenant' },
+		});
+		expect(camelCaseNaming.toDatabase('moodType')).toBe('mood_type');
+		expect(recognized).toMatchObject({
+			recognized: true,
+			match: { type: 'moodType' },
+		});
+	});
+
 	it('recognizes appended and positioned enum labels', () => {
 		const rule = createEnumAddValueRule();
 		const appended = rule.recognize(

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	DbCasing,
@@ -182,6 +183,7 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			})
 			.map((sequence) => sequence.name),
 	);
+	assertDeclaredEnumMapIdentity(input.model.enums);
 	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
 	const declarationScopedAdapter = new Proxy(adapter, {
 		get(target, property, receiver) {

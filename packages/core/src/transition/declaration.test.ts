@@ -4,6 +4,7 @@ import {
 	admitRecordedIdentity,
 	declarationSetFromModel,
 } from './declaration.js';
+import { EnumNameMapKeyMismatchError } from './enum-name.js';
 
 const context = { engine: 'postgresql', database: 'db', schema: 'public' };
 
@@ -99,7 +100,7 @@ describe('managed declaration slicing', () => {
 		);
 	});
 
-	it('uses the physical naming strategy for every declarable address and parent', () => {
+	it('keeps declared enum names physical while mapping tables and sequences', () => {
 		const declarations = declarationSetFromModel(
 			{
 				...model(
@@ -160,12 +161,36 @@ describe('managed declaration slicing', () => {
 					name: 'post_comments_check',
 					parent: 'post_comments',
 				},
-				{ kind: 'enum', name: 'comment_status', parent: undefined },
+				{ kind: 'enum', name: 'commentStatus', parent: undefined },
 				{ kind: 'sequence', name: 'post_comments_seq', parent: undefined },
 			]),
 		);
-		expect(JSON.stringify(declarations)).not.toContain('postComments');
+		const enumDeclaration = declarations.declarations.find(
+			(declaration) => declaration.address.kind === 'enum',
+		);
+		expect(enumDeclaration?.fragment).toMatchObject({ name: 'commentStatus' });
 		expect(JSON.stringify(declarations)).not.toContain('postId');
+	});
+
+	it('refuses a declared enum map key that differs from its physical name', () => {
+		expect(() =>
+			declarationSetFromModel(
+				{
+					...model(table()),
+					enums: new Map([['a', { name: 'b\n', values: ['active'] }]]),
+				},
+				context,
+			),
+		).toThrow(EnumNameMapKeyMismatchError);
+		expect(() =>
+			declarationSetFromModel(
+				{
+					...model(table()),
+					enums: new Map([['a', { name: 'b\n', values: ['active'] }]]),
+				},
+				context,
+			),
+		).toThrow('"b\\n"');
 	});
 
 	it('SC-24: refuses admission when a same-name live object has another identity', () => {

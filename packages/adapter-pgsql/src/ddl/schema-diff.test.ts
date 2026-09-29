@@ -1,4 +1,5 @@
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
+import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type {
 	ColumnIR,
 	DialectCapabilities,
@@ -3569,6 +3570,17 @@ function makeModelWithEnums(
 }
 
 describe('ENUM types', () => {
+	it('refuses a declared enum map key that differs from its physical name', () => {
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['a', { name: 'b\n', values: ['active'] }]]),
+		);
+		expect(() => compareSchemata(schema, makeModel([]))).toThrow(
+			EnumNameMapKeyMismatchError,
+		);
+		expect(() => compareSchemata(schema, makeModel([]))).toThrow('"b\\n"');
+	});
+
 	it('should detect new enum type', () => {
 		const schema = makeModelWithEnums(
 			[],

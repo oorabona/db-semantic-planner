@@ -10,11 +10,16 @@ export {
 	decideDestructiveDecision,
 	isDestructiveAuthorityPermit,
 } from './transition/destructive-authority.js';
+export { escapeDiagnosticText } from './transition/diagnostic-text.js';
 export {
 	type DurablyLoadedRun,
 	isDurablyLoadedRun,
 	mintDurablyLoadedRun,
 } from './transition/durably-loaded-run.js';
+export {
+	assertDeclaredEnumMapIdentity,
+	EnumNameMapKeyMismatchError,
+} from './transition/enum-name.js';
 export {
 	admitOutcomeClaim,
 	claimIdForToken,

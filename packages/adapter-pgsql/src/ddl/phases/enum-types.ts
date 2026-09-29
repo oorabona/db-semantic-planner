@@ -7,6 +7,7 @@
  * @module ddl/phases/enum-types
  */
 
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import { type PhaseContext, sup } from './types.js';
 import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
 
@@ -18,6 +19,7 @@ import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
  */
 export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
 	const { schema, schemaName, caps } = ctx;
+	assertDeclaredEnumMapIdentity(schema.enums);
 	if (!schema.enums || !sup(caps, caps?.supportsDDLEnumTypes)) {
 		return [];
 	}

@@ -16,7 +16,7 @@ function enumModel(values: readonly string[]): ModelIR {
 		tables: new Map(),
 		relations: new Map(),
 		enums: new Map([
-			['status', { name: 'status', schema: schemaName, values }],
+			['moodType', { name: 'moodType', schema: schemaName, values }],
 		]),
 		getTable: () => undefined,
 		getRelation: () => undefined,
@@ -58,7 +58,7 @@ describe('dbsp apply: enum-add-value', () => {
 			runId = undefined;
 		}
 		await pool.query(
-			`DROP TYPE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent('status')} CASCADE`,
+			`DROP TYPE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent('moodType')} CASCADE`,
 		);
 	});
 
@@ -67,7 +67,7 @@ describe('dbsp apply: enum-add-value', () => {
 	it('mutation: releasing the pinned apply session before its observed journal write loses the completed audit event', async () => {
 		const pool = await getTestPool();
 		await pool.query(
-			`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent('status')} AS ENUM ('inactive', 'active')`,
+			`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent('moodType')} AS ENUM ('happy', 'sad')`,
 		);
 		const planned = await runPlan(
 			{
@@ -81,9 +81,10 @@ describe('dbsp apply: enum-add-value', () => {
 					release: () => Promise.resolve(),
 				}),
 				loadSchema: async () => ({
-					model: enumModel(['inactive', 'pending', 'active']),
+					model: enumModel(['happy', 'sad', 'calm']),
 					definition: {},
 					tableNames: [],
+					dbCasing: 'snake_case',
 				}),
 			},
 		);
@@ -112,13 +113,18 @@ describe('dbsp apply: enum-add-value', () => {
 				'JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace ' +
 				'JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid ' +
 				'WHERE n.nspname = $1 AND t.typname = $2 ORDER BY e.enumsortorder',
-			[schemaName, 'status'],
+			[schemaName, 'moodType'],
 		);
 		expect(labels.rows.map((row) => row.label)).toEqual([
-			'inactive',
-			'pending',
-			'active',
+			'happy',
+			'sad',
+			'calm',
 		]);
+		expect(planned.plan?.declarations?.declarations).toContainEqual(
+			expect.objectContaining({
+				address: expect.objectContaining({ kind: 'enum', name: 'moodType' }),
+			}),
+		);
 		await expect(
 			pool.query(
 				'SELECT * FROM dbsp_meta.dbsp_transition_authorization WHERE run_id = $1',

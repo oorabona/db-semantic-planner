@@ -8,6 +8,7 @@
  */
 
 import { validateSchemaIndexOptions } from '@dbsp/core';
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	ColumnIR,
@@ -220,6 +221,7 @@ export function compareSchemata(
 	db: ModelIR,
 	options?: CompareSchemataOptions,
 ): SchemaDiff {
+	assertDeclaredEnumMapIdentity(schema.enums);
 	const caps = options?.dialectCapabilities;
 	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
 	/**

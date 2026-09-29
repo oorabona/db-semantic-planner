@@ -1920,30 +1920,30 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('no-drift');
 	});
 
-	it('surfaces enum name-normalization collisions as unsupported drift', () => {
-		const compare = createComparator(
+	it('keeps live enum names physical under a current-name normalizer', () => {
+		const comparator = createComparator(
 			registry({
-				rules: [enumRule()],
 				comparatorNameNormalizer: {
-					normalizeCurrentIdentifier: (identifier) => identifier.toLowerCase(),
+					normalizeCurrentIdentifier: (identifier) =>
+						identifier.replace(/([a-z0-9])([A-Z])/gu, '$1_$2').toLowerCase(),
 				},
 			}),
-		).compare(
-			modelFromEnums([enumDef(['active'], 'status')]),
-			modelFromEnums([
-				enumDef(['active'], 'Status'),
-				enumDef(['inactive'], 'status'),
-			]),
 		);
+		expect(
+			comparator.compare(
+				modelFromEnums([enumDef(['happy', 'sad'], 'moodType')]),
+				modelFromEnums([enumDef(['happy', 'sad'], 'moodType')]),
+			),
+		).toMatchObject({ kind: 'no-drift' });
 
-		expect(compare.kind).toBe('unsupported');
-		if (compare.kind === 'unsupported') {
-			expect(compare.changes).toContainEqual(
-				expect.objectContaining({
-					kind: 'type',
-					name: 'status',
-					qualifiedBy: ['enum'],
-				}),
+		const drift = comparator.compare(
+			modelFromEnums([enumDef(['happy', 'sad'], 'moodType')]),
+			modelFromEnums([enumDef(['happy', 'sad'], 'mood_type')]),
+		);
+		expect(drift.kind).toBe('unsupported');
+		if (drift.kind === 'unsupported') {
+			expect(drift.changes).toContainEqual(
+				expect.objectContaining({ kind: 'type', name: 'moodType' }),
 			);
 		}
 	});

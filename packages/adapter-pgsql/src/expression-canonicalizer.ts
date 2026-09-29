@@ -3,6 +3,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { ModelIRImpl } from '@dbsp/core';
+import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
 	DbCasing,
@@ -2122,6 +2123,7 @@ function missingDesiredEnums(
 	desired: ModelIR,
 	dbModel: ModelIR,
 ): Map<string, EnumIR> {
+	assertDeclaredEnumMapIdentity(desired.enums);
 	const missing = new Map<string, EnumIR>();
 	for (const [name, enumDef] of desired.enums ?? []) {
 		if (!dbModel.enums?.has(name)) missing.set(name, enumDef);

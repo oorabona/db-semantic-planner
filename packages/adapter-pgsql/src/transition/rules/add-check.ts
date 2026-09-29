@@ -298,7 +298,6 @@ function operationRef(match: AddCheckMatch): string {
 function enumLabelCompositionFact(
 	match: AddCheckMatch,
 	required: RequiredEnumLabelIR,
-	naming: NamingPlugin,
 	context?: ObservationContext,
 	database = match.database ?? 'model',
 ) {
@@ -308,7 +307,7 @@ function enumLabelCompositionFact(
 			'add-check enum-label composition requires an explicit enum schema',
 		);
 	}
-	const type = naming.toDatabase(required.type);
+	const type = required.type;
 	return pgEnumLabelVisibleFact({
 		database,
 		schema,
@@ -319,7 +318,6 @@ function enumLabelCompositionFact(
 
 function compositionForRequiredEnumLabels(
 	match: AddCheckMatch,
-	naming: NamingPlugin,
 	context?: ObservationContext,
 ): TransitionFragmentComposition | undefined {
 	if (!match.requiresEnumLabels || match.requiresEnumLabels.length === 0) {
@@ -329,7 +327,7 @@ function compositionForRequiredEnumLabels(
 	return {
 		requires: match.requiresEnumLabels.map((required) => ({
 			opRef,
-			fact: enumLabelCompositionFact(match, required, naming, context),
+			fact: enumLabelCompositionFact(match, required, context),
 			needs: 'producer-after-commit',
 		})),
 	};
@@ -570,7 +568,7 @@ export function createAddCheckRule(
 			match: AddCheckMatch,
 			context: ObservationContext,
 		): TransitionFragmentComposition | undefined {
-			return compositionForRequiredEnumLabels(match, naming, context);
+			return compositionForRequiredEnumLabels(match, context);
 		},
 		evaluate(match: AddCheckMatch, evidence: EvidenceView): RuleEvaluation {
 			const obligations = evaluationObligations(match, evidence);
@@ -676,10 +674,7 @@ export function createAddCheckRule(
 				'check-constraint',
 				resolvedMatch.database,
 			);
-			const composition = compositionForRequiredEnumLabels(
-				resolvedMatch,
-				naming,
-			);
+			const composition = compositionForRequiredEnumLabels(resolvedMatch);
 			return {
 				generatedBy: { id: ADD_CHECK_RULE_ID, pack: PG_RULE_PACK_ARTIFACT },
 				operations: [operation],
