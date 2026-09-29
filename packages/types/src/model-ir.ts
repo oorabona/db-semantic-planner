@@ -324,9 +324,11 @@ export interface SequenceIR {
 
 export interface EnumIR {
 	/**
-	 * PostgreSQL type name, exactly as columns spell it in `originalDbType`.
-	 * It is physical: `dbCasing` never maps it. Its `ModelIR.enums` key must be
-	 * this same string.
+	 * Raw PostgreSQL catalog type name (`pg_type.typname`): no identifier
+	 * quotes, schema, modifiers or array suffix. It is physical: `dbCasing`
+	 * never maps it. A column refers to it through the rendered spelling in
+	 * `originalDbType` (`status`, `"Status"`, `status[]`), with the schema in
+	 * `originalDbTypeSchema`. Its `ModelIR.enums` key must be this same string.
 	 */
 	readonly name: string;
 
