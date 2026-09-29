@@ -1892,7 +1892,7 @@ describe('convergePg refusal boundary', () => {
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 	});
 
-	it('refuses a fresh single-column FK without a covering declared key before execution', async () => {
+	it('refuses a fresh single-column FK without a declared foreign key index before execution', async () => {
 		mocks.compare.mockResolvedValue({
 			changes: [createTableWithForeignKey('posts', ['author_id'])],
 		});
@@ -1900,7 +1900,7 @@ describe('convergePg refusal boundary', () => {
 		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
-				'converge refuses fresh foreign keys without a covering declared key: posts.author_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
+				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
 			),
 			changes: [
 				expect.objectContaining({ kind: 'create_table', table: 'posts' }),
@@ -1965,16 +1965,15 @@ describe('convergePg refusal boundary', () => {
 	});
 
 	it.each([
-		['a non-leading composite index', { columns: ['tenant_id', 'author_id'] }],
-		['a partial index', { columns: ['author_id'], where: 'id > 0' }],
+		['partial', { columns: ['author_id'], where: 'id > 0' }],
 		[
-			'an expression index',
+			'expression',
 			{ columns: ['author_id'], expressions: ['lower(author_id)'] },
 		],
-		['a gin index', { columns: ['author_id'], method: 'gin' }],
-		['a hash index', { columns: ['author_id'], method: 'hash' }],
+		['gin', { columns: ['author_id'], method: 'gin' }],
+		['hash', { columns: ['author_id'], method: 'hash' }],
 	] as const)(
-		'refuses a fresh FK covered only by %s',
+		'admits a fresh FK with a declared single-column %s index',
 		async (_reason, index) => {
 			mocks.compare.mockResolvedValue({
 				changes: [
@@ -1986,14 +1985,35 @@ describe('convergePg refusal boundary', () => {
 				],
 			});
 
-			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
-				refusal: 'unsupported-change',
-				detail: expect.stringContaining(
-					'converge refuses fresh foreign keys without a covering declared key: posts.author_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
-				),
+			mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+			await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+				kind: 'applied',
 			});
 		},
 	);
+
+	it('refuses a fresh FK with only a non-leading composite index', async () => {
+		mocks.compare.mockResolvedValue({
+			changes: [
+				freshSingleColumnFkChange({
+					indexes: [
+						{
+							name: 'posts_tenant_author_index',
+							columns: ['tenant_id', 'author_id'],
+						},
+					],
+				}),
+			],
+		});
+
+		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining(
+				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
+			),
+		});
+	});
 
 	it('admits a fresh composite FK because the generator does not auto-index it', async () => {
 		mocks.compare.mockResolvedValue({

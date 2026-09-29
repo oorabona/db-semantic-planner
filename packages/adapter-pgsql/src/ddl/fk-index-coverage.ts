@@ -47,9 +47,9 @@ export function hasDeclaredFkIndexCoverage(
 }
 
 /**
- * The pre-#830 generation rule, retained only to recognize legacy automatic
- * indexes during comparison. Unlike coverage, this intentionally considers
- * every declared single-column index, regardless of its options.
+ * Whether a declared index is the single-column key recognized by the current
+ * generation and fresh-FK admission rules. Unlike coverage, this intentionally
+ * considers every declared single-column index, regardless of its options.
  */
 export function hasDeclaredSingleColumnFkIndex(
 	table: TableIR,
@@ -61,20 +61,32 @@ export function hasDeclaredSingleColumnFkIndex(
 }
 
 /**
+ * Whether a declared key admits a fresh single-column foreign key.
+ *
+ * Admission matches automatic FK-index emission: a covering key or any
+ * declared single-column index means generation needs no automatic index.
+ */
+export function hasDeclaredFkIndexAdmission(
+	table: TableIR,
+	fkColumn: string,
+): boolean {
+	return (
+		hasDeclaredFkIndexCoverage(table, fkColumn) ||
+		hasDeclaredSingleColumnFkIndex(table, fkColumn)
+	);
+}
+
+/**
  * Whether generation should emit an automatic index for a single-column FK.
  *
  * A declared single-column index suppresses automatic generation even when it
- * is not a covering lookup key. This preserves the pre-#830 emission rule;
- * coverage remains available to callers that need to enforce lookup safety.
+ * is not a covering lookup key.
  */
 export function shouldEmitAutoFkIndex(
 	table: TableIR,
 	fkColumn: string,
 ): boolean {
-	return (
-		!hasDeclaredFkIndexCoverage(table, fkColumn) &&
-		!hasDeclaredSingleColumnFkIndex(table, fkColumn)
-	);
+	return !hasDeclaredFkIndexAdmission(table, fkColumn);
 }
 
 function primaryKeyColumns(
