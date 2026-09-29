@@ -703,7 +703,7 @@ describe('convergePg refusal boundary', () => {
 		},
 	);
 
-	it('maps preflight failures into structured initialization refusals', async () => {
+	it('keeps generic preflight failures as reinitialize-preflight-failed', async () => {
 		mocks.currency.mockResolvedValue({ kind: 'absent' });
 		mocks.preflight.mockResolvedValue({
 			scopes: [
@@ -732,6 +732,48 @@ describe('convergePg refusal boundary', () => {
 				code: 'reinitialize-preflight-failed',
 				step: 'create',
 				detail: 'denied',
+			},
+		});
+	});
+
+	it('maps a pristine live-relation preflight refusal into initialization metadata', async () => {
+		mocks.currency.mockResolvedValue({ kind: 'absent' });
+		mocks.preflight.mockResolvedValue({
+			scopes: [
+				{
+					ledger: { scope: 'database' },
+					outcome: 'unchanged',
+					marker: { kind: 'current' },
+				},
+				{
+					ledger: { scope: 'schema', schema: 'public' },
+					outcome: 'failed',
+					marker: { kind: 'absent' },
+					refusal: {
+						code: 'pristine-live-relations',
+						detail:
+							'converge pristine initialization refuses declared live relation legacy_items',
+					},
+					reason: {
+						step: 'create',
+						message:
+							'converge pristine initialization refuses declared live relation legacy_items',
+					},
+				},
+			],
+			adoptionCandidates: [],
+		} as never);
+
+		await expect(
+			convergePg(poolFor(), emptyModel(), { initialize: 'pristine' }),
+		).rejects.toMatchObject({
+			refusal: 'initialization-refused',
+			initialization: {
+				home: { scope: 'schema', schema: 'public' },
+				code: 'pristine-live-relations',
+				step: 'create',
+				detail:
+					'converge pristine initialization refuses declared live relation legacy_items',
 			},
 		});
 	});

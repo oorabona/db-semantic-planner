@@ -131,12 +131,41 @@ type ReinitializePreflightOutput = Pick<
 	'declarations' | 'writeAdoptionFile'
 >;
 
-type ReinitializePreflightScopeOnlyReport = Pick<
-	ReinitializePreflightReport,
-	'scopes'
->;
+type ConvergeInitializationRefusalCode =
+	| ReinitializePreflightRefusalCode
+	| 'pristine-live-relations';
+
+type ConvergeInitializationScopeReport =
+	| ReinitializePreflightScopeReport
+	| {
+			readonly ledger: LedgerHome;
+			readonly outcome: 'failed';
+			readonly marker: LedgerMarkerState;
+			readonly refusal: {
+				readonly code: ConvergeInitializationRefusalCode;
+				readonly detail: string;
+			};
+			readonly reason: {
+				readonly step: ReinitializePreflightFailureStep;
+				readonly message: string;
+			};
+	  };
+
+interface ConvergeInitializationScopeOnlyReport {
+	readonly scopes: readonly ConvergeInitializationScopeReport[];
+}
+
+interface ConvergeInitializationAdmissionRefusal {
+	readonly code: 'pristine-live-relations';
+	readonly detail: string;
+}
 
 type LineageMismatchPolicy = 'archive' | 'refuse';
+
+type BeforeFirstWrite = (
+	client: PgReinitializePreflightClient,
+	home: LedgerHome,
+) => Promise<ConvergeInitializationAdmissionRefusal | undefined>;
 
 const LEDGER_TABLES = DBSP_LEDGER_TABLES;
 const TRANSITION_JOURNAL_TABLES = [
@@ -732,6 +761,61 @@ function refusal(
 	};
 }
 
+function convergeInitializationRefusal(
+	home: LedgerHome,
+	marker: LedgerMarkerState,
+	refusal: ConvergeInitializationAdmissionRefusal,
+	step: ReinitializePreflightFailureStep,
+): ConvergeInitializationScopeReport {
+	return {
+		ledger: home,
+		outcome: 'failed',
+		marker,
+		refusal,
+		reason: { step, message: refusal.detail },
+	};
+}
+
+function publicScopeReport(
+	report: ConvergeInitializationScopeReport,
+): ReinitializePreflightScopeReport {
+	if (report.outcome !== 'failed') return report;
+	const { refusal: scopeRefusal } = report;
+	if (!scopeRefusal)
+		return {
+			ledger: report.ledger,
+			outcome: 'failed',
+			marker: report.marker,
+			reason: report.reason,
+		};
+	if (scopeRefusal.code !== 'pristine-live-relations')
+		return {
+			...report,
+			refusal: {
+				code: scopeRefusal.code,
+				detail: scopeRefusal.detail,
+			},
+		};
+	return {
+		...report,
+		refusal: {
+			code: 'reinitialize-preflight-failed',
+			detail: scopeRefusal.detail,
+		},
+	};
+}
+
+async function processInternalPreflightScopes(
+	inspections: readonly ReinitializePreflightScopeInspection[],
+	process: (
+		inspection: ReinitializePreflightScopeInspection,
+	) => Promise<ConvergeInitializationScopeReport>,
+): Promise<readonly ConvergeInitializationScopeReport[]> {
+	return processReinitializePreflightScopes(inspections, async (inspection) =>
+		publicScopeReport(await process(inspection)),
+	);
+}
+
 function failureCode(detail: string): ReinitializePreflightRefusalCode {
 	if (detail.includes('widened grants')) return 'reinitialize-preflight-grants';
 	if (detail.includes('owned by') || detail.includes('ownership'))
@@ -751,12 +835,9 @@ async function processScope(
 	pool: PgReinitializePreflightPool,
 	inspection: ReinitializePreflightScopeInspection,
 	observer: ReinitializePreflightObserver | undefined,
-	beforeFirstWrite?: (
-		client: PgReinitializePreflightClient,
-		home: LedgerHome,
-	) => Promise<void>,
+	beforeFirstWrite?: BeforeFirstWrite,
 	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
-): Promise<ReinitializePreflightScopeReport> {
+): Promise<ConvergeInitializationScopeReport> {
 	const client = await pool.connect();
 	let begun = false;
 	let failed = false;
@@ -802,7 +883,17 @@ async function processScope(
 		}
 		if (beforeFirstWrite && current.marker.kind === 'absent') {
 			failureStep = 'create';
-			await beforeFirstWrite(client, current.home);
+			const admissionRefusal = await beforeFirstWrite(client, current.home);
+			if (admissionRefusal) {
+				await client.query('ROLLBACK');
+				begun = false;
+				return convergeInitializationRefusal(
+					current.home,
+					current.marker,
+					admissionRefusal,
+					failureStep,
+				);
+			}
 		}
 		const preexistingLedger =
 			current.marker.kind !== 'current' &&
@@ -961,8 +1052,8 @@ async function refuseNonPristineRelations(
 	client: PgReinitializePreflightClient,
 	home: LedgerHome,
 	names: readonly string[],
-): Promise<void> {
-	if (home.scope !== 'schema' || names.length === 0) return;
+): Promise<ConvergeInitializationAdmissionRefusal | undefined> {
+	if (home.scope !== 'schema' || names.length === 0) return undefined;
 	const relations = await client.query(
 		`SELECT relation.relname AS name FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = ANY($2::text[]) AND relation.relkind IN ('r', 'p', 'f', 'S') ORDER BY relation.relname`,
 		[home.schema, names],
@@ -971,9 +1062,11 @@ async function refuseNonPristineRelations(
 		.map((row) => row.name)
 		.filter((name): name is string => typeof name === 'string');
 	if (found.length > 0)
-		throw new Error(
-			`converge pristine initialization refuses declared live relation${found.length === 1 ? '' : 's'} ${found.join(', ')}`,
-		);
+		return {
+			code: 'pristine-live-relations',
+			detail: `converge pristine initialization refuses declared live relation${found.length === 1 ? '' : 's'} ${found.join(', ')}`,
+		};
+	return undefined;
 }
 
 function runPgReinitializePreflightInternal(
@@ -983,35 +1076,31 @@ function runPgReinitializePreflightInternal(
 function runPgReinitializePreflightInternal(
 	options: ReinitializePreflightScopeOptions,
 	output: undefined,
-	beforeFirstWrite?: (
-		client: PgReinitializePreflightClient,
-		home: LedgerHome,
-	) => Promise<void>,
+	beforeFirstWrite?: BeforeFirstWrite,
 	lineageMismatchPolicy?: LineageMismatchPolicy,
 	processScopes?: (
 		inspections: readonly ReinitializePreflightScopeInspection[],
 		process: (
 			inspection: ReinitializePreflightScopeInspection,
-		) => Promise<ReinitializePreflightScopeReport>,
-	) => Promise<readonly ReinitializePreflightScopeReport[]>,
-): Promise<ReinitializePreflightScopeOnlyReport>;
+		) => Promise<ConvergeInitializationScopeReport>,
+	) => Promise<readonly ConvergeInitializationScopeReport[]>,
+): Promise<ConvergeInitializationScopeOnlyReport>;
 async function runPgReinitializePreflightInternal(
 	options: ReinitializePreflightScopeOptions,
 	output: ReinitializePreflightOutput | undefined,
-	beforeFirstWrite?: (
-		client: PgReinitializePreflightClient,
-		home: LedgerHome,
-	) => Promise<void>,
+	beforeFirstWrite?: BeforeFirstWrite,
 	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
 	processScopes: (
 		inspections: readonly ReinitializePreflightScopeInspection[],
 		process: (
 			inspection: ReinitializePreflightScopeInspection,
-		) => Promise<ReinitializePreflightScopeReport>,
+		) => Promise<ConvergeInitializationScopeReport>,
 	) => Promise<
-		readonly ReinitializePreflightScopeReport[]
-	> = processReinitializePreflightScopes,
-): Promise<ReinitializePreflightReport | ReinitializePreflightScopeOnlyReport> {
+		readonly ConvergeInitializationScopeReport[]
+	> = processInternalPreflightScopes,
+): Promise<
+	ReinitializePreflightReport | ConvergeInitializationScopeOnlyReport
+> {
 	const homes = homesFor(options.schemas);
 	const inspectionClient = await options.pool.connect();
 	let inspections: readonly ReinitializePreflightScopeInspection[];
@@ -1096,7 +1185,9 @@ async function runPgReinitializePreflightInternal(
 		);
 	const scopes = await processScopes(inspections, process);
 	if (scopes.some((scope) => scope.outcome === 'failed'))
-		return output ? { scopes, adoptionCandidates: [] } : { scopes };
+		return output
+			? { scopes: scopes.map(publicScopeReport), adoptionCandidates: [] }
+			: { scopes };
 	if (!output) return { scopes };
 	try {
 		const chains = await readChainAddresses(options.pool, homes);
@@ -1104,7 +1195,10 @@ async function runPgReinitializePreflightInternal(
 			output.declarations,
 			chains,
 		);
-		const report = { scopes, adoptionCandidates };
+		const report = {
+			scopes: scopes.map(publicScopeReport),
+			adoptionCandidates,
+		};
 		await checkpoint(options.observer, 'output');
 		await output.writeAdoptionFile(report);
 		return report;
@@ -1133,7 +1227,7 @@ async function runPgReinitializePreflightInternal(
 
 export function runPgConvergeInitializationPreflight(
 	options: PgConvergeInitializationPreflightOptions,
-): Promise<ReinitializePreflightScopeOnlyReport> {
+): Promise<ConvergeInitializationScopeOnlyReport> {
 	return runPgReinitializePreflightInternal(
 		{
 			pool: options.pool,
@@ -1157,22 +1251,24 @@ async function processConvergeInitializationScopes(
 	inspections: readonly ReinitializePreflightScopeInspection[],
 	process: (
 		inspection: ReinitializePreflightScopeInspection,
-	) => Promise<ReinitializePreflightScopeReport>,
-): Promise<readonly ReinitializePreflightScopeReport[]> {
+	) => Promise<ConvergeInitializationScopeReport>,
+): Promise<readonly ConvergeInitializationScopeReport[]> {
 	const [databaseInspection, ...schemaInspections] = inspections;
 	if (!databaseInspection) throw new Error('missing database ledger home');
-	const [databaseScope] = await processReinitializePreflightScopes(
-		[databaseInspection],
+	const databaseScope = await processConvergeInitializationScope(
+		databaseInspection,
 		process,
 	);
-	if (!databaseScope) throw new Error('missing database ledger scope report');
 	if (
 		databaseScope.outcome === 'current' ||
 		databaseScope.outcome === 'unchanged'
 	)
 		return [
 			databaseScope,
-			...(await processReinitializePreflightScopes(schemaInspections, process)),
+			...(await processConvergeInitializationScopeList(
+				schemaInspections,
+				process,
+			)),
 		];
 	return [
 		databaseScope,
@@ -1182,6 +1278,39 @@ async function processConvergeInitializationScopes(
 			marker: inspection.marker,
 		})),
 	];
+}
+
+async function processConvergeInitializationScopeList(
+	inspections: readonly ReinitializePreflightScopeInspection[],
+	process: (
+		inspection: ReinitializePreflightScopeInspection,
+	) => Promise<ConvergeInitializationScopeReport>,
+): Promise<readonly ConvergeInitializationScopeReport[]> {
+	const scopes: ConvergeInitializationScopeReport[] = [];
+	for (const inspection of inspections)
+		scopes.push(await processConvergeInitializationScope(inspection, process));
+	return scopes;
+}
+
+async function processConvergeInitializationScope(
+	inspection: ReinitializePreflightScopeInspection,
+	process: (
+		inspection: ReinitializePreflightScopeInspection,
+	) => Promise<ConvergeInitializationScopeReport>,
+): Promise<ConvergeInitializationScopeReport> {
+	const accessFailure = inspectionAccessFailure(inspection);
+	if (accessFailure) return accessFailure;
+	try {
+		return await process(inspection);
+	} catch (error) {
+		return refusal(
+			inspection.home,
+			inspection.marker,
+			failureCode(errorDetail(error)),
+			errorDetail(error),
+			'advisory-lock',
+		);
+	}
 }
 
 /**
