@@ -1,5 +1,51 @@
 import type { TableIR } from '@dbsp/types';
 
+/** Resolve the physical name PostgreSQL will use for a declared index. */
+export function getResolvedIndexName(
+	tableName: string,
+	columns: readonly string[],
+	declaredName: string | undefined,
+): string {
+	return declaredName ?? `idx_${tableName}_${columns.join('_')}`;
+}
+
+/** Base name for an automatically generated single-column FK index. */
+export function getAutoFkIndexName(
+	tableName: string,
+	columnName: string,
+): string {
+	return `idx_${tableName}_${columnName}`;
+}
+
+/**
+ * Allocate automatic FK-index names without colliding with declared indexes
+ * or automatic indexes allocated earlier for the same table.
+ */
+export function createAutoFkIndexNameAllocator(
+	tableName: string,
+	declaredIndexNames: Iterable<string>,
+): { allocate(columnName: string): string } {
+	const usedNames = new Set(declaredIndexNames);
+
+	return {
+		allocate(columnName: string): string {
+			const baseName = getAutoFkIndexName(tableName, columnName);
+			if (!usedNames.has(baseName)) {
+				usedNames.add(baseName);
+				return baseName;
+			}
+
+			for (let suffix = 1; ; suffix++) {
+				const candidate = `${baseName}_fk${suffix === 1 ? '' : suffix}`;
+				if (!usedNames.has(candidate)) {
+					usedNames.add(candidate);
+					return candidate;
+				}
+			}
+		},
+	};
+}
+
 /**
  * Whether a declared key can serve lookups through a single-column foreign key.
  *

@@ -3982,6 +3982,61 @@ describe('FK enhancements — migration SQL', () => {
 		);
 	});
 
+	it.each([
+		['unnamed partial index', { columns: ['user_id'], where: 'id > 0' }],
+		[
+			'unnamed expression index',
+			{
+				columns: ['user_id'],
+				expressions: ['(user_id + 1)'],
+			},
+		],
+		['unnamed gin index', { columns: ['user_id'], method: 'gin' }],
+		['unnamed hash index', { columns: ['user_id'], method: 'hash' }],
+		[
+			'explicitly colliding non-covering index',
+			{
+				name: 'idx_posts_user_id',
+				columns: ['user_id'],
+				where: 'id > 0',
+			},
+		],
+	] satisfies readonly [string, IndexIR][])(
+		'allocates the same distinct FK auto-index name as generateDDL after a %s',
+		(_description, declaredIndex) => {
+			const users: TableIR = {
+				...makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+			};
+			const posts: TableIR = {
+				...makeTable(
+					'posts',
+					[
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					'id',
+				),
+				foreignKeys: [baseFk],
+				indexes: [declaredIndex],
+			};
+			const schema = makeModel([users, posts]);
+			const migration = generateMigrationSQL(
+				compareSchemata(schema, makeModel([])),
+			);
+			const names = (statements: readonly string[]) =>
+				statements
+					.filter((statement) => statement.startsWith('CREATE INDEX'))
+					.map((statement) => statement.match(/^CREATE INDEX "([^"]+)"/)?.[1])
+					.filter((name): name is string => name !== undefined);
+
+			expect(names(migration)).toEqual([
+				'idx_posts_user_id',
+				'idx_posts_user_id_fk',
+			]);
+			expect(names(migration)).toEqual(names(generateDDL(schema)));
+		},
+	);
+
 	it('should not generate FK auto-index when explicit FK index uses nullsNotDistinct', () => {
 		const table = makeTable('orders', [
 			makeCol({ name: 'user_id', type: 'integer' }),

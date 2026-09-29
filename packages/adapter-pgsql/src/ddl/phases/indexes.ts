@@ -13,8 +13,11 @@
 
 import type { IndexIR } from '@dbsp/types';
 import { generateCreateIndex } from '../ddl-generator.js';
-import { hasDeclaredFkIndexCoverage } from '../fk-index-coverage.js';
-import { getAutoFkIndexName } from '../schema-diff.js';
+import {
+	createAutoFkIndexNameAllocator,
+	getResolvedIndexName,
+	hasDeclaredFkIndexCoverage,
+} from '../fk-index-coverage.js';
 import type { PhaseContext } from './types.js';
 
 /**
@@ -29,6 +32,17 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 
 	for (const table of tables) {
+		const dbTableName = naming.toDatabase(table.name);
+		const autoIndexNames = createAutoFkIndexNameAllocator(
+			dbTableName,
+			table.indexes.map((idx) =>
+				getResolvedIndexName(
+					dbTableName,
+					idx.columns.map((column) => naming.toDatabase(column)),
+					idx.name,
+				),
+			),
+		);
 		// Explicit indexes
 		for (const idx of table.indexes) {
 			statements.push(
@@ -45,13 +59,12 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 					fkCol &&
 					!hasDeclaredFkIndexCoverage(table, fkCol)
 				) {
-					const dbTableName = naming.toDatabase(table.name);
 					const dbFkCol = naming.toDatabase(fkCol);
 					const autoIdx: IndexIR = {
 						// Auto-index names are derived from emitted DB identifiers. Existing
 						// old-style names do not churn because compareIndexes tracks auto-FK
 						// identity structurally (columns + unique), not by index name.
-						name: getAutoFkIndexName(dbTableName, dbFkCol),
+						name: autoIndexNames.allocate(dbFkCol),
 						columns: [fkCol],
 						unique: false,
 					};

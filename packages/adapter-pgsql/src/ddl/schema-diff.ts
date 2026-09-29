@@ -54,6 +54,7 @@ import {
 import { escapeDiagnosticText } from '../validate.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
 import {
+	getResolvedIndexName,
 	hasDeclaredFkIndexCoverage,
 	hasDeclaredSingleColumnFkIndex,
 } from './fk-index-coverage.js';
@@ -66,6 +67,8 @@ import {
 	isQualifyingUniqueIndex,
 	sameColumnSet,
 } from './key-column-set.js';
+
+export { getAutoFkIndexName } from './fk-index-coverage.js';
 
 // ============================================================================
 // Types
@@ -1512,13 +1515,6 @@ function canValidateSchemaIndex(tableName: string, idx: IndexIR): boolean {
 	}
 }
 
-export function getAutoFkIndexName(
-	tableName: string,
-	columnName: string,
-): string {
-	return `idx_${tableName}_${columnName}`;
-}
-
 function isAutoUniqueIndex(
 	tableName: string,
 	idx: IndexIR,
@@ -1543,7 +1539,7 @@ function isAutoUniqueIndex(
 }
 
 function indexReplacementKey(tableName: string, idx: IndexIR): string {
-	return idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`;
+	return getResolvedIndexName(tableName, idx.columns, idx.name);
 }
 
 function formatIndexTargets(idx: IndexIR): string {

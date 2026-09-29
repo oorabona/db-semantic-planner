@@ -190,6 +190,34 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 
+	it('converges an unnamed partial FK index alongside its automatic index', async () => {
+		const desired = model([
+			table('fk_auto_index_users', [column('id', 'integer')], {
+				primaryKey: 'id',
+			}),
+			table(
+				'fk_auto_index_posts',
+				[column('id', 'integer'), column('user_id', 'integer')],
+				{
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['user_id'],
+							references: {
+								table: 'fk_auto_index_users',
+								columns: ['id'],
+							},
+						},
+					],
+					indexes: [{ columns: ['user_id'], where: 'id > 0' }],
+				},
+			),
+		]);
+
+		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+	});
+
 	it('keeps a non-owned nextval default and its free-standing sequence', async () => {
 		const desired = model(
 			[
