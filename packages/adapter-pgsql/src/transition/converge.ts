@@ -22,6 +22,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
+import { hasDeclaredFkIndexCoverage } from '../ddl/fk-index-coverage.js';
 import {
 	createPgsqlGeneratedManagedStep,
 	generateMigrationSQL,
@@ -40,7 +41,7 @@ import {
 	addressForChange,
 	createPgsqlDeclaredAdoptionStep,
 } from '../ddl/managed-step-manifest.js';
-import { collectFkAutoIndexSpecs, getPhase } from '../ddl/migration-sql.js';
+import { getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { physicalizeDeclaredSequences } from '../sequence-name.js';
@@ -947,12 +948,22 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 	return qualifyingIndexes;
 }
 
-function describeFkAutoIndexSpecs(
-	specs: ReturnType<typeof collectFkAutoIndexSpecs>,
-): string {
-	return specs
-		.map((spec) => `${spec.table}.${spec.keys[0]?.column} (${spec.name})`)
-		.join(', ');
+function uncoveredFreshFkColumns(
+	changes: readonly SchemaChange[],
+): readonly { readonly table: string; readonly column: string }[] {
+	return changes.flatMap((change) => {
+		if (change.kind !== 'create_table') return [];
+		const table = change.meta?.table as TableIR | undefined;
+		if (table === undefined) return [];
+		return table.foreignKeys.flatMap((foreignKey) => {
+			const column = foreignKey.columns[0];
+			return foreignKey.columns.length === 1 &&
+				column !== undefined &&
+				!hasDeclaredFkIndexCoverage(table, column)
+				? [{ table: change.table, column }]
+				: [];
+		});
+	});
 }
 
 /**
@@ -1168,16 +1179,16 @@ export async function convergePg(
 			database,
 			schema,
 		);
-		const fkAutoIndexSpecs = collectFkAutoIndexSpecs(diff.changes, schema);
-		if (fkAutoIndexSpecs.length > 0) {
-			const tables = new Set(fkAutoIndexSpecs.map((spec) => spec.table));
+		const uncoveredFkColumns = uncoveredFreshFkColumns(diff.changes);
+		if (uncoveredFkColumns.length > 0) {
+			const tables = new Set(uncoveredFkColumns.map(({ table }) => table));
 			throw refusal(
 				'unsupported-change',
 				diff.changes.filter(
 					(change) =>
 						change.kind === 'create_table' && tables.has(change.table),
 				),
-				`converge refuses fresh foreign keys without declared indexes: ${describeFkAutoIndexSpecs(fkAutoIndexSpecs)}; declare each index in the model`,
+				`converge refuses fresh foreign keys without a covering declared key: ${uncoveredFkColumns.map(({ table, column }) => `${table}.${column}`).join(', ')}; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is`,
 			);
 		}
 		await assertExistingDeclaredTablesManaged(

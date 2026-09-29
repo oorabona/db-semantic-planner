@@ -309,6 +309,111 @@ describe('generateIndexesPhase', () => {
 		expect(stmts[0]).toContain('idx_posts_user_id');
 	});
 
+	it.each([
+		[
+			'a leading composite primary key',
+			{ primaryKey: ['user_id', 'id'] },
+			false,
+		],
+		['a single-column primary key', { primaryKey: 'user_id' }, false],
+		[
+			'a leading composite index',
+			{ indexes: [{ name: 'posts_user_id_id', columns: ['user_id', 'id'] }] },
+			false,
+		],
+		[
+			'an index with INCLUDE columns',
+			{
+				indexes: [
+					{ name: 'posts_user_id', columns: ['user_id'], include: ['id'] },
+				],
+			},
+			false,
+		],
+		[
+			'a unique index',
+			{
+				indexes: [
+					{ name: 'posts_user_id', columns: ['user_id'], unique: true },
+				],
+			},
+			false,
+		],
+		[
+			'a unique column',
+			{
+				columns: [
+					{ name: 'user_id', type: 'integer', nullable: false, unique: true },
+				],
+			},
+			false,
+		],
+		[
+			'a non-leading composite index',
+			{ indexes: [{ name: 'posts_id_user_id', columns: ['id', 'user_id'] }] },
+			true,
+		],
+		[
+			'a partial index',
+			{
+				indexes: [
+					{ name: 'posts_user_id', columns: ['user_id'], where: 'id > 0' },
+				],
+			},
+			false,
+		],
+		[
+			'an expression index',
+			{
+				indexes: [
+					{
+						name: 'posts_user_id',
+						columns: ['user_id'],
+						expressions: ['lower(user_id)'],
+					},
+				],
+			},
+			false,
+		],
+		[
+			'a gin index',
+			{
+				indexes: [
+					{ name: 'posts_user_id', columns: ['user_id'], method: 'gin' },
+				],
+			},
+			false,
+		],
+		[
+			'a hash index',
+			{
+				indexes: [
+					{ name: 'posts_user_id', columns: ['user_id'], method: 'hash' },
+				],
+			},
+			false,
+		],
+	] as const)(
+		'generates an auto-index only when the declared key permits it: %s is %s',
+		(_reason, overrides, expected) => {
+			const posts = makeTable('posts', {
+				foreignKeys: [
+					{
+						columns: ['user_id'],
+						references: { table: 'users', columns: ['id'] },
+					},
+				],
+				...overrides,
+			});
+
+			expect(
+				generateIndexesPhase(makeCtx({ tables: [posts] })).some((statement) =>
+					statement.includes('idx_posts_user_id'),
+				),
+			).toBe(expected);
+		},
+	);
+
 	it('does not auto-generate FK index when explicit FK index uses nullsNotDistinct', () => {
 		const posts = makeTable('posts', {
 			indexes: [

@@ -3936,7 +3936,7 @@ describe('FK enhancements — migration SQL', () => {
 		expect(autoIndexCount).toBe(0);
 	});
 
-	it('should not generate FK auto-index when only a partial index covers the FK column', () => {
+	it('should not generate an FK auto-index when only a partial index is declared on the FK column', () => {
 		const usersTable = makeTable(
 			'users',
 			[makeCol({ name: 'id', type: 'integer' })],
@@ -3981,6 +3981,58 @@ describe('FK enhancements — migration SQL', () => {
 			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
 		);
 	});
+
+	it.each([
+		['unnamed partial index', { columns: ['user_id'], where: 'id > 0' }],
+		[
+			'unnamed expression index',
+			{
+				columns: ['user_id'],
+				expressions: ['(user_id + 1)'],
+			},
+		],
+		['unnamed gin index', { columns: ['user_id'], method: 'gin' }],
+		['unnamed hash index', { columns: ['user_id'], method: 'hash' }],
+		[
+			'explicitly colliding non-covering index',
+			{
+				name: 'idx_posts_user_id',
+				columns: ['user_id'],
+				where: 'id > 0',
+			},
+		],
+	] satisfies readonly [string, IndexIR][])(
+		'generates only the declared %s and no FK auto-index',
+		(description, declaredIndex) => {
+			const users: TableIR = {
+				...makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+			};
+			const posts: TableIR = {
+				...makeTable(
+					'posts',
+					[
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'user_id', type: 'integer' }),
+					],
+					'id',
+				),
+				foreignKeys: [baseFk],
+				indexes: [declaredIndex],
+			};
+			const schema = makeModel([users, posts]);
+			const migration = generateMigrationSQL(
+				compareSchemata(schema, makeModel([])),
+			);
+			const names = (statements: readonly string[]) =>
+				statements
+					.filter((statement) => statement.startsWith('CREATE INDEX'))
+					.map((statement) => statement.match(/^CREATE INDEX "([^"]+)"/)?.[1])
+					.filter((name): name is string => name !== undefined);
+
+			expect(names(migration), description).toEqual(['idx_posts_user_id']);
+			expect(names(migration)).toEqual(names(generateDDL(schema)));
+		},
+	);
 
 	it('should not generate FK auto-index when explicit FK index uses nullsNotDistinct', () => {
 		const table = makeTable('orders', [

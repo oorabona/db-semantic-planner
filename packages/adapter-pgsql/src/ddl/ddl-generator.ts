@@ -19,6 +19,11 @@ import type {
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	getAutoFkIndexName,
+	getResolvedIndexName,
+	shouldEmitAutoFkIndex,
+} from './fk-index-coverage.js';
 import { normalizeOptionalBoolean } from './generated-source-normalizers.js';
 import {
 	assertCreateIndexesSupported,
@@ -175,7 +180,11 @@ function buildIndexRenderSpec(
 	naming: NamingPlugin,
 ): IndexRenderSpec {
 	return {
-		name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
+		name: getResolvedIndexName(
+			naming.toDatabase(tableName),
+			idx.columns.map((column) => naming.toDatabase(column)),
+			idx.name,
+		),
 		table: naming.toDatabase(tableName),
 		schema: schemaName,
 		unique: idx.unique === true,
@@ -203,11 +212,7 @@ function collectGeneratedCreateIndexSpecs(
 ): IndexRenderSpec[] {
 	const specs: IndexRenderSpec[] = [];
 	for (const table of tables) {
-		const explicitIndexColumns = new Set(
-			table.indexes.flatMap((idx) =>
-				idx.columns.length === 1 ? idx.columns : [],
-			),
-		);
+		const dbTableName = naming.toDatabase(table.name);
 		for (const idx of table.indexes) {
 			specs.push(buildIndexRenderSpec(table.name, idx, schemaName, naming));
 		}
@@ -217,15 +222,14 @@ function collectGeneratedCreateIndexSpecs(
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				!explicitIndexColumns.has(fkCol)
+				shouldEmitAutoFkIndex(table, fkCol)
 			) {
-				const dbTableName = naming.toDatabase(table.name);
 				const dbFkCol = naming.toDatabase(fkCol);
 				specs.push(
 					buildIndexRenderSpec(
 						table.name,
 						{
-							name: `idx_${dbTableName}_${dbFkCol}`,
+							name: getAutoFkIndexName(dbTableName, dbFkCol),
 							columns: [fkCol],
 							unique: false,
 						},

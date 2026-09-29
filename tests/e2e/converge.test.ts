@@ -82,6 +82,47 @@ function table(name: string, includeNickname = true): TableIR {
 	};
 }
 
+function fkCoverageModel(prefix: string): ModelIR {
+	const projects = `${prefix}_projects`;
+	return model([
+		{
+			...table(projects, false),
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+		},
+		{
+			...table(`${prefix}_project_state`, false),
+			columns: [{ name: 'project_id', type: 'integer', nullable: false }],
+			primaryKey: 'project_id',
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: projects, columns: ['id'] },
+				},
+			],
+		},
+		{
+			...table(`${prefix}_files`, false),
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'project_id', type: 'integer', nullable: false },
+				{ name: 'path', type: 'string', nullable: false },
+			],
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: projects, columns: ['id'] },
+				},
+			],
+			indexes: [
+				{
+					name: `${prefix}_files_project_id_path_index`,
+					columns: ['project_id', 'path'],
+				},
+			],
+		},
+	]);
+}
+
 function legacyTable(name: string, adopt = true): TableIR {
 	return {
 		name,
@@ -1193,7 +1234,7 @@ describe('convergePg', () => {
 		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
-				'fk_auto_index_refusal_child.parent_id (idx_fk_auto_index_refusal_child_parent_id)',
+				'converge refuses fresh foreign keys without a covering declared key: fk_auto_index_refusal_child.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is',
 			),
 		});
 		for (const tableName of [
@@ -1205,6 +1246,80 @@ describe('convergePg', () => {
 					`${schema}.${tableName}`,
 				]),
 			).resolves.toMatchObject({ rows: [{ relation: null }] });
+	});
+
+	it.each([
+		['partial', { columns: ['parent_id'], where: 'id > 0' }],
+		[
+			'expression',
+			{ columns: ['parent_id'], expressions: ['(parent_id + 1)'] },
+		],
+		['gin', { columns: ['parent_id'], method: 'gin' }],
+		['hash', { columns: ['parent_id'], method: 'hash' }],
+	] satisfies readonly [string, TableIR['indexes'][number]][])(
+		'refuses a fresh single-column FK with a non-covering declared %s index',
+		async (kind, index) => {
+			const pool = await getTestPool();
+			const parent = `fk_coverage_refusal_${kind}_parent`;
+			const child = `fk_coverage_refusal_${kind}_child`;
+			const desired = model([
+				table(parent, false),
+				{
+					...table(child, false),
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'parent_id', type: 'integer', nullable: false },
+					],
+					foreignKeys: [
+						{
+							columns: ['parent_id'],
+							references: { table: parent, columns: ['id'] },
+						},
+					],
+					indexes: [index],
+				},
+			]);
+
+			await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject(
+				{
+					refusal: 'unsupported-change',
+					detail: expect.stringContaining(
+						`converge refuses fresh foreign keys without a covering declared key: ${child}.parent_id; a foreign key column is covered by a primary key or a unique column starting with it, or by a declared non-partial btree index without expressions whose first column it is`,
+					),
+				},
+			);
+		},
+	);
+
+	it('converges FKs covered by a primary key and a leading composite index', async () => {
+		const pool = await getTestPool();
+		const prefix = 'fk_coverage_converge';
+		const desired = fkCoverageModel(prefix);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		for (const [tableName, indexes] of [
+			[`${prefix}_projects`, [`pk_${prefix}_projects`]],
+			[`${prefix}_project_state`, [`pk_${prefix}_project_state`]],
+			[
+				`${prefix}_files`,
+				[`${prefix}_files_project_id_path_index`, `pk_${prefix}_files`],
+			],
+		] as const) {
+			await expect(
+				pool.query(
+					'SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY indexname',
+					[schema, tableName],
+				),
+			).resolves.toMatchObject({
+				rows: indexes.map((indexname) => ({ indexname })),
+			});
+		}
 	});
 
 	it('refuses new-table children that target an existing managed table', async () => {

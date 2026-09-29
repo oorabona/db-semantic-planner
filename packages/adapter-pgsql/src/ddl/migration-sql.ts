@@ -35,6 +35,11 @@ import {
 	generateCreateIndex,
 } from './ddl-generator.js';
 import {
+	getAutoFkIndexName,
+	getResolvedIndexName,
+	shouldEmitAutoFkIndex,
+} from './fk-index-coverage.js';
+import {
 	assertNonZeroSequenceIncrement,
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
@@ -56,7 +61,6 @@ import {
 import { escapeCanonicalSqlLiterals } from './rendered-sql.js';
 import {
 	collectReferencedKeyRemovalConflicts,
-	getAutoFkIndexName,
 	ReferencedKeyRemovalError,
 	type SchemaChange,
 	type SchemaDiff,
@@ -139,15 +143,6 @@ function fkName(table: string, columns: readonly string[]): string {
 /** Column UNIQUE constraint name convention. */
 function uniqueName(table: string, column: string): string {
 	return `${table}_${column}_key`;
-}
-
-/** Index name convention (custom name takes priority). */
-function idxName(
-	table: string,
-	columns: readonly string[],
-	customName?: string,
-): string {
-	return customName ?? `idx_${table}_${columns.join('_')}`;
 }
 
 /** Build a CREATE POLICY SQL statement from a PolicyIR. */
@@ -446,7 +441,7 @@ function buildCreateIndexSpec(
 	const idx = change.meta?.index as IndexIR | undefined;
 	if (!idx) return undefined;
 	return {
-		name: idxName(change.table, idx.columns, idx.name),
+		name: getResolvedIndexName(change.table, idx.columns, idx.name),
 		table: change.table,
 		schema: schemaName,
 		unique: idx.unique === true,
@@ -473,9 +468,10 @@ function buildFkAutoIndexSpec(
 	table: TableIR,
 	fkCol: string,
 	schemaName: string | undefined,
+	name: string,
 ): IndexRenderSpec {
 	return {
-		name: getAutoFkIndexName(table.name, fkCol),
+		name,
 		table: table.name,
 		schema: schemaName,
 		unique: false,
@@ -486,10 +482,14 @@ function buildFkAutoIndexSpec(
 	};
 }
 
-function buildFkAutoIndex(table: TableIR, fkCol: string): IndexIR {
+function buildFkAutoIndexFromSpec(spec: IndexRenderSpec): IndexIR {
+	const fkColumn = spec.keys[0]?.column;
+	if (fkColumn === undefined) {
+		throw new Error('FK auto-index spec must have one column key');
+	}
 	return {
-		name: getAutoFkIndexName(table.name, fkCol),
-		columns: [fkCol],
+		name: spec.name,
+		columns: [fkColumn],
 		unique: false,
 	};
 }
@@ -503,19 +503,21 @@ export function collectFkAutoIndexSpecs(
 		if (change.kind !== 'create_table') continue;
 		const table = change.meta?.table as TableIR | undefined;
 		if (!table) continue;
-		const explicitIndexColumns = new Set(
-			table.indexes.flatMap((idx) =>
-				idx.columns.length === 1 ? idx.columns : [],
-			),
-		);
 		for (const fk of table.foreignKeys) {
 			const fkCol = fk.columns[0];
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				!explicitIndexColumns.has(fkCol)
+				shouldEmitAutoFkIndex(table, fkCol)
 			) {
-				specs.push(buildFkAutoIndexSpec(table, fkCol, schemaName));
+				specs.push(
+					buildFkAutoIndexSpec(
+						table,
+						fkCol,
+						schemaName,
+						getAutoFkIndexName(table.name, fkCol),
+					),
+				);
 			}
 		}
 	}
@@ -634,38 +636,20 @@ export function generateMigrationSQL(
 	}
 	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
-	// FK auto-indexes for new tables (single-column FKs without explicit index)
+	// FK auto-indexes for new tables (single-column FKs without a declared
+	// single-column index or another covering declared key)
 	if (options?.fkAutoIndex !== false) {
-		for (const change of changes) {
-			if (change.kind === 'create_table') {
-				const table = change.meta?.table as TableIR | undefined;
-				if (!table) continue;
-				const explicitIndexColumns = new Set(
-					table.indexes.flatMap((idx) =>
-						idx.columns.length === 1 ? idx.columns : [],
-					),
-				);
-				for (const fk of table.foreignKeys) {
-					const fkCol = fk.columns[0];
-					if (
-						fk.columns.length === 1 &&
-						fkCol &&
-						!explicitIndexColumns.has(fkCol)
-					) {
-						const spec = buildFkAutoIndexSpec(table, fkCol, schemaName);
-						statements.push(
-							generateCreateIndex(
-								table.name,
-								buildFkAutoIndex(table, fkCol),
-								schemaName,
-								identityNaming,
-								indexContext,
-								spec.ifNotExists,
-							),
-						);
-					}
-				}
-			}
+		for (const spec of collectFkAutoIndexSpecs(changes, schemaName)) {
+			statements.push(
+				generateCreateIndex(
+					spec.table,
+					buildFkAutoIndexFromSpec(spec),
+					schemaName,
+					identityNaming,
+					indexContext,
+					spec.ifNotExists,
+				),
+			);
 		}
 	}
 	return statements;
@@ -893,7 +877,7 @@ function upDropIndex(
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
 	const indexName = quoteIdent(
-		idxName(change.table, idx.columns, idx.name),
+		getResolvedIndexName(change.table, idx.columns, idx.name),
 		'alias',
 	);
 	const schemaPrefix = schemaName ? `${quoteIdent(schemaName, 'alias')}.` : '';
@@ -1405,7 +1389,7 @@ function changeToDownSQL(
 			const idx = change.meta?.index as IndexIR | undefined;
 			if (!idx) return { sql: undefined, destructive: true };
 			const indexName = quoteIdent(
-				idxName(change.table, idx.columns, idx.name),
+				getResolvedIndexName(change.table, idx.columns, idx.name),
 				'alias',
 			);
 			const schemaPrefix = schemaName

@@ -697,7 +697,7 @@ describe('DDL Generator', () => {
 			expect(autoIndex).toContain('ON "posts" ("user_id")');
 		});
 
-		it('should emit main-compatible DDL when an FK column has a partial index', () => {
+		it('does not add an auto-index when an FK column has a partial index', () => {
 			const schema = {
 				tables: new Map([
 					[
@@ -747,6 +747,110 @@ describe('DDL Generator', () => {
 				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
 				'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
 			]);
+		});
+
+		it.each([
+			['unnamed partial index', { columns: ['user_id'], where: 'id > 0' }],
+			[
+				'unnamed expression index',
+				{
+					columns: ['user_id'],
+					expressions: ['(user_id + 1)'],
+				},
+			],
+			['unnamed gin index', { columns: ['user_id'], method: 'gin' }],
+			['unnamed hash index', { columns: ['user_id'], method: 'hash' }],
+			[
+				'explicitly colliding non-covering index',
+				{
+					name: 'idx_posts_user_id',
+					columns: ['user_id'],
+					where: 'id > 0',
+				},
+			],
+		] satisfies readonly [string, IndexIR][])(
+			'does not generate an FK auto-index after a declared %s',
+			(description, declaredIndex) => {
+				const users: TableIR = {
+					name: 'users',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				};
+				const posts: TableIR = {
+					name: 'posts',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'user_id', type: 'integer', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['user_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [declaredIndex],
+				};
+				const schema = new ModelIRImpl(
+					new Map([
+						['users', users],
+						['posts', posts],
+					]),
+					new Map(),
+				);
+
+				const indexStatements = generateDDL(schema).filter((statement) =>
+					statement.startsWith('CREATE INDEX'),
+				);
+
+				expect(indexStatements, description).toHaveLength(1);
+				expect(
+					indexStatements.some((statement) =>
+						statement.includes('CREATE INDEX "idx_posts_user_id"'),
+					),
+				).toBe(true);
+				expect(indexStatements[0]).toContain('"idx_posts_user_id"');
+			},
+		);
+
+		it('does not generate an FK auto-index when a declared index covers it', () => {
+			const users: TableIR = {
+				name: 'users',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			const posts: TableIR = {
+				name: 'posts',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'user_id', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['user_id'],
+						references: { table: 'users', columns: ['id'] },
+					},
+				],
+				indexes: [{ columns: ['user_id'] }],
+			};
+			const schema = new ModelIRImpl(
+				new Map([
+					['users', users],
+					['posts', posts],
+				]),
+				new Map(),
+			);
+
+			expect(
+				generateDDL(schema).filter((statement) =>
+					statement.startsWith('CREATE INDEX'),
+				),
+			).toEqual(['CREATE INDEX "idx_posts_user_id" ON "posts" ("user_id");']);
 		});
 
 		it('should name snake_case FK auto-indexes with database identifiers', () => {

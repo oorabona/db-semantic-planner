@@ -1482,6 +1482,53 @@ describe('compareSchemata', () => {
 			);
 		});
 
+		it('drops a plain auto-index beside a declared partial FK-column index', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const partialIndex: IndexIR = {
+				name: 'idx_posts_user_id_partial',
+				columns: ['user_id'],
+				where: 'id > 0',
+			};
+			const users = makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+				primaryKey: 'id',
+			});
+			const posts = makeTable({
+				name: 'posts',
+				columns: [
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'user_id', type: 'integer' }),
+				],
+				primaryKey: 'id',
+				foreignKeys: [fk],
+				indexes: [partialIndex],
+			});
+			const dbPosts = {
+				...posts,
+				indexes: [
+					partialIndex,
+					{ name: 'idx_posts_user_id', columns: ['user_id'] },
+				],
+			};
+
+			expect(
+				compareSchemata(makeModel([users, posts]), makeModel([users, dbPosts]))
+					.changes,
+			).toEqual([
+				expect.objectContaining({
+					kind: 'drop_index',
+					table: 'posts',
+					meta: expect.objectContaining({
+						index: expect.objectContaining({ name: 'idx_posts_user_id' }),
+					}),
+				}),
+			]);
+		});
+
 		it('should match indexes by columns+unique, not name', () => {
 			const schemaIdx: IndexIR = {
 				name: 'new_name',
@@ -2651,6 +2698,56 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db, snakeCaseOpts);
 
 			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('keeps a legacy FK auto-index when a leading composite index now covers it', () => {
+			const foreignKey: ForeignKeyIR = {
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const compositeIndex: IndexIR = {
+				name: 'posts_author_id_id_index',
+				columns: ['author_id', 'id'],
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'author_id', type: 'uuid' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [foreignKey],
+					indexes: [compositeIndex],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'author_id', type: 'uuid' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [foreignKey],
+					indexes: [
+						compositeIndex,
+						{ name: 'idx_posts_author_id', columns: ['author_id'] },
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([]);
 		});
 
 		it('normalizes index names so same-name replacements are all-or-nothing under dbCasing', () => {
