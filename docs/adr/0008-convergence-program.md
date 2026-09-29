@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted (2026-09-29). It records the decision taken on #837. The check mode and `initialize` are
-shipped; the program signature below is the accepted target, and "Deliveries" gives the state of each part.
+Accepted (2026-09-29). It records the decision taken on #837. The check mode, `initialize` and
+application steps are shipped; the program signature below is the accepted target, and "Deliveries" gives the state of each part.
 
 ## Context
 
@@ -18,7 +18,7 @@ and each dbsp upgrade can break the pairing.
 
 dbsp owns one convergence program: `convergePg(pool, program, { mode, initialize })`, where the program
 holds the model, the schema, `dbCasing`, the external indexes and the application's declared steps. dbsp
-computes every fingerprint and records every step in its ledger under its lock.
+computes every fingerprint and records every step run in its ledger under its lock.
 
 ### `check` plans without committing
 
@@ -35,6 +35,39 @@ re-verification at claim time, lock timeouts) do not run.
 - `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
 - `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only and runs on
   every check; `apply` runs in apply mode when inspection reports the database unhealthy.
+
+How they are recorded and run:
+
+- **No new ledger event.** A step's address is `kind: 'application-step'`, `name: id` in the target
+  schema's ledger. A recorded run is an `intent` claim of the claim species `application-step`, declaring
+  `{ id, digest, step }`, closed by `observed`. The ledger shape, its 14 event kinds and its deparse
+  fixtures are unchanged; an application step is not a declarable object and has no catalogue identity.
+- **Admission.** A `once` is admitted only from `unknown`; recorded with the same digest it is complete,
+  with another digest it refuses `application-step-changed`. An `assert` is admitted from `unknown` or
+  `managed`, keeping the controller check.
+- **One transaction per step** on converge's locked connection: `lock_timeout` 5 s unless the step sets
+  `lockTimeoutMs`, `statement_timeout` only if it sets `statementTimeoutMs`. An `assert` inspects first
+  and records nothing when healthy; otherwise it claims, applies, and inspects again, and records
+  `observed` only if the database is now healthy. An error before `COMMIT`, or a `COMMIT` PostgreSQL
+  rejects, rolls the step back, records nothing, and stops converge with `application-step-failed`;
+  earlier steps and DDL stay committed. A `COMMIT` whose acknowledgement is lost is
+  `transport-ambiguous`, as for generated steps. Session-level effects of a step are not part of it;
+  converge closes its connection after any step ran instead of returning it to the pool.
+- **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
+  generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
+  every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is
+  pending, since only then does its answer decide `no-drift`; otherwise it is inspected at its phase,
+  so it can read what earlier steps and generated DDL made. Check mode never runs `apply` and lists an
+  assert it could not inspect ahead of pending work with `inspected: false`. A step must not release
+  advisory locks: converge's session lock lives on the same connection.
+- **The digest is the caller's contract.** dbsp cannot hash a function: a `once` whose body changes
+  needs a new id, and an `assert` records the digest it last repaired with.
+- Schema scope only in this delivery; `scope: 'database'` is refused until needed.
+- **A step does not touch what the comparison sees.** Converge compares a declared table's columns,
+  keys, foreign keys, CHECK constraints and indexes; a step that creates or changes one of them makes
+  the next call refuse `unsupported-change` during planning, before any step runs. Functions,
+  triggers, data and undeclared tables are outside the comparison. An application that repairs a
+  declared CHECK or column type needs an ownership mask, the next delivery.
 
 ### Initialisation and adoption are a library operation
 
@@ -68,8 +101,12 @@ application should not run as.
 1. `check` mode on `convergePg` (`ConvergePgCheckOptions`, `PgConvergeCheckResult`): shipped.
 2. Initialisation and adoption as a library operation (`initialize`, refusal `initialization-refused`):
    shipped.
-3. `once` and `assert` steps: not shipped.
-4. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
+3. `once` and `assert` steps (`steps` option, refusals `application-step-changed` and
+   `application-step-failed`): shipped.
+4. Ownership: an `assert` declares the named CHECK constraints, column types and named indexes it
+   owns, and converge leaves them out of every comparison (diff, planning refusals, generated DDL,
+   `no-drift`, check plan, plan digest), so the model can still declare them. Not shipped.
+5. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
    and check mode is selected with `ConvergePgCheckOptions`.
 
 ## Consequences

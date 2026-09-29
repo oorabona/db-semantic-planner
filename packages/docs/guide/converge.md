@@ -125,9 +125,9 @@ same call commits on its own and can remain after a failure.
 
 | `result.kind` | Meaning |
 |---|---|
-| `no-drift` | Nothing to apply for the declared tables, sequences and enums. |
-| `applied` | Every planned step committed; `applied` lists their change kinds. |
-| `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
+| `no-drift` | Nothing to apply for the declared tables, sequences and enums, every `once` [application step](#application-steps) recorded, and every `assert` healthy. |
+| `applied` | Every planned step committed; `applied` lists their change kinds (`adopt_table` and `adopt_sequence` for adoptions), followed by `application-step:<id>` for each application step that recorded a run. |
+| `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. Both lists cover generated and adoption steps only: `before-generated-ddl` application steps that already ran stay committed and are not listed. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
 
 ## Checking without applying
@@ -138,7 +138,7 @@ planning refusals an apply runs before it starts executing, and returns without 
 | `result.kind` | Meaning |
 |---|---|
 | `no-drift` | An apply would find nothing to do. |
-| `would-apply` | `steps` lists, in execution order, the steps an apply would run: each has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. `planDigest` identifies that plan. |
+| `would-apply` | `steps` lists, in execution order, the steps an apply would run. A generated or adoption step has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. An [application step](#application-steps) has only `kind: 'application-step'`, its `id`, `step` (`'once'` or `'assert'`) and, for an assert, `inspected`. `planDigest` identifies that plan. |
 
 Before executing, a check refuses as an apply would (`busy`, `ledger-absent`, `database-read-only`,
 `unsupported-change`, …), except that it never creates a ledger: with no ledger it refuses
@@ -151,19 +151,100 @@ claims it, can still refuse that apply. The options type is `ConvergePgCheckOpti
 [ADR 0008](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0008-convergence-program.md)
 records the decision.
 
+## Application steps
+
+Work the model cannot declare (a backfill, a function or trigger you maintain yourself, dropping an
+obsolete table) goes in `steps`, and converge runs it under its lock and records it in the ledger.
+A step must not create or change what converge compares on a declared table: its columns, keys,
+foreign keys, CHECK constraints and indexes (other than [external indexes](#external-indexes)). The
+next call would compare that object against the model and refuse the difference as
+`unsupported-change` before any step runs. Functions, triggers, data, and tables the model does not
+declare are outside the comparison.
+
+```typescript
+// doctest: skip — illustrates the option only
+await convergePg(pool, model, {
+  schema: 'app',
+  initialize: 'adopt-existing',
+  steps: [
+    {
+      kind: 'once',
+      id: 'backfill-project-state',
+      digest: 'v1',
+      phase: 'after-generated-ddl',
+      apply: async (tx) => {
+        await tx.query('INSERT INTO app.project_state (project_id) SELECT id FROM app.projects ON CONFLICT DO NOTHING');
+      },
+    },
+    {
+      kind: 'assert',
+      id: 'touch-function',
+      digest: 'v3',
+      phase: 'after-generated-ddl',
+      inspect: async (tx) => {
+        const { rows } = await tx.query<{ readonly ok: boolean }>(
+          "SELECT coalesce(position('-- touch v3' IN pg_get_functiondef(to_regprocedure('app.touch()'))) > 0, false) AS ok",
+        );
+        return rows[0]?.ok === true ? 'healthy' : 'unhealthy';
+      },
+      apply: async (tx) => {
+        await tx.query('CREATE OR REPLACE FUNCTION app.touch() RETURNS integer LANGUAGE sql AS $$ SELECT 1 -- touch v3 $$');
+      },
+    },
+  ],
+});
+```
+
+- A `once` runs the first time and is recorded with its `digest`; later calls skip it. Changing its
+  body needs a new `id`: the same `id` with another `digest` refuses `application-step-changed`.
+- An `assert` runs `inspect` on every call. When it answers `'unhealthy'`, converge runs `apply`,
+  inspects again, and records the run only if the database is now healthy; otherwise it refuses
+  `application-step-failed`.
+- `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
+  `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
+- Each step is one transaction on converge's connection. `tx.query` sends one statement per call
+  and refuses transaction-control statements (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`,
+  `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`, `SET TRANSACTION`); this guards against mistakes, not
+  against code that runs with the same role. A step must not release advisory locks
+  (`pg_advisory_unlock_all()` and the like): converge's own lock lives on the same connection. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
+  `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
+  `apply`. Both are whole milliseconds from 1 to 2147483647.
+- Use `SET LOCAL`, not `SET`: session-level effects (`SET`, `SET ROLE`, `LISTEN`, `PREPARE`,
+  temporary tables, session advisory locks) are not part of the step and can affect the rest of that
+  converge call. Converge closes its connection instead of returning it to the pool whenever a step
+  ran, so they never reach your application's queries. `tx` is valid only until the callback returns.
+- An error in a step rolls it back and records nothing; converge stops with
+  `application-step-failed`, and what committed before stays committed. The next call retries it.
+  If the connection is lost while the step's `COMMIT` is in flight, the result is
+  `transport-ambiguous` instead: the step may or may not be recorded, so run converge again and let it
+  observe the ledger rather than repeating the step's work yourself.
+- A recorded run appears in `applied` as `application-step:<id>`. `no-drift` means no generated
+  change, every `once` recorded and every `assert` healthy.
+- An `assert` is inspected before anything runs only when nothing else is pending (no generated
+  change, every `once` recorded), since only then does its answer decide `no-drift`. Otherwise it is
+  inspected when its phase comes, so an `after-generated-ddl` assert can read tables the same call
+  creates. Check mode never runs `apply` and lists pending steps as `application-step` entries of
+  `steps`: each unrecorded `once`, and each `assert` either with `inspected: true` (inspected read-only
+  and unhealthy) or, when other work is pending, with `inspected: false` (not inspected; apply will).
+- dbsp cannot compare function bodies: the `digest` is your statement that a step changed.
+- Steps apply to the converged schema only; `scope: 'database'` is refused.
+
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
 `changes` carries planning context and can be empty. An error raised before execution starts — an
 invalid model, a connection failure, a database error while planning — is thrown as it is, except a
 database error inside an `initialize` preflight scope (a missing privilege, for example), which
-becomes `initialization-refused` with the error in `initialization.detail`. A failure
-during execution becomes an `execution-refused` or `adoption-refused` refusal, or a
-`partially-applied` or `transport-ambiguous` result.
+becomes `initialization-refused` with the error in `initialization.detail`, and an error in an
+application step's `inspect` or `apply`, which becomes `application-step-failed`. A failure
+during execution becomes an `execution-refused`, `adoption-refused` or `application-step-failed`
+refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
+| `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
 | `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, a refusal code, the step and the detail; the `'pristine'` guard's code is `pristine-live-relations`, other failures carry the preflight's code. The schema's ledger is created only after `dbsp_meta` is ready, so a refused `dbsp_meta` leaves the schema without a ledger and the next call refuses again; a refusal of the schema itself can leave `dbsp_meta` prepared, which the next call reuses. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |

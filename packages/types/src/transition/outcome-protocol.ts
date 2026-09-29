@@ -88,11 +88,22 @@ export interface CascadeCoveredOutcomeClaimPlan extends OutcomeClaimPlanBase {
 	readonly statementBundle: EmptyClaimStatementBundle;
 }
 
+/** A caller-supplied transactional application step recorded at a schema address. */
+export interface ApplicationStepOutcomeClaimPlan extends OutcomeClaimPlanBase {
+	readonly claimSpecies: 'application-step';
+	readonly claimKind: 'intent';
+	readonly statementBundle: EmptyClaimStatementBundle;
+	/** `once` may only claim an unknown chain; `assert` may repair its managed chain. */
+	readonly applicationStep: 'once' | 'assert';
+	readonly declared: LedgerPayload;
+}
+
 /** The fixed plan-time material that becomes one ledger claim. */
 export type OutcomeClaimPlan =
 	| SqlBearingOutcomeClaimPlan
 	| AdoptionOutcomeClaimPlan
-	| CascadeCoveredOutcomeClaimPlan;
+	| CascadeCoveredOutcomeClaimPlan
+	| ApplicationStepOutcomeClaimPlan;
 
 /** The only successful result of admission, including its single-use token. */
 export interface AdmittedOutcomeClaim {

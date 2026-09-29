@@ -83,6 +83,9 @@ const refusalOutcomes = {
 	'database-read-only': 'database-read-only',
 	'execution-refused': 'execution-refused',
 	'adoption-refused': 'adoption-refused',
+	// dbsp migrate never supplies application steps, but preserve the closed converge map.
+	'application-step-changed': 'migrate-failed',
+	'application-step-failed': 'migrate-failed',
 	// dbsp migrate never supplies initialize, but preserve the closed converge map.
 	'initialization-refused': 'migrate-failed',
 } as const satisfies Record<PgConvergeRefusal, MigrateOutcome>;

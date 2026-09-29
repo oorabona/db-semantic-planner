@@ -8,6 +8,7 @@ import {
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
+	type PgApplicationStepTx,
 	readPgLedgerAddressChain,
 	reconcilePgTransitionRun,
 } from '@dbsp/adapter-pgsql';
@@ -373,6 +374,552 @@ describe('convergePg', () => {
 		await expect(
 			convergePg(pool, desired, { schema, mode: 'check' }),
 		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('records once and assert application steps through the public converge API', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const name = `application_items_${suffix}`;
+		const functionName = 'items_touch';
+		const marker = '-- items_touch v1';
+		const desired = model([
+			{
+				name,
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'state', type: 'string', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `${name}-state-check`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					const result = await tx.query<{ definition?: string }>(
+						"SELECT pg_catalog.pg_get_functiondef(procedure.oid) AS definition FROM pg_catalog.pg_proc AS procedure JOIN pg_catalog.pg_namespace AS function_namespace ON function_namespace.oid = procedure.pronamespace WHERE function_namespace.nspname = $1 AND procedure.proname = $2 AND pg_catalog.pg_get_function_identity_arguments(procedure.oid) = ''",
+						[schema, functionName],
+					);
+					return result.rows[0]?.definition?.includes(marker)
+						? 'healthy'
+						: 'unhealthy';
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`CREATE OR REPLACE FUNCTION "${schema}"."${functionName}"() RETURNS integer LANGUAGE sql AS $$ SELECT 1 ${marker} $$`,
+					);
+				},
+			},
+			{
+				kind: 'once' as const,
+				id: `${name}-backfill`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`INSERT INTO "${schema}"."${name}" ("id", "state") VALUES (1, 'ready')`,
+					);
+				},
+			},
+		];
+		const first = await convergePg(pool, desired, {
+			schema,
+			initialize: 'pristine',
+			steps,
+		});
+		expect(first).toMatchObject({
+			kind: 'applied',
+			applied: [
+				`create_table`,
+				`application-step:${name}-state-check`,
+				`application-step:${name}-backfill`,
+			],
+		});
+		expect(
+			await pool.query(
+				`SELECT count(*)::text AS count FROM "${schema}"."${name}"`,
+			),
+		).toMatchObject({ rows: [{ count: '1' }] });
+		const rowsBefore = await ledgerRowCounts(pool);
+		await expect(convergePg(pool, desired, { schema, steps })).resolves.toEqual(
+			{ kind: 'no-drift', applied: [] },
+		);
+		expect(await ledgerRowCounts(pool)).toEqual(rowsBefore);
+		await pool.query(`DROP FUNCTION "${schema}"."${functionName}"()`);
+		await expect(
+			convergePg(pool, desired, { schema, mode: 'check', steps }),
+		).resolves.toMatchObject({
+			kind: 'would-apply',
+			steps: [
+				{
+					kind: 'application-step',
+					id: `${name}-state-check`,
+					step: 'assert',
+					inspected: true,
+				},
+			],
+		});
+		await expect(
+			convergePg(pool, desired, { schema, steps }),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: [`application-step:${name}-state-check`],
+		});
+		await expect(
+			pool.query<{ readonly exists: boolean }>(
+				"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc AS procedure JOIN pg_catalog.pg_namespace AS function_namespace ON function_namespace.oid = procedure.pronamespace WHERE function_namespace.nspname = $1 AND procedure.proname = $2 AND pg_catalog.pg_get_function_identity_arguments(procedure.oid) = '') AS exists",
+				[schema, functionName],
+			),
+		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('defers an after-generated-ddl assert inspection until its table exists', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const freshSchema = `converge_assert_phase_${suffix}`;
+		const functionName = `widgets_verified_${suffix}`;
+		const desired = model([
+			{
+				name: 'widgets',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'widgets-function',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					await tx.query(`SELECT count(*) FROM "${freshSchema}"."widgets"`);
+					const result = await tx.query<{ readonly exists: boolean }>(
+						'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc procedure JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = $1 AND procedure.proname = $2) AS exists',
+						[freshSchema, functionName],
+					);
+					return result.rows[0]?.exists ? 'healthy' : 'unhealthy';
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`CREATE FUNCTION "${freshSchema}"."${functionName}"() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$`,
+					);
+				},
+			},
+		];
+		await createSchema(freshSchema);
+		try {
+			await convergePg(pool, model([]), {
+				schema: freshSchema,
+				initialize: 'pristine',
+			});
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toMatchObject({
+				kind: 'would-apply',
+				steps: [
+					{ kind: 'create_table' },
+					{
+						kind: 'application-step',
+						id: 'widgets-function',
+						step: 'assert',
+						inspected: false,
+					},
+				],
+			});
+			await expect(
+				convergePg(pool, desired, { schema: freshSchema, steps }),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['create_table', 'application-step:widgets-function'],
+			});
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toEqual({ kind: 'no-drift' });
+			await pool.query(`DROP FUNCTION "${freshSchema}"."${functionName}"()`);
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toMatchObject({
+				kind: 'would-apply',
+				steps: [
+					{
+						kind: 'application-step',
+						id: 'widgets-function',
+						step: 'assert',
+						inspected: true,
+					},
+				],
+			});
+		} finally {
+			await dropSchema(freshSchema);
+		}
+	});
+
+	it('refuses planning inspection errors in apply and check mode without recording a step', async () => {
+		const pool = await getTestPool();
+		const id = `inspect-error-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async () => {
+					throw new Error('syntax error at or near "constraint"');
+				},
+				apply: async () => undefined,
+			},
+		];
+		for (const check of [false, true]) {
+			const result = check
+				? convergePg(pool, model([]), { schema, mode: 'check', steps })
+				: convergePg(pool, model([]), { schema, steps });
+			await expect(result).rejects.toMatchObject({
+				refusal: 'application-step-failed',
+				detail: expect.stringContaining(id),
+				message: expect.stringContaining(
+					'syntax error at or near "constraint"',
+				),
+			});
+			expect(await ledgerRowCounts(pool)).toEqual(before);
+		}
+	});
+
+	it('rolls back a failing once and permits its later repaired declaration', async () => {
+		const pool = await getTestPool();
+		const id = `once-failure-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		const failed = {
+			kind: 'once' as const,
+			id,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			apply: async () => {
+				throw new Error('backfill failed');
+			},
+		};
+		await expect(
+			convergePg(pool, model([]), { schema, steps: [failed] }),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [{ ...failed, apply: async () => undefined }],
+			}),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: [`application-step:${id}`],
+		});
+	});
+
+	it('refuses a once declaration whose digest changes after completion', async () => {
+		const pool = await getTestPool();
+		const id = `once-digest-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const completed = {
+			kind: 'once' as const,
+			id,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			apply: async () => undefined,
+		};
+		await convergePg(pool, model([]), {
+			schema,
+			initialize: 'pristine',
+			steps: [completed],
+		});
+		for (const check of [false, true]) {
+			const result = check
+				? convergePg(pool, model([]), {
+						schema,
+						mode: 'check',
+						steps: [{ ...completed, digest: 'v2' }],
+					})
+				: convergePg(pool, model([]), {
+						schema,
+						steps: [{ ...completed, digest: 'v2' }],
+					});
+			await expect(result).rejects.toMatchObject({
+				refusal: 'application-step-changed',
+				detail: expect.stringContaining(id),
+			});
+		}
+	});
+
+	it('refuses a once when an assert was recorded under its id', async () => {
+		const pool = await getTestPool();
+		const id = `assert-once-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		let healthy = false;
+		await convergePg(pool, model([]), {
+			schema,
+			steps: [
+				{
+					kind: 'assert',
+					id,
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					inspect: async () => (healthy ? 'healthy' : 'unhealthy'),
+					apply: async () => {
+						healthy = true;
+					},
+				},
+			],
+		});
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({ refusal: 'application-step-changed' });
+	});
+
+	it('destroys a session that an application step changes with SET', async () => {
+		const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL! });
+		try {
+			const before = await pool.connect();
+			const defaultSearchPath = (
+				await before.query<{ readonly search_path: string }>('SHOW search_path')
+			).rows[0]?.search_path;
+			before.release();
+			await convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id: `set-search-path-${randomUUID().replaceAll('-', '').slice(0, 12)}`,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							await tx.query('SET search_path TO pg_catalog');
+						},
+					},
+				],
+			});
+			expect(
+				(await pool.query<{ readonly search_path: string }>('SHOW search_path'))
+					.rows[0]?.search_path,
+			).toBe(defaultSearchPath);
+		} finally {
+			await pool.end();
+		}
+	});
+
+	it('does not record an assert that remains unhealthy after apply', async () => {
+		const pool = await getTestPool();
+		const id = `assert-failure-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'assert',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'unhealthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
+	it('runs application steps around generated DDL according to their phase', async () => {
+		const pool = await getTestPool();
+		const name = `phase_items_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		let beforeExists: string | null | undefined;
+		let afterExists: string | null | undefined;
+		const readRelation = async (tx: PgApplicationStepTx) =>
+			(
+				await tx.query<{ readonly relation: string | null }>(
+					'SELECT pg_catalog.to_regclass($1)::text AS relation',
+					[`${schema}.${name}`],
+				)
+			).rows[0]?.relation;
+		await expect(
+			convergePg(pool, model([table(name, false)]), {
+				schema,
+				initialize: 'pristine',
+				steps: [
+					{
+						kind: 'once',
+						id: `${name}-before`,
+						digest: 'v1',
+						phase: 'before-generated-ddl',
+						apply: async (tx) => {
+							beforeExists = await readRelation(tx);
+						},
+					},
+					{
+						kind: 'once',
+						id: `${name}-after`,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							afterExists = await readRelation(tx);
+						},
+					},
+				],
+			}),
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(beforeExists).toBeNull();
+		expect(afterExists).toBe(`${schema}.${name}`);
+	});
+
+	it('rolls back a statement-timed-out application step without recording it', async () => {
+		const pool = await getTestPool();
+		const id = `timeout-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						statementTimeoutMs: 50,
+						apply: async (tx) => {
+							await tx.query('SELECT pg_catalog.pg_sleep(1)');
+						},
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
+	it('refuses a multi-statement application callback without recording its step', async () => {
+		const pool = await getTestPool();
+		const id = `multi-statement-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							await tx.query('SELECT 1; COMMIT');
+						},
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
+	it('bounds planning inspections with the application-step statement timeout', async () => {
+		const pool = await getTestPool();
+		const id = `inspect-timeout-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await convergePg(pool, model([]), { schema, initialize: 'pristine' });
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						statementTimeoutMs: 50,
+						inspect: async (tx) => {
+							await tx.query('SELECT pg_catalog.pg_sleep(1)');
+							return 'healthy' as const;
+						},
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			detail: expect.stringContaining(id),
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+	});
+
+	it('reports no drift in check mode for healthy asserts and completed once steps', async () => {
+		const pool = await getTestPool();
+		const prefix = `complete-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `${prefix}-assert`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async () => 'healthy' as const,
+				apply: async () => undefined,
+			},
+			{
+				kind: 'once' as const,
+				id: `${prefix}-once`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				apply: async () => undefined,
+			},
+		];
+		await convergePg(pool, model([]), {
+			schema,
+			initialize: 'pristine',
+			steps,
+		});
+		const before = await ledgerRowCounts(pool);
+		await expect(
+			convergePg(pool, model([]), { schema, mode: 'check', steps }),
+		).resolves.toEqual({ kind: 'no-drift' });
+		expect(await ledgerRowCounts(pool)).toEqual(before);
 	});
 
 	it('refuses check mode on a dedicated default-read-only session', async () => {

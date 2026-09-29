@@ -47,6 +47,13 @@ import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { physicalizeDeclaredSequences } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
+import {
+	PgApplicationStepError,
+	type PgConvergeApplicationStep,
+	planPgApplicationSteps,
+	runPgApplicationSteps,
+	validatePgConvergeApplicationSteps,
+} from './application-step.js';
 import { readPgCatalogueIdentity } from './catalogue-identity.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
 import { classifyPgDatabaseWritability } from './database-writability.js';
@@ -62,6 +69,7 @@ import {
 import { advisoryKey } from './lessor.js';
 import {
 	lockPgJournalRun,
+	PgCommitAcknowledgementAmbiguousError,
 	type PgLockedRun,
 	readPgOutcomeSessionCompromise,
 } from './outcome-protocol.js';
@@ -86,6 +94,8 @@ export type PgConvergeRefusal =
 	| 'database-read-only'
 	| 'execution-refused'
 	| 'adoption-refused'
+	| 'application-step-changed'
+	| 'application-step-failed'
 	| 'initialization-refused';
 
 export interface PgConvergeInitializationFailure {
@@ -270,6 +280,26 @@ export type PgConvergePlannedStep =
 			readonly dependencyOrder: readonly string[];
 			readonly address: NonNullable<NormalizedManagedStep['address']>;
 			readonly kind: 'adopt_table' | 'adopt_sequence';
+	  }
+	| {
+			readonly kind: 'application-step';
+			readonly id: string;
+			readonly step: 'once';
+			readonly inspected?: never;
+			readonly stepKey?: never;
+			readonly order?: never;
+			readonly dependencyOrder?: never;
+			readonly address?: never;
+	  }
+	| {
+			readonly kind: 'application-step';
+			readonly id: string;
+			readonly step: 'assert';
+			readonly inspected: boolean;
+			readonly stepKey?: never;
+			readonly order?: never;
+			readonly dependencyOrder?: never;
+			readonly address?: never;
 	  };
 
 export type PgConvergeCheckResult =
@@ -305,6 +335,13 @@ export interface ConvergePgBaseOptions {
 		readonly table: string;
 		readonly name: string;
 	}[];
+	/**
+	 * Transactional application-owned schema work. Recorded runs append
+	 * `application-step:<id>` to `applied`, after generated change kinds.
+	 * The transaction facade rejects leading transaction-control keywords; it is
+	 * a correctness guard, not a security boundary for code in this process.
+	 */
+	readonly steps?: readonly PgConvergeApplicationStep[];
 }
 
 export interface ConvergePgOptions extends ConvergePgBaseOptions {
@@ -1160,6 +1197,10 @@ function projectCheckedPlan(
  * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
  * and the journal owner one whose journal attribution cannot be read, then call
  * converge again.
+ * Application steps run on the converge session: session-level effects such as
+ * `SET` without `LOCAL`, `SET ROLE`, `LISTEN`, `PREPARE`, temporary tables and
+ * session advisory locks are not part of a step and can affect the rest of the
+ * call. Steps should use `SET LOCAL`.
  * A declared table with `adopt: true` is taken into management when it exists,
  * the ledger projects its address as unknown (the only state an adoption claim
  * opens from), and it matches the declaration exactly after `externalIndexes`
@@ -1215,6 +1256,16 @@ export async function convergePg(
 	const casing = options.dbCasing ?? 'preserve';
 	const naming = getNamingPluginForDbCasing(casing);
 	const externalIndexes = validateExternalIndexes(model, options, naming);
+	let applicationSteps: readonly PgConvergeApplicationStep[];
+	try {
+		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
 	if (!check && initialization !== 'never') {
 		const initializationClient = await pool.connect();
@@ -1260,7 +1311,9 @@ export async function convergePg(
 		| 'converge could not confirm ledger lock release'
 		| 'converge could not confirm predecessor run lock release'
 		| 'converge received a transport-ambiguous outcome'
+		| 'converge application step callback may have changed session state'
 		| undefined;
+	let applicationStepCallbackRan = false;
 	let locked = false;
 	try {
 		destroyReason = 'converge could not determine ledger lock acquisition';
@@ -1536,7 +1589,36 @@ export async function convergePg(
 					.filter((name): name is string => name !== undefined),
 			),
 		);
-		if (diff.changes.length === 0 && adoptionSteps.length === 0)
+		let plannedApplicationSteps: Awaited<
+			ReturnType<typeof planPgApplicationSteps>
+		>;
+		try {
+			plannedApplicationSteps = await planPgApplicationSteps({
+				client,
+				database,
+				schema,
+				steps: applicationSteps,
+				hasPendingGeneratedWork:
+					diff.changes.length > 0 || adoptionSteps.length > 0,
+				check,
+				onApplicationStepCallback: () => {
+					applicationStepCallbackRan = true;
+				},
+			});
+		} catch (error) {
+			if (error instanceof PgApplicationStepError)
+				throw refusal(
+					error.refusal,
+					[],
+					`application step ${error.stepId}: ${error.message}`,
+				);
+			throw error;
+		}
+		if (
+			diff.changes.length === 0 &&
+			adoptionSteps.length === 0 &&
+			plannedApplicationSteps.length === 0
+		)
 			return check ? { kind: 'no-drift' } : { kind: 'no-drift', applied: [] };
 		const phaseOrderedChanges = [...diff.changes].sort(
 			(left, right) => getPhase(left.kind) - getPhase(right.kind),
@@ -1681,16 +1763,70 @@ export async function convergePg(
 			database,
 			schema,
 			steps: manifest.manifest.steps,
+			applicationSteps: applicationSteps.map((step) => ({
+				kind: step.kind,
+				id: step.id,
+				digest: step.digest,
+				scope: step.scope ?? 'schema',
+				phase: step.phase,
+				...(step.lockTimeoutMs === undefined
+					? {}
+					: { lockTimeoutMs: step.lockTimeoutMs }),
+				...(step.statementTimeoutMs === undefined
+					? {}
+					: { statementTimeoutMs: step.statementTimeoutMs }),
+			})),
 		});
-		if (check)
+		if (check) {
+			const phaseByApplicationStepId = new Map(
+				applicationSteps.map((step) => [step.id, step.phase]),
+			);
 			return {
 				kind: 'would-apply',
 				planDigest,
-				steps: projectCheckedPlan(
-					manifest.manifest.steps,
-					new Map(assembled.map(({ change, step }) => [step.stepKey, change])),
-				),
+				steps: [
+					...plannedApplicationSteps.filter(
+						(step) =>
+							phaseByApplicationStepId.get(step.id) === 'before-generated-ddl',
+					),
+					...projectCheckedPlan(
+						manifest.manifest.steps,
+						new Map(
+							assembled.map(({ change, step }) => [step.stepKey, change]),
+						),
+					),
+					...plannedApplicationSteps.filter(
+						(step) =>
+							phaseByApplicationStepId.get(step.id) === 'after-generated-ddl',
+					),
+				],
 			};
+		}
+		let appliedApplicationSteps: readonly string[];
+		try {
+			appliedApplicationSteps = await runPgApplicationSteps({
+				client,
+				database,
+				schema,
+				phase: 'before-generated-ddl',
+				steps: applicationSteps,
+				onApplicationStepCallback: () => {
+					applicationStepCallbackRan = true;
+				},
+			});
+		} catch (error) {
+			if (error instanceof PgCommitAcknowledgementAmbiguousError) {
+				destroyReason = 'converge received a transport-ambiguous outcome';
+				return { kind: 'transport-ambiguous', detail: error.message };
+			}
+			if (error instanceof PgApplicationStepError)
+				throw refusal(
+					error.refusal,
+					[],
+					`application step ${error.stepId}: ${error.message}`,
+				);
+			throw error;
+		}
 		const run: TransitionRunMetadata = {
 			runId: `dbsp-converge-${randomUUID()}`,
 			planDigest,
@@ -1743,6 +1879,34 @@ export async function convergePg(
 			...(atomicCreationGroup.length === 0 ? {} : { atomicCreationGroup }),
 		});
 		if (outcome.outcome === 'completed')
+			try {
+				appliedApplicationSteps = [
+					...appliedApplicationSteps,
+					...(await runPgApplicationSteps({
+						client,
+						database,
+						schema,
+						phase: 'after-generated-ddl',
+						steps: applicationSteps,
+						onApplicationStepCallback: () => {
+							applicationStepCallbackRan = true;
+						},
+					})),
+				];
+			} catch (error) {
+				if (error instanceof PgCommitAcknowledgementAmbiguousError) {
+					destroyReason = 'converge received a transport-ambiguous outcome';
+					return { kind: 'transport-ambiguous', detail: error.message };
+				}
+				if (error instanceof PgApplicationStepError)
+					throw refusal(
+						error.refusal,
+						[],
+						`application step ${error.stepId}: ${error.message}`,
+					);
+				throw error;
+			}
+		if (outcome.outcome === 'completed')
 			return {
 				kind: 'applied',
 				applied: [
@@ -1752,6 +1916,7 @@ export async function convergePg(
 							: 'adopt_table',
 					),
 					...orderedChanges.map((change) => change.kind),
+					...appliedApplicationSteps,
 				],
 			};
 		if (outcome.outcome === 'partially-applied')
@@ -1773,8 +1938,9 @@ export async function convergePg(
 			outcome.detail,
 		);
 	} finally {
+		const compromised = readPgOutcomeSessionCompromise(client);
 		lockedConvergeClients.delete(client);
-		if (locked) {
+		if (locked && !compromised) {
 			try {
 				if (!(await releasePgLedgerSessionLock(client, schemaHome(schema))))
 					destroyReason = 'converge could not confirm ledger lock release';
@@ -1782,10 +1948,11 @@ export async function convergePg(
 				destroyReason = 'converge could not confirm ledger lock release';
 			}
 		}
+		if (applicationStepCallbackRan && destroyReason === undefined)
+			destroyReason =
+				'converge application step callback may have changed session state';
 		client.release(
-			destroyReason === undefined
-				? readPgOutcomeSessionCompromise(client)
-				: new Error(destroyReason),
+			destroyReason === undefined ? compromised : new Error(destroyReason),
 		);
 	}
 }

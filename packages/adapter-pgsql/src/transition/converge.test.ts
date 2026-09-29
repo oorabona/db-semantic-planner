@@ -32,7 +32,17 @@ const mocks = vi.hoisted(() => {
 			) => Promise<GeneratorExecutionResult>
 		>(async () => ({ outcome: 'completed' })),
 		identity: vi.fn(),
-		chain: vi.fn(async () => ({ events: [] })),
+		chain: vi.fn<
+			(...args: unknown[]) => Promise<{
+				readonly ledger?: unknown;
+				readonly address?: unknown;
+				readonly events: readonly never[];
+			}>
+		>(async (...args: unknown[]) => ({
+			ledger: args[1],
+			address: args[2],
+			events: [],
+		})),
 		reservations: vi.fn(async () => []),
 		runIds: vi.fn(async () => new Map()),
 		lock: vi.fn(async () => ({ kind: 'acquired' })),
@@ -682,6 +692,126 @@ describe('convergePg refusal boundary', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
+	it('keeps an unexpected step getter error out of invalid-options detail', async () => {
+		const pool = poolFor();
+		const step = {
+			get kind(): never {
+				throw new Error('X');
+			},
+		};
+		await expect(
+			Reflect.apply(convergePg, undefined, [
+				pool,
+				emptyModel(),
+				{ steps: [step] },
+			]),
+		).rejects.toMatchObject({
+			refusal: 'invalid-options',
+			detail: 'converge steps are invalid',
+		});
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{
+			kind: 'once',
+			id: '',
+			digest: 'v1',
+			phase: 'after-generated-ddl',
+			apply: async () => undefined,
+		},
+		{
+			kind: 'once',
+			id: 'one',
+			digest: 'v1',
+			scope: 'database',
+			phase: 'after-generated-ddl',
+			apply: async () => undefined,
+		},
+		{
+			kind: 'once',
+			id: 'one',
+			digest: 'v1',
+			phase: 'after-generated-ddl',
+			lockTimeoutMs: 0,
+			apply: async () => undefined,
+		},
+	])('refuses invalid application steps before connecting', async (step) => {
+		const pool = poolFor();
+		await expect(
+			Reflect.apply(convergePg, undefined, [
+				pool,
+				emptyModel(),
+				{ steps: [step] },
+			]),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('does not run an application step apply callback in check mode', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const apply = vi.fn(async () => undefined);
+
+		await expect(
+			convergePg(poolFor(), emptyModel(), {
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'state-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'unhealthy' as const,
+						apply,
+					},
+				],
+			}),
+		).resolves.toMatchObject({
+			kind: 'would-apply',
+			steps: [
+				{
+					kind: 'application-step',
+					id: 'state-check',
+					step: 'assert',
+					inspected: true,
+				},
+			],
+		});
+		expect(apply).not.toHaveBeenCalled();
+	});
+
+	it('destroys a client after an application-step callback and releases one with no steps', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const callbackClient = client();
+		await expect(
+			convergePg(poolFor(callbackClient), emptyModel(), {
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'session-state-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+		expect(callbackClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message:
+					'converge application step callback may have changed session state',
+			}),
+		);
+
+		const untouchedClient = client();
+		await expect(
+			convergePg(poolFor(untouchedClient), emptyModel()),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+		expect(untouchedClient.release).toHaveBeenCalledWith(undefined);
+	});
+
 	it.each(['once', Object.create(null)])(
 		'refuses an invalid initialize value before validating or connecting',
 		async (initialize) => {
@@ -924,6 +1054,7 @@ describe('convergePg refusal boundary', () => {
 				database: 'app',
 				schema: 'public',
 				steps: applyInput.manifest.steps,
+				applicationSteps: [],
 			}),
 		);
 		expect(checked.steps.map(({ kind }) => kind)).toEqual([
@@ -3584,6 +3715,7 @@ describe('convergePg refusal boundary', () => {
 		await rollbackPgOutcomeGroup(testClient);
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await convergePg(poolFor(testClient), emptyModel());
+		expect(mocks.unlock).not.toHaveBeenCalled();
 		expect(testClient.release).toHaveBeenCalledWith(
 			expect.objectContaining({ message: 'rollback rejected' }),
 		);

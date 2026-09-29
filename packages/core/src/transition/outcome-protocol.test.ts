@@ -1,4 +1,5 @@
 import type {
+	ApplicationStepOutcomeClaimPlan,
 	ClaimToken,
 	LedgerAddress,
 	LedgerChainMember,
@@ -55,6 +56,23 @@ function plan(
 	};
 }
 
+function applicationPlan(
+	step: 'once' | 'assert',
+): ApplicationStepOutcomeClaimPlan {
+	return {
+		claimId: `application-${step}`,
+		claimSpecies: 'application-step',
+		address: { ...address, kind: 'application-step', name: 'items-backfill' },
+		claimKind: 'intent',
+		statementBundle: { statements: [] },
+		applicationStep: step,
+		declared: {
+			value: { id: 'items-backfill', digest: 'v1', step },
+			digest: 'v1',
+		},
+	};
+}
+
 function admit(
 	value: OutcomeClaimPlan = plan(),
 	events: readonly LedgerChainMember[] = [],
@@ -79,6 +97,53 @@ function admit(
 }
 
 describe('outcome claim admission (SC-30, SC-42)', () => {
+	it('admits application once only from unknown and assert from unknown or managed without catalogue identity', () => {
+		const applicationAddress = applicationPlan('assert').address;
+		const managed = [
+			{
+				...event('application-intent', 'intent'),
+				address: applicationAddress,
+			},
+			{
+				...event('application-observed', 'observed', 'application-intent'),
+				address: applicationAddress,
+				observed: { value: { id: 'items-backfill' }, digest: 'v1' },
+			},
+		];
+		expect(
+			admitOutcomeClaim({
+				plan: applicationPlan('once'),
+				projection: projectLedgerChain({
+					ledger,
+					address: applicationAddress,
+					events: managed,
+				}),
+				currentController: { name: 'deployment', oid: '10' },
+			}),
+		).toMatchObject({ kind: 'outcome-protocol-refused' });
+		expect(
+			admitOutcomeClaim({
+				plan: applicationPlan('assert'),
+				projection: projectLedgerChain({
+					ledger,
+					address: applicationAddress,
+					events: managed,
+				}),
+				currentController: { name: 'deployment', oid: '10' },
+			}),
+		).toMatchObject({ kind: 'admitted-outcome-claim' });
+		expect(
+			admitOutcomeClaim({
+				plan: applicationPlan('assert'),
+				projection: projectLedgerChain({
+					ledger,
+					address: applicationAddress,
+					events: managed,
+				}),
+				currentController: { name: 'other', oid: '11' },
+			}),
+		).toMatchObject({ kind: 'outcome-protocol-refused' });
+	});
 	it('selects exactly one terminal with one predecessor-set pass', () => {
 		expect(
 			findUniqueLedgerTerminal([
