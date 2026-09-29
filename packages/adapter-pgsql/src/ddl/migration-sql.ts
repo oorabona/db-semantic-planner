@@ -636,7 +636,8 @@ export function generateMigrationSQL(
 	}
 	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
-	// FK auto-indexes for new tables (single-column FKs without a covering key)
+	// FK auto-indexes for new tables (single-column FKs without a declared
+	// single-column index or another covering declared key)
 	if (options?.fkAutoIndex !== false) {
 		for (const spec of collectFkAutoIndexSpecs(changes, schemaName)) {
 			statements.push(
