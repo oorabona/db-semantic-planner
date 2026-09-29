@@ -16,3 +16,11 @@ presentation; `apply <run-id>` executes only the recorded plan.
 
 For caller-owned SQL, use `generate ddl` as rendering output and execute it
 under the caller's own controls. It is not part of the managed apply protocol.
+
+`plan` refuses a change that removes or replaces a unique index, a primary key
+or a column's unique constraint when a foreign key in the compared schema
+references the same columns, and so does `generateMigrationSQL` with
+`includeDestructive`. dbsp cannot address that foreign key yet (#319): drop it,
+change the key and recreate it in a reviewed manual migration, then plan again.
+The schema comparison still reports the change, with the foreign keys in
+`meta.referencedBy`.
