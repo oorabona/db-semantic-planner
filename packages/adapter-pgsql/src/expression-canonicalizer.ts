@@ -28,7 +28,7 @@ import {
 import { generateColumnDef } from './ddl/ddl-generator.js';
 import { generateEnumTypesPhase } from './ddl/phases/enum-types.js';
 import { generateSequencesPhase } from './ddl/phases/sequences.js';
-import type { PhaseContext } from './ddl/phases/types.js';
+import { type PhaseContext, sup } from './ddl/phases/types.js';
 import {
 	formatSqlDefault,
 	quoteCollation,
@@ -2097,7 +2097,12 @@ async function createMissingDesiredEnumTypes(
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<unknown | undefined> {
-	if (options?.dialectCapabilities?.supportsDDLEnumTypes === false) {
+	if (
+		!sup(
+			options?.dialectCapabilities,
+			options?.dialectCapabilities?.supportsDDLEnumTypes,
+		)
+	) {
 		return undefined;
 	}
 	const missingEnums = missingDesiredEnums(desired, dbModel);

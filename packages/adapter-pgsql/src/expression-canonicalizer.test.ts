@@ -433,6 +433,37 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 	});
 
+	it('skips a mismatched enum map when enum staging support is undeclared', async () => {
+		const client = new FakePgClient();
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['happy'] }]]),
+		);
+		const dialectCapabilities = { ...POSTGRESQL_CAPABILITIES };
+		delete dialectCapabilities.supportsDDLEnumTypes;
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				makeModel([]),
+				{ dialectCapabilities },
+			),
+		).resolves.toBeDefined();
+		expect(client.queries.some((query) => /CREATE TYPE/u.test(query.sql))).toBe(
+			false,
+		);
+	});
+
 	it.each([
 		['single-quoted', "state = 'pending'"],
 		['dollar-quoted', 'state = $$pending$$'],
