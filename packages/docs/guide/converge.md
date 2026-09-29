@@ -107,7 +107,9 @@ declare `mood_type` to match a live `mood_type`.
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
-  expression, and, for a single-column key, a declared index on its referencing column.
+  expression, and, for a single-column key, a declared key covering its referencing column: a primary
+  key or unique column starting with it, or a non-partial btree index without expressions whose first
+  column it is. A partial, expression, gin or hash index on that column does not cover it.
 - A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
   finite-number or string literal default (not a function call such as `now()`). A column with a
   default must use a PostgreSQL built-in base type or an enum, whether it is declared by a neutral type
