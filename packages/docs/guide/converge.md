@@ -125,9 +125,9 @@ same call commits on its own and can remain after a failure.
 
 | `result.kind` | Meaning |
 |---|---|
-| `no-drift` | Nothing to apply for the declared tables, sequences and enums. |
-| `applied` | Every planned step committed; `applied` lists their change kinds. |
-| `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
+| `no-drift` | Nothing to apply for the declared tables, sequences and enums, every `once` [application step](#application-steps) recorded, and every `assert` healthy. |
+| `applied` | Every planned step committed; `applied` lists their change kinds (`adopt_table` and `adopt_sequence` for adoptions), followed by `application-step:<id>` for each application step that recorded a run. |
+| `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. Both lists cover generated and adoption steps only: `before-generated-ddl` application steps that already ran stay committed and are not listed. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
 
 ## Checking without applying
@@ -138,7 +138,7 @@ planning refusals an apply runs before it starts executing, and returns without 
 | `result.kind` | Meaning |
 |---|---|
 | `no-drift` | An apply would find nothing to do. |
-| `would-apply` | `steps` lists, in execution order, the steps an apply would run. A generated or adoption step has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. An [application step](#application-steps) has only `kind: 'application-step'`, its `id`, and `step` (`'once'` or `'assert'`). `planDigest` identifies that plan. |
+| `would-apply` | `steps` lists, in execution order, the steps an apply would run. A generated or adoption step has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. An [application step](#application-steps) has only `kind: 'application-step'`, its `id`, `step` (`'once'` or `'assert'`) and, for an assert, `inspected`. `planDigest` identifies that plan. |
 
 Before executing, a check refuses as an apply would (`busy`, `ledger-absent`, `database-read-only`,
 `unsupported-change`, …), except that it never creates a ledger: with no ledger it refuses
@@ -202,9 +202,11 @@ await convergePg(pool, model, {
   `application-step-failed`.
 - `phase: 'before-generated-ddl'` runs before converge's first generated DDL change,
   `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
-- Each step is one transaction on converge's connection. `tx.query` refuses transaction-control
-  statements (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, …); this guards against mistakes, not against
-  code that runs with the same role. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
+- Each step is one transaction on converge's connection. `tx.query` sends one statement per call
+  and refuses transaction-control statements (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`,
+  `SAVEPOINT`, `RELEASE`, `PREPARE TRANSACTION`, `SET TRANSACTION`); this guards against mistakes, not
+  against code that runs with the same role. A step must not release advisory locks
+  (`pg_advisory_unlock_all()` and the like): converge's own lock lives on the same connection. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
   `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
   `apply`. Both are whole milliseconds from 1 to 2147483647.
 - Use `SET LOCAL`, not `SET`: session-level effects (`SET`, `SET ROLE`, `LISTEN`, `PREPARE`,
@@ -217,8 +219,13 @@ await convergePg(pool, model, {
   `transport-ambiguous` instead: the step may or may not be recorded, so run converge again and let it
   observe the ledger rather than repeating the step's work yourself.
 - A recorded run appears in `applied` as `application-step:<id>`. `no-drift` means no generated
-  change, every `once` recorded and every `assert` healthy. Check mode runs `inspect` read-only,
-  never `apply`, and lists pending steps as `application-step` entries of `steps`.
+  change, every `once` recorded and every `assert` healthy.
+- An `assert` is inspected before anything runs only when nothing else is pending (no generated
+  change, every `once` recorded), since only then does its answer decide `no-drift`. Otherwise it is
+  inspected when its phase comes, so an `after-generated-ddl` assert can read tables the same call
+  creates. Check mode never runs `apply` and lists pending steps as `application-step` entries of
+  `steps`: each unrecorded `once`, and each `assert` either with `inspected: true` (inspected read-only
+  and unhealthy) or, when other work is pending, with `inspected: false` (not inspected; apply will).
 - dbsp cannot compare function bodies: the `digest` is your statement that a step changed.
 - Steps apply to the converged schema only; `scope: 'database'` is refused.
 

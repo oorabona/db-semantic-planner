@@ -456,7 +456,12 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({
 			kind: 'would-apply',
 			steps: [
-				{ kind: 'application-step', id: `${name}-state-check`, step: 'assert' },
+				{
+					kind: 'application-step',
+					id: `${name}-state-check`,
+					step: 'assert',
+					inspected: true,
+				},
 			],
 		});
 		await expect(
@@ -471,6 +476,101 @@ describe('convergePg', () => {
 				[schema, functionName],
 			),
 		).resolves.toMatchObject({ rows: [{ exists: true }] });
+	});
+
+	it('defers an after-generated-ddl assert inspection until its table exists', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const freshSchema = `converge_assert_phase_${suffix}`;
+		const functionName = `widgets_verified_${suffix}`;
+		const desired = model([
+			{
+				name: 'widgets',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'widgets-function',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					await tx.query(`SELECT count(*) FROM "${freshSchema}"."widgets"`);
+					const result = await tx.query<{ readonly exists: boolean }>(
+						'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_proc procedure JOIN pg_catalog.pg_namespace namespace ON namespace.oid = procedure.pronamespace WHERE namespace.nspname = $1 AND procedure.proname = $2) AS exists',
+						[freshSchema, functionName],
+					);
+					return result.rows[0]?.exists ? 'healthy' : 'unhealthy';
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`CREATE FUNCTION "${freshSchema}"."${functionName}"() RETURNS integer LANGUAGE sql AS $$ SELECT 1 $$`,
+					);
+				},
+			},
+		];
+		await createSchema(freshSchema);
+		try {
+			await convergePg(pool, model([]), {
+				schema: freshSchema,
+				initialize: 'pristine',
+			});
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toMatchObject({
+				kind: 'would-apply',
+				steps: [
+					{ kind: 'create_table' },
+					{
+						kind: 'application-step',
+						id: 'widgets-function',
+						step: 'assert',
+						inspected: false,
+					},
+				],
+			});
+			await expect(
+				convergePg(pool, desired, { schema: freshSchema, steps }),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['create_table', 'application-step:widgets-function'],
+			});
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toEqual({ kind: 'no-drift' });
+			await pool.query(`DROP FUNCTION "${freshSchema}"."${functionName}"()`);
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					mode: 'check',
+					steps,
+				}),
+			).resolves.toMatchObject({
+				kind: 'would-apply',
+				steps: [
+					{
+						kind: 'application-step',
+						id: 'widgets-function',
+						step: 'assert',
+						inspected: true,
+					},
+				],
+			});
+		} finally {
+			await dropSchema(freshSchema);
+		}
 	});
 
 	it('refuses planning inspection errors in apply and check mode without recording a step', async () => {

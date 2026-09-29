@@ -768,7 +768,14 @@ describe('convergePg refusal boundary', () => {
 			}),
 		).resolves.toMatchObject({
 			kind: 'would-apply',
-			steps: [{ kind: 'application-step', id: 'state-check', step: 'assert' }],
+			steps: [
+				{
+					kind: 'application-step',
+					id: 'state-check',
+					step: 'assert',
+					inspected: true,
+				},
+			],
 		});
 		expect(apply).not.toHaveBeenCalled();
 	});
@@ -3708,6 +3715,7 @@ describe('convergePg refusal boundary', () => {
 		await rollbackPgOutcomeGroup(testClient);
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await convergePg(poolFor(testClient), emptyModel());
+		expect(mocks.unlock).not.toHaveBeenCalled();
 		expect(testClient.release).toHaveBeenCalledWith(
 			expect.objectContaining({ message: 'rollback rejected' }),
 		);

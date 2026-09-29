@@ -55,7 +55,11 @@ How they are recorded and run:
   converge closes its connection after any step ran instead of returning it to the pool.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
-  every `assert` healthy. Check mode runs `inspect` read-only and never `apply`.
+  every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is
+  pending, since only then does its answer decide `no-drift`; otherwise it is inspected at its phase,
+  so it can read what earlier steps and generated DDL made. Check mode never runs `apply` and lists an
+  assert it could not inspect ahead of pending work with `inspected: false`. A step must not release
+  advisory locks: converge's session lock lives on the same connection.
 - **The digest is the caller's contract.** dbsp cannot hash a function: a `once` whose body changes
   needs a new id, and an `assert` records the digest it last repaired with.
 - Schema scope only in this delivery; `scope: 'database'` is refused until needed.

@@ -284,7 +284,18 @@ export type PgConvergePlannedStep =
 	| {
 			readonly kind: 'application-step';
 			readonly id: string;
-			readonly step: 'once' | 'assert';
+			readonly step: 'once';
+			readonly inspected?: never;
+			readonly stepKey?: never;
+			readonly order?: never;
+			readonly dependencyOrder?: never;
+			readonly address?: never;
+	  }
+	| {
+			readonly kind: 'application-step';
+			readonly id: string;
+			readonly step: 'assert';
+			readonly inspected: boolean;
 			readonly stepKey?: never;
 			readonly order?: never;
 			readonly dependencyOrder?: never;
@@ -1587,6 +1598,9 @@ export async function convergePg(
 				database,
 				schema,
 				steps: applicationSteps,
+				hasPendingGeneratedWork:
+					diff.changes.length > 0 || adoptionSteps.length > 0,
+				check,
 				onApplicationStepCallback: () => {
 					applicationStepCallbackRan = true;
 				},
@@ -1924,8 +1938,9 @@ export async function convergePg(
 			outcome.detail,
 		);
 	} finally {
+		const compromised = readPgOutcomeSessionCompromise(client);
 		lockedConvergeClients.delete(client);
-		if (locked) {
+		if (locked && !compromised) {
 			try {
 				if (!(await releasePgLedgerSessionLock(client, schemaHome(schema))))
 					destroyReason = 'converge could not confirm ledger lock release';
@@ -1937,9 +1952,7 @@ export async function convergePg(
 			destroyReason =
 				'converge application step callback may have changed session state';
 		client.release(
-			destroyReason === undefined
-				? readPgOutcomeSessionCompromise(client)
-				: new Error(destroyReason),
+			destroyReason === undefined ? compromised : new Error(destroyReason),
 		);
 	}
 }

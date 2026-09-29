@@ -56,11 +56,18 @@ export type PgConvergeApplicationStep =
 
 export type ValidatedPgConvergeApplicationStep = PgConvergeApplicationStep;
 
-export interface PgPlannedApplicationStep {
-	readonly kind: 'application-step';
-	readonly id: string;
-	readonly step: 'once' | 'assert';
-}
+export type PgPlannedApplicationStep =
+	| {
+			readonly kind: 'application-step';
+			readonly id: string;
+			readonly step: 'once';
+	  }
+	| {
+			readonly kind: 'application-step';
+			readonly id: string;
+			readonly step: 'assert';
+			readonly inspected: boolean;
+	  };
 
 export class PgApplicationStepError extends Error {
 	constructor(
@@ -96,99 +103,105 @@ export function validatePgConvergeApplicationSteps(
 				'converge step must be an object',
 			);
 		const step = value as Record<string, unknown>;
-		if (step.kind !== 'once' && step.kind !== 'assert')
+		const kind = step.kind;
+		const id = step.id;
+		const digest = step.digest;
+		const scope = step.scope;
+		const phase = step.phase;
+		const lockTimeoutMs = step.lockTimeoutMs;
+		const statementTimeoutMs = step.statementTimeoutMs;
+		const apply = step.apply;
+		const inspect = step.inspect;
+		if (kind !== 'once' && kind !== 'assert')
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step kind is invalid',
 			);
-		if (typeof step.id !== 'string' || step.id.length === 0)
+		if (typeof id !== 'string' || id.length === 0)
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step id must be a non-empty string',
 			);
-		if (ids.has(step.id))
+		if (ids.has(id))
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step ids must be unique',
 			);
-		ids.add(step.id);
-		if (typeof step.digest !== 'string' || step.digest.length === 0)
+		ids.add(id);
+		if (typeof digest !== 'string' || digest.length === 0)
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step digest must be a non-empty string',
 			);
-		if (step.scope !== undefined && step.scope !== 'schema')
+		if (scope !== undefined && scope !== 'schema')
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step scope must be schema',
 			);
-		if (
-			step.phase !== 'before-generated-ddl' &&
-			step.phase !== 'after-generated-ddl'
-		)
+		if (phase !== 'before-generated-ddl' && phase !== 'after-generated-ddl')
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step phase is invalid',
 			);
-		for (const timeout of ['lockTimeoutMs', 'statementTimeoutMs'] as const)
+		for (const timeout of [lockTimeoutMs, statementTimeoutMs])
 			if (
-				step[timeout] !== undefined &&
-				(!Number.isSafeInteger(step[timeout]) ||
-					(step[timeout] as number) < 1 ||
-					(step[timeout] as number) > 2_147_483_647)
+				timeout !== undefined &&
+				(!Number.isSafeInteger(timeout) ||
+					(timeout as number) < 1 ||
+					(timeout as number) > 2_147_483_647)
 			)
 				throw new PgApplicationStepError(
 					'application-step-failed',
 					'',
 					'converge step timeout must be a safe integer from 1 to 2147483647 milliseconds',
 				);
-		if (typeof step.apply !== 'function')
+		if (typeof apply !== 'function')
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge step apply must be a function',
 			);
-		if (step.kind === 'assert' && typeof step.inspect !== 'function')
+		if (kind === 'assert' && typeof inspect !== 'function')
 			throw new PgApplicationStepError(
 				'application-step-failed',
 				'',
 				'converge assert inspect must be a function',
 			);
-		return step.kind === 'once'
+		return kind === 'once'
 			? {
 					kind: 'once',
-					id: step.id as string,
-					digest: step.digest as string,
-					...(step.scope === undefined ? {} : { scope: 'schema' }),
-					phase: step.phase as PgConvergeOnceStep['phase'],
-					...(step.lockTimeoutMs === undefined
+					id,
+					digest,
+					...(scope === undefined ? {} : { scope: 'schema' }),
+					phase,
+					...(lockTimeoutMs === undefined
 						? {}
-						: { lockTimeoutMs: step.lockTimeoutMs as number }),
-					...(step.statementTimeoutMs === undefined
+						: { lockTimeoutMs: lockTimeoutMs as number }),
+					...(statementTimeoutMs === undefined
 						? {}
-						: { statementTimeoutMs: step.statementTimeoutMs as number }),
-					apply: step.apply as PgConvergeOnceStep['apply'],
+						: { statementTimeoutMs: statementTimeoutMs as number }),
+					apply: apply as PgConvergeOnceStep['apply'],
 				}
 			: {
 					kind: 'assert',
-					id: step.id as string,
-					digest: step.digest as string,
-					...(step.scope === undefined ? {} : { scope: 'schema' }),
-					phase: step.phase as PgConvergeAssertStep['phase'],
-					...(step.lockTimeoutMs === undefined
+					id,
+					digest,
+					...(scope === undefined ? {} : { scope: 'schema' }),
+					phase,
+					...(lockTimeoutMs === undefined
 						? {}
-						: { lockTimeoutMs: step.lockTimeoutMs as number }),
-					...(step.statementTimeoutMs === undefined
+						: { lockTimeoutMs: lockTimeoutMs as number }),
+					...(statementTimeoutMs === undefined
 						? {}
-						: { statementTimeoutMs: step.statementTimeoutMs as number }),
-					inspect: step.inspect as PgConvergeAssertStep['inspect'],
-					apply: step.apply as PgConvergeAssertStep['apply'],
+						: { statementTimeoutMs: statementTimeoutMs as number }),
+					inspect: inspect as PgConvergeAssertStep['inspect'],
+					apply: apply as PgConvergeAssertStep['apply'],
 				};
 	});
 }
@@ -269,11 +282,11 @@ function refusesApplicationStepTransactionControl(text: string): boolean {
 			'ABORT',
 			'SAVEPOINT',
 			'RELEASE',
-			'PREPARE',
-			'DISCARD',
 		].includes(keyword)
 	)
 		return true;
+	if (keyword === 'PREPARE')
+		return /^PREPARE\s+TRANSACTION\b/iu.test(statement);
 	if (keyword !== 'SET') return false;
 	return /^SET\s+(?:(?:LOCAL|SESSION)\s+)?(?:TRANSACTION\b|SESSION\s+CHARACTERISTICS\b)/iu.test(
 		statement,
@@ -486,10 +499,15 @@ export async function planPgApplicationSteps(input: {
 	readonly database: string;
 	readonly schema: string;
 	readonly steps: readonly PgConvergeApplicationStep[];
+	readonly hasPendingGeneratedWork?: boolean;
+	readonly check?: boolean;
 	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly PgPlannedApplicationStep[]> {
 	const planned: PgPlannedApplicationStep[] = [];
-	for (const step of input.steps) {
+	const onceSteps = input.steps.filter(
+		(step): step is PgConvergeOnceStep => step.kind === 'once',
+	);
+	for (const step of onceSteps) {
 		let begun = false;
 		let completed = false;
 		try {
@@ -505,18 +523,61 @@ export async function planPgApplicationSteps(input: {
 				input.schema,
 				step,
 			);
-			const unhealthy =
-				step.kind === 'assert' &&
-				(await inspectPgApplicationStep(
-					step,
-					input.client,
-					input.onApplicationStepCallback,
-				)) === 'unhealthy';
-			if (!state.complete && (step.kind === 'once' || unhealthy))
+			if (!state.complete)
 				planned.push({
 					kind: 'application-step',
 					id: step.id,
 					step: step.kind,
+				});
+			completed = true;
+		} finally {
+			if (begun) {
+				await rollbackPgOutcomeGroup(input.client);
+				if (completed)
+					assertPgApplicationStepSessionHealthy(input.client, step);
+			}
+		}
+	}
+	if (input.hasPendingGeneratedWork || planned.length > 0) {
+		if (input.check)
+			planned.push(
+				...input.steps
+					.filter(
+						(step): step is PgConvergeAssertStep => step.kind === 'assert',
+					)
+					.map((step) => ({
+						kind: 'application-step' as const,
+						id: step.id,
+						step: 'assert' as const,
+						inspected: false,
+					})),
+			);
+		return planned;
+	}
+	for (const step of input.steps) {
+		if (step.kind !== 'assert') continue;
+		let begun = false;
+		let completed = false;
+		try {
+			await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+			begun = true;
+			await setPgApplicationStepStatementTimeout(
+				input.client,
+				step.statementTimeoutMs,
+			);
+			await admission(input.client, input.database, input.schema, step);
+			if (
+				(await inspectPgApplicationStep(
+					step,
+					input.client,
+					input.onApplicationStepCallback,
+				)) === 'unhealthy'
+			)
+				planned.push({
+					kind: 'application-step',
+					id: step.id,
+					step: 'assert',
+					inspected: true,
 				});
 			completed = true;
 		} finally {

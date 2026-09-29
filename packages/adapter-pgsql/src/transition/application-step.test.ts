@@ -202,16 +202,35 @@ describe('converge application steps', () => {
 			"PREPARE TRANSACTION 'x'",
 			'SET TRANSACTION READ ONLY',
 			'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
-			'DISCARD ALL',
 		])
 			await expect(tx.query(statement)).rejects.toThrow('transaction control');
 		expect(query).not.toHaveBeenCalled();
+		await tx.query('PREPARE q AS SELECT 1');
+		await tx.query('DISCARD PLANS');
 		await tx.query('SELECT 1');
-		expect(query).toHaveBeenCalledWith({
+		expect(query).toHaveBeenLastCalledWith({
 			text: 'SELECT 1',
 			values: [],
 			queryMode: 'extended',
 		});
+	});
+
+	it('reads each declaration property once before normalizing it', () => {
+		let idReads = 0;
+		const step = {
+			kind: 'once',
+			get id() {
+				idReads += 1;
+				return idReads === 1 ? 'read-once' : '';
+			},
+			digest: 'v1',
+			phase: 'after-generated-ddl',
+			apply,
+		};
+		expect(validatePgConvergeApplicationSteps([step])).toEqual([
+			expect.objectContaining({ id: 'read-once' }),
+		]);
+		expect(idReads).toBe(1);
 	});
 
 	it.each([Number.MAX_SAFE_INTEGER, 2_147_483_648, 1.5])(
@@ -415,6 +434,37 @@ describe('converge application steps', () => {
 			],
 			['ROLLBACK'],
 		]);
+	});
+
+	it('defers assert inspection while generated work is pending in check mode', async () => {
+		const inspect = vi.fn(async () => 'unhealthy' as const);
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				hasPendingGeneratedWork: true,
+				check: true,
+				steps: [
+					{
+						kind: 'assert',
+						id: 'after-ddl-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect,
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'after-ddl-check',
+				step: 'assert',
+				inspected: false,
+			},
+		]);
+		expect(inspect).not.toHaveBeenCalled();
 	});
 
 	it('verifies an assert after applying it before recording the ledger row', async () => {
