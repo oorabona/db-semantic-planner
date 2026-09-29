@@ -4699,6 +4699,23 @@ describe('compareSchemata with Capabilities (CAPS-003)', () => {
 		expect(enumChanges).toHaveLength(0);
 	});
 
+	it('skips a mismatched enum map when supportsDDLEnumTypes is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLEnumTypes: false,
+		};
+		const schema = makeModelWithEnums(
+			[],
+			new Map([['logical', { name: 'physical', values: ['active'] }]]),
+		);
+
+		const diff = compareSchemata(schema, makeModel([]), {
+			dialectCapabilities: caps,
+		});
+
+		expect(diff.changes).toEqual([]);
+	});
+
 	it('should emit enum changes when supportsDDLEnumTypes is true', () => {
 		const caps: DialectCapabilities = {
 			...POSTGRESQL_CAPABILITIES,

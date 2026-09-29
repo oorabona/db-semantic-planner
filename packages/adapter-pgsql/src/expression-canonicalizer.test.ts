@@ -399,6 +399,40 @@ describe('canonicalizeCheckConstraints', () => {
 		).rejects.toThrow(EnumNameMapKeyMismatchError);
 	});
 
+	it('skips a mismatched enum map when enum staging is disabled', async () => {
+		const client = new FakePgClient();
+		const desired = new ModelIRImpl(
+			new Map([
+				[
+					'jobs',
+					makeTable({
+						name: 'jobs',
+						checkConstraints: [{ name: 'jobs_mood_check', expression: 'true' }],
+					}),
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['happy'] }]]),
+		);
+
+		await expect(
+			canonicalizeWithScratch(
+				adapterForPool(new FakePgPool(client)),
+				desired,
+				makeModel([]),
+				{
+					dialectCapabilities: {
+						...POSTGRESQL_CAPABILITIES,
+						supportsDDLEnumTypes: false,
+					},
+				},
+			),
+		).resolves.toBeDefined();
+		expect(client.queries.some((query) => /CREATE TYPE/u.test(query.sql))).toBe(
+			false,
+		);
+	});
+
 	it.each([
 		['single-quoted', "state = 'pending'"],
 		['dollar-quoted', 'state = $$pending$$'],

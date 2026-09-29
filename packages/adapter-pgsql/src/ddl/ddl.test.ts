@@ -2228,6 +2228,31 @@ describe('DDL Generation with Capabilities (CAPS-003)', () => {
 		expect(stmts.some((s) => s.includes('CREATE TABLE'))).toBe(true);
 	});
 
+	it('skips a mismatched enum map when supportsDDLEnumTypes is false', () => {
+		const model = new ModelIRImpl(
+			new Map<string, TableIR>([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [],
+					},
+				],
+			]),
+			new Map(),
+			new Map([['logical', { name: 'physical', values: ['active'] }]]),
+		);
+
+		const statements = generateDDL(model, { dialectCapabilities: noEnumCaps });
+
+		expect(statements).toHaveLength(1);
+		expect(statements[0]).toContain('CREATE TABLE');
+	});
+
 	// SC-10: PG generates everything
 	it('should include all DDL features with POSTGRESQL_CAPABILITIES', () => {
 		const model = makeFullModel();

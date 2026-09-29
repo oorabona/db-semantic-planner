@@ -221,7 +221,6 @@ export function compareSchemata(
 	db: ModelIR,
 	options?: CompareSchemataOptions,
 ): SchemaDiff {
-	assertDeclaredEnumMapIdentity(schema.enums);
 	const caps = options?.dialectCapabilities;
 	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
 	/**
@@ -288,6 +287,7 @@ export function compareSchemata(
 	);
 	// 0. Compare ENUM types (schema-level, before tables)
 	if (sup(caps?.supportsDDLEnumTypes)) {
+		assertDeclaredEnumMapIdentity(schema.enums);
 		compareEnums(schema, db, changes);
 	}
 

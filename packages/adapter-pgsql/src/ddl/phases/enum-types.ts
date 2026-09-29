@@ -19,10 +19,13 @@ import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
  */
 export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
 	const { schema, schemaName, caps } = ctx;
-	assertDeclaredEnumMapIdentity(schema.enums);
-	if (!schema.enums || !sup(caps, caps?.supportsDDLEnumTypes)) {
+	if (!sup(caps, caps?.supportsDDLEnumTypes)) {
 		return [];
 	}
+	if (!schema.enums) {
+		return [];
+	}
+	assertDeclaredEnumMapIdentity(schema.enums);
 	const statements: string[] = [];
 	for (const [, enumDef] of schema.enums) {
 		const effectiveSchema =

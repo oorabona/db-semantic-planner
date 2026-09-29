@@ -2097,6 +2097,9 @@ async function createMissingDesiredEnumTypes(
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<unknown | undefined> {
+	if (options?.dialectCapabilities?.supportsDDLEnumTypes === false) {
+		return undefined;
+	}
 	const missingEnums = missingDesiredEnums(desired, dbModel);
 	if (missingEnums.size === 0) return undefined;
 	const enumModel = new ModelIRImpl(new Map(), new Map(), missingEnums);
