@@ -34,6 +34,7 @@ import {
 	withGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
 import { modelForDeclaredAdoption } from '../ddl/live-diff.js';
+import { pgsqlDeclaredSequenceAdoptionDeclaration } from '../ddl/managed-step-manifest.js';
 import { compareSchemata } from '../ddl/schema-diff.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import {
@@ -656,7 +657,19 @@ export async function executeGeneratorPlan(input: {
 					detail: `declared adoption for ${step.address?.name ?? step.stepKey} refuses live shape mismatch`,
 				};
 			const lifecycle = step.lifecycle;
-			if (lifecycle?.kind !== 'adoption') continue;
+			if (
+				lifecycle?.kind !== 'adoption' &&
+				lifecycle?.kind !== 'sequence-adoption'
+			)
+				continue;
+			if (
+				lifecycle.kind === 'sequence-adoption' &&
+				!input.verifyDeclaredAdoptionShape
+			)
+				return {
+					outcome: 'execution-failed',
+					detail: `sequence adoption step ${step.stepKey} requires a declared shape verifier`,
+				};
 			if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 				return {
 					outcome: 'execution-failed',
@@ -672,6 +685,17 @@ export async function executeGeneratorPlan(input: {
 					outcome: 'execution-failed',
 					detail: `adoption step ${step.stepKey} has incomplete normalized material`,
 				};
+			if (
+				lifecycle.kind === 'sequence-adoption' &&
+				!isDeepStrictEqual(
+					step.expectedDeclaration,
+					pgsqlDeclaredSequenceAdoptionDeclaration(lifecycle.shape),
+				)
+			)
+				return {
+					outcome: 'adoption-refused',
+					detail: `sequence adoption step ${step.stepKey} has a non-canonical declared sequence`,
+				};
 			const preflight = await preflightPgDeclaredAdoption({
 				executor: input.pool,
 				home: home(address),
@@ -681,11 +705,13 @@ export async function executeGeneratorPlan(input: {
 				shapeMatches: (executor) =>
 					input.verifyDeclaredAdoptionShape
 						? input.verifyDeclaredAdoptionShape(executor, step)
-						: adoptionShapeMatches(
-								adoptionPool!,
-								input.schema,
-								lifecycle.shape,
-							),
+						: lifecycle.kind === 'adoption'
+							? adoptionShapeMatches(
+									adoptionPool!,
+									input.schema,
+									lifecycle.shape,
+								)
+							: Promise.resolve(false),
 			});
 			if (preflight.outcome !== 'ready' && preflight.outcome !== 'no-op')
 				return preflight.outcome === 'adoption-refused'
@@ -750,8 +776,19 @@ export async function executeGeneratorPlan(input: {
 					`atomic creation group ${step.stepKey} was not reached at its first member`,
 				);
 			if (step.lifecycle?.kind === 'adoption-refused') continue;
-			if (step.lifecycle?.kind === 'adoption') {
+			if (
+				step.lifecycle?.kind === 'adoption' ||
+				step.lifecycle?.kind === 'sequence-adoption'
+			) {
 				const lifecycle = step.lifecycle;
+				if (
+					lifecycle.kind === 'sequence-adoption' &&
+					!input.verifyDeclaredAdoptionShape
+				)
+					return {
+						outcome: 'execution-failed',
+						detail: `sequence adoption step ${step.stepKey} requires a declared shape verifier`,
+					};
 				if (!input.verifyDeclaredAdoptionShape && !adoptionPool)
 					return {
 						outcome: 'execution-failed',
@@ -782,11 +819,13 @@ export async function executeGeneratorPlan(input: {
 					shapeMatches: (executor) =>
 						input.verifyDeclaredAdoptionShape
 							? input.verifyDeclaredAdoptionShape(executor, step)
-							: adoptionShapeMatches(
-									adoptionPool!,
-									input.schema,
-									lifecycle.shape,
-								),
+							: lifecycle.kind === 'adoption'
+								? adoptionShapeMatches(
+										adoptionPool!,
+										input.schema,
+										lifecycle.shape,
+									)
+								: Promise.resolve(false),
 					...(input.observer === undefined ? {} : { observer: input.observer }),
 				});
 				if (adopted.outcome === 'completed' || adopted.outcome === 'no-op') {
@@ -818,6 +857,11 @@ export async function executeGeneratorPlan(input: {
 				}
 				return result;
 			}
+			if (step.claimKind === 'adopt-intent')
+				return {
+					outcome: 'execution-failed',
+					detail: `adoption step ${step.stepKey} was not dispatched as an adoption`,
+				};
 			if (step.statementBundle.statements.length === 0) {
 				completedStepKeys.push(step.stepKey);
 				continue;

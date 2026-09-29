@@ -66,6 +66,28 @@ function step(order: number, stepKey: string): NormalizedManagedStep {
 }
 
 describe('generated managed-step dependencies', () => {
+	it('refuses declared sequence adoption before opening a connection or comparing', async () => {
+		generator.loadSchema.mockResolvedValue({
+			model: {
+				tables: new Map(),
+				sequences: new Map([
+					['union_group_seq', { name: 'union_group_seq', adopt: true }],
+				]),
+			},
+		});
+		await expect(
+			runGeneratorPlan({
+				db: 'postgres://unused',
+				schemaFile: 'schema.ts',
+				dryRun: true,
+			}),
+		).rejects.toThrow(
+			'sequence adoption is available through convergePg / dbsp migrate',
+		);
+		expect(generator.createDbConnection).not.toHaveBeenCalled();
+		expect(generator.comparePgsqlDatabaseSchema).not.toHaveBeenCalled();
+	});
+
 	it('refuses a replacement plan with an empty primary key before replacement-create material exists', async () => {
 		const pool = {
 			end: vi.fn(),

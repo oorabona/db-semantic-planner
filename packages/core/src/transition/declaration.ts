@@ -317,12 +317,13 @@ export function declarationSetFromModel(
 	for (const [name, item] of [...(model.sequences ?? new Map())].sort(
 		([a], [b]) => (a < b ? -1 : a > b ? 1 : 0),
 	)) {
+		const { adopt: _adopt, ...shape } = item;
 		declarations.push(
 			declaration(
 				context,
 				'sequence',
 				toDatabase(name),
-				{ ...item, name: toDatabase(item.name) },
+				{ ...shape, name: toDatabase(item.name) },
 				`schema.sequences[${JSON.stringify(name)}]`,
 			),
 		);

@@ -647,6 +647,10 @@ function modelLevelCollectionsForComparison(
 		sequences: projectManagedMapEntries(
 			model.sequences,
 			managedCollections.sequences,
+			(_name, sequence) => {
+				const { adopt: _adopt, ...shape } = sequence;
+				return shape;
+			},
 		),
 	};
 }

@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
 		writability: vi.fn<() => Promise<PgDatabaseWritability>>(async () => ({
 			kind: 'writable',
 		})),
+		sequenceShape: vi.fn(async () => true),
 		introspect,
 		adapter: { introspect },
 	};
@@ -182,6 +183,10 @@ vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./reinitialize-preflight.js')>()),
 	readPgLedgerScopeCurrency: (...args: unknown[]) =>
 		forward(mocks.currency, args),
+}));
+vi.mock('./sequence-adoption.js', () => ({
+	pgDeclaredSequenceAdoptionShapeMatches: (...args: unknown[]) =>
+		forward(mocks.sequenceShape, args),
 }));
 
 import { convergePg, PgConvergeRefusalError } from './converge.js';
@@ -557,6 +562,7 @@ afterEach(() => {
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
 	mocks.writability.mockResolvedValue({ kind: 'writable' });
+	mocks.sequenceShape.mockResolvedValue(true);
 	mocks.reservations.mockResolvedValue([]);
 	mocks.runIds.mockResolvedValue(new Map());
 	mocks.introspect.mockResolvedValue(emptyModel());
@@ -590,6 +596,120 @@ describe('convergePg refusal boundary', () => {
 			changes: [expect.objectContaining({ kind: 'add_column' })],
 		});
 		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('skips declared sequence adoption checks after matching managed admission', async () => {
+		const sequence = { name: 'managed_sequence', adopt: true as const };
+		mockManagedObjects();
+		mocks.sequenceShape.mockResolvedValue(false);
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(
+			convergePg(poolFor(), {
+				...emptyModel(),
+				sequences: new Map([[sequence.name, sequence]]),
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'alter_sequence',
+					table: '',
+					destructive: true,
+					details: 'alter managed sequence',
+					meta: { sequence },
+				},
+			],
+		});
+		await expect(
+			convergePg(poolFor(), {
+				...emptyModel(),
+				sequences: new Map([[sequence.name, sequence]]),
+			}),
+		).rejects.toMatchObject({ refusal: 'unsupported-change' });
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('refuses declared sequence adoption with a schema other than the converge target', async () => {
+		const sequence = {
+			name: 'legacy_sequence',
+			adopt: true as const,
+			schema: 'decoy',
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(
+			convergePg(
+				poolFor(),
+				{
+					...emptyModel(),
+					sequences: new Map([[sequence.name, sequence]]),
+				},
+				{ schema: 'tenant' },
+			),
+		).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+			detail: expect.stringMatching(/decoy.*tenant/),
+		});
+		expect(mocks.identity).not.toHaveBeenCalled();
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['without a declared schema', undefined],
+		['with the converge target schema', 'tenant'],
+	] as const)('adopts a sequence %s', async (_description, declaredSchema) => {
+		const sequence = {
+			name: 'legacy_sequence',
+			adopt: true as const,
+			...(declaredSchema === undefined ? {} : { schema: declaredSchema }),
+		};
+		const catalogueIdentity = {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue({ catalogueIdentity });
+		mocks.chain.mockResolvedValue({ events: [] });
+		mocks.execute.mockImplementation(async (input) => {
+			const step = input.manifest?.steps[0];
+			if (!step || !input.verifyDeclaredAdoptionShape)
+				throw new Error(
+					'expected a declared sequence adoption step and verifier',
+				);
+			expect(step.lifecycle).toEqual({
+				kind: 'sequence-adoption',
+				shape: {
+					name: sequence.name,
+					...(declaredSchema === undefined ? {} : { schema: declaredSchema }),
+				},
+			});
+			await input.verifyDeclaredAdoptionShape(input.pool, step);
+			return { outcome: 'completed' };
+		});
+
+		await expect(
+			convergePg(
+				poolFor(),
+				{
+					...emptyModel(),
+					sequences: new Map([[sequence.name, sequence]]),
+				},
+				{ schema: 'tenant' },
+			),
+		).resolves.toEqual({ kind: 'applied', applied: ['adopt_sequence'] });
+		expect(mocks.sequenceShape).toHaveBeenCalledWith(
+			expect.anything(),
+			'tenant',
+			sequence.name,
+			sequence,
+		);
 	});
 
 	it('refuses declared replace before comparison or execution', async () => {

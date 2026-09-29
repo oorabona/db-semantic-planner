@@ -42,8 +42,9 @@ dbsp migrate ./schema.ts --db "$DATABASE_URL" --schema "$DBSP_SCHEMA" --format j
 ```
 
 `dbsp migrate` runs [`convergePg`](./converge.md) once: it creates what the
-schema file adds, adopts the tables it marks `adopt: true`, and refuses any
-other change before sending DDL. It asks for no confirmation and has no dry
+schema file adds, adopts the tables and sequences it marks `adopt: true`, and
+refuses any other change before sending DDL. `dbsp plan` and `dbsp apply`
+adopt tables only; they refuse a sequence marked `adopt: true`. It asks for no confirmation and has no dry
 run; review a change with `dbsp plan` instead. The schema needs its ledger
 first, from `dbsp preflight --reinitialize`. Name each index you manage
 yourself with `--external-index <model-table>:<index>`: the table as the model

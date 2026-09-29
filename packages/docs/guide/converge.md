@@ -96,7 +96,7 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
   converge throws before writing anything; the error message gives the schema-qualified
   `ALTER SEQUENCE … RENAME TO …` that fixes it.
 - **New columns on tables dbsp already manages**, within the rules below.
-- **Adoption** of existing tables you mark `adopt: true` (see
+- **Adoption** of existing tables and standalone sequences you mark `adopt: true` (see
   [Adopting an existing install](#adopting-an-existing-install)).
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
@@ -149,7 +149,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `unmanaged-object` | A live object at an address converge would manage is not managed by dbsp: an existing table or sequence, or an object created while converge was running. |
 | `unmanaged-parent` | A change targets a table dbsp does not manage. |
 | `concurrent-drift` | A declared object disappeared while converge was planning. |
-| `adoption-refused` | A table marked `adopt: true` could not be adopted: it is absent, differs from its declaration, or its ledger state is not unknown. A managed table that was dropped and recreated is in that last case, and converge offers no way to take it over. |
+| `adoption-refused` | A table or sequence marked `adopt: true` could not be adopted. With an unknown ledger state, it is absent or differs from its declaration; a sequence is also refused when it is owned by a column (`OWNED BY`, serial or identity), is not `bigint` with cache 1, or is declared in another schema. An object already managed under the same catalogue identity is skipped, and its drift follows the ordinary rules (for example `unsupported-change`). Any other ledger state is refused, which includes a managed object that was dropped and recreated; converge offers no way to take it over. |
 | `execution-refused` | The executor refused or failed a step; `detail` says why. |
 
 ## Adopting an existing install
@@ -167,6 +167,21 @@ table `adopt: true`, then drop the flag:
 - `adopt: true` on a table that does not exist is refused, so do not set it on a fresh install.
 - An install that lags the model, for example a missing column, must be brought to the model before
   the adoption pass.
+
+A sequence created outside dbsp is refused as `unmanaged-object` too. Declare it with `adopt: true`
+in the schema's `sequences` for the same pass:
+
+- It is adopted only if it is a standalone sequence (not owned by a column through `OWNED BY`, serial
+  or identity), `bigint` with cache 1, in the schema converge targets, its ledger state is unknown,
+  and its start, increment, minimum, maximum and cycle match the declaration.
+- Its current value is never read or reset: the next `nextval` continues where it was.
+- The match is observed on the adoption's own session before it commits. PostgreSQL has no lock that
+  keeps a sequence from being altered in between, so an `ALTER SEQUENCE` running at that moment is
+  not excluded.
+- Type, cache and ownership are checked only when adopting. A managed sequence later altered on them
+  is not reported as drift.
+- `adopt: true` kept on a sequence that is already managed is a no-op. Only `convergePg` and
+  `dbsp migrate` adopt sequences; `dbsp plan` and `dbsp apply` refuse a sequence marked `adopt: true`.
 
 ```typescript
 // doctest: real-db-only — adopts a table created outside dbsp

@@ -1944,7 +1944,7 @@ function compareExtensions(
  * Compare those effective values so the DDL generated from a declaration reads
  * back as a fixed point, while a changed catalog value remains observable.
  */
-function effectiveSequenceOptions(
+export function effectiveSequenceOptions(
 	sequence: SequenceIR,
 	validateDeclaredOptions = false,
 ): {

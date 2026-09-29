@@ -242,7 +242,10 @@ export type SchemaConstraints = Record<string, SchemaTableOptions>;
 export interface SchemaExtras {
 	/** PostgreSQL extensions to ensure (CREATE EXTENSION IF NOT EXISTS "name") */
 	extensions?: string[];
-	/** Sequences to create (CREATE SEQUENCE). Key = sequence name */
+	/**
+	 * Sequences to create (CREATE SEQUENCE), or, with `adopt: true`, an existing standalone
+	 * sequence for `convergePg` to take into management. Key = sequence name
+	 */
 	sequences?: Record<
 		string,
 		{
@@ -251,6 +254,8 @@ export interface SchemaExtras {
 			minValue?: number | string;
 			maxValue?: number | string;
 			cycle?: boolean;
+			/** Explicitly bring an existing standalone sequence under managed state. */
+			adopt?: true;
 		}
 	>;
 }
@@ -799,10 +804,17 @@ export function schemaToModelIR(
 	const extensions = extras?.extensions;
 	const sequenceMap = extras?.sequences
 		? new Map(
-				Object.entries(extras.sequences).map(([name, seq]) => [
-					name,
-					{ name, ...seq },
-				]),
+				Object.entries(extras.sequences).map(([name, seq]) => {
+					const { adopt, ...shape } = seq;
+					return [
+						name,
+						{
+							name,
+							...shape,
+							...(adopt === true ? { adopt: true as const } : {}),
+						},
+					];
+				}),
 			)
 		: undefined;
 

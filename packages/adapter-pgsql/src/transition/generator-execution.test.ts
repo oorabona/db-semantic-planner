@@ -1,6 +1,7 @@
 import {
 	canonicalJsonDigest,
 	type ValidatedManagedStepManifest,
+	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import type { PoolClient } from 'pg';
@@ -17,6 +18,7 @@ import {
 import {
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
+	pgsqlDeclaredSequenceAdoptionDeclaration,
 } from '../ddl/managed-step-manifest.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import { readPgOutcomeSessionCompromise } from './outcome-protocol.js';
@@ -217,6 +219,44 @@ function declaredAdoptionStep(
 			shape: { name: 'accounts', columns: [], foreignKeys: [], indexes: [] },
 		},
 		expectedDeclaration: { value: { kind: 'table' }, digest: 'declared' },
+		expectedCatalogueIdentity: {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		},
+	};
+}
+
+function declaredSequenceAdoptionStep(
+	stepKey: string,
+	order: number,
+): NormalizedManagedStep {
+	return {
+		...dataDestructiveStep,
+		stepKey,
+		order,
+		segmentId: `generator-segment-${order}`,
+		address: {
+			scope: 'schema',
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'tenant',
+			kind: 'sequence',
+			name: 'union_group_seq',
+		},
+		claimKind: 'adopt-intent',
+		plannedClaimKeys: [`${stepKey}:root`],
+		statementBundle: { statements: [] },
+		classification: 'non-destructive',
+		requiresVacancy: false,
+		selection: { kind: 'adoption', selector: 'sequence:union_group_seq' },
+		lifecycle: {
+			kind: 'sequence-adoption',
+			shape: { name: 'union_group_seq' },
+		},
+		expectedDeclaration: pgsqlDeclaredSequenceAdoptionDeclaration({
+			name: 'union_group_seq',
+		}),
 		expectedCatalogueIdentity: {
 			engine: 'postgresql',
 			format: 1,
@@ -624,6 +664,140 @@ describe('generator execution fixture shim', () => {
 			detail:
 				'adoption step adoption:0 requires a pool executor for live shape introspection',
 		});
+	});
+
+	it('does not complete a sequence adoption as an empty statement step', async () => {
+		preflightPgDeclaredAdoption.mockClear();
+		executePgDeclaredAdoption.mockClear();
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			connect: vi.fn(),
+		};
+		await expect(
+			executeGeneratorPlan({
+				pool: executor as never,
+				run: {} as never,
+				plan: {
+					steps: [declaredSequenceAdoptionStep('sequence-adoption:0', 0)],
+				},
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({
+			outcome: 'execution-failed',
+			detail:
+				'sequence adoption step sequence-adoption:0 requires a declared shape verifier',
+		});
+		expect(preflightPgDeclaredAdoption).not.toHaveBeenCalled();
+		expect(executePgDeclaredAdoption).not.toHaveBeenCalled();
+	});
+
+	it('refuses a non-canonical sequence declaration before preflight', async () => {
+		preflightPgDeclaredAdoption.mockClear();
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			connect: vi.fn(),
+		};
+		const step = {
+			...declaredSequenceAdoptionStep('sequence-adoption:0', 0),
+			expectedDeclaration: { value: { kind: 'sequence' }, digest: 'declared' },
+		};
+
+		await expect(
+			executeGeneratorPlan({
+				pool: executor as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: async () => true,
+			}),
+		).resolves.toEqual({
+			outcome: 'adoption-refused',
+			detail:
+				'sequence adoption step sequence-adoption:0 has a non-canonical declared sequence',
+		});
+		expect(preflightPgDeclaredAdoption).not.toHaveBeenCalled();
+	});
+
+	it('refuses an undispatched adopt-intent before completing an empty step', async () => {
+		const validated = validateNormalizedManagedStepManifest([
+			dataDestructiveStep,
+		]);
+		if (!validated.ok) throw new Error(validated.detail);
+		const malformedManifest: ValidatedManagedStepManifest = Object.assign(
+			Object.create(null),
+			{
+				steps: [
+					{
+						...dataDestructiveStep,
+						claimKind: 'adopt-intent' as const,
+						classification: 'non-destructive' as const,
+						statementBundle: { statements: [] },
+						requiresVacancy: false,
+						replayPolicy: 'recorded' as const,
+					},
+				],
+			},
+		);
+
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+					connect: vi.fn(),
+				} as never,
+				run: {} as never,
+				manifest: malformedManifest,
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({
+			outcome: 'execution-failed',
+			detail: 'adoption step generator:0 was not dispatched as an adoption',
+		});
+	});
+
+	it('refuses sequence adoption when its claim-time shape check changes', async () => {
+		preflightPgDeclaredAdoption.mockImplementation(async (input) => {
+			await input.shapeMatches(input.executor);
+			return { outcome: 'ready' };
+		});
+		executePgDeclaredAdoption.mockImplementation(async (input) => ({
+			outcome: (await input.shapeMatches(input.executor))
+				? 'completed'
+				: 'adoption-refused',
+			detail: 'live shape mismatch',
+		}));
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			connect: vi.fn(),
+		};
+		const verifier = vi.fn(async () => verifier.mock.calls.length === 1);
+		await expect(
+			executeGeneratorPlan({
+				pool: executor as never,
+				run: {} as never,
+				plan: {
+					steps: [declaredSequenceAdoptionStep('sequence-adoption:0', 0)],
+				},
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: verifier,
+			}),
+		).resolves.toEqual({
+			outcome: 'adoption-refused',
+			detail: 'live shape mismatch',
+		});
+		expect(verifier).toHaveBeenCalledTimes(2);
 	});
 
 	it('uses the supplied verifier on the pinned executor before and during adoption', async () => {

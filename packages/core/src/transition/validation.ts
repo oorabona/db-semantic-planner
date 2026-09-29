@@ -15,6 +15,7 @@ import type {
 	ProofClaim,
 	ProvenPlanShape,
 	ResourceAddress,
+	SequenceIR,
 	TableIR,
 	TableReaddressAddress,
 	TransitionFragment,
@@ -241,6 +242,11 @@ function lifecycle(value: unknown, detail: string): ManagedStepLifecycle {
 			kind: 'adoption',
 			shape: canonicalJson(source.shape, detail) as unknown as TableIR,
 		};
+	if (source.kind === 'sequence-adoption')
+		return {
+			kind: 'sequence-adoption',
+			shape: sequenceShape(source.shape, detail),
+		};
 	if (source.kind === 'adoption-refused') return { kind: 'adoption-refused' };
 	if (source.kind === 'readdress') {
 		const declaration = record(source.declaration, detail);
@@ -253,6 +259,40 @@ function lifecycle(value: unknown, detail: string): ManagedStepLifecycle {
 		};
 	}
 	return parseError(detail);
+}
+
+function sequenceShape(value: unknown, detail: string): SequenceIR {
+	const source = record(value, detail);
+	const sequenceInteger = (item: unknown): number | string => {
+		if (typeof item === 'string') return item;
+		if (typeof item === 'number' && Number.isFinite(item)) return item;
+		return parseError(detail);
+	};
+	const sequenceBoolean = (item: unknown): boolean => {
+		if (typeof item === 'boolean') return item;
+		return parseError(detail);
+	};
+	return {
+		name: nonEmptyString(source.name, detail),
+		...(source.startWith === undefined
+			? {}
+			: { startWith: sequenceInteger(source.startWith) }),
+		...(source.incrementBy === undefined
+			? {}
+			: { incrementBy: sequenceInteger(source.incrementBy) }),
+		...(source.minValue === undefined
+			? {}
+			: { minValue: sequenceInteger(source.minValue) }),
+		...(source.maxValue === undefined
+			? {}
+			: { maxValue: sequenceInteger(source.maxValue) }),
+		...(source.cycle === undefined
+			? {}
+			: { cycle: sequenceBoolean(source.cycle) }),
+		...(source.schema === undefined
+			? {}
+			: { schema: nonEmptyString(source.schema, detail) }),
+	};
 }
 
 function deepFreeze<T>(value: T): T {
@@ -412,6 +452,15 @@ function validateLifecycleCoupling(
 	step: NormalizedManagedStep,
 ): string | undefined {
 	const lifecycle = step.lifecycle;
+	if (
+		step.selection?.kind === 'adoption' &&
+		(!lifecycle ||
+			(step.address?.kind === 'table' && lifecycle.kind !== 'adoption') ||
+			(step.address?.kind === 'sequence' &&
+				lifecycle.kind !== 'sequence-adoption') ||
+			(step.address?.kind !== 'table' && step.address?.kind !== 'sequence'))
+	)
+		return `adoption step ${step.stepKey} has invalid lifecycle coupling`;
 	if (step.selection?.kind === 'replacement') {
 		if (lifecycle)
 			return `replacement step ${step.stepKey} has invalid lifecycle coupling`;
@@ -446,11 +495,31 @@ function validateLifecycleCoupling(
 			step.requiresVacancy ||
 			step.selection?.kind !== 'adoption' ||
 			!step.address ||
+			step.address.kind !== 'table' ||
 			!step.expectedDeclaration ||
 			!step.expectedCatalogueIdentity ||
 			step.statementBundle.statements.length !== 0
 		)
 			return `adoption step ${step.stepKey} has invalid lifecycle coupling`;
+		return undefined;
+	}
+	if (lifecycle.kind === 'sequence-adoption') {
+		if (
+			step.claimKind !== 'adopt-intent' ||
+			step.classification !== 'non-destructive' ||
+			step.requiresVacancy ||
+			step.selection?.kind !== 'adoption' ||
+			!step.address ||
+			step.address.kind !== 'sequence' ||
+			step.selection.selector !== `sequence:${step.address.name}` ||
+			lifecycle.shape.name !== step.address.name ||
+			(lifecycle.shape.schema !== undefined &&
+				lifecycle.shape.schema !== step.address.schema) ||
+			!step.expectedDeclaration ||
+			!step.expectedCatalogueIdentity ||
+			step.statementBundle.statements.length !== 0
+		)
+			return `sequence adoption step ${step.stepKey} has invalid lifecycle coupling`;
 		return undefined;
 	}
 	if (lifecycle.kind === 'readdress') {

@@ -308,6 +308,8 @@ export interface ForeignKeyIR {
 export interface SequenceIR {
 	/** Sequence name */
 	readonly name: string;
+	/** Explicitly bring this existing standalone sequence under managed state. Adoption is never inferred. */
+	readonly adopt?: true;
 	/** Start value */
 	readonly startWith?: number | string;
 	/** Increment step */

@@ -172,6 +172,130 @@ describe('validated managed-step manifests', () => {
 		if (!result.ok) expect(result.detail).toContain(kind);
 	});
 
+	it('accepts only the coupled sequence adoption lifecycle', () => {
+		const sequenceAddress = {
+			...root,
+			kind: 'sequence' as const,
+			name: 'union_group_seq',
+		};
+		const accepted = addressedStep({
+			address: sequenceAddress,
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'sequence:union_group_seq' },
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'union_group_seq' },
+			},
+		});
+		expect(validateNormalizedManagedStepManifest([accepted]).ok).toBe(true);
+		const schemaBound = addressedStep({
+			...accepted,
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'union_group_seq', schema: 'public' },
+			},
+		});
+		expect(validateNormalizedManagedStepManifest([schemaBound]).ok).toBe(true);
+
+		const rejected = addressedStep({
+			...accepted,
+			selection: { kind: 'adoption', selector: 'table:union_group_seq' },
+		});
+		expect(validateNormalizedManagedStepManifest([rejected])).toMatchObject({
+			ok: false,
+		});
+		const schemaMismatch = addressedStep({
+			...accepted,
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'union_group_seq', schema: 'tenant' },
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([schemaMismatch]),
+		).toMatchObject({ ok: false });
+	});
+
+	it('refuses incomplete and address-mismatched adoption-selected material', () => {
+		const missingLifecycle = addressedStep({
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'table:orders' },
+		});
+		expect(
+			validateNormalizedManagedStepManifest([missingLifecycle]),
+		).toMatchObject({ ok: false });
+		const adoptionSelectionWithoutLifecycle = addressedStep({
+			claimKind: 'intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'table:orders' },
+		});
+		expect(
+			validateNormalizedManagedStepManifest([
+				adoptionSelectionWithoutLifecycle,
+			]),
+		).toMatchObject({ ok: false });
+
+		const lifecycleLessAdoptIntent = addressedStep({
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [{ ordinal: 0, sql: 'SELECT 1' }] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+		});
+		expect(Reflect.deleteProperty(lifecycleLessAdoptIntent, 'selection')).toBe(
+			true,
+		);
+		expect(
+			validateNormalizedManagedStepManifest([lifecycleLessAdoptIntent]),
+		).toMatchObject({ ok: true });
+
+		const sequenceAddress = { ...root, kind: 'sequence' as const };
+		const tableLifecycleOnSequence = addressedStep({
+			address: sequenceAddress,
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'sequence:orders' },
+			lifecycle: {
+				kind: 'adoption',
+				shape: { name: 'orders' } as never,
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([tableLifecycleOnSequence]),
+		).toMatchObject({ ok: false });
+
+		const shapeWithDifferentName = addressedStep({
+			address: sequenceAddress,
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'sequence:orders' },
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'other_orders' },
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([shapeWithDifferentName]),
+		).toMatchObject({ ok: false });
+	});
+
 	it('P01: validates dependency order through the first-pass key map', () => {
 		const first = step({
 			stepKey: 'first',

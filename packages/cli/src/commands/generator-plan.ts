@@ -467,6 +467,12 @@ export async function runGeneratorPlan(input: {
 	readonly dryRun?: boolean;
 }): Promise<PlanResult> {
 	const loaded = await loadSchema(input.schemaFile);
+	for (const sequence of loaded.model.sequences?.values() ?? []) {
+		if (sequence.adopt === true)
+			throw new Error(
+				`generator planning refuses sequence adoption for ${sequence.name}: sequence adoption is available through convergePg / dbsp migrate`,
+			);
+	}
 	const dbCasing = loaded.dbCasing ?? 'preserve';
 	const naming = getNamingPluginForDbCasing(dbCasing);
 	for (const table of loaded.model.tables.values()) {

@@ -14,7 +14,9 @@ export {
 } from './ddl/live-diff.js';
 export {
 	createPgsqlDeclaredAdoptionStep,
+	createPgsqlDeclaredSequenceAdoptionStep,
 	pgsqlDeclaredAdoptionDeclaration,
+	pgsqlDeclaredSequenceAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';
 export { collectReferencedKeyRemovalConflicts } from './ddl/schema-diff.js';
 export {

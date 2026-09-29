@@ -6,6 +6,7 @@ import type {
 	LedgerClaimKind,
 	LedgerPayload,
 	NormalizedManagedStep,
+	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import { canonicalResourceParent } from '@dbsp/types';
@@ -1219,6 +1220,48 @@ export function createPgsqlDeclaredAdoptionStep(input: {
 		expectedDeclaration: pgsqlDeclaredAdoptionDeclaration(input.table),
 		expectedCatalogueIdentity: input.catalogueIdentity,
 		lifecycle: { kind: 'adoption', shape: input.table },
+		replayPolicy: 'recorded',
+	};
+}
+
+export function pgsqlDeclaredSequenceAdoptionDeclaration(
+	sequence: SequenceIR,
+): LedgerPayload {
+	const { adopt: _adopt, ...shape } = sequence;
+	const value = JSON.parse(
+		canonicalJson({ kind: 'sequence', name: shape.name, shape }),
+	) as LedgerPayload['value'];
+	return { value, digest: canonicalJsonDigest(value) };
+}
+
+/** Creates the token-gated adoption claim for a physical standalone sequence. */
+export function createPgsqlDeclaredSequenceAdoptionStep(input: {
+	readonly address: Address;
+	readonly sequence: SequenceIR;
+	readonly stepKey: string;
+	readonly order: number;
+	readonly catalogueIdentity: CatalogueIdentity;
+}): NormalizedManagedStep {
+	const { adopt: _adopt, ...shape } = input.sequence;
+	if (shape.schema !== undefined && shape.schema !== input.address.schema)
+		throw new Error(
+			`sequence adoption shape schema ${shape.schema} does not match address schema ${input.address.schema ?? '<absent>'}`,
+		);
+	return {
+		stepKey: input.stepKey,
+		order: input.order,
+		segmentId: `generator-segment-${input.order}`,
+		dependencyOrder: [],
+		address: input.address,
+		claimKind: 'adopt-intent',
+		plannedClaimKeys: [`${input.stepKey}:root`],
+		statementBundle: { statements: [] },
+		classification: 'non-destructive',
+		requiresVacancy: false,
+		selection: { kind: 'adoption', selector: `sequence:${shape.name}` },
+		expectedDeclaration: pgsqlDeclaredSequenceAdoptionDeclaration(shape),
+		expectedCatalogueIdentity: input.catalogueIdentity,
+		lifecycle: { kind: 'sequence-adoption', shape },
 		replayPolicy: 'recorded',
 	};
 }
