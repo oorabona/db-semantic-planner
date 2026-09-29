@@ -242,7 +242,10 @@ export type SchemaConstraints = Record<string, SchemaTableOptions>;
 export interface SchemaExtras {
 	/** PostgreSQL extensions to ensure (CREATE EXTENSION IF NOT EXISTS "name") */
 	extensions?: string[];
-	/** Sequences to create (CREATE SEQUENCE). Key = sequence name */
+	/**
+	 * Sequences to create (CREATE SEQUENCE), or, with `adopt: true`, an existing standalone
+	 * sequence for `convergePg` to take into management. Key = sequence name
+	 */
 	sequences?: Record<
 		string,
 		{

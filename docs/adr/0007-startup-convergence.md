@@ -97,6 +97,14 @@ adopted in its own transaction, so a table that changes while its adoption runs 
 earlier tables of the same call were adopted; the next call skips those. The caller sets `adopt` for
 the one pass over an existing install and omits it afterwards.
 
+A sequence the model marks `adopt: true` is adopted the same way when it is standalone (no
+`OWNED BY`, serial or identity link), `bigint` with cache 1, in the target schema, and its start,
+increment, minimum, maximum and cycle match the declaration (#831). Its current value is never read.
+The match is observed on the claimed session before commit; PostgreSQL offers no lock for a sequence,
+so an `ALTER SEQUENCE` in between is not excluded. Type, cache and ownership are admission
+constraints, not managed drift. Only `convergePg` adopts sequences: a generator plan (`dbsp plan`,
+`dbsp apply`) refuses a sequence marked `adopt: true`.
+
 ## What ADR 0006 no longer says
 
 **"Managed DDL has one apply path."** Managed DDL has one executor and outcome protocol, reached
@@ -105,8 +113,8 @@ and adoptions above.
 
 **Adoption's grant "belongs in the reviewed plan."** Through `convergePg`, the grant is the caller's
 `adopt: true` declaration, compared and re-verified as above; no plan is presented for review.
-`dbsp apply` still presents adoption in the reviewed plan; `dbsp migrate` passes the schema file's
-`adopt: true` to `convergePg` without one.
+`dbsp apply` still presents table adoption in the reviewed plan and refuses sequence adoption;
+`dbsp migrate` passes the schema file's `adopt: true` to `convergePg` without one.
 
 **"`migrate` is deleted with `push`."** The file-based `migrate apply` and `migrate rollback` stay
 deleted with their migration files. The name returns as `dbsp migrate`, the command-line entry point
