@@ -121,6 +121,8 @@ export interface PgConvergeInitializationPreflightOptions {
 	readonly pristineRelationNames?: readonly string[];
 }
 
+type LineageMismatchPolicy = 'archive' | 'refuse';
+
 const LEDGER_TABLES = DBSP_LEDGER_TABLES;
 const TRANSITION_JOURNAL_TABLES = [
 	DBSP_TRANSITION_RUN_TABLE,
@@ -738,6 +740,7 @@ async function processScope(
 		client: PgReinitializePreflightClient,
 		home: LedgerHome,
 	) => Promise<void>,
+	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
 ): Promise<ReinitializePreflightScopeReport> {
 	const client = await pool.connect();
 	let begun = false;
@@ -847,6 +850,17 @@ async function processScope(
 					marker: current.marker,
 				};
 			}
+			if (lineageMismatchPolicy === 'refuse') {
+				await client.query('ROLLBACK');
+				begun = false;
+				return refusal(
+					current.home,
+					current.marker,
+					'reinitialize-preflight-lineage',
+					`reinitialize-preflight refuses ledger lineage mismatch for ${schemaFor(current.home)}`,
+					'identity',
+				);
+			}
 			// A lineage mismatch remains a current ledger only after the same
 			// physical-shape and ownership admission checks as the unchanged path.
 			// Otherwise a counterfeit would be renamed into the archive.
@@ -953,6 +967,7 @@ async function runPgReinitializePreflightInternal(
 		client: PgReinitializePreflightClient,
 		home: LedgerHome,
 	) => Promise<void>,
+	lineageMismatchPolicy: LineageMismatchPolicy = 'archive',
 ): Promise<ReinitializePreflightReport> {
 	const homes = homesFor(options.schemas);
 	const inspectionClient = await options.pool.connect();
@@ -1038,6 +1053,7 @@ async function runPgReinitializePreflightInternal(
 				inspection,
 				options.observer,
 				beforeFirstWrite,
+				lineageMismatchPolicy,
 			),
 	);
 	if (scopes.some((scope) => scope.outcome === 'failed'))
@@ -1097,6 +1113,7 @@ export function runPgConvergeInitializationPreflight(
 						home,
 						options.pristineRelationNames ?? [],
 					),
+		'refuse',
 	);
 }
 

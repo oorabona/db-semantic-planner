@@ -1350,12 +1350,6 @@ export async function convergePg(
 			const adoptionChanges = diff.changes.filter(
 				(change) => change.table === physicalName,
 			);
-			if (adoptionChanges.length > 0)
-				throw refusal(
-					'adoption-refused',
-					adoptionChanges,
-					`declared adoption for ${physicalName} refuses live shape mismatch`,
-				);
 			const address = {
 				scope: 'schema' as const,
 				engine: 'postgresql',
@@ -1371,6 +1365,12 @@ export async function convergePg(
 					'adoption-refused',
 					[],
 					`declared adoption for ${physicalName} refuses ledger admission`,
+				);
+			if (adoptionChanges.length > 0)
+				throw refusal(
+					'adoption-refused',
+					adoptionChanges,
+					`declared adoption for ${physicalName} refuses live shape mismatch`,
 				);
 			adoptionSteps.push(
 				createPgsqlDeclaredAdoptionStep({

@@ -2136,6 +2136,105 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('converges nullable columns on managed tables under standing and explicit adoption', async () => {
+		const initializedSchema = `converge_adopt_evolve_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const adopted = 'adopted_items';
+		const created = 'created_items';
+		const evolve = (name: string, column: string): TableIR => {
+			const base = legacyTable(name);
+			return {
+				...base,
+				columns: [
+					...base.columns,
+					{ name: column, type: 'string', nullable: true },
+				],
+			};
+		};
+		await createSchema(initializedSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${initializedSchema}"."${adopted}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL); CREATE INDEX "${adopted}_code_index" ON "${initializedSchema}"."${adopted}" ("code")`,
+			);
+			const adoptedModel = model([legacyTable(adopted)]);
+			await expect(
+				convergePg(pool, adoptedModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['adopt_table'] });
+			await expect(
+				convergePg(pool, adoptedModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+
+			const adoptedEvolved = model([evolve(adopted, 'nickname')]);
+			const standingCheck = await convergePg(pool, adoptedEvolved, {
+				schema: initializedSchema,
+				initialize: 'adopt-existing',
+				mode: 'check',
+			});
+			expect(standingCheck).toMatchObject({
+				kind: 'would-apply',
+				steps: [{ kind: 'add_column' }],
+			});
+			if (standingCheck.kind === 'would-apply')
+				expect(standingCheck.steps.map(({ kind }) => kind)).toEqual([
+					'add_column',
+				]);
+			await expect(
+				convergePg(pool, adoptedEvolved, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+			await expect(
+				convergePg(pool, adoptedEvolved, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+
+			const createdModel = model([legacyTable(created)]);
+			await expect(
+				convergePg(pool, createdModel, {
+					schema: initializedSchema,
+					initialize: 'adopt-existing',
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			const createdEvolved = model([evolve(created, 'description')]);
+			const explicitCheck = await convergePg(pool, createdEvolved, {
+				schema: initializedSchema,
+				mode: 'check',
+				initialize: 'never',
+			});
+			expect(explicitCheck).toMatchObject({
+				kind: 'would-apply',
+				steps: [{ kind: 'add_column' }],
+			});
+			if (explicitCheck.kind === 'would-apply')
+				expect(explicitCheck.steps.map(({ kind }) => kind)).toEqual([
+					'add_column',
+				]);
+			await expect(
+				convergePg(pool, createdEvolved, {
+					schema: initializedSchema,
+					initialize: 'never',
+				}),
+			).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+			await expect(
+				convergePg(pool, createdEvolved, {
+					schema: initializedSchema,
+					initialize: 'never',
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(initializedSchema);
+		}
+	});
+
 	it('keeps normal unmanaged-object behavior and refuses a non-pristine schema', async () => {
 		const initializedSchema = `converge_guard_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const pool = await getTestPool();

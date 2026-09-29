@@ -29,8 +29,10 @@ planning; plan those with
    - `'adopt-existing'`: create them whatever the schema holds.
 
    The role that converges then owns the ledger, so it needs `CREATE` on the database for
-   `dbsp_meta`, and every later call must run as that role. `initialize` never touches a ledger that
-   exists: an incompatible one is refused `incompatible-ledger`. When several instances start
+   `dbsp_meta`, and every later call must run as that role. `initialize` never archives or replaces a
+   ledger that exists: an incompatible schema ledger is refused `incompatible-ledger`, and a
+   `dbsp_meta` ledger whose identity no longer matches the database (a restored or cloned database)
+   is refused `initialization-refused`; reinitialize those explicitly with `runPgReinitializePreflight`. When several instances start
    together, one converges and the others get `busy`: retry `busy` after a delay, or converge from a
    single instance. To prepare the ledger with a different, privileged role instead, run
    `runPgReinitializePreflight` once with that role and keep `initialize: 'never'`.
@@ -190,6 +192,8 @@ them as `unmanaged-object`. Two ways take them into management:
   `adoption-refused` before anything is written.
 - Each table is adopted in its own transaction. A table that changes while its adoption runs is
   refused, and tables adopted earlier in the same call stay adopted; the next call skips them.
+- A table that is already managed is never adopted again, with `adopt: true` or
+  `adopt-existing`: its model changes converge like those of any managed table.
 - Without `adopt-existing`, `adopt: true` on a table that does not exist is refused, so do not set it
   on a fresh install.
 - An install that lags the model, for example a missing column, must be brought to the model before

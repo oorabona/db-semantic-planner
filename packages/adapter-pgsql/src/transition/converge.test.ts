@@ -909,6 +909,14 @@ describe('convergePg refusal boundary', () => {
 	});
 
 	it('refuses a declared adoption mismatch before invoking the executor', async () => {
+		mocks.identity.mockResolvedValue({
+			catalogueIdentity: {
+				engine: 'postgresql',
+				format: 1,
+				value: { oid: '1' },
+			},
+		});
+		mocks.chain.mockResolvedValue({ events: [] });
 		mocks.compare.mockResolvedValue({
 			changes: [
 				{
@@ -935,6 +943,44 @@ describe('convergePg refusal boundary', () => {
 			changes: [expect.objectContaining({ kind: 'add_column' })],
 		});
 		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('converges a managed declared table change instead of re-adopting it', async () => {
+		const table = {
+			name: 'managed_items',
+			adopt: true as const,
+			columns: [],
+			foreignKeys: [],
+			indexes: [],
+		};
+		mockManagedObjects();
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'add_column',
+					table: table.name,
+					column: 'nickname',
+					destructive: false,
+					details: 'Add column nickname',
+					meta: {
+						column: {
+							name: 'nickname',
+							type: 'string',
+							nullable: true,
+						},
+					},
+				},
+			],
+		});
+		mocks.createStep.mockImplementation(
+			({ change: input }: { change: Record<string, unknown> }) =>
+				stepFor(input),
+		);
+
+		await expect(
+			convergePg(poolFor(), modelWithTables([table])),
+		).resolves.toEqual({ kind: 'applied', applied: ['add_column'] });
+		expect(mocks.execute).toHaveBeenCalledTimes(1);
 	});
 
 	it('skips declared sequence adoption checks after matching managed admission', async () => {
