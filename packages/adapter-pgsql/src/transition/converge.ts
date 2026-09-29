@@ -240,7 +240,34 @@ export type PgConvergeResult =
 	  }
 	| { readonly kind: 'transport-ambiguous'; readonly detail: string };
 
-export interface ConvergePgOptions {
+export type PgConvergePlannedStep =
+	| {
+			readonly stepKey: string;
+			readonly order: number;
+			readonly dependencyOrder: readonly string[];
+			readonly address: NonNullable<NormalizedManagedStep['address']>;
+			readonly kind: SchemaChange['kind'];
+			readonly table: string;
+			readonly column?: string;
+			readonly details: string;
+	  }
+	| {
+			readonly stepKey: string;
+			readonly order: number;
+			readonly dependencyOrder: readonly string[];
+			readonly address: NonNullable<NormalizedManagedStep['address']>;
+			readonly kind: 'adopt_table' | 'adopt_sequence';
+	  };
+
+export type PgConvergeCheckResult =
+	| { readonly kind: 'no-drift' }
+	| {
+			readonly kind: 'would-apply';
+			readonly planDigest: string;
+			readonly steps: readonly PgConvergePlannedStep[];
+	  };
+
+interface ConvergePgBaseOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
 	/**
@@ -258,6 +285,14 @@ export interface ConvergePgOptions {
 		readonly table: string;
 		readonly name: string;
 	}[];
+}
+
+export interface ConvergePgOptions extends ConvergePgBaseOptions {
+	readonly mode?: 'apply';
+}
+
+export interface ConvergePgCheckOptions extends ConvergePgBaseOptions {
+	readonly mode: 'check';
 }
 
 type Queryable = Pick<PoolClient, 'query'>;
@@ -322,7 +357,7 @@ function externalIndexKey(table: string, name: string): string {
 /** Validate logical option entries and produce physical keys for diff matching. */
 function validateExternalIndexes(
 	model: ModelIR,
-	options: ConvergePgOptions,
+	options: ConvergePgBaseOptions,
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): ReadonlySet<string> {
 	const supplied = options.externalIndexes;
@@ -973,6 +1008,40 @@ function uncoveredFreshFkColumns(
 	});
 }
 
+function projectCheckedPlan(
+	steps: readonly NormalizedManagedStep[],
+	changesByStepKey: ReadonlyMap<string, SchemaChange>,
+): readonly PgConvergePlannedStep[] {
+	return steps.map((step) => {
+		if (step.address === undefined)
+			throw new Error(
+				`converge checked manifest step ${step.stepKey} has no root address`,
+			);
+		const common = {
+			stepKey: step.stepKey,
+			order: step.order,
+			dependencyOrder: step.dependencyOrder,
+			address: step.address,
+		};
+		const change = changesByStepKey.get(step.stepKey);
+		if (change)
+			return {
+				...common,
+				kind: change.kind,
+				table: change.table,
+				...(change.column === undefined ? {} : { column: change.column }),
+				details: change.details,
+			};
+		if (step.lifecycle?.kind === 'adoption')
+			return { ...common, kind: 'adopt_table' };
+		if (step.lifecycle?.kind === 'sequence-adoption')
+			return { ...common, kind: 'adopt_sequence' };
+		throw new Error(
+			`converge checked manifest step ${step.stepKey} has no paired change or adoption lifecycle`,
+		);
+	});
+}
+
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
  * sequences, adds nullable columns without defaults and NOT NULL columns with
@@ -1010,14 +1079,32 @@ function uncoveredFreshFkColumns(
  * Tables a run creates and every change on those tables commit together or not
  * at all. A sequence created by the same run commits on its own and can remain
  * after a failure. After a transport-ambiguous outcome, the next call observes
- * whichever state PostgreSQL holds. Converge runs are not journaled.
+ * whichever state PostgreSQL holds. Converge runs are not journaled. Check mode
+ * returns a point-in-time plan without executing it; it is not a guarantee that
+ * a later apply will succeed, because other sessions can change the database
+ * and execution-time ledger physical-shape integrity, claim-time adoption
+ * re-verification, vacancy, and lock-timeout checks are not reproduced.
  */
+export function convergePg(
+	pool: Pool,
+	model: ModelIR,
+	options?: ConvergePgOptions,
+): Promise<PgConvergeResult>;
+export function convergePg(
+	pool: Pool,
+	model: ModelIR,
+	options: ConvergePgCheckOptions,
+): Promise<PgConvergeCheckResult>;
 export async function convergePg(
 	pool: Pool,
 	model: ModelIR,
-	options: ConvergePgOptions = {},
-): Promise<PgConvergeResult> {
+	options: ConvergePgOptions | ConvergePgCheckOptions = {},
+): Promise<PgConvergeResult | PgConvergeCheckResult> {
+	const mode: unknown = options.mode;
+	if (mode !== undefined && mode !== 'apply' && mode !== 'check')
+		throw invalidOptions('converge mode must be apply or check');
 	validateDeclarationModel(model);
+	const check = mode === 'check';
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
 	const naming = getNamingPluginForDbCasing(casing);
@@ -1286,7 +1373,7 @@ export async function convergePg(
 			),
 		);
 		if (diff.changes.length === 0 && adoptionSteps.length === 0)
-			return { kind: 'no-drift', applied: [] };
+			return check ? { kind: 'no-drift' } : { kind: 'no-drift', applied: [] };
 		const phaseOrderedChanges = [...diff.changes].sort(
 			(left, right) => getPhase(left.kind) - getPhase(right.kind),
 		);
@@ -1431,6 +1518,15 @@ export async function convergePg(
 			schema,
 			steps: manifest.manifest.steps,
 		});
+		if (check)
+			return {
+				kind: 'would-apply',
+				planDigest,
+				steps: projectCheckedPlan(
+					manifest.manifest.steps,
+					new Map(assembled.map(({ change, step }) => [step.stepKey, change])),
+				),
+			};
 		const run: TransitionRunMetadata = {
 			runId: `dbsp-converge-${randomUUID()}`,
 			planDigest,

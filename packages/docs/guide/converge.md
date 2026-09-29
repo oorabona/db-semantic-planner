@@ -130,6 +130,25 @@ same call commits on its own and can remain after a failure.
 | `partially-applied` | The steps in `completedStepKeys` committed; those in `notStartedStepKeys` did not commit (a step whose transaction rolled back is listed there too). `detail` says why. |
 | `transport-ambiguous` | The connection was lost while a COMMIT was in flight. The next call observes whichever state PostgreSQL holds. |
 
+## Checking without applying
+
+`convergePg(pool, model, { schema, mode: 'check' })` takes the ledger lock, runs the checks and
+planning refusals an apply runs before it starts executing, and returns without executing:
+
+| `result.kind` | Meaning |
+|---|---|
+| `no-drift` | An apply would find nothing to do. |
+| `would-apply` | `steps` lists, in execution order, the steps an apply would run: each has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. `planDigest` identifies that plan. |
+
+Before executing, a check refuses as an apply would (`busy`, `ledger-absent`, `database-read-only`,
+`unsupported-change`, …). It commits nothing: the comparison's scratch DDL runs in a transaction that
+is rolled back, which is why a read-only target is refused, and the ledger is unchanged. Its answer
+holds for the moment it was taken: another session can change the database before your next apply,
+and checks the executor makes only while executing, such as re-verifying an adopted table when it
+claims it, can still refuse that apply. The options type is `ConvergePgCheckOptions` and the result type `PgConvergeCheckResult`;
+[ADR 0008](https://github.com/oorabona/db-semantic-planner/blob/main/docs/adr/0008-convergence-program.md)
+records the decision.
+
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
@@ -140,7 +159,7 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `ledger-absent` | The schema has no ledger: run `runPgReinitializePreflight`. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
 | `unsupported-server` | PostgreSQL is older than 15. |

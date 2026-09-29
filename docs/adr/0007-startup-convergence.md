@@ -32,7 +32,8 @@ database.
 the file's `dbCasing` export and each `--external-index <model-table:index>`, then reports the result or
 the refusal as a named outcome with its own exit code. It asks for no confirmation and has no dry run:
 `convergePg` plans and executes in one call, and the reviewed path stays `dbsp plan` then
-`dbsp apply`. Exit codes that mean the same as one of `dbsp apply`'s reuse its number.
+`dbsp apply`. Exit codes that mean the same as one of `dbsp apply`'s reuse its number. ADR 0008 adds
+a check mode to `convergePg` that plans without executing; `dbsp migrate` does not expose it.
 
 ### It admits only startup-safe additions
 

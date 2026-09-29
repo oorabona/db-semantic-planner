@@ -1,0 +1,63 @@
+# ADR 0008: The Convergence Program
+
+## Status
+
+Accepted (2026-09-29). It records the decision taken on #837. Only the check mode is shipped; the
+program signature below is the accepted target, and "Deliveries" gives the state of each part.
+
+## Context
+
+ADR 0007 gives an application one call, `convergePg`, that brings its declared model to the database at
+start. An application still runs its own work around that call: one-time data backfills, a deliberate
+drop of an obsolete table, repairs of triggers and CHECK constraints, and a way to tell whether the
+database is current without changing it. It therefore keeps its own run-once registry and advisory
+locks beside dbsp's ledger and ledger lock, so two registries and two lock systems govern one database,
+and each dbsp upgrade can break the pairing.
+
+## Decision
+
+dbsp owns one convergence program: `convergePg(pool, program, { mode, initialize })`, where the program
+holds the model, the schema, `dbCasing`, the external indexes and the application's declared steps. dbsp
+computes every fingerprint and records every step in its ledger under its lock.
+
+### `check` plans without committing
+
+`mode: 'check'` runs the path `apply` runs before executing (the ledger lock, the version and ledger checks,
+`database-read-only` before the comparison, every planning refusal, manifest validation) and returns
+`{ kind: 'no-drift' }` or `{ kind: 'would-apply', planDigest, steps }` instead of executing. It writes
+nothing durable: the comparison's expression canonicalisation runs in a transaction that is always
+rolled back. A check is a point-in-time answer. Another session can change the database before a later
+apply, and the checks the executor makes at execution time (ledger physical shape, adoption
+re-verification at claim time, lock timeouts) do not run.
+
+### Application steps are transactional and recorded in the ledger
+
+- `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
+- `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only and runs on
+  every check; `apply` runs in apply mode when inspection reports the database unhealthy.
+
+### Initialisation and adoption are a library operation
+
+`initialize: 'never' | 'pristine' | 'adopt-existing'` replaces the CLI preflight for an application,
+without its file output.
+
+### Not built
+
+A converged-state marker or `isConverged` check, SQL migration files, non-transactional steps, and
+retries. Extensions stay in the application's privileged bootstrap, since creating one needs a role an
+application should not run as.
+
+## Deliveries
+
+1. `check` mode on `convergePg` (`ConvergePgCheckOptions`, `PgConvergeCheckResult`): shipped.
+2. Initialisation and adoption as a library operation: not shipped.
+3. `once` and `assert` steps: not shipped.
+4. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
+   and check mode is selected with `ConvergePgCheckOptions`.
+
+## Consequences
+
+- `PgConvergeResult` and `dbsp migrate` are unchanged by the check mode: it has its own options and
+  result types, so the command's exhaustive handling of results still compiles.
+- The check cost is a full planning pass. Measured on one application's install, a `no-drift` converge
+  takes 570 ms at the median.

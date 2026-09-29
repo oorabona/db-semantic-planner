@@ -137,6 +137,23 @@ function legacyTable(name: string, adopt = true): TableIR {
 	};
 }
 
+async function ledgerRowCounts(pool: pg.Pool): Promise<Map<string, number>> {
+	const tables = await pool.query<{ readonly table_name: string }>(
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = $1 AND table_name LIKE 'dbsp_ledger_%' ORDER BY table_name",
+		[schema],
+	);
+	const counts = await Promise.all(
+		tables.rows.map(async ({ table_name: tableName }) => {
+			const quotedTable = `"${tableName.replaceAll('"', '""')}"`;
+			const result = await pool.query<{ readonly count: string }>(
+				`SELECT count(*)::text AS count FROM "${schema}".${quotedTable}`,
+			);
+			return [tableName, Number(result.rows[0]?.count)] as const;
+		}),
+	);
+	return new Map(counts);
+}
+
 function adoptedProjectTables(): readonly TableIR[] {
 	return [
 		{
@@ -289,6 +306,83 @@ describe('convergePg', () => {
 			kind: 'no-drift',
 			applied: [],
 		});
+	});
+
+	it('checks an adoption and table plan without writing before applying it', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const adoptedName = `check_adopted_${suffix}`;
+		const createdName = `check_created_${suffix}`;
+		const desired = model([
+			legacyTable(adoptedName),
+			{
+				name: createdName,
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'code', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [{ name: `${createdName}_code_index`, columns: ['code'] }],
+			},
+		]);
+		await pool.query(
+			`CREATE TABLE "${schema}"."${adoptedName}" ("id" integer NOT NULL PRIMARY KEY, "code" integer NOT NULL)`,
+		);
+		await pool.query(
+			`CREATE INDEX "${adoptedName}_code_index" ON "${schema}"."${adoptedName}" ("code")`,
+		);
+		const relationCount = async () =>
+			Number(
+				(
+					await pool.query(
+						'SELECT count(*)::text AS count FROM pg_catalog.pg_class relation JOIN pg_catalog.pg_namespace namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1',
+						[schema],
+					)
+				).rows[0]?.count,
+			);
+		const relationsBefore = await relationCount();
+		const ledgerBefore = await ledgerRowCounts(pool);
+
+		const checked = await convergePg(pool, desired, { schema, mode: 'check' });
+		expect(checked.kind).toBe('would-apply');
+		if (checked.kind !== 'would-apply') return;
+		expect(checked.steps.map(({ kind }) => kind)).toEqual([
+			'adopt_table',
+			'create_table',
+			'create_index',
+		]);
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.${createdName}`,
+			]),
+		).resolves.toMatchObject({ rows: [{ relation: null }] });
+		expect(await relationCount()).toBe(relationsBefore);
+		expect(await ledgerRowCounts(pool)).toEqual(ledgerBefore);
+
+		const applied = await convergePg(pool, desired, { schema });
+		expect(applied).toMatchObject({
+			kind: 'applied',
+			applied: checked.steps.map(({ kind }) => kind),
+		});
+		await expect(
+			convergePg(pool, desired, { schema, mode: 'check' }),
+		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('refuses check mode on a dedicated default-read-only session', async () => {
+		const readOnlyPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			max: 1,
+			options: '-c default_transaction_read_only=on',
+		});
+		try {
+			await expect(
+				convergePg(readOnlyPool, model([]), { schema, mode: 'check' }),
+			).rejects.toMatchObject({ refusal: 'database-read-only' });
+		} finally {
+			await readOnlyPool.end();
+		}
 	});
 
 	it('adopts an advanced standalone sequence without changing its OID or value', async () => {
