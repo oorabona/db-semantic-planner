@@ -19,6 +19,7 @@ import {
 	PgCommitAcknowledgementAmbiguousError,
 	readPgOutcomeSessionCompromise,
 	rollbackPgOutcomeGroup,
+	setPgTransitionLockTimeout,
 } from './outcome-protocol.js';
 
 /** The intentionally narrow query facade passed to application callbacks. */
@@ -252,7 +253,8 @@ const APPLICATION_STEP_TX_REVOKED_MESSAGE =
 function skipSqlWhitespaceAndComments(text: string, offset = 0): number {
 	let index = offset;
 	while (true) {
-		while (index < text.length && /\s/u.test(text[index]!)) index += 1;
+		while (index < text.length && /[ \t\n\r\f\v]/u.test(text[index]!))
+			index += 1;
 		if (text.startsWith('--', index)) {
 			const lineEnd = text.slice(index + 2).search(/[\r\n]/u);
 			index = lineEnd === -1 ? text.length : index + 2 + lineEnd;
@@ -278,7 +280,10 @@ function readSqlKeyword(
 	offset = 0,
 ): { readonly keyword: string; readonly end: number } | undefined {
 	const start = skipSqlWhitespaceAndComments(text, offset);
-	const match = /^[A-Za-z]+/u.exec(text.slice(start));
+	const match =
+		/^[A-Za-z_\u0080-\u{10FFFF}][A-Za-z0-9_$\u0080-\u{10FFFF}]*/u.exec(
+			text.slice(start),
+		);
 	return match === null
 		? undefined
 		: { keyword: match[0].toUpperCase(), end: start + match[0].length };
@@ -517,35 +522,47 @@ async function setPgApplicationStepStatementTimeout(
 	await client.query(`SET LOCAL statement_timeout = '${timeout}ms'`);
 }
 
-async function admitPgApplicationStepDuringPlanning(
+async function admitPgApplicationStepsDuringPlanning(
 	input: {
 		readonly client: PoolClient;
 		readonly database: string;
 		readonly schema: string;
 	},
-	step: PgConvergeApplicationStep,
-) {
+	steps: readonly PgConvergeApplicationStep[],
+): Promise<ReadonlySet<string>> {
 	let begun = false;
 	let completed = false;
+	const pendingOnceIds = new Set<string>();
+	if (steps.length === 0) return pendingOnceIds;
 	try {
-		await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+		await beginPgOutcome(
+			input.client,
+			steps[0]!.lockTimeoutMs,
+			'BEGIN READ ONLY',
+		);
 		begun = true;
-		await setPgApplicationStepStatementTimeout(
-			input.client,
-			step.statementTimeoutMs,
-		);
-		const state = await admission(
-			input.client,
-			input.database,
-			input.schema,
-			step,
-		);
+		for (const [index, step] of steps.entries()) {
+			if (index > 0)
+				await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
+			await setPgApplicationStepStatementTimeout(
+				input.client,
+				step.statementTimeoutMs,
+			);
+			const state = await admission(
+				input.client,
+				input.database,
+				input.schema,
+				step,
+			);
+			if (step.kind === 'once' && !state.complete) pendingOnceIds.add(step.id);
+		}
 		completed = true;
-		return state;
+		return pendingOnceIds;
 	} finally {
 		if (begun) {
 			await rollbackPgOutcomeGroup(input.client);
-			if (completed) assertPgApplicationStepSessionHealthy(input.client, step);
+			if (completed)
+				assertPgApplicationStepSessionHealthy(input.client, steps.at(-1)!);
 		}
 	}
 }
@@ -591,11 +608,10 @@ export async function planPgApplicationSteps(input: {
 	readonly check?: boolean;
 	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly PgPlannedApplicationStep[]> {
-	const pendingOnceIds = new Set<string>();
-	for (const step of input.steps) {
-		const state = await admitPgApplicationStepDuringPlanning(input, step);
-		if (step.kind === 'once' && !state.complete) pendingOnceIds.add(step.id);
-	}
+	const pendingOnceIds = await admitPgApplicationStepsDuringPlanning(
+		input,
+		input.steps,
+	);
 	const planned: PgPlannedApplicationStep[] = [];
 	const deferAssertInspection =
 		input.hasPendingGeneratedWork === true || pendingOnceIds.size > 0;

@@ -190,39 +190,61 @@ describe('converge application steps', () => {
 		expect(() => validatePgConvergeApplicationSteps(steps)).toThrow();
 	});
 
-	it('refuses transaction control through the callback facade', async () => {
-		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
-		const tx = createPgApplicationStepTx({ query } as never);
-		for (const statement of [
-			'BEGIN',
-			'  rollback',
-			'/* x */ COMMIT',
-			'-- x\nROLLBACK',
-			'START TRANSACTION',
-			"PREPARE TRANSACTION 'x'",
-			"PREPARE /* c */ TRANSACTION 'x'",
-			"PREPARE/**/TRANSACTION 'x'",
-			"PREPARE /* outer /* inner */ outer */ TRANSACTION 'x'",
-			"PREPARE -- c\rTRANSACTION 'x'",
-			"PREPARE -- c\r\nTRANSACTION 'x'",
-			'SET TRANSACTION READ ONLY',
-			'SET -- c\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
-			'SET -- c\rTRANSACTION ISOLATION LEVEL SERIALIZABLE',
-			'SET -- c\r\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
-			'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
-		])
+	it.each([
+		'PREPARE transaction_cache AS SELECT 1',
+		'PREPARE transaction1 AS SELECT 1',
+		'PREPARE transactioné AS SELECT 1',
+		'SET transaction_timeout = 1000',
+		'SET LOCAL transaction_timeout = 1000',
+	])(
+		'allows guarded-keyword prefixes that are complete identifiers: %s',
+		async (statement) => {
+			const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+			const tx = createPgApplicationStepTx({ query } as never);
+			await expect(tx.query(statement)).resolves.toEqual({ rows: [] });
+			expect(query).toHaveBeenCalledWith({
+				text: statement,
+				values: [],
+				queryMode: 'extended',
+			});
+		},
+	);
+
+	it.each(['PREPARE q AS SELECT 1', 'SELECT 1 -- c\r', 'DISCARD PLANS'])(
+		'permits ordinary callback SQL: %s',
+		async (statement) => {
+			const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+			const tx = createPgApplicationStepTx({ query } as never);
+			await expect(tx.query(statement)).resolves.toEqual({ rows: [] });
+		},
+	);
+
+	it.each([
+		'BEGIN',
+		'  rollback',
+		'/* x */ COMMIT',
+		'-- x\nROLLBACK',
+		'START TRANSACTION',
+		"PREPARE TRANSACTION 'x'",
+		"PREPARE /* c */ TRANSACTION 'x'",
+		"PREPARE/**/TRANSACTION 'x'",
+		"PREPARE /* outer /* inner */ outer */ TRANSACTION 'x'",
+		"PREPARE -- c\rTRANSACTION 'x'",
+		"PREPARE -- c\r\nTRANSACTION 'x'",
+		'SET TRANSACTION READ ONLY',
+		'SET -- c\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
+		'SET -- c\rTRANSACTION ISOLATION LEVEL SERIALIZABLE',
+		'SET -- c\r\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
+		'SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY',
+	])(
+		'refuses transaction control through the callback facade: %s',
+		async (statement) => {
+			const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+			const tx = createPgApplicationStepTx({ query } as never);
 			await expect(tx.query(statement)).rejects.toThrow('transaction control');
-		expect(query).not.toHaveBeenCalled();
-		await tx.query('PREPARE q AS SELECT 1');
-		await tx.query('SELECT 1 -- c\r');
-		await tx.query('DISCARD PLANS');
-		await tx.query('SELECT 1');
-		expect(query).toHaveBeenLastCalledWith({
-			text: 'SELECT 1',
-			values: [],
-			queryMode: 'extended',
-		});
-	});
+			expect(query).not.toHaveBeenCalled();
+		},
+	);
 
 	it('reads each declaration property once before normalizing it', () => {
 		let idReads = 0;
@@ -457,6 +479,92 @@ describe('converge application steps', () => {
 			],
 			['ROLLBACK'],
 		]);
+	});
+
+	it('uses one admission transaction and one transaction per inspected assert', async () => {
+		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+		await expect(
+			planPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'first-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'second-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([]);
+		expect(
+			query.mock.calls.filter(([statement]) => statement === 'BEGIN READ ONLY'),
+		).toHaveLength(3);
+	});
+
+	it('finishes all admissions before invoking an inspect callback', async () => {
+		const inspect = vi.fn(async () => 'healthy' as const);
+		mocks.chain.mockImplementation(async (ledger, stepAddress) =>
+			stepAddress.name === 'last-check'
+				? {
+						ledger,
+						address: stepAddress,
+						events: [
+							{
+								eventId: 'open-claim',
+								address: stepAddress,
+								eventKind: 'intent',
+								declared: {
+									value: { id: 'last-check' },
+									digest: 'v1',
+								},
+								controller: 'owner',
+								controllerOid: '10',
+							},
+						],
+					}
+				: { ledger, address: stepAddress, events: [] },
+		);
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'first-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect,
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'last-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'recovery-required',
+			stepId: 'last-check',
+		});
+		expect(inspect).not.toHaveBeenCalled();
 	});
 
 	it('defers assert inspection while generated work is pending in check mode', async () => {
