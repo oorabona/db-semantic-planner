@@ -561,6 +561,104 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('does not let the incoming search_path hijack application-step setup', async () => {
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const evilSchema = `s_evil_${suffix}`;
+		const targetSchema = `converge_search_path_${suffix}`;
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			max: 1,
+		});
+		let createdEvilSchema = false;
+		let createdTargetSchema = false;
+		let testFailed = false;
+		let testError: unknown;
+		try {
+			await dedicatedPool.query(`CREATE SCHEMA "${evilSchema}"`);
+			createdEvilSchema = true;
+			await dedicatedPool.query(
+				`CREATE FUNCTION "${evilSchema}".set_config(text, text, boolean) RETURNS text LANGUAGE sql AS $$ SELECT 'hijacked' $$`,
+			);
+			await dedicatedPool.query(
+				`CREATE TABLE "${evilSchema}".calls (query text)`,
+			);
+			await dedicatedPool.query(
+				`CREATE FUNCTION "${evilSchema}".record_call() RETURNS boolean LANGUAGE plpgsql AS $$ BEGIN INSERT INTO "${evilSchema}".calls (query) VALUES (pg_catalog.current_query()); RETURN true; END $$`,
+			);
+			await dedicatedPool.query(
+				`CREATE DOMAIN "${evilSchema}".text AS pg_catalog.text CHECK ("${evilSchema}".record_call())`,
+			);
+			await dedicatedPool.query(
+				`SET search_path = "${evilSchema}", pg_catalog`,
+			);
+			await createSchema(targetSchema);
+			createdTargetSchema = true;
+			await runPreflight([targetSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await expect(
+				convergePg(dedicatedPool, model([]), {
+					schema: targetSchema,
+					steps: [
+						{
+							kind: 'once',
+							id: 'search-path-not-hijacked',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							apply: async (tx: PgApplicationStepTx) => {
+								const currentSchema = await tx.query<{
+									readonly current_schema: string;
+								}>('SELECT current_schema() AS current_schema');
+								expect(currentSchema.rows).toEqual([
+									{ current_schema: targetSchema },
+								]);
+							},
+						},
+					],
+				}),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['application-step:search-path-not-hijacked'],
+			});
+			await expect(
+				dedicatedPool.query<{ readonly count: number }>(
+					`SELECT count(*)::integer AS count FROM "${evilSchema}".calls WHERE query LIKE '%set_config%'`,
+				),
+			).resolves.toMatchObject({ rows: [{ count: 0 }] });
+		} catch (error) {
+			testFailed = true;
+			testError = error;
+		}
+		{
+			let cleanupFailed = false;
+			let firstCleanupError: unknown;
+			try {
+				await dedicatedPool.end();
+			} catch (error) {
+				cleanupFailed = true;
+				firstCleanupError = error;
+			}
+			try {
+				if (createdTargetSchema) await dropSchema(targetSchema);
+			} catch (error) {
+				if (!cleanupFailed) {
+					cleanupFailed = true;
+					firstCleanupError = error;
+				}
+			}
+			try {
+				if (createdEvilSchema) await dropSchema(evilSchema);
+			} catch (error) {
+				if (!cleanupFailed) {
+					cleanupFailed = true;
+					firstCleanupError = error;
+				}
+			}
+			if (testFailed) throw testError;
+			if (cleanupFailed) throw firstCleanupError;
+		}
+	});
+
 	it('defers an after-generated-ddl assert inspection until its table exists', async () => {
 		const pool = await getTestPool();
 		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);

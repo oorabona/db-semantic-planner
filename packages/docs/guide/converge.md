@@ -183,7 +183,7 @@ await convergePg(pool, model, {
       phase: 'after-generated-ddl',
       inspect: async (tx) => {
         const { rows } = await tx.query<{ readonly ok: boolean }>(
-          "SELECT coalesce(position('-- touch v3' IN pg_get_functiondef(to_regprocedure('app.touch()'))) > 0, false) AS ok",
+          "SELECT coalesce(pg_catalog.strpos(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('app.touch()')), '-- touch v3') OPERATOR(pg_catalog.>) 0, false) AS ok",
         );
         return rows[0]?.ok === true ? 'healthy' : 'unhealthy';
       },
@@ -205,8 +205,9 @@ await convergePg(pool, model, {
   `'after-generated-ddl'` after the last one. Steps run in the order given within a phase.
 - Each step runs in one transaction on converge's connection: its admission, `inspect`, `apply`,
   re-inspection and ledger record commit or roll back together. An `assert` inspected during
-  planning is inspected there in a separate read-only transaction that is rolled back, then again
-  in its execution transaction. `tx.query` sends one statement per call
+  planning is inspected there in a separate read-only transaction that is rolled back; if the plan
+  has work, it is inspected again in its execution transaction, and if every assert is healthy and
+  nothing else is pending, converge returns `no-drift` without one. `tx.query` sends one statement per call
   and refuses transaction-control statements (`BEGIN`, `START`, `COMMIT`, `END`, `ROLLBACK`, `ABORT`,
   `SAVEPOINT`, `RELEASE`, `SET TRANSACTION`, `SET SESSION CHARACTERISTICS`); this guards against
   mistakes, not against code that runs with the same role. `PREPARE TRANSACTION` is not checked: a
@@ -216,8 +217,10 @@ await convergePg(pool, model, {
   `apply`. Both are whole milliseconds from 1 to 2147483647.
 - Each step transaction sets `search_path` to the converged schema, `pg_temp`, then the
   connection's own entries, so `current_schema()` is `options.schema` and an unqualified
-  `CREATE TABLE` or `CREATE FUNCTION` lands there whatever the pool's default is. PostgreSQL still
-  searches `pg_catalog` first, so a built-in name wins over a same-named object in `options.schema`.
+  `CREATE TABLE` or `CREATE FUNCTION` lands there whatever the pool's default is. Unless the
+  connection's own `search_path` names `pg_catalog` explicitly, PostgreSQL searches it first, so a
+  built-in name wins over a same-named object in `options.schema`; when it is named explicitly, it is
+  searched at that position.
   Otherwise a name that exists in `options.schema` resolves there and a session temporary table
   cannot shadow it; a name absent from it continues down the path, like any query your application
   runs with that path, so schema-qualify names that live elsewhere. A schema literally named `$user`
@@ -261,7 +264,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |

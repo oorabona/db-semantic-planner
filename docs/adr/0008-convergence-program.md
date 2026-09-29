@@ -57,7 +57,8 @@ How they are recorded and run:
   converge closes its connection after any step ran instead of returning it to the pool. Each step
   transaction sets `search_path` to the target schema, `pg_temp`, then the connection's entries
   (transaction-local), so `current_schema()` is the target and unqualified creation lands there;
-  PostgreSQL still searches `pg_catalog` first, so built-in names win; otherwise a name that exists
+  unless the connection's path names `pg_catalog` explicitly, PostgreSQL searches it first, so
+  built-in names win; otherwise a name that exists
   in the target resolves there and a session temporary table cannot shadow it, while a name absent
   from it continues down the path. A target schema literally named `$user` cannot host steps.
   Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
