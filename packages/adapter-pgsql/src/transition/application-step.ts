@@ -306,8 +306,6 @@ function refusesApplicationStepTransactionControl(text: string): boolean {
 		].includes(keyword)
 	)
 		return true;
-	if (first?.keyword === 'PREPARE')
-		return readSqlKeyword(text, first.end)?.keyword === 'TRANSACTION';
 	if (first?.keyword !== 'SET') return false;
 	let next = readSqlKeyword(text, first.end);
 	if (next?.keyword === 'LOCAL') next = readSqlKeyword(text, next.end);
@@ -522,6 +520,17 @@ async function setPgApplicationStepStatementTimeout(
 	await client.query(`SET LOCAL statement_timeout = '${timeout}ms'`);
 }
 
+async function setPgApplicationStepAdmissionStatementTimeout(
+	client: PoolClient,
+	timeout: number | undefined,
+): Promise<void> {
+	if (timeout === undefined) {
+		await client.query('SET LOCAL statement_timeout TO DEFAULT');
+		return;
+	}
+	await setPgApplicationStepStatementTimeout(client, timeout);
+}
+
 async function admitPgApplicationStepsDuringPlanning(
 	input: {
 		readonly client: PoolClient;
@@ -544,7 +553,7 @@ async function admitPgApplicationStepsDuringPlanning(
 		for (const [index, step] of steps.entries()) {
 			if (index > 0)
 				await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
-			await setPgApplicationStepStatementTimeout(
+			await setPgApplicationStepAdmissionStatementTimeout(
 				input.client,
 				step.statementTimeoutMs,
 			);

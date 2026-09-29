@@ -210,14 +210,16 @@ describe('converge application steps', () => {
 		},
 	);
 
-	it.each(['PREPARE q AS SELECT 1', 'SELECT 1 -- c\r', 'DISCARD PLANS'])(
-		'permits ordinary callback SQL: %s',
-		async (statement) => {
-			const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
-			const tx = createPgApplicationStepTx({ query } as never);
-			await expect(tx.query(statement)).resolves.toEqual({ rows: [] });
-		},
-	);
+	it.each([
+		'PREPARE transaction AS SELECT 1',
+		'PREPARE q AS SELECT 1',
+		'SELECT 1 -- c\r',
+		'DISCARD PLANS',
+	])('permits ordinary callback SQL: %s', async (statement) => {
+		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+		const tx = createPgApplicationStepTx({ query } as never);
+		await expect(tx.query(statement)).resolves.toEqual({ rows: [] });
+	});
 
 	it.each([
 		'BEGIN',
@@ -225,12 +227,10 @@ describe('converge application steps', () => {
 		'/* x */ COMMIT',
 		'-- x\nROLLBACK',
 		'START TRANSACTION',
-		"PREPARE TRANSACTION 'x'",
-		"PREPARE /* c */ TRANSACTION 'x'",
-		"PREPARE/**/TRANSACTION 'x'",
-		"PREPARE /* outer /* inner */ outer */ TRANSACTION 'x'",
-		"PREPARE -- c\rTRANSACTION 'x'",
-		"PREPARE -- c\r\nTRANSACTION 'x'",
+		'END',
+		'ABORT',
+		'SAVEPOINT application_step',
+		'RELEASE SAVEPOINT application_step',
 		'SET TRANSACTION READ ONLY',
 		'SET -- c\nTRANSACTION ISOLATION LEVEL SERIALIZABLE',
 		'SET -- c\rTRANSACTION ISOLATION LEVEL SERIALIZABLE',
@@ -328,6 +328,7 @@ describe('converge application steps', () => {
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
+			'SET LOCAL statement_timeout TO DEFAULT',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
@@ -431,10 +432,59 @@ describe('converge application steps', () => {
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
+			'SET LOCAL statement_timeout TO DEFAULT',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
+		]);
+	});
+
+	it('resets admission timeouts for a following step without overrides', async () => {
+		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+		await expect(
+			planPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'once',
+						id: 'bounded-admission',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						lockTimeoutMs: 25,
+						statementTimeoutMs: 1,
+						apply,
+					},
+					{
+						kind: 'once',
+						id: 'default-admission',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				step: 'once',
+				id: 'bounded-admission',
+			},
+			{
+				kind: 'application-step',
+				step: 'once',
+				id: 'default-admission',
+			},
+		]);
+		expect(query.mock.calls).toEqual([
+			['BEGIN READ ONLY'],
+			["SET LOCAL lock_timeout = '25ms'"],
+			["SET LOCAL statement_timeout = '1ms'"],
+			["SET LOCAL lock_timeout = '5000ms'"],
+			['SET LOCAL statement_timeout TO DEFAULT'],
+			['ROLLBACK'],
 		]);
 	});
 
