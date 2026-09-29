@@ -14,11 +14,12 @@ import {
 	appendPgLedgerResolution,
 } from './ledger.js';
 import {
-	beginPgOutcome,
+	beginPgOutcomeTransaction,
 	commitPgOutcome,
 	PgCommitAcknowledgementAmbiguousError,
 	readPgOutcomeSessionCompromise,
 	rollbackPgOutcomeGroup,
+	setPgTransitionLockTimeout,
 } from './outcome-protocol.js';
 
 /** The intentionally narrow query facade passed to application callbacks. */
@@ -524,7 +525,7 @@ async function setPgApplicationStepSearchPath(
 	schema: string,
 ): Promise<void> {
 	await client.query(
-		"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+		"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 		[schema],
 	);
 }
@@ -542,7 +543,7 @@ async function admitPgApplicationStepsDuringPlanning(
 	const pendingOnceIds = new Set<string>();
 	if (steps.length === 0) return pendingOnceIds;
 	try {
-		await input.client.query('BEGIN READ ONLY');
+		await beginPgOutcomeTransaction(input.client, 'BEGIN READ ONLY');
 		begun = true;
 		for (const step of steps) {
 			const state = await admission(
@@ -575,13 +576,14 @@ async function inspectPgApplicationStepDuringPlanning(
 	let begun = false;
 	let completed = false;
 	try {
-		await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
+		await beginPgOutcomeTransaction(input.client, 'BEGIN READ ONLY');
 		begun = true;
+		await setPgApplicationStepSearchPath(input.client, input.schema);
+		await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
 		await setPgApplicationStepStatementTimeout(
 			input.client,
 			step.statementTimeoutMs,
 		);
-		await setPgApplicationStepSearchPath(input.client, input.schema);
 		const status = await inspectPgApplicationStep(
 			step,
 			input.client,
@@ -661,13 +663,14 @@ export async function runPgApplicationSteps(input: {
 		let begun = false;
 		let commitAttempted = false;
 		try {
-			await beginPgOutcome(input.client, step.lockTimeoutMs);
+			await beginPgOutcomeTransaction(input.client);
 			begun = true;
+			await setPgApplicationStepSearchPath(input.client, input.schema);
+			await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
 			await setPgApplicationStepStatementTimeout(
 				input.client,
 				step.statementTimeoutMs,
 			);
-			await setPgApplicationStepSearchPath(input.client, input.schema);
 			const lock = await acquirePgLedgerLocks(input.client, [
 				home(input.schema),
 			]);

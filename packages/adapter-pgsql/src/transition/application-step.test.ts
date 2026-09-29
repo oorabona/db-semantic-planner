@@ -329,8 +329,8 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
+			"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
-			"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
 			'ROLLBACK',
 		]);
 	});
@@ -432,8 +432,8 @@ describe('converge application steps', () => {
 			'BEGIN READ ONLY',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
+			"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
-			"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
 			'ROLLBACK',
 		]);
 	});
@@ -479,6 +479,33 @@ describe('converge application steps', () => {
 		expect(query.mock.calls).toEqual([['BEGIN READ ONLY'], ['ROLLBACK']]);
 	});
 
+	it('marks the session compromised when planning admission loses its BEGIN acknowledgement', async () => {
+		const beginError = new Error('BEGIN acknowledgement lost');
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'BEGIN READ ONLY') throw beginError;
+			return { rows: [] };
+		});
+		const client = { query };
+		await expect(
+			planPgApplicationSteps({
+				client: client as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'once',
+						id: 'admission-begin',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).rejects.toBe(beginError);
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(beginError);
+		expect(query).toHaveBeenCalledExactlyOnceWith('BEGIN READ ONLY');
+	});
+
 	it('bounds planning inspections with the step timeouts', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		await expect(
@@ -507,12 +534,12 @@ describe('converge application steps', () => {
 			['BEGIN READ ONLY'],
 			['ROLLBACK'],
 			['BEGIN READ ONLY'],
-			["SET LOCAL lock_timeout = '25ms'"],
-			["SET LOCAL statement_timeout = '50ms'"],
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+				"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 				['public'],
 			],
+			["SET LOCAL lock_timeout = '25ms'"],
+			["SET LOCAL statement_timeout = '50ms'"],
 			[
 				{
 					text: 'SELECT pg_catalog.pg_sleep(1)',
@@ -564,15 +591,15 @@ describe('converge application steps', () => {
 			query.mock.calls.filter(
 				([text]) =>
 					text ===
-					"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+					"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 			),
 		).toEqual([
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+				"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 				['Mixed Case'],
 			],
 			[
-				"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+				"SELECT pg_catalog.set_config('search_path', 'pg_catalog, ' || pg_catalog.quote_ident($1) || ', pg_temp, ' || pg_catalog.current_setting('search_path'), true)",
 				['Mixed Case'],
 			],
 		]);

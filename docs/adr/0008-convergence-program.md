@@ -54,8 +54,10 @@ How they are recorded and run:
   earlier steps and DDL stay committed. A `COMMIT` whose acknowledgement is lost is
   `transport-ambiguous`, as for generated steps. Session-level effects of a step are not part of it;
   converge closes its connection after any step ran instead of returning it to the pool. Each step
-  transaction puts the target schema first in `search_path` (transaction-local), so a step's
-  unqualified names mean `options.schema`; step timeouts bound only the step's callbacks.
+  transaction sets `search_path` to `pg_catalog`, the target schema, `pg_temp`, then the connection's
+  entries (transaction-local), so a step's unqualified names mean `options.schema` and a session
+  temporary table cannot shadow them; step timeouts bound the transactions that run the step's
+  callbacks, and planning admission runs without them.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
   every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is

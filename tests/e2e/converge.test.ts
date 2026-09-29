@@ -483,6 +483,7 @@ describe('convergePg', () => {
 		const dedicatedPool = new pg.Pool({
 			connectionString: process.env.DATABASE_URL!,
 			options: '-c search_path=public',
+			max: 1,
 		});
 		const steps = [
 			{
@@ -513,6 +514,12 @@ describe('convergePg', () => {
 			await runPreflight([targetSchema], {
 				writeAdoptionFile: async () => {},
 			});
+			const client = await dedicatedPool.connect();
+			try {
+				await client.query('CREATE TEMP TABLE widgets (id integer)');
+			} finally {
+				client.release();
+			}
 			await expect(
 				convergePg(dedicatedPool, model([table('widgets', false)]), {
 					schema: targetSchema,
