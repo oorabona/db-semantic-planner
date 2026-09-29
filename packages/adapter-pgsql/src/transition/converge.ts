@@ -1225,7 +1225,8 @@ function projectCheckedPlan(
  * relations on every call. The target schema must already exist. Application
  * steps run with `search_path` set to the target schema, `pg_temp`, then the
  * connection's entries, so `current_schema()` is the target. Lookup goes through
- * `pg_catalog` (implicit, first), the target, `pg_temp`, then those entries.
+ * `pg_catalog` first unless those entries name it explicitly, then the target,
+ * `pg_temp` and those entries.
  */
 export function convergePg(
 	pool: Pool,

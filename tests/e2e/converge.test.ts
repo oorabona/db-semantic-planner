@@ -561,6 +561,58 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('does not let the incoming search_path hijack application-step setup', async () => {
+		const evilSchema = 's_evil';
+		const targetSchema = `converge_search_path_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			max: 1,
+		});
+		let createdEvilSchema = false;
+		let createdTargetSchema = false;
+		try {
+			await dedicatedPool.query(`CREATE SCHEMA "${evilSchema}"`);
+			createdEvilSchema = true;
+			await dedicatedPool.query(
+				`CREATE FUNCTION "${evilSchema}".set_config(text, text, boolean) RETURNS text LANGUAGE sql AS $$ SELECT 'hijacked' $$`,
+			);
+			await dedicatedPool.query(`SET search_path = ${evilSchema}, pg_catalog`);
+			await createSchema(targetSchema);
+			createdTargetSchema = true;
+			await runPreflight([targetSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await expect(
+				convergePg(dedicatedPool, model([]), {
+					schema: targetSchema,
+					steps: [
+						{
+							kind: 'once',
+							id: 'search-path-not-hijacked',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							apply: async (tx: PgApplicationStepTx) => {
+								const currentSchema = await tx.query<{
+									readonly current_schema: string;
+								}>('SELECT current_schema() AS current_schema');
+								expect(currentSchema.rows).toEqual([
+									{ current_schema: targetSchema },
+								]);
+							},
+						},
+					],
+				}),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['application-step:search-path-not-hijacked'],
+			});
+		} finally {
+			await dedicatedPool.end();
+			if (createdTargetSchema) await dropSchema(targetSchema);
+			if (createdEvilSchema) await dropSchema(evilSchema);
+		}
+	});
+
 	it('defers an after-generated-ddl assert inspection until its table exists', async () => {
 		const pool = await getTestPool();
 		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
