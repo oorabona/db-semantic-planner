@@ -192,6 +192,14 @@ describe('validated managed-step manifests', () => {
 			},
 		});
 		expect(validateNormalizedManagedStepManifest([accepted]).ok).toBe(true);
+		const schemaBound = addressedStep({
+			...accepted,
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'union_group_seq', schema: 'public' },
+			},
+		});
+		expect(validateNormalizedManagedStepManifest([schemaBound]).ok).toBe(true);
 
 		const rejected = addressedStep({
 			...accepted,
@@ -200,6 +208,16 @@ describe('validated managed-step manifests', () => {
 		expect(validateNormalizedManagedStepManifest([rejected])).toMatchObject({
 			ok: false,
 		});
+		const schemaMismatch = addressedStep({
+			...accepted,
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'union_group_seq', schema: 'tenant' },
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([schemaMismatch]),
+		).toMatchObject({ ok: false });
 	});
 
 	it('refuses incomplete and address-mismatched adoption-selected material', () => {

@@ -63,6 +63,35 @@ describe('PostgreSQL generated managed-step manifest', () => {
 		expect(JSON.stringify(step.expectedDeclaration)).not.toContain('adopt');
 	});
 
+	it('refuses sequence adoption whose declared schema differs from its address', () => {
+		expect(() =>
+			createPgsqlDeclaredSequenceAdoptionStep({
+				address: {
+					scope: 'schema',
+					engine: 'postgresql',
+					database: 'app',
+					schema: 'tenant',
+					kind: 'sequence',
+					name: 'union_group_seq',
+				},
+				sequence: {
+					name: 'union_group_seq',
+					adopt: true,
+					schema: 'decoy',
+				},
+				stepKey: 'sequence-adoption:0',
+				order: 0,
+				catalogueIdentity: {
+					engine: 'postgresql',
+					format: 1,
+					value: { oid: '42' },
+				},
+			}),
+		).toThrow(
+			'sequence adoption shape schema decoy does not match address schema tenant',
+		);
+	});
+
 	it('normalizes strict integer sequence strings identically for SQL and the durable declaration', () => {
 		const sequence = { name: 'orders_id_seq', startWith: '9007199254740993' };
 		expect(

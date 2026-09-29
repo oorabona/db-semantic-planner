@@ -3,11 +3,11 @@ import { effectiveSequenceOptions } from '../ddl/schema-diff.js';
 import type { TransitionJournalQueryable } from './journal.js';
 
 /**
- * Checks the immutable declaration shape required to admit a standalone
- * sequence. Ownership, type, and cache are admission constraints only: later
- * changes to them are intentionally not converge drift. PostgreSQL has no
- * LOCK mode for a sequence relation, so ALTER SEQUENCE after this claimed
- * check and before commit is not excluded (as for unmapped final reads).
+ * Observes the catalogue at claim time to admit a standalone sequence. Start,
+ * increment, min, max, cycle, type, cache, and ownership can still
+ * change before commit because PostgreSQL has no LOCK mode for a sequence
+ * relation. Adoption therefore records a match observed before commit. Type,
+ * cache, and ownership are admission constraints, not managed drift.
  */
 export async function pgDeclaredSequenceAdoptionShapeMatches(
 	executor: TransitionJournalQueryable,

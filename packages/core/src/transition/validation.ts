@@ -513,6 +513,8 @@ function validateLifecycleCoupling(
 			step.address.kind !== 'sequence' ||
 			step.selection.selector !== `sequence:${step.address.name}` ||
 			lifecycle.shape.name !== step.address.name ||
+			(lifecycle.shape.schema !== undefined &&
+				lifecycle.shape.schema !== step.address.schema) ||
 			!step.expectedDeclaration ||
 			!step.expectedCatalogueIdentity ||
 			step.statementBundle.statements.length !== 0

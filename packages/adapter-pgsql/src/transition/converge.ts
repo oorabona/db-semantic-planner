@@ -1136,6 +1136,12 @@ export async function convergePg(
 		}
 		for (const [physicalName, sequence] of declaredSequences) {
 			if (sequence.adopt !== true) continue;
+			if (sequence.schema !== undefined && sequence.schema !== schema)
+				throw refusal(
+					'adoption-refused',
+					[],
+					`declared sequence adoption for ${physicalName} refuses declared schema ${sequence.schema}; converge target schema is ${schema}`,
+				);
 			const address = {
 				scope: 'schema' as const,
 				engine: 'postgresql',

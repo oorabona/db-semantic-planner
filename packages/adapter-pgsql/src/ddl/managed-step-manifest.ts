@@ -1243,6 +1243,10 @@ export function createPgsqlDeclaredSequenceAdoptionStep(input: {
 	readonly catalogueIdentity: CatalogueIdentity;
 }): NormalizedManagedStep {
 	const { adopt: _adopt, ...shape } = input.sequence;
+	if (shape.schema !== undefined && shape.schema !== input.address.schema)
+		throw new Error(
+			`sequence adoption shape schema ${shape.schema} does not match address schema ${input.address.schema ?? '<absent>'}`,
+		);
 	return {
 		stepKey: input.stepKey,
 		order: input.order,

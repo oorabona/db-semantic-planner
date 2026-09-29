@@ -606,6 +606,84 @@ describe('convergePg refusal boundary', () => {
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 
+	it('refuses declared sequence adoption with a schema other than the converge target', async () => {
+		const sequence = {
+			name: 'legacy_sequence',
+			adopt: true as const,
+			schema: 'decoy',
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(
+			convergePg(
+				poolFor(),
+				{
+					...emptyModel(),
+					sequences: new Map([[sequence.name, sequence]]),
+				},
+				{ schema: 'tenant' },
+			),
+		).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+			detail: expect.stringMatching(/decoy.*tenant/),
+		});
+		expect(mocks.identity).not.toHaveBeenCalled();
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['without a declared schema', undefined],
+		['with the converge target schema', 'tenant'],
+	] as const)('adopts a sequence %s', async (_description, declaredSchema) => {
+		const sequence = {
+			name: 'legacy_sequence',
+			adopt: true as const,
+			...(declaredSchema === undefined ? {} : { schema: declaredSchema }),
+		};
+		const catalogueIdentity = {
+			engine: 'postgresql',
+			format: 1,
+			value: { oid: '1' },
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue({ catalogueIdentity });
+		mocks.chain.mockResolvedValue({ events: [] });
+		mocks.execute.mockImplementation(async (input) => {
+			const step = input.manifest?.steps[0];
+			if (!step || !input.verifyDeclaredAdoptionShape)
+				throw new Error(
+					'expected a declared sequence adoption step and verifier',
+				);
+			expect(step.lifecycle).toEqual({
+				kind: 'sequence-adoption',
+				shape: {
+					name: sequence.name,
+					...(declaredSchema === undefined ? {} : { schema: declaredSchema }),
+				},
+			});
+			await input.verifyDeclaredAdoptionShape(input.pool, step);
+			return { outcome: 'completed' };
+		});
+
+		await expect(
+			convergePg(
+				poolFor(),
+				{
+					...emptyModel(),
+					sequences: new Map([[sequence.name, sequence]]),
+				},
+				{ schema: 'tenant' },
+			),
+		).resolves.toEqual({ kind: 'applied', applied: ['adopt_sequence'] });
+		expect(mocks.sequenceShape).toHaveBeenCalledWith(
+			expect.anything(),
+			'tenant',
+			sequence.name,
+			sequence,
+		);
+	});
+
 	it('refuses declared replace before comparison or execution', async () => {
 		const testClient = client();
 		mocks.compare.mockResolvedValue({ changes: [] });
