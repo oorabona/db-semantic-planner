@@ -34,6 +34,7 @@ import {
 	withGeneratedPostconditionSession,
 } from '../ddl/generated-postcondition-verifier.js';
 import { modelForDeclaredAdoption } from '../ddl/live-diff.js';
+import { pgsqlDeclaredSequenceAdoptionDeclaration } from '../ddl/managed-step-manifest.js';
 import { compareSchemata } from '../ddl/schema-diff.js';
 import { createPgsqlAdapter } from '../pgsql-adapter.js';
 import {
@@ -684,6 +685,17 @@ export async function executeGeneratorPlan(input: {
 					outcome: 'execution-failed',
 					detail: `adoption step ${step.stepKey} has incomplete normalized material`,
 				};
+			if (
+				lifecycle.kind === 'sequence-adoption' &&
+				!isDeepStrictEqual(
+					step.expectedDeclaration,
+					pgsqlDeclaredSequenceAdoptionDeclaration(lifecycle.shape),
+				)
+			)
+				return {
+					outcome: 'adoption-refused',
+					detail: `sequence adoption step ${step.stepKey} has a non-canonical declared sequence`,
+				};
 			const preflight = await preflightPgDeclaredAdoption({
 				executor: input.pool,
 				home: home(address),
@@ -845,6 +857,11 @@ export async function executeGeneratorPlan(input: {
 				}
 				return result;
 			}
+			if (step.claimKind === 'adopt-intent')
+				return {
+					outcome: 'execution-failed',
+					detail: `adoption step ${step.stepKey} was not dispatched as an adoption`,
+				};
 			if (step.statementBundle.statements.length === 0) {
 				completedStepKeys.push(step.stepKey);
 				continue;

@@ -285,7 +285,14 @@ describe('convergePg', () => {
 			pool.query(`SELECT nextval('"${schema}"."${name}"')::text AS value`),
 		).resolves.toMatchObject({ rows: [{ value: '4' }] });
 		await expect(
-			convergePg(pool, model([], [{ name }]), { schema }),
+			convergePg(pool, model([], [declared]), { schema }),
+		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		await pool.query(`ALTER SEQUENCE "${schema}"."${name}" CACHE 2`);
+		await expect(
+			convergePg(pool, model([], [declared]), { schema }),
 		).resolves.toEqual({
 			kind: 'no-drift',
 			applied: [],

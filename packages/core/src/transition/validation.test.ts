@@ -202,6 +202,67 @@ describe('validated managed-step manifests', () => {
 		});
 	});
 
+	it('refuses incomplete and address-mismatched adoption material', () => {
+		const missingLifecycle = addressedStep({
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'table:orders' },
+		});
+		expect(
+			validateNormalizedManagedStepManifest([missingLifecycle]),
+		).toMatchObject({ ok: false });
+		const adoptionSelectionWithoutLifecycle = addressedStep({
+			claimKind: 'intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'table:orders' },
+		});
+		expect(
+			validateNormalizedManagedStepManifest([
+				adoptionSelectionWithoutLifecycle,
+			]),
+		).toMatchObject({ ok: false });
+
+		const sequenceOnTable = addressedStep({
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'sequence:orders' },
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'orders' },
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([sequenceOnTable]),
+		).toMatchObject({ ok: false });
+
+		const sequenceAddress = { ...root, kind: 'sequence' as const };
+		const shapeWithDifferentName = addressedStep({
+			address: sequenceAddress,
+			claimKind: 'adopt-intent',
+			classification: 'non-destructive',
+			statementBundle: { statements: [] },
+			requiresVacancy: false,
+			replayPolicy: 'recorded',
+			selection: { kind: 'adoption', selector: 'sequence:orders' },
+			lifecycle: {
+				kind: 'sequence-adoption',
+				shape: { name: 'other_orders' },
+			},
+		});
+		expect(
+			validateNormalizedManagedStepManifest([shapeWithDifferentName]),
+		).toMatchObject({ ok: false });
+	});
+
 	it('P01: validates dependency order through the first-pass key map', () => {
 		const first = step({
 			stepKey: 'first',

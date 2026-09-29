@@ -1,6 +1,7 @@
 import {
 	canonicalJsonDigest,
 	type ValidatedManagedStepManifest,
+	validateNormalizedManagedStepManifest,
 } from '@dbsp/core';
 import type { LedgerAddress, NormalizedManagedStep } from '@dbsp/types';
 import type { PoolClient } from 'pg';
@@ -17,6 +18,7 @@ import {
 import {
 	generatedPostconditionDigest,
 	generatedPostconditionForChange,
+	pgsqlDeclaredSequenceAdoptionDeclaration,
 } from '../ddl/managed-step-manifest.js';
 import { executeGeneratorPlan } from './generator-execution.js';
 import { readPgOutcomeSessionCompromise } from './outcome-protocol.js';
@@ -252,7 +254,9 @@ function declaredSequenceAdoptionStep(
 			kind: 'sequence-adoption',
 			shape: { name: 'union_group_seq' },
 		},
-		expectedDeclaration: { value: { kind: 'sequence' }, digest: 'declared' },
+		expectedDeclaration: pgsqlDeclaredSequenceAdoptionDeclaration({
+			name: 'union_group_seq',
+		}),
 		expectedCatalogueIdentity: {
 			engine: 'postgresql',
 			format: 1,
@@ -688,6 +692,76 @@ describe('generator execution fixture shim', () => {
 		});
 		expect(preflightPgDeclaredAdoption).not.toHaveBeenCalled();
 		expect(executePgDeclaredAdoption).not.toHaveBeenCalled();
+	});
+
+	it('refuses a non-canonical sequence declaration before preflight', async () => {
+		preflightPgDeclaredAdoption.mockClear();
+		const executor = {
+			query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+			connect: vi.fn(),
+		};
+		const step = {
+			...declaredSequenceAdoptionStep('sequence-adoption:0', 0),
+			expectedDeclaration: { value: { kind: 'sequence' }, digest: 'declared' },
+		};
+
+		await expect(
+			executeGeneratorPlan({
+				pool: executor as never,
+				run: {} as never,
+				plan: { steps: [step] },
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+				verifyDeclaredAdoptionShape: async () => true,
+			}),
+		).resolves.toEqual({
+			outcome: 'adoption-refused',
+			detail:
+				'sequence adoption step sequence-adoption:0 has a non-canonical declared sequence',
+		});
+		expect(preflightPgDeclaredAdoption).not.toHaveBeenCalled();
+	});
+
+	it('refuses an undispatched adopt-intent before completing an empty step', async () => {
+		const validated = validateNormalizedManagedStepManifest([
+			dataDestructiveStep,
+		]);
+		if (!validated.ok) throw new Error(validated.detail);
+		const malformedManifest: ValidatedManagedStepManifest = Object.assign(
+			Object.create(null),
+			{
+				steps: [
+					{
+						...dataDestructiveStep,
+						claimKind: 'adopt-intent' as const,
+						classification: 'non-destructive' as const,
+						statementBundle: { statements: [] },
+						requiresVacancy: false,
+						replayPolicy: 'recorded' as const,
+					},
+				],
+			},
+		);
+
+		await expect(
+			executeGeneratorPlan({
+				pool: {
+					query: vi.fn().mockResolvedValue({ rows: [{ database_id: 'app' }] }),
+					connect: vi.fn(),
+				} as never,
+				run: {} as never,
+				manifest: malformedManifest,
+				planDigest: 'reviewed-plan',
+				schema: 'tenant',
+				runId: 'reviewed-run',
+				recordAttempt: async () => undefined,
+			}),
+		).resolves.toEqual({
+			outcome: 'execution-failed',
+			detail: 'adoption step generator:0 was not dispatched as an adoption',
+		});
 	});
 
 	it('refuses sequence adoption when its claim-time shape check changes', async () => {

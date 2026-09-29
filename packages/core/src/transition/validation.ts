@@ -452,6 +452,16 @@ function validateLifecycleCoupling(
 	step: NormalizedManagedStep,
 ): string | undefined {
 	const lifecycle = step.lifecycle;
+	if (
+		(step.claimKind === 'adopt-intent' ||
+			step.selection?.kind === 'adoption') &&
+		(!lifecycle ||
+			(lifecycle.kind === 'adoption' && step.address?.kind !== 'table') ||
+			(lifecycle.kind === 'sequence-adoption' &&
+				step.address?.kind !== 'sequence') ||
+			(lifecycle.kind !== 'adoption' && lifecycle.kind !== 'sequence-adoption'))
+	)
+		return `adoption step ${step.stepKey} has invalid lifecycle coupling`;
 	if (step.selection?.kind === 'replacement') {
 		if (lifecycle)
 			return `replacement step ${step.stepKey} has invalid lifecycle coupling`;
@@ -486,6 +496,7 @@ function validateLifecycleCoupling(
 			step.requiresVacancy ||
 			step.selection?.kind !== 'adoption' ||
 			!step.address ||
+			step.address.kind !== 'table' ||
 			!step.expectedDeclaration ||
 			!step.expectedCatalogueIdentity ||
 			step.statementBundle.statements.length !== 0
@@ -502,6 +513,7 @@ function validateLifecycleCoupling(
 			!step.address ||
 			step.address.kind !== 'sequence' ||
 			step.selection.selector !== `sequence:${step.address.name}` ||
+			lifecycle.shape.name !== step.address.name ||
 			!step.expectedDeclaration ||
 			!step.expectedCatalogueIdentity ||
 			step.statementBundle.statements.length !== 0

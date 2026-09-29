@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => {
 		writability: vi.fn<() => Promise<PgDatabaseWritability>>(async () => ({
 			kind: 'writable',
 		})),
+		sequenceShape: vi.fn(async () => true),
 		introspect,
 		adapter: { introspect },
 	};
@@ -182,6 +183,10 @@ vi.mock('./reinitialize-preflight.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./reinitialize-preflight.js')>()),
 	readPgLedgerScopeCurrency: (...args: unknown[]) =>
 		forward(mocks.currency, args),
+}));
+vi.mock('./sequence-adoption.js', () => ({
+	pgDeclaredSequenceAdoptionShapeMatches: (...args: unknown[]) =>
+		forward(mocks.sequenceShape, args),
 }));
 
 import { convergePg, PgConvergeRefusalError } from './converge.js';
@@ -529,6 +534,7 @@ afterEach(() => {
 	mocks.unlock.mockResolvedValue(true);
 	mocks.currency.mockResolvedValue({ kind: 'current' });
 	mocks.writability.mockResolvedValue({ kind: 'writable' });
+	mocks.sequenceShape.mockResolvedValue(true);
 	mocks.reservations.mockResolvedValue([]);
 	mocks.runIds.mockResolvedValue(new Map());
 	mocks.introspect.mockResolvedValue(emptyModel());
@@ -561,6 +567,42 @@ describe('convergePg refusal boundary', () => {
 			refusal: 'adoption-refused',
 			changes: [expect.objectContaining({ kind: 'add_column' })],
 		});
+		expect(mocks.execute).not.toHaveBeenCalled();
+	});
+
+	it('skips declared sequence adoption checks after matching managed admission', async () => {
+		const sequence = { name: 'managed_sequence', adopt: true as const };
+		mockManagedObjects();
+		mocks.sequenceShape.mockResolvedValue(false);
+		mocks.compare.mockResolvedValue({ changes: [] });
+
+		await expect(
+			convergePg(poolFor(), {
+				...emptyModel(),
+				sequences: new Map([[sequence.name, sequence]]),
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
+		expect(mocks.execute).not.toHaveBeenCalled();
+
+		mocks.compare.mockResolvedValue({
+			changes: [
+				{
+					kind: 'alter_sequence',
+					table: '',
+					destructive: true,
+					details: 'alter managed sequence',
+					meta: { sequence },
+				},
+			],
+		});
+		await expect(
+			convergePg(poolFor(), {
+				...emptyModel(),
+				sequences: new Map([[sequence.name, sequence]]),
+			}),
+		).rejects.toMatchObject({ refusal: 'unsupported-change' });
+		expect(mocks.sequenceShape).not.toHaveBeenCalled();
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
 

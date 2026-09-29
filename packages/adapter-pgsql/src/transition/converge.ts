@@ -1136,6 +1136,22 @@ export async function convergePg(
 		}
 		for (const [physicalName, sequence] of declaredSequences) {
 			if (sequence.adopt !== true) continue;
+			const address = {
+				scope: 'schema' as const,
+				engine: 'postgresql',
+				database,
+				schema,
+				kind: 'sequence' as const,
+				name: physicalName,
+			};
+			const admission = await declaredAdoptionAdmission(client, address);
+			if (admission.kind === 'managed') continue;
+			if (admission.kind !== 'unknown')
+				throw refusal(
+					'adoption-refused',
+					[],
+					`declared sequence adoption for ${physicalName} refuses ledger admission`,
+				);
 			const sequenceChanges = diff.changes.filter((change) => {
 				if (
 					change.kind !== 'create_sequence' &&
@@ -1151,14 +1167,6 @@ export async function convergePg(
 					sequenceChanges,
 					`declared sequence adoption for ${physicalName} refuses ${sequenceChanges.map((change) => change.kind).join(', ')}`,
 				);
-			const address = {
-				scope: 'schema' as const,
-				engine: 'postgresql',
-				database,
-				schema,
-				kind: 'sequence' as const,
-				name: physicalName,
-			};
 			if (
 				!(await pgDeclaredSequenceAdoptionShapeMatches(
 					client,
@@ -1171,14 +1179,6 @@ export async function convergePg(
 					'adoption-refused',
 					[],
 					`declared sequence adoption for ${physicalName} refuses live shape mismatch`,
-				);
-			const admission = await declaredAdoptionAdmission(client, address);
-			if (admission.kind === 'managed') continue;
-			if (admission.kind !== 'unknown')
-				throw refusal(
-					'adoption-refused',
-					[],
-					`declared sequence adoption for ${physicalName} refuses ledger admission`,
 				);
 			adoptionSteps.push(
 				createPgsqlDeclaredSequenceAdoptionStep({
