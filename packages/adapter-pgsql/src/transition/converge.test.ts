@@ -599,13 +599,64 @@ describe('convergePg refusal boundary', () => {
 		await expect(checkResult).resolves.toEqual({ kind: 'no-drift' });
 	});
 
-	it('refuses an invalid runtime mode before connecting', async () => {
-		const pool = poolFor();
-		const runtimeOptions = JSON.parse('{"mode":"preview"}');
+	it.each([
+		{
+			name: 'preview mode with a valid model',
+			mode: 'preview',
+			model: emptyModel(),
+		},
+		{
+			name: 'a null-prototype mode',
+			mode: Object.create(null),
+			model: emptyModel(),
+		},
+		{
+			name: 'a mode whose coercion throws',
+			mode: {
+				[Symbol.toPrimitive]() {
+					throw new Error('coerced');
+				},
+			},
+			model: emptyModel(),
+		},
+	])(
+		'refuses $name before validating or connecting',
+		async ({ mode, model }) => {
+			const pool = poolFor();
+			const error = await Promise.resolve(
+				Reflect.apply(convergePg, undefined, [pool, model, { mode }]),
+			).catch((caught: unknown) => caught);
 
-		await expect(
-			convergePg(pool, emptyModel(), runtimeOptions),
-		).rejects.toMatchObject({ refusal: 'invalid-options' });
+			expect(error).toBeInstanceOf(PgConvergeRefusalError);
+			expect(error).toMatchObject({
+				refusal: 'invalid-options',
+				message: 'converge mode must be apply or check',
+			});
+			expect(pool.connect).not.toHaveBeenCalled();
+		},
+	);
+
+	it('refuses a preview mode before validating an invalid model', async () => {
+		const invalidModel: ModelIR = {
+			...emptyModel(),
+			enums: new Map([
+				['declared_status', { name: 'actual_status', values: ['pending'] }],
+			]),
+		};
+		const pool = poolFor();
+		const error = await Promise.resolve(
+			Reflect.apply(convergePg, undefined, [
+				pool,
+				invalidModel,
+				{ mode: 'preview' },
+			]),
+		).catch((caught: unknown) => caught);
+
+		expect(error).toBeInstanceOf(PgConvergeRefusalError);
+		expect(error).toMatchObject({
+			refusal: 'invalid-options',
+			message: 'converge mode must be apply or check',
+		});
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 

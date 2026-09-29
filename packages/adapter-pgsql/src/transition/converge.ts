@@ -1100,12 +1100,10 @@ export async function convergePg(
 	model: ModelIR,
 	options: ConvergePgOptions | ConvergePgCheckOptions = {},
 ): Promise<PgConvergeResult | PgConvergeCheckResult> {
-	validateDeclarationModel(model);
 	const mode: unknown = options.mode;
 	if (mode !== undefined && mode !== 'apply' && mode !== 'check')
-		throw invalidOptions(
-			`converge mode must be apply or check, got ${String(mode)}`,
-		);
+		throw invalidOptions('converge mode must be apply or check');
+	validateDeclarationModel(model);
 	const check = mode === 'check';
 	const schema = options.schema ?? 'public';
 	const casing = options.dbCasing ?? 'preserve';
