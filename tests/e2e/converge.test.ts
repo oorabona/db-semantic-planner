@@ -2169,7 +2169,7 @@ describe('convergePg', () => {
 		}
 	});
 
-	it('does not make adopt-existing an initialization-only policy', async () => {
+	it('refuses a later unmanaged table once initialize is back to never', async () => {
 		const initializedSchema = `converge_never_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const pool = await getTestPool();
 		const first = 'managed_first';
