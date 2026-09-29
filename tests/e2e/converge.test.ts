@@ -2151,15 +2151,11 @@ describe('convergePg', () => {
 			const desired = model([legacyTable(name, false)]);
 			const settle = async (initialize: 'never' | 'adopt-existing') => {
 				try {
-					return {
-						kind: (
-							await convergePg(pool, desired, {
-								schema: initializedSchema,
-								mode: 'check',
-								initialize,
-							})
-						).kind,
-					};
+					return await convergePg(pool, desired, {
+						schema: initializedSchema,
+						mode: 'check',
+						initialize,
+					});
 				} catch (error) {
 					if (!(error instanceof PgConvergeRefusalError)) throw error;
 					return { refusal: error.refusal };
@@ -2172,6 +2168,16 @@ describe('convergePg', () => {
 			expect(adoptExisting).not.toEqual({
 				refusal: 'adoption-refused',
 			});
+			if ('kind' in adoptExisting && adoptExisting.kind === 'would-apply') {
+				expect(
+					adoptExisting.steps.some(
+						(step) =>
+							step.kind === 'adopt_table' &&
+							(step.address.name === name ||
+								('table' in step && step.table === name)),
+					),
+				).toBe(false);
+			}
 		} finally {
 			await dropSchema(initializedSchema);
 		}
