@@ -19,15 +19,21 @@ planning; plan those with
 
 ## The startup sequence
 
-1. **Before the first `convergePg` call on a schema, with a role allowed to create schemas and
-   tables:** `runPgReinitializePreflight` creates and owns the `dbsp_meta` schema, the ledger of each
-   schema it is given, and the transition journal. Run it again when you add a schema to converge.
-   Check both channels it fails through: scopes reported as `failed` or `not-attempted` in the
-   returned report, and a rejected promise. `convergePg` never creates these tables, and refuses
-   `ledger-absent` when the schema has no ledger.
-2. **At every start, as the same role:** `convergePg(pool, model, { schema })`. When several
-   instances start together, one converges and the others get `busy`: retry `busy` after a delay, or
-   converge from a single instance.
+1. **Create the schema** you converge (`CREATE SCHEMA`); converge never creates it.
+2. **At every start:** `convergePg(pool, model, { schema, initialize })`. When the schema has no
+   ledger, `initialize` decides what happens:
+   - `'never'` (the default): refuse `ledger-absent`.
+   - `'pristine'`: create the `dbsp_meta` schema, the transition journal and the schema's ledger,
+     unless a declared table or sequence already exists in the schema, which refuses
+     `initialization-refused`.
+   - `'adopt-existing'`: create them whatever the schema holds.
+
+   The role that converges then owns the ledger, so it needs `CREATE` on the database for
+   `dbsp_meta`, and every later call must run as that role. `initialize` never touches a ledger that
+   exists: an incompatible one is refused `incompatible-ledger`. When several instances start
+   together, one converges and the others get `busy`: retry `busy` after a delay, or converge from a
+   single instance. To prepare the ledger with a different, privileged role instead, run
+   `runPgReinitializePreflight` once with that role and keep `initialize: 'never'`.
 3. **After converge, from a single instance:** create or repair the indexes you manage yourself (see
    [External indexes](#external-indexes)). The ledger lock is released when `convergePg` returns, so
    it does not serialize this step.
@@ -35,8 +41,8 @@ planning; plan those with
 The ledger needs PostgreSQL 15 or later.
 
 ```typescript
-// doctest: real-db-only — runs the preflight and converges a real schema
-import { convergePg, runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+// doctest: real-db-only — initializes and converges a real schema
+import { convergePg } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 
 const app = schema({
@@ -48,22 +54,11 @@ const app = schema({
 
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
 
-// Before the first convergePg call on this schema.
-const report = await runPgReinitializePreflight({
-  pool,
-  schemas: ['converge_guide'],
-  declarations: { version: 1, digest: 'none', declarations: [] },
-  writeAdoptionFile: async () => {},
-});
-const unprepared = report.scopes.filter(
-  (scope) => scope.outcome === 'failed' || scope.outcome === 'not-attempted',
-);
-if (unprepared.length > 0) {
-  throw new Error(`preflight did not prepare ${JSON.stringify(unprepared)}`);
-}
-
 // At every start: 'applied' the first time, 'no-drift' afterwards.
-const result = await convergePg(pool, app.model, { schema: 'converge_guide' });
+const result = await convergePg(pool, app.model, {
+  schema: 'converge_guide',
+  initialize: 'pristine',
+});
 if (result.kind !== 'applied' && result.kind !== 'no-drift') {
   throw new Error(`unexpected converge result ${result.kind}`);
 }
@@ -141,7 +136,9 @@ planning refusals an apply runs before it starts executing, and returns without 
 | `would-apply` | `steps` lists, in execution order, the steps an apply would run: each has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. `planDigest` identifies that plan. |
 
 Before executing, a check refuses as an apply would (`busy`, `ledger-absent`, `database-read-only`,
-`unsupported-change`, …). It commits nothing: the comparison's scratch DDL runs in a transaction that
+`unsupported-change`, …), except that it never creates a ledger: with no ledger it refuses
+`ledger-absent` whatever `initialize` says. With a ledger, `initialize: 'adopt-existing'` lists the
+adoptions an apply would run. It commits nothing: the comparison's scratch DDL runs in a transaction that
 is rolled back, which is why a read-only target is refused, and the ledger is unchanged. Its answer
 holds for the moment it was taken: another session can change the database before your next apply,
 and checks the executor makes only while executing, such as re-verifying an adopted table when it
@@ -160,7 +157,8 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 | `refusal` | Meaning |
 |---|---|
 | `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
-| `ledger-absent` | The schema has no ledger: run `runPgReinitializePreflight`. |
+| `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
+| `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, the preflight's refusal code, its step and its detail. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |
 | `unsupported-server` | PostgreSQL is older than 15. |
 | `database-read-only` | The target refuses writes (a standby, or a session whose transactions are read-only); converge checks this before comparing and writes nothing, even when the model already matches. A target that becomes read-only after that check and before converge's first write is reported `execution-refused`, with the reason in `detail`; after earlier steps committed, the result is `partially-applied`. |
@@ -176,8 +174,15 @@ during execution becomes an `execution-refused` or `adoption-refused` refusal, o
 ## Adopting an existing install
 
 If an earlier version of your application created its tables without dbsp, `convergePg` refuses
-them as `unmanaged-object`. Take them into management with one pass in which the model marks each
-table `adopt: true`, then drop the flag:
+them as `unmanaged-object`. Two ways take them into management:
+
+- `initialize: 'adopt-existing'` at every start. On every call, each declared table and standalone
+  sequence that exists in the schema is treated as marked `adopt: true`, and each one that does not
+  exist is created, whatever its declared flag. A call that stops part-way resumes on the next start.
+  A table someone creates later outside dbsp with exactly its declared shape is adopted rather than
+  refused.
+- One pass in which the model marks each table `adopt: true`, then drop the flag. The rules below
+  apply to both ways:
 
 - A table is adopted only if it exists, its ledger state is unknown, and it matches its declaration
   exactly, columns, types, defaults, keys and indexes included (after
@@ -185,7 +190,8 @@ table `adopt: true`, then drop the flag:
   `adoption-refused` before anything is written.
 - Each table is adopted in its own transaction. A table that changes while its adoption runs is
   refused, and tables adopted earlier in the same call stay adopted; the next call skips them.
-- `adopt: true` on a table that does not exist is refused, so do not set it on a fresh install.
+- Without `adopt-existing`, `adopt: true` on a table that does not exist is refused, so do not set it
+  on a fresh install.
 - An install that lags the model, for example a missing column, must be brought to the model before
   the adoption pass.
 

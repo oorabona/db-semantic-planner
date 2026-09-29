@@ -74,8 +74,9 @@ readable journal run explains.
 
 ### The ledger and journal come from a separate preflight
 
-Converge requires the schema's ledger and refuses `ledger-absent` without it; it never creates the
-ledger or the transition journal. `runPgReinitializePreflight` creates and owns both, and converge
+Converge requires the schema's ledger and refuses `ledger-absent` without it, unless ADR 0008's
+`initialize` option asks it to create an absent ledger through the same preflight code.
+`runPgReinitializePreflight` creates and owns the ledger and the transition journal, and converge
 runs as the same PostgreSQL role, so it can read the journal. The ledger requires PostgreSQL 15
 (`unsupported-server` below it).
 

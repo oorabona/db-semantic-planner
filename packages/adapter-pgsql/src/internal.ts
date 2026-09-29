@@ -20,10 +20,12 @@ export {
 } from './ddl/managed-step-manifest.js';
 export { collectReferencedKeyRemovalConflicts } from './ddl/schema-diff.js';
 export {
+	type ConvergePgBaseOptions,
 	type ConvergePgCheckOptions,
 	type ConvergePgOptions,
 	convergePg,
 	type PgConvergeCheckResult,
+	type PgConvergeInitializationFailure,
 	type PgConvergePlannedStep,
 	PgConvergeRefusalError,
 	type PgConvergeResult,

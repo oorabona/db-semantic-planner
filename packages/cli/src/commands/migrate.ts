@@ -83,6 +83,8 @@ const refusalOutcomes = {
 	'database-read-only': 'database-read-only',
 	'execution-refused': 'execution-refused',
 	'adoption-refused': 'adoption-refused',
+	// dbsp migrate never supplies initialize, but preserve the closed converge map.
+	'initialization-refused': 'migrate-failed',
 } as const satisfies Record<PgConvergeRefusal, MigrateOutcome>;
 
 type ExternalIndex = NonNullable<ConvergePgOptions['externalIndexes']>[number];
