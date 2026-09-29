@@ -8,10 +8,11 @@ import {
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
 	readPgCatalogueIdentity,
+	readPgLedgerAddressChain,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
 import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
-import { schema } from '@dbsp/core';
+import { projectLedgerChain, schema } from '@dbsp/core';
 import {
 	type LedgerAddress,
 	type LedgerPayload,
@@ -64,6 +65,22 @@ function address(
 		kind: 'table',
 		name,
 	};
+}
+
+async function ledgerIsManaged(
+	schema: string,
+	databaseId: string,
+	name: string,
+): Promise<boolean> {
+	const chain = await readPgLedgerAddressChain(
+		await getTestPool(),
+		{ scope: 'schema', schema },
+		address(schema, databaseId, name),
+	);
+	const state = projectLedgerChain(chain);
+	return (
+		state.kind === 'projected-ledger-chain' && state.stableState === 'managed'
+	);
 }
 
 function declaration(name: string): LedgerPayload {
@@ -186,6 +203,27 @@ async function adoptionForeignKeySchemaFile(input: {
 			`    orders: { id: { type: 'integer', primaryKey: true }, customer_id: ${input.childHasForeignKey ? "ref('customers', { nullable: true })" : "{ type: 'integer', nullable: true }"} },`,
 			'  },',
 			'  { customers: { adopt: true }, orders: { adopt: true } },',
+			');',
+			'',
+		].join('\n'),
+		'utf8',
+	);
+	schemaFiles.push(path);
+	return path;
+}
+
+async function adoptionFkTargetSchemaFile(): Promise<string> {
+	const path = `${process.cwd()}/.unit13-${unique('adoption-fk-target')}.mjs`;
+	await writeFile(
+		path,
+		[
+			"import { ref, schema } from '@dbsp/core';",
+			'export default schema(',
+			'  {',
+			"    projects: { id: { type: 'integer', primaryKey: true } },",
+			"    project_state: { project_id: ref('projects', { primaryKey: true }) },",
+			'  },',
+			'  { projects: { adopt: true }, project_state: { adopt: true } },',
 			');',
 			'',
 		].join('\n'),
@@ -663,6 +701,48 @@ describe('unit 13 adoption, release, replacement, and drift (SC-59…62)', {
 			pool,
 		);
 		expect(applied).toMatchObject({ outcome: 'completed' });
+	});
+
+	it('adopts and replays foreign-key-target adoption through the reviewed apply run', async () => {
+		const { pool, database: databaseId, schemas: names } = await fixture();
+		const schema = names[0]!;
+		await pool.query(
+			`CREATE TABLE ${quote(schema)}.projects (id integer PRIMARY KEY); CREATE TABLE ${quote(schema)}.project_state (project_id integer PRIMARY KEY REFERENCES ${quote(schema)}.projects(id))`,
+		);
+		const schemaFile = await adoptionFkTargetSchemaFile();
+		const planned = await runGeneratorPlan({
+			db: process.env.DATABASE_URL!,
+			schema,
+			schemaFile,
+		});
+		generatorSchemaFiles.set(planned, schemaFile);
+		const reviewed = generatorPlan(planned);
+		expect(reviewed.plan.generator.changes).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ kind: 'adopt_table', table: 'projects' }),
+				expect.objectContaining({
+					kind: 'adopt_table',
+					table: 'project_state',
+				}),
+			]),
+		);
+
+		await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+			outcome: 'completed',
+		});
+		for (const name of ['projects', 'project_state']) {
+			const events = await pool.query(
+				`SELECT event_kind FROM ${quote(schema)}.dbsp_ledger_event WHERE address_name = $1 AND event_kind = 'adopt'`,
+				[name],
+			);
+			expect(events.rows).toEqual([{ event_kind: 'adopt' }]);
+			await expect(ledgerIsManaged(schema, databaseId, name)).resolves.toBe(
+				true,
+			);
+		}
+		await expect(applyReviewedGenerator(reviewed)).resolves.toEqual({
+			outcome: 'completed',
+		});
 	});
 
 	it('refuses child adoption when its live foreign key is undeclared', async () => {
