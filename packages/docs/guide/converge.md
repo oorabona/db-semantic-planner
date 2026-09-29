@@ -183,7 +183,7 @@ await convergePg(pool, model, {
       phase: 'after-generated-ddl',
       inspect: async (tx) => {
         const { rows } = await tx.query<{ readonly ok: boolean }>(
-          "SELECT coalesce(position('-- touch v3' IN pg_get_functiondef(to_regprocedure('app.touch()'))) > 0, false) AS ok",
+          "SELECT coalesce(pg_catalog.strpos(pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('app.touch()')), '-- touch v3') OPERATOR(pg_catalog.>) 0, false) AS ok",
         );
         return rows[0]?.ok === true ? 'healthy' : 'unhealthy';
       },
