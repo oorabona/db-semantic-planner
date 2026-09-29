@@ -3936,7 +3936,7 @@ describe('FK enhancements — migration SQL', () => {
 		expect(autoIndexCount).toBe(0);
 	});
 
-	it('should not generate FK auto-index when only a partial index covers the FK column', () => {
+	it('should generate an FK auto-index when only a partial index covers the FK column', () => {
 		const usersTable = makeTable(
 			'users',
 			[makeCol({ name: 'id', type: 'integer' })],
@@ -3977,7 +3977,7 @@ describe('FK enhancements — migration SQL', () => {
 		expect(sql).toContain(
 			'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
 		);
-		expect(sql).not.toContain(
+		expect(sql).toContain(
 			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
 		);
 	});

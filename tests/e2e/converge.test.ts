@@ -82,6 +82,47 @@ function table(name: string, includeNickname = true): TableIR {
 	};
 }
 
+function fkCoverageModel(prefix: string): ModelIR {
+	const projects = `${prefix}_projects`;
+	return model([
+		{
+			...table(projects, false),
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+		},
+		{
+			...table(`${prefix}_project_state`, false),
+			columns: [{ name: 'project_id', type: 'integer', nullable: false }],
+			primaryKey: 'project_id',
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: projects, columns: ['id'] },
+				},
+			],
+		},
+		{
+			...table(`${prefix}_files`, false),
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'project_id', type: 'integer', nullable: false },
+				{ name: 'path', type: 'string', nullable: false },
+			],
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: projects, columns: ['id'] },
+				},
+			],
+			indexes: [
+				{
+					name: `${prefix}_files_project_id_path_index`,
+					columns: ['project_id', 'path'],
+				},
+			],
+		},
+	]);
+}
+
 function legacyTable(name: string, adopt = true): TableIR {
 	return {
 		name,
@@ -1155,6 +1196,37 @@ describe('convergePg', () => {
 					`${schema}.${tableName}`,
 				]),
 			).resolves.toMatchObject({ rows: [{ relation: null }] });
+	});
+
+	it('converges FKs covered by a primary key and a leading composite index', async () => {
+		const pool = await getTestPool();
+		const prefix = 'fk_coverage_converge';
+		const desired = fkCoverageModel(prefix);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		for (const [tableName, indexes] of [
+			[`${prefix}_projects`, [`pk_${prefix}_projects`]],
+			[`${prefix}_project_state`, [`pk_${prefix}_project_state`]],
+			[
+				`${prefix}_files`,
+				[`${prefix}_files_project_id_path_index`, `pk_${prefix}_files`],
+			],
+		] as const) {
+			await expect(
+				pool.query(
+					'SELECT indexname FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 ORDER BY indexname',
+					[schema, tableName],
+				),
+			).resolves.toMatchObject({
+				rows: indexes.map((indexname) => ({ indexname })),
+			});
+		}
 	});
 
 	it('refuses new-table children that target an existing managed table', async () => {

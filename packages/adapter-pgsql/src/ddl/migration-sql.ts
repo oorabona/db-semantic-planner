@@ -34,6 +34,7 @@ import {
 	assertPartitionStrategy,
 	generateCreateIndex,
 } from './ddl-generator.js';
+import { hasDeclaredFkIndexCoverage } from './fk-index-coverage.js';
 import {
 	assertNonZeroSequenceIncrement,
 	normalizeOptionalBoolean,
@@ -486,10 +487,14 @@ function buildFkAutoIndexSpec(
 	};
 }
 
-function buildFkAutoIndex(table: TableIR, fkCol: string): IndexIR {
+function buildFkAutoIndexFromSpec(spec: IndexRenderSpec): IndexIR {
+	const fkColumn = spec.keys[0]?.column;
+	if (fkColumn === undefined) {
+		throw new Error('FK auto-index spec must have one column key');
+	}
 	return {
-		name: getAutoFkIndexName(table.name, fkCol),
-		columns: [fkCol],
+		name: spec.name,
+		columns: [fkColumn],
 		unique: false,
 	};
 }
@@ -503,17 +508,12 @@ export function collectFkAutoIndexSpecs(
 		if (change.kind !== 'create_table') continue;
 		const table = change.meta?.table as TableIR | undefined;
 		if (!table) continue;
-		const explicitIndexColumns = new Set(
-			table.indexes.flatMap((idx) =>
-				idx.columns.length === 1 ? idx.columns : [],
-			),
-		);
 		for (const fk of table.foreignKeys) {
 			const fkCol = fk.columns[0];
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				!explicitIndexColumns.has(fkCol)
+				!hasDeclaredFkIndexCoverage(table, fkCol)
 			) {
 				specs.push(buildFkAutoIndexSpec(table, fkCol, schemaName));
 			}
@@ -634,38 +634,19 @@ export function generateMigrationSQL(
 	}
 	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
-	// FK auto-indexes for new tables (single-column FKs without explicit index)
+	// FK auto-indexes for new tables (single-column FKs without a covering key)
 	if (options?.fkAutoIndex !== false) {
-		for (const change of changes) {
-			if (change.kind === 'create_table') {
-				const table = change.meta?.table as TableIR | undefined;
-				if (!table) continue;
-				const explicitIndexColumns = new Set(
-					table.indexes.flatMap((idx) =>
-						idx.columns.length === 1 ? idx.columns : [],
-					),
-				);
-				for (const fk of table.foreignKeys) {
-					const fkCol = fk.columns[0];
-					if (
-						fk.columns.length === 1 &&
-						fkCol &&
-						!explicitIndexColumns.has(fkCol)
-					) {
-						const spec = buildFkAutoIndexSpec(table, fkCol, schemaName);
-						statements.push(
-							generateCreateIndex(
-								table.name,
-								buildFkAutoIndex(table, fkCol),
-								schemaName,
-								identityNaming,
-								indexContext,
-								spec.ifNotExists,
-							),
-						);
-					}
-				}
-			}
+		for (const spec of collectFkAutoIndexSpecs(changes, schemaName)) {
+			statements.push(
+				generateCreateIndex(
+					spec.table,
+					buildFkAutoIndexFromSpec(spec),
+					schemaName,
+					identityNaming,
+					indexContext,
+					spec.ifNotExists,
+				),
+			);
 		}
 	}
 	return statements;

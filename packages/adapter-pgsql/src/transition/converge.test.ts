@@ -1,4 +1,4 @@
-import type { DbCasing, ModelIR, TableIR } from '@dbsp/types';
+import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
@@ -288,6 +288,34 @@ function createTableWithForeignKey(
 				indexes,
 			},
 		},
+	};
+}
+
+function freshSingleColumnFkChange(
+	overrides: Partial<TableIR> = {},
+): SchemaChange {
+	const table: TableIR = {
+		name: 'posts',
+		columns: [
+			{ name: 'author_id', type: 'integer', nullable: false },
+			{ name: 'tenant_id', type: 'integer', nullable: false },
+			{ name: 'id', type: 'integer', nullable: false },
+		],
+		foreignKeys: [
+			{
+				columns: ['author_id'],
+				references: { table: 'parents', columns: ['id'] },
+			},
+		],
+		indexes: [],
+		...overrides,
+	};
+	return {
+		kind: 'create_table',
+		table: 'posts',
+		destructive: false,
+		details: 'Create table posts',
+		meta: { table },
 	};
 }
 
@@ -1758,6 +1786,89 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.execute).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		[
+			'a leading composite primary key',
+			{ primaryKey: ['author_id', 'tenant_id'] },
+		],
+		['a single-column primary key', { primaryKey: 'author_id' }],
+		[
+			'a leading composite index',
+			{
+				indexes: [
+					{ name: 'posts_author_tenant', columns: ['author_id', 'tenant_id'] },
+				],
+			},
+		],
+		[
+			'an index with INCLUDE columns',
+			{
+				indexes: [
+					{
+						name: 'posts_author_include',
+						columns: ['author_id'],
+						include: ['id'],
+					},
+				],
+			},
+		],
+		[
+			'a unique index',
+			{
+				indexes: [
+					{ name: 'posts_author_unique', columns: ['author_id'], unique: true },
+				],
+			},
+		],
+		[
+			'a unique column',
+			{
+				columns: [
+					{ name: 'author_id', type: 'integer', nullable: false, unique: true },
+					{ name: 'tenant_id', type: 'integer', nullable: false },
+					{ name: 'id', type: 'integer', nullable: false },
+				],
+			},
+		],
+	] as const)('admits a fresh FK covered by %s', async (_reason, overrides) => {
+		mocks.compare.mockResolvedValue({
+			changes: [freshSingleColumnFkChange(overrides)],
+		});
+		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
+
+		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
+			kind: 'applied',
+		});
+	});
+
+	it.each([
+		['a non-leading composite index', { columns: ['tenant_id', 'author_id'] }],
+		['a partial index', { columns: ['author_id'], where: 'id > 0' }],
+		[
+			'an expression index',
+			{ columns: ['author_id'], expressions: ['lower(author_id)'] },
+		],
+		['a gin index', { columns: ['author_id'], method: 'gin' }],
+		['a hash index', { columns: ['author_id'], method: 'hash' }],
+	] as const)(
+		'refuses a fresh FK covered only by %s',
+		async (_reason, index) => {
+			mocks.compare.mockResolvedValue({
+				changes: [
+					freshSingleColumnFkChange({
+						indexes: [
+							{ name: 'posts_author_index', ...index } satisfies IndexIR,
+						],
+					}),
+				],
+			});
+
+			await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+				refusal: 'unsupported-change',
+			});
+		},
+	);
 
 	it('admits a fresh composite FK because the generator does not auto-index it', async () => {
 		mocks.compare.mockResolvedValue({

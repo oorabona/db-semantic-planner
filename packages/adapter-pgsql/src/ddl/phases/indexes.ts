@@ -13,6 +13,7 @@
 
 import type { IndexIR } from '@dbsp/types';
 import { generateCreateIndex } from '../ddl-generator.js';
+import { hasDeclaredFkIndexCoverage } from '../fk-index-coverage.js';
 import { getAutoFkIndexName } from '../schema-diff.js';
 import type { PhaseContext } from './types.js';
 
@@ -28,13 +29,6 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 
 	for (const table of tables) {
-		// Collect explicit index column names to avoid duplicating FK auto-indexes
-		const explicitIndexColumns = new Set(
-			table.indexes.flatMap((idx) =>
-				idx.columns.length === 1 ? idx.columns : [],
-			),
-		);
-
 		// Explicit indexes
 		for (const idx of table.indexes) {
 			statements.push(
@@ -42,14 +36,14 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 			);
 		}
 
-		// Auto-generate indexes for single-column FK columns without an explicit index
+		// Auto-generate indexes for single-column FKs without a covering declared key.
 		if (fkAutoIndex) {
 			for (const fk of table.foreignKeys) {
 				const fkCol = fk.columns[0];
 				if (
 					fk.columns.length === 1 &&
 					fkCol &&
-					!explicitIndexColumns.has(fkCol)
+					!hasDeclaredFkIndexCoverage(table, fkCol)
 				) {
 					const dbTableName = naming.toDatabase(table.name);
 					const dbFkCol = naming.toDatabase(fkCol);

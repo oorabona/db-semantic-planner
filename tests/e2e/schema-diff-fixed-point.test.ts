@@ -63,6 +63,45 @@ function table(
 	return { name, columns, foreignKeys: [], indexes: [], ...overrides };
 }
 
+function fkCoverageModel(prefix: string): ModelIR {
+	const projects = `${prefix}_projects`;
+	return model([
+		table(projects, [column('id', 'integer')], { primaryKey: 'id' }),
+		table(`${prefix}_project_state`, [column('project_id', 'integer')], {
+			primaryKey: 'project_id',
+			foreignKeys: [
+				{
+					columns: ['project_id'],
+					references: { table: projects, columns: ['id'] },
+				},
+			],
+		}),
+		table(
+			`${prefix}_files`,
+			[
+				column('id', 'integer'),
+				column('project_id', 'integer'),
+				column('path', 'string'),
+			],
+			{
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['project_id'],
+						references: { table: projects, columns: ['id'] },
+					},
+				],
+				indexes: [
+					{
+						name: `${prefix}_files_project_id_path_index`,
+						columns: ['project_id', 'path'],
+					},
+				],
+			},
+		),
+	]);
+}
+
 describe('#797 schema-diff fixed points (real PG)', () => {
 	let adapter: Awaited<ReturnType<typeof createPgsqlAdapterForSchema>>;
 
@@ -120,6 +159,34 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 			),
 		]);
 		await apply(desired);
+		expect((await changes(desired)).changes).toEqual([]);
+	});
+
+	it('does not create or remove automatic indexes for FK coverage and legacy indexes', async () => {
+		const prefix = 'fk_coverage_diff';
+		const desired = fkCoverageModel(prefix);
+		const current = await adapter.introspect({ schema: SCHEMA });
+		const sql = generateMigrationSQL(compareSchemata(desired, current), {
+			includeDestructive: false,
+			schemaName: SCHEMA,
+		});
+		expect(
+			sql.some((statement) =>
+				statement.includes(`"idx_${prefix}_project_state_project_id"`),
+			),
+		).toBe(false);
+		expect(
+			sql.some((statement) =>
+				statement.includes(`"idx_${prefix}_files_project_id"`),
+			),
+		).toBe(false);
+		const pool = await getTestPool();
+		for (const statement of sql) await pool.query(statement);
+		expect((await changes(desired)).changes).toEqual([]);
+
+		await pool.query(
+			`CREATE INDEX "idx_${prefix}_files_project_id" ON "${SCHEMA}"."${prefix}_files" ("project_id")`,
+		);
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 

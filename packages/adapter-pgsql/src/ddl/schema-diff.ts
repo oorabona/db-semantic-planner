@@ -54,6 +54,10 @@ import {
 import { escapeDiagnosticText } from '../validate.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
 import {
+	hasDeclaredFkIndexCoverage,
+	hasDeclaredSingleColumnFkIndex,
+} from './fk-index-coverage.js';
+import {
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
 } from './generated-source-normalizers.js';
@@ -1304,15 +1308,11 @@ function compareIndexes(
 	db: TableIR,
 	changes: SchemaChange[],
 ): void {
-	// Build the set of FK auto-index keys.
-	// generateDDL (fkAutoIndex=true default) creates an index for every single-column FK that
-	// does not already have an explicit index.  These indexes are managed automatically — they
-	// should never trigger create_index or drop_index diffs.
-	const explicitIndexCols = new Set(
-		schema.indexes.flatMap((idx) =>
-			idx.columns.length === 1 ? idx.columns : [],
-		),
-	);
+	// Build the set of FK auto-index keys. generateDDL (fkAutoIndex=true by
+	// default) creates one for every single-column FK without declared coverage.
+	// These indexes are managed automatically — they should never trigger index
+	// diffs. Keep recognizing the pre-#830 shape too, so a legacy automatic
+	// index remains protected when a PK or leading composite key now covers it.
 	// These declared indexes still stay in schemaIdxMap below. This set only keeps an
 	// existing FK auto-index from being dropped before the requested index reaches
 	// the emitter and fails loudly.
@@ -1329,8 +1329,25 @@ function compareIndexes(
 				(fk) =>
 					fk.columns.length === 1 &&
 					fk.columns[0] !== undefined &&
-					!explicitIndexCols.has(fk.columns[0]),
+					!hasDeclaredFkIndexCoverage(schema, fk.columns[0]),
 			)
+			.map((fk) =>
+				indexComparisonKey({
+					columns: fk.columns,
+					unique: false,
+				}),
+			),
+	);
+	const legacyAutoFkIndexKeys = new Set(
+		schema.foreignKeys
+			.filter((fk) => {
+				const fkCol = fk.columns[0];
+				return (
+					fk.columns.length === 1 &&
+					fkCol !== undefined &&
+					!hasDeclaredSingleColumnFkIndex(schema, fkCol)
+				);
+			})
 			.map((fk) =>
 				indexComparisonKey({
 					columns: fk.columns,
@@ -1402,6 +1419,7 @@ function compareIndexes(
 		if (
 			!schemaIdxMap.has(key) &&
 			!autoFkIndexKeys.has(key) &&
+			!legacyAutoFkIndexKeys.has(key) &&
 			!declaredUnemittableFkAutoIndexKeys.has(key) &&
 			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
 		) {
