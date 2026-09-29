@@ -138,7 +138,7 @@ planning refusals an apply runs before it starts executing, and returns without 
 | `result.kind` | Meaning |
 |---|---|
 | `no-drift` | An apply would find nothing to do. |
-| `would-apply` | `steps` lists, in execution order, the steps an apply would run: each has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. `planDigest` identifies that plan. |
+| `would-apply` | `steps` lists, in execution order, the steps an apply would run. A generated or adoption step has `stepKey`, `kind` (a change kind, `adopt_table` or `adopt_sequence`), `address`, and the `table`, `column` and `details` of its change. An [application step](#application-steps) has only `kind: 'application-step'`, its `id`, and `step` (`'once'` or `'assert'`). `planDigest` identifies that plan. |
 
 Before executing, a check refuses as an apply would (`busy`, `ledger-absent`, `database-read-only`,
 `unsupported-change`, …), except that it never creates a ledger: with no ledger it refuses
@@ -205,9 +205,17 @@ await convergePg(pool, model, {
 - Each step is one transaction on converge's connection. `tx.query` refuses transaction-control
   statements (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`, …); this guards against mistakes, not against
   code that runs with the same role. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
-  `statement_timeout` applies only if the step sets `statementTimeoutMs`.
+  `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
+  `apply`. Both are whole milliseconds from 1 to 2147483647.
+- Use `SET LOCAL`, not `SET`: session-level effects (`SET`, `SET ROLE`, `LISTEN`, `PREPARE`,
+  temporary tables, session advisory locks) are not part of the step and can affect the rest of that
+  converge call. Converge closes its connection instead of returning it to the pool whenever a step
+  ran, so they never reach your application's queries. `tx` is valid only until the callback returns.
 - An error in a step rolls it back and records nothing; converge stops with
   `application-step-failed`, and what committed before stays committed. The next call retries it.
+  If the connection is lost while the step's `COMMIT` is in flight, the result is
+  `transport-ambiguous` instead: the step may or may not be recorded, so run converge again and let it
+  observe the ledger rather than repeating the step's work yourself.
 - A recorded run appears in `applied` as `application-step:<id>`. `no-drift` means no generated
   change, every `once` recorded and every `assert` healthy. Check mode runs `inspect` read-only,
   never `apply`, and lists pending steps as `application-step` entries of `steps`.
@@ -220,13 +228,14 @@ A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail`
 `changes` carries planning context and can be empty. An error raised before execution starts — an
 invalid model, a connection failure, a database error while planning — is thrown as it is, except a
 database error inside an `initialize` preflight scope (a missing privilege, for example), which
-becomes `initialization-refused` with the error in `initialization.detail`. A failure
-during execution becomes an `execution-refused` or `adoption-refused` refusal, or a
-`partially-applied` or `transport-ambiguous` result.
+becomes `initialization-refused` with the error in `initialization.detail`, and an error in an
+application step's `inspect` or `apply`, which becomes `application-step-failed`. A failure
+during execution becomes an `execution-refused`, `adoption-refused` or `application-step-failed`
+refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a non-positive timeout, a missing `inspect` or `apply`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |

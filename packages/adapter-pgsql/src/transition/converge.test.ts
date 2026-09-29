@@ -692,6 +692,26 @@ describe('convergePg refusal boundary', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
+	it('keeps an unexpected step getter error out of invalid-options detail', async () => {
+		const pool = poolFor();
+		const step = {
+			get kind(): never {
+				throw new Error('X');
+			},
+		};
+		await expect(
+			Reflect.apply(convergePg, undefined, [
+				pool,
+				emptyModel(),
+				{ steps: [step] },
+			]),
+		).rejects.toMatchObject({
+			refusal: 'invalid-options',
+			detail: 'converge steps are invalid',
+		});
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		{
 			kind: 'once',
@@ -751,6 +771,38 @@ describe('convergePg refusal boundary', () => {
 			steps: [{ kind: 'application-step', id: 'state-check', step: 'assert' }],
 		});
 		expect(apply).not.toHaveBeenCalled();
+	});
+
+	it('destroys a client after an application-step callback and releases one with no steps', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const callbackClient = client();
+		await expect(
+			convergePg(poolFor(callbackClient), emptyModel(), {
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'session-state-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+		expect(callbackClient.release).toHaveBeenCalledWith(
+			expect.objectContaining({
+				message:
+					'converge application step callback may have changed session state',
+			}),
+		);
+
+		const untouchedClient = client();
+		await expect(
+			convergePg(poolFor(untouchedClient), emptyModel()),
+		).resolves.toMatchObject({ kind: 'no-drift' });
+		expect(untouchedClient.release).toHaveBeenCalledWith(undefined);
 	});
 
 	it.each(['once', Object.create(null)])(

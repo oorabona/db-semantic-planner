@@ -570,6 +570,72 @@ describe('convergePg', () => {
 		}
 	});
 
+	it('refuses a once when an assert was recorded under its id', async () => {
+		const pool = await getTestPool();
+		const id = `assert-once-${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		let healthy = false;
+		await convergePg(pool, model([]), {
+			schema,
+			steps: [
+				{
+					kind: 'assert',
+					id,
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					inspect: async () => (healthy ? 'healthy' : 'unhealthy'),
+					apply: async () => {
+						healthy = true;
+					},
+				},
+			],
+		});
+		await expect(
+			convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({ refusal: 'application-step-changed' });
+	});
+
+	it('destroys a session that an application step changes with SET', async () => {
+		const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL! });
+		try {
+			const before = await pool.connect();
+			const defaultSearchPath = (
+				await before.query<{ readonly search_path: string }>('SHOW search_path')
+			).rows[0]?.search_path;
+			before.release();
+			await convergePg(pool, model([]), {
+				schema,
+				steps: [
+					{
+						kind: 'once',
+						id: `set-search-path-${randomUUID().replaceAll('-', '').slice(0, 12)}`,
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							await tx.query('SET search_path TO pg_catalog');
+						},
+					},
+				],
+			});
+			expect(
+				(await pool.query<{ readonly search_path: string }>('SHOW search_path'))
+					.rows[0]?.search_path,
+			).toBe(defaultSearchPath);
+		} finally {
+			await pool.end();
+		}
+	});
+
 	it('does not record an assert that remains unhealthy after apply', async () => {
 		const pool = await getTestPool();
 		const id = `assert-failure-${randomUUID().replaceAll('-', '').slice(0, 12)}`;

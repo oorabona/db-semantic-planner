@@ -1,4 +1,9 @@
-import type { LedgerAddress, LedgerChainMember, LedgerHome } from '@dbsp/types';
+import type {
+	LedgerAddress,
+	LedgerChainMember,
+	LedgerHome,
+	LedgerPayload,
+} from '@dbsp/types';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +39,7 @@ vi.mock('./ledger.js', async (importOriginal) => ({
 
 import {
 	createPgApplicationStepTx,
+	type PgApplicationStepTx,
 	planPgApplicationSteps,
 	runPgApplicationSteps,
 	validatePgConvergeApplicationSteps,
@@ -49,16 +55,16 @@ function completedOnceChain(
 	ledger: LedgerHome,
 	address: LedgerAddress,
 	digest: string,
-) {
-	const declared = {
+	recorded: LedgerPayload = {
 		value: { id: 'items-backfill', digest, step: 'once' },
 		digest,
-	} as const;
+	},
+) {
 	const claim: LedgerChainMember = {
 		eventId: 'application-step-claim',
 		address,
 		eventKind: 'intent',
-		declared,
+		declared: recorded,
 		controller: 'owner',
 		controllerOid: '10',
 	};
@@ -67,7 +73,7 @@ function completedOnceChain(
 		address,
 		eventKind: 'observed',
 		predecessor: claim.eventId,
-		observed: declared,
+		observed: recorded,
 		controller: 'owner',
 		controllerOid: '10',
 	};
@@ -310,6 +316,37 @@ describe('converge application steps', () => {
 		expect(readPgOutcomeSessionCompromise(client as never)).toBe(rollbackError);
 	});
 
+	it('stops after a healthy assert rollback compromises the session', async () => {
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'ROLLBACK') throw new Error('rollback lost');
+			return { rows: [] };
+		});
+		await expect(
+			runPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'healthy-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'application-step-failed',
+			stepId: 'healthy-check',
+		});
+		expect(
+			query.mock.calls.filter(([statement]) => statement === 'ROLLBACK'),
+		).toHaveLength(1);
+	});
+
 	it('refuses an inspection status outside the public contract', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		await expect(
@@ -536,6 +573,80 @@ describe('converge application steps', () => {
 		expect(completed.apply).not.toHaveBeenCalled();
 		expect(mocks.appendClaim).not.toHaveBeenCalled();
 		expect(mocks.appendResolution).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{
+			value: { id: 'items-backfill', digest: 'v1', step: 'assert' },
+			digest: 'v1',
+		},
+		{ value: { id: 'items-backfill', digest: 'v1' }, digest: 'v1' },
+	] satisfies readonly LedgerPayload[])(
+		'refuses a completed once with an incompatible recorded payload in apply and check mode',
+		async (recorded) => {
+			mocks.chain.mockImplementation(async (ledger, address) =>
+				completedOnceChain(ledger, address, 'v1', recorded),
+			);
+			const query = vi.fn(async (text: string) =>
+				queryWithCurrentController(text),
+			);
+			const completed = {
+				kind: 'once' as const,
+				id: 'items-backfill',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				apply: vi.fn(async () => undefined),
+			};
+			const input = {
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [completed],
+			};
+
+			await expect(planPgApplicationSteps(input)).rejects.toMatchObject({
+				refusal: 'application-step-changed',
+				stepId: 'items-backfill',
+			});
+			await expect(
+				runPgApplicationSteps({ ...input, phase: 'after-generated-ddl' }),
+			).rejects.toMatchObject({
+				refusal: 'application-step-changed',
+				stepId: 'items-backfill',
+			});
+			expect(completed.apply).not.toHaveBeenCalled();
+		},
+	);
+
+	it('revokes a callback transaction facade after the callback settles', async () => {
+		const query = vi.fn(async (text: string) =>
+			queryWithCurrentController(text),
+		);
+		let retained: PgApplicationStepTx | undefined;
+		await expect(
+			runPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'once',
+						id: 'retained-facade',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply: async (tx) => {
+							retained = tx;
+						},
+					},
+				],
+			}),
+		).resolves.toEqual(['application-step:retained-facade']);
+		const callsBeforeRetainedQuery = query.mock.calls.length;
+		await expect(retained?.query('SELECT 1')).rejects.toThrow(
+			'application step transaction facade is no longer active',
+		);
+		expect(query).toHaveBeenCalledTimes(callsBeforeRetainedQuery);
 	});
 
 	it('refuses a completed once whose recorded digest changes in apply and check mode', async () => {

@@ -1186,6 +1186,10 @@ function projectCheckedPlan(
  * <database> <run-id>`, have the ledger owner resolve an unmapped reservation
  * and the journal owner one whose journal attribution cannot be read, then call
  * converge again.
+ * Application steps run on the converge session: session-level effects such as
+ * `SET` without `LOCAL`, `SET ROLE`, `LISTEN`, `PREPARE`, temporary tables and
+ * session advisory locks are not part of a step and can affect the rest of the
+ * call. Steps should use `SET LOCAL`.
  * A declared table with `adopt: true` is taken into management when it exists,
  * the ledger projects its address as unknown (the only state an adoption claim
  * opens from), and it matches the declaration exactly after `externalIndexes`
@@ -1246,7 +1250,9 @@ export async function convergePg(
 		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
 	} catch (error) {
 		throw invalidOptions(
-			error instanceof Error ? error.message : 'converge steps are invalid',
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
 		);
 	}
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
@@ -1294,7 +1300,9 @@ export async function convergePg(
 		| 'converge could not confirm ledger lock release'
 		| 'converge could not confirm predecessor run lock release'
 		| 'converge received a transport-ambiguous outcome'
+		| 'converge application step callback may have changed session state'
 		| undefined;
+	let applicationStepCallbackRan = false;
 	let locked = false;
 	try {
 		destroyReason = 'converge could not determine ledger lock acquisition';
@@ -1579,6 +1587,9 @@ export async function convergePg(
 				database,
 				schema,
 				steps: applicationSteps,
+				onApplicationStepCallback: () => {
+					applicationStepCallbackRan = true;
+				},
 			});
 		} catch (error) {
 			if (error instanceof PgApplicationStepError)
@@ -1752,15 +1763,17 @@ export async function convergePg(
 					: { statementTimeoutMs: step.statementTimeoutMs }),
 			})),
 		});
-		if (check)
+		if (check) {
+			const phaseByApplicationStepId = new Map(
+				applicationSteps.map((step) => [step.id, step.phase]),
+			);
 			return {
 				kind: 'would-apply',
 				planDigest,
 				steps: [
 					...plannedApplicationSteps.filter(
 						(step) =>
-							applicationSteps.find((candidate) => candidate.id === step.id)
-								?.phase === 'before-generated-ddl',
+							phaseByApplicationStepId.get(step.id) === 'before-generated-ddl',
 					),
 					...projectCheckedPlan(
 						manifest.manifest.steps,
@@ -1770,11 +1783,11 @@ export async function convergePg(
 					),
 					...plannedApplicationSteps.filter(
 						(step) =>
-							applicationSteps.find((candidate) => candidate.id === step.id)
-								?.phase === 'after-generated-ddl',
+							phaseByApplicationStepId.get(step.id) === 'after-generated-ddl',
 					),
 				],
 			};
+		}
 		let appliedApplicationSteps: readonly string[];
 		try {
 			appliedApplicationSteps = await runPgApplicationSteps({
@@ -1783,6 +1796,9 @@ export async function convergePg(
 				schema,
 				phase: 'before-generated-ddl',
 				steps: applicationSteps,
+				onApplicationStepCallback: () => {
+					applicationStepCallbackRan = true;
+				},
 			});
 		} catch (error) {
 			if (error instanceof PgCommitAcknowledgementAmbiguousError) {
@@ -1858,6 +1874,9 @@ export async function convergePg(
 						schema,
 						phase: 'after-generated-ddl',
 						steps: applicationSteps,
+						onApplicationStepCallback: () => {
+							applicationStepCallbackRan = true;
+						},
 					})),
 				];
 			} catch (error) {
@@ -1914,6 +1933,9 @@ export async function convergePg(
 				destroyReason = 'converge could not confirm ledger lock release';
 			}
 		}
+		if (applicationStepCallbackRan && destroyReason === undefined)
+			destroyReason =
+				'converge application step callback may have changed session state';
 		client.release(
 			destroyReason === undefined
 				? readPgOutcomeSessionCompromise(client)

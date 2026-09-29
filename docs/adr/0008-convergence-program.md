@@ -18,7 +18,7 @@ and each dbsp upgrade can break the pairing.
 
 dbsp owns one convergence program: `convergePg(pool, program, { mode, initialize })`, where the program
 holds the model, the schema, `dbCasing`, the external indexes and the application's declared steps. dbsp
-computes every fingerprint and records every step in its ledger under its lock.
+computes every fingerprint and records every step run in its ledger under its lock.
 
 ### `check` plans without committing
 
@@ -48,8 +48,11 @@ How they are recorded and run:
 - **One transaction per step** on converge's locked connection: `lock_timeout` 5 s unless the step sets
   `lockTimeoutMs`, `statement_timeout` only if it sets `statementTimeoutMs`. An `assert` inspects first
   and records nothing when healthy; otherwise it claims, applies, and inspects again, and records
-  `observed` only if the database is now healthy. Any error rolls the step back, records nothing, and
-  stops converge with `application-step-failed`; earlier steps and DDL stay committed.
+  `observed` only if the database is now healthy. An error before `COMMIT`, or a `COMMIT` PostgreSQL
+  rejects, rolls the step back, records nothing, and stops converge with `application-step-failed`;
+  earlier steps and DDL stay committed. A `COMMIT` whose acknowledgement is lost is
+  `transport-ambiguous`, as for generated steps. Session-level effects of a step are not part of it;
+  converge closes its connection after any step ran instead of returning it to the pool.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
   every `assert` healthy. Check mode runs `inspect` read-only and never `apply`.

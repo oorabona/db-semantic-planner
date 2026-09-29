@@ -17,6 +17,7 @@ import {
 	beginPgOutcome,
 	commitPgOutcome,
 	PgCommitAcknowledgementAmbiguousError,
+	readPgOutcomeSessionCompromise,
 	rollbackPgOutcomeGroup,
 } from './outcome-protocol.js';
 
@@ -214,20 +215,26 @@ function declaration(step: PgConvergeApplicationStep): LedgerPayload {
 	};
 }
 
-function recordedDigest(
+function isRecordedOnce(
 	payload: LedgerPayload | undefined,
-): string | undefined {
+	step: PgConvergeOnceStep,
+): boolean {
 	const value = payload?.value;
-	return value &&
-		typeof value === 'object' &&
-		!Array.isArray(value) &&
-		typeof (value as Record<string, unknown>).digest === 'string'
-		? (value as Record<string, string>).digest
-		: undefined;
+	return Boolean(
+		value &&
+			typeof value === 'object' &&
+			!Array.isArray(value) &&
+			payload.digest === step.digest &&
+			(value as Record<string, unknown>).id === step.id &&
+			(value as Record<string, unknown>).digest === step.digest &&
+			(value as Record<string, unknown>).step === 'once',
+	);
 }
 
 const APPLICATION_STEP_TRANSACTION_CONTROL_MESSAGE =
 	'application step transaction control is refused';
+const APPLICATION_STEP_TX_REVOKED_MESSAGE =
+	'application step transaction facade is no longer active';
 
 function withoutLeadingSqlComments(text: string): string {
 	let remaining = text;
@@ -273,11 +280,18 @@ function refusesApplicationStepTransactionControl(text: string): boolean {
 	);
 }
 
-export function createPgApplicationStepTx(
+interface RevocablePgApplicationStepTx extends PgApplicationStepTx {
+	revoke(): void;
+}
+
+function createRevocablePgApplicationStepTx(
 	client: PoolClient,
-): PgApplicationStepTx {
+): RevocablePgApplicationStepTx {
+	let active = true;
 	return {
 		query: (text: string, values?: readonly unknown[]) => {
+			if (!active)
+				return Promise.reject(new Error(APPLICATION_STEP_TX_REVOKED_MESSAGE));
 			if (refusesApplicationStepTransactionControl(text))
 				return Promise.reject(
 					new Error(APPLICATION_STEP_TRANSACTION_CONTROL_MESSAGE),
@@ -291,7 +305,30 @@ export function createPgApplicationStepTx(
 			};
 			return client.query(query);
 		},
+		revoke: () => {
+			active = false;
+		},
 	};
+}
+
+export function createPgApplicationStepTx(
+	client: PoolClient,
+): PgApplicationStepTx {
+	return createRevocablePgApplicationStepTx(client);
+}
+
+async function withPgApplicationStepTx<T>(
+	client: PoolClient,
+	callback: (tx: PgApplicationStepTx) => Promise<T> | T,
+	onCallback?: () => void,
+): Promise<T> {
+	const tx = createRevocablePgApplicationStepTx(client);
+	try {
+		onCallback?.();
+		return await callback(tx);
+	} finally {
+		tx.revoke();
+	}
 }
 
 async function controller(client: PoolClient) {
@@ -347,7 +384,7 @@ async function admission(
 	if (
 		step.kind === 'once' &&
 		projection.stableState === 'managed' &&
-		recordedDigest(projection.declaration) !== step.digest
+		!isRecordedOnce(projection.declaration, step)
 	)
 		throw new PgApplicationStepError(
 			'application-step-changed',
@@ -380,7 +417,11 @@ async function admission(
 				step.id,
 				'application step recovery is required',
 			);
-		if (step.kind === 'once' && projection.stableState === 'managed')
+		if (
+			step.kind === 'once' &&
+			projection.stableState === 'managed' &&
+			isRecordedOnce(projection.declaration, step)
+		)
 			return { chain, projection, plan, complete: true as const };
 		throw new PgApplicationStepError(
 			'application-step-failed',
@@ -393,11 +434,16 @@ async function admission(
 
 async function inspectPgApplicationStep(
 	step: PgConvergeAssertStep,
-	tx: PgApplicationStepTx,
+	client: PoolClient,
+	onCallback?: () => void,
 ): Promise<'healthy' | 'unhealthy'> {
 	let status: unknown;
 	try {
-		status = await step.inspect(tx);
+		status = await withPgApplicationStepTx(
+			client,
+			(tx) => step.inspect(tx),
+			onCallback,
+		);
 	} catch (error) {
 		throw new PgApplicationStepError(
 			'application-step-failed',
@@ -414,6 +460,18 @@ async function inspectPgApplicationStep(
 	return status;
 }
 
+function assertPgApplicationStepSessionHealthy(
+	client: PoolClient,
+	step: PgConvergeApplicationStep,
+): void {
+	if (readPgOutcomeSessionCompromise(client))
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			step.id,
+			'application step rollback left the session outcome unknown',
+		);
+}
+
 async function setPgApplicationStepStatementTimeout(
 	client: PoolClient,
 	timeout: number | undefined,
@@ -428,10 +486,12 @@ export async function planPgApplicationSteps(input: {
 	readonly database: string;
 	readonly schema: string;
 	readonly steps: readonly PgConvergeApplicationStep[];
+	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly PgPlannedApplicationStep[]> {
 	const planned: PgPlannedApplicationStep[] = [];
 	for (const step of input.steps) {
 		let begun = false;
+		let completed = false;
 		try {
 			await beginPgOutcome(input.client, step.lockTimeoutMs, 'BEGIN READ ONLY');
 			begun = true;
@@ -449,7 +509,8 @@ export async function planPgApplicationSteps(input: {
 				step.kind === 'assert' &&
 				(await inspectPgApplicationStep(
 					step,
-					createPgApplicationStepTx(input.client),
+					input.client,
+					input.onApplicationStepCallback,
 				)) === 'unhealthy';
 			if (!state.complete && (step.kind === 'once' || unhealthy))
 				planned.push({
@@ -457,8 +518,13 @@ export async function planPgApplicationSteps(input: {
 					id: step.id,
 					step: step.kind,
 				});
+			completed = true;
 		} finally {
-			if (begun) await rollbackPgOutcomeGroup(input.client);
+			if (begun) {
+				await rollbackPgOutcomeGroup(input.client);
+				if (completed)
+					assertPgApplicationStepSessionHealthy(input.client, step);
+			}
 		}
 	}
 	return planned;
@@ -470,6 +536,7 @@ export async function runPgApplicationSteps(input: {
 	readonly schema: string;
 	readonly phase: PgConvergeApplicationStep['phase'];
 	readonly steps: readonly PgConvergeApplicationStep[];
+	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly string[]> {
 	const applied: string[] = [];
 	for (const step of input.steps) {
@@ -497,15 +564,20 @@ export async function runPgApplicationSteps(input: {
 			if (state.complete) {
 				await rollbackPgOutcomeGroup(input.client);
 				begun = false;
+				assertPgApplicationStepSessionHealthy(input.client, step);
 				continue;
 			}
-			const tx = createPgApplicationStepTx(input.client);
 			if (
 				step.kind === 'assert' &&
-				(await inspectPgApplicationStep(step, tx)) === 'healthy'
+				(await inspectPgApplicationStep(
+					step,
+					input.client,
+					input.onApplicationStepCallback,
+				)) === 'healthy'
 			) {
 				await rollbackPgOutcomeGroup(input.client);
 				begun = false;
+				assertPgApplicationStepSessionHealthy(input.client, step);
 				continue;
 			}
 			const executionId = `application-step:${randomUUID()}`;
@@ -544,10 +616,18 @@ export async function runPgApplicationSteps(input: {
 					},
 				],
 			);
-			await step.apply(tx);
+			await withPgApplicationStepTx(
+				input.client,
+				(tx) => step.apply(tx),
+				input.onApplicationStepCallback,
+			);
 			if (
 				step.kind === 'assert' &&
-				(await inspectPgApplicationStep(step, tx)) !== 'healthy'
+				(await inspectPgApplicationStep(
+					step,
+					input.client,
+					input.onApplicationStepCallback,
+				)) !== 'healthy'
 			)
 				throw new PgApplicationStepError(
 					'application-step-failed',
