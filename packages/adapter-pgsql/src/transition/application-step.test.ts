@@ -327,10 +327,9 @@ describe('converge application steps', () => {
 		});
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
-			"SET LOCAL lock_timeout = '5000ms'",
-			'SET LOCAL statement_timeout TO DEFAULT',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
+			"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
 		]);
@@ -431,16 +430,15 @@ describe('converge application steps', () => {
 		});
 		expect(query.mock.calls.map(([text]) => text)).toEqual([
 			'BEGIN READ ONLY',
-			"SET LOCAL lock_timeout = '5000ms'",
-			'SET LOCAL statement_timeout TO DEFAULT',
 			'ROLLBACK',
 			'BEGIN READ ONLY',
+			"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
 			"SET LOCAL lock_timeout = '5000ms'",
 			'ROLLBACK',
 		]);
 	});
 
-	it('resets admission timeouts for a following step without overrides', async () => {
+	it('uses the connection settings throughout batched planning admission', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		await expect(
 			planPgApplicationSteps({
@@ -478,14 +476,34 @@ describe('converge application steps', () => {
 				id: 'default-admission',
 			},
 		]);
-		expect(query.mock.calls).toEqual([
-			['BEGIN READ ONLY'],
-			["SET LOCAL lock_timeout = '25ms'"],
-			["SET LOCAL statement_timeout = '1ms'"],
-			["SET LOCAL lock_timeout = '5000ms'"],
-			['SET LOCAL statement_timeout TO DEFAULT'],
-			['ROLLBACK'],
-		]);
+		expect(query.mock.calls).toEqual([['BEGIN READ ONLY'], ['ROLLBACK']]);
+	});
+
+	it('marks the session compromised when planning admission loses its BEGIN acknowledgement', async () => {
+		const beginError = new Error('BEGIN acknowledgement lost');
+		const query = vi.fn(async (statement: string) => {
+			if (statement === 'BEGIN READ ONLY') throw beginError;
+			return { rows: [] };
+		});
+		const client = { query };
+		await expect(
+			planPgApplicationSteps({
+				client: client as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'once',
+						id: 'admission-begin',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						apply,
+					},
+				],
+			}),
+		).rejects.toBe(beginError);
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(beginError);
+		expect(query).toHaveBeenCalledExactlyOnceWith('BEGIN READ ONLY');
 	});
 
 	it('bounds planning inspections with the step timeouts', async () => {
@@ -514,10 +532,12 @@ describe('converge application steps', () => {
 		).resolves.toEqual([]);
 		expect(query.mock.calls).toEqual([
 			['BEGIN READ ONLY'],
-			["SET LOCAL lock_timeout = '25ms'"],
-			["SET LOCAL statement_timeout = '50ms'"],
 			['ROLLBACK'],
 			['BEGIN READ ONLY'],
+			[
+				"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
+				['public'],
+			],
 			["SET LOCAL lock_timeout = '25ms'"],
 			["SET LOCAL statement_timeout = '50ms'"],
 			[
@@ -528,6 +548,68 @@ describe('converge application steps', () => {
 				},
 			],
 			['ROLLBACK'],
+		]);
+	});
+
+	it('sets the target schema before every callback transaction', async () => {
+		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
+		let inspectCount = 0;
+		const step = {
+			kind: 'assert' as const,
+			id: 'state-check',
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			lockTimeoutMs: 25,
+			statementTimeoutMs: 50,
+			inspect: async (tx: PgApplicationStepTx) => {
+				await tx.query('SELECT inspection callback');
+				return inspectCount++ < 2 ? 'unhealthy' : 'healthy';
+			},
+			apply: async (tx: PgApplicationStepTx) => {
+				await tx.query('SELECT apply callback');
+			},
+		};
+		const input = {
+			client: { query } as never,
+			database: 'app',
+			schema: 'Mixed Case',
+			steps: [step],
+		};
+
+		await expect(planPgApplicationSteps(input)).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'state-check',
+				step: 'assert',
+				inspected: true,
+			},
+		]);
+		await expect(
+			runPgApplicationSteps({ ...input, phase: 'after-generated-ddl' }),
+		).resolves.toEqual(['application-step:state-check']);
+		expect(
+			query.mock.calls.filter(
+				([text]) =>
+					text ===
+					"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
+			),
+		).toEqual([
+			[
+				"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
+				['Mixed Case'],
+			],
+			[
+				"SELECT set_config('search_path', quote_ident($1) || ', pg_temp, ' || current_setting('search_path'), true)",
+				['Mixed Case'],
+			],
+		]);
+		expect(
+			query.mock.calls.filter(
+				([text]) => text === "SET LOCAL statement_timeout = '50ms'",
+			),
+		).toEqual([
+			["SET LOCAL statement_timeout = '50ms'"],
+			["SET LOCAL statement_timeout = '50ms'"],
 		]);
 	});
 

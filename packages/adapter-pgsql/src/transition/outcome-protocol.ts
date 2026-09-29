@@ -1512,9 +1512,8 @@ async function admitPgOutcomeClaim(
 	return { admission, chain };
 }
 
-async function begin(
+async function beginPgOutcomeTransaction(
 	executor: TransitionJournalQueryable,
-	timeout: number | undefined,
 	statement = 'BEGIN',
 ): Promise<void> {
 	try {
@@ -1526,6 +1525,14 @@ async function begin(
 		);
 		throw error;
 	}
+}
+
+async function begin(
+	executor: TransitionJournalQueryable,
+	timeout: number | undefined,
+	statement = 'BEGIN',
+): Promise<void> {
+	await beginPgOutcomeTransaction(executor, statement);
 	try {
 		await setPgTransitionLockTimeout(executor, timeout);
 	} catch (error) {
@@ -1535,7 +1542,7 @@ async function begin(
 }
 
 /** Package-internal transaction setup shared by multi-step execution. */
-export { begin as beginPgOutcome };
+export { begin as beginPgOutcome, beginPgOutcomeTransaction };
 
 async function rollback(executor: TransitionJournalQueryable): Promise<void> {
 	try {

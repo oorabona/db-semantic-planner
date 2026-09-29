@@ -46,14 +46,22 @@ How they are recorded and run:
 - **Admission.** A `once` is admitted only from `unknown`; recorded with the same digest it is complete,
   with another digest it refuses `application-step-changed`. An `assert` is admitted from `unknown` or
   `managed`, keeping the controller check.
-- **One transaction per step** on converge's locked connection: `lock_timeout` 5 s unless the step sets
+- **One execution transaction per step** on converge's locked connection (a planning inspection of an
+  `assert`, when it happens, is a separate read-only transaction that is rolled back): `lock_timeout` 5 s unless the step sets
   `lockTimeoutMs`, `statement_timeout` only if it sets `statementTimeoutMs`. An `assert` inspects first
   and records nothing when healthy; otherwise it claims, applies, and inspects again, and records
   `observed` only if the database is now healthy. An error before `COMMIT`, or a `COMMIT` PostgreSQL
   rejects, rolls the step back, records nothing, and stops converge with `application-step-failed`;
   earlier steps and DDL stay committed. A `COMMIT` whose acknowledgement is lost is
   `transport-ambiguous`, as for generated steps. Session-level effects of a step are not part of it;
-  converge closes its connection after any step ran instead of returning it to the pool.
+  converge closes its connection after any step ran instead of returning it to the pool. Each step
+  transaction sets `search_path` to the target schema, `pg_temp`, then the connection's entries
+  (transaction-local), so `current_schema()` is the target and unqualified creation lands there;
+  PostgreSQL still searches `pg_catalog` first, so built-in names win; otherwise a name that exists
+  in the target resolves there and a session temporary table cannot shadow it, while a name absent
+  from it continues down the path. A target schema literally named `$user` cannot host steps.
+  Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
+  deadline on the callback; planning admission runs without them.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
   every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is
