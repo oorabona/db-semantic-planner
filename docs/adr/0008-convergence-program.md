@@ -44,9 +44,11 @@ without its file output. It is evaluated at every start, like the rest of the pr
 - When the schema's ledger is absent, `'pristine'` and `'adopt-existing'` create it through the
   preflight code before converge takes its lock; `'pristine'` first refuses `initialization-refused`
   if a declared table or standalone sequence exists, inside the preflight's own scope transaction.
-  A schema ledger that exists is never passed to the preflight, and a `dbsp_meta` ledger whose
-  identity no longer matches the database fails initialisation, so initialisation never archives a
-  ledger; archiving stays with an explicit `runPgReinitializePreflight`.
+  The preflight runs only when converge saw the schema ledger absent; a ledger another initialiser
+  creates in between is re-inspected under the preflight's lock and left `unchanged`. A ledger whose
+  identity no longer matches the database, on `dbsp_meta` or the schema, fails initialisation, so
+  initialisation never archives a ledger; archiving stays with an explicit
+  `runPgReinitializePreflight`. The schema's ledger is prepared only after `dbsp_meta` is ready.
 - `'adopt-existing'` then treats, on every call, each declared table and standalone sequence that
   exists as marked `adopt: true`, and each that does not as unmarked. Adoption commits per table, so
   this is what lets a start that stopped part-way resume; it also adopts a table created later outside

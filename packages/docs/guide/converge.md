@@ -155,13 +155,15 @@ records the decision.
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
 `changes` carries planning context and can be empty. An error raised before execution starts — an
-invalid model, a connection failure, a database error while planning — is thrown as it is. A failure
+invalid model, a connection failure, a database error while planning — is thrown as it is, except a
+database error inside an `initialize` preflight scope (a missing privilege, for example), which
+becomes `initialization-refused` with the error in `initialization.detail`. A failure
 during execution becomes an `execution-refused` or `adoption-refused` refusal, or a
 `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
 | `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, the preflight's refusal code, its step and its detail. The schema's ledger is created only after `dbsp_meta` is ready, so a refused `dbsp_meta` leaves the schema without a ledger and the next call refuses again; a refusal of the schema itself can leave `dbsp_meta` prepared, which the next call reuses. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |

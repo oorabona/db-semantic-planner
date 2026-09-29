@@ -121,6 +121,21 @@ export interface PgConvergeInitializationPreflightOptions {
 	readonly pristineRelationNames?: readonly string[];
 }
 
+type ReinitializePreflightScopeOptions = Pick<
+	PgReinitializePreflightOptions,
+	'pool' | 'schemas' | 'observer'
+>;
+
+type ReinitializePreflightOutput = Pick<
+	PgReinitializePreflightOptions,
+	'declarations' | 'writeAdoptionFile'
+>;
+
+type ReinitializePreflightScopeOnlyReport = Pick<
+	ReinitializePreflightReport,
+	'scopes'
+>;
+
 type LineageMismatchPolicy = 'archive' | 'refuse';
 
 const LEDGER_TABLES = DBSP_LEDGER_TABLES;
@@ -961,8 +976,28 @@ async function refuseNonPristineRelations(
 		);
 }
 
+function runPgReinitializePreflightInternal(
+	options: ReinitializePreflightScopeOptions,
+	output: ReinitializePreflightOutput,
+): Promise<ReinitializePreflightReport>;
+function runPgReinitializePreflightInternal(
+	options: ReinitializePreflightScopeOptions,
+	output: undefined,
+	beforeFirstWrite?: (
+		client: PgReinitializePreflightClient,
+		home: LedgerHome,
+	) => Promise<void>,
+	lineageMismatchPolicy?: LineageMismatchPolicy,
+	processScopes?: (
+		inspections: readonly ReinitializePreflightScopeInspection[],
+		process: (
+			inspection: ReinitializePreflightScopeInspection,
+		) => Promise<ReinitializePreflightScopeReport>,
+	) => Promise<readonly ReinitializePreflightScopeReport[]>,
+): Promise<ReinitializePreflightScopeOnlyReport>;
 async function runPgReinitializePreflightInternal(
-	options: PgReinitializePreflightOptions,
+	options: ReinitializePreflightScopeOptions,
+	output: ReinitializePreflightOutput | undefined,
 	beforeFirstWrite?: (
 		client: PgReinitializePreflightClient,
 		home: LedgerHome,
@@ -976,7 +1011,7 @@ async function runPgReinitializePreflightInternal(
 	) => Promise<
 		readonly ReinitializePreflightScopeReport[]
 	> = processReinitializePreflightScopes,
-): Promise<ReinitializePreflightReport> {
+): Promise<ReinitializePreflightReport | ReinitializePreflightScopeOnlyReport> {
 	const homes = homesFor(options.schemas);
 	const inspectionClient = await options.pool.connect();
 	let inspections: readonly ReinitializePreflightScopeInspection[];
@@ -1034,24 +1069,22 @@ async function runPgReinitializePreflightInternal(
 			marker.kind === 'unreadable',
 	);
 	if (markerFailure) {
-		return {
-			scopes: inspections.map((inspection) =>
-				inspection === markerFailure
-					? refusal(
-							inspection.home,
-							inspection.marker,
-							'reinitialize-preflight-marker-not-current',
-							markerRefusal(inspection.marker),
-							'marker',
-						)
-					: {
-							ledger: inspection.home,
-							outcome: 'not-attempted',
-							marker: inspection.marker,
-						},
-			),
-			adoptionCandidates: [],
-		};
+		const scopes = inspections.map((inspection) =>
+			inspection === markerFailure
+				? refusal(
+						inspection.home,
+						inspection.marker,
+						'reinitialize-preflight-marker-not-current',
+						markerRefusal(inspection.marker),
+						'marker',
+					)
+				: {
+						ledger: inspection.home,
+						outcome: 'not-attempted' as const,
+						marker: inspection.marker,
+					},
+		);
+		return output ? { scopes, adoptionCandidates: [] } : { scopes };
 	}
 	const process = (inspection: ReinitializePreflightScopeInspection) =>
 		processScope(
@@ -1063,16 +1096,17 @@ async function runPgReinitializePreflightInternal(
 		);
 	const scopes = await processScopes(inspections, process);
 	if (scopes.some((scope) => scope.outcome === 'failed'))
-		return { scopes, adoptionCandidates: [] };
+		return output ? { scopes, adoptionCandidates: [] } : { scopes };
+	if (!output) return { scopes };
 	try {
 		const chains = await readChainAddresses(options.pool, homes);
 		const adoptionCandidates = selectReinitializeAdoptionCandidates(
-			options.declarations,
+			output.declarations,
 			chains,
 		);
 		const report = { scopes, adoptionCandidates };
 		await checkpoint(options.observer, 'output');
-		await options.writeAdoptionFile(report);
+		await output.writeAdoptionFile(report);
 		return report;
 	} catch (error) {
 		return {
@@ -1099,18 +1133,13 @@ async function runPgReinitializePreflightInternal(
 
 export function runPgConvergeInitializationPreflight(
 	options: PgConvergeInitializationPreflightOptions,
-): Promise<ReinitializePreflightReport> {
+): Promise<ReinitializePreflightScopeOnlyReport> {
 	return runPgReinitializePreflightInternal(
 		{
 			pool: options.pool,
 			schemas: [options.schema],
-			declarations: {
-				version: 1,
-				digest: 'converge-initialize',
-				declarations: [],
-			},
-			writeAdoptionFile: async () => undefined,
 		},
+		undefined,
 		options.pristineRelationNames === undefined
 			? undefined
 			: (client, home) =>
@@ -1322,5 +1351,8 @@ async function readChainAddresses(
 export async function runPgReinitializePreflight(
 	options: PgReinitializePreflightOptions,
 ): Promise<ReinitializePreflightReport> {
-	return runPgReinitializePreflightInternal(options);
+	return runPgReinitializePreflightInternal(options, {
+		declarations: options.declarations,
+		writeAdoptionFile: options.writeAdoptionFile,
+	});
 }

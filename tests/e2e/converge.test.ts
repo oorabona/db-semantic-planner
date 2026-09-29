@@ -2149,18 +2149,29 @@ describe('convergePg', () => {
 				`CREATE VIEW "${initializedSchema}"."${name}" AS SELECT 1::integer AS "id", 7::integer AS "code"`,
 			);
 			const desired = model([legacyTable(name, false)]);
-			const never = await convergePg(pool, desired, {
-				schema: initializedSchema,
-				mode: 'check',
-				initialize: 'never',
+			const settle = async (initialize: 'never' | 'adopt-existing') => {
+				try {
+					return {
+						kind: (
+							await convergePg(pool, desired, {
+								schema: initializedSchema,
+								mode: 'check',
+								initialize,
+							})
+						).kind,
+					};
+				} catch (error) {
+					if (!(error instanceof PgConvergeRefusalError)) throw error;
+					return { refusal: error.refusal };
+				}
+			};
+			const never = await settle('never');
+			const adoptExisting = await settle('adopt-existing');
+
+			expect(adoptExisting).toEqual(never);
+			expect(adoptExisting).not.toEqual({
+				refusal: 'adoption-refused',
 			});
-			await expect(
-				convergePg(pool, desired, {
-					schema: initializedSchema,
-					mode: 'check',
-					initialize: 'adopt-existing',
-				}),
-			).resolves.toEqual(never);
 		} finally {
 			await dropSchema(initializedSchema);
 		}

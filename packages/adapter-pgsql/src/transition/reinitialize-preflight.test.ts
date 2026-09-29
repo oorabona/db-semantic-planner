@@ -10,10 +10,17 @@ import { describe, expect, it, vi } from 'vitest';
 const ledger = vi.hoisted(() => ({
 	validatePgLedgerPhysicalShape: vi.fn(),
 }));
+const journal = vi.hoisted(() => ({
+	verifyTransitionJournalShape: vi.fn(),
+}));
 
 vi.mock('./ledger.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('./ledger.js')>()),
 	validatePgLedgerPhysicalShape: ledger.validatePgLedgerPhysicalShape,
+}));
+vi.mock('./journal.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('./journal.js')>()),
+	verifyTransitionJournalShape: journal.verifyTransitionJournalShape,
 }));
 
 import type { ReinitializePreflightScopeInspection } from './reinitialize-preflight.js';
@@ -446,6 +453,125 @@ describe('reinitialize-preflight pure decisions', () => {
 			}),
 		);
 		expect(connect).toHaveBeenCalledTimes(3);
+	});
+
+	it('stops converge initialization after successful scopes but retains preflight output', async () => {
+		ledger.validatePgLedgerPhysicalShape.mockResolvedValue(undefined);
+		journal.verifyTransitionJournalShape.mockResolvedValue(undefined);
+		const chainReadFailure = new Error('chain addresses must not be read');
+		let failChainRead = true;
+		const query = vi.fn(async (sql: string, values?: readonly unknown[]) => {
+			if (sql.includes('pg_is_in_recovery')) {
+				return {
+					rows: [
+						{
+							in_recovery: false,
+							default_transaction_read_only: 'off',
+							transaction_read_only: 'off',
+						},
+					],
+				};
+			}
+			if (sql.startsWith('SELECT to_regclass'))
+				return { rows: [{ relation: 'dbsp_ledger_marker' }] };
+			if (sql.startsWith('SELECT version FROM'))
+				return { rows: [{ version: 1 }] };
+			if (sql.startsWith('SELECT cluster_system_identifier')) {
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'cluster',
+							database_oid: 'database',
+							namespace_oid: 'recorded',
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_control_system')) {
+				return {
+					rows: [
+						{
+							cluster_system_identifier: 'cluster',
+							database_oid: 'database',
+							namespace_oid: 'recorded',
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_try_advisory_xact_lock'))
+				return { rows: [{ locked: true }] };
+			if (sql === 'SELECT current_user AS role')
+				return { rows: [{ role: 'deployer' }] };
+			if (sql.includes('pg_catalog.pg_get_userbyid(n.nspowner)'))
+				return { rows: [{ owner: 'deployer', widened: false }] };
+			if (sql.includes('pg_catalog.pg_get_userbyid(c.relowner)')) {
+				const names = Array.isArray(values?.[1]) ? values[1] : [];
+				return {
+					rows: names.map((relname) => ({
+						relname,
+						owner: 'deployer',
+						widened: false,
+						column_widened: false,
+					})),
+				};
+			}
+			if (sql.startsWith('SELECT c.relname FROM')) {
+				return {
+					rows: [
+						'dbsp_transition_run',
+						'dbsp_transition_run_plan',
+						'dbsp_transition_journal',
+						'dbsp_transition_authorization',
+					].map((relname) => ({ relname })),
+				};
+			}
+			if (sql.startsWith('SELECT DISTINCT address_')) {
+				if (failChainRead) throw chainReadFailure;
+				return { rows: [] };
+			}
+			return { rows: [] };
+		});
+		const connect = vi.fn(async () => ({ query, release: vi.fn() }));
+		const pool = { connect };
+
+		const convergence = await runPgConvergeInitializationPreflight({
+			pool,
+			schema: 'tenant_a',
+		});
+
+		expect(convergence.scopes).toEqual([
+			{
+				ledger: { scope: 'database' },
+				outcome: 'unchanged',
+				marker: { kind: 'current' },
+			},
+			{
+				ledger: { scope: 'schema', schema: 'tenant_a' },
+				outcome: 'unchanged',
+				marker: { kind: 'current' },
+			},
+		]);
+		expect(convergence).not.toHaveProperty('adoptionCandidates');
+		expect(connect).toHaveBeenCalledTimes(3);
+		expect(query).not.toHaveBeenCalledWith(
+			expect.stringContaining('SELECT DISTINCT address_'),
+		);
+
+		failChainRead = false;
+		connect.mockClear();
+		const writeAdoptionFile = vi.fn(async () => {});
+		await runPgReinitializePreflight({
+			pool,
+			schemas: ['tenant_a'],
+			declarations: { version: 1, digest: 'empty', declarations: [] },
+			writeAdoptionFile,
+		});
+
+		expect(connect).toHaveBeenCalledTimes(4);
+		expect(query).toHaveBeenCalledWith(
+			expect.stringContaining('SELECT DISTINCT address_'),
+		);
+		expect(writeAdoptionFile).toHaveBeenCalledTimes(1);
 	});
 
 	it.each([
