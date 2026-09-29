@@ -53,7 +53,9 @@ How they are recorded and run:
   rejects, rolls the step back, records nothing, and stops converge with `application-step-failed`;
   earlier steps and DDL stay committed. A `COMMIT` whose acknowledgement is lost is
   `transport-ambiguous`, as for generated steps. Session-level effects of a step are not part of it;
-  converge closes its connection after any step ran instead of returning it to the pool.
+  converge closes its connection after any step ran instead of returning it to the pool. Each step
+  transaction puts the target schema first in `search_path` (transaction-local), so a step's
+  unqualified names mean `options.schema`; step timeouts bound only the step's callbacks.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
   every `assert` healthy. An `assert` is inspected before anything runs only when nothing else is

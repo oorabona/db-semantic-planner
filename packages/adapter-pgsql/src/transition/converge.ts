@@ -1219,7 +1219,8 @@ function projectCheckedPlan(
  * `initialize` defaults to `never`. `pristine` creates an absent ledger only
  * when declared tables and standalone sequences are absent, while
  * `adopt-existing` creates an absent ledger and adopts matching declared
- * relations on every call. The target schema must already exist.
+ * relations on every call. The target schema must already exist. Application
+ * steps run with the target schema first in `search_path`.
  */
 export function convergePg(
 	pool: Pool,

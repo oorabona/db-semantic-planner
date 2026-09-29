@@ -211,6 +211,10 @@ await convergePg(pool, model, {
   (`pg_advisory_unlock_all()` and the like): converge's own lock lives on the same connection. `lock_timeout` is 5 s unless the step sets `lockTimeoutMs`;
   `statement_timeout` applies only if the step sets `statementTimeoutMs`, to `inspect` as well as
   `apply`. Both are whole milliseconds from 1 to 2147483647.
+- Each step transaction puts the converged schema first in `search_path`, followed by the
+  connection's own entries, so unqualified names in a step resolve in `options.schema` whatever the
+  pool's default is. Timeouts apply only while a step's `inspect` or `apply` runs, never to
+  converge's own ledger reads.
 - Use `SET LOCAL`, not `SET`: session-level effects (`SET`, `SET ROLE`, `LISTEN`, `PREPARE`,
   temporary tables, session advisory locks) are not part of the step and can affect the rest of that
   converge call. Converge closes its connection instead of returning it to the pool whenever a step

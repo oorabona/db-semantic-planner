@@ -478,6 +478,69 @@ describe('convergePg', () => {
 		).resolves.toMatchObject({ rows: [{ exists: true }] });
 	});
 
+	it('runs unqualified application-step SQL in a mixed-case target schema before public', async () => {
+		const targetSchema = `Mixed_Step_Path_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=public',
+		});
+		const steps = [
+			{
+				kind: 'once' as const,
+				id: 'widgets-insert',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query('INSERT INTO widgets (id) VALUES (1)');
+				},
+			},
+			{
+				kind: 'assert' as const,
+				id: 'widgets-present',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				inspect: async (tx: PgApplicationStepTx) => {
+					const result = await tx.query<{ readonly count: string }>(
+						'SELECT count(*)::text AS count FROM widgets',
+					);
+					return result.rows[0]?.count === '1' ? 'healthy' : 'unhealthy';
+				},
+				apply: async () => undefined,
+			},
+		];
+		try {
+			await createSchema(targetSchema);
+			await runPreflight([targetSchema], {
+				writeAdoptionFile: async () => {},
+			});
+			await expect(
+				convergePg(dedicatedPool, model([table('widgets', false)]), {
+					schema: targetSchema,
+					steps,
+				}),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['create_table', 'application-step:widgets-insert'],
+			});
+			await expect(
+				dedicatedPool.query(
+					`SELECT count(*)::text AS count FROM "${targetSchema}".widgets`,
+				),
+			).resolves.toMatchObject({ rows: [{ count: '1' }] });
+			await expect(
+				dedicatedPool.query(
+					"SELECT pg_catalog.to_regclass('public.widgets') AS relation",
+				),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
+		} finally {
+			try {
+				await dropSchema(targetSchema);
+			} finally {
+				await dedicatedPool.end();
+			}
+		}
+	});
+
 	it('defers an after-generated-ddl assert inspection until its table exists', async () => {
 		const pool = await getTestPool();
 		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
@@ -856,7 +919,8 @@ describe('convergePg', () => {
 			}),
 		).resolves.toMatchObject({ kind: 'applied' });
 		expect(beforeExists).toBeNull();
-		expect(afterExists).toBe(`${schema}.${name}`);
+		// The step's search_path starts with the target schema, so regclass renders the name unqualified.
+		expect(afterExists).toBe(name);
 	});
 
 	it('rolls back a statement-timed-out application step without recording it', async () => {

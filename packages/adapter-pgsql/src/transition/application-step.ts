@@ -19,7 +19,6 @@ import {
 	PgCommitAcknowledgementAmbiguousError,
 	readPgOutcomeSessionCompromise,
 	rollbackPgOutcomeGroup,
-	setPgTransitionLockTimeout,
 } from './outcome-protocol.js';
 
 /** The intentionally narrow query facade passed to application callbacks. */
@@ -520,15 +519,14 @@ async function setPgApplicationStepStatementTimeout(
 	await client.query(`SET LOCAL statement_timeout = '${timeout}ms'`);
 }
 
-async function setPgApplicationStepAdmissionStatementTimeout(
+async function setPgApplicationStepSearchPath(
 	client: PoolClient,
-	timeout: number | undefined,
+	schema: string,
 ): Promise<void> {
-	if (timeout === undefined) {
-		await client.query('SET LOCAL statement_timeout TO DEFAULT');
-		return;
-	}
-	await setPgApplicationStepStatementTimeout(client, timeout);
+	await client.query(
+		"SELECT pg_catalog.set_config('search_path', pg_catalog.quote_ident($1) || ', ' || pg_catalog.current_setting('search_path'), true)",
+		[schema],
+	);
 }
 
 async function admitPgApplicationStepsDuringPlanning(
@@ -544,19 +542,9 @@ async function admitPgApplicationStepsDuringPlanning(
 	const pendingOnceIds = new Set<string>();
 	if (steps.length === 0) return pendingOnceIds;
 	try {
-		await beginPgOutcome(
-			input.client,
-			steps[0]!.lockTimeoutMs,
-			'BEGIN READ ONLY',
-		);
+		await input.client.query('BEGIN READ ONLY');
 		begun = true;
-		for (const [index, step] of steps.entries()) {
-			if (index > 0)
-				await setPgTransitionLockTimeout(input.client, step.lockTimeoutMs);
-			await setPgApplicationStepAdmissionStatementTimeout(
-				input.client,
-				step.statementTimeoutMs,
-			);
+		for (const step of steps) {
 			const state = await admission(
 				input.client,
 				input.database,
@@ -579,6 +567,7 @@ async function admitPgApplicationStepsDuringPlanning(
 async function inspectPgApplicationStepDuringPlanning(
 	input: {
 		readonly client: PoolClient;
+		readonly schema: string;
 		readonly onApplicationStepCallback?: () => void;
 	},
 	step: PgConvergeAssertStep,
@@ -592,6 +581,7 @@ async function inspectPgApplicationStepDuringPlanning(
 			input.client,
 			step.statementTimeoutMs,
 		);
+		await setPgApplicationStepSearchPath(input.client, input.schema);
 		const status = await inspectPgApplicationStep(
 			step,
 			input.client,
@@ -677,6 +667,7 @@ export async function runPgApplicationSteps(input: {
 				input.client,
 				step.statementTimeoutMs,
 			);
+			await setPgApplicationStepSearchPath(input.client, input.schema);
 			const lock = await acquirePgLedgerLocks(input.client, [
 				home(input.schema),
 			]);
