@@ -518,6 +518,56 @@ function validateApplicationOwnership(
 	const tables = new Map(
 		[...model.tables.values()].map((table) => [table.name, table]),
 	);
+	const ownershipLookups = new Map<
+		string,
+		{
+			readonly columns: ReadonlyMap<string, ColumnIR>;
+			readonly checks: ReadonlyMap<
+				string,
+				NonNullable<TableIR['checkConstraints']>[number]
+			>;
+			readonly checkNameMultiplicity: ReadonlyMap<string, number>;
+			readonly indexes: ReadonlyMap<string, readonly IndexIR[]>;
+			readonly physicalTable: string;
+		}
+	>();
+	const lookupFor = (table: TableIR) => {
+		const existing = ownershipLookups.get(table.name);
+		if (existing) return existing;
+		const columns = new Map<string, ColumnIR>();
+		for (const column of table.columns) {
+			if (!columns.has(column.name)) columns.set(column.name, column);
+		}
+		const checks = new Map<
+			string,
+			NonNullable<TableIR['checkConstraints']>[number]
+		>();
+		const checkNameMultiplicity = new Map<string, number>();
+		for (const check of table.checkConstraints ?? []) {
+			if (!checks.has(check.name)) checks.set(check.name, check);
+			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			checkNameMultiplicity.set(
+				physicalName,
+				(checkNameMultiplicity.get(physicalName) ?? 0) + 1,
+			);
+		}
+		const indexes = new Map<string, IndexIR[]>();
+		for (const index of table.indexes) {
+			const physicalName = resolvePgsqlDeclaredIndexName(table, index, naming);
+			const matching = indexes.get(physicalName);
+			if (matching) matching.push(index);
+			else indexes.set(physicalName, [index]);
+		}
+		const lookup = {
+			columns,
+			checks,
+			checkNameMultiplicity,
+			indexes,
+			physicalTable: naming.toDatabase(table.name),
+		};
+		ownershipLookups.set(table.name, lookup);
+		return lookup;
+	};
 	const foreignKeyReferencedKeys = new Set(
 		[...model.tables.values()].flatMap((table) =>
 			table.foreignKeys.flatMap((foreignKey) => {
@@ -553,16 +603,14 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns columnTypes on undeclared table ${entry.table}`,
 				);
-			const physicalTable = naming.toDatabase(table.name);
-			const column = table.columns.find(
-				(candidate) => candidate.name === entry.column,
-			);
+			const lookup = lookupFor(table);
+			const column = lookup.columns.get(entry.column);
 			if (!column)
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared column ${entry.table}.${entry.column}`,
 				);
 			const key = pgsqlSurfaceKey(
-				physicalTable,
+				lookup.physicalTable,
 				naming.toDatabase(column.name),
 			);
 			if (claimed.columnTypes.has(key))
@@ -572,7 +620,7 @@ function validateApplicationOwnership(
 			claimed.columnTypes.add(key);
 			masks.columnTypes.add(key);
 			columnTypes.push({
-				table: physicalTable,
+				table: lookup.physicalTable,
 				column: naming.toDatabase(column.name),
 			});
 		}
@@ -582,31 +630,26 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns checks on undeclared table ${entry.table}`,
 				);
-			const physicalTable = naming.toDatabase(table.name);
-			const matching = (table.checkConstraints ?? []).filter(
-				(candidate) => candidate.name === entry.name,
-			);
-			if (matching.length === 0)
+			const lookup = lookupFor(table);
+			const check = lookup.checks.get(entry.name);
+			if (!check)
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared CHECK ${entry.table}.${entry.name}`,
 				);
-			const physicalName = getCheckConstraintDatabaseName(matching[0]!, naming);
-			const multiplicity = (table.checkConstraints ?? []).filter(
-				(candidate) =>
-					getCheckConstraintDatabaseName(candidate, naming) === physicalName,
-			).length;
+			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			const multiplicity = lookup.checkNameMultiplicity.get(physicalName) ?? 0;
 			if (multiplicity !== 1)
 				throw invalidOptions(
-					`converge application step ${step.id} owns ambiguous CHECK ${physicalTable}.${physicalName}`,
+					`converge application step ${step.id} owns ambiguous CHECK ${lookup.physicalTable}.${physicalName}`,
 				);
-			const key = pgsqlSurfaceKey(physicalTable, physicalName);
+			const key = pgsqlSurfaceKey(lookup.physicalTable, physicalName);
 			if (claimed.checks.has(key))
 				throw invalidOptions(
 					`converge application steps own CHECK twice: ${key}`,
 				);
 			claimed.checks.add(key);
 			masks.checks.add(key);
-			checks.push({ table: physicalTable, name: physicalName });
+			checks.push({ table: lookup.physicalTable, name: physicalName });
 		}
 		for (const entry of step.owns.indexes ?? []) {
 			const table = tables.get(entry.table);
@@ -614,19 +657,15 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns indexes on undeclared table ${entry.table}`,
 				);
-			const physicalTable = naming.toDatabase(table.name);
-			const matching = table.indexes.filter(
-				(candidate) =>
-					resolvePgsqlDeclaredIndexName(table, candidate, naming) ===
-					entry.name,
-			);
+			const lookup = lookupFor(table);
+			const matching = lookup.indexes.get(entry.name) ?? [];
 			if (matching.length === 0)
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared index ${entry.table}.${entry.name}`,
 				);
 			if (matching.length !== 1)
 				throw invalidOptions(
-					`converge application step ${step.id} owns ambiguous index ${physicalTable}.${entry.name}`,
+					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
 				);
 			const index = matching[0]!;
 			if (
@@ -636,16 +675,16 @@ function validateApplicationOwnership(
 				)
 			)
 				throw invalidOptions(
-					`converge application step ${step.id} owns unique index ${physicalTable}.${entry.name} required by a declared foreign key`,
+					`converge application step ${step.id} owns unique index ${lookup.physicalTable}.${entry.name} required by a declared foreign key`,
 				);
-			const key = pgsqlSurfaceKey(physicalTable, entry.name);
+			const key = pgsqlSurfaceKey(lookup.physicalTable, entry.name);
 			if (claimed.indexes.has(key))
 				throw invalidOptions(
 					`converge application steps own index twice: ${key}`,
 				);
 			claimed.indexes.add(key);
 			masks.indexes.add(key);
-			indexes.push({ table: physicalTable, name: entry.name });
+			indexes.push({ table: lookup.physicalTable, name: entry.name });
 		}
 		if (
 			(checks.length > 0 || indexes.length > 0) &&
