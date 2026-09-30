@@ -4227,6 +4227,72 @@ describe('convergePg', () => {
 		expect(observed).toContain('healthy');
 	});
 
+	it('keeps same-named owned CHECK state with the table that owns it', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const projects = `owned_same_name_projects_${suffix}`;
+		const accounts = `owned_same_name_accounts_${suffix}`;
+		const observed: (readonly string[])[] = [];
+		let repairs = 0;
+		const repair = async (tx: PgApplicationStepTx) => {
+			repairs++;
+			for (const tableName of [projects, accounts]) {
+				await tx.query(
+					`ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS positive`,
+				);
+				await tx.query(
+					`ALTER TABLE "${tableName}" ADD CONSTRAINT positive CHECK (score > 0)`,
+				);
+			}
+		};
+		const desired = model(
+			[projects, accounts].map((name) => ({
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+			})),
+		);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `owned-same-name-${suffix}`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: {
+					checks: [
+						{ table: projects, name: 'positive' },
+						{ table: accounts, name: 'positive' },
+					],
+				},
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const states = owned.checks.map((check) => check.state);
+					observed.push(states);
+					return states.every((state) => state === 'healthy')
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: repair,
+			},
+		];
+
+		await convergePg(pool, desired, { schema, initialize: 'pristine', steps });
+		observed.length = 0;
+		repairs = 0;
+		await pool.query(
+			`ALTER TABLE "${schema}"."${projects}" DROP CONSTRAINT positive`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(observed).toContainEqual(['absent', 'healthy']);
+		expect(observed).toContainEqual(['healthy', 'healthy']);
+		expect(repairs).toBe(1);
+	});
+
 	it('uses snake_case physical CHECK names for a camelCase owned assertion', async () => {
 		const freshSchema = `converge_owned_casing_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 		const pool = await getTestPool();

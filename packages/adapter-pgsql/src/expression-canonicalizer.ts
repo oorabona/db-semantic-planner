@@ -1482,6 +1482,14 @@ async function renderOwnedTableChecks(
 			physicalName: check.physicalName,
 			state: 'absent',
 		}));
+	const presentChecks = request.checks.filter((check) =>
+		live.checks.has(check.physicalName),
+	);
+	if (presentChecks.length === 0)
+		return request.checks.map((check) => ({
+			physicalName: check.physicalName,
+			state: 'absent',
+		}));
 
 	const tempTableName = `${request.tempPrefix}_table`;
 	const tempTable = quoteIdent(tempTableName, 'table');
@@ -1495,8 +1503,8 @@ async function renderOwnedTableChecks(
 
 	const declaredByPhysicalName = new Map<string, EngineCanonicalExpression>();
 	const tempNamesByPhysicalName = new Map<string, string>();
-	for (let i = 0; i < request.checks.length; i++) {
-		const check = request.checks[i]!;
+	for (let i = 0; i < presentChecks.length; i++) {
+		const check = presentChecks[i]!;
 		validateCheckExpression(check.expression, 'owned CHECK constraint');
 		const tempName = `${request.tempPrefix}_${i}`;
 		try {

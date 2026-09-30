@@ -39,6 +39,7 @@ vi.mock('./ledger.js', async (importOriginal) => ({
 
 import {
 	createPgApplicationStepTx,
+	PgApplicationStepError,
 	type PgApplicationStepTx,
 	planPgApplicationSteps,
 	runPgApplicationSteps,
@@ -888,6 +889,293 @@ describe('converge application steps', () => {
 		).resolves.toEqual([]);
 		expect(inspect).toHaveBeenCalledOnce();
 		expect(query.mock.calls.map(([call]) => call)).toContain('BEGIN READ ONLY');
+	});
+
+	it('keeps same-named owned CHECK states associated with their physical tables', async () => {
+		const noTransaction = Object.assign(new Error('no transaction'), {
+			code: '25P01',
+		});
+		const client = {
+			query: undefined as unknown,
+			release: vi.fn(),
+			_txStatus: 'I',
+		};
+		const query = vi.fn(
+			async (statement: unknown, values?: readonly unknown[]) => {
+				const text =
+					typeof statement === 'string'
+						? statement
+						: (statement as { text: string }).text;
+				if (text.startsWith('SAVEPOINT') && client._txStatus === 'I')
+					throw noTransaction;
+				if (text.startsWith('BEGIN')) client._txStatus = 'T';
+				if (text === 'ROLLBACK') client._txStatus = 'I';
+				if (text.includes("current_setting('search_path')"))
+					return { rows: [{ search_path: 'public' }] };
+				if (text.includes('SELECT pg_catalog.to_regclass'))
+					return { rows: [{ exists: true }] };
+				if (text.includes('FROM pg_catalog.pg_constraint c'))
+					return values?.[0] === '"public"."projects"'
+						? { rows: [] }
+						: {
+								rows: [
+									{
+										name: 'positive',
+										expression: 'CHECK ((score > 0))',
+										validated: true,
+									},
+								],
+							};
+				if (text.includes('FROM pg_catalog.pg_constraint'))
+					return {
+						rows: [
+							{
+								name:
+									(values?.[1] as readonly string[] | undefined)?.[0] ??
+									'owned_0',
+								expression: 'CHECK ((score > 0))',
+							},
+						],
+					};
+				return { rows: [] };
+			},
+		);
+		const inspect = vi.fn(async (_tx: PgApplicationStepTx, owned) => {
+			expect(owned.checks).toEqual([
+				{
+					table: 'Projects',
+					name: 'positive',
+					physicalTable: 'projects',
+					physicalName: 'positive',
+					state: 'absent',
+				},
+				{
+					table: 'Accounts',
+					name: 'positive',
+					physicalTable: 'accounts',
+					physicalName: 'positive',
+					state: 'healthy',
+				},
+			]);
+			return 'healthy' as const;
+		});
+
+		await expect(
+			planPgApplicationSteps({
+				client: Object.assign(client, { query }) as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'same-named-checks',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect,
+						apply,
+					},
+				],
+				ownedChecks: new Map([
+					[
+						'same-named-checks',
+						[
+							{
+								table: 'Projects',
+								name: 'positive',
+								physicalTable: 'projects',
+								physicalName: 'positive',
+								expression: 'score > 0',
+							},
+							{
+								table: 'Accounts',
+								name: 'positive',
+								physicalTable: 'accounts',
+								physicalName: 'positive',
+								expression: 'score > 0',
+							},
+						],
+					],
+				]),
+			}),
+		).resolves.toEqual([]);
+		expect(inspect).toHaveBeenCalledOnce();
+	});
+
+	it.each(['planning', 'execution'] as const)(
+		'wraps an owned-CHECK rendering failure during %s with its original cause',
+		async (phase) => {
+			const renderingError = new Error('scratch table unavailable');
+			const noTransaction = Object.assign(new Error('no transaction'), {
+				code: '25P01',
+			});
+			const client = {
+				query: undefined as unknown,
+				release: vi.fn(),
+				_txStatus: 'I',
+			};
+			const query = vi.fn(async (statement: unknown) => {
+				const text =
+					typeof statement === 'string'
+						? statement
+						: (statement as { text: string }).text;
+				if (text.startsWith('SAVEPOINT') && client._txStatus === 'I')
+					throw noTransaction;
+				if (text.startsWith('BEGIN')) client._txStatus = 'T';
+				if (text === 'ROLLBACK') client._txStatus = 'I';
+				if (text.includes("current_setting('search_path')"))
+					return { rows: [{ search_path: 'public' }] };
+				if (text.includes('SELECT pg_catalog.to_regclass'))
+					return { rows: [{ exists: true }] };
+				if (text.includes('FROM pg_catalog.pg_constraint c'))
+					return {
+						rows: [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						],
+					};
+				if (text.startsWith('CREATE TEMP TABLE ')) throw renderingError;
+				return { rows: [] };
+			});
+			const steps = [
+				{
+					kind: 'assert' as const,
+					id: 'owned-check-rendering',
+					digest: 'v1',
+					phase: 'after-generated-ddl' as const,
+					inspect: async () => 'healthy' as const,
+					apply,
+				},
+			];
+			const ownedChecks = new Map([
+				[
+					'owned-check-rendering',
+					[
+						{
+							table: 'Projects',
+							name: 'positive',
+							physicalTable: 'projects',
+							physicalName: 'positive',
+							expression: 'score > 0',
+						},
+					],
+				],
+			]);
+			let caught: unknown;
+			try {
+				if (phase === 'planning')
+					await planPgApplicationSteps({
+						client: Object.assign(client, { query }) as never,
+						database: 'app',
+						schema: 'public',
+						steps,
+						ownedChecks,
+					});
+				else
+					await runPgApplicationSteps({
+						client: Object.assign(client, { query }) as never,
+						database: 'app',
+						schema: 'public',
+						phase: 'after-generated-ddl',
+						steps,
+						ownedChecks,
+					});
+			} catch (error) {
+				caught = error;
+			}
+			expect(caught).toBeInstanceOf(PgApplicationStepError);
+			expect(caught).toMatchObject({
+				refusal: 'application-step-failed',
+				stepId: 'owned-check-rendering',
+				message: 'scratch table unavailable',
+			});
+			expect((caught as Error).cause).toBe(renderingError);
+		},
+	);
+
+	it('marks a session compromised before wrapping an owned-CHECK cleanup failure', async () => {
+		const cleanupError = new Error('scratch rollback acknowledgement lost');
+		const client = {
+			query: undefined as unknown,
+			release: vi.fn(),
+			_txStatus: 'I',
+		};
+		const query = vi.fn(
+			async (statement: unknown, values?: readonly unknown[]) => {
+				const text =
+					typeof statement === 'string'
+						? statement
+						: (statement as { text: string }).text;
+				if (text.startsWith('BEGIN')) client._txStatus = 'T';
+				if (text.startsWith('ROLLBACK TO SAVEPOINT')) throw cleanupError;
+				if (text === 'ROLLBACK') client._txStatus = 'I';
+				if (text.includes('SELECT pg_catalog.to_regclass'))
+					return { rows: [{ exists: true }] };
+				if (text.includes('FROM pg_catalog.pg_constraint c'))
+					return {
+						rows: [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						],
+					};
+				if (text.includes('FROM pg_catalog.pg_constraint'))
+					return {
+						rows: [
+							{
+								name:
+									(values?.[1] as readonly string[] | undefined)?.[0] ??
+									'owned_0',
+								expression: 'CHECK ((score > 0))',
+							},
+						],
+					};
+				return { rows: [] };
+			},
+		);
+		let caught: unknown;
+		try {
+			await runPgApplicationSteps({
+				client: Object.assign(client, { query }) as never,
+				database: 'app',
+				schema: 'public',
+				phase: 'after-generated-ddl',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'owned-check-cleanup',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+				],
+				ownedChecks: new Map([
+					[
+						'owned-check-cleanup',
+						[
+							{
+								table: 'Projects',
+								name: 'positive',
+								physicalTable: 'projects',
+								physicalName: 'positive',
+								expression: 'score > 0',
+							},
+						],
+					],
+				]),
+			});
+		} catch (error) {
+			caught = error;
+		}
+		expect(caught).toBeInstanceOf(PgApplicationStepError);
+		const cause = (caught as Error).cause;
+		expect(cause).toMatchObject({ cleanupError });
+		expect(readPgOutcomeSessionCompromise(client as never)).toBe(cause);
 	});
 
 	it('uses one admission transaction and one transaction per inspected assert', async () => {

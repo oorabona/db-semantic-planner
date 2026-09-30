@@ -127,8 +127,9 @@ export class PgApplicationStepError extends Error {
 			| 'recovery-required',
 		readonly stepId: string,
 		detail: string,
+		options?: ErrorOptions,
 	) {
-		super(detail);
+		super(detail, options);
 		this.name = 'PgApplicationStepError';
 	}
 }
@@ -720,26 +721,32 @@ async function renderPgApplicationStepOwnedChecks(
 			borrowedClient: true,
 			managedTransactions: true,
 		});
-		const states = await adapter.withScratchScope(async (scope) => {
-			if (configureScope) {
-				const session = scratchScopeSession(scope);
-				await setPgApplicationStepSearchPath(session, schema);
-				await setPgTransitionLockTimeout(session, step.lockTimeoutMs);
-				await setPgApplicationStepStatementTimeout(
-					session,
-					step.statementTimeoutMs,
-				);
-			}
-			const byTable = new Map<string, PgApplicationStepResolvedOwnedCheck[]>();
-			for (const check of checks) {
-				const tableChecks = byTable.get(check.physicalTable);
-				if (tableChecks) tableChecks.push(check);
-				else byTable.set(check.physicalTable, [check]);
-			}
-			const rendered = [];
-			for (const [physicalTable, tableChecks] of byTable) {
-				rendered.push(
-					...(await renderOwnedTableChecksInScratchScope(scope, {
+		const statesByPhysicalTable = await adapter.withScratchScope(
+			async (scope) => {
+				if (configureScope) {
+					const session = scratchScopeSession(scope);
+					await setPgApplicationStepSearchPath(session, schema);
+					await setPgTransitionLockTimeout(session, step.lockTimeoutMs);
+					await setPgApplicationStepStatementTimeout(
+						session,
+						step.statementTimeoutMs,
+					);
+				}
+				const byTable = new Map<
+					string,
+					PgApplicationStepResolvedOwnedCheck[]
+				>();
+				for (const check of checks) {
+					const tableChecks = byTable.get(check.physicalTable);
+					if (tableChecks) tableChecks.push(check);
+					else byTable.set(check.physicalTable, [check]);
+				}
+				const renderedByPhysicalTable = new Map<
+					string,
+					Map<string, PgOwnedCheckState>
+				>();
+				for (const [physicalTable, tableChecks] of byTable) {
+					const rendered = await renderOwnedTableChecksInScratchScope(scope, {
 						schema,
 						physicalTable,
 						checks: tableChecks.map((check) => ({
@@ -747,27 +754,40 @@ async function renderPgApplicationStepOwnedChecks(
 							expression: check.expression,
 						})),
 						tempPrefix: `dbsp_owned_check_${randomUUID().replaceAll('-', '')}`,
-					})),
-				);
-			}
-			return rendered;
-		});
-		const stateByPhysicalName = new Map(
-			states.map((state) => [state.physicalName, state.state]),
+					});
+					renderedByPhysicalTable.set(
+						physicalTable,
+						new Map(rendered.map((state) => [state.physicalName, state.state])),
+					);
+				}
+				return renderedByPhysicalTable;
+			},
 		);
 		return {
-			checks: checks.map((check) => ({
-				table: check.table,
-				name: check.name,
-				physicalTable: check.physicalTable,
-				physicalName: check.physicalName,
-				state: stateByPhysicalName.get(check.physicalName)!,
-			})),
+			checks: checks.map((check) => {
+				const state = statesByPhysicalTable
+					.get(check.physicalTable)
+					?.get(check.physicalName);
+				if (state === undefined)
+					throw new Error('owned CHECK rendering omitted a requested CHECK');
+				return {
+					table: check.table,
+					name: check.name,
+					physicalTable: check.physicalTable,
+					physicalName: check.physicalName,
+					state,
+				};
+			}),
 		};
 	} catch (error) {
 		if (hasScratchCleanupFailure(error))
 			markPgOutcomeSessionCompromisedAfterCleanup(client, error);
-		throw error;
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			step.id,
+			error instanceof Error ? error.message : String(error),
+			{ cause: error },
+		);
 	}
 }
 
