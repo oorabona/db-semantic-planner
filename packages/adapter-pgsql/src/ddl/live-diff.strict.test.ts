@@ -2,6 +2,8 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import type { CheckConstraintNewEnumValueError as CheckConstraintNewEnumValueErrorType } from './live-diff.js';
 import {
 	ExpressionCanonicalizationUnavailableError,
@@ -22,13 +24,34 @@ vi.mock('../expression-canonicalizer.js', async (importOriginal) => {
 
 const {
 	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema,
+	comparePgsqlDatabaseSchema: comparePgsqlDatabaseSchemaForPhysicalModel,
 	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
 	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
 	PartialIndexPredicateNewEnumValueError,
 	RawIndexPredicateFallbackError,
 } = await import('./live-diff.js');
+
+function comparePgsqlDatabaseSchema(
+	...args: Parameters<typeof comparePgsqlDatabaseSchemaForPhysicalModel>
+) {
+	const [adapter, desired, options] = args;
+	if (options?.dbCasing === undefined)
+		return comparePgsqlDatabaseSchemaForPhysicalModel(...args);
+	const { dbCasing, ...physicalOptions } = options;
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: desired,
+		schema: options.schema ?? 'public',
+		dbCasing,
+	});
+	return comparePgsqlDatabaseSchemaForPhysicalModel(adapter, physical.model, {
+		...physicalOptions,
+		declaredSequenceNames: declaredSequenceNamesFromInventory(
+			physical.inventory,
+		),
+	});
+}
 const {
 	CheckConstraintNewEnumValueError: RootCheckConstraintNewEnumValueError,
 	ColumnDefaultCanonicalizationError: RootColumnDefaultCanonicalizationError,

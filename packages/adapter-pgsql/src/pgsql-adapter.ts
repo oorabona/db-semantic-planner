@@ -112,7 +112,7 @@ import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
-import { qualifyTableIdent, quoteIdent } from './ddl/phases/utils.js';
+import { quoteIdent } from './ddl/phases/utils.js';
 import { generateDDL as generateDDLStatements } from './ddl/public-api.js';
 import {
 	generateAlterColumnSQL,
@@ -2222,7 +2222,7 @@ function compileNqlRuntimeBindingCte(
 			quoteIdent(naming.toDatabase(sourceColumnFor(column)), 'column'),
 		)
 		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${qualifyTableIdent(sourceTable, schemaName, naming)} WHERE false`;
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.toDatabase(sourceTable), 'table')} WHERE false`;
 	if (binding.rows.length === 0) {
 		return {
 			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,

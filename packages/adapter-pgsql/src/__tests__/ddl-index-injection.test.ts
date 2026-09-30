@@ -256,7 +256,6 @@ describe('S-1 ddl-generator generateCreateIndex — index WHERE injection', () =
 					where: 'active = true; DROP TABLE users',
 				},
 				undefined,
-				naming,
 			),
 		).toThrow(/Unsafe SQL expression/);
 	});
@@ -271,7 +270,6 @@ describe('S-1 ddl-generator generateCreateIndex — index WHERE injection', () =
 					where: 'active = true -- injected',
 				},
 				undefined,
-				naming,
 			),
 		).toThrow(/Unsafe SQL expression/);
 	});
@@ -282,7 +280,6 @@ describe('S-1 ddl-generator generateCreateIndex — index WHERE injection', () =
 				'users',
 				{ name: 'idx_test', columns: ['id'], where: 'active = true' },
 				undefined,
-				naming,
 			),
 		).not.toThrow();
 	});
@@ -299,7 +296,6 @@ describe('S-1 ddl-generator generateCreateIndex — expression injection', () =>
 					expressions: ['lower(email); DROP TABLE users'],
 				},
 				undefined,
-				naming,
 			),
 		).toThrow(/Unsafe SQL expression/);
 	});
@@ -310,7 +306,6 @@ describe('S-1 ddl-generator generateCreateIndex — expression injection', () =>
 				'users',
 				{ name: 'idx_test', columns: [], expressions: ['lower(email)'] },
 				undefined,
-				naming,
 			),
 		).not.toThrow();
 	});
@@ -327,7 +322,6 @@ describe('S-1 ddl-generator generateCreateIndex — opclass injection', () => {
 					opclass: { vec: 'ops; DROP TABLE users' },
 				},
 				undefined,
-				naming,
 			),
 		).toThrow(/Invalid.*identifier/i);
 	});
@@ -344,7 +338,6 @@ describe('S-1 ddl-generator generateCreateIndex — WITH key injection', () => {
 					with: { 'fillfactor = 10; DROP TABLE users --': '1' },
 				},
 				undefined,
-				naming,
 			),
 		).toThrow(/Invalid.*identifier/i);
 	});
@@ -358,7 +351,6 @@ describe('S-1 ddl-generator generateCreateIndex — WITH key injection', () => {
 				with: { fillfactor: unsafeWithValue },
 			},
 			undefined,
-			naming,
 		);
 
 		expect(sql).toContain(`WITH (fillfactor = '${unsafeWithValue}')`);
@@ -377,7 +369,6 @@ describe('S-1 ddl-generator generateCreateIndex — WITH key injection', () => {
 				},
 			},
 			undefined,
-			naming,
 		);
 
 		expect(sql).toContain('WITH (fillfactor = 70, fastupdate = off)');
@@ -703,7 +694,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 					'users',
 					{ name: 'idx_test', columns: ['id'], method },
 					undefined,
-					identityNaming,
 				),
 			).not.toThrow();
 		}
@@ -715,7 +705,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 				'users',
 				{ name: 'idx_test', columns: ['id'], method: 'spgist' },
 				undefined,
-				identityNaming,
 			),
 		).not.toThrow();
 	});
@@ -727,7 +716,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 					'users',
 					{ name: 'idx_test', columns: ['id'], method },
 					undefined,
-					identityNaming,
 				),
 			).not.toThrow();
 		}
@@ -743,7 +731,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 					method: 'btree); DROP TABLE users --',
 				},
 				undefined,
-				identityNaming,
 			),
 		).toThrow(/Invalid index method/);
 	});
@@ -754,7 +741,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 				'users',
 				{ name: 'idx_test', columns: ['id'], method: 'btree\x00' },
 				undefined,
-				identityNaming,
 			),
 		).toThrow(/Invalid index method/);
 	});
@@ -765,7 +751,6 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 				'users',
 				{ name: 'idx_test', columns: ['id'], method: 'spgist_unknown' },
 				undefined,
-				identityNaming,
 			),
 		).toThrow(/Invalid index method/);
 	});

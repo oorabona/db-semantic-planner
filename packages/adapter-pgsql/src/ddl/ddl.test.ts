@@ -15,13 +15,42 @@ import { EnumNameMapKeyMismatchError } from '@dbsp/core/internal';
 import type { SequenceIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { markEngineCanonicalCheck } from '../expression-provenance.js';
+import type { NamingPlugin } from '../naming-plugin.js';
 import { camelCaseNaming } from '../naming-plugin.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import {
 	SequenceNameCollisionError,
 	SequenceNameMapKeyMismatchError,
 } from '../sequence-name.js';
-import { generateDDL } from './ddl-generator.js';
+import { generateDDL as generateDDLForPhysicalModel } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
+
+function generateDDL(
+	model: ModelIR,
+	options: Parameters<typeof generateDDLForPhysicalModel>[1] & {
+		readonly naming?: NamingPlugin;
+	} = {},
+): string[] {
+	const { naming, schemaName, fkAutoIndex, ...remaining } = options;
+	if (naming === undefined)
+		return generateDDLForPhysicalModel(model, {
+			...remaining,
+			...(schemaName === undefined ? {} : { schemaName }),
+			...(fkAutoIndex === undefined ? {} : { fkAutoIndex }),
+		});
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model,
+		schema: schemaName ?? 'public',
+		...(naming === undefined ? {} : { naming }),
+		...(fkAutoIndex === undefined ? {} : { fkAutoIndex }),
+	});
+	return generateDDLForPhysicalModel(physical.model, {
+		...remaining,
+		...(schemaName === undefined ? {} : { schemaName }),
+		fkAutoIndex: physical.fkAutoIndex,
+	});
+}
 
 describe('DDL Generator', () => {
 	it('refuses a declared enum map key that differs from its physical name', () => {
@@ -1368,7 +1397,7 @@ describe('CHECK constraints in DDL', () => {
 		} as unknown as ModelIR;
 
 		expect(() => generateDDL(schema, { naming: camelCaseNaming })).toThrow(
-			'authored constraints "myCheck" and "my_check" both resolve to physical name "my_check"',
+			'PostgreSQL physical name collision in constraint schema "public" table "users": "my_check"',
 		);
 	});
 
@@ -1687,17 +1716,17 @@ describe('ENUM types in DDL', () => {
 		);
 		expect(statements).toContain(`CREATE TABLE "tenantOne"."tenant_owners" (
   "id" INTEGER NOT NULL,
-  CONSTRAINT "pk_tenantOwners" PRIMARY KEY ("id")
+  CONSTRAINT "pk_tenant_owners" PRIMARY KEY ("id")
 );`);
 		expect(statements).toContain(`CREATE TABLE "tenantOne"."job_queue" (
   "id" INTEGER NOT NULL,
   "owner_id" INTEGER NOT NULL,
   "status" "tenantOne".status NOT NULL,
   "priority" INTEGER NOT NULL,
-  CONSTRAINT "pk_jobQueue" PRIMARY KEY ("id")
+  CONSTRAINT "pk_job_queue" PRIMARY KEY ("id")
 );`);
 		expect(statements).toContain(
-			'ALTER TABLE "tenantOne"."job_queue" ADD CONSTRAINT "fk_jobQueue_ownerId" FOREIGN KEY ("owner_id") REFERENCES "tenantOne"."tenant_owners" ("id") ON DELETE CASCADE;',
+			'ALTER TABLE "tenantOne"."job_queue" ADD CONSTRAINT "fk_job_queue_owner_id" FOREIGN KEY ("owner_id") REFERENCES "tenantOne"."tenant_owners" ("id") ON DELETE CASCADE;',
 		);
 		expect(statements).toContain(
 			'ALTER TABLE "tenantOne"."job_queue" ADD CONSTRAINT "job_queue_priority_check" CHECK ((priority >= 0));',

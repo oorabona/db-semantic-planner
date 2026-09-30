@@ -26,16 +26,16 @@ import type { PhaseContext } from './types.js';
  * @returns Array of DDL statements
  */
 export function generateIndexesPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, fkAutoIndex, caps } = ctx;
+	const { tables, schemaName, fkAutoIndex, caps } = ctx;
 	const indexContext = caps ? { caps } : undefined;
 	const statements: string[] = [];
 
 	for (const table of tables) {
-		const dbTableName = naming.toDatabase(table.name);
+		const dbTableName = table.name;
 		// Explicit indexes
 		for (const idx of table.indexes) {
 			statements.push(
-				generateCreateIndex(table.name, idx, schemaName, naming, indexContext),
+				generateCreateIndex(table.name, idx, schemaName, indexContext),
 			);
 		}
 
@@ -49,20 +49,14 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 					fkCol &&
 					shouldEmitAutoFkIndex(table, fkCol)
 				) {
-					const dbFkCol = naming.toDatabase(fkCol);
+					const dbFkCol = fkCol;
 					const autoIdx: IndexIR = {
 						name: getAutoFkIndexName(dbTableName, dbFkCol),
 						columns: [fkCol],
 						unique: false,
 					};
 					statements.push(
-						generateCreateIndex(
-							table.name,
-							autoIdx,
-							schemaName,
-							naming,
-							indexContext,
-						),
+						generateCreateIndex(table.name, autoIdx, schemaName, indexContext),
 					);
 				}
 			}

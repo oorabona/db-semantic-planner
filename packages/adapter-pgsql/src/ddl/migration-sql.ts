@@ -20,7 +20,6 @@ import type {
 } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { isEngineCanonicalCheck } from '../expression-provenance.js';
-import { identityNaming } from '../naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertString,
@@ -645,7 +644,6 @@ export function generateMigrationSQL(
 					spec.table,
 					buildFkAutoIndexFromSpec(spec),
 					schemaName,
-					identityNaming,
 					indexContext,
 					spec.ifNotExists,
 				),
@@ -863,7 +861,6 @@ function upCreateIndex(
 				change.table,
 				idx,
 				schemaName,
-				identityNaming,
 				context,
 				spec.ifNotExists,
 			)

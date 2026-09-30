@@ -272,7 +272,7 @@ export function compareSchemata(
 	const schemaNaming = identityNaming;
 	if (supportsCheckConstraints) {
 		for (const table of schema.tables.values()) {
-			assertNoCheckConstraintNameCollisions(table, schemaNaming);
+			assertNoCheckConstraintNameCollisions(table);
 		}
 	}
 	const schemaTables = new Map(schema.tables);

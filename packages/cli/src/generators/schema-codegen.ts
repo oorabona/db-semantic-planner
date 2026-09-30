@@ -8,7 +8,6 @@
 import {
 	canGenerateCreateIndex,
 	generateCreateIndex,
-	identityNaming,
 } from '@dbsp/adapter-pgsql';
 import {
 	type ModelIR,
@@ -476,11 +475,11 @@ function ddlIndexRepresentationWarning(
 	tableName: string,
 	idx: IndexIR,
 ): string | undefined {
-	if (canGenerateCreateIndex(tableName, idx, undefined, identityNaming)) {
+	if (canGenerateCreateIndex(tableName, idx, undefined)) {
 		return undefined;
 	}
 	try {
-		generateCreateIndex(tableName, idx, undefined, identityNaming);
+		generateCreateIndex(tableName, idx, undefined);
 	} catch (error) {
 		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it: ${errorMessage(error)}. dbsp will neither drop nor recreate it; maintain it by hand.`;
 	}

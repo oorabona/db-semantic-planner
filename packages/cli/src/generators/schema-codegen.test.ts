@@ -6,7 +6,7 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateCreateIndex, identityNaming } from '@dbsp/adapter-pgsql';
+import { generateCreateIndex } from '@dbsp/adapter-pgsql';
 import {
 	compareSchemata,
 	generateDDL,
@@ -1336,7 +1336,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			for (const table of loaded.model.tables.values()) {
 				for (const idx of table.indexes) {
 					expect(() =>
-						generateCreateIndex(table.name, idx, undefined, identityNaming),
+						generateCreateIndex(table.name, idx, undefined),
 					).not.toThrow();
 				}
 			}

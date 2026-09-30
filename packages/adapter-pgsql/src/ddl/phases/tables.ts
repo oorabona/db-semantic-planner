@@ -19,6 +19,6 @@ import type { PhaseContext } from './types.js';
  * @returns Array of DDL statements, one per table
  */
 export function generateTablesPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming } = ctx;
-	return tables.map((table) => generateCreateTable(table, schemaName, naming));
+	const { tables, schemaName } = ctx;
+	return tables.map((table) => generateCreateTable(table, schemaName));
 }

@@ -21,7 +21,7 @@ import {
  * @returns Array of DDL statements (empty if comments are unsupported by the dialect)
  */
 export function generateCommentsPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, caps } = ctx;
+	const { tables, schemaName, caps } = ctx;
 	if (!sup(caps, caps?.supportsDDLComments)) {
 		return [];
 	}
@@ -30,7 +30,7 @@ export function generateCommentsPhase(ctx: PhaseContext): string[] {
 		const tableComment = table.comment;
 		if (tableComment) {
 			assertString(tableComment, 'table comment');
-			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			const qualifiedTable = qualifyTable(table.name, schemaName);
 			statements.push(
 				`COMMENT ON TABLE ${qualifiedTable} IS '${tableComment.replace(/'/g, "''")}';`,
 			);
@@ -39,9 +39,9 @@ export function generateCommentsPhase(ctx: PhaseContext): string[] {
 			const columnComment = col.comment;
 			if (columnComment) {
 				assertString(columnComment, 'column comment');
-				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+				const qualifiedTable = qualifyTable(table.name, schemaName);
 				statements.push(
-					`COMMENT ON COLUMN ${qualifiedTable}.${quoteId(naming.toDatabase(col.name))} IS '${columnComment.replace(/'/g, "''")}';`,
+					`COMMENT ON COLUMN ${qualifiedTable}.${quoteId(col.name)} IS '${columnComment.replace(/'/g, "''")}';`,
 				);
 			}
 		}

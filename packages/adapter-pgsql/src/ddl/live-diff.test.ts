@@ -4,16 +4,39 @@ import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgsqlCanonicalizationScope } from '../expression-canonicalizer.js';
 import { PgsqlAdapter } from '../pgsql-adapter.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema,
+	comparePgsqlDatabaseSchema as comparePgsqlDatabaseSchemaForPhysicalModel,
 	comparePgsqlDeclaredAdoptionSchema,
 	IndexPredicateCanonicalizationError,
 	modelForDeclaredAdoption,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
 import type { SchemaDiff } from './schema-diff.js';
+
+function comparePgsqlDatabaseSchema(
+	...args: Parameters<typeof comparePgsqlDatabaseSchemaForPhysicalModel>
+) {
+	const [adapter, desired, options] = args;
+	if (options?.dbCasing === undefined)
+		return comparePgsqlDatabaseSchemaForPhysicalModel(...args);
+	const { dbCasing, ...physicalOptions } = options;
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: desired,
+		schema: options.schema ?? 'public',
+		dbCasing,
+	});
+	return comparePgsqlDatabaseSchemaForPhysicalModel(adapter, physical.model, {
+		...physicalOptions,
+		declaredSequenceNames: declaredSequenceNamesFromInventory(
+			physical.inventory,
+		),
+	});
+}
 
 function checkExpressionDiff(
 	table: string,

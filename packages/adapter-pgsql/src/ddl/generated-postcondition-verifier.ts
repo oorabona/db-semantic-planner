@@ -5,7 +5,6 @@ import {
 	quoteTypeSchemaIdentifier,
 	stripDbTypeSchema,
 } from '../db-type.js';
-import { identityNaming } from '../naming-plugin.js';
 import {
 	lockPgRelation,
 	PgResolvableRelationLockError,
@@ -1936,7 +1935,6 @@ async function verifyIndexStructure(input: {
 			scratchTable,
 			indexSource(expected, scratchIndex),
 			undefined,
-			identityNaming,
 		);
 		return (async () => {
 			const live = input.live;

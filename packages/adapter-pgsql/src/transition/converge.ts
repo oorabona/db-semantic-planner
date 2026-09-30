@@ -16,12 +16,12 @@ import type {
 	LedgerHome,
 	ModelIR,
 	NormalizedManagedStep,
+	PhysicalNameInventory,
 	SequenceIR,
 	TableIR,
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
-import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
 import { hasDeclaredFkIndexAdmission } from '../ddl/fk-index-coverage.js';
 import {
 	createPgsqlGeneratedManagedStep,
@@ -45,12 +45,8 @@ import {
 } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
-import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
-import {
-	declaredSequenceNamesFromInventory,
-	physicalizeDeclaredSequences,
-} from '../sequence-name.js';
+import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import {
 	PgApplicationStepError,
@@ -479,12 +475,18 @@ async function declaredRelationNames(
 
 function declaredIndexNames(
 	model: ModelIR,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	inventory: PhysicalNameInventory,
+	schema: string,
 ): ReadonlySet<string> {
 	return new Set(
 		[...model.tables.values()].flatMap((table) => {
 			return table.indexes.map((index) =>
-				resolvePgsqlDeclaredIndexName(table, index, naming),
+				inventory.get({
+					kind: 'index',
+					schema,
+					table: table.name,
+					name: resolvePgsqlDeclaredIndexName(table, index),
+				}),
 			);
 		}),
 	);
@@ -520,7 +522,7 @@ function sortedOwnershipEntries(
 function validateApplicationOwnership(
 	model: ModelIR,
 	steps: readonly PgConvergeApplicationStep[],
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	inventory: PhysicalNameInventory,
 	schema: string,
 ): ReadonlyMap<string, ResolvedApplicationOwnership> {
 	const resolved = new Map<string, ResolvedApplicationOwnership>();
@@ -566,7 +568,12 @@ function validateApplicationOwnership(
 		const checkNameMultiplicity = new Map<string, number>();
 		for (const check of table.checkConstraints ?? []) {
 			if (!checks.has(check.name)) checks.set(check.name, check);
-			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			const physicalName = inventory.get({
+				kind: 'constraint',
+				schema,
+				table: table.name,
+				name: check.name,
+			});
 			checkNameMultiplicity.set(
 				physicalName,
 				(checkNameMultiplicity.get(physicalName) ?? 0) + 1,
@@ -574,7 +581,12 @@ function validateApplicationOwnership(
 		}
 		const indexes = new Map<string, IndexIR[]>();
 		for (const index of table.indexes) {
-			const physicalName = resolvePgsqlDeclaredIndexName(table, index, naming);
+			const physicalName = inventory.get({
+				kind: 'index',
+				schema,
+				table: table.name,
+				name: resolvePgsqlDeclaredIndexName(table, index),
+			});
 			const matching = indexes.get(physicalName);
 			if (matching) matching.push(index);
 			else indexes.set(physicalName, [index]);
@@ -584,7 +596,11 @@ function validateApplicationOwnership(
 			checks,
 			checkNameMultiplicity,
 			indexes,
-			physicalTable: naming.toDatabase(table.name),
+			physicalTable: inventory.get({
+				kind: 'table',
+				schema,
+				name: table.name,
+			}),
 		};
 		ownershipLookups.set(table.name, lookup);
 		return lookup;
@@ -631,10 +647,13 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared column ${entry.table}.${entry.column}`,
 				);
-			const key = pgsqlSurfaceKey(
-				lookup.physicalTable,
-				naming.toDatabase(column.name),
-			);
+			const physicalColumn = inventory.get({
+				kind: 'column',
+				schema,
+				table: table.name,
+				name: column.name,
+			});
+			const key = pgsqlSurfaceKey(lookup.physicalTable, physicalColumn);
 			if (claimed.columnTypes.has(key))
 				throw invalidOptions(
 					`converge application steps own column type twice: ${key}`,
@@ -643,7 +662,7 @@ function validateApplicationOwnership(
 			masks.columnTypes.add(key);
 			columnTypes.push({
 				table: lookup.physicalTable,
-				column: naming.toDatabase(column.name),
+				column: physicalColumn,
 			});
 		}
 		for (const entry of step.owns.checks ?? []) {
@@ -658,7 +677,12 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared CHECK ${entry.table}.${entry.name}`,
 				);
-			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			const physicalName = inventory.get({
+				kind: 'constraint',
+				schema,
+				table: table.name,
+				name: check.name,
+			});
 			const multiplicity = lookup.checkNameMultiplicity.get(physicalName) ?? 0;
 			if (multiplicity !== 1)
 				throw invalidOptions(
@@ -687,11 +711,24 @@ function validateApplicationOwnership(
 					`converge application step ${step.id} owns indexes on undeclared table ${entry.table}`,
 				);
 			const lookup = lookupFor(table);
-			const matching = lookup.indexes.get(entry.name) ?? [];
-			if (matching.length === 0)
+			const declared = table.indexes.filter(
+				(index) => resolvePgsqlDeclaredIndexName(table, index) === entry.name,
+			);
+			if (declared.length === 0)
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared index ${entry.table}.${entry.name}`,
 				);
+			if (declared.length !== 1)
+				throw invalidOptions(
+					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
+				);
+			const physicalName = inventory.get({
+				kind: 'index',
+				schema,
+				table: table.name,
+				name: entry.name,
+			});
+			const matching = lookup.indexes.get(physicalName) ?? [];
 			if (matching.length !== 1)
 				throw invalidOptions(
 					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
@@ -706,14 +743,14 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns unique index ${lookup.physicalTable}.${entry.name} required by a declared foreign key`,
 				);
-			const key = pgsqlSurfaceKey(lookup.physicalTable, entry.name);
+			const key = pgsqlSurfaceKey(lookup.physicalTable, physicalName);
 			if (claimed.indexes.has(key))
 				throw invalidOptions(
 					`converge application steps own index twice: ${key}`,
 				);
 			claimed.indexes.add(key);
 			masks.indexes.add(key);
-			indexes.push({ table: lookup.physicalTable, name: entry.name });
+			indexes.push({ table: lookup.physicalTable, name: physicalName });
 		}
 		if (
 			(checks.length > 0 || indexes.length > 0) &&
@@ -768,7 +805,8 @@ function validateApplicationOwnership(
 function validateExternalIndexes(
 	model: ModelIR,
 	options: ConvergePgBaseOptions,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	inventory: PhysicalNameInventory,
+	schema: string,
 ): ReadonlySet<string> {
 	const supplied = options.externalIndexes;
 	if (supplied === undefined) return new Set();
@@ -776,9 +814,11 @@ function validateExternalIndexes(
 		throw invalidOptions('converge externalIndexes must be an array');
 
 	const declaredTables = new Set(
-		[...model.tables.values()].map((table) => table.name),
+		inventory.entries
+			.filter((entry) => entry.logical.kind === 'table')
+			.map((entry) => entry.logical.name),
 	);
-	const declaredIndexes = declaredIndexNames(model, naming);
+	const declaredIndexes = declaredIndexNames(model, inventory, schema);
 	const seen = new Set<string>();
 	const externalIndexKeys = new Set<string>();
 	for (const [position, entry] of supplied.entries()) {
@@ -811,7 +851,10 @@ function validateExternalIndexes(
 				`converge ${label} names declared index ${entry.name}`,
 			);
 		externalIndexKeys.add(
-			pgsqlSurfaceKey(naming.toDatabase(entry.table), entry.name),
+			pgsqlSurfaceKey(
+				inventory.get({ kind: 'table', schema, name: entry.table }),
+				entry.name,
+			),
 		);
 	}
 	return externalIndexKeys;
@@ -1108,11 +1151,10 @@ async function declaredAdoptionAdmission(
 
 function declaredAdoptionTable(
 	model: ModelIR,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 	address: LedgerAddress,
 ): TableIR {
 	const table = [...model.tables.values()].find(
-		(candidate) => naming.toDatabase(candidate.name) === address.name,
+		(candidate) => candidate.name === address.name,
 	);
 	if (!table)
 		throw new Error(
@@ -1177,11 +1219,9 @@ async function assertExistingDeclaredTablesManaged(
 	database: string,
 	schema: string,
 	model: ModelIR,
-	casing: DbCasing,
 	createdTables: ReadonlySet<string>,
 	adoptedTables: ReadonlySet<string>,
 ): Promise<void> {
-	const naming = getNamingPluginForDbCasing(casing);
 	for (const table of model.tables.values()) {
 		const address: LedgerAddress = {
 			scope: 'schema',
@@ -1189,7 +1229,7 @@ async function assertExistingDeclaredTablesManaged(
 			database,
 			schema,
 			kind: 'table',
-			name: naming.toDatabase(table.name),
+			name: table.name,
 		};
 		// An absent table has a create_table change and is admitted as fresh work;
 		// an adoption step separately owns the sole unmanaged-table exception.
@@ -1254,9 +1294,8 @@ async function assertExistingDeclaredSequencesManaged(
 
 function assertDeclaredSequenceNamesPreserved(
 	model: ModelIR,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): Map<string, SequenceIR> {
-	return physicalizeDeclaredSequences(model.sequences, naming);
+	return new Map(model.sequences);
 }
 
 function referencedUniqueKey(
@@ -1409,12 +1448,11 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 function uncoveredFreshFkColumns(
 	changes: readonly SchemaChange[],
 	model: ModelIR,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): readonly { readonly table: string; readonly column: string }[] {
 	return changes.flatMap((change) => {
 		if (change.kind !== 'create_table') return [];
 		const table = [...model.tables.values()].find(
-			(candidate) => naming.toDatabase(candidate.name) === change.table,
+			(candidate) => candidate.name === change.table,
 		);
 		if (table === undefined)
 			throw new Error(
@@ -1557,8 +1595,20 @@ export async function convergePg(
 	const initialization = initialize ?? 'never';
 	const schema = options.schema ?? 'public';
 	const sourceCasing = options.dbCasing ?? 'preserve';
-	const sourceNaming = getNamingPluginForDbCasing(sourceCasing);
-	const externalIndexes = validateExternalIndexes(model, options, sourceNaming);
+	const logicalModel = model;
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model,
+		schema,
+		dbCasing: sourceCasing,
+		fkAutoIndex: false,
+	});
+	const externalIndexes = validateExternalIndexes(
+		logicalModel,
+		options,
+		physical.inventory,
+		schema,
+	);
 	let applicationSteps: readonly PgConvergeApplicationStep[];
 	try {
 		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
@@ -1570,9 +1620,9 @@ export async function convergePg(
 		);
 	}
 	const applicationOwnership = validateApplicationOwnership(
-		model,
+		logicalModel,
 		applicationSteps,
-		sourceNaming,
+		physical.inventory,
 		schema,
 	);
 	const applicationOwnedChecks = new Map(
@@ -1600,20 +1650,12 @@ export async function convergePg(
 				};
 	if (applicationSteps.length > 0 && schema === '$user')
 		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
-	const physical = createPgPhysicalModel({
-		mode: 'logical',
-		model,
-		schema,
-		dbCasing: sourceCasing,
-		fkAutoIndex: false,
-	});
 	model = physical.model;
 	const casing: DbCasing = 'preserve';
-	const naming = getNamingPluginForDbCasing(casing);
 	const declaredSequenceNames =
 		options.declaredSequenceNames ??
 		declaredSequenceNamesFromInventory(physical.inventory);
-	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
+	const declaredSequences = assertDeclaredSequenceNamesPreserved(model);
 	if (!check && initialization !== 'never') {
 		const initializationClient = await pool.connect();
 		let initializationCurrency: PgLedgerScopeCurrency | undefined;
@@ -1641,9 +1683,7 @@ export async function convergePg(
 								...model.tables.values(),
 								...declaredSequences.keys(),
 							].map((value) =>
-								typeof value === 'string'
-									? value
-									: naming.toDatabase(value.name),
+								typeof value === 'string' ? value : value.name,
 							),
 						}
 					: {}),
@@ -1733,10 +1773,7 @@ export async function convergePg(
 						client,
 						schema,
 						[...model.tables.values(), ...declaredSequences.keys()].map(
-							(value) =>
-								typeof value === 'string'
-									? value
-									: naming.toDatabase(value.name),
+							(value) => (typeof value === 'string' ? value : value.name),
 						),
 					)
 				: undefined;
@@ -1751,7 +1788,7 @@ export async function convergePg(
 		});
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
-			const physicalName = naming.toDatabase(table.name);
+			const physicalName = table.name;
 			if (
 				standingAdoptionRelations === undefined
 					? table.adopt !== true
@@ -1908,11 +1945,7 @@ export async function convergePg(
 			database,
 			schema,
 		);
-		const uncoveredFkColumns = uncoveredFreshFkColumns(
-			diff.changes,
-			model,
-			naming,
-		);
+		const uncoveredFkColumns = uncoveredFreshFkColumns(diff.changes, model);
 		if (uncoveredFkColumns.length > 0) {
 			const tables = new Set(uncoveredFkColumns.map(({ table }) => table));
 			throw refusal(
@@ -1929,11 +1962,10 @@ export async function convergePg(
 			database,
 			schema,
 			model,
-			casing,
 			new Set(
 				diff.changes
 					.filter((change) => change.kind === 'create_table')
-					.map((change) => naming.toDatabase(change.table)),
+					.map((change) => change.table),
 			),
 			new Set(
 				adoptionSteps
@@ -2226,7 +2258,7 @@ export async function convergePg(
 				const compared = await compareConvergeMaskedSchema({
 					executor: client,
 					model: modelForDeclaredAdoption(
-						declaredAdoptionTable(model, naming, address),
+						declaredAdoptionTable(model, address),
 					),
 					schema,
 					casing,
