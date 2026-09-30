@@ -13,7 +13,7 @@ import {
 	compareSchemata,
 	generateDDL,
 	generateMigrationSQL,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import { createOrm, eq, getSchemaFromDb, ModelIRImpl } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {

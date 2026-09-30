@@ -35,6 +35,11 @@ digest printed by `plan` or `apply`: a recorded `apply <run-id>` is available
 only for replayable runs. A declined removal is not replayable; re-plan it when
 you are ready to proceed. `--yes` accepts the presentation step.
 
+For `plan`, no-argument `apply`, and `preflight --reinitialize`, dbsp creates
+one PostgreSQL physical model from the loaded schema file, its `dbCasing`, and
+the target schema. The resulting physical names are used for declarations and
+transition planning; commands do not remap declared names themselves.
+
 ## Startup convergence
 
 ```bash

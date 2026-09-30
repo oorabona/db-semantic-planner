@@ -1,4 +1,3 @@
-import { identityNaming } from '../naming-plugin.js';
 import { validateCheckExpression, validateIdentifier } from '../validate.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import { normalizeSequenceInteger } from './generated-source-normalizers.js';
@@ -513,7 +512,6 @@ export function validateGeneratedPostconditionV3Declaration(
 						...(index.where === undefined ? {} : { where: index.where.sql }),
 					},
 					undefined,
-					identityNaming,
 				);
 			} catch {
 				refuse('index renderer representability');

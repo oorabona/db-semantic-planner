@@ -6,9 +6,7 @@
 
 export {
 	canGenerateCreateIndex,
-	type GenerateDDLOptions,
 	generateCreateIndex,
-	generateDDL,
 } from './ddl-generator.js';
 export {
 	classifyGeneratedMutation,
@@ -56,8 +54,6 @@ export {
 	type AddedEnumValue,
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
-	type ComparePgsqlDatabaseSchemaOptions,
-	comparePgsqlDatabaseSchema,
 	ExpressionKeyedIndexPredicateCanonicalizationUnsupportedError,
 	IndexPredicateCanonicalizationError,
 	NonConvergentSchemaDiffError,
@@ -73,14 +69,20 @@ export {
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 export {
+	type ComparePgsqlDatabaseSchemaOptions,
+	type CompareSchemataOptions,
+	comparePgsqlDatabaseSchema,
+	compareSchemata,
+	type GenerateDDLOptions,
+	generateDDL,
 	generateDownSQL,
 	generateMigrationSQL,
 	type MigrationSQLOptions,
-} from './migration-sql.js';
+	PgPhysicalModelSchemaMismatchError,
+	type PgSchemaDiff,
+} from './public-api.js';
 export {
 	type ChangeKind,
-	type CompareSchemataOptions,
-	compareSchemata,
 	type DiffSummary,
 	ExpressionCanonicalizationUnavailableError,
 	type ReferencedKeyKind,

@@ -105,8 +105,18 @@ function givenLoadedSchema(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
 
 function comparisonReturning(
 	diff: SchemaDiff,
+	schema = 'public',
 ): ReturnType<typeof vi.fn<SchemaDiffComparisonOperation>> {
-	return vi.fn<SchemaDiffComparisonOperation>().mockResolvedValue(diff);
+	return vi
+		.fn<SchemaDiffComparisonOperation>()
+		.mockResolvedValue(physicalDiff(diff, schema));
+}
+
+function physicalDiff(diff: SchemaDiff, schema = 'public') {
+	return {
+		...diff,
+		physical: { schema, fkAutoIndex: true },
+	} satisfies Awaited<ReturnType<SchemaDiffComparisonOperation>>;
 }
 
 describe('handleSchemaDiff', () => {
@@ -133,13 +143,20 @@ describe('handleSchemaDiff', () => {
 
 		expect(compare).toHaveBeenCalledWith(
 			'test-conn',
-			minimalModel,
 			expect.objectContaining({
 				schema: 'tenant_1',
-				dbCasing: 'snake_case',
+				model: expect.objectContaining({
+					tables: expect.objectContaining({ get: expect.any(Function) }),
+				}),
+			}),
+			expect.objectContaining({
 				onExpressionCanonicalizationWarning: expect.any(Function),
 			}),
 		);
+		const desired = compare.mock.calls[0]?.[1];
+		expect([...desired!.model.tables.entries()]).toEqual([
+			['users', minimalModel.tables.get('users')],
+		]);
 		const options = compare.mock.calls[0]?.[2];
 		expect(options).not.toHaveProperty('requireExpressionCanonicalization');
 		expect(options).not.toHaveProperty('previouslyAppliedDiff');
@@ -164,7 +181,7 @@ describe('handleSchemaDiff', () => {
 				cause: new Error('role app_writer rejected value classified-secret'),
 				comparison: 'raw',
 			});
-			return emptyDiff;
+			return physicalDiff(emptyDiff);
 		};
 
 		const result = await handleSchemaDiff(
@@ -205,7 +222,7 @@ describe('handleSchemaDiff', () => {
 				message: 'The table is absent from the database',
 				cause: new Error('The table is absent from the database'),
 			});
-			return emptyDiff;
+			return physicalDiff(emptyDiff);
 		};
 
 		const result = await handleSchemaDiff(
@@ -246,20 +263,19 @@ describe('handleSchemaDiff', () => {
 
 		const result = await handleSchemaDiff(
 			{ connectionId: 'test-conn', schemaPath: '/project' },
-			comparisonReturning(diffWithChanges),
+			comparisonReturning(diffWithChanges, 'tenant_1'),
 		);
 
-		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
-			schemaName: 'tenant_1',
-			includeDestructive: false,
-		});
+		expect(generateMigrationSQL).toHaveBeenCalledWith(
+			physicalDiff(diffWithChanges, 'tenant_1'),
+			{
+				includeDestructive: false,
+			},
+		);
 		expect(generateDownSQL).toHaveBeenCalledWith(
 			expect.objectContaining({
 				changes: [diffWithChanges.changes[0]],
 			}),
-			{
-				schemaName: 'tenant_1',
-			},
 		);
 		expect(result.upSQL).toEqual([
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
@@ -284,14 +300,16 @@ describe('handleSchemaDiff', () => {
 			comparisonReturning(diffWithChanges),
 		);
 
-		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
-			includeDestructive: false,
-		});
+		expect(generateMigrationSQL).toHaveBeenCalledWith(
+			physicalDiff(diffWithChanges),
+			{
+				includeDestructive: false,
+			},
+		);
 		expect(generateDownSQL).toHaveBeenCalledWith(
 			expect.objectContaining({
 				changes: [diffWithChanges.changes[0]],
 			}),
-			{},
 		);
 	});
 
@@ -307,9 +325,12 @@ describe('handleSchemaDiff', () => {
 			comparisonReturning(diffWithChanges),
 		);
 
-		expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
-			includeDestructive: false,
-		});
+		expect(generateMigrationSQL).toHaveBeenCalledWith(
+			physicalDiff(diffWithChanges),
+			{
+				includeDestructive: false,
+			},
+		);
 		expect(result.upSQL).toEqual([
 			'ALTER TABLE "users" ADD COLUMN "email" text;',
 		]);
@@ -363,7 +384,6 @@ describe('handleSchemaDiff', () => {
 			expect.objectContaining({
 				changes: [createTable.changes[0]],
 			}),
-			{},
 		);
 	});
 

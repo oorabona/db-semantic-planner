@@ -3,9 +3,9 @@ import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
-import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import * as physicalModel from '../physical-model/index.js';
 import {
 	physicalizeDeclaredSequences,
 	SequenceNameMapKeyMismatchError,
@@ -100,6 +100,10 @@ vi.mock('../ddl/index.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/index.js')>()),
 	createPgsqlGeneratedManagedStep: (...args: unknown[]) =>
 		forward(mocks.createStep, args),
+}));
+
+vi.mock('../ddl/migration-sql.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../ddl/migration-sql.js')>()),
 	generateMigrationSQL: (...args: unknown[]) => forward(mocks.generate, args),
 }));
 
@@ -243,6 +247,7 @@ import {
 	type ConvergePgCheckOptions,
 	type ConvergePgOptions,
 	convergePg,
+	convergePgPhysical,
 	type PgConvergeCheckResult,
 	PgConvergeRefusalError,
 	type PgConvergeResult,
@@ -483,6 +488,7 @@ function freshForeignKeyChanges(
 			details: 'child references parent',
 			meta: {
 				fk: {
+					name: 'fk_child_table_parent_first_parent_second',
 					columns: ['parent_first', 'parent_second'],
 					references: { table: 'parent_table', columns: referencedColumns },
 				},
@@ -869,14 +875,14 @@ describe('convergePg refusal boundary', () => {
 		}
 	});
 
-	it('allows schema $user without application steps', async () => {
+	it('refuses a renderer-invalid schema before application step handling', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await expect(
 			convergePg(poolFor(), emptyModel(), {
 				mode: 'check',
 				schema: '$user',
 			}),
-		).resolves.toEqual({ kind: 'no-drift' });
+		).rejects.toThrow('Invalid schema identifier');
 	});
 
 	it('keeps an unexpected step getter error out of invalid-options detail', async () => {
@@ -2971,7 +2977,9 @@ describe('convergePg refusal boundary', () => {
 
 	it('refuses a create_index before execution', async () => {
 		await expectRefusal(
-			change('create_index', { index: { columns: ['email'] } }),
+			change('create_index', {
+				index: { name: 'idx_users_email', columns: ['email'] },
+			}),
 			'unsupported-change',
 		);
 	});
@@ -3029,6 +3037,7 @@ describe('convergePg refusal boundary', () => {
 				{
 					...change('add_foreign_key', {
 						fk: {
+							name: 'fk_new_table_user_id',
 							columns: ['user_id'],
 							references: { table: 'users', columns: ['id'] },
 						},
@@ -3283,7 +3292,9 @@ describe('convergePg refusal boundary', () => {
 			changes: [createTableWithForeignKey('posts', ['author_id'])],
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+		await expect(
+			convergePg(poolFor(), emptyModel(), { fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -3393,7 +3404,9 @@ describe('convergePg refusal boundary', () => {
 			],
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+		await expect(
+			convergePg(poolFor(), emptyModel(), { fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -3412,7 +3425,7 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.generate).toHaveBeenCalledWith(
 			expect.anything(),
-			expect.objectContaining({ fkAutoIndex: false }),
+			expect.objectContaining({ fkAutoIndex: true }),
 		);
 	});
 
@@ -3426,12 +3439,6 @@ describe('convergePg refusal boundary', () => {
 				),
 			],
 		});
-		mocks.generate.mockImplementation((...args: unknown[]) =>
-			generateMigrationSql(
-				args[0] as Parameters<typeof generateMigrationSql>[0],
-				args[1] as Parameters<typeof generateMigrationSql>[1],
-			),
-		);
 		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
@@ -3454,7 +3461,7 @@ describe('convergePg refusal boundary', () => {
 		).toBe(false);
 		expect(mocks.generate).toHaveBeenCalledWith(
 			expect.anything(),
-			expect.objectContaining({ fkAutoIndex: false }),
+			expect.objectContaining({ fkAutoIndex: true }),
 		);
 	});
 
@@ -3641,20 +3648,31 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
-	it('passes the caller model without an ownership mask when no step owns a surface', async () => {
+	it('passes the physical snapshot to adoption comparison without rebuilding it', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		mocks.identity.mockResolvedValue(undefined);
 		const model = emptyModel();
-		await expect(convergePg(poolFor(), model)).resolves.toEqual({
-			kind: 'no-drift',
-			applied: [],
+		const physical = physicalModel.createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
 		});
-		expect(mocks.declaredComparison).toHaveBeenCalledWith(
-			expect.objectContaining({ model }),
-		);
-		expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
-			'ownershipMask',
-		);
+		const factory = vi.spyOn(physicalModel, 'createPgPhysicalModel');
+		try {
+			await expect(convergePgPhysical(poolFor(), physical)).resolves.toEqual({
+				kind: 'no-drift',
+				applied: [],
+			});
+			expect(factory).not.toHaveBeenCalled();
+			expect(mocks.declaredComparison).toHaveBeenCalledWith(
+				expect.objectContaining({ model: physical.model, physical }),
+			);
+			expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
+				'ownershipMask',
+			);
+		} finally {
+			factory.mockRestore();
+		}
 	});
 
 	it('refuses a declared table absent after comparison without sending DDL', async () => {
@@ -3823,6 +3841,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'left references right',
 				meta: {
 					fk: {
+						name: 'fk_left_table_right_id',
 						columns: ['right_id'],
 						references: { table: 'right_table', columns: ['id'] },
 					},
@@ -3866,6 +3885,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'right references left',
 				meta: {
 					fk: {
+						name: 'fk_right_table_left_id',
 						columns: ['left_id'],
 						references: { table: 'left_table', columns: ['id'] },
 					},
@@ -3934,6 +3954,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent external id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_external_id',
 						columns: ['parent_external_id'],
 						references: { table: 'parent_table', columns: ['external_id'] },
 					},
@@ -4261,6 +4282,7 @@ describe('convergePg refusal boundary', () => {
 					details: 'child references parent external id',
 					meta: {
 						fk: {
+							name: 'fk_child_table_parent_external_id',
 							columns: ['parent_external_id'],
 							references: { table: 'parent_table', columns: ['external_id'] },
 						},
@@ -4334,6 +4356,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_id',
 						columns: ['parent_id'],
 						references: { table: 'parent_table', columns: ['id'] },
 					},
@@ -4346,6 +4369,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent external id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_external_id',
 						columns: ['parent_external_id'],
 						references: { table: 'parent_table', columns: ['external_id'] },
 					},

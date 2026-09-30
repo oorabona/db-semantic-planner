@@ -15,8 +15,6 @@ import type {
 	TransitionFragment,
 	TransitionRule,
 } from '@dbsp/types';
-import type { NamingPlugin } from '../../naming-plugin.js';
-import { identityNaming } from '../../naming-plugin.js';
 import { validateIdentifier } from '../../validate.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
@@ -56,10 +54,6 @@ type CreateUniqueIndexConcurrentlyApplicableEvaluation =
 	ApplicableEvaluation & {
 		readonly catalogIndexes: readonly IndexSet[];
 	};
-
-export interface CreateUniqueIndexConcurrentlyRuleOptions {
-	readonly naming?: NamingPlugin;
-}
 
 const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
 	'partitioned tables are not yet supported by the CREATE UNIQUE INDEX CONCURRENTLY transition';
@@ -486,10 +480,7 @@ function unsupportedRecognition(
 	};
 }
 
-export function createCreateUniqueIndexConcurrentlyRule(
-	options: CreateUniqueIndexConcurrentlyRuleOptions = {},
-): TransitionRule<CreateUniqueIndexConcurrentlyMatch> {
-	const naming = options.naming ?? identityNaming;
+export function createCreateUniqueIndexConcurrentlyRule(): TransitionRule<CreateUniqueIndexConcurrentlyMatch> {
 	return {
 		id: CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
 		artifact: PG_RULE_PACK_ARTIFACT,
@@ -516,7 +507,7 @@ export function createCreateUniqueIndexConcurrentlyRule(
 				if (delta.kind === 'none') {
 					continue;
 				}
-				const table = naming.toDatabase(desiredTable.name);
+				const table = desiredTable.name;
 				const schema = context?.context.targetSchema;
 				const baseMatch = { table, ...(schema ? { schema } : {}) };
 				if (delta.kind === 'unsupported') {
@@ -529,9 +520,7 @@ export function createCreateUniqueIndexConcurrentlyRule(
 						'index transition shape is outside the CREATE UNIQUE INDEX CONCURRENTLY first slice',
 					);
 				}
-				const columns = delta.index.columns.map((column) =>
-					naming.toDatabase(column),
-				);
+				const columns = delta.index.columns;
 				const missingColumn = delta.index.columns.find(
 					(column) =>
 						!desiredTable.columns.some(
@@ -541,12 +530,11 @@ export function createCreateUniqueIndexConcurrentlyRule(
 							(candidate) => candidate.name === column,
 						),
 				);
-				const index = naming.toDatabase(
+				const index =
 					delta.index.name ??
-						defaultIndexName(desiredTable.name, {
-							columns: delta.index.columns,
-						}),
-				);
+					defaultIndexName(desiredTable.name, {
+						columns: delta.index.columns,
+					});
 				const match: CreateUniqueIndexConcurrentlyMatch = {
 					...baseMatch,
 					index,

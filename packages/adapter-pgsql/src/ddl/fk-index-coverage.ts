@@ -1,22 +1,5 @@
 import type { TableIR } from '@dbsp/types';
 
-/** Resolve the physical name PostgreSQL will use for a declared index. */
-export function getResolvedIndexName(
-	tableName: string,
-	columns: readonly string[],
-	declaredName: string | undefined,
-): string {
-	return declaredName ?? `idx_${tableName}_${columns.join('_')}`;
-}
-
-/** Base name for an automatically generated single-column FK index. */
-export function getAutoFkIndexName(
-	tableName: string,
-	columnName: string,
-): string {
-	return `idx_${tableName}_${columnName}`;
-}
-
 /**
  * Whether a declared key can serve lookups through a single-column foreign key.
  *

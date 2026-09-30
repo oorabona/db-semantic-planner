@@ -89,6 +89,7 @@ const ADAPTER_AMBIENT_NAMES = [
 	'l2Distance',
 	'rawDistance',
 	'vectorDims',
+	'createPgPhysicalModel',
 	'generateDDL',
 	'redactParams',
 	'DEFAULT_REDACTION_PATTERNS',
@@ -196,7 +197,12 @@ const __doctestPool = new __doctestPgPool({ connectionString: __doctestEnv.DATAB
 const __doctestAdapter = __doctestCreatePgsqlAdapter(__doctestPool);
 const __defaultOrm = __doctestCreateOrm({ schema: __defaultDb, adapter: __doctestAdapter });
 // DDL statements for the default schema — computed once per block.
-const __bootstrapDDL: string[] = __doctestGenerateDDL(__defaultDb.model);
+const __defaultPhysical = __doctestCreatePgPhysicalModel({
+	mode: 'logical',
+	model: __defaultDb.model,
+	schema: 'public',
+});
+const __bootstrapDDL: string[] = __doctestGenerateDDL(__defaultPhysical);
 /**
  * Drop all default tables then replay DDL so each block starts from a clean state.
  *
@@ -237,7 +243,7 @@ function renderPreamble(
 		.join('\n');
 	const privateImports = realDb
 		? `import { schema as __doctestSchema, ref as __doctestRef, createOrm as __doctestCreateOrm } from '@dbsp/core';
-import { createPgsqlAdapter as __doctestCreatePgsqlAdapter, generateDDL as __doctestGenerateDDL } from '@dbsp/adapter-pgsql';
+import { createPgPhysicalModel as __doctestCreatePgPhysicalModel, createPgsqlAdapter as __doctestCreatePgsqlAdapter, generateDDL as __doctestGenerateDDL } from '@dbsp/adapter-pgsql';
 import { Pool as __doctestPgPool } from 'pg';
 import { env as __doctestEnv } from 'node:process';
 `

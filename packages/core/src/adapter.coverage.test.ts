@@ -15,7 +15,6 @@ import {
 	assertCapability,
 	executeCompiledQuery,
 	executeCompiledQueryWithMeta,
-	supportsDDLGeneration,
 	supportsExecution,
 	supportsIntrospection,
 	supportsRawSql,
@@ -306,26 +305,6 @@ describe('supportsRawSql', () => {
 	it('returns true when executeRaw is a function', () => {
 		const adapter = { executeRaw: () => {} } as unknown as BaseAdapter;
 		expect(supportsRawSql(adapter)).toBe(true);
-	});
-});
-
-// ============================================================================
-// supportsDDLGeneration
-// ============================================================================
-
-describe('supportsDDLGeneration', () => {
-	it('returns false for empty object', () => {
-		expect(supportsDDLGeneration({} as BaseAdapter)).toBe(false);
-	});
-
-	it('returns false when generateDDL is not a function', () => {
-		const adapter = { generateDDL: true } as unknown as BaseAdapter;
-		expect(supportsDDLGeneration(adapter)).toBe(false);
-	});
-
-	it('returns true when generateDDL is a function', () => {
-		const adapter = { generateDDL: () => {} } as unknown as BaseAdapter;
-		expect(supportsDDLGeneration(adapter)).toBe(true);
 	});
 });
 

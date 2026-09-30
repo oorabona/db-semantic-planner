@@ -19,8 +19,6 @@ import type {
 	TransitionRule,
 	TrustRoot,
 } from '@dbsp/types';
-import type { NamingPlugin } from '../../naming-plugin.js';
-import { identityNaming } from '../../naming-plugin.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	LOGICAL_IDENTITY_ADOPTION_RULE_ID,
@@ -52,7 +50,6 @@ type ResolvedLogicalIdentityAdoptionMatch = LogicalIdentityAdoptionMatch & {
 };
 
 export interface LogicalIdentityAdoptionRuleOptions {
-	readonly naming?: NamingPlugin;
 	readonly asserter?: IdentityAdoptionAsserter;
 	readonly selectionBasis?: string;
 }
@@ -354,7 +351,6 @@ function identityClaimDraft(
 function recognitionForTable(
 	desiredTable: TableIR,
 	currentTable: TableIR,
-	naming: NamingPlugin,
 	selectionBasis: string,
 ): LogicalIdentityAdoptionMatch | undefined {
 	const identity = desiredTable.logicalIdentity;
@@ -369,7 +365,7 @@ function recognitionForTable(
 		return undefined;
 	}
 	return {
-		table: naming.toDatabase(desiredTable.name),
+		table: desiredTable.name,
 		logicalId: identity.id,
 		carrierKind: 'postgresql-side-table',
 		authenticated: false,
@@ -382,7 +378,6 @@ function recognitionForColumn(
 	currentTable: TableIR,
 	desiredColumn: ColumnIR,
 	currentColumn: ColumnIR,
-	naming: NamingPlugin,
 	selectionBasis: string,
 ): LogicalIdentityAdoptionMatch | undefined {
 	const identity = desiredColumn.logicalIdentity;
@@ -398,8 +393,8 @@ function recognitionForColumn(
 		return undefined;
 	}
 	return {
-		table: naming.toDatabase(desiredTable.name),
-		column: naming.toDatabase(desiredColumn.name),
+		table: desiredTable.name,
+		column: desiredColumn.name,
 		logicalId: identity.id,
 		carrierKind: 'postgresql-side-table',
 		authenticated: false,
@@ -410,7 +405,6 @@ function recognitionForColumn(
 export function createLogicalIdentityAdoptionRule(
 	options: LogicalIdentityAdoptionRuleOptions = {},
 ): TransitionRule<LogicalIdentityAdoptionMatch> {
-	const naming = options.naming ?? identityNaming;
 	const asserter = options.asserter ?? DEFAULT_ASSERTER;
 	const selectionBasis = options.selectionBasis ?? DEFAULT_SELECTION_BASIS;
 	return {
@@ -435,7 +429,6 @@ export function createLogicalIdentityAdoptionRule(
 				const tableMatch = recognitionForTable(
 					desiredTable,
 					currentTable,
-					naming,
 					selectionBasis,
 				);
 				if (tableMatch) {
@@ -453,7 +446,6 @@ export function createLogicalIdentityAdoptionRule(
 						currentTable,
 						desiredColumn,
 						currentColumn,
-						naming,
 						selectionBasis,
 					);
 					if (columnMatch) {

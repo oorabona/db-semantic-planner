@@ -6,7 +6,6 @@ import { ModelIRImpl } from '@dbsp/core';
 import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
-	DbCasing,
 	DialectCapabilities,
 	EnumIR,
 	IndexIR,
@@ -42,13 +41,7 @@ import {
 	markEngineCanonicalCheck,
 	markEngineCanonicalIndex,
 } from './expression-provenance.js';
-import {
-	getNamingPluginForDbCasing,
-	identityNaming,
-	type NamingPlugin,
-} from './naming-plugin.js';
 import type { RollbackOnlyPgsqlScope } from './pgsql-adapter.js';
-import { physicalizeDeclaredSequences } from './sequence-name.js';
 import { escapeDiagnosticText, validateCheckExpression } from './validate.js';
 
 export interface CheckConstraintCanonicalizationWarning {
@@ -93,8 +86,6 @@ export type ExpressionCanonicalizationWarning =
 export interface CanonicalizeCheckConstraintsOptions {
 	/** Database schema that owns the target tables and target-scoped enum types. */
 	readonly schemaName?: string;
-	/** Naming convention used when matching desired table names to DB table names. */
-	readonly dbCasing?: DbCasing;
 	/** Called when PostgreSQL CHECK canonicalisation fails and raw comparison is used. */
 	readonly onWarning?: (
 		warning: CheckConstraintCanonicalizationWarning,
@@ -421,7 +412,7 @@ export function fallbackToRawCheckConstraintComparison(
 	cause: unknown,
 	options?: CanonicalizationOptions,
 ): ModelIR {
-	const targets = collectCheckConstraintTargets(desired, dbModel, options);
+	const targets = collectCheckConstraintTargets(desired, dbModel);
 	if (targets.length === 0) {
 		return desired;
 	}
@@ -449,12 +440,10 @@ export function fallbackToRawExpressionComparison(
 	const defaultOutcomes = collectUnavailableColumnDefaultOutcomes(
 		desired,
 		dbModel,
-		options,
 	);
 	const desiredPredicateTargets = collectDesiredIndexPredicateTargets(
 		desired,
 		dbModel,
-		options,
 	);
 	const databasePredicateTargets =
 		collectDatabaseIndexPredicateTargets(dbModel);
@@ -471,7 +460,7 @@ export function fallbackToRawExpressionComparison(
 	for (const outcome of defaultOutcomes) {
 		reportUnavailableColumnDefault(outcome, options);
 	}
-	for (const target of collectColumnDefaultTargets(desired, dbModel, options)) {
+	for (const target of collectColumnDefaultTargets(desired, dbModel)) {
 		for (const column of target.columns) {
 			reportColumnDefaultCanonicalizationFailure(
 				target,
@@ -483,7 +472,7 @@ export function fallbackToRawExpressionComparison(
 			const outcome = fallbackColumnDefaultOutcome(
 				'desired',
 				target.dbTableName,
-				namingForOptions(options).toDatabase(column.name),
+				column.name,
 				'unavailable',
 				'raw',
 				cause,
@@ -493,8 +482,7 @@ export function fallbackToRawExpressionComparison(
 				recordedDefaultOutcomes.add(defaultOutcomeKey(outcome));
 			}
 			const databaseColumn = target.dbTable.columns.find(
-				(candidate) =>
-					candidate.name === namingForOptions(options).toDatabase(column.name),
+				(candidate) => candidate.name === column.name,
 			);
 			if (
 				databaseColumn?.default !== undefined &&
@@ -559,7 +547,7 @@ async function canonicalizeCheckConstraintModels(
 	canonicalizeDatabaseChecks: boolean,
 	createEnumTypes = true,
 ): Promise<CanonicalizedExpressionModels> {
-	const targets = collectCheckConstraintTargets(desired, dbModel, options);
+	const targets = collectCheckConstraintTargets(desired, dbModel);
 	if (targets.length === 0) {
 		return {
 			desired,
@@ -688,11 +676,10 @@ export async function canonicalizeExpressionSurfaces(
 	options?: CanonicalizeExpressionSurfacesOptions,
 ): Promise<CanonicalizedExpressionModels> {
 	const scope = canonicalizationScope(adapter);
-	const defaultTargets = collectColumnDefaultTargets(desired, dbModel, options);
+	const defaultTargets = collectColumnDefaultTargets(desired, dbModel);
 	const desiredPredicateTargets = collectDesiredIndexPredicateTargets(
 		desired,
 		dbModel,
-		options,
 	);
 	const databasePredicateTargets =
 		collectDatabaseIndexPredicateTargets(dbModel);
@@ -711,11 +698,10 @@ export async function canonicalizeExpressionSurfaces(
 	const unavailableDefaultOutcomes = collectUnavailableColumnDefaultOutcomes(
 		desired,
 		dbModel,
-		options,
 	);
 	const hasChecks =
 		options?.canonicalizeCheckConstraints !== false &&
-		collectCheckConstraintTargets(desired, dbModel, options).length > 0;
+		collectCheckConstraintTargets(desired, dbModel).length > 0;
 	if (
 		!hasChecks &&
 		defaultTargets.length === 0 &&
@@ -740,11 +726,7 @@ export async function canonicalizeExpressionSurfaces(
 	);
 	if (enumCreationFailure !== undefined) {
 		if (hasChecks) {
-			for (const target of collectCheckConstraintTargets(
-				desired,
-				dbModel,
-				options,
-			)) {
+			for (const target of collectCheckConstraintTargets(desired, dbModel)) {
 				reportCanonicalizationFailure(target, enumCreationFailure, options);
 			}
 		}
@@ -781,11 +763,7 @@ export async function canonicalizeExpressionSurfaces(
 	);
 	if (sequenceCreationFailure !== undefined) {
 		if (hasChecks) {
-			for (const target of collectCheckConstraintTargets(
-				desired,
-				dbModel,
-				options,
-			)) {
+			for (const target of collectCheckConstraintTargets(desired, dbModel)) {
 				reportCanonicalizationFailure(target, sequenceCreationFailure, options);
 			}
 		}
@@ -935,7 +913,7 @@ function unavailableDefaultOutcomesForEnumCreation(
 				fallbackColumnDefaultOutcome(
 					'desired',
 					target.dbTableName,
-					namingForOptions(options).toDatabase(column.name),
+					column.name,
 					'unavailable',
 					'raw',
 					cause,
@@ -949,22 +927,17 @@ function unavailableDefaultOutcomesForEnumCreation(
 function collectUnavailableColumnDefaultOutcomes(
 	desired: ModelIR,
 	dbModel: ModelIR,
-	options: CanonicalizationOptions | undefined,
 ): ColumnDefaultFallbackOutcome[] {
-	const naming = namingForOptions(options);
 	const outcomes: ColumnDefaultFallbackOutcome[] = [];
 	const desiredTablesByDatabaseName = new Map<string, TableIR>(
-		[...desired.tables.values()].map((table) => [
-			naming.toDatabase(table.name),
-			table,
-		]),
+		[...desired.tables.values()].map((table) => [table.name, table]),
 	);
 	for (const table of desired.tables.values()) {
-		const dbTableName = naming.toDatabase(table.name);
+		const dbTableName = table.name;
 		const dbTable = dbModel.tables.get(dbTableName);
 		for (const column of table.columns) {
 			if (column.default === undefined || column.default === null) continue;
-			const columnName = naming.toDatabase(column.name);
+			const columnName = column.name;
 			if (dbTable === undefined) {
 				outcomes.push(
 					fallbackColumnDefaultOutcome(
@@ -997,7 +970,7 @@ function collectUnavailableColumnDefaultOutcomes(
 		for (const dbColumn of dbTable.columns) {
 			if (dbColumn.default === undefined || dbColumn.default === null) continue;
 			const desiredColumn = desiredTable?.columns.find(
-				(column) => naming.toDatabase(column.name) === dbColumn.name,
+				(column) => column.name === dbColumn.name,
 			);
 			if (
 				desiredColumn?.default === undefined ||
@@ -1042,12 +1015,10 @@ function defaultOutcomeKey(
 function collectColumnDefaultTargets(
 	desired: ModelIR,
 	dbModel: ModelIR,
-	options: CanonicalizationOptions | undefined,
 ): ColumnDefaultTarget[] {
-	const naming = namingForOptions(options);
 	const targets: ColumnDefaultTarget[] = [];
 	for (const [modelKey, table] of desired.tables) {
-		const dbTableName = naming.toDatabase(table.name);
+		const dbTableName = table.name;
 		const dbTable = dbModel.tables.get(dbTableName);
 		if (dbTable === undefined) continue;
 		const dbColumnNames = new Set(dbTable.columns.map((column) => column.name));
@@ -1055,7 +1026,7 @@ function collectColumnDefaultTargets(
 			(column) =>
 				column.default !== undefined &&
 				column.default !== null &&
-				dbColumnNames.has(naming.toDatabase(column.name)),
+				dbColumnNames.has(column.name),
 		);
 		if (columns.length === 0) continue;
 		targets.push({
@@ -1072,12 +1043,10 @@ function collectColumnDefaultTargets(
 function collectDesiredIndexPredicateTargets(
 	desired: ModelIR,
 	database: ModelIR,
-	options: CanonicalizationOptions | undefined,
 ): DesiredIndexPredicateTarget[] {
-	const naming = namingForOptions(options);
 	const targets: DesiredIndexPredicateTarget[] = [];
 	for (const [modelKey, modelTable] of desired.tables) {
-		const dbTableName = naming.toDatabase(modelTable.name);
+		const dbTableName = modelTable.name;
 		const dbTable = database.tables.get(dbTableName);
 		for (const index of modelTable.indexes) {
 			const predicate = index.where;
@@ -1410,14 +1379,12 @@ export async function canonicalizeIndexPredicate(
 				'Index predicate canonicalization requires columns or a live scratch relation.',
 			);
 		}
-		const naming = namingForOptions(request.options);
 		const dbColumnsByName = new Map(
 			(request.databaseColumns ?? []).map((column) => [column.name, column]),
 		);
 		const columns = request.columns.map((column) =>
 			generateColumnDef(
-				toScratchColumn(column, dbColumnsByName, naming),
-				naming,
+				toScratchColumn(column, dbColumnsByName),
 				request.options?.schemaName,
 			),
 		);
@@ -1673,9 +1640,7 @@ async function canonicalizeTableDefaultsBestEffort(
 		columnIndex++
 	) {
 		const column = target.columns[columnIndex]!;
-		const databaseColumnName = namingForOptions(options).toDatabase(
-			column.name,
-		);
+		const databaseColumnName = column.name;
 		try {
 			results.push(
 				await adapter.transaction((tx) =>
@@ -1710,8 +1675,7 @@ async function canonicalizeColumnDefault(
 	options: CanonicalizeExpressionSurfacesOptions | undefined,
 	names: CheckCanonicalizationNameScope,
 ): Promise<CanonicalColumnDefault> {
-	const naming = namingForOptions(options);
-	const databaseColumnName = naming.toDatabase(column.name);
+	const databaseColumnName = column.name;
 	const dbColumn = target.dbTable.columns.find(
 		(candidate) => candidate.name === databaseColumnName,
 	)!;
@@ -1856,19 +1820,14 @@ async function deparseColumnDefaults(
 function collectCheckConstraintTargets(
 	desired: ModelIR,
 	dbModel: ModelIR,
-	options: CanonicalizationOptions | undefined,
 ): CheckConstraintTarget[] {
-	const plugin =
-		options?.dbCasing !== undefined
-			? getNamingPluginForDbCasing(options.dbCasing)
-			: identityNaming;
 	const targets: CheckConstraintTarget[] = [];
 
 	for (const [modelKey, table] of desired.tables) {
 		const checks = table.checkConstraints ?? [];
 		if (checks.length === 0) continue;
 
-		const dbTableName = plugin.toDatabase(table.name);
+		const dbTableName = table.name;
 		const dbTable = dbModel.tables.get(dbTableName);
 
 		targets.push({
@@ -1878,7 +1837,7 @@ function collectCheckConstraintTargets(
 			dbTableName,
 			checks,
 			dbCheckNames: checks.map((check) =>
-				getCheckConstraintDatabaseName(check, plugin),
+				getCheckConstraintDatabaseName(check),
 			),
 		});
 	}
@@ -2106,9 +2065,8 @@ async function deparseDatabaseChecks(
 function toScratchColumn(
 	column: TableIR['columns'][number],
 	dbColumnsByName: ReadonlyMap<string, TableIR['columns'][number]>,
-	naming: NamingPlugin,
 ): TableIR['columns'][number] {
-	const dbColumn = dbColumnsByName.get(naming.toDatabase(column.name));
+	const dbColumn = dbColumnsByName.get(column.name);
 	const dbOriginalDbType = dbColumn?.originalDbType;
 	let typeColumn = column;
 	if (
@@ -2175,12 +2133,8 @@ async function createProjectedScratchRelation(
 		`CREATE TEMP TABLE ${request.tempTable} (LIKE ${request.liveRelation}) ON COMMIT DROP`,
 	);
 
-	const naming = namingForOptions(request.options);
 	const desiredByDatabaseName = new Map(
-		request.desiredTable.columns.map((column) => [
-			naming.toDatabase(column.name),
-			column,
-		]),
+		request.desiredTable.columns.map((column) => [column.name, column]),
 	);
 	const databaseByName = new Map(
 		request.databaseTable.columns.map((column) => [column.name, column]),
@@ -2194,13 +2148,12 @@ async function createProjectedScratchRelation(
 	}
 
 	for (const desiredColumn of request.desiredTable.columns) {
-		const databaseName = naming.toDatabase(desiredColumn.name);
+		const databaseName = desiredColumn.name;
 		const databaseColumn = databaseByName.get(databaseName);
 		if (databaseColumn === undefined) {
 			await adapter.executeRaw(
 				`ALTER TABLE ${request.tempTable} ADD COLUMN ${generateColumnDef(
-					toScratchColumn(desiredColumn, databaseByName, naming),
-					naming,
+					toScratchColumn(desiredColumn, databaseByName),
 					request.options?.schemaName,
 				)}`,
 			);
@@ -2233,13 +2186,8 @@ async function createDesiredScratchRelation(
 	table: TableIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<void> {
-	const naming = namingForOptions(options);
 	const columns = table.columns.map((column) =>
-		generateColumnDef(
-			toScratchColumn(column, new Map(), naming),
-			naming,
-			options?.schemaName,
-		),
+		generateColumnDef(toScratchColumn(column, new Map()), options?.schemaName),
 	);
 	await adapter.executeRaw(
 		`CREATE TEMP TABLE ${tempTable} (${columns.join(', ')}) ON COMMIT DROP`,
@@ -2302,7 +2250,6 @@ async function createMissingDesiredEnumTypes(
 		schema: enumModel,
 		tables: [],
 		schemaName: options?.schemaName,
-		naming: namingForOptions(options),
 		caps: options?.dialectCapabilities,
 		fkAutoIndex: false,
 		includeDropStatements: false,
@@ -2343,11 +2290,7 @@ async function createMissingDesiredSequences(
 	dbModel: ModelIR,
 	options: CanonicalizationOptions | undefined,
 ): Promise<unknown | undefined> {
-	const missingSequences = missingDesiredSequences(
-		desired,
-		dbModel,
-		namingForOptions(options),
-	);
+	const missingSequences = missingDesiredSequences(desired, dbModel);
 	if (missingSequences.size === 0) return undefined;
 	const sequenceModel = new ModelIRImpl(
 		new Map(),
@@ -2360,7 +2303,6 @@ async function createMissingDesiredSequences(
 		schema: sequenceModel,
 		tables: [],
 		schemaName: options?.schemaName,
-		naming: identityNaming,
 		caps: options?.dialectCapabilities,
 		fkAutoIndex: false,
 		includeDropStatements: false,
@@ -2378,13 +2320,9 @@ async function createMissingDesiredSequences(
 function missingDesiredSequences(
 	desired: ModelIR,
 	dbModel: ModelIR,
-	naming: NamingPlugin,
 ): Map<string, SequenceIR> {
 	const missing = new Map<string, SequenceIR>();
-	for (const [name, sequence] of physicalizeDeclaredSequences(
-		desired.sequences,
-		naming,
-	)) {
+	for (const [name, sequence] of desired.sequences ?? []) {
 		if (!dbModel.sequences?.has(name)) missing.set(name, sequence);
 	}
 	return missing;
@@ -2459,14 +2397,6 @@ function createCheckCanonicalizationNameScope(): CheckCanonicalizationNameScope 
 	};
 }
 
-function namingForOptions(
-	options: CanonicalizationOptions | undefined,
-): NamingPlugin {
-	return options?.dbCasing !== undefined
-		? getNamingPluginForDbCasing(options.dbCasing)
-		: identityNaming;
-}
-
 function reportCanonicalizationFailure(
 	target: CheckConstraintTarget,
 	cause: unknown,
@@ -2513,7 +2443,7 @@ function reportColumnDefaultCanonicalizationFailure(
 	options: CanonicalizeExpressionSurfacesOptions | undefined,
 	outcome: 'unavailable' | 'rejected',
 ): void {
-	const columnName = namingForOptions(options).toDatabase(column.name);
+	const columnName = column.name;
 	const message =
 		'Could not canonicalize one column default with PostgreSQL; falling back to verbatim raw comparison. ' +
 		'Inspect the warning table and name fields for its identity. ' +

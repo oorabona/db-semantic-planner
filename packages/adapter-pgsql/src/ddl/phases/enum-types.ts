@@ -14,7 +14,7 @@ import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
 /**
  * Generate CREATE TYPE ... AS ENUM statements for all enum types in the schema.
  *
- * @param ctx - Phase context with schema, schemaName, naming, and capabilities
+ * @param ctx - Phase context with schema, schemaName, and capabilities
  * @returns Array of DDL statements, or empty if enum types are unsupported / absent
  */
 export function generateEnumTypesPhase(ctx: PhaseContext): string[] {

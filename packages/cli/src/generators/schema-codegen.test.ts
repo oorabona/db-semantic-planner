@@ -6,13 +6,12 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generateCreateIndex } from '@dbsp/adapter-pgsql';
 import {
 	compareSchemata,
-	generateCreateIndex,
 	generateDDL,
 	generateMigrationSQL,
-	identityNaming,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import type { ModelIR, TableIR } from '@dbsp/core';
 import { ref, schema } from '@dbsp/core';
 import type { IndexIR } from '@dbsp/types';
@@ -1337,7 +1336,7 @@ describe('generateSchemaFileWithDiagnostics', () => {
 			for (const table of loaded.model.tables.values()) {
 				for (const idx of table.indexes) {
 					expect(() =>
-						generateCreateIndex(table.name, idx, undefined, identityNaming),
+						generateCreateIndex(table.name, idx, undefined),
 					).not.toThrow();
 				}
 			}

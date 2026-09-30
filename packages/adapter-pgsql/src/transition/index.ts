@@ -258,7 +258,6 @@ export {
 } from './removal-containment.js';
 export {
 	type AddCheckMatch,
-	type AddCheckRuleOptions,
 	createAddCheckRule,
 } from './rules/add-check.js';
 export {
@@ -269,7 +268,6 @@ export {
 } from './rules/adopt-logical-identity.js';
 export {
 	type CreateUniqueIndexConcurrentlyMatch,
-	type CreateUniqueIndexConcurrentlyRuleOptions,
 	createCreateUniqueIndexConcurrentlyRule,
 } from './rules/create-unique-index-concurrently.js';
 export {
@@ -280,5 +278,4 @@ export {
 export {
 	createSetNotNullRule,
 	type SetNotNullMatch,
-	type SetNotNullRuleOptions,
 } from './rules/set-not-null.js';

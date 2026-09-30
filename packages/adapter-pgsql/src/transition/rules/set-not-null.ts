@@ -16,8 +16,6 @@ import type {
 	TransitionFragment,
 	TransitionRule,
 } from '@dbsp/types';
-import type { NamingPlugin } from '../../naming-plugin.js';
-import { identityNaming } from '../../naming-plugin.js';
 import {
 	columnShapeFromColumn,
 	compareSetNotNullColumnShape,
@@ -66,10 +64,6 @@ type SetNotNullTarget = Pick<
 	SetNotNullMatch,
 	'schema' | 'database' | 'table' | 'column'
 >;
-
-export interface SetNotNullRuleOptions {
-	readonly naming?: NamingPlugin;
-}
 
 const SET_NOT_NULL_PROVEN_COLUMN_FIELDS = [
 	'nullable',
@@ -493,10 +487,7 @@ function matchForOperation(
 	return { ...match, schema, database };
 }
 
-export function createSetNotNullRule(
-	options: SetNotNullRuleOptions = {},
-): TransitionRule<SetNotNullMatch> {
-	const naming = options.naming ?? identityNaming;
+export function createSetNotNullRule(): TransitionRule<SetNotNullMatch> {
 	return {
 		id: SET_NOT_NULL_RULE_ID,
 		artifact: PG_RULE_PACK_ARTIFACT,
@@ -524,8 +515,8 @@ export function createSetNotNullRule(
 					if (!currentColumn) {
 						continue;
 					}
-					const physicalTable = naming.toDatabase(desiredTable.name);
-					const physicalColumn = naming.toDatabase(desiredColumn.name);
+					const physicalTable = desiredTable.name;
+					const physicalColumn = desiredColumn.name;
 					const nullabilityTightening = isPureNullabilityTightening(
 						desiredColumn,
 						currentColumn,

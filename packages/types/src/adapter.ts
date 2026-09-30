@@ -911,20 +911,6 @@ export interface TableDDLGeneratorAdapter {
 	storageSize?(table: string, schema?: string): Promise<number>;
 }
 
-/**
- * DDL-generating adapter - can generate DDL (CREATE TABLE statements) from a schema.
- */
-export interface DDLGeneratingAdapter extends BaseAdapter {
-	/**
-	 * Generate DDL statements from a schema.
-	 *
-	 * @param schema - The ModelIR schema to generate DDL from
-	 * @param options - Optional adapter-specific options (e.g., includeDropStatements)
-	 * @returns Array of DDL statements (CREATE TABLE, CREATE INDEX, etc.)
-	 */
-	generateDDL(schema: ModelIR, options?: Record<string, unknown>): string[];
-}
-
 // ============================================================================
 // Convenience Composed Types (DX-104)
 // ============================================================================
@@ -945,7 +931,6 @@ export interface Adapter<DB = unknown>
 		IntrospectingAdapter,
 		TransactionalAdapter<DB>,
 		RawSqlAdapter,
-		DDLGeneratingAdapter,
 		TableDDLGeneratorAdapter {
 	/**
 	 * Naming convention used by this adapter.
@@ -968,7 +953,6 @@ export interface Adapter<DB = unknown>
  * `Adapter` when direct execution calls are needed.
  */
 export type CompileOnlyAdapter<DB = unknown> = CompilingAdapter &
-	DDLGeneratingAdapter &
 	TableDDLGeneratorAdapter & {
 		/** Naming convention used by this adapter. */
 		readonly dbCasing: DbCasing;

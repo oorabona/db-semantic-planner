@@ -1,5 +1,4 @@
 import type { CheckConstraintIR } from '@dbsp/types';
-import type { NamingPlugin } from './naming-plugin.js';
 
 export class CheckConstraintNameCollisionError extends Error {
 	constructor(
@@ -19,21 +18,17 @@ export class CheckConstraintNameCollisionError extends Error {
 
 export function getCheckConstraintDatabaseName(
 	check: Pick<CheckConstraintIR, 'name'>,
-	naming: NamingPlugin,
 ): string {
-	return naming.toDatabase(check.name);
+	return check.name;
 }
 
-export function assertNoCheckConstraintNameCollisions(
-	table: {
-		readonly name: string;
-		readonly checkConstraints?: readonly Pick<CheckConstraintIR, 'name'>[];
-	},
-	naming: NamingPlugin,
-): void {
+export function assertNoCheckConstraintNameCollisions(table: {
+	readonly name: string;
+	readonly checkConstraints?: readonly Pick<CheckConstraintIR, 'name'>[];
+}): void {
 	const seen = new Map<string, string>();
 	for (const check of table.checkConstraints ?? []) {
-		const databaseName = getCheckConstraintDatabaseName(check, naming);
+		const databaseName = getCheckConstraintDatabaseName(check);
 		const previous = seen.get(databaseName);
 		if (previous !== undefined) {
 			throw new CheckConstraintNameCollisionError(

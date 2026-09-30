@@ -11,6 +11,7 @@ import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { generateMigrationSQL } from './ddl/migration-sql.js';
 import { formatSqlDefault } from './ddl/phases/utils.js';
+import { compareSchemata as comparePhysicalSchemata } from './ddl/public-api.js';
 import { compareSchemata } from './ddl/schema-diff.js';
 import {
 	CheckConstraintCanonicalizationError,
@@ -28,6 +29,7 @@ import {
 } from './expression-provenance.js';
 import * as namingPlugin from './naming-plugin.js';
 import { PgsqlAdapter } from './pgsql-adapter.js';
+import { createPgPhysicalModel } from './physical-model/index.js';
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
 	return {
@@ -45,6 +47,30 @@ function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
 		indexes: [],
 		...overrides,
 	};
+}
+
+function compareSnakeCase(desired: ModelIR, database: ModelIR) {
+	return comparePhysicalSchemata(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema: 'public',
+		}),
+		createPgPhysicalModel({
+			mode: 'physical',
+			model: database,
+			schema: 'public',
+		}),
+	);
+}
+
+function physicalSnakeCase(model: ModelIR): ModelIR {
+	return createPgPhysicalModel({
+		mode: 'logical',
+		model,
+		schema: 'public',
+		dbCasing: 'snake_case',
+	}).model;
 }
 
 describe('owned CHECK rendering', () => {
@@ -802,7 +828,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(new FakePgPool(client)),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{ schemaName: 'tenant_one' },
 		);
@@ -876,7 +902,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{ schemaName: 'public' },
 		);
@@ -1078,7 +1104,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning) },
 		);
@@ -1169,7 +1195,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning) },
 		);
@@ -1289,7 +1315,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 		);
 
@@ -1412,7 +1438,6 @@ describe('canonicalizeCheckConstraints', () => {
 
 		await canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
 			schemaName: 'tenantOne',
-			dbCasing: 'snake_case',
 		});
 
 		expect(
@@ -1598,7 +1623,7 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning.message) },
 		);
@@ -1690,16 +1715,15 @@ describe('canonicalizeCheckConstraints', () => {
 
 		const canonical = await canonicalizeWithScratch(
 			adapterForPool(pool),
-			desired,
+			physicalSnakeCase(desired),
 			dbModel,
 			{
-				dbCasing: 'snake_case',
 				onWarning: (warning) => warnings.push(warning),
 			},
 		);
 
 		expect(canonical.tables.get('users')?.checkConstraints).toEqual([
-			{ name: 'usersAgeCheck', expression: 'age > 0' },
+			{ name: 'users_age_check', expression: 'age > 0' },
 		]);
 		expect(warnings).toEqual([
 			expect.objectContaining({
@@ -2128,9 +2152,14 @@ describe('canonicalizeExpressionSurfaces partial-index predicates', () => {
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, database, {
-				schemaName: 'tenant',
-			}),
+			canonicalizeExpressionSurfaces(
+				scratch,
+				physicalSnakeCase(desired),
+				database,
+				{
+					schemaName: 'tenant',
+				},
+			),
 		);
 
 		expect(client.searchPathQueries).toEqual([
@@ -2174,9 +2203,14 @@ describe('canonicalizeExpressionSurfaces partial-index predicates', () => {
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, database, {
-				schemaName: 'tenant',
-			}),
+			canonicalizeExpressionSurfaces(
+				scratch,
+				physicalSnakeCase(desired),
+				database,
+				{
+					schemaName: 'tenant',
+				},
+			),
 		);
 
 		expect(canonical.indexPredicateOutcomes).toContainEqual(
@@ -2685,15 +2719,16 @@ describe('canonicalizeExpressionSurfaces partial-index predicates', () => {
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, database, {
-				dbCasing: 'snake_case',
-			}),
+			canonicalizeExpressionSurfaces(
+				scratch,
+				physicalSnakeCase(desired),
+				database,
+				{},
+			),
 		);
 
 		expect(
-			compareSchemata(canonical.desired, canonical.database, {
-				dbCasing: 'snake_case',
-			}).changes,
+			compareSnakeCase(canonical.desired, canonical.database).changes,
 		).toEqual([]);
 	});
 
@@ -3069,10 +3104,14 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 		const canonical = await adapterForPool(
 			new FakePgPool(client),
 		).withScratchScope((scratch) =>
-			canonicalizeExpressionSurfaces(scratch, desired, dbModel, {
-				schemaName: 'tenantOne',
-				dbCasing: 'snake_case',
-			}),
+			canonicalizeExpressionSurfaces(
+				scratch,
+				physicalSnakeCase(desired),
+				dbModel,
+				{
+					schemaName: 'tenantOne',
+				},
+			),
 		);
 
 		expect(canonical.database.tables.get('jobs')?.checkConstraints).toEqual([
@@ -3082,9 +3121,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			},
 		]);
 		expect(
-			compareSchemata(canonical.desired, canonical.database, {
-				dbCasing: 'snake_case',
-			}).changes,
+			compareSnakeCase(canonical.desired, canonical.database).changes,
 		).toEqual([]);
 		expect(client.searchPathQueries).toEqual([
 			'SET LOCAL search_path TO pg_catalog',
@@ -3411,9 +3448,9 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			(scratch) =>
 				canonicalizeExpressionSurfaces(
 					scratch,
-					desired,
+					physicalSnakeCase(desired),
 					liveWithPhysicalSequence,
-					{ dbCasing: 'snake_case' },
+					{},
 				),
 		);
 		expect(
@@ -3427,7 +3464,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			(scratch) =>
 				canonicalizeExpressionSurfaces(
 					scratch,
-					desired,
+					physicalSnakeCase(desired),
 					makeModel([
 						makeTable({
 							name: 'jobs',
@@ -3439,7 +3476,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 							],
 						}),
 					]),
-					{ dbCasing: 'snake_case' },
+					{},
 				),
 		);
 		expect(
@@ -3448,12 +3485,13 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 	});
 
 	it('stages a sequence exactly once for a non-idempotent naming plugin', async () => {
+		const suffixNaming = {
+			toDatabase: (name: string) => `${name}_physical`,
+			toModel: (name: string) => name,
+		};
 		const naming = vi
 			.spyOn(namingPlugin, 'getNamingPluginForDbCasing')
-			.mockReturnValue({
-				toDatabase: (name) => `${name}_physical`,
-				toModel: (name) => name,
-			});
+			.mockReturnValue(suffixNaming);
 		try {
 			const client = new FakePgClient();
 			const desired = makeModel(
@@ -3478,7 +3516,12 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			await adapterForPool(new FakePgPool(client)).withScratchScope((scratch) =>
 				canonicalizeExpressionSurfaces(
 					scratch,
-					desired,
+					createPgPhysicalModel({
+						mode: 'logical',
+						model: desired,
+						schema: 'public',
+						naming: suffixNaming,
+					}).model,
 					makeModel([
 						makeTable({
 							name: 'jobs_physical',
@@ -3490,7 +3533,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 							],
 						}),
 					]),
-					{ dbCasing: 'snake_case' },
+					{},
 				),
 			);
 			expect(client.queries.map((query) => normalizeSql(query.sql))).toContain(

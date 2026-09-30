@@ -21,22 +21,20 @@ import { qualifyTableIdent as qualifyTable } from './utils.js';
  * @returns Array of DDL statements (empty if RLS is unsupported by the dialect)
  */
 export function generateRlsPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, caps } = ctx;
+	const { tables, schemaName, caps } = ctx;
 	if (!sup(caps, caps?.supportsDDLRowLevelSecurity)) {
 		return [];
 	}
 	const statements: string[] = [];
 	for (const table of tables) {
 		if (table.rlsEnabled) {
-			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+			const qualifiedTable = qualifyTable(table.name, schemaName);
 			statements.push(
 				`ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY;`,
 			);
 		}
 		for (const policy of table.policies ?? []) {
-			statements.push(
-				generateCreatePolicy(table.name, policy, schemaName, naming),
-			);
+			statements.push(generateCreatePolicy(table.name, policy, schemaName));
 		}
 	}
 	return statements;

@@ -107,15 +107,13 @@ import {
 	renderColumnDbType,
 	validateDbType,
 } from './db-type.js';
-import {
-	type GenerateDDLOptions,
-	generateDDL as generateDDLStatements,
-} from './ddl/index.js';
+import type { GenerateDDLOptions } from './ddl/index.js';
 import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
-import { qualifyTableIdent, quoteIdent } from './ddl/phases/utils.js';
+import { quoteIdent } from './ddl/phases/utils.js';
+import { generateDDL as generateDDLStatements } from './ddl/public-api.js';
 import {
 	generateAlterColumnSQL,
 	generateTruncateSQL,
@@ -134,6 +132,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import type { PgPhysicalModel } from './physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
 	derivePreparedStatementFingerprint,
@@ -2223,7 +2222,7 @@ function compileNqlRuntimeBindingCte(
 			quoteIdent(naming.toDatabase(sourceColumnFor(column)), 'column'),
 		)
 		.join(', ');
-	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${qualifyTableIdent(sourceTable, schemaName, naming)} WHERE false`;
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.toDatabase(sourceTable), 'table')} WHERE false`;
 	if (binding.rows.length === 0) {
 		return {
 			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
@@ -6348,31 +6347,31 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	// =========================================================================
-	// DDLGeneratingAdapter Methods
+	// PostgreSQL DDL Methods
 	// =========================================================================
 
 	/**
-	 * Generate DDL statements from a ModelIR schema.
+	 * Generate DDL statements from the PostgreSQL physical model.
 	 *
 	 * Uses PostgreSQL AST nodes and pgsql-deparser for consistent SQL generation.
-	 * Applies the naming plugin for identifier transformation.
+	 * Names are already physical: they were mapped once when the model was built
+	 * with `createPgPhysicalModel`, and this method maps none again.
 	 *
-	 * @param schema - The ModelIR schema to generate DDL from
-	 * @param overrideOptions - Optional overrides for DDL generation (e.g., includeDropStatements)
+	 * @param physical - The physical model to generate DDL from; its schema and
+	 *   `fkAutoIndex` apply
+	 * @param overrideOptions - Optional rendering overrides (e.g., includeDropStatements)
 	 * @returns Array of DDL statements in dependency order
 	 */
 	generateDDL(
-		schema: ModelIR,
-		overrideOptions?: Partial<GenerateDDLOptions>,
+		physical: PgPhysicalModel,
+		overrideOptions?: GenerateDDLOptions,
 	): string[] {
 		const options: GenerateDDLOptions = {
-			...(this.schemaName ? { schemaName: this.schemaName } : {}),
-			naming: this.naming,
 			...overrideOptions,
 			dialectCapabilities:
 				overrideOptions?.dialectCapabilities ?? this.dialectCapabilities,
 		};
-		return generateDDLStatements(schema, options);
+		return generateDDLStatements(physical, options);
 	}
 
 	/**

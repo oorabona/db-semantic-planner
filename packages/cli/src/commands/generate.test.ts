@@ -109,7 +109,7 @@ describe('generate command casing wiring', () => {
 		});
 
 		const output = capturedLog();
-		expect(output).toContain('CREATE TABLE "userProfiles"');
+		expect(output).toContain('CREATE TABLE "public"."userProfiles"');
 		expect(output).toContain('"displayName"');
 		expect(output).not.toContain('user_profiles');
 		expect(output).not.toContain('display_name');
@@ -124,7 +124,7 @@ describe('generate command casing wiring', () => {
 		);
 
 		const output = capturedLog();
-		expect(output).toContain('CREATE TABLE "userProfiles"');
+		expect(output).toContain('CREATE TABLE "public"."userProfiles"');
 		expect(output).toContain('"displayName"');
 		expect(output).not.toContain('user_profiles');
 	});
@@ -138,7 +138,7 @@ describe('generate command casing wiring', () => {
 		);
 
 		const output = capturedLog();
-		expect(output).toContain('CREATE TABLE "userProfiles"');
+		expect(output).toContain('CREATE TABLE "public"."userProfiles"');
 		expect(output).toContain('"displayName"');
 		expect(output).not.toContain('user_profiles');
 	});
@@ -151,7 +151,7 @@ describe('generate command casing wiring', () => {
 		});
 
 		const output = capturedLog();
-		expect(output).toContain('CREATE TABLE "user_profiles"');
+		expect(output).toContain('CREATE TABLE "public"."user_profiles"');
 		expect(output).toContain('"display_name"');
 		expect(output).not.toContain('CREATE TABLE "userProfiles"');
 		expect(output).not.toContain('"displayName"');
@@ -190,7 +190,9 @@ describe('generate: the command options reach the generator', () => {
 			['ddl', '--schema', 'dbsp.schema.ts', '--drop'],
 			{ from: 'user' },
 		);
-		expect(capturedLog()).toContain('DROP TABLE IF EXISTS "user_profiles"');
+		expect(capturedLog()).toContain(
+			'DROP TABLE IF EXISTS "public"."user_profiles"',
+		);
 
 		vi.mocked(console.log).mockClear();
 
@@ -213,7 +215,7 @@ describe('generate: the command options reach the generator', () => {
 			expect(console.error).toHaveBeenCalledWith(
 				expect.stringContaining("Only 'postgresql' dialect"),
 			);
-			expect(capturedLog()).toContain('CREATE TABLE "user_profiles"');
+			expect(capturedLog()).toContain('CREATE TABLE "public"."user_profiles"');
 		},
 	);
 
@@ -228,7 +230,7 @@ describe('generate: the command options reach the generator', () => {
 		expect(console.error).not.toHaveBeenCalledWith(
 			expect.stringContaining('dialect'),
 		);
-		expect(capturedLog()).toContain('CREATE TABLE "user_profiles"');
+		expect(capturedLog()).toContain('CREATE TABLE "public"."user_profiles"');
 	});
 
 	it('refuses NULLS NOT DISTINCT for a PostgreSQL 14 target at generation time', async () => {
@@ -270,8 +272,15 @@ describe('generate: the command options reach the generator', () => {
 			...nullsNotDistinctDdlSchema,
 			dbCasing: 'snake_case',
 		});
+		const { createPgPhysicalModel } = await import('@dbsp/adapter-pgsql');
 		const expected = createPgsqlCompileOnlyAdapter()
-			.generateDDL(nullsNotDistinctDdlSchema.model)
+			.generateDDL(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: nullsNotDistinctDdlSchema.model,
+					schema: 'public',
+				}),
+			)
 			.join('\n\n');
 
 		await generateCommand.parseAsync(['ddl', '--schema', 'dbsp.schema.ts'], {

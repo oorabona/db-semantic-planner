@@ -4,6 +4,11 @@ title: DDL Provisioning
 
 # DDL provisioning
 
+PostgreSQL DDL APIs take a `PgPhysicalModel`, created once with
+`createPgPhysicalModel({ mode: 'logical', model, schema, dbCasing })`. Pass that
+same value to `generateDDL`, `compareSchemata`, and live comparison; an
+introspected model is wrapped with `mode: 'physical'` and is never mapped again.
+
 Managed database changes use one path: `dbsp plan` records a proven change and
 `dbsp apply` executes a replayable record. This keeps execution authority, live
 observation, and the durable outcome in the same workflow.

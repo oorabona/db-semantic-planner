@@ -10,11 +10,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
 	CheckConstraintNewEnumValueError,
-	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
+} from '@dbsp/adapter-pgsql';
+import {
+	comparePgsqlDatabaseSchema,
 	generateDDL,
 	generateMigrationSQL,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import { ModelIRImpl, schema } from '@dbsp/core';
 import type { ColumnIR, TableIR } from '@dbsp/types';
 import pg from 'pg';

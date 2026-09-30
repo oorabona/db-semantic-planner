@@ -21,13 +21,20 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { camelCaseNaming } from '../naming-plugin.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import { generateDDL } from './ddl-generator.js';
 import {
 	generateDownMigrationSQL,
 	generateDownSQL,
 	generateMigrationSQL,
 } from './migration-sql.js';
+import {
+	compareSchemata as comparePhysicalSchemata,
+	generateDDL as generatePhysicalDDL,
+	generateDownSQL as generatePhysicalDownSQL,
+	generateMigrationSQL as generatePhysicalMigrationSQL,
+	type MigrationSQLOptions,
+} from './public-api.js';
 import {
 	compareSchemata,
 	ReferencedKeyRemovalError,
@@ -3849,21 +3856,28 @@ describe('FK enhancements — migration SQL', () => {
 			new Map(),
 		);
 
-		const ddl = generateDDL(schema, { naming: camelCaseNaming });
-		const diff = compareSchemata(
-			schema,
-			new ModelIRImpl(new Map(), new Map()),
-			{
-				dbCasing: 'snake_case',
-			},
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: schema,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
+		const ddl = generatePhysicalDDL(physical);
+		const diff = comparePhysicalSchemata(
+			physical,
+			createPgPhysicalModel({
+				mode: 'physical',
+				model: new ModelIRImpl(new Map(), new Map()),
+				schema: 'public',
+			}),
 		);
-		const sql = generateMigrationSQL(diff);
+		const sql = generatePhysicalMigrationSQL(diff);
 
 		expect(ddl).toContain(
-			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+			'CREATE INDEX "idx_posts_author_id" ON "public"."posts" ("author_id");',
 		);
 		expect(sql).toContain(
-			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+			'CREATE INDEX "idx_posts_author_id" ON "public"."posts" ("author_id");',
 		);
 	});
 
@@ -3876,15 +3890,26 @@ describe('FK enhancements — migration SQL', () => {
 			new Map([['orderNumberSeq', { name: 'orderNumberSeq' }]]),
 		);
 
-		const ddl = generateDDL(schema, { naming: camelCaseNaming });
-		const migration = generateMigrationSQL(
-			compareSchemata(schema, new ModelIRImpl(new Map(), new Map()), {
-				dbCasing: 'snake_case',
-			}),
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: schema,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
+		const ddl = generatePhysicalDDL(physical);
+		const migration = generatePhysicalMigrationSQL(
+			comparePhysicalSchemata(
+				physical,
+				createPgPhysicalModel({
+					mode: 'physical',
+					model: new ModelIRImpl(new Map(), new Map()),
+					schema: 'public',
+				}),
+			),
 		);
 
-		expect(ddl).toContain('CREATE SEQUENCE "order_number_seq";');
-		expect(migration).toContain('CREATE SEQUENCE "order_number_seq";');
+		expect(ddl).toContain('CREATE SEQUENCE "public"."order_number_seq";');
+		expect(migration).toContain('CREATE SEQUENCE "public"."order_number_seq";');
 	});
 
 	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {
@@ -3934,6 +3959,86 @@ describe('FK enhancements — migration SQL', () => {
 		).length;
 		// Only the explicit index from create_index phase (none here), no duplicates
 		expect(autoIndexCount).toBe(0);
+	});
+
+	it('uses declared FK coverage when rendering a create table with an owned index masked', () => {
+		const declared = {
+			...makeTable('orders', [makeCol({ name: 'user_id', type: 'integer' })]),
+			foreignKeys: [baseFk],
+			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
+		};
+		const masked = { ...declared, indexes: [] };
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: masked },
+			},
+		]);
+
+		const sql = generateMigrationSQL(diff, {
+			fkAutoIndex: true,
+			fkAutoIndexCoverage: makeModel([
+				makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+				declared,
+			]),
+		});
+
+		expect(sql).not.toContain(
+			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
+		);
+	});
+
+	it('does not expose FK coverage as a second public migration model', () => {
+		type PublicMigrationOptionsOmitCoverage =
+			'fkAutoIndexCoverage' extends keyof MigrationSQLOptions ? false : true;
+		const exposesNoCoverage: PublicMigrationOptionsOmitCoverage = true;
+		expect(exposesNoCoverage).toBe(true);
+
+		const declared = {
+			...makeTable('orders', [makeCol({ name: 'user_id', type: 'integer' })]),
+			foreignKeys: [baseFk],
+			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
+		};
+		const desired = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'public',
+			model: makeModel([
+				makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+				declared,
+			]),
+		});
+		const database = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'public',
+			model: makeModel([]),
+		});
+		const compared = comparePhysicalSchemata(desired, database);
+		const masked = {
+			...compared,
+			changes: compared.changes.map((change) =>
+				change.kind !== 'create_table' || change.table !== 'orders'
+					? change
+					: {
+							...change,
+							meta: {
+								...change.meta,
+								table: { ...(change.meta?.table as TableIR), indexes: [] },
+							},
+						},
+			),
+		};
+		const injectedCoverage = {
+			fkAutoIndexCoverage: desired.model,
+		} as unknown as MigrationSQLOptions;
+		expect(generatePhysicalMigrationSQL(masked, injectedCoverage)).toEqual(
+			generatePhysicalMigrationSQL(masked),
+		);
+		expect(generatePhysicalDownSQL(masked, injectedCoverage)).toEqual(
+			generatePhysicalDownSQL(masked),
+		);
 	});
 
 	it('should not generate an FK auto-index when only a partial index is declared on the FK column', () => {

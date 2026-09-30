@@ -16,14 +16,15 @@ import type {
 	PolicyIR,
 	TableIR,
 } from '@dbsp/types';
-import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
+import type { NamingPlugin } from '../naming-plugin.js';
+import {
+	createPgPhysicalModel,
+	pgForeignKeyName,
+	pgPrimaryKeyName,
+} from '../physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
-import {
-	getAutoFkIndexName,
-	getResolvedIndexName,
-	shouldEmitAutoFkIndex,
-} from './fk-index-coverage.js';
+import { shouldEmitAutoFkIndex } from './fk-index-coverage.js';
 import { normalizeOptionalBoolean } from './generated-source-normalizers.js';
 import {
 	assertCreateIndexesSupported,
@@ -72,7 +73,7 @@ export interface GenerateDDLOptions {
 	 * @default true
 	 */
 	readonly fkAutoIndex?: boolean;
-	/** Naming plugin for identifier transformation */
+	/** Naming plugin for logical-model callers. Physical models omit this option. */
 	readonly naming?: NamingPlugin;
 	/** Dialect capabilities — unsupported index features throw during DDL generation */
 	readonly dialectCapabilities?: DialectCapabilities;
@@ -130,13 +131,53 @@ export function generateDDL(
 	schema: ModelIR,
 	options: GenerateDDLOptions = {},
 ): string[] {
+	const { naming, ...renderOptions } = options;
+	for (const table of schema.tables.values()) {
+		validateIdentifier(table.name, 'alias');
+		for (const column of table.columns)
+			validateIdentifier(column.name, 'alias');
+	}
+	const needsPhysicalNames = [...schema.tables.values()].some((table) =>
+		table.primaryKey !== undefined && table.primaryKeyName === undefined
+			? true
+			: table.columns.some(
+					(column) =>
+						column.unique === true && column.uniqueConstraintName === undefined,
+				) ||
+				table.foreignKeys.some(
+					(fk) =>
+						fk.name === undefined ||
+						(fk.columns.length === 1 &&
+							shouldEmitAutoFkIndex(table, fk.columns[0]!) &&
+							renderOptions.fkAutoIndex !== false &&
+							fk.autoIndexName === undefined),
+				) ||
+				table.indexes.some((index) => index.name === undefined),
+	);
+	if (naming !== undefined || needsPhysicalNames) {
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: schema,
+			schema: renderOptions.schemaName ?? 'public',
+			...(naming === undefined ? {} : { naming }),
+			...(renderOptions.fkAutoIndex === undefined
+				? {}
+				: { fkAutoIndex: renderOptions.fkAutoIndex }),
+		});
+		return generateDDL(physical.model, {
+			...renderOptions,
+			...(renderOptions.schemaName === undefined
+				? {}
+				: { schemaName: renderOptions.schemaName }),
+			fkAutoIndex: physical.fkAutoIndex,
+		});
+	}
 	const {
 		includeDropStatements = false,
 		schemaName,
-		fkAutoIndex = true,
-		naming = identityNaming,
+		fkAutoIndex: resolvedFkAutoIndex = true,
 		dialectCapabilities: caps,
-	} = options;
+	} = renderOptions;
 
 	const tables = Array.from(schema.tables.values());
 	const scope = collectModelScopeEvidence(schema, {
@@ -148,13 +189,12 @@ export function generateDDL(
 		schema,
 		tables,
 		schemaName,
-		naming,
 		caps,
-		fkAutoIndex,
+		fkAutoIndex: resolvedFkAutoIndex,
 		includeDropStatements,
 	};
 	assertCreateIndexesSupported(
-		collectGeneratedCreateIndexSpecs(tables, schemaName, naming, fkAutoIndex),
+		collectGeneratedCreateIndexSpecs(tables, schemaName, resolvedFkAutoIndex),
 		indexContextFromCaps(caps),
 	);
 
@@ -177,26 +217,21 @@ function buildIndexRenderSpec(
 	tableName: string,
 	idx: IndexIR,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): IndexRenderSpec {
 	return {
-		name: getResolvedIndexName(
-			naming.toDatabase(tableName),
-			idx.columns.map((column) => naming.toDatabase(column)),
-			idx.name,
-		),
-		table: naming.toDatabase(tableName),
+		name: requiredPhysicalIndexName(idx, tableName),
+		table: tableName,
 		schema: schemaName,
 		unique: idx.unique === true,
 		method: idx.method,
 		keys: [
 			...(idx.expressions ?? []).map((expression) => ({ expression })),
 			...idx.columns.map((col) => ({
-				column: naming.toDatabase(col),
+				column: col,
 				opclass: idx.opclass?.[col],
 			})),
 		],
-		include: idx.include?.map((col) => naming.toDatabase(col)),
+		include: idx.include,
 		nullsNotDistinct: idx.nullsNotDistinct,
 		with: idx.with,
 		where: idx.where,
@@ -204,17 +239,54 @@ function buildIndexRenderSpec(
 	};
 }
 
+/** All renderer-visible index names must already come from PgPhysicalModel. */
+function requiredPhysicalIndexName(idx: IndexIR, tableName: string): string {
+	if (idx.name !== undefined) return idx.name;
+	const tables = new Map([
+		[
+			tableName,
+			{
+				name: tableName,
+				columns: idx.columns.map((name) => ({
+					name,
+					type: 'string' as const,
+					nullable: true,
+				})),
+				foreignKeys: [],
+				indexes: [idx],
+			},
+		],
+	]);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: 'public',
+		model: {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		},
+	});
+	const name = physical.model.getTable(tableName)?.indexes[0]?.name;
+	if (name === undefined)
+		throw new Error(
+			`physical index name is missing from the model for table ${tableName}`,
+		);
+	return name;
+}
+
 function collectGeneratedCreateIndexSpecs(
 	tables: readonly TableIR[],
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 	fkAutoIndex: boolean,
 ): IndexRenderSpec[] {
 	const specs: IndexRenderSpec[] = [];
 	for (const table of tables) {
-		const dbTableName = naming.toDatabase(table.name);
 		for (const idx of table.indexes) {
-			specs.push(buildIndexRenderSpec(table.name, idx, schemaName, naming));
+			specs.push(buildIndexRenderSpec(table.name, idx, schemaName));
 		}
 		if (!fkAutoIndex) continue;
 		for (const fk of table.foreignKeys) {
@@ -224,17 +296,20 @@ function collectGeneratedCreateIndexSpecs(
 				fkCol &&
 				shouldEmitAutoFkIndex(table, fkCol)
 			) {
-				const dbFkCol = naming.toDatabase(fkCol);
+				const autoIndexName = fk.autoIndexName;
+				if (autoIndexName === undefined)
+					throw new Error(
+						'physical automatic foreign-key index name is missing from the model',
+					);
 				specs.push(
 					buildIndexRenderSpec(
 						table.name,
 						{
-							name: getAutoFkIndexName(dbTableName, dbFkCol),
+							name: autoIndexName,
 							columns: [fkCol],
 							unique: false,
 						},
 						schemaName,
-						naming,
 					),
 				);
 			}
@@ -278,9 +353,8 @@ function quoteIdentifier(name: string): string {
 function qualifyTable(
 	tableName: string,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
-	const table = quoteIdentifier(naming.toDatabase(tableName));
+	const table = quoteIdentifier(tableName);
 	if (schemaName) {
 		return `${quoteIdentifier(schemaName)}.${table}`;
 	}
@@ -294,9 +368,8 @@ function qualifyTable(
 export function generateDropTable(
 	tableName: string,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
-	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
+	const qualifiedTable = qualifyTable(tableName, schemaName);
 	return `DROP TABLE IF EXISTS ${qualifiedTable} CASCADE;`;
 }
 
@@ -307,14 +380,13 @@ export function generateDropTable(
 export function generateCreateTable(
 	table: TableIR,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
-	const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+	const qualifiedTable = qualifyTable(table.name, schemaName);
 	const elements: string[] = [];
 
 	// Add columns
 	for (const col of table.columns) {
-		elements.push(generateColumnDef(col, naming, schemaName));
+		elements.push(generateColumnDef(col, schemaName));
 	}
 
 	// Add primary key constraint (omit if no PK defined)
@@ -335,10 +407,10 @@ export function generateCreateTable(
 		} else {
 			pkColumns = [rawPk as string];
 		}
-		const pkCols = pkColumns
-			.map((col) => quoteIdentifier(naming.toDatabase(col)))
-			.join(', ');
-		const pkName = quoteIdentifier(`pk_${table.name}`);
+		const pkCols = pkColumns.map((col) => quoteIdentifier(col)).join(', ');
+		const pkName = quoteIdentifier(
+			table.primaryKeyName ?? pgPrimaryKeyName(table.name),
+		);
 		elements.push(`CONSTRAINT ${pkName} PRIMARY KEY (${pkCols})`);
 	}
 
@@ -347,7 +419,7 @@ export function generateCreateTable(
 	if (table.partition) {
 		const strategy = assertPartitionStrategy(table.partition.strategy);
 		const partCols = table.partition.columns
-			.map((col) => quoteIdentifier(naming.toDatabase(col)))
+			.map((col) => quoteIdentifier(col))
 			.join(', ');
 		sql += ` PARTITION BY ${strategy} (${partCols})`;
 	}
@@ -360,13 +432,12 @@ export function generateCreateTable(
  */
 export function generateColumnDef(
 	col: ColumnIR,
-	naming: NamingPlugin,
 	targetSchema?: string,
 ): string {
 	const parts: string[] = [];
 
 	// Column name and type
-	parts.push(quoteIdentifier(naming.toDatabase(col.name)));
+	parts.push(quoteIdentifier(col.name));
 	const type = mapColumnType(col, targetSchema);
 	parts.push(type);
 
@@ -426,25 +497,22 @@ export function generateAlterTableAddFK(
 	tableName: string,
 	fk: ForeignKeyIR,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
-	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
+	const qualifiedTable = qualifyTable(tableName, schemaName);
 	const constraintName = quoteIdentifier(
-		`fk_${tableName}_${fk.columns.join('_')}`,
+		fk.name ?? pgForeignKeyName(tableName, fk.columns),
 	);
 
 	// Local columns
-	const fkCols = fk.columns
-		.map((col) => quoteIdentifier(naming.toDatabase(col)))
-		.join(', ');
+	const fkCols = fk.columns.map((col) => quoteIdentifier(col)).join(', ');
 
 	// Referenced table and columns resolve to a declared schema, or the DDL schema when absent.
 	const refTable =
 		fk.references.schema !== undefined
-			? qualifyTable(fk.references.table, fk.references.schema, naming)
-			: qualifyTable(fk.references.table, schemaName, naming);
+			? qualifyTable(fk.references.table, fk.references.schema)
+			: qualifyTable(fk.references.table, schemaName);
 	const refCols = fk.references.columns
-		.map((col) => quoteIdentifier(naming.toDatabase(col)))
+		.map((col) => quoteIdentifier(col))
 		.join(', ');
 
 	// ON DELETE / ON UPDATE / DEFERRABLE actions
@@ -474,11 +542,10 @@ export function generateCreateIndex(
 	tableName: string,
 	idx: IndexIR,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 	context?: IndexCapabilityContext,
 	ifNotExists?: boolean,
 ): string {
-	const spec = buildIndexRenderSpec(tableName, idx, schemaName, naming);
+	const spec = buildIndexRenderSpec(tableName, idx, schemaName);
 	return `${renderCreateIndex(
 		ifNotExists === undefined ? spec : { ...spec, ifNotExists },
 		context,
@@ -496,10 +563,9 @@ export function canGenerateCreateIndex(
 	tableName: string,
 	idx: IndexIR,
 	schemaName: string | undefined = undefined,
-	naming: NamingPlugin = identityNaming,
 ): boolean {
 	try {
-		generateCreateIndex(tableName, idx, schemaName, naming);
+		generateCreateIndex(tableName, idx, schemaName);
 		return true;
 	} catch {
 		return false;
@@ -517,9 +583,8 @@ export function generateCreatePolicy(
 	tableName: string,
 	policy: PolicyIR,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
-	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
+	const qualifiedTable = qualifyTable(tableName, schemaName);
 	const policyName = quoteIdentifier(policy.name);
 	const ALLOWED_RLS_COMMANDS = [
 		'ALL',

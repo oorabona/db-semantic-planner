@@ -84,6 +84,7 @@ export {
 	NonConvergentSchemaDiffError,
 	type NonConvergentSchemaDiffSurface,
 	PartialIndexPredicateNewEnumValueError,
+	type PgSchemaDiff,
 	RawIndexPredicateFallbackError,
 	type ReferencedKeyKind,
 	type ReferencedKeyRemovalConflict,
@@ -219,6 +220,17 @@ export {
 	PgsqlTransactionTimeoutError,
 	type RollbackOnlyPgsqlScope,
 } from './pgsql-adapter.js';
+// PostgreSQL physical-name authority
+export {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+	type PgPhysicalModelInput,
+	PgPhysicalModelInputError,
+	type PgPhysicalNameClaim,
+	type PgPhysicalNameCollision,
+	PgPhysicalNameCollisionError,
+	type PgPhysicalNamespace,
+} from './physical-model/index.js';
 export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)
 export {
@@ -262,10 +274,6 @@ export type {
 } from './transition/application-step.js';
 // Startup convergence
 export {
-	type ConvergePgBaseOptions,
-	type ConvergePgCheckOptions,
-	type ConvergePgOptions,
-	convergePg,
 	type PgConvergeCheckResult,
 	type PgConvergeInitializationFailure,
 	type PgConvergePlannedStep,
@@ -431,12 +439,17 @@ export {
 	runPgReinitializePreflight,
 	SET_NOT_NULL_RULE_ID,
 	type SetNotNullMatch,
-	type SetNotNullRuleOptions,
 	TransitionRunIdentityMismatchError,
 	validatePgLedgerRuntimeIntegrity,
 	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from './transition/index.js';
+export {
+	type ConvergePgBaseOptions,
+	type ConvergePgCheckOptions,
+	type ConvergePgOptions,
+	convergePg,
+} from './transition/public-api.js';
 // Durable transition recovery. This is the supported non-CLI reconciliation API.
 export {
 	executionIdsForRun,

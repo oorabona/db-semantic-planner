@@ -68,9 +68,18 @@ function makeLoadedSchema(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
 	return {
 		model: {
 			tables: new Map([
-				['userProfiles', {}],
-				['posts', {}],
+				[
+					'userProfiles',
+					{ name: 'userProfiles', columns: [], foreignKeys: [], indexes: [] },
+				],
+				['posts', { name: 'posts', columns: [], foreignKeys: [], indexes: [] }],
 			]),
+			relations: new Map(),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
 		},
 		definition: {},
 		tableNames: ['userProfiles', 'posts'],
@@ -131,17 +140,14 @@ describe('verify command live diff integration', () => {
 		process.exitCode = undefined;
 	});
 
-	it('uses live PostgreSQL comparison and honours schema dbCasing', async () => {
+	it('builds the physical model before live PostgreSQL comparison', async () => {
 		mockComparePgsqlDatabaseSchema.mockImplementation(
 			async (
 				_pool: unknown,
 				_desired: unknown,
 				options?: ComparePgsqlDatabaseSchemaOptions,
 			) => {
-				if (
-					options?.schema === 'tenant_1' &&
-					options.dbCasing === 'snake_case'
-				) {
+				if (options?.canonicalizeExpressions !== false) {
 					return makeDiff();
 				}
 				return makeDiff([
@@ -161,11 +167,13 @@ describe('verify command live diff integration', () => {
 		expect(mockCreatePgsqlAdapter).toHaveBeenCalledWith(pool);
 		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledWith(
 			adapter,
-			loadedSchema.model,
 			expect.objectContaining({
-				dbCasing: 'snake_case',
 				schema: 'tenant_1',
+				model: expect.objectContaining({
+					tables: expect.any(Map),
+				}),
 			}),
+			expect.any(Object),
 		);
 		expect(mockIntrospect).toHaveBeenCalledWith({ schema: 'tenant_1' });
 		expect(pool.end).toHaveBeenCalledOnce();

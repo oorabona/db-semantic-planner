@@ -138,12 +138,7 @@ describe('ITEM-3: columnRef rejects unsafe identifiers', () => {
 
 	it('rejects schema with injection payload', () => {
 		expect(() =>
-			columnRef(
-				'id',
-				'users',
-				'public; DROP SCHEMA pg_catalog',
-				identityNaming,
-			),
+			columnRef('id', 'users', 'public; DROP SCHEMA pg_catalog'),
 		).toThrow(InvalidIdentifierError);
 	});
 
@@ -412,9 +407,9 @@ describe('ITEM-5b: RLS policy command allowlist (generateCreatePolicy)', () => {
 			permissive: true,
 		};
 		Object.assign(policy, { command: 'SELECT; DROP TABLE users --' });
-		expect(() =>
-			generateCreatePolicy('users', policy, undefined, naming),
-		).toThrow(/Invalid RLS policy command/);
+		expect(() => generateCreatePolicy('users', policy, undefined)).toThrow(
+			/Invalid RLS policy command/,
+		);
 	});
 
 	it('rejects unknown command EXECUTE', () => {
@@ -424,9 +419,9 @@ describe('ITEM-5b: RLS policy command allowlist (generateCreatePolicy)', () => {
 			permissive: true,
 		};
 		Object.assign(policy, { command: 'EXECUTE' });
-		expect(() =>
-			generateCreatePolicy('users', policy, undefined, naming),
-		).toThrow(/Invalid RLS policy command/);
+		expect(() => generateCreatePolicy('users', policy, undefined)).toThrow(
+			/Invalid RLS policy command/,
+		);
 	});
 
 	it('accepts all valid commands: ALL SELECT INSERT UPDATE DELETE', () => {
@@ -450,7 +445,6 @@ describe('ITEM-5b: RLS policy command allowlist (generateCreatePolicy)', () => {
 							permissive: true,
 						} as Parameters<typeof generateCreatePolicy>[1],
 						undefined,
-						naming,
 					),
 				`command "${command}" should compile without error`,
 			).not.toThrow();
@@ -466,7 +460,6 @@ describe('ITEM-5b: RLS policy command allowlist (generateCreatePolicy)', () => {
 				permissive: true,
 			} as Parameters<typeof generateCreatePolicy>[1],
 			undefined,
-			naming,
 		);
 		expect(sql).toContain('FOR SELECT');
 		// Injection payload must not appear mid-statement (trailing ; is the valid terminator)
@@ -1624,12 +1617,7 @@ describe('TOCTOU getter-probe: RLS policy using/withCheck snapshot-once (ddl-gen
 					: 'tenant_id = current_user_id()); DROP TABLE users --';
 			},
 		} as Parameters<typeof generateCreatePolicy>[1];
-		const sql = generateCreatePolicy(
-			'users',
-			policy,
-			undefined,
-			identityNaming,
-		);
+		const sql = generateCreatePolicy('users', policy, undefined);
 		expect(sql).toContain('USING (');
 		expect(sql).not.toContain('DROP TABLE');
 	});
@@ -1646,12 +1634,7 @@ describe('TOCTOU getter-probe: RLS policy using/withCheck snapshot-once (ddl-gen
 					: 'tenant_id = current_user_id()); DROP TABLE users --';
 			},
 		} as Parameters<typeof generateCreatePolicy>[1];
-		const sql = generateCreatePolicy(
-			'users',
-			policy,
-			undefined,
-			identityNaming,
-		);
+		const sql = generateCreatePolicy('users', policy, undefined);
 		expect(sql).toContain('WITH CHECK (');
 		expect(sql).not.toContain('DROP TABLE');
 	});

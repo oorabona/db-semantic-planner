@@ -3,9 +3,6 @@ import type {
 	ExecutionCoordinator,
 	TransitionExecutionClient,
 } from '@dbsp/core';
-import type { DbCasing } from '@dbsp/types';
-import type { NamingPlugin } from '../naming-plugin.js';
-import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import { setLocalTransactionTimeoutSql } from '../transaction-timeouts.js';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
@@ -45,8 +42,6 @@ import {
 import { createSetNotNullRule } from './rules/set-not-null.js';
 
 export interface PgTransitionPackOptions {
-	readonly dbCasing?: DbCasing;
-	readonly naming?: NamingPlugin;
 	readonly identityAdoptionAsserter?: IdentityAdoptionAsserter;
 	readonly identityAdoptionSelectionBasis?: string;
 }
@@ -127,9 +122,6 @@ function createPgExecutionCoordinator(): ExecutionCoordinator {
 }
 
 export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
-	const naming =
-		options.naming ??
-		getNamingPluginForDbCasing(options.dbCasing ?? 'preserve');
 	const equivalence = createPgEquivalenceCapability();
 	const executionCoordinator = createPgExecutionCoordinator();
 	const capabilityDescriptors: readonly CapabilityDescriptor[] = [
@@ -179,7 +171,6 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 	return {
 		rules: [
 			createLogicalIdentityAdoptionRule({
-				naming,
 				...(options.identityAdoptionAsserter
 					? { asserter: options.identityAdoptionAsserter }
 					: {}),
@@ -187,10 +178,10 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 					? { selectionBasis: options.identityAdoptionSelectionBasis }
 					: {}),
 			}),
-			createSetNotNullRule({ naming }),
-			createAddCheckRule({ naming }),
+			createSetNotNullRule(),
+			createAddCheckRule(),
 			createEnumAddValueRule(),
-			createCreateUniqueIndexConcurrentlyRule({ naming }),
+			createCreateUniqueIndexConcurrentlyRule(),
 		],
 		operationSemantics,
 		issuer: createPgObservationIssuer(),
@@ -199,8 +190,7 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		equivalence,
 		capabilityDescriptors,
 		comparatorNameNormalizer: {
-			normalizeCurrentIdentifier: (identifier: string) =>
-				naming.toModel(identifier),
+			normalizeCurrentIdentifier: (identifier: string) => identifier,
 		},
 		compositionFactKinds: [ENUM_LABEL_VISIBLE_OBSERVATION],
 		satisfiesCompositionFact: satisfiesPgEnumLabelVisibleCompositionFact,

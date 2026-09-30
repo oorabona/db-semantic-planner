@@ -24,14 +24,14 @@ import type {
 	IntrospectionOptions,
 	SchemaScopeOptions,
 } from '../introspection.js';
-import {
-	getNamingPluginForDbCasing,
-	identityNaming,
-} from '../naming-plugin.js';
 import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
 import {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+} from '../physical-model/index.js';
+import {
+	declaredSequenceNamesFromInventory,
 	LegacySequenceNameError,
-	physicalizeDeclaredSequences,
 } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
@@ -74,6 +74,8 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	 * expression-surface drift appears again after re-introspection.
 	 */
 	readonly previouslyAppliedDiff?: SchemaDiff;
+	/** Internal physical-to-authored sequence provenance for legacy-name refusal. */
+	readonly declaredSequenceNames?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -88,10 +90,17 @@ export interface ComparePgsqlDeclaredAdoptionSchemaInput {
 	readonly model: ModelIR;
 	readonly schema: string;
 	readonly dbCasing: DbCasing;
+	/**
+	 * Already-physicalized naming authority for `model`. Callers that own a
+	 * snapshot pass it here so comparison never re-applies logical naming.
+	 */
+	readonly physical?: PgPhysicalModel;
 	/** Physical [table, index] JSON keys whose drop drift is unmanaged. */
 	readonly externalIndexMask?: ReadonlySet<string>;
 	/** Physical [table, surface] JSON keys maintained by application assertions. */
 	readonly ownershipMask?: PgsqlDeclaredAdoptionOwnershipMask;
+	/** Internal physical-to-authored sequence provenance for legacy-name refusal. */
+	readonly declaredSequenceNames?: ReadonlyMap<string, string>;
 }
 
 /** Internal converge-only declaration mask; public database comparison is unchanged. */
@@ -165,27 +174,18 @@ export function pgsqlSurfaceKey(table: string, name: string): string {
 export function resolvePgsqlDeclaredIndexName(
 	table: TableIR,
 	index: IndexIR,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): string {
-	const physicalTable = naming.toDatabase(table.name);
-	return defaultIndexName(physicalTable, {
-		...index,
-		...(index.name === undefined
-			? {}
-			: { name: naming.toDatabase(index.name) }),
-		columns: index.columns.map((column) => naming.toDatabase(column)),
-	});
+	return defaultIndexName(table.name, index);
 }
 
 function modelWithOwnedSurfacesRemoved(
 	model: ModelIR,
 	mask: PgsqlDeclaredAdoptionOwnershipMask | undefined,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): ModelIR {
 	if (!mask) return model;
 	const tables = new Map(
 		[...model.tables.values()].map((table) => {
-			const physicalTable = naming.toDatabase(table.name);
+			const physicalTable = table.name;
 			return [
 				table.name,
 				{
@@ -195,7 +195,7 @@ function modelWithOwnedSurfacesRemoved(
 							!mask.checks.has(
 								pgsqlSurfaceKey(
 									physicalTable,
-									getCheckConstraintDatabaseName(check, naming),
+									getCheckConstraintDatabaseName(check),
 								),
 							),
 					),
@@ -204,7 +204,7 @@ function modelWithOwnedSurfacesRemoved(
 							!mask.indexes.has(
 								pgsqlSurfaceKey(
 									physicalTable,
-									resolvePgsqlDeclaredIndexName(table, index, naming),
+									resolvePgsqlDeclaredIndexName(table, index),
 								),
 							),
 					),
@@ -252,15 +252,13 @@ function applyOwnedColumnTypeMask(
 	desired: ModelIR,
 	live: ModelIR,
 	mask: PgsqlDeclaredAdoptionOwnershipMask | undefined,
-	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): void {
 	if (!mask) return;
-	for (const [logicalName, table] of desired.tables) {
-		const physicalTable = naming.toDatabase(logicalName);
+	for (const [physicalTable, table] of desired.tables) {
 		const liveTable = live.tables.get(physicalTable);
 		if (!liveTable) continue;
 		const columns = table.columns.map((column) => {
-			const physicalColumn = naming.toDatabase(column.name);
+			const physicalColumn = column.name;
 			if (!mask.columnTypes.has(pgsqlSurfaceKey(physicalTable, physicalColumn)))
 				return column;
 			const liveColumn = liveTable.columns.find(
@@ -290,7 +288,7 @@ function applyOwnedColumnTypeMask(
 						}),
 			};
 		});
-		(desired.tables as Map<string, TableIR>).set(logicalName, {
+		(desired.tables as Map<string, TableIR>).set(physicalTable, {
 			...table,
 			columns,
 		});
@@ -320,7 +318,6 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 						'comparePgsqlDeclaredAdoptionSchema() requires a pg Pool or checked-out PoolClient executor',
 					);
 				})();
-	const naming = getNamingPluginForDbCasing(input.dbCasing);
 	const ownershipMask =
 		input.ownershipMask !== undefined &&
 		(input.ownershipMask.checks.size > 0 ||
@@ -328,29 +325,29 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			input.ownershipMask.indexes.size > 0)
 			? input.ownershipMask
 			: undefined;
+	const physicalDesired =
+		input.physical ??
+		createPgPhysicalModel({
+			mode: 'logical',
+			model: input.model,
+			schema: input.schema,
+			dbCasing: input.dbCasing,
+		});
 	const desired = modelWithOwnedSurfacesRemoved(
-		input.model,
+		input.physical === undefined ? physicalDesired.model : input.model,
 		ownershipMask,
-		naming,
 	);
-	const declaredTables = new Set(
-		[...input.model.tables.values()].map((table) =>
-			naming.toDatabase(table.name),
+	const declaredSequenceNames =
+		input.declaredSequenceNames ??
+		declaredSequenceNamesFromInventory(physicalDesired.inventory);
+	const declaredTables = new Set(desired.tables.keys());
+	const declaredSequences = new Set(desired.sequences?.keys() ?? []);
+	const legacyRawSequencePhysicalNames = new Map(
+		[...declaredSequenceNames].flatMap(([physicalName, authoredName]) =>
+			physicalName === authoredName
+				? []
+				: ([[authoredName, physicalName]] as const),
 		),
-	);
-	const declaredSequences = new Set(
-		physicalizeDeclaredSequences(input.model.sequences, naming).keys(),
-	);
-	const legacyRawSequenceNames = new Set(
-		[...(input.model.sequences?.values() ?? [])]
-			.filter((sequence) => {
-				const databaseName = naming.toDatabase(sequence.name);
-				return (
-					databaseName !== sequence.name &&
-					!declaredSequences.has(sequence.name)
-				);
-			})
-			.map((sequence) => sequence.name),
 	);
 	assertDeclaredEnumMapIdentity(input.model.enums);
 	const declaredEnums = new Set(input.model.enums?.keys() ?? []);
@@ -392,8 +389,10 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 								[...(introspected.sequences ?? [])].filter(
 									([name]) =>
 										declaredSequences.has(name) ||
-										(legacyRawSequenceNames.has(name) &&
-											!introspected.sequences?.has(naming.toDatabase(name))),
+										(legacyRawSequencePhysicalNames.has(name) &&
+											!introspected.sequences?.has(
+												legacyRawSequencePhysicalNames.get(name)!,
+											)),
 								),
 							),
 							enums: new Map(
@@ -403,7 +402,7 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 							),
 						};
 						const masked = maskOwnedLiveSurfaces(scoped, ownershipMask);
-						applyOwnedColumnTypeMask(desired, masked, ownershipMask, naming);
+						applyOwnedColumnTypeMask(desired, masked, ownershipMask);
 						return masked;
 					});
 			return Reflect.get(target, property, receiver);
@@ -414,8 +413,8 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 		desired,
 		{
 			schema: input.schema,
-			dbCasing: input.dbCasing,
 			ignoreUnmanagedExtensions: true,
+			declaredSequenceNames,
 		},
 	);
 	return {
@@ -592,18 +591,64 @@ export async function comparePgsqlDatabaseSchema(
 	desired: ModelIR,
 	options?: ComparePgsqlDatabaseSchemaOptions,
 ): Promise<SchemaDiff> {
-	const dbModel = await adapter.introspect(toIntrospectionOptions(options));
+	const physicalDesired =
+		options?.dbCasing === undefined
+			? undefined
+			: createPgPhysicalModel({
+					mode: 'logical',
+					model: desired,
+					schema: options.schema ?? 'public',
+					dbCasing: options.dbCasing,
+				});
+	const desiredModel = physicalDesired?.model ?? desired;
+	const declaredSequenceNames =
+		options?.declaredSequenceNames ??
+		(physicalDesired === undefined
+			? undefined
+			: declaredSequenceNamesFromInventory(physicalDesired.inventory));
+	const rawDatabaseModel = await adapter.introspect(
+		toIntrospectionOptions(options),
+	);
+	for (const [physicalName, authoredName] of declaredSequenceNames ?? []) {
+		if (
+			physicalName !== authoredName &&
+			rawDatabaseModel.sequences?.has(authoredName) === true &&
+			rawDatabaseModel.sequences?.has(physicalName) !== true
+		)
+			throw new LegacySequenceNameError(
+				authoredName,
+				physicalName,
+				options?.schema ?? 'public',
+			);
+	}
+	// Introspection is already in PostgreSQL spelling.  Route it through the
+	// physical authority to claim its names without applying a naming plugin.
+	const dbModel =
+		physicalDesired === undefined
+			? rawDatabaseModel
+			: createPgPhysicalModel({
+					mode: 'physical',
+					model: rawDatabaseModel,
+					schema: options?.schema ?? 'public',
+				}).model;
 	const compareCheckConstraints = supportsDDLCheckConstraints(options);
 	const useCanonicalizer = options?.canonicalizeExpressions ?? true;
 	const rawExpressionSurfaces = new Set<string>();
 	let hasRawIndexPredicateFallback = false;
 	let rawIndexPredicateFallbackCause: unknown;
+	const physicalOptions: ComparePgsqlDatabaseSchemaOptions | undefined =
+		physicalDesired === undefined
+			? options
+			: (() => {
+					const { dbCasing: _dbCasing, ...remaining } = options ?? {};
+					return remaining;
+				})();
 	const canonicalModels = useCanonicalizer
 		? await canonicalizeLiveExpressions(
 				adapter,
-				desired,
+				desiredModel,
 				dbModel,
-				options,
+				physicalOptions,
 				rawExpressionSurfaces,
 				(rawFallback, cause) => {
 					hasRawIndexPredicateFallback = rawFallback;
@@ -611,7 +656,7 @@ export async function comparePgsqlDatabaseSchema(
 				},
 			)
 		: {
-				desired,
+				desired: desiredModel,
 				database: dbModel,
 				defaultOutcomes: [],
 				indexPredicateOutcomes: [],
@@ -630,7 +675,6 @@ export async function comparePgsqlDatabaseSchema(
 				desiredForCompare,
 				dbModelForCompare,
 				compareCheckConstraints,
-				options?.dbCasing,
 			);
 		} else {
 			assertNoRawLiveExpressionSurfaces(
@@ -645,7 +689,7 @@ export async function comparePgsqlDatabaseSchema(
 		diff = compareSchemata(
 			desiredForCompare,
 			dbModelForCompare,
-			toCompareOptions(options, {
+			toCompareOptions(physicalOptions, {
 				delegateExpressionCanonicalization:
 					options?.requireExpressionCanonicalization === true &&
 					!useCanonicalizer &&
@@ -846,7 +890,6 @@ function assertNoUncanonicalizedLiveExpressionSurfaces(
 	desired: ModelIR,
 	dbModel: ModelIR,
 	includeCheckConstraints: boolean,
-	dbCasing: ComparePgsqlDatabaseSchemaOptions['dbCasing'],
 ): void {
 	const surfaces = [
 		...collectExpressionSurfaces('schema', desired, {
@@ -863,7 +906,6 @@ function assertNoUncanonicalizedLiveExpressionSurfaces(
 			desired,
 			dbModel,
 			includeCheckConstraints,
-			dbCasing,
 		),
 	];
 	if (surfaces.length > 0) {
@@ -875,17 +917,9 @@ function collectDatabaseOnlyExpressionSurfaces(
 	desired: ModelIR,
 	dbModel: ModelIR,
 	includeCheckConstraints: boolean,
-	dbCasing: ComparePgsqlDatabaseSchemaOptions['dbCasing'],
 ): string[] {
-	const naming =
-		dbCasing === undefined
-			? identityNaming
-			: getNamingPluginForDbCasing(dbCasing);
 	const desiredTables = new Map(
-		[...desired.tables.values()].map((table) => [
-			naming.toDatabase(table.name),
-			table,
-		]),
+		[...desired.tables.values()].map((table) => [table.name, table]),
 	);
 	const surfaces: string[] = [];
 
@@ -894,7 +928,7 @@ function collectDatabaseOnlyExpressionSurfaces(
 		if (!includeCheckConstraints) continue;
 		const desiredChecks = new Set(
 			(desiredTable?.checkConstraints ?? []).map((check) =>
-				getCheckConstraintDatabaseName(check, naming),
+				getCheckConstraintDatabaseName(check),
 			),
 		);
 		for (const dbCheck of dbTable.checkConstraints ?? []) {
@@ -1222,7 +1256,6 @@ function toCanonicalizerOptions(
 ): CanonicalizeExpressionSurfacesOptions {
 	return {
 		...(options?.schema !== undefined ? { schemaName: options.schema } : {}),
-		...(options?.dbCasing !== undefined ? { dbCasing: options.dbCasing } : {}),
 		...(options?.requireExpressionCanonicalization !== undefined
 			? { requireCanonicalization: options.requireExpressionCanonicalization }
 			: {}),
@@ -1304,7 +1337,6 @@ function toCompareOptions(
 ): CompareSchemataOptions {
 	return {
 		...(options?.schema !== undefined ? { schema: options.schema } : {}),
-		...(options?.dbCasing !== undefined ? { dbCasing: options.dbCasing } : {}),
 		...(options?.dialectCapabilities !== undefined
 			? { dialectCapabilities: options.dialectCapabilities }
 			: {}),

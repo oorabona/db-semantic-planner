@@ -32,27 +32,23 @@ import {
  * @returns Array of DDL statements
  */
 export function generateConstraintsPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, caps } = ctx;
+	const { tables, schemaName, caps } = ctx;
 	const statements: string[] = [];
 
 	// FK constraints (two-pass approach: tables first, then FKs to handle circularity)
 	for (const table of tables) {
 		for (const fk of table.foreignKeys) {
-			statements.push(
-				generateAlterTableAddFK(table.name, fk, schemaName, naming),
-			);
+			statements.push(generateAlterTableAddFK(table.name, fk, schemaName));
 		}
 	}
 
 	// Check constraints
 	if (sup(caps, caps?.supportsDDLCheckConstraints)) {
 		for (const table of tables) {
-			assertNoCheckConstraintNameCollisions(table, naming);
+			assertNoCheckConstraintNameCollisions(table);
 			for (const check of table.checkConstraints ?? []) {
-				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-				const constraintName = quoteId(
-					getCheckConstraintDatabaseName(check, naming),
-				);
+				const qualifiedTable = qualifyTable(table.name, schemaName);
+				const constraintName = quoteId(getCheckConstraintDatabaseName(check));
 				const canonicalCheck = isEngineCanonicalCheck(check);
 				const expression = renderCheckConstraintClause(check);
 				if (!canonicalCheck) {

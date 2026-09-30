@@ -20,7 +20,8 @@ planning; plan those with
 ## The startup sequence
 
 1. **Create the schema** you converge (`CREATE SCHEMA`); converge never creates it.
-2. **At every start:** `convergePg(pool, model, { schema, initialize })`. When the schema has no
+2. **At every start:** build a `PgPhysicalModel` for the target schema, then call
+   `convergePg(pool, physical, { initialize })`. When the schema has no
    ledger, `initialize` decides what happens:
    - `'never'` (the default): refuse `ledger-absent`.
    - `'pristine'`: create the `dbsp_meta` schema, the transition journal and the schema's ledger,
@@ -45,7 +46,7 @@ The ledger needs PostgreSQL 15 or later.
 
 ```typescript
 // doctest: real-db-only — initializes and converges a real schema
-import { convergePg } from '@dbsp/adapter-pgsql';
+import { convergePg, createPgPhysicalModel } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 
 const app = schema({
@@ -58,8 +59,10 @@ const app = schema({
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
 
 // At every start: 'applied' the first time, 'no-drift' afterwards.
-const result = await convergePg(pool, app.model, {
-  schema: 'converge_guide',
+const physical = createPgPhysicalModel({
+	mode: 'logical', model: app.model, schema: 'converge_guide',
+});
+const result = await convergePg(pool, physical, {
   initialize: 'pristine',
 });
 if (result.kind !== 'applied' && result.kind !== 'no-drift') {
@@ -107,11 +110,10 @@ on an existing table are left to that assert. It does not create enums or extens
 uses must already exist. An enum's declared name is its physical PostgreSQL type name under every
 `dbCasing`, the name its columns' types refer to, so declare `mood_type` to match a live `mood_type`.
 
-- A foreign key needs both of its tables created by the same call, its referenced columns covered by
+- A foreign key needs both of its tables created by the same call and its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
-  expression, and, for a single-column key, a declared index on its referencing column: any
-  single-column index on it (a partial `WHERE <column> IS NOT NULL` index included), or a primary key
-  or non-partial btree index without expressions whose first column it is.
+  expression. For an uncovered single-column referencing key, converge creates the model's automatic
+  foreign-key index (enabled by default); a declared covering or single-column index suppresses it.
 - A new column on a managed table is nullable without a default, or NOT NULL with a boolean,
   finite-number or string literal default (not a function call such as `now()`). A column with a
   default must use a PostgreSQL built-in base type or an enum, whether it is declared by a neutral type
@@ -134,7 +136,7 @@ same call commits on its own and can remain after a failure.
 
 ## Checking without applying
 
-`convergePg(pool, model, { schema, mode: 'check' })` takes the ledger lock, runs the checks and
+`convergePg(pool, physical, { mode: 'check' })` takes the ledger lock, runs the checks and
 planning refusals an apply runs before it starts executing, and returns without executing:
 
 | `result.kind` | Meaning |
@@ -165,8 +167,7 @@ tables the model does not declare are outside the comparison.
 
 ```typescript
 // doctest: skip — illustrates the option only
-await convergePg(pool, model, {
-  schema: 'app',
+await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: 'app' }), {
   initialize: 'adopt-existing',
   steps: [
     {
@@ -226,7 +227,7 @@ await convergePg(pool, model, {
   Otherwise a name that exists in `options.schema` resolves there and a session temporary table
   cannot shadow it; a name absent from it continues down the path, like any query your application
   runs with that path, so schema-qualify names that live elsewhere. A schema literally named `$user`
-  cannot host steps (`invalid-options`).
+  cannot be a converge target: `createPgPhysicalModel` refuses a schema the DDL renderers cannot write.
 - `lockTimeoutMs` and `statementTimeoutMs` set PostgreSQL's `lock_timeout` and `statement_timeout`
   in the transactions that run the step's `inspect` or `apply`, so they limit each lock wait and
   each statement there, converge's ledger statements included. They do not limit how long the
@@ -280,7 +281,8 @@ healthy. Other column properties, including defaults and nullability, remain com
 }
 ```
 
-`owns` must be a non-empty object containing only `checks`, `columnTypes`, and `indexes` arrays; at
+`owns` must be a non-empty object containing only `checks`, `columnTypes`, and `indexes` arrays; every
+named table, column and CHECK must be declared by the logical model; at
 runtime, a list set to `undefined` is treated as absent.
 Entries have exactly the required non-empty string fields and must name one declared surface; no
 surface may be owned twice. CHECKs and indexes require `after-generated-ddl`. An owned unique index
@@ -317,7 +319,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, or a missing `inspect` or `apply`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, owned CHECK state rendering failed, an `assert` stayed unhealthy after `apply`, or a step timed out. It names the step and carries the original rendering error as `cause`; failed rendering-scope cleanup destroys the session. During planning only that scope is rolled back and no step ran; during execution the step transaction is rolled back and not recorded. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
@@ -378,7 +380,7 @@ in the schema's `sequences` for the same pass, or converge with `initialize: 'ad
 
 ```typescript
 // doctest: real-db-only — adopts a table created outside dbsp
-import { convergePg, runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+import { convergePg, createPgPhysicalModel, runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
@@ -404,12 +406,17 @@ const tables = {
 } as const;
 
 // The one-time pass over the existing install.
-await convergePg(pool, schema(tables, { legacy_notes: { adopt: true } }).model, {
-  schema: 'converge_guide',
+await convergePg(pool, createPgPhysicalModel({
+	mode: 'logical',
+	model: schema(tables, { legacy_notes: { adopt: true } }).model,
+	schema: 'converge_guide',
+}), {
 });
 
 // Every later start omits adopt.
-const result = await convergePg(pool, schema(tables).model, { schema: 'converge_guide' });
+const result = await convergePg(pool, createPgPhysicalModel({
+	mode: 'logical', model: schema(tables).model, schema: 'converge_guide',
+}));
 if (result.kind !== 'no-drift') throw new Error(`expected no-drift, got ${result.kind}`);
 ```
 
@@ -420,8 +427,7 @@ Create them yourself after `convergePg`, and name them so converge leaves them a
 
 ```typescript
 // doctest: skip — illustrates the option only
-await convergePg(pool, model, {
-  schema: 'app',
+await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: 'app' }), {
   externalIndexes: [{ table: 'documents', name: 'documents_search_index' }],
 });
 ```

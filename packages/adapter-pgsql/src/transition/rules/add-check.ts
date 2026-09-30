@@ -20,8 +20,6 @@ import type {
 	TransitionRule,
 	VendorValidatedExpression,
 } from '@dbsp/types';
-import type { NamingPlugin } from '../../naming-plugin.js';
-import { identityNaming } from '../../naming-plugin.js';
 import { validateIdentifier } from '../../validate.js';
 import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {
@@ -61,10 +59,6 @@ type AddCheckApplicableEvaluation = ApplicableEvaluation & {
 	readonly expression: VendorValidatedExpression;
 	readonly predicate: VendorValidatedExpression;
 };
-
-export interface AddCheckRuleOptions {
-	readonly naming?: NamingPlugin;
-}
 
 const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
 	'partitioned tables are not yet supported by the ADD CHECK transition';
@@ -469,10 +463,7 @@ function unsupportedRecognition(
 	};
 }
 
-export function createAddCheckRule(
-	options: AddCheckRuleOptions = {},
-): TransitionRule<AddCheckMatch> {
-	const naming = options.naming ?? identityNaming;
+export function createAddCheckRule(): TransitionRule<AddCheckMatch> {
 	return {
 		id: ADD_CHECK_RULE_ID,
 		artifact: PG_RULE_PACK_ARTIFACT,
@@ -498,14 +489,14 @@ export function createAddCheckRule(
 				if (delta.kind === 'none' || delta.kind === 'unsupported') {
 					continue;
 				}
-				const table = naming.toDatabase(desiredTable.name);
+				const table = desiredTable.name;
 				const schema = context?.context.targetSchema;
 				const baseMatch = {
 					table,
 					...(schema ? { schema } : {}),
 				};
 				if (delta.kind === 'add-check') {
-					const constraint = naming.toDatabase(delta.check.name);
+					const constraint = delta.check.name;
 					const desiredCheck = desiredTable.checkConstraints?.find(
 						(candidate) => candidate.name === delta.check.name,
 					);
@@ -526,7 +517,7 @@ export function createAddCheckRule(
 					};
 				}
 
-				const constraint = naming.toDatabase(delta.desired.name);
+				const constraint = delta.desired.name;
 				const desiredCheck = desiredTable.checkConstraints?.find(
 					(candidate) => candidate.name === delta.desired.name,
 				);

@@ -304,7 +304,6 @@ BaseAdapter
   └─ IntrospectingAdapter
   └─ TransactionalAdapter
   └─ RawSqlAdapter
-  └─ DDLGeneratingAdapter
 
 TableDDLGeneratorAdapter (does not extend BaseAdapter)
 

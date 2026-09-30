@@ -19,7 +19,6 @@ import { generateRlsPhase } from '../ddl/phases/rls.js';
 import { generateSequencesPhase } from '../ddl/phases/sequences.js';
 import { generateTablesPhase } from '../ddl/phases/tables.js';
 import type { PhaseContext } from '../ddl/phases/types.js';
-import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Minimal ModelIR factory
@@ -53,7 +52,6 @@ function makeCtx(overrides: Partial<PhaseContext> = {}): PhaseContext {
 		schema: makeModel(),
 		tables: [],
 		schemaName: undefined,
-		naming: identityNaming,
 		caps: undefined,
 		fkAutoIndex: true,
 		includeDropStatements: false,

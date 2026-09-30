@@ -97,7 +97,6 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		withSchema: () => createMockAdapter(options),
 		introspect: notImplemented,
 		executeRaw: notImplemented,
-		generateDDL: notImplemented,
 		generateCreateIndex: notImplemented,
 		compileSelectExpression: notImplemented,
 		validateIdentifier: () => {},

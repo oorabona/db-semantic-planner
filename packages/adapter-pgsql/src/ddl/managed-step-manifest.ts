@@ -34,6 +34,18 @@ type Address = DeclarableResourceAddress & {
 
 type Meta = Readonly<Record<string, unknown>>;
 
+function stringList(value: unknown, label: string): readonly string[] {
+	if (
+		!Array.isArray(value) ||
+		value.length === 0 ||
+		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
+	)
+		throw new Error(
+			`generator planning refuses ${label}: missing typed columns`,
+		);
+	return value as readonly string[];
+}
+
 export type GeneratedColumnPostcondition = {
 	readonly name: string;
 	readonly type?: string;
@@ -926,18 +938,6 @@ function text(value: unknown, label: string): string {
 	return value;
 }
 
-function stringList(value: unknown, label: string): readonly string[] {
-	if (
-		!Array.isArray(value) ||
-		value.length === 0 ||
-		value.some((item) => typeof item !== 'string' || item.trim().length === 0)
-	)
-		throw new Error(
-			`generator planning refuses ${label}: missing typed columns`,
-		);
-	return value as readonly string[];
-}
-
 function named(meta: Meta | undefined, key: string, label: string): string {
 	return text(meta?.[key], label);
 }
@@ -993,7 +993,8 @@ export function addressForChange(input: {
 	readonly database: string;
 	readonly schema: string;
 }): Address {
-	const { change, database, schema } = input;
+	const { database, schema } = input;
+	const change = input.change;
 	const meta = change.meta;
 	const column = () =>
 		childAddress(
@@ -1005,9 +1006,15 @@ export function addressForChange(input: {
 		);
 	const constraint = (name: string) =>
 		childAddress(database, schema, 'constraint', name, change.table);
-	const fkName = (fk: Readonly<Record<string, unknown>>) => {
-		return `fk_${change.table}_${stringList(fk.columns, `${change.kind} columns`).join('_')}`;
+	const physicalName = (value: unknown, subject: string): string => {
+		if (typeof value !== 'string' || value.length === 0)
+			throw new Error(
+				`generator planning refuses ${change.kind} on table ${change.table}: missing physical ${subject} name`,
+			);
+		return value;
 	};
+	const fkName = (fk: Readonly<Record<string, unknown>>) =>
+		physicalName(fk.name, 'foreign-key constraint');
 	switch (change.kind) {
 		case 'create_table':
 		case 'drop_table':
@@ -1029,15 +1036,11 @@ export function addressForChange(input: {
 			);
 		case 'alter_column_unique':
 			return constraint(
-				text(
-					meta?.constraintName ??
-						`${change.table}_${text(change.column, change.kind)}_key`,
-					change.kind,
-				),
+				physicalName(meta?.constraintName, 'UNIQUE constraint'),
 			);
 		case 'add_primary_key':
 		case 'drop_primary_key':
-			return constraint(`pk_${change.table}`);
+			return constraint(physicalName(meta?.name, 'primary-key constraint'));
 		case 'add_foreign_key':
 		case 'drop_foreign_key':
 		case 'alter_foreign_key':
@@ -1058,10 +1061,10 @@ export function addressForChange(input: {
 					`generator planning refuses ${change.kind}: missing typed index`,
 				);
 			const record = index as Record<string, unknown>;
-			const name =
-				typeof record.name === 'string' && record.name.length > 0
-					? record.name
-					: `idx_${change.table}_${stringList(record.columns, change.kind).join('_')}`;
+			const typedIndex = index as TableIR['indexes'][number];
+			if ((typedIndex.expressions?.length ?? 0) === 0)
+				stringList(typedIndex.columns, change.kind);
+			const name = physicalName(record.name, 'index');
 			return childAddress(database, schema, 'index', name, change.table);
 		}
 		case 'add_check_constraint':

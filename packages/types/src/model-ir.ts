@@ -271,6 +271,10 @@ export interface ColumnIR {
  * Foreign key constraint
  */
 export interface ForeignKeyIR {
+	/** Physical PostgreSQL constraint name when the model has been physicalized. */
+	readonly name?: string;
+	/** Physical PostgreSQL name of the automatic single-column FK index. */
+	readonly autoIndexName?: string;
 	/** Local columns that form the FK */
 	readonly columns: readonly string[];
 
@@ -484,6 +488,9 @@ export interface TableIR {
 
 	/** Primary key (single column or composite); omitted for junction tables without explicit PK */
 	readonly primaryKey?: string | readonly string[];
+
+	/** Physical PostgreSQL primary-key constraint name when known. */
+	readonly primaryKeyName?: string;
 
 	/** Foreign key constraints */
 	readonly foreignKeys: readonly ForeignKeyIR[];

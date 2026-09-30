@@ -16,7 +16,6 @@ import {
 	validateSqlExpression,
 } from '../../validate.js';
 import { escapeCanonicalSqlLiterals } from '../rendered-sql.js';
-import type { PhaseContext } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Index method validation
@@ -210,20 +209,17 @@ export function quoteRoleName(name: string): string {
 /**
  * Qualify a table name with an optional schema prefix.
  * Both the schema and table names are validated + quoted via `quoteIdent`.
- * The schema name is already a database identifier and must not be transformed
- * by the naming plugin.
+ * Both inputs are already physical database identifiers.
  *
- * @param tableName  Unqualified table name (pre-naming-plugin)
+ * @param tableName  Unqualified physical table name
  * @param schemaName Optional database schema identifier
- * @param naming     NamingPlugin from PhaseContext
  * @returns `"schema"."table"` or `"table"` if no schema
  */
 export function qualifyTableIdent(
 	tableName: string,
 	schemaName: string | undefined,
-	naming: PhaseContext['naming'],
 ): string {
-	const table = quoteIdent(naming.toDatabase(tableName), 'table');
+	const table = quoteIdent(tableName, 'table');
 	if (schemaName) {
 		return `${quoteIdent(schemaName, 'schema')}.${table}`;
 	}

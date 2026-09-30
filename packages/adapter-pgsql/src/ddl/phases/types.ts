@@ -8,7 +8,6 @@
  */
 
 import type { DialectCapabilities, ModelIR, TableIR } from '@dbsp/types';
-import type { NamingPlugin } from '../../naming-plugin.js';
 
 /**
  * Resolved context passed to every DDL generation phase.
@@ -19,7 +18,6 @@ export type PhaseContext = {
 	readonly tables: TableIR[];
 	/** Database schema identifier resolved from GenerateDDLOptions; never pass through naming plugins. */
 	readonly schemaName: string | undefined;
-	readonly naming: NamingPlugin;
 	readonly caps: DialectCapabilities | undefined;
 	readonly fkAutoIndex: boolean;
 	readonly includeDropStatements: boolean;

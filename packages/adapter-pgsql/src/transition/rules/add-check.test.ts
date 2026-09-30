@@ -16,7 +16,6 @@ import type {
 	TransitionLessor,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { camelCaseNaming } from '../../naming-plugin.js';
 import {
 	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
@@ -381,7 +380,7 @@ describe('postgresql.table.add-check rule', () => {
 	});
 
 	it('declares enum-label visibility dependencies from authored CHECK metadata', () => {
-		const rule = createAddCheckRule({ naming: camelCaseNaming });
+		const rule = createAddCheckRule();
 		const required = {
 			schema: 'public',
 			type: 'moodType',

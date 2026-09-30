@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import {
-	convergePg,
 	PgConvergeRefusalError,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
+import { convergePg } from '@dbsp/adapter-pgsql/internal';
 import type { ModelIR } from '@dbsp/core';
 import pg from 'pg';
 import { expect, it } from 'vitest';

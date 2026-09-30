@@ -11,13 +11,13 @@ import {
 	assertDeclarableChangeKind,
 	classifyGeneratedMutation,
 	comparePgsqlDatabaseSchema,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionLessor,
 	createPgTransitionRunPersister,
 	generatedPostconditionForChange,
 	generateMigrationSQL,
-	getNamingPluginForDbCasing,
 	ReferencedKeyRemovalError,
 	readPgCatalogueIdentity,
 	renderPgTableReaddressStatements,
@@ -27,6 +27,7 @@ import {
 	collectReferencedKeyRemovalConflicts,
 	comparePgsqlDeclaredAdoptionSchema,
 	createPgsqlDeclaredAdoptionStep,
+	generateMigrationSQL as generateMigrationSQLForPhysicalDiff,
 	modelForDeclaredAdoption,
 	pgsqlDeclaredAdoptionDeclaration,
 } from '@dbsp/adapter-pgsql/internal';
@@ -143,7 +144,7 @@ function replacementStatements(table: TableIR, schema: string) {
 	};
 	return {
 		retireStatements: [`DROP TABLE ${quote(schema)}.${quote(table.name)}`],
-		createStatements: generateMigrationSQL(createDiff, {
+		createStatements: generateMigrationSQLForPhysicalDiff(createDiff, {
 			includeDestructive: true,
 			schemaName: schema,
 		}),
@@ -473,11 +474,19 @@ export async function runGeneratorPlan(input: {
 				`generator planning refuses sequence adoption for ${sequence.name}: sequence adoption is available through convergePg / dbsp migrate`,
 			);
 	}
+	const schema = input.schema ?? 'public';
 	const dbCasing = loaded.dbCasing ?? 'preserve';
-	const naming = getNamingPluginForDbCasing(dbCasing);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: loaded.model,
+		schema,
+		...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+	});
+	const physicalTable = (name: string) =>
+		physical.inventory.get({ kind: 'table', schema, name });
 	for (const table of loaded.model.tables.values()) {
 		if (table.replace !== true) continue;
-		const physicalName = naming.toDatabase(table.name);
+		const physicalName = physicalTable(table.name);
 		if (physicalName !== table.name)
 			throw new Error(
 				`generator planning refuses replacement ${table.name}: dbCasing addresses physical table ${physicalName}; replacement requires preserve casing`,
@@ -485,17 +494,14 @@ export async function runGeneratorPlan(input: {
 	}
 	const { pool } = await createDbConnection(input.db);
 	try {
-		const schema = input.schema ?? 'public';
 		const diff = await comparePgsqlDatabaseSchema(
 			createPgsqlAdapter(pool),
-			loaded.model,
+			physical,
 			{
-				schema,
 				// `apply --schema` owns one schema. Extensions are database-scoped,
 				// so an extension not declared by this schema must not become a
 				// schema-plan removal merely because it is installed in the database.
 				ignoreUnmanagedExtensions: true,
-				...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
 			},
 		);
 		const declaredLifecycleWork = [...loaded.model.tables.values()].some(
@@ -536,7 +542,7 @@ export async function runGeneratorPlan(input: {
 		const adoptionMismatches = new Set<string>();
 		for (const table of loaded.model.tables.values()) {
 			if (table.adopt !== true) continue;
-			const physicalName = naming.toDatabase(table.name);
+			const physicalName = physicalTable(table.name);
 			adoptionPhysicalNames.set(table.name, physicalName);
 			const compared = await comparePgsqlDeclaredAdoptionSchema({
 				executor: pool,
@@ -610,8 +616,8 @@ export async function runGeneratorPlan(input: {
 							change.meta.readdress as TableReaddressDeclaration,
 						)
 					: generateMigrationSQL(
-							{ ...executableDiff, changes: [change] },
-							{ includeDestructive: true, schemaName: schema },
+							{ ...executableDiff, physical: diff.physical, changes: [change] },
+							{ includeDestructive: true },
 						),
 			...(change.kind === 'readdress_table' && change.meta?.readdress
 				? { readdress: change.meta.readdress as TableReaddressDeclaration }

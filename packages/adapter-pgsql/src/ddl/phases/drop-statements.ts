@@ -18,13 +18,13 @@ import type { PhaseContext } from './types.js';
  * @returns Array of DDL statements (empty if includeDropStatements is false)
  */
 export function generateDropStatementsPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, includeDropStatements } = ctx;
+	const { tables, schemaName, includeDropStatements } = ctx;
 	if (!includeDropStatements) {
 		return [];
 	}
 	const statements: string[] = [];
 	for (const table of [...tables].reverse()) {
-		statements.push(generateDropTable(table.name, schemaName, naming));
+		statements.push(generateDropTable(table.name, schemaName));
 	}
 	statements.push(''); // Empty line separator
 	return statements;

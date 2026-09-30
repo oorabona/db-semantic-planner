@@ -3,7 +3,6 @@
 import { randomUUID } from 'node:crypto';
 import { unlink, writeFile } from 'node:fs/promises';
 import {
-	comparePgsqlDatabaseSchema,
 	createPgsqlAdapter,
 	DBSP_LEDGER_MARKER_TABLE,
 	PG_LEDGER_SHAPE_VERSION,
@@ -11,7 +10,10 @@ import {
 	readPgLedgerAddressChain,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
-import { appendPgLedgerResolution } from '@dbsp/adapter-pgsql/internal';
+import {
+	appendPgLedgerResolution,
+	comparePgsqlDatabaseSchema,
+} from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain, schema } from '@dbsp/core';
 import {
 	type LedgerAddress,

@@ -1,13 +1,15 @@
 /** Execute the deliberately narrow, additive PostgreSQL convergence entry point. */
+
+import type { PgPhysicalModel } from '@dbsp/adapter-pgsql';
 import {
 	type ConvergePgOptions,
 	convergePg,
+	createPgPhysicalModel,
 	escapeDiagnosticText,
 	type PgConvergeRefusal,
 	PgConvergeRefusalError,
 	type PgConvergeResult,
 } from '@dbsp/adapter-pgsql';
-import type { ModelIR } from '@dbsp/types';
 import { Command } from 'commander';
 import type { Pool } from 'pg';
 import { createDbConnection } from '../utils/db-utils.js';
@@ -97,7 +99,7 @@ export interface MigrateDeps {
 	readonly createDbConnection: (db: string) => Promise<{ readonly pool: Pool }>;
 	readonly converge: (
 		pool: Pool,
-		model: ModelIR,
+		model: PgPhysicalModel,
 		options: ConvergePgOptions,
 	) => Promise<PgConvergeResult>;
 }
@@ -263,6 +265,17 @@ export async function runMigrate(
 	} catch (error) {
 		return failureResult('load-failed', error, schema, schemaPath);
 	}
+	let physical: PgPhysicalModel;
+	try {
+		physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: loaded.model,
+			schema,
+			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+		});
+	} catch (error) {
+		return failureResult('migrate-failed', error, schema, schemaPath);
+	}
 	let pool: Pool;
 	try {
 		({ pool } = await deps.createDbConnection(options.db));
@@ -272,9 +285,7 @@ export async function runMigrate(
 	let result: MigrateResult;
 	let convergeResult: PgConvergeResult | undefined;
 	try {
-		convergeResult = await deps.converge(pool, loaded.model, {
-			schema,
-			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+		convergeResult = await deps.converge(pool, physical, {
 			...(externalIndexes === undefined ? {} : { externalIndexes }),
 		});
 		result = resultForConverge(convergeResult, schema, schemaPath);

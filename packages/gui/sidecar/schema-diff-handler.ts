@@ -9,14 +9,15 @@ import {
 	type ChangeKind,
 	type ComparePgsqlDatabaseSchemaOptions,
 	comparePgsqlDatabaseSchema,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	type DiffSummary,
 	type ExpressionCanonicalizationWarning,
 	generateDownSQL,
 	generateMigrationSQL,
+	type PgPhysicalModel,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
-import type { ModelIR } from '@dbsp/types';
 import { getConnectionInfo, getPool } from './connection-manager.js';
 import {
 	findSchemaFile,
@@ -85,9 +86,13 @@ export interface SchemaDiffResult {
  */
 export type SchemaDiffComparisonOperation = (
 	connectionId: string,
-	desired: ModelIR,
+	desired: PgPhysicalModel,
 	options: ComparePgsqlDatabaseSchemaOptions,
-) => Promise<SchemaDiff>;
+) => Promise<
+	SchemaDiff & {
+		readonly physical: Pick<PgPhysicalModel, 'schema' | 'fkAutoIndex'>;
+	}
+>;
 
 /** Run the live comparison against the pool owned by the GUI connection. */
 export const compareManagedSchema: SchemaDiffComparisonOperation = async (
@@ -184,8 +189,6 @@ export async function handleSchemaDiff(
 	const connectionSchema = getConnectionInfo(connectionId)?.schema;
 	const warnings: SchemaDiffComparisonWarning[] = [];
 	const compareOptions: ComparePgsqlDatabaseSchemaOptions = {
-		...(connectionSchema !== undefined ? { schema: connectionSchema } : {}),
-		...(loaded.dbCasing !== undefined ? { dbCasing: loaded.dbCasing } : {}),
 		onExpressionCanonicalizationWarning: (warning) => {
 			warnings.push(serializeCanonicalizationWarning(warning));
 		},
@@ -193,12 +196,15 @@ export async function handleSchemaDiff(
 
 	// 3. Compare through PostgreSQL so desired and live expression surfaces use
 	// the same canonical spelling as `dbsp push`.
-	const diff = await compare(connectionId, loaded.model, compareOptions);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: loaded.model,
+		schema: connectionSchema ?? 'public',
+		...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+	});
+	const diff = await compare(connectionId, physical, compareOptions);
 
 	const sqlOptions = {
-		...(connectionSchema !== undefined && connectionSchema !== 'public'
-			? { schemaName: connectionSchema }
-			: {}),
 		// Schema Apply excludes changes the migration generator classifies as
 		// destructive. The full diff, including those excluded changes, remains
 		// available in `changes`.
@@ -216,13 +222,7 @@ export async function handleSchemaDiff(
 		changes: diff.changes.filter((change) => !change.destructive),
 	};
 	const downSQL =
-		appliedDiff.changes.length > 0
-			? generateDownSQL(appliedDiff, {
-					...(connectionSchema !== undefined && connectionSchema !== 'public'
-						? { schemaName: connectionSchema }
-						: {}),
-				})
-			: [];
+		appliedDiff.changes.length > 0 ? generateDownSQL(appliedDiff) : [];
 
 	// 5. Serialize for JSON transport
 	return {

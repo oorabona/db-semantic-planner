@@ -5,6 +5,10 @@
 Accepted (2026-09-29). It records the decision taken on #837. The check mode, `initialize` and
 application steps and ownership are shipped; "Deliveries" gives the state of each part.
 
+ADR 0009 supersedes the call shape given here: `convergePg(pool, physical, options)` takes a
+`PgPhysicalModel`, which carries the schema, the naming choice and `fkAutoIndex`; `options` no longer
+holds `schema` or `dbCasing`.
+
 ## Context
 
 ADR 0007 gives an application one call, `convergePg`, that brings its declared model to the database at
@@ -60,7 +64,8 @@ How they are recorded and run:
   unless the connection's path names `pg_catalog` explicitly, PostgreSQL searches it first, so
   built-in names win; otherwise a name that exists
   in the target resolves there and a session temporary table cannot shadow it, while a name absent
-  from it continues down the path. A target schema literally named `$user` cannot host steps.
+  from it continues down the path. A target schema literally named `$user` cannot host steps; since ADR 0009
+  it cannot be a converge target at all, because the physical model refuses a schema the renderers cannot write.
   An owned-CHECK state rendering failure during planning or execution is `application-step-failed`
   naming the step with the original error as `cause`; failed rendering-scope cleanup destroys the
   session, so planning rolls back only that scope without running a step while execution rolls back

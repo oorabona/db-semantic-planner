@@ -14,7 +14,6 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
-import { CamelCaseNamingPlugin } from '../../naming-plugin.js';
 import {
 	columnShapeFromColumn,
 	compareSetNotNullColumnShape,
@@ -383,13 +382,11 @@ describe('postgresql.column.set-not-null rule', () => {
 		}
 	});
 
-	it('uses the naming plugin to emit physical target identifiers', () => {
-		const rule = createSetNotNullRule({
-			naming: new CamelCaseNamingPlugin(),
-		});
+	it('uses physical model identifiers for emitted targets', () => {
+		const rule = createSetNotNullRule();
 		const result = rule.recognize(
-			model(false, {}, 'userProfiles', 'createdAt'),
-			model(true, {}, 'userProfiles', 'createdAt'),
+			model(false, {}, 'user_profiles', 'created_at'),
+			model(true, {}, 'user_profiles', 'created_at'),
 		);
 
 		expect(result.recognized).toBe(true);
@@ -400,7 +397,7 @@ describe('postgresql.column.set-not-null rule', () => {
 			table: 'user_profiles',
 			column: 'created_at',
 			expectedColumnShape: expectedColumnShapeFor(
-				column(false, {}, 'createdAt'),
+				column(false, {}, 'created_at'),
 				'created_at',
 				{ table: 'user_profiles', column: 'created_at' },
 			),
@@ -430,19 +427,17 @@ describe('postgresql.column.set-not-null rule', () => {
 			table: 'user_profiles',
 			column: 'created_at',
 			expectedColumnShape: expectedColumnShapeFor(
-				column(false, {}, 'createdAt'),
+				column(false, {}, 'created_at'),
 				'created_at',
 				{ table: 'user_profiles', column: 'created_at' },
 			),
 		});
 	});
 
-	it('matches logical desired identifiers to physical current identifiers under snake_case dbCasing', () => {
-		const registry = createPackRegistry([
-			createPgTransitionPack({ dbCasing: 'snake_case' }),
-		]);
+	it('matches physical desired identifiers to physical current identifiers', () => {
+		const registry = createPackRegistry([createPgTransitionPack()]);
 		const compare = createComparator(registry).compare(
-			model(false, {}, 'userProfiles', 'createdAt'),
+			model(false, {}, 'user_profiles', 'created_at'),
 			model(true, {}, 'user_profiles', 'created_at'),
 		);
 
@@ -455,7 +450,7 @@ describe('postgresql.column.set-not-null rule', () => {
 			table: 'user_profiles',
 			column: 'created_at',
 			expectedColumnShape: expectedColumnShapeFor(
-				column(false, {}, 'createdAt'),
+				column(false, {}, 'created_at'),
 				'created_at',
 				{ table: 'user_profiles', column: 'created_at' },
 			),

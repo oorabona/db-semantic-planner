@@ -28,7 +28,7 @@ import type {
 	TransitionSessionClient,
 } from '@dbsp/types';
 import type { Pool } from 'pg';
-import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import type { PgPhysicalModel } from '../physical-model/index.js';
 import { DBSP_META_SCHEMA, DBSP_TRANSITION_RUN_TABLE } from './constants.js';
 import {
 	createPgExecutionContract,
@@ -60,8 +60,6 @@ export type PgLiveSchemaReader = (
 ) => Promise<ModelIR>;
 
 export interface PlanPgTransitionRunOptions {
-	readonly schema?: string;
-	readonly dbCasing?: Parameters<typeof getNamingPluginForDbCasing>[0];
 	/** False proves and binds a durable plan but leaves no journal record. */
 	readonly persist?: boolean;
 	/** Lets a caller prepare an inspection view before durable persistence. */
@@ -195,12 +193,12 @@ function executionContractBlockedAssessment(
  * evidence, and contract sessions are opened and released here.
  */
 export async function planPgTransitionRun(
-	model: ModelIR,
+	physical: PgPhysicalModel,
 	readLiveSchema: PgLiveSchemaReader,
 	pool: Pool,
 	options: PlanPgTransitionRunOptions = {},
 ): Promise<PgTransitionPlanResult> {
-	const schema = options.schema;
+	const schema = physical.schema;
 	const targetLease = await acquireTransitionLease(
 		createPgTransitionLessor(pool),
 	);
@@ -250,13 +248,9 @@ export async function planPgTransitionRun(
 		undefined,
 		targetIdentity,
 	);
-	const registry = createPackRegistry([
-		createPgTransitionPack(
-			options.dbCasing === undefined ? {} : { dbCasing: options.dbCasing },
-		),
-	]);
+	const registry = createPackRegistry([createPgTransitionPack()]);
 	const compare = createComparator(registry).compare(
-		model,
+		physical.model,
 		current,
 		equivalenceContext(context),
 	);
@@ -287,15 +281,11 @@ export async function planPgTransitionRun(
 	}
 	const durablePlan = bindDeclarationSet(
 		bindExecutionContract(prove.plan, executionContract),
-		declarationSetFromModel(
-			model,
-			{
-				engine: context.engine,
-				database: context.databaseId,
-				schema: schema ?? 'public',
-			},
-			getNamingPluginForDbCasing(options.dbCasing ?? 'preserve'),
-		),
+		declarationSetFromModel(physical.model, {
+			engine: context.engine,
+			database: context.databaseId,
+			schema,
+		}),
 	);
 	const run = createTransitionRunMetadata(durablePlan);
 	const proofContext = prove.plan.observations.find(

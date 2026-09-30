@@ -12,7 +12,10 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
-	LegacySequenceNameError,
+	compareSchemata as comparePhysicalSchemata,
+	createPgPhysicalModel,
+} from '../index.js';
+import {
 	SequenceNameCollisionError,
 	SequenceNameMapKeyMismatchError,
 } from '../sequence-name.js';
@@ -61,6 +64,23 @@ function makeModel(tables: TableIR[], externalTables?: Iterable<string>) {
 
 function changeKinds(changes: readonly SchemaChange[]) {
 	return changes.map((c) => c.kind);
+}
+
+function compareSnakeCase(
+	desired: ReturnType<typeof makeModel>,
+	database: ReturnType<typeof makeModel>,
+	options: Omit<CompareSchemataOptions, 'dbCasing'> = {},
+) {
+	return comparePhysicalSchemata(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema: 'app',
+			dbCasing: 'snake_case',
+		}),
+		createPgPhysicalModel({ mode: 'physical', model: database, schema: 'app' }),
+		options,
+	);
 }
 
 // ============================================================================
@@ -2454,10 +2474,6 @@ describe('compareSchemata', () => {
 	});
 
 	describe('dbCasing: snake_case', () => {
-		const snakeCaseOpts: CompareSchemataOptions = {
-			dbCasing: 'snake_case',
-		};
-
 		it('should match camelCase schema columns to snake_case DB columns', () => {
 			const schema = makeModel([
 				makeTable({
@@ -2480,7 +2496,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2499,7 +2515,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2526,7 +2542,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2567,7 +2583,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2604,7 +2620,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2639,8 +2655,8 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			expect(() => compareSchemata(schema, db, snakeCaseOpts)).toThrow(
-				'authored constraints "myCheck" and "my_check" both resolve to physical name "my_check"',
+			expect(() => compareSnakeCase(schema, db)).toThrow(
+				'PostgreSQL physical name collision in constraint',
 			);
 		});
 
@@ -2695,7 +2711,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2778,7 +2794,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toEqual([
 				expect.objectContaining({
@@ -2835,7 +2851,7 @@ describe('compareSchemata', () => {
 				['tenant_users'],
 			);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2874,7 +2890,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(changeKinds(diff.changes).sort()).toEqual([
 				'add_foreign_key',
@@ -2898,7 +2914,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(0);
 		});
@@ -2924,7 +2940,7 @@ describe('compareSchemata', () => {
 				}),
 			]);
 
-			const diff = compareSchemata(schema, db, snakeCaseOpts);
+			const diff = compareSnakeCase(schema, db);
 
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('add_column');
@@ -3580,13 +3596,14 @@ describe('referenced key removals', () => {
 				foreignKeys: [childForeignKey],
 			}),
 		]);
-		const diff = compareSchemata(
-			makeModel([
-				parent(),
-				children(),
-				...Array.from(db.tables.values()).slice(2),
-			]),
-			db,
+		const diff = comparePhysicalSchemata(
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: makeModel([parent(), children()]),
+				schema: 'app',
+				dbCasing: 'snake_case',
+			}),
+			createPgPhysicalModel({ mode: 'physical', model: db, schema: 'app' }),
 		);
 		expect(referencedBy(changeOfKind(diff, 'drop_index'))).toEqual([
 			{
@@ -4184,7 +4201,7 @@ describe('FK enhancements — compareForeignKeys', () => {
 			name: 'orders',
 			foreignKeys: [baseFk],
 		});
-		const diff = compareSchemata(
+		const diff = compareSnakeCase(
 			makeModel([usersTable, schema]),
 			makeModel([usersTable, db]),
 		);
@@ -4555,10 +4572,9 @@ describe('Sequences', () => {
 	});
 
 	it('uses the physical sequence name in comparison metadata and migration SQL', () => {
-		const diff = compareSchemata(
+		const diff = compareSnakeCase(
 			makeModelWithSequences([{ name: 'orderNumberSeq' }]),
 			makeModel([]),
-			{ dbCasing: 'snake_case' },
 		);
 
 		expect(diff.changes).toMatchObject([
@@ -4577,9 +4593,7 @@ describe('Sequences', () => {
 		const schema = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
 		const db = makeModelWithSequences([{ name: 'order_number_seq' }]);
 
-		expect(
-			compareSchemata(schema, db, { dbCasing: 'snake_case' }).changes,
-		).toEqual([]);
+		expect(compareSnakeCase(schema, db).changes).toEqual([]);
 	});
 
 	it('keeps the raw sequence name without a casing option', () => {
@@ -4593,16 +4607,13 @@ describe('Sequences', () => {
 		});
 	});
 
-	it('refuses a legacy raw sequence instead of planning a destructive replacement', () => {
+	it('refuses a raw authored sequence instead of create/drop drift', () => {
 		const schema = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
 		const db = makeModelWithSequences([{ name: 'orderNumberSeq' }]);
 
-		expect(() =>
-			compareSchemata(schema, db, { dbCasing: 'snake_case' }),
-		).toThrow(LegacySequenceNameError);
-		expect(() =>
-			compareSchemata(schema, db, { dbCasing: 'snake_case' }),
-		).toThrow('Rename "orderNumberSeq" to "order_number_seq" before comparing');
+		expect(() => compareSnakeCase(schema, db)).toThrow(
+			'ALTER SEQUENCE "app"."orderNumberSeq" RENAME TO "order_number_seq"',
+		);
 	});
 
 	it.each([
@@ -4627,9 +4638,11 @@ describe('Sequences', () => {
 			undefined,
 			sequences,
 		);
-		expect(() =>
-			compareSchemata(schema, makeModel([]), { dbCasing: 'snake_case' }),
-		).toThrow(error);
+		expect(() => compareSnakeCase(schema, makeModel([]))).toThrow(
+			error === SequenceNameCollisionError
+				? 'Sequence name collision'
+				: undefined,
+		);
 	});
 
 	it('should detect dropped sequence', () => {
@@ -5198,19 +5211,9 @@ describe('compareSchemata with Capabilities (CAPS-003)', () => {
 			}),
 		]);
 
-		const diff = compareSchemata(schema, db, {
-			dbCasing: 'snake_case',
-			dialectCapabilities: caps,
-		});
-
-		expect(
-			diff.changes.filter(
-				(c) =>
-					c.kind === 'add_check_constraint' ||
-					c.kind === 'drop_check_constraint',
-			),
-		).toHaveLength(0);
-		expect(diff.changes).toHaveLength(0);
+		expect(() =>
+			compareSnakeCase(schema, db, { dialectCapabilities: caps }),
+		).toThrow('PostgreSQL physical name collision in constraint');
 	});
 
 	it('does not require CHECK expression canonicalization when supportsDDLCheckConstraints is false', () => {
@@ -5259,11 +5262,10 @@ describe('compareSchemata with Capabilities (CAPS-003)', () => {
 		const db = makeModel([]);
 
 		expect(() =>
-			compareSchemata(schema, db, {
-				dbCasing: 'snake_case',
+			compareSnakeCase(schema, db, {
 				dialectCapabilities: POSTGRESQL_CAPABILITIES,
 			}),
-		).toThrow(/CHECK constraint name collision/);
+		).toThrow(/PostgreSQL physical name collision in constraint/);
 	});
 
 	it('still requires CHECK expression canonicalization when supportsDDLCheckConstraints is true', () => {

@@ -7,7 +7,6 @@ import {
 	markEngineCanonicalCheck,
 	markEngineCanonicalIndex,
 } from '../expression-provenance.js';
-import { identityNaming } from '../naming-plugin.js';
 import { derivePostgresqlCapabilitiesForVersion } from '../postgresql-capabilities.js';
 import { generateCreateIndex } from './ddl-generator.js';
 import { generateCreateIndexSQL } from './index-operations.js';
@@ -280,9 +279,7 @@ function dropIndexDiff(index: IndexIR): SchemaDiff {
 
 describe('CREATE INDEX pre-refactor goldens', () => {
 	it('captures ddl-generator maximal index SQL byte-for-byte', () => {
-		expect(
-			generateCreateIndex('orders', maximalIndex, 'app', identityNaming),
-		).toEqual(
+		expect(generateCreateIndex('orders', maximalIndex, 'app')).toEqual(
 			'CREATE UNIQUE INDEX "idx_orders_email_cover" ON "app"."orders" USING gin (lower(email), "email" gin_trgm_ops, "tenant_id" int4_ops) INCLUDE ("id", "created_at") NULLS NOT DISTINCT WITH (fillfactor = 80, fastupdate = off) WHERE deleted_at IS NULL AND note = \'active\';',
 		);
 	});
@@ -685,7 +682,6 @@ describe('CREATE INDEX capability assertions', () => {
 			'orders',
 			{ ...maximalIndex, name: 'idx_orders_email_cover' },
 			'app',
-			identityNaming,
 		).replace(/;$/, '');
 		const publicSql = generateCreateIndexSQL('orders', 'app', {
 			...maximalPublicOptions,

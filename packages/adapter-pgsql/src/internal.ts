@@ -7,7 +7,13 @@
  */
 
 export {
+	type GenerateDDLOptions,
+	generateDDL,
+} from './ddl/ddl-generator.js';
+export {
+	type ComparePgsqlDatabaseSchemaOptions,
 	type ComparePgsqlDeclaredAdoptionSchemaInput,
+	comparePgsqlDatabaseSchema,
 	comparePgsqlDeclaredAdoptionSchema,
 	modelForDeclaredAdoption,
 	type PgsqlAdoptionComparisonExecutor,
@@ -18,7 +24,16 @@ export {
 	pgsqlDeclaredAdoptionDeclaration,
 	pgsqlDeclaredSequenceAdoptionDeclaration,
 } from './ddl/managed-step-manifest.js';
-export { collectReferencedKeyRemovalConflicts } from './ddl/schema-diff.js';
+export {
+	generateDownSQL,
+	generateMigrationSQL,
+	type MigrationSQLOptions,
+} from './ddl/migration-sql.js';
+export {
+	type CompareSchemataOptions,
+	collectReferencedKeyRemovalConflicts,
+	compareSchemata,
+} from './ddl/schema-diff.js';
 export type {
 	PgApplicationStepTx,
 	PgConvergeApplicationStep,

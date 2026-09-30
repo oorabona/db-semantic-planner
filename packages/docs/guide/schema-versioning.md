@@ -4,6 +4,17 @@ title: Managed schema history
 
 # Managed schema history
 
+Create the PostgreSQL physical model once for the target schema before comparing
+versions. `compareSchemata(desiredPhysical, databasePhysical)` returns the
+stamped diff that `generateMigrationSQL(diff)` consumes; schema and naming are
+therefore not per-call options.
+
+`dbsp plan` and its no-argument `dbsp apply` path do the same before transition
+planning: they build `createPgPhysicalModel({ mode: 'logical', model, schema,
+dbCasing })` once from the schema file. Declaration addresses, comparison and
+transition operations then use `physical.model`; no plan or preflight command
+maps declared identifiers independently.
+
 DBSP records managed intent and verified outcomes in its ledger; it does not
 make local SQL files an execution authority. The live catalogue remains the
 authority for what a database contains.

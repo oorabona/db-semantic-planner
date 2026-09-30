@@ -2,8 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import {
 	appendIntentJournal,
-	comparePgsqlDatabaseSchema,
-	convergePg,
+	convergePg as convergePhysicalPg,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -14,6 +14,8 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerClaim,
+	comparePgsqlDatabaseSchema,
+	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
 import {
@@ -1427,6 +1429,57 @@ describe('convergePg', () => {
 		);
 	});
 
+	it('adds same-column partial indexes by their carried physical names', async () => {
+		const pool = await getTestPool();
+		const name = 'same_column_partial_indexes';
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'score', type: 'integer', nullable: false },
+				],
+				indexes: [
+					{
+						name: `${name}_positive`,
+						columns: ['score'],
+						where: 'score > 0',
+					},
+					{
+						name: `${name}_negative`,
+						columns: ['score'],
+						where: 'score < 0',
+					},
+				],
+			},
+		]);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(
+			pool.query(
+				'SELECT indexname, indexdef FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname = ANY($3::text[]) ORDER BY indexname',
+				[schema, name, [`${name}_negative`, `${name}_positive`]],
+			),
+		).resolves.toMatchObject({
+			rows: [
+				{
+					indexname: `${name}_negative`,
+					indexdef: expect.stringContaining('WHERE (score < 0)'),
+				},
+				{
+					indexname: `${name}_positive`,
+					indexdef: expect.stringContaining('WHERE (score > 0)'),
+				},
+			],
+		});
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
 	it('masks a caller-named external index while adopting', async () => {
 		const pool = await getTestPool();
 		const databaseId = await database();
@@ -2010,7 +2063,15 @@ describe('convergePg', () => {
 		await pool.query(`CREATE SEQUENCE "${schema}"."invoiceNumberSeq"`);
 
 		await expect(
-			convergePg(pool, desired, { schema, dbCasing: 'snake_case' }),
+			convergePhysicalPg(
+				pool,
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: desired,
+					schema,
+					dbCasing: 'snake_case',
+				}),
+			),
 		).rejects.toThrow(
 			`ALTER SEQUENCE "${schema}"."invoiceNumberSeq" RENAME TO "invoice_number_seq"`,
 		);
@@ -2226,7 +2287,86 @@ describe('convergePg', () => {
 		}
 	});
 
-	it('refuses fresh single-column FKs without declared foreign key indexes before creating either table', async () => {
+	it('converges a fresh single-column FK with its carried automatic index and rechecks cleanly', async () => {
+		const pool = await getTestPool();
+		const desired = model([
+			table('fk_auto_index_default_parent', false),
+			{
+				...table('fk_auto_index_default_child', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'parent_id', type: 'integer', nullable: false },
+				],
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: {
+							table: 'fk_auto_index_default_parent',
+							columns: ['id'],
+						},
+					},
+				],
+			},
+		]);
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema,
+		});
+		const autoIndexName = physical.model.getTable(
+			'fk_auto_index_default_child',
+		)!.foreignKeys[0]!.autoIndexName!;
+		await expect(convergePhysicalPg(pool, physical)).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.${autoIndexName}`,
+			]),
+		).resolves.toMatchObject({
+			rows: [{ relation: `${schema}.${autoIndexName}` }],
+		});
+		await expect(
+			convergePhysicalPg(pool, physical, { mode: 'check' }),
+		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('adopts a physical snapshot with catalog primary-key and CHECK names without renaming either', async () => {
+		const pool = await getTestPool();
+		const adoptionSchema = `converge_physical_names_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await createSchema(adoptionSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${adoptionSchema}"."widgets" (id integer NOT NULL, CONSTRAINT "widgets_catalog_pkey" PRIMARY KEY (id), CONSTRAINT "pk_widgets" CHECK (id > 0))`,
+			);
+			const physical = createPgPhysicalModel({
+				mode: 'physical',
+				schema: adoptionSchema,
+				model: model([
+					{
+						name: 'widgets',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						primaryKeyName: 'widgets_catalog_pkey',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'pk_widgets', expression: 'id > 0' }],
+						adopt: true,
+					},
+				]),
+			});
+			await expect(
+				convergePhysicalPg(pool, physical, { initialize: 'adopt-existing' }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePhysicalPg(pool, physical, { mode: 'check' }),
+			).resolves.toEqual({ kind: 'no-drift' });
+		} finally {
+			await dropSchema(adoptionSchema);
+		}
+	});
+
+	it('refuses fresh single-column FKs without declared foreign key indexes when automatic indexes are disabled', async () => {
 		const pool = await getTestPool();
 		const desired = model([
 			table('fk_auto_index_refusal_parent', false),
@@ -2248,7 +2388,9 @@ describe('convergePg', () => {
 			},
 		]);
 
-		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+		await expect(
+			convergePg(pool, desired, { schema, fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: fk_auto_index_refusal_child.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -2308,21 +2450,21 @@ describe('convergePg', () => {
 				},
 			]);
 
-		await expect(convergePg(pool, desired(), { schema })).rejects.toMatchObject(
-			{
-				refusal: 'unsupported-change',
-				detail: expect.stringContaining(
-					`converge refuses fresh foreign keys without a declared foreign key index: ${unindexedChild}.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
-				),
-			},
-		);
+		await expect(
+			convergePg(pool, desired(), { schema, fkAutoIndex: false }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining(
+				`converge refuses fresh foreign keys without a declared foreign key index: ${unindexedChild}.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
+			),
+		});
 		await expect(
 			convergePg(
 				pool,
 				desired([
 					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
 				]),
-				{ schema },
+				{ schema, fkAutoIndex: false },
 			),
 		).resolves.toMatchObject({ kind: 'applied' });
 		await expect(
@@ -2331,7 +2473,7 @@ describe('convergePg', () => {
 				desired([
 					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
 				]),
-				{ schema },
+				{ schema, fkAutoIndex: false },
 			),
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 	});
