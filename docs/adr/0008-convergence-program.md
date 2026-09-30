@@ -5,6 +5,10 @@
 Accepted (2026-09-29). It records the decision taken on #837. The check mode, `initialize` and
 application steps and ownership are shipped; "Deliveries" gives the state of each part.
 
+ADR 0009 supersedes the call shape given here: `convergePg(pool, physical, options)` takes a
+`PgPhysicalModel`, which carries the schema, the naming choice and `fkAutoIndex`; `options` no longer
+holds `schema` or `dbCasing`.
+
 ## Context
 
 ADR 0007 gives an application one call, `convergePg`, that brings its declared model to the database at

@@ -7,6 +7,10 @@ issuecomment-5858590586, issuecomment-5860057918) and shipped in #805, #808, #80
 #813, #814 and #816, and the `dbsp migrate` command #769 names. It supersedes three rules of ADR
 0006, named in "What ADR 0006 no longer says".
 
+ADR 0009 supersedes the call shape given here: `convergePg(pool, physical, options)` takes a
+`PgPhysicalModel`, which carries the schema, the naming choice and `fkAutoIndex`, instead of a
+`ModelIR` with per-call `schema` and `dbCasing`.
+
 ## Context
 
 An application that owns its schema must bring the database to its declared model at every start,
