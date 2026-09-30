@@ -613,11 +613,14 @@ export async function comparePgsqlDatabaseSchema(
 	}
 	// Introspection is already in PostgreSQL spelling.  Route it through the
 	// physical authority to claim its names without applying a naming plugin.
-	const dbModel = createPgPhysicalModel({
-		mode: 'physical',
-		model: rawDatabaseModel,
-		schema: options?.schema ?? 'public',
-	}).model;
+	const dbModel =
+		physicalDesired === undefined
+			? rawDatabaseModel
+			: createPgPhysicalModel({
+					mode: 'physical',
+					model: rawDatabaseModel,
+					schema: options?.schema ?? 'public',
+				}).model;
 	const compareCheckConstraints = supportsDDLCheckConstraints(options);
 	const useCanonicalizer = options?.canonicalizeExpressions ?? true;
 	const rawExpressionSurfaces = new Set<string>();

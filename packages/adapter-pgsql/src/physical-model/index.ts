@@ -14,11 +14,7 @@ import {
 	type SequenceIR,
 	type TableIR,
 } from '@dbsp/types';
-import {
-	getAutoFkIndexName,
-	getResolvedIndexName,
-	shouldEmitAutoFkIndex,
-} from '../ddl/fk-index-coverage.js';
+import { shouldEmitAutoFkIndex } from '../ddl/fk-index-coverage.js';
 import {
 	getNamingPluginForDbCasing,
 	identityNaming,
@@ -28,6 +24,7 @@ import {
 	physicalizeDeclaredSequences,
 	SequenceNameMapKeyMismatchError,
 } from '../sequence-name.js';
+import { validateIdentifier } from '../validate.js';
 
 export type PgPhysicalModelInput =
 	| {
@@ -122,6 +119,34 @@ export interface PgPhysicalModel {
 	readonly claims: readonly PgPhysicalNameClaim[];
 }
 
+/** The only PostgreSQL templates for dbsp-selected constraint names. */
+export function pgPrimaryKeyName(table: string): string {
+	return truncateIdentifier(`pk_${table}`);
+}
+export function pgForeignKeyName(
+	table: string,
+	columns: readonly string[],
+): string {
+	return truncateIdentifier(`fk_${table}_${columns.join('_')}`);
+}
+export function pgUniqueConstraintName(table: string, column: string): string {
+	return makeObjectName(table, column, 'key');
+}
+
+function pgIndexName(
+	table: string,
+	columns: readonly string[],
+	declaredName: string | undefined,
+): string {
+	return truncateIdentifier(
+		declaredName ?? `idx_${table}_${columns.join('_')}`,
+	);
+}
+
+function pgAutoFkIndexName(table: string, column: string): string {
+	return truncateIdentifier(`idx_${table}_${column}`);
+}
+
 /** Builds the sole PostgreSQL physical spelling of one model without rendering SQL. */
 export function createPgPhysicalModel(
 	input: PgPhysicalModelInput,
@@ -183,6 +208,7 @@ export function createPgPhysicalModel(
 			columnNames.set(column.name, name(column.name));
 		const columns = table.columns.map((column) => {
 			const physicalColumn = columnNames.get(column.name)!;
+			let uniqueConstraintName: string | undefined;
 			entries.push(
 				entry('column', tableSchema, table.name, column.name, physicalColumn),
 			);
@@ -193,13 +219,17 @@ export function createPgPhysicalModel(
 				physicalColumn,
 				`column ${table.name}.${column.name}`,
 			);
-			if (column.unique) {
-				const logicalUnique = `${table.name}_${column.name}_key`;
-				const physicalUnique = makeObjectName(
-					physicalTable,
-					physicalColumn,
-					'key',
-				);
+			if (
+				column.unique &&
+				(physical || column.uniqueConstraintName !== undefined)
+			) {
+				const logicalUnique = physical
+					? `${table.name}_${column.name}_key`
+					: column.uniqueConstraintName!;
+				const physicalUnique = physical
+					? pgUniqueConstraintName(physicalTable, physicalColumn)
+					: column.uniqueConstraintName!;
+				uniqueConstraintName = physicalUnique;
 				entries.push(
 					entry(
 						'constraint',
@@ -224,16 +254,17 @@ export function createPgPhysicalModel(
 					`column-UNIQUE backing index ${table.name}.${column.name}`,
 				);
 			}
-			if (column.autoIncrement || column.identity) {
+			if (physical && (column.autoIncrement || column.identity)) {
 				const logicalSequence = `${table.name}_${column.name}_seq`;
 				const physicalSequence = makeObjectName(
 					physicalTable,
 					physicalColumn,
 					'seq',
 				);
-				entries.push(
-					entry('sequence', tableSchema, logicalSequence, physicalSequence),
-				);
+				entries.push({
+					...entry('sequence', tableSchema, logicalSequence, physicalSequence),
+					sequenceProvenance: 'generated',
+				});
 				claims.add(
 					'pg_class',
 					tableSchema,
@@ -242,13 +273,18 @@ export function createPgPhysicalModel(
 					`generated sequence ${table.name}.${column.name}`,
 				);
 			}
-			return physicalizeColumn(column, physicalColumn);
+			return physicalizeColumn(column, physicalColumn, uniqueConstraintName);
 		});
 
 		const primaryKey = mapColumnList(table.primaryKey, columnNames, name);
-		if (primaryKey !== undefined) {
-			const logicalPk = `pk_${table.name}`;
-			const physicalPk = derived(`pk_${physicalTable}`);
+		if (
+			primaryKey !== undefined &&
+			(physical || table.primaryKeyName !== undefined)
+		) {
+			const logicalPk = physical ? `pk_${table.name}` : table.primaryKeyName!;
+			const physicalPk = physical
+				? pgPrimaryKeyName(physicalTable)
+				: table.primaryKeyName!;
 			entries.push(
 				entry('constraint', tableSchema, table.name, logicalPk, physicalPk),
 			);
@@ -272,21 +308,33 @@ export function createPgPhysicalModel(
 			const columnsForFk = foreignKey.columns.map(
 				(column) => columnNames.get(column) ?? name(column),
 			);
-			const logicalFk = `fk_${table.name}_${foreignKey.columns.join('_')}`;
-			const physicalFk = derived(
-				`fk_${physicalTable}_${columnsForFk.join('_')}`,
-			);
-			entries.push(
-				entry('constraint', tableSchema, table.name, logicalFk, physicalFk),
-			);
-			claims.add(
-				'constraint',
-				tableSchema,
-				physicalTable,
-				physicalFk,
-				`foreign key ${table.name}.${foreignKey.columns.join(',')}`,
-			);
-			return {
+			const logicalFk = physical
+				? `fk_${table.name}_${foreignKey.columns.join('_')}`
+				: foreignKey.name;
+			const physicalFk = physical
+				? pgForeignKeyName(physicalTable, columnsForFk)
+				: foreignKey.name;
+			if (physicalFk !== undefined) {
+				entries.push(
+					entry('constraint', tableSchema, table.name, logicalFk!, physicalFk),
+				);
+				claims.add(
+					'constraint',
+					tableSchema,
+					physicalTable,
+					physicalFk,
+					`foreign key ${table.name}.${foreignKey.columns.join(',')}`,
+				);
+			}
+			const autoIndexName =
+				physical &&
+				fkAutoIndex &&
+				columnsForFk.length === 1 &&
+				columnsForFk[0] !== undefined &&
+				shouldEmitAutoFkIndex(table, foreignKey.columns[0]!)
+					? pgAutoFkIndexName(physicalTable, columnsForFk[0])
+					: foreignKey.autoIndexName;
+			return Object.freeze({
 				...cloneRecord(foreignKey),
 				columns: Object.freeze(columnsForFk),
 				references: Object.freeze({
@@ -296,32 +344,34 @@ export function createPgPhysicalModel(
 						name(foreignKey.references.table),
 					columns: Object.freeze(foreignKey.references.columns.map(name)),
 				}),
-			};
+				...(physicalFk === undefined ? {} : { name: physicalFk }),
+				...(autoIndexName === undefined ? {} : { autoIndexName }),
+			});
 		});
 
 		const indexes = table.indexes.map((index) => {
 			const physicalColumns = index.columns.map(
 				(column) => columnNames.get(column) ?? name(column),
 			);
-			const logicalIndex = getResolvedIndexName(
-				table.name,
-				index.columns,
-				index.name,
-			);
+			const logicalIndex = physical
+				? (index.name ?? `idx_${table.name}_${index.columns.join('_')}`)
+				: index.name;
 			const named = index.name === undefined ? undefined : name(index.name);
-			const physicalIndex = derived(
-				getResolvedIndexName(physicalTable, physicalColumns, named),
-			);
-			entries.push(
-				entry('index', tableSchema, table.name, logicalIndex, physicalIndex),
-			);
-			claims.add(
-				'pg_class',
-				tableSchema,
-				undefined,
-				physicalIndex,
-				`declared index ${table.name}.${logicalIndex}`,
-			);
+			const physicalIndex = physical
+				? pgIndexName(physicalTable, physicalColumns, named)
+				: named;
+			if (physicalIndex !== undefined) {
+				entries.push(
+					entry('index', tableSchema, table.name, logicalIndex!, physicalIndex),
+				);
+				claims.add(
+					'pg_class',
+					tableSchema,
+					undefined,
+					physicalIndex,
+					`declared index ${table.name}.${logicalIndex}`,
+				);
+			}
 			return physicalizeIndex(
 				index,
 				physicalColumns,
@@ -331,38 +381,28 @@ export function createPgPhysicalModel(
 			);
 		});
 
-		if (fkAutoIndex) {
-			for (const foreignKey of table.foreignKeys) {
-				const logicalColumn = foreignKey.columns[0];
-				if (
-					foreignKey.columns.length === 1 &&
-					logicalColumn !== undefined &&
-					shouldEmitAutoFkIndex(table, logicalColumn)
-				) {
-					const physicalColumn =
-						columnNames.get(logicalColumn) ?? name(logicalColumn);
-					const logicalIndex = getAutoFkIndexName(table.name, logicalColumn);
-					const physicalIndex = derived(
-						getAutoFkIndexName(physicalTable, physicalColumn),
-					);
-					entries.push(
-						entry(
-							'index',
-							tableSchema,
-							table.name,
-							logicalIndex,
-							physicalIndex,
-						),
-					);
-					claims.add(
-						'pg_class',
-						tableSchema,
-						undefined,
-						physicalIndex,
-						`automatic foreign-key index ${table.name}.${logicalColumn}`,
-					);
-				}
-			}
+		for (const [index, foreignKey] of foreignKeys.entries()) {
+			if (foreignKey.autoIndexName === undefined) continue;
+			const logicalColumn = table.foreignKeys[index]?.columns[0];
+			if (logicalColumn === undefined) continue;
+			entries.push(
+				entry(
+					'index',
+					tableSchema,
+					table.name,
+					physical
+						? `idx_${table.name}_${logicalColumn}`
+						: foreignKey.autoIndexName,
+					foreignKey.autoIndexName,
+				),
+			);
+			claims.add(
+				'pg_class',
+				tableSchema,
+				undefined,
+				foreignKey.autoIndexName,
+				`automatic foreign-key index ${table.name}.${foreignKey.columns[0]}`,
+			);
 		}
 
 		const checkConstraints = table.checkConstraints?.map((check) => {
@@ -377,7 +417,7 @@ export function createPgPhysicalModel(
 				physicalCheck,
 				`CHECK ${table.name}.${check.name}`,
 			);
-			return { ...cloneRecord(check), name: physicalCheck };
+			return Object.freeze({ ...cloneRecord(check), name: physicalCheck });
 		});
 		const policies = table.policies?.map((policy) => {
 			const physicalPolicy = name(policy.name);
@@ -391,7 +431,7 @@ export function createPgPhysicalModel(
 				physicalPolicy,
 				`policy ${table.name}.${policy.name}`,
 			);
-			return { ...cloneRecord(policy), name: physicalPolicy };
+			return Object.freeze({ ...cloneRecord(policy), name: physicalPolicy });
 		});
 
 		const partition = table.partition
@@ -435,6 +475,14 @@ export function createPgPhysicalModel(
 			foreignKeys: Object.freeze(foreignKeys),
 			indexes: Object.freeze(indexes),
 			...(primaryKey === undefined ? {} : { primaryKey }),
+			...(primaryKey === undefined ||
+			(!physical && table.primaryKeyName === undefined)
+				? {}
+				: {
+						primaryKeyName: physical
+							? pgPrimaryKeyName(physicalTable)
+							: table.primaryKeyName,
+					}),
 			...(checkConstraints === undefined
 				? {}
 				: { checkConstraints: Object.freeze(checkConstraints) }),
@@ -450,7 +498,7 @@ export function createPgPhysicalModel(
 
 	const enums = new Map<string, EnumIR>();
 	for (const [key, value] of input.model.enums ?? []) {
-		const enumSchema = value.schema ?? input.schema;
+		const enumSchema = physical ? input.schema : (value.schema ?? input.schema);
 		const copied = Object.freeze(cloneRecord(value));
 		enums.set(key, copied);
 		entries.push(entry('enum', enumSchema, value.name, value.name));
@@ -490,9 +538,10 @@ export function createPgPhysicalModel(
 			...cloneRecord(physicalSequenceDefinition),
 		});
 		sequences.set(physicalSequence, copied);
-		entries.push(
-			entry('sequence', sequenceSchema, sequence.name, physicalSequence),
-		);
+		entries.push({
+			...entry('sequence', sequenceSchema, sequence.name, physicalSequence),
+			sequenceProvenance: 'declared',
+		});
 		claims.add(
 			'pg_class',
 			sequenceSchema,
@@ -502,6 +551,16 @@ export function createPgPhysicalModel(
 		);
 	}
 
+	// A logical model is dbsp's emitted vocabulary, so reject spellings its
+	// renderers cannot represent before returning it.  Physical input is an
+	// introspected PostgreSQL catalogue: quoted identifiers there are already
+	// accepted by PostgreSQL and must not be narrowed by dbsp's logical alias
+	// grammar.
+	if (physical)
+		for (const claim of claims.values) {
+			validateIdentifier(claim.schema, 'schema');
+			validateIdentifier(claim.physicalName, 'alias');
+		}
 	const copiedModel = createModel(
 		input.model,
 		tables,
@@ -528,6 +587,7 @@ const tableFields = {
 	logicalIdentity: 'preserve',
 	columns: 'map',
 	primaryKey: 'map',
+	primaryKeyName: 'map',
 	foreignKeys: 'map',
 	indexes: 'map',
 	checkConstraints: 'map',
@@ -569,6 +629,8 @@ const indexFields = {
 	with: 'preserve',
 } satisfies Record<keyof IndexIR, 'map' | 'preserve'>;
 const foreignKeyFields = {
+	name: 'map',
+	autoIndexName: 'map',
 	columns: 'map',
 	references: 'map',
 	onDelete: 'preserve',
@@ -620,14 +682,22 @@ function assertInput(input: PgPhysicalModelInput): void {
 		throw new PgPhysicalModelInputError('mode-options');
 }
 
-function physicalizeColumn(column: ColumnIR, name: string): ColumnIR {
-	return Object.freeze({ ...cloneRecord(column), name });
+function physicalizeColumn(
+	column: ColumnIR,
+	name: string,
+	uniqueConstraintName: string | undefined,
+): ColumnIR {
+	return Object.freeze({
+		...cloneRecord(column),
+		name,
+		...(uniqueConstraintName === undefined ? {} : { uniqueConstraintName }),
+	});
 }
 
 function physicalizeIndex(
 	index: IndexIR,
 	columns: readonly string[],
-	name: string,
+	name: string | undefined,
 	columnNames: ReadonlyMap<string, string>,
 	map: (value: string) => string,
 ): IndexIR {
@@ -643,7 +713,7 @@ function physicalizeIndex(
 		: undefined;
 	return Object.freeze({
 		...cloneRecord(index),
-		name,
+		...(name === undefined ? {} : { name }),
 		columns: Object.freeze([...columns]),
 		...(index.include === undefined
 			? {}
@@ -706,22 +776,30 @@ function createModel(
 			copiedRelation,
 		);
 	}
+	const readonlyTables = readOnlyMap(tables);
+	const readonlyRelations = readOnlyMap(relations);
 	const copied: ModelIR = {
-		tables: new Map(tables),
-		relations,
+		tables: readonlyTables,
+		relations: readonlyRelations,
 		...(model.extensions === undefined
 			? {}
 			: { extensions: Object.freeze([...model.extensions]) }),
-		...(model.enums === undefined ? {} : { enums }),
-		...(model.sequences === undefined ? {} : { sequences: new Map(sequences) }),
+		...(model.enums === undefined ? {} : { enums: readOnlyMap(enums) }),
+		...(model.sequences === undefined
+			? {}
+			: { sequences: readOnlyMap(sequences) }),
 		...(model.externalTables === undefined
 			? {}
-			: { externalTables: new Set([...model.externalTables].map(map)) }),
+			: {
+					externalTables: readOnlySet(
+						new Set([...model.externalTables].map(map)),
+					),
+				}),
 		getTable(name: string) {
-			return tables.get(name);
+			return readonlyTables.get(name);
 		},
 		getRelation(qualifiedName: string) {
-			return relations.get(qualifiedName);
+			return readonlyRelations.get(qualifiedName);
 		},
 		getRelationsFrom(source: string) {
 			return Object.freeze(
@@ -751,6 +829,39 @@ function createModel(
 		},
 	};
 	return Object.freeze(copied);
+}
+
+/** Map/Set objects cannot be frozen into immutability; expose mutation traps instead. */
+function readOnlyMap<K, V>(source: ReadonlyMap<K, V>): ReadonlyMap<K, V> {
+	const values = new Map(source);
+	return Object.freeze(
+		new Proxy(values, {
+			get(target, property) {
+				if (property === 'set' || property === 'delete' || property === 'clear')
+					return () => {
+						throw new TypeError('PgPhysicalModel collections are read-only');
+					};
+				const value = Reflect.get(target, property, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+		}),
+	) as ReadonlyMap<K, V>;
+}
+
+function readOnlySet<T>(source: ReadonlySet<T>): ReadonlySet<T> {
+	const values = new Set(source);
+	return Object.freeze(
+		new Proxy(values, {
+			get(target, property) {
+				if (property === 'add' || property === 'delete' || property === 'clear')
+					return () => {
+						throw new TypeError('PgPhysicalModel collections are read-only');
+					};
+				const value = Reflect.get(target, property, target);
+				return typeof value === 'function' ? value.bind(target) : value;
+			},
+		}),
+	) as ReadonlySet<T>;
 }
 
 function mapNameList(

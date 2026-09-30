@@ -20,6 +20,8 @@ export type LogicalNameAddress =
 export interface PhysicalNameEntry {
 	readonly logical: LogicalNameAddress;
 	readonly physical: string;
+	/** Sequence entries distinguish authored declarations from serial/identity predictions. */
+	readonly sequenceProvenance?: 'declared' | 'generated';
 }
 
 export class PhysicalNameInventoryDuplicateError extends Error {
@@ -53,6 +55,9 @@ export function createPhysicalNameInventory(
 		Object.freeze({
 			logical: Object.freeze({ ...entry.logical }) as LogicalNameAddress,
 			physical: entry.physical,
+			...(entry.sequenceProvenance === undefined
+				? {}
+				: { sequenceProvenance: entry.sequenceProvenance }),
 		}),
 	);
 	const physicalTables = new Map<string, string>();

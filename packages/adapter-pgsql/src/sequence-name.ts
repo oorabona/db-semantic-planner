@@ -85,7 +85,8 @@ export function declaredSequenceNamesFromInventory(
 ): ReadonlyMap<string, string> {
 	return new Map(
 		inventory.entries.flatMap((entry) =>
-			entry.logical.kind === 'sequence'
+			entry.logical.kind === 'sequence' &&
+			entry.sequenceProvenance !== 'generated'
 				? ([[entry.physical, entry.logical.name]] as const)
 				: [],
 		),

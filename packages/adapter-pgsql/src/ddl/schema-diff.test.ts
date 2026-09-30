@@ -3596,13 +3596,14 @@ describe('referenced key removals', () => {
 				foreignKeys: [childForeignKey],
 			}),
 		]);
-		const diff = compareSnakeCase(
-			makeModel([
-				parent(),
-				children(),
-				...Array.from(db.tables.values()).slice(2),
-			]),
-			db,
+		const diff = comparePhysicalSchemata(
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: makeModel([parent(), children()]),
+				schema: 'app',
+				dbCasing: 'snake_case',
+			}),
+			createPgPhysicalModel({ mode: 'physical', model: db, schema: 'app' }),
 		);
 		expect(referencedBy(changeOfKind(diff, 'drop_index'))).toEqual([
 			{

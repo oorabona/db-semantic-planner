@@ -26,6 +26,7 @@ import {
 } from '@dbsp/adapter-pgsql/internal';
 import {
 	acquireTransitionLease,
+	assertCanonicalizableJson,
 	bindDeclarationSet,
 	bindExecutionContract,
 	createComparator,
@@ -158,6 +159,21 @@ type CleanupFailure =
 	| { readonly kind: 'failed'; readonly error: unknown };
 
 const noCleanupFailure: CleanupFailure = { kind: 'not-failed' };
+
+/**
+ * Physical names do not exist on a logical source model yet, but a default is
+ * already a durable declaration value. Validate it before physical identifier
+ * admission so its precise authored path remains the user-facing refusal.
+ */
+function validateSourceDeclarationValues(model: ModelIR): void {
+	for (const [tableKey, table] of model.tables)
+		for (const [index, column] of table.columns.entries())
+			if (column.default !== undefined)
+				assertCanonicalizableJson(
+					column.default,
+					`schema.tables[${JSON.stringify(tableKey)}].columns[${index}].default`,
+				);
+}
 
 /**
  * A planning connection together with the action that returns its resource.
@@ -428,6 +444,7 @@ export async function runPlan(
 		throw new Error(`unsupported plan format ${format}; expected sql or json`);
 	}
 	const loaded = await deps.loadSchema(options.schemaFile);
+	validateSourceDeclarationValues(loaded.model);
 	const physical = createPgPhysicalModel({
 		mode: 'logical',
 		model: loaded.model,

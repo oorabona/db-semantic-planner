@@ -14,12 +14,19 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
+	ModelIR,
 	PolicyIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
 import { isEngineCanonicalCheck } from '../expression-provenance.js';
+import {
+	createPgPhysicalModel,
+	pgForeignKeyName,
+	pgPrimaryKeyName,
+	pgUniqueConstraintName,
+} from '../physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertString,
@@ -33,11 +40,7 @@ import {
 	assertPartitionStrategy,
 	generateCreateIndex,
 } from './ddl-generator.js';
-import {
-	getAutoFkIndexName,
-	getResolvedIndexName,
-	shouldEmitAutoFkIndex,
-} from './fk-index-coverage.js';
+import { shouldEmitAutoFkIndex } from './fk-index-coverage.js';
 import {
 	assertNonZeroSequenceIncrement,
 	normalizeOptionalBoolean,
@@ -48,6 +51,7 @@ import {
 	assertCreateIndexesSupported,
 	type IndexCapabilityContext,
 	type IndexRenderSpec,
+	renderCreateIndex,
 } from './index-render.js';
 import {
 	formatSqlDefault,
@@ -129,19 +133,73 @@ function chooseDoBlockDelimiter(body: string): string {
 
 // validateEnumLabel is imported from './phases/utils.js' (shared with enum-types.ts)
 
-/** PK constraint name convention. */
-function pkName(table: string): string {
-	return `pk_${table}`;
+function requiredName(
+	name: string | undefined,
+	subject: string,
+	fallback: () => string,
+): string {
+	void subject;
+	return name ?? fallback();
 }
 
-/** FK constraint name convention. */
-function fkName(table: string, columns: readonly string[]): string {
-	return `fk_${table}_${columns.join('_')}`;
+function physicalizeNameTable(table: TableIR): ModelIR {
+	const tables = new Map([[table.name, table]]);
+	return {
+		tables,
+		relations: new Map(),
+		getTable: (name) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
 }
 
-/** Column UNIQUE constraint name convention. */
-function uniqueName(table: string, column: string): string {
-	return `${table}_${column}_key`;
+function requiredPhysicalIndexName(
+	idx: IndexIR,
+	table: string,
+	schemaName: string | undefined,
+): string {
+	if (idx.name !== undefined) return idx.name;
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: schemaName ?? 'public',
+		model: physicalizeNameTable({
+			name: table,
+			columns: idx.columns.map((name) => ({
+				name,
+				type: 'string',
+				nullable: true,
+			})),
+			foreignKeys: [],
+			indexes: [idx],
+		}),
+	});
+	const name = physical.model.getTable(table)?.indexes[0]?.name;
+	if (name === undefined)
+		throw new Error(`physical index name is missing for ${table}`);
+	return name;
+}
+
+function requiredAutoFkIndexName(
+	table: TableIR,
+	foreignKeyIndex: number,
+	schemaName: string | undefined,
+): string {
+	const carried = table.foreignKeys[foreignKeyIndex]?.autoIndexName;
+	if (carried !== undefined) return carried;
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: schemaName ?? 'public',
+		model: physicalizeNameTable(table),
+	});
+	const name = physical.model.getTable(table.name)?.foreignKeys[foreignKeyIndex]
+		?.autoIndexName;
+	if (name === undefined)
+		throw new Error(
+			`physical automatic foreign-key index name is missing from the model for table ${table.name}`,
+		);
+	return name;
 }
 
 /** Build a CREATE POLICY SQL statement from a PolicyIR. */
@@ -440,7 +498,7 @@ function buildCreateIndexSpec(
 	const idx = change.meta?.index as IndexIR | undefined;
 	if (!idx) return undefined;
 	return {
-		name: getResolvedIndexName(change.table, idx.columns, idx.name),
+		name: requiredPhysicalIndexName(idx, change.table, schemaName),
 		table: change.table,
 		schema: schemaName,
 		unique: idx.unique === true,
@@ -502,7 +560,7 @@ export function collectFkAutoIndexSpecs(
 		if (change.kind !== 'create_table') continue;
 		const table = change.meta?.table as TableIR | undefined;
 		if (!table) continue;
-		for (const fk of table.foreignKeys) {
+		for (const [foreignKeyIndex, fk] of table.foreignKeys.entries()) {
 			const fkCol = fk.columns[0];
 			if (
 				fk.columns.length === 1 &&
@@ -514,7 +572,7 @@ export function collectFkAutoIndexSpecs(
 						table,
 						fkCol,
 						schemaName,
-						getAutoFkIndexName(table.name, fkCol),
+						requiredAutoFkIndexName(table, foreignKeyIndex, schemaName),
 					),
 				);
 			}
@@ -780,8 +838,12 @@ function addColumnUniqueSQL(
 	schemaName?: string,
 	constraintName?: string,
 ): string {
-	const name = constraintName ?? uniqueName(table, column);
-	if (constraintName !== undefined) validateIdentifier(constraintName, 'alias');
+	const name = requiredName(
+		constraintName,
+		`UNIQUE constraint for ${table}.${column}`,
+		() => pgUniqueConstraintName(table, column),
+	);
+	validateIdentifier(name, 'alias');
 	const quotedConstraintName = quoteIdent(name, 'alias');
 	return `ALTER TABLE ${qualifyTable(table, schemaName)} ADD CONSTRAINT ${quotedConstraintName} UNIQUE (${quoteIdent(column, 'alias')});`;
 }
@@ -792,8 +854,12 @@ function dropColumnUniqueSQL(
 	schemaName?: string,
 	constraintName?: string,
 ): string {
-	const name = constraintName ?? uniqueName(table, column);
-	if (constraintName !== undefined) validateIdentifier(constraintName, 'alias');
+	const name = requiredName(
+		constraintName,
+		`UNIQUE constraint for ${table}.${column}`,
+		() => pgUniqueConstraintName(table, column),
+	);
+	validateIdentifier(name, 'alias');
 	const quotedConstraintName = quoteIdent(name, 'alias');
 	return `ALTER TABLE ${qualifyTable(table, schemaName)} DROP CONSTRAINT IF EXISTS ${quotedConstraintName};`;
 }
@@ -823,7 +889,12 @@ function upAlterColumnUnique(
 function upAddPrimaryKey(change: SchemaChange, schemaName?: string): string {
 	const columns = change.meta?.columns as string[];
 	const pkCols = columns.map((n) => quoteIdent(n, 'alias')).join(', ');
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(pkName(change.table), 'alias')} PRIMARY KEY (${pkCols});`;
+	const name = requiredName(
+		change.meta?.name as string | undefined,
+		`primary key for ${change.table}`,
+		() => pgPrimaryKeyName(change.table),
+	);
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(name, 'alias')} PRIMARY KEY (${pkCols});`;
 }
 
 function upDropForeignKey(
@@ -832,7 +903,12 @@ function upDropForeignKey(
 ): string | undefined {
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
+	const constraintName = quoteIdent(
+		requiredName(fk.name, `foreign key for ${change.table}`, () =>
+			pgForeignKeyName(change.table, fk.columns),
+		),
+		'alias',
+	);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 }
 
@@ -843,7 +919,12 @@ function upAlterForeignKey(
 	// Drop + re-add with new onDelete
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
+	const constraintName = quoteIdent(
+		requiredName(fk.name, `foreign key for ${change.table}`, () =>
+			pgForeignKeyName(change.table, fk.columns),
+		),
+		'alias',
+	);
 	const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 	const add = generateAddFKSQL(change.table, fk, schemaName);
 	return `${drop}\n${add}`;
@@ -856,15 +937,7 @@ function upCreateIndex(
 ): string | undefined {
 	const idx = change.meta?.index as IndexIR | undefined;
 	const spec = buildCreateIndexSpec(change, schemaName);
-	return idx && spec
-		? generateCreateIndex(
-				change.table,
-				idx,
-				schemaName,
-				context,
-				spec.ifNotExists,
-			)
-		: undefined;
+	return idx && spec ? `${renderCreateIndex(spec, context)};` : undefined;
 }
 
 function upDropIndex(
@@ -874,7 +947,7 @@ function upDropIndex(
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
 	const indexName = quoteIdent(
-		getResolvedIndexName(change.table, idx.columns, idx.name),
+		requiredPhysicalIndexName(idx, change.table, schemaName),
 		'alias',
 	);
 	const schemaPrefix = schemaName ? `${quoteIdent(schemaName, 'alias')}.` : '';
@@ -913,7 +986,12 @@ function upValidateConstraint(
 	const fk = change.meta?.fk as ForeignKeyIR | undefined;
 	const check = change.meta?.check as CheckConstraintIR | undefined;
 	const constraintName = fk
-		? quoteIdent(fkName(change.table, fk.columns), 'alias')
+		? quoteIdent(
+				requiredName(fk.name, `foreign key for ${change.table}`, () =>
+					pgForeignKeyName(change.table, fk.columns),
+				),
+				'alias',
+			)
 		: check
 			? quoteIdent(check.name, 'alias')
 			: undefined;
@@ -1077,7 +1155,14 @@ function changeToUpSQL(
 		case 'add_primary_key':
 			return upAddPrimaryKey(change, schemaName);
 		case 'drop_primary_key':
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(
+				requiredName(
+					change.meta?.name as string | undefined,
+					`primary key for ${change.table}`,
+					() => pgPrimaryKeyName(change.table),
+				),
+				'alias',
+			)} CASCADE;`;
 		case 'add_foreign_key': {
 			const fk = change.meta?.fk as ForeignKeyIR;
 			return fk ? generateAddFKSQL(change.table, fk, schemaName) : undefined;
@@ -1314,7 +1399,14 @@ function changeToDownSQL(
 
 		case 'add_primary_key': {
 			return {
-				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`,
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(
+					requiredName(
+						change.meta?.name as string | undefined,
+						`primary key for ${change.table}`,
+						() => pgPrimaryKeyName(change.table),
+					),
+					'alias',
+				)} CASCADE;`,
 				destructive: true,
 			};
 		}
@@ -1324,7 +1416,14 @@ function changeToDownSQL(
 			if (Array.isArray(columns) && columns.length > 0) {
 				const pkCols = columns.map((n) => quoteIdent(n, 'alias')).join(', ');
 				return {
-					sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(pkName(change.table), 'alias')} PRIMARY KEY (${pkCols});`,
+					sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(
+						requiredName(
+							change.meta?.name as string | undefined,
+							`primary key for ${change.table}`,
+							() => pgPrimaryKeyName(change.table),
+						),
+						'alias',
+					)} PRIMARY KEY (${pkCols});`,
 					// Allowlisted: re-adds the dropped primary-key constraint from metadata.
 					destructive: false,
 				};
@@ -1339,7 +1438,9 @@ function changeToDownSQL(
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
 			if (!fk) return { sql: undefined, destructive: true };
 			const constraintName = quoteIdent(
-				fkName(change.table, fk.columns),
+				requiredName(fk.name, `foreign key for ${change.table}`, () =>
+					pgForeignKeyName(change.table, fk.columns),
+				),
 				'alias',
 			);
 			return {
@@ -1373,7 +1474,9 @@ function changeToDownSQL(
 				};
 			}
 			const constraintName = quoteIdent(
-				fkName(change.table, fk.columns),
+				requiredName(fk.name, `foreign key for ${change.table}`, () =>
+					pgForeignKeyName(change.table, fk.columns),
+				),
 				'alias',
 			);
 			const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
@@ -1386,7 +1489,7 @@ function changeToDownSQL(
 			const idx = change.meta?.index as IndexIR | undefined;
 			if (!idx) return { sql: undefined, destructive: true };
 			const indexName = quoteIdent(
-				getResolvedIndexName(change.table, idx.columns, idx.name),
+				requiredPhysicalIndexName(idx, change.table, schemaName),
 				'alias',
 			);
 			const schemaPrefix = schemaName
@@ -1864,7 +1967,14 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 			.map((n) => quoteIdent(n, 'alias'))
 			.join(', ');
 		elements.push(
-			`CONSTRAINT ${quoteIdent(pkName(table.name), 'alias')} PRIMARY KEY (${pkCols})`,
+			`CONSTRAINT ${quoteIdent(
+				requiredName(
+					table.primaryKeyName,
+					`primary key for ${table.name}`,
+					() => pgPrimaryKeyName(table.name),
+				),
+				'alias',
+			)} PRIMARY KEY (${pkCols})`,
 		);
 	}
 
@@ -1887,7 +1997,12 @@ function generateAddFKSQL(
 	schemaName?: string,
 ): string {
 	const qualTable = qualifyTable(tableName, schemaName);
-	const constraintName = quoteIdent(fkName(tableName, fk.columns), 'alias');
+	const constraintName = quoteIdent(
+		requiredName(fk.name, `foreign key for ${tableName}`, () =>
+			pgForeignKeyName(tableName, fk.columns),
+		),
+		'alias',
+	);
 	const fkCols = fk.columns.map((n) => quoteIdent(n, 'alias')).join(', ');
 	// Referenced table resolves to its declared schema, or the migration schema when absent.
 	const refTable = qualifyTable(

@@ -33,16 +33,14 @@ import {
 	stripDbTypeSchema,
 } from '../db-type.js';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import {
 	LegacySequenceNameError,
 	physicalizeDeclaredSequences,
 } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
-import {
-	getResolvedIndexName,
-	hasDeclaredSingleColumnFkIndex,
-} from './fk-index-coverage.js';
+import { hasDeclaredSingleColumnFkIndex } from './fk-index-coverage.js';
 import {
 	normalizeOptionalBoolean,
 	normalizeSequenceInteger,
@@ -52,8 +50,6 @@ import {
 	isQualifyingUniqueIndex,
 	sameColumnSet,
 } from './key-column-set.js';
-
-export { getAutoFkIndexName } from './fk-index-coverage.js';
 
 // ============================================================================
 // Types
@@ -948,8 +944,14 @@ function compareColumnDetails(
 			details: `Change unique of "${schema.name}" from ${dbUnique} to ${schemaUnique}`,
 			meta: {
 				unique: schemaUnique,
-				...(db.uniqueConstraintName !== undefined
-					? { constraintName: db.uniqueConstraintName }
+				...((schemaUnique
+					? schema.uniqueConstraintName
+					: db.uniqueConstraintName) !== undefined
+					? {
+							constraintName: schemaUnique
+								? schema.uniqueConstraintName
+								: db.uniqueConstraintName,
+						}
 					: {}),
 			},
 		});
@@ -1069,7 +1071,7 @@ function comparePrimaryKeys(
 			table: schema.name,
 			destructive: false,
 			details: `Add primary key (${schemaPK.join(', ')})`,
-			meta: { columns: schemaPK },
+			meta: { columns: schemaPK, name: schema.primaryKeyName },
 		});
 		return;
 	}
@@ -1081,7 +1083,7 @@ function comparePrimaryKeys(
 			table: schema.name,
 			destructive: true,
 			details: `Drop primary key (${dbPK.join(', ')})`,
-			meta: { columns: dbPK },
+			meta: { columns: dbPK, name: db.primaryKeyName },
 		});
 		return;
 	}
@@ -1093,14 +1095,14 @@ function comparePrimaryKeys(
 		table: schema.name,
 		destructive: true,
 		details: `Drop primary key (${dbPK.join(', ')})`,
-		meta: { columns: dbPK },
+		meta: { columns: dbPK, name: db.primaryKeyName },
 	});
 	changes.push({
 		kind: 'add_primary_key',
 		table: schema.name,
 		destructive: true,
 		details: `Add primary key (${schemaPK.join(', ')})`,
-		meta: { columns: schemaPK },
+		meta: { columns: schemaPK, name: schema.primaryKeyName },
 	});
 }
 
@@ -1410,7 +1412,41 @@ function isAutoUniqueIndex(
 }
 
 function indexReplacementKey(tableName: string, idx: IndexIR): string {
-	return getResolvedIndexName(tableName, idx.columns, idx.name);
+	if (idx.name !== undefined) return idx.name;
+	const tables = new Map([
+		[
+			tableName,
+			{
+				name: tableName,
+				columns: idx.columns.map((name) => ({
+					name,
+					type: 'string' as const,
+					nullable: true,
+				})),
+				foreignKeys: [],
+				indexes: [idx],
+			},
+		],
+	]);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: 'public',
+		model: {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		},
+	});
+	const name = physical.model.getTable(tableName)?.indexes[0]?.name;
+	if (name === undefined)
+		throw new Error(
+			`physical index name is missing from the model for table ${tableName}`,
+		);
+	return name;
 }
 
 function formatIndexTargets(idx: IndexIR): string {

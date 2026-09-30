@@ -167,6 +167,20 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 		expect((await changes(desired)).changes).toEqual([]);
 	});
 
+	it('compares a live custom primary key and a CHECK named like dbsp primary key without rejecting the catalogue', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE "${SCHEMA}"."custom_constraint_names" ("id" integer CONSTRAINT "custom_constraint_primary" PRIMARY KEY, CONSTRAINT "pk_custom_constraint_names" CHECK ("id" > 0))`,
+		);
+		await expect(changes(model([]), 'preserve')).resolves.toBeDefined();
+	});
+
+	it('compares an undeclared live Unicode table without rejecting the catalogue', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE TABLE "${SCHEMA}"."café" ("id" integer)`);
+		await expect(changes(model([]), 'preserve')).resolves.toBeDefined();
+	});
+
 	it('does not create or remove automatic indexes for FK coverage and legacy indexes', async () => {
 		const prefix = 'fk_coverage_diff';
 		const desired = fkCoverageModel(prefix);
@@ -350,6 +364,17 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 			]),
 		).resolves.toMatchObject({
 			rows: [{ present: true }],
+		});
+	});
+
+	it('does not treat a generated serial sequence as an authored legacy sequence under snake_case', async () => {
+		const pool = await getTestPool();
+		await pool.query(`CREATE SEQUENCE "${SCHEMA}"."invoiceItems_id_seq"`);
+		const desired = model([
+			table('invoiceItems', [column('id', 'integer', { autoIncrement: true })]),
+		]);
+		await expect(changes(desired, 'snake_case')).resolves.toMatchObject({
+			changes: expect.any(Array),
 		});
 	});
 

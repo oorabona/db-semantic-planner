@@ -145,12 +145,18 @@ describe('handleSchemaDiff', () => {
 			'test-conn',
 			expect.objectContaining({
 				schema: 'tenant_1',
-				model: expect.objectContaining({ tables: minimalModel.tables }),
+				model: expect.objectContaining({
+					tables: expect.objectContaining({ get: expect.any(Function) }),
+				}),
 			}),
 			expect.objectContaining({
 				onExpressionCanonicalizationWarning: expect.any(Function),
 			}),
 		);
+		const desired = compare.mock.calls[0]?.[1];
+		expect([...desired!.model.tables.entries()]).toEqual([
+			['users', minimalModel.tables.get('users')],
+		]);
 		const options = compare.mock.calls[0]?.[2];
 		expect(options).not.toHaveProperty('requireExpressionCanonicalization');
 		expect(options).not.toHaveProperty('previouslyAppliedDiff');

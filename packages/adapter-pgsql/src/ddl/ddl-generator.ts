@@ -17,14 +17,14 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	createPgPhysicalModel,
+	pgForeignKeyName,
+	pgPrimaryKeyName,
+} from '../physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
-import {
-	getAutoFkIndexName,
-	getResolvedIndexName,
-	shouldEmitAutoFkIndex,
-} from './fk-index-coverage.js';
+import { shouldEmitAutoFkIndex } from './fk-index-coverage.js';
 import { normalizeOptionalBoolean } from './generated-source-normalizers.js';
 import {
 	assertCreateIndexesSupported,
@@ -132,12 +132,34 @@ export function generateDDL(
 	options: GenerateDDLOptions = {},
 ): string[] {
 	const { naming, ...renderOptions } = options;
-	if (naming !== undefined) {
+	for (const table of schema.tables.values()) {
+		validateIdentifier(table.name, 'alias');
+		for (const column of table.columns)
+			validateIdentifier(column.name, 'alias');
+	}
+	const needsPhysicalNames = [...schema.tables.values()].some((table) =>
+		table.primaryKey !== undefined && table.primaryKeyName === undefined
+			? true
+			: table.columns.some(
+					(column) =>
+						column.unique === true && column.uniqueConstraintName === undefined,
+				) ||
+				table.foreignKeys.some(
+					(fk) =>
+						fk.name === undefined ||
+						(fk.columns.length === 1 &&
+							shouldEmitAutoFkIndex(table, fk.columns[0]!) &&
+							renderOptions.fkAutoIndex !== false &&
+							fk.autoIndexName === undefined),
+				) ||
+				table.indexes.some((index) => index.name === undefined),
+	);
+	if (naming !== undefined || needsPhysicalNames) {
 		const physical = createPgPhysicalModel({
 			mode: 'logical',
 			model: schema,
 			schema: renderOptions.schemaName ?? 'public',
-			naming,
+			...(naming === undefined ? {} : { naming }),
 			...(renderOptions.fkAutoIndex === undefined
 				? {}
 				: { fkAutoIndex: renderOptions.fkAutoIndex }),
@@ -197,7 +219,7 @@ function buildIndexRenderSpec(
 	schemaName: string | undefined,
 ): IndexRenderSpec {
 	return {
-		name: getResolvedIndexName(tableName, idx.columns, idx.name),
+		name: requiredPhysicalIndexName(idx, tableName),
 		table: tableName,
 		schema: schemaName,
 		unique: idx.unique === true,
@@ -217,6 +239,45 @@ function buildIndexRenderSpec(
 	};
 }
 
+/** All renderer-visible index names must already come from PgPhysicalModel. */
+function requiredPhysicalIndexName(idx: IndexIR, tableName: string): string {
+	if (idx.name !== undefined) return idx.name;
+	const tables = new Map([
+		[
+			tableName,
+			{
+				name: tableName,
+				columns: idx.columns.map((name) => ({
+					name,
+					type: 'string' as const,
+					nullable: true,
+				})),
+				foreignKeys: [],
+				indexes: [idx],
+			},
+		],
+	]);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: 'public',
+		model: {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		},
+	});
+	const name = physical.model.getTable(tableName)?.indexes[0]?.name;
+	if (name === undefined)
+		throw new Error(
+			`physical index name is missing from the model for table ${tableName}`,
+		);
+	return name;
+}
+
 function collectGeneratedCreateIndexSpecs(
 	tables: readonly TableIR[],
 	schemaName: string | undefined,
@@ -224,7 +285,6 @@ function collectGeneratedCreateIndexSpecs(
 ): IndexRenderSpec[] {
 	const specs: IndexRenderSpec[] = [];
 	for (const table of tables) {
-		const dbTableName = table.name;
 		for (const idx of table.indexes) {
 			specs.push(buildIndexRenderSpec(table.name, idx, schemaName));
 		}
@@ -236,12 +296,16 @@ function collectGeneratedCreateIndexSpecs(
 				fkCol &&
 				shouldEmitAutoFkIndex(table, fkCol)
 			) {
-				const dbFkCol = fkCol;
+				const autoIndexName = fk.autoIndexName;
+				if (autoIndexName === undefined)
+					throw new Error(
+						'physical automatic foreign-key index name is missing from the model',
+					);
 				specs.push(
 					buildIndexRenderSpec(
 						table.name,
 						{
-							name: getAutoFkIndexName(dbTableName, dbFkCol),
+							name: autoIndexName,
 							columns: [fkCol],
 							unique: false,
 						},
@@ -344,7 +408,9 @@ export function generateCreateTable(
 			pkColumns = [rawPk as string];
 		}
 		const pkCols = pkColumns.map((col) => quoteIdentifier(col)).join(', ');
-		const pkName = quoteIdentifier(`pk_${table.name}`);
+		const pkName = quoteIdentifier(
+			table.primaryKeyName ?? pgPrimaryKeyName(table.name),
+		);
 		elements.push(`CONSTRAINT ${pkName} PRIMARY KEY (${pkCols})`);
 	}
 
@@ -434,7 +500,7 @@ export function generateAlterTableAddFK(
 ): string {
 	const qualifiedTable = qualifyTable(tableName, schemaName);
 	const constraintName = quoteIdentifier(
-		`fk_${tableName}_${fk.columns.join('_')}`,
+		fk.name ?? pgForeignKeyName(tableName, fk.columns),
 	);
 
 	// Local columns

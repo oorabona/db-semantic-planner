@@ -172,6 +172,64 @@ describe('createPgPhysicalModel', () => {
 		);
 	});
 
+	it('carries 63-byte primary-key, foreign-key, and automatic-index names to every consumer', () => {
+		const tableName = 'a'.repeat(61);
+		const logical = model([
+			{
+				name: 'owners',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+			{
+				name: tableName,
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'ownerId', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['ownerId'],
+						references: { table: 'owners', columns: ['id'] },
+					},
+				],
+				indexes: [],
+			},
+		]);
+		const desired = createPgPhysicalModel({
+			mode: 'logical',
+			model: logical,
+			schema: 'app',
+		});
+		const database = createPgPhysicalModel({
+			mode: 'physical',
+			model: model([]),
+			schema: 'app',
+		});
+		const pk = `pk_${'a'.repeat(60)}`;
+		const fk = `fk_${'a'.repeat(60)}`;
+		const index = `idx_${'a'.repeat(59)}`;
+		expect(Buffer.byteLength(pk, 'utf8')).toBe(63);
+		expect(Buffer.byteLength(fk, 'utf8')).toBe(63);
+		expect(Buffer.byteLength(index, 'utf8')).toBe(63);
+		for (const name of [pk, fk, index]) {
+			expect(generateDDL(desired).join('\n')).toContain(`"${name}"`);
+			expect(
+				generateMigrationSQL(compareSchemata(desired, database)).join('\n'),
+			).toContain(`"${name}"`);
+		}
+		const declarations = declarationSetFromModel(desired.model, {
+			engine: 'postgresql',
+			database: 'app',
+			schema: 'app',
+		});
+		expect(declarations.declarations.map((item) => item.address.name)).toEqual(
+			expect.arrayContaining([pk, fk, index]),
+		);
+	});
+
 	it('refuses physical comparison across schemas', () => {
 		const source = model([]);
 		const desired = createPgPhysicalModel({
@@ -187,6 +245,84 @@ describe('createPgPhysicalModel', () => {
 		expect(() => compareSchemata(desired, database)).toThrow(
 			'different schemas',
 		);
+	});
+
+	it('uses the target schema for logical enum admission despite an embedded enum schema', () => {
+		try {
+			createPgPhysicalModel({
+				mode: 'logical',
+				schema: 'app',
+				model: {
+					...model([
+						{ name: 'status', columns: [], foreignKeys: [], indexes: [] },
+					]),
+					enums: new Map([
+						[
+							'status',
+							{ name: 'status', schema: 'legacy', values: ['active'] },
+						],
+					]),
+				},
+			});
+			expect.unreachable();
+		} catch (error) {
+			expect(error).toBeInstanceOf(PgPhysicalNameCollisionError);
+			expect((error as PgPhysicalNameCollisionError).namespace).toBe('pg_type');
+		}
+	});
+
+	it('accepts catalog physical names without predicting primary-key or CHECK names', () => {
+		expect(() =>
+			createPgPhysicalModel({
+				mode: 'physical',
+				schema: 'app',
+				model: model([
+					{
+						name: 'widgets',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						primaryKeyName: 'widgets_primary_key',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'pk_widgets', expression: 'id > 0' }],
+					},
+				]),
+			}),
+		).not.toThrow();
+	});
+
+	it('exposes an immutable snapshot through its model collections', () => {
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'app',
+			model: {
+				...model([
+					{
+						name: 'widgets',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{ name: 'widgets_positive', expression: 'id > 0' },
+						],
+					},
+				]),
+				externalTables: new Set(['outside']),
+			},
+		});
+		const table = physical.model.getTable('widgets')!;
+		expect(() =>
+			(physical.model.tables as Map<string, TableIR>).set('other', table),
+		).toThrow('collections are read-only');
+		expect(() =>
+			(physical.model.externalTables as Set<string>).add('other'),
+		).toThrow('collections are read-only');
+		expect(physical.model.tables.get('widgets')).toBe(table);
+		expect(physical.model.getTable('widgets')).toBe(table);
+		expect(Object.isFrozen(table)).toBe(true);
+		expect(Object.isFrozen(table.columns[0]!)).toBe(true);
+		expect(Object.isFrozen(table.checkConstraints?.[0]!)).toBe(true);
 	});
 
 	it('physicalizes identifiers once while retaining metadata and expression text', () => {
@@ -459,22 +595,32 @@ describe('createPgPhysicalModel', () => {
 		).toThrow(PgPhysicalNameCollisionError);
 	});
 
-	it('truncates a multibyte identifier without splitting it', () => {
-		const longName = `${'é'.repeat(32)}z`;
-		const physical = createPgPhysicalModel({
-			mode: 'logical',
-			model: model([
-				{ name: longName, columns: [], foreignKeys: [], indexes: [] },
-			]),
-			schema: 'app',
-		});
-		const physicalName = physical.inventory.get({
-			kind: 'table',
-			schema: 'app',
-			name: longName,
-		});
-		expect(Buffer.byteLength(physicalName, 'utf8')).toBe(62);
-		expect(physicalName).toBe('é'.repeat(31));
+	it('refuses a renderer-invalid identifier containing é after physicalization', () => {
+		const longName = 'café';
+		expect(() =>
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: model([
+					{ name: longName, columns: [], foreignKeys: [], indexes: [] },
+				]),
+				schema: 'app',
+			}),
+		).toThrow('Invalid alias identifier');
+	});
+
+	it('keeps PostgreSQL-accepted quoted identifiers in physical mode', () => {
+		const source = model([
+			{ name: 'café', columns: [], foreignKeys: [], indexes: [] },
+			{
+				name: 'audit\nchildren',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			},
+		]);
+		expect(() =>
+			createPgPhysicalModel({ mode: 'physical', model: source, schema: 'app' }),
+		).not.toThrow();
 	});
 
 	it.each([

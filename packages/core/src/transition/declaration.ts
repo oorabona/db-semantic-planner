@@ -147,6 +147,12 @@ function tableAddress(
 	return address(context, 'table', name);
 }
 
+function physicalName(name: string | undefined, subject: string): string {
+	if (name === undefined)
+		throw new Error(`physical ${subject} name is missing from the model`);
+	return name;
+}
+
 /**
  * Slice only the declarable part of ModelIR. Deliberately absent are
  * logicalIdentity, pseudoColumns, comment, partition, rlsEnabled and policies;
@@ -164,6 +170,9 @@ export function declarationSetFromModel(
 		a < b ? -1 : a > b ? 1 : 0,
 	)) {
 		const tablePath = `schema.tables[${JSON.stringify(tableKey)}]`;
+		const namedTable = table as typeof table & {
+			readonly primaryKeyName?: string;
+		};
 		const tableName = table.name;
 		const parent = tableAddress(context, tableName);
 		declarations.push(
@@ -218,9 +227,7 @@ export function declarationSetFromModel(
 							),
 						}),
 			};
-			const name =
-				physicalItem.name ??
-				`idx_${tableName}_${physicalItem.columns.join('_')}`;
+			const name = physicalName(physicalItem.name, 'index');
 			declarations.push(
 				declaration(
 					context,
@@ -238,7 +245,7 @@ export function declarationSetFromModel(
 				declaration(
 					context,
 					'constraint',
-					`pk_${tableName}`,
+					physicalName(namedTable.primaryKeyName, 'primary-key constraint'),
 					{ kind: 'primary-key', columns },
 					`${tablePath}.primaryKey`,
 					parent,
@@ -254,17 +261,34 @@ export function declarationSetFromModel(
 					table: item.references.table,
 					columns: item.references.columns,
 				},
-			};
+			} as typeof item & { readonly name?: string };
 			declarations.push(
 				declaration(
 					context,
 					'constraint',
-					`fk_${tableName}_${physicalItem.columns.join('_')}`,
+					physicalName(physicalItem.name, 'foreign-key constraint'),
 					{ kind: 'foreign-key', ...physicalItem },
 					`${tablePath}.foreignKeys[${index}]`,
 					parent,
 				),
 			);
+			if (item.autoIndexName !== undefined) {
+				declarations.push(
+					declaration(
+						context,
+						'index',
+						item.autoIndexName,
+						{
+							name: item.autoIndexName,
+							columns: item.columns,
+							unique: false,
+							automaticForeignKeyIndex: true,
+						},
+						`${tablePath}.foreignKeys[${index}].autoIndexName`,
+						parent,
+					),
+				);
+			}
 		}
 		for (const [index, item] of (table.checkConstraints ?? []).entries()) {
 			const physicalItem = { ...item, name: item.name };

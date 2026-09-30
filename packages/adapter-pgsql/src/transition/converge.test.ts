@@ -3286,7 +3286,9 @@ describe('convergePg refusal boundary', () => {
 			changes: [createTableWithForeignKey('posts', ['author_id'])],
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+		await expect(
+			convergePg(poolFor(), emptyModel(), { fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -3396,7 +3398,9 @@ describe('convergePg refusal boundary', () => {
 			],
 		});
 
-		await expect(convergePg(poolFor(), emptyModel())).rejects.toMatchObject({
+		await expect(
+			convergePg(poolFor(), emptyModel(), { fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: posts.author_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -3415,7 +3419,7 @@ describe('convergePg refusal boundary', () => {
 		});
 		expect(mocks.generate).toHaveBeenCalledWith(
 			expect.anything(),
-			expect.objectContaining({ fkAutoIndex: false }),
+			expect.objectContaining({ fkAutoIndex: true }),
 		);
 	});
 
@@ -3451,7 +3455,7 @@ describe('convergePg refusal boundary', () => {
 		).toBe(false);
 		expect(mocks.generate).toHaveBeenCalledWith(
 			expect.anything(),
-			expect.objectContaining({ fkAutoIndex: false }),
+			expect.objectContaining({ fkAutoIndex: true }),
 		);
 	});
 

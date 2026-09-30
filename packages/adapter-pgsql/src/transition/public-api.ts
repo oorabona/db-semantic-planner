@@ -2,6 +2,10 @@ import type { Pool } from 'pg';
 import type { PgPhysicalModel } from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import {
+	PgApplicationStepError,
+	validatePgConvergeApplicationSteps,
+} from './application-step.js';
+import {
 	convergePg as convergePgForModel,
 	type ConvergePgCheckOptions as InternalConvergePgCheckOptions,
 	type ConvergePgOptions as InternalConvergePgOptions,
@@ -13,10 +17,64 @@ import {
 export interface ConvergePgBaseOptions
 	extends Omit<
 		InternalConvergePgOptions,
-		'schema' | 'dbCasing' | 'mode' | 'declaredSequenceNames'
+		'schema' | 'dbCasing' | 'mode' | 'declaredSequenceNames' | 'fkAutoIndex'
 	> {}
 export interface ConvergePgOptions extends ConvergePgBaseOptions {
 	readonly mode?: 'apply';
+}
+
+function invalidOptions(detail: string): PgConvergeRefusalError {
+	return new PgConvergeRefusalError('invalid-options', [], detail);
+}
+
+function validateLogicalOwnership(
+	physical: PgPhysicalModel,
+	steps: ReturnType<typeof validatePgConvergeApplicationSteps>,
+): void {
+	const tables = new Set(
+		physical.inventory.entries.flatMap((entry) =>
+			entry.logical.kind === 'table' && entry.logical.schema === physical.schema
+				? [entry.logical.name]
+				: [],
+		),
+	);
+	for (const step of steps) {
+		if (step.kind !== 'assert' || step.owns === undefined) continue;
+		for (const entry of step.owns.columnTypes ?? []) {
+			if (
+				!tables.has(entry.table) ||
+				!physical.inventory.has({
+					kind: 'column',
+					schema: physical.schema,
+					table: entry.table,
+					name: entry.column,
+				})
+			)
+				throw invalidOptions(
+					`converge owns names undeclared column ${entry.table}.${entry.column}`,
+				);
+		}
+		for (const entry of step.owns.checks ?? []) {
+			if (
+				!tables.has(entry.table) ||
+				!physical.inventory.has({
+					kind: 'constraint',
+					schema: physical.schema,
+					table: entry.table,
+					name: entry.name,
+				})
+			)
+				throw invalidOptions(
+					`converge owns names undeclared CHECK ${entry.table}.${entry.name}`,
+				);
+		}
+		for (const entry of step.owns.indexes ?? []) {
+			if (!tables.has(entry.table))
+				throw invalidOptions(
+					`converge owns names undeclared table ${entry.table}`,
+				);
+		}
+	}
 }
 export interface ConvergePgCheckOptions extends ConvergePgBaseOptions {
 	readonly mode: 'check';
@@ -84,11 +142,22 @@ function physicalOptions(
 	options: ConvergePgOptions | ConvergePgCheckOptions,
 ): InternalConvergePgOptions | InternalConvergePgCheckOptions {
 	validateExternalIndexes(physical, options.externalIndexes);
+	let validatedSteps: ReturnType<typeof validatePgConvergeApplicationSteps>;
+	try {
+		validatedSteps = validatePgConvergeApplicationSteps(options.steps);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
+	validateLogicalOwnership(physical, validatedSteps);
 	const externalIndexes = options.externalIndexes?.map((entry) => ({
 		...entry,
 		table: physicalTable(physical, entry.table),
 	}));
-	const steps = options.steps?.map((step) => {
+	const steps = validatedSteps.map((step) => {
 		if (step.kind !== 'assert' || step.owns === undefined) return step;
 		const owns = step.owns;
 		return {
@@ -138,6 +207,7 @@ function physicalOptions(
 		...(steps === undefined ? {} : { steps }),
 		schema: physical.schema,
 		dbCasing: 'preserve',
+		fkAutoIndex: physical.fkAutoIndex,
 		declaredSequenceNames: declaredSequenceNamesFromInventory(
 			physical.inventory,
 		),

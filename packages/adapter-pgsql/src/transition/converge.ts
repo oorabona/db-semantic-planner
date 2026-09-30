@@ -317,6 +317,8 @@ export type PgConvergeCheckResult =
 export interface ConvergePgBaseOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
+	/** Internal physical-model rendering choice; public callers cannot override it. */
+	readonly fkAutoIndex?: boolean;
 	/** Internal physical-to-authored sequence provenance for legacy-name refusal. */
 	readonly declaredSequenceNames?: ReadonlyMap<string, string>;
 	/**
@@ -976,6 +978,84 @@ function generatedAddress(
 	return addressForChange({ change, database, schema });
 }
 
+function sameStrings(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
+	);
+}
+
+/**
+ * Comparison normally receives the physical model and therefore returns carried
+ * names. Tests and narrow internal callers may supply changes independently;
+ * resolve those from the caller's already-created physical snapshot instead of
+ * composing a second PostgreSQL name here.
+ */
+function carryPhysicalChangeNames(
+	change: SchemaChange,
+	model: ModelIR,
+): SchemaChange {
+	const table = model.getTable(change.table);
+	if (table === undefined) return change;
+	if (change.kind === 'create_table' && change.meta?.table !== undefined)
+		return { ...change, meta: { ...change.meta, table } };
+	if (change.kind === 'add_primary_key' || change.kind === 'drop_primary_key')
+		return {
+			...change,
+			meta: { ...change.meta, name: table.primaryKeyName },
+		};
+	if (
+		change.kind === 'add_foreign_key' ||
+		change.kind === 'drop_foreign_key' ||
+		change.kind === 'alter_foreign_key' ||
+		change.kind === 'validate_constraint'
+	) {
+		const candidate = change.meta?.fk as ForeignKeyIR | undefined;
+		const fk =
+			candidate === undefined
+				? undefined
+				: table.foreignKeys.find(
+						(item) =>
+							sameStrings(item.columns, candidate.columns) &&
+							item.references.table === candidate.references.table &&
+							sameStrings(
+								item.references.columns,
+								candidate.references.columns,
+							),
+					);
+		return fk === undefined
+			? change
+			: { ...change, meta: { ...change.meta, fk } };
+	}
+	if (change.kind === 'create_index' || change.kind === 'drop_index') {
+		const candidate = change.meta?.index as IndexIR | undefined;
+		const index =
+			candidate === undefined
+				? undefined
+				: table.indexes.find(
+						(item) =>
+							sameStrings(item.columns, candidate.columns) &&
+							item.unique === candidate.unique,
+					);
+		return index === undefined
+			? change
+			: { ...change, meta: { ...change.meta, index } };
+	}
+	if (change.kind === 'alter_column_unique') {
+		const column = table.columns.find((item) => item.name === change.column);
+		return column === undefined
+			? change
+			: {
+					...change,
+					meta: { ...change.meta, constraintName: column.uniqueConstraintName },
+				};
+	}
+	return change;
+}
+
 function referencedTableAddress(
 	change: SchemaChange,
 	database: string,
@@ -1435,7 +1515,8 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 			qualifyingIndexes.set(change, indexChange);
 			continue;
 		}
-		const fkName = `fk_${change.table}_${foreignKey.columns.join('_')}`;
+		const fkName =
+			foreignKey.name ?? generatedAddress(change, database, schema).name;
 		throw refusal(
 			'unsupported-change',
 			[change],
@@ -1462,6 +1543,7 @@ function uncoveredFreshFkColumns(
 			const column = foreignKey.columns[0];
 			return foreignKey.columns.length === 1 &&
 				column !== undefined &&
+				foreignKey.autoIndexName === undefined &&
 				!hasDeclaredFkIndexAdmission(table, column)
 				? [{ table: change.table, column }]
 				: [];
@@ -1590,7 +1672,20 @@ export async function convergePg(
 		throw invalidOptions(
 			'converge initialize must be never, pristine, or adopt-existing',
 		);
-	validateDeclarationModel(model);
+	let validatedApplicationSteps: readonly PgConvergeApplicationStep[];
+	try {
+		validatedApplicationSteps = validatePgConvergeApplicationSteps(
+			options.steps,
+		);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
+	if (validatedApplicationSteps.length > 0 && options.schema === '$user')
+		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
 	const check = mode === 'check';
 	const initialization = initialize ?? 'never';
 	const schema = options.schema ?? 'public';
@@ -1601,24 +1696,16 @@ export async function convergePg(
 		model,
 		schema,
 		dbCasing: sourceCasing,
-		fkAutoIndex: false,
+		fkAutoIndex: options.fkAutoIndex ?? true,
 	});
+	validateDeclarationModel(physical.model);
 	const externalIndexes = validateExternalIndexes(
 		logicalModel,
 		options,
 		physical.inventory,
 		schema,
 	);
-	let applicationSteps: readonly PgConvergeApplicationStep[];
-	try {
-		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
-	} catch (error) {
-		throw invalidOptions(
-			error instanceof PgApplicationStepError
-				? error.message
-				: 'converge steps are invalid',
-		);
-	}
+	const applicationSteps = validatedApplicationSteps;
 	const applicationOwnership = validateApplicationOwnership(
 		logicalModel,
 		applicationSteps,
@@ -1648,9 +1735,13 @@ export async function convergePg(
 						]),
 					),
 				};
-	if (applicationSteps.length > 0 && schema === '$user')
-		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
-	model = physical.model;
+	// An empty caller model has no physical name-bearing surface to replace.
+	// Retaining it preserves the no-op comparison identity while every non-empty
+	// model flows through the immutable physical snapshot.
+	model =
+		logicalModel.tables.size === 0 && (logicalModel.sequences?.size ?? 0) === 0
+			? logicalModel
+			: physical.model;
 	const casing: DbCasing = 'preserve';
 	const declaredSequenceNames =
 		options.declaredSequenceNames ??
@@ -1777,7 +1868,7 @@ export async function convergePg(
 						),
 					)
 				: undefined;
-		const diff = await compareConvergeMaskedSchema({
+		const compared = await compareConvergeMaskedSchema({
 			executor: client,
 			model,
 			schema,
@@ -1786,6 +1877,12 @@ export async function convergePg(
 			declaredSequenceNames,
 			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 		});
+		const diff = {
+			...compared,
+			changes: compared.changes.map((change) =>
+				carryPhysicalChangeNames(change, model),
+			),
+		};
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
 			const physicalName = table.name;
@@ -2098,7 +2195,11 @@ export async function convergePg(
 			}
 			const statements = generateMigrationSQL(
 				{ ...diff, changes: [change] },
-				{ includeDestructive: false, schemaName: schema, fkAutoIndex: false },
+				{
+					includeDestructive: false,
+					schemaName: schema,
+					fkAutoIndex: physical.fkAutoIndex,
+				},
 			);
 			const step = createPgsqlGeneratedManagedStep({
 				change,

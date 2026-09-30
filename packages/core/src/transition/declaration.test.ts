@@ -36,8 +36,10 @@ describe('managed declaration slicing', () => {
 			...model(
 				table({
 					primaryKey: 'id',
+					primaryKeyName: 'pk_users',
 					foreignKeys: [
 						{
+							name: 'fk_users_id',
 							columns: ['id'],
 							references: { table: 'users', columns: ['id'] },
 						},
@@ -108,8 +110,10 @@ describe('managed declaration slicing', () => {
 						name: 'post_comments',
 						columns: [{ name: 'post_id', type: 'uuid', nullable: false }],
 						primaryKey: 'post_id',
+						primaryKeyName: 'pk_post_comments',
 						foreignKeys: [
 							{
+								name: 'fk_post_comments_post_id',
 								columns: ['post_id'],
 								references: { table: 'blog_posts', columns: ['id'] },
 							},

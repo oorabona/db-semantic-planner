@@ -2236,7 +2236,51 @@ describe('convergePg', () => {
 		}
 	});
 
-	it('refuses fresh single-column FKs without declared foreign key indexes before creating either table', async () => {
+	it('converges a fresh single-column FK with its carried automatic index and rechecks cleanly', async () => {
+		const pool = await getTestPool();
+		const desired = model([
+			table('fk_auto_index_default_parent', false),
+			{
+				...table('fk_auto_index_default_child', false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'parent_id', type: 'integer', nullable: false },
+				],
+				foreignKeys: [
+					{
+						columns: ['parent_id'],
+						references: {
+							table: 'fk_auto_index_default_parent',
+							columns: ['id'],
+						},
+					},
+				],
+			},
+		]);
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema,
+		});
+		const autoIndexName = physical.model.getTable(
+			'fk_auto_index_default_child',
+		)!.foreignKeys[0]!.autoIndexName!;
+		await expect(convergePhysicalPg(pool, physical)).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(
+			pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+				`${schema}.${autoIndexName}`,
+			]),
+		).resolves.toMatchObject({
+			rows: [{ relation: `${schema}.${autoIndexName}` }],
+		});
+		await expect(
+			convergePhysicalPg(pool, physical, { mode: 'check' }),
+		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('refuses fresh single-column FKs without declared foreign key indexes when automatic indexes are disabled', async () => {
 		const pool = await getTestPool();
 		const desired = model([
 			table('fk_auto_index_refusal_parent', false),
@@ -2258,7 +2302,9 @@ describe('convergePg', () => {
 			},
 		]);
 
-		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+		await expect(
+			convergePg(pool, desired, { schema, fkAutoIndex: false }),
+		).rejects.toMatchObject({
 			refusal: 'unsupported-change',
 			detail: expect.stringContaining(
 				'converge refuses fresh foreign keys without a declared foreign key index: fk_auto_index_refusal_child.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column',
@@ -2318,21 +2364,21 @@ describe('convergePg', () => {
 				},
 			]);
 
-		await expect(convergePg(pool, desired(), { schema })).rejects.toMatchObject(
-			{
-				refusal: 'unsupported-change',
-				detail: expect.stringContaining(
-					`converge refuses fresh foreign keys without a declared foreign key index: ${unindexedChild}.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
-				),
-			},
-		);
+		await expect(
+			convergePg(pool, desired(), { schema, fkAutoIndex: false }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			detail: expect.stringContaining(
+				`converge refuses fresh foreign keys without a declared foreign key index: ${unindexedChild}.parent_id; declare a single-column index on each listed column, or a primary key or btree index (non-partial, without expressions) whose first column is that column`,
+			),
+		});
 		await expect(
 			convergePg(
 				pool,
 				desired([
 					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
 				]),
-				{ schema },
+				{ schema, fkAutoIndex: false },
 			),
 		).resolves.toMatchObject({ kind: 'applied' });
 		await expect(
@@ -2341,7 +2387,7 @@ describe('convergePg', () => {
 				desired([
 					{ name: `${unindexedChild}_parent_id_index`, columns: ['parent_id'] },
 				]),
-				{ schema },
+				{ schema, fkAutoIndex: false },
 			),
 		).resolves.toEqual({ kind: 'no-drift', applied: [] });
 	});

@@ -11,13 +11,42 @@
  * @module ddl/phases/indexes
  */
 
-import type { IndexIR } from '@dbsp/types';
+import { createPgPhysicalModel } from '../../physical-model/index.js';
 import { generateCreateIndex } from '../ddl-generator.js';
-import {
-	getAutoFkIndexName,
-	shouldEmitAutoFkIndex,
-} from '../fk-index-coverage.js';
+import { shouldEmitAutoFkIndex } from '../fk-index-coverage.js';
 import type { PhaseContext } from './types.js';
+
+function physicalAutoIndexName(
+	table: PhaseContext['tables'][number],
+	foreignKey: PhaseContext['tables'][number]['foreignKeys'][number],
+): string {
+	const carried = foreignKey.autoIndexName;
+	if (carried !== undefined) return carried;
+	const tables = new Map([[table.name, table]]);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		schema: 'public',
+		model: {
+			tables,
+			relations: new Map(),
+			getTable: (name) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		},
+	});
+	const autoIndexName = physical.model
+		.getTable(table.name)
+		?.foreignKeys.find(
+			(item) => item.columns.join(',') === foreignKey.columns.join(','),
+		)?.autoIndexName;
+	if (autoIndexName === undefined)
+		throw new Error(
+			'physical automatic foreign-key index name is missing from the model',
+		);
+	return autoIndexName;
+}
 
 /**
  * Generate CREATE INDEX statements for all tables.
@@ -31,35 +60,34 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 
 	for (const table of tables) {
-		const dbTableName = table.name;
 		// Explicit indexes
 		for (const idx of table.indexes) {
 			statements.push(
 				generateCreateIndex(table.name, idx, schemaName, indexContext),
 			);
 		}
-
-		// Auto-generate indexes for single-column FKs without a declared
-		// single-column key or another covering declared key.
-		if (fkAutoIndex) {
-			for (const fk of table.foreignKeys) {
-				const fkCol = fk.columns[0];
-				if (
-					fk.columns.length === 1 &&
-					fkCol &&
-					shouldEmitAutoFkIndex(table, fkCol)
-				) {
-					const dbFkCol = fkCol;
-					const autoIdx: IndexIR = {
-						name: getAutoFkIndexName(dbTableName, dbFkCol),
-						columns: [fkCol],
+		if (!fkAutoIndex) continue;
+		for (const fk of table.foreignKeys) {
+			const column = fk.columns[0];
+			if (
+				fk.columns.length !== 1 ||
+				column === undefined ||
+				!shouldEmitAutoFkIndex(table, column)
+			)
+				continue;
+			const autoIndexName = physicalAutoIndexName(table, fk);
+			statements.push(
+				generateCreateIndex(
+					table.name,
+					{
+						name: autoIndexName,
+						columns: [column],
 						unique: false,
-					};
-					statements.push(
-						generateCreateIndex(table.name, autoIdx, schemaName, indexContext),
-					);
-				}
-			}
+					},
+					schemaName,
+					indexContext,
+				),
+			);
 		}
 	}
 
