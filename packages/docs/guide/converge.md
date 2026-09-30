@@ -268,14 +268,11 @@ check it. Other column properties, including defaults and nullability, remain co
   kind: 'assert', id: 'project-state-check', digest: 'v2',
   phase: 'after-generated-ddl',
   owns: { checks: [{ table: 'projects', name: 'project_state_check' }] },
-  inspect: async (tx) => {
-    const result = await tx.query(
-      'SELECT pg_catalog.pg_get_constraintdef(constraint.oid) AS definition FROM pg_catalog.pg_constraint AS constraint JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND constraint.conname = $2',
-      ['projects', 'project_state_check'],
-    )
-    return result.rows[0]?.definition === 'CHECK ((state IN (\'ready\', \'archived\')))' ? 'healthy' : 'unhealthy'
-  },
+  inspect: async (_tx, owned) =>
+    owned.checks.every((check) => check.state === 'healthy') ? 'healthy' : 'unhealthy',
   apply: async (tx) => {
+    // `projects` and `project_state_check` are the physical names (`owned.checks[0].physicalTable`,
+    // `physicalName`); quote them in SQL when the naming plugin produces names that need quoting.
     await tx.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS project_state_check')
     await tx.query("ALTER TABLE projects ADD CONSTRAINT project_state_check CHECK (state IN ('ready', 'archived'))")
   },
@@ -287,6 +284,13 @@ runtime, a list set to `undefined` is treated as absent.
 Entries have exactly the required non-empty string fields and must name one declared surface; no
 surface may be owned twice. CHECKs and indexes require `after-generated-ddl`. An owned unique index
 cannot be a key referenced by a declared foreign key toward the converged schema. A `once` cannot own anything.
+`inspect` receives a second, read-only `owned` parameter. Its `checks` are in the declared `owns.checks`
+order and carry model `table`/`name`, resolved `physicalTable`/`physicalName`, and one of `healthy`,
+`absent`, `unrenderable`, `definition-mismatch`, or `unvalidated`. Treat `unrenderable` as unhealthy:
+it means PostgreSQL could not render the declared expression yet. `apply` can use the physical names
+for DDL; rendered definitions are intentionally not exposed. A CHECK-owning step must follow every
+other step that owns a column type on the same table (a step owning both is allowed), so rendering
+uses the current live column types.
 `owns` is not part of the recorded step, so changing it never refuses `application-step-changed`;
 it changes the check-mode `planDigest`.
 
@@ -308,7 +312,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, or reserves a foreign-key unique key, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or puts a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |

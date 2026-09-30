@@ -64,7 +64,20 @@ const mocks = vi.hoisted(() => {
 		})),
 		sequenceShape: vi.fn(async () => true),
 		introspect,
-		adapter: { introspect },
+		adapter: {
+			introspect,
+			withScratchScope: async (fn: (scope: unknown) => Promise<unknown>) => {
+				const scope = {
+					executeRaw: async (sql: string) =>
+						sql.includes("current_setting('search_path')")
+							? [{ search_path: 'public' }]
+							: [],
+					transaction: async (inner: (value: unknown) => Promise<unknown>) =>
+						inner(scope),
+				};
+				return fn(scope);
+			},
+		},
 	};
 });
 
@@ -1084,6 +1097,44 @@ describe('convergePg refusal boundary', () => {
 			expect(pool.connect).not.toHaveBeenCalled();
 		},
 	);
+
+	it('refuses a CHECK owner before another column-type owner for its table before connecting', async () => {
+		const pool = poolFor();
+		const model = modelWithTables([
+			{
+				name: 'projects',
+				columns: [{ name: 'state', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'project_state', expression: 'state > 0' }],
+			},
+		]);
+		await expect(
+			convergePg(pool, model, {
+				steps: [
+					{
+						kind: 'assert',
+						id: 'check-first',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+					{
+						kind: 'assert',
+						id: 'type-second',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
 
 	it('allows an owned local unique index for a foreign key targeting another schema', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });

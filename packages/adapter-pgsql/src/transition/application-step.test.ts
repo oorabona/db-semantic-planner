@@ -681,6 +681,81 @@ describe('converge application steps', () => {
 		]);
 	});
 
+	it.each([
+		[undefined, "SET LOCAL lock_timeout = '5000ms'"],
+		[250, "SET LOCAL lock_timeout = '250ms'"],
+	] as const)(
+		'uses %s as the owned-CHECK scratch rendering lock timeout',
+		async (lockTimeoutMs, expectedLockTimeout) => {
+			const noTransaction = Object.assign(new Error('no transaction'), {
+				code: '25P01',
+			});
+			const client = {
+				query: undefined as unknown,
+				release: vi.fn(),
+				_txStatus: 'I',
+			};
+			const query = vi.fn(async (statement: unknown) => {
+				const text =
+					typeof statement === 'string'
+						? statement
+						: (statement as { text: string }).text;
+				if (text.startsWith('SAVEPOINT') && client._txStatus === 'I')
+					throw noTransaction;
+				if (text === 'BEGIN') client._txStatus = 'T';
+				if (text === 'ROLLBACK') client._txStatus = 'I';
+				if (text.includes("current_setting('search_path')"))
+					return { rows: [{ search_path: 'public' }] };
+				return { rows: [] };
+			});
+			await expect(
+				planPgApplicationSteps({
+					client: Object.assign(client, { query }) as never,
+					database: 'app',
+					schema: 'public',
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							...(lockTimeoutMs === undefined ? {} : { lockTimeoutMs }),
+							inspect: async () => 'healthy' as const,
+							apply,
+						},
+					],
+					ownedChecks: new Map([
+						[
+							'owned-check',
+							[
+								{
+									table: 'Projects',
+									name: 'projectState',
+									physicalTable: 'projects',
+									physicalName: 'project_state',
+									expression: 'true',
+								},
+							],
+						],
+					]),
+				}),
+			).resolves.toEqual([]);
+			const statements = query.mock.calls.map(([statement]) =>
+				typeof statement === 'string'
+					? statement
+					: (statement as { text: string }).text,
+			);
+			const lockTimeoutIndex = statements.indexOf(expectedLockTimeout);
+			expect(lockTimeoutIndex).toBeGreaterThan(0);
+			expect(
+				statements.slice(lockTimeoutIndex - 1, lockTimeoutIndex + 1),
+			).toEqual([
+				"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
+				expectedLockTimeout,
+			]);
+		},
+	);
+
 	it('sets the target schema before every callback transaction', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		let inspectCount = 0;
@@ -741,6 +816,78 @@ describe('converge application steps', () => {
 			["SET LOCAL statement_timeout = '50ms'"],
 			["SET LOCAL statement_timeout = '50ms'"],
 		]);
+	});
+
+	it('passes canonical owned CHECK state to inspect without changing unowned inspection', async () => {
+		const noTransaction = Object.assign(new Error('no transaction'), {
+			code: '25P01',
+		});
+		const client = {
+			query: undefined as unknown,
+			release: vi.fn(),
+			_txStatus: 'I',
+		};
+		const query = vi.fn(async (statement: unknown) => {
+			const text =
+				typeof statement === 'string'
+					? statement
+					: (statement as { text: string }).text;
+			if (text.startsWith('SAVEPOINT') && client._txStatus === 'I')
+				throw noTransaction;
+			if (text === 'BEGIN') client._txStatus = 'T';
+			if (text === 'ROLLBACK') client._txStatus = 'I';
+			if (text.includes("current_setting('search_path')"))
+				return { rows: [{ search_path: 'public' }] };
+			if (text.includes('FROM pg_catalog.pg_constraint c')) return { rows: [] };
+			return { rows: [] };
+		});
+		const inspect = vi.fn(async (_tx: PgApplicationStepTx, owned) => {
+			expect(owned).toEqual({
+				checks: [
+					{
+						table: 'Projects',
+						name: 'projectState',
+						physicalTable: 'projects',
+						physicalName: 'project_state',
+						state: 'absent',
+					},
+				],
+			});
+			return 'healthy' as const;
+		});
+		await expect(
+			planPgApplicationSteps({
+				client: Object.assign(client, { query }) as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'owned-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect,
+						apply,
+					},
+				],
+				ownedChecks: new Map([
+					[
+						'owned-check',
+						[
+							{
+								table: 'Projects',
+								name: 'projectState',
+								physicalTable: 'projects',
+								physicalName: 'project_state',
+								expression: 'true',
+							},
+						],
+					],
+				]),
+			}),
+		).resolves.toEqual([]);
+		expect(inspect).toHaveBeenCalledOnce();
+		expect(query.mock.calls.map(([call]) => call)).toContain('BEGIN READ ONLY');
 	});
 
 	it('uses one admission transaction and one transaction per inspected assert', async () => {

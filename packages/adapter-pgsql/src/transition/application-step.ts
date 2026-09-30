@@ -7,7 +7,16 @@ import {
 import { admitOutcomeClaim } from '@dbsp/core/internal';
 import type { LedgerAddress, LedgerHome, LedgerPayload } from '@dbsp/types';
 import type { PoolClient, QueryConfig } from 'pg';
+import {
+	type OwnedCheckState,
+	renderOwnedTableChecksInScratchScope,
+} from '../expression-canonicalizer.js';
+import {
+	createPgsqlAdapter,
+	type RollbackOnlyPgsqlScope,
+} from '../pgsql-adapter.js';
 import { readPgLedgerAddressChain } from './chain-reader.js';
+import type { TransitionJournalQueryable } from './journal.js';
 import {
 	acquirePgLedgerLocks,
 	appendPgLedgerClaim,
@@ -16,6 +25,7 @@ import {
 import {
 	beginPgOutcomeTransaction,
 	commitPgOutcome,
+	markPgOutcomeSessionCompromisedAfterCleanup,
 	PgCommitAcknowledgementAmbiguousError,
 	readPgOutcomeSessionCompromise,
 	rollbackPgOutcomeGroup,
@@ -59,12 +69,34 @@ export interface PgConvergeAssertOwnership {
 	}[];
 }
 
+export type PgOwnedCheckState = OwnedCheckState;
+
+export interface PgApplicationStepOwnedState {
+	readonly checks: readonly {
+		readonly table: string;
+		readonly name: string;
+		readonly physicalTable: string;
+		readonly physicalName: string;
+		readonly state: PgOwnedCheckState;
+	}[];
+}
+
+/** Resolved by converge from the model; internal to the PostgreSQL adapter. */
+export interface PgApplicationStepResolvedOwnedCheck {
+	readonly table: string;
+	readonly name: string;
+	readonly physicalTable: string;
+	readonly physicalName: string;
+	readonly expression: string;
+}
+
 export interface PgConvergeAssertStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'assert';
 	/** Declaration surfaces maintained by this assertion rather than converge. */
 	readonly owns?: PgConvergeAssertOwnership;
 	readonly inspect: (
 		tx: PgApplicationStepTx,
+		owned: PgApplicationStepOwnedState,
 	) => Promise<'healthy' | 'unhealthy'> | 'healthy' | 'unhealthy';
 }
 
@@ -601,13 +633,14 @@ async function admission(
 async function inspectPgApplicationStep(
 	step: PgConvergeAssertStep,
 	client: PoolClient,
+	owned: PgApplicationStepOwnedState,
 	onCallback?: () => void,
 ): Promise<'healthy' | 'unhealthy'> {
 	let status: unknown;
 	try {
 		status = await withPgApplicationStepTx(
 			client,
-			(tx) => step.inspect(tx),
+			(tx) => step.inspect(tx, owned),
 			onCallback,
 		);
 	} catch (error) {
@@ -639,7 +672,7 @@ function assertPgApplicationStepSessionHealthy(
 }
 
 async function setPgApplicationStepStatementTimeout(
-	client: PoolClient,
+	client: TransitionJournalQueryable,
 	timeout: number | undefined,
 ): Promise<void> {
 	if (timeout === undefined) return;
@@ -647,13 +680,95 @@ async function setPgApplicationStepStatementTimeout(
 }
 
 async function setPgApplicationStepSearchPath(
-	client: PoolClient,
+	client: TransitionJournalQueryable,
 	schema: string,
 ): Promise<void> {
 	await client.query(
 		"SELECT pg_catalog.set_config('search_path', pg_catalog.format('%I, pg_temp, %s', $1::pg_catalog.text, pg_catalog.current_setting('search_path')), true)",
 		[schema],
 	);
+}
+
+function scratchScopeSession(
+	scope: Pick<RollbackOnlyPgsqlScope, 'executeRaw'>,
+): TransitionJournalQueryable {
+	return {
+		query: async (sql, params) => ({
+			rows: await scope.executeRaw(sql, params),
+		}),
+	};
+}
+
+function hasScratchCleanupFailure(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		Object.hasOwn(error, 'cleanupError')
+	);
+}
+
+async function renderPgApplicationStepOwnedChecks(
+	client: PoolClient,
+	schema: string,
+	step: PgConvergeAssertStep,
+	checks: readonly PgApplicationStepResolvedOwnedCheck[],
+	configureScope: boolean,
+): Promise<PgApplicationStepOwnedState> {
+	if (checks.length === 0) return { checks: [] };
+	try {
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const states = await adapter.withScratchScope(async (scope) => {
+			if (configureScope) {
+				const session = scratchScopeSession(scope);
+				await setPgApplicationStepSearchPath(session, schema);
+				await setPgTransitionLockTimeout(session, step.lockTimeoutMs);
+				await setPgApplicationStepStatementTimeout(
+					session,
+					step.statementTimeoutMs,
+				);
+			}
+			const byTable = new Map<string, PgApplicationStepResolvedOwnedCheck[]>();
+			for (const check of checks) {
+				const tableChecks = byTable.get(check.physicalTable);
+				if (tableChecks) tableChecks.push(check);
+				else byTable.set(check.physicalTable, [check]);
+			}
+			const rendered = [];
+			for (const [physicalTable, tableChecks] of byTable) {
+				rendered.push(
+					...(await renderOwnedTableChecksInScratchScope(scope, {
+						schema,
+						physicalTable,
+						checks: tableChecks.map((check) => ({
+							physicalName: check.physicalName,
+							expression: check.expression,
+						})),
+						tempPrefix: `dbsp_owned_check_${randomUUID().replaceAll('-', '')}`,
+					})),
+				);
+			}
+			return rendered;
+		});
+		const stateByPhysicalName = new Map(
+			states.map((state) => [state.physicalName, state.state]),
+		);
+		return {
+			checks: checks.map((check) => ({
+				table: check.table,
+				name: check.name,
+				physicalTable: check.physicalTable,
+				physicalName: check.physicalName,
+				state: stateByPhysicalName.get(check.physicalName)!,
+			})),
+		};
+	} catch (error) {
+		if (hasScratchCleanupFailure(error))
+			markPgOutcomeSessionCompromisedAfterCleanup(client, error);
+		throw error;
+	}
 }
 
 async function admitPgApplicationStepsDuringPlanning(
@@ -695,6 +810,10 @@ async function inspectPgApplicationStepDuringPlanning(
 	input: {
 		readonly client: PoolClient;
 		readonly schema: string;
+		readonly ownedChecks?: ReadonlyMap<
+			string,
+			readonly PgApplicationStepResolvedOwnedCheck[]
+		>;
 		readonly onApplicationStepCallback?: () => void;
 	},
 	step: PgConvergeAssertStep,
@@ -702,6 +821,13 @@ async function inspectPgApplicationStepDuringPlanning(
 	let begun = false;
 	let completed = false;
 	try {
+		const owned = await renderPgApplicationStepOwnedChecks(
+			input.client,
+			input.schema,
+			step,
+			input.ownedChecks?.get(step.id) ?? [],
+			true,
+		);
 		await beginPgOutcomeTransaction(input.client, 'BEGIN READ ONLY');
 		begun = true;
 		await setPgApplicationStepSearchPath(input.client, input.schema);
@@ -713,6 +839,7 @@ async function inspectPgApplicationStepDuringPlanning(
 		const status = await inspectPgApplicationStep(
 			step,
 			input.client,
+			owned,
 			input.onApplicationStepCallback,
 		);
 		completed = true;
@@ -733,6 +860,10 @@ export async function planPgApplicationSteps(input: {
 	readonly steps: readonly PgConvergeApplicationStep[];
 	readonly hasPendingGeneratedWork?: boolean;
 	readonly check?: boolean;
+	readonly ownedChecks?: ReadonlyMap<
+		string,
+		readonly PgApplicationStepResolvedOwnedCheck[]
+	>;
 	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly PgPlannedApplicationStep[]> {
 	const pendingOnceIds = await admitPgApplicationStepsDuringPlanning(
@@ -781,6 +912,10 @@ export async function runPgApplicationSteps(input: {
 	readonly schema: string;
 	readonly phase: PgConvergeApplicationStep['phase'];
 	readonly steps: readonly PgConvergeApplicationStep[];
+	readonly ownedChecks?: ReadonlyMap<
+		string,
+		readonly PgApplicationStepResolvedOwnedCheck[]
+	>;
 	readonly onApplicationStepCallback?: () => void;
 }): Promise<readonly string[]> {
 	const applied: string[] = [];
@@ -819,6 +954,13 @@ export async function runPgApplicationSteps(input: {
 				(await inspectPgApplicationStep(
 					step,
 					input.client,
+					await renderPgApplicationStepOwnedChecks(
+						input.client,
+						input.schema,
+						step,
+						input.ownedChecks?.get(step.id) ?? [],
+						false,
+					),
 					input.onApplicationStepCallback,
 				)) === 'healthy'
 			) {
@@ -873,6 +1015,13 @@ export async function runPgApplicationSteps(input: {
 				(await inspectPgApplicationStep(
 					step,
 					input.client,
+					await renderPgApplicationStepOwnedChecks(
+						input.client,
+						input.schema,
+						step,
+						input.ownedChecks?.get(step.id) ?? [],
+						false,
+					),
 					input.onApplicationStepCallback,
 				)) !== 'healthy'
 			)

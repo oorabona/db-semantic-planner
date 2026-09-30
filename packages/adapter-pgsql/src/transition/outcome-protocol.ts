@@ -227,6 +227,17 @@ function markPgOutcomeSessionCompromised(
 	);
 }
 
+/** A failed dbsp-owned cleanup leaves the caller transaction unsafe to reuse. */
+export function markPgOutcomeSessionCompromisedAfterCleanup(
+	session: TransitionJournalQueryable,
+	error: unknown,
+): void {
+	compromisedPgOutcomeSessions.set(
+		session as object,
+		asPgSessionReleaseError(error),
+	);
+}
+
 /** Returns the release marker recorded for a session whose outcome is unknown. */
 export function readPgOutcomeSessionCompromise(
 	session: TransitionJournalQueryable,
