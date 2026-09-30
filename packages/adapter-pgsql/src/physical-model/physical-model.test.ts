@@ -271,6 +271,29 @@ describe('createPgPhysicalModel', () => {
 		}
 	});
 
+	it('uses the target schema for logical sequence admission despite an embedded sequence schema', () => {
+		try {
+			createPgPhysicalModel({
+				mode: 'logical',
+				schema: 'app',
+				model: {
+					...model([
+						{ name: 'collision', columns: [], foreignKeys: [], indexes: [] },
+					]),
+					sequences: new Map([
+						['collision', { name: 'collision', schema: 'legacy' }],
+					]),
+				},
+			});
+			expect.unreachable();
+		} catch (error) {
+			expect(error).toBeInstanceOf(PgPhysicalNameCollisionError);
+			expect((error as PgPhysicalNameCollisionError).namespace).toBe(
+				'pg_class',
+			);
+		}
+	});
+
 	it('accepts catalog physical names without predicting primary-key or CHECK names', () => {
 		expect(() =>
 			createPgPhysicalModel({
@@ -299,13 +322,27 @@ describe('createPgPhysicalModel', () => {
 				...model([
 					{
 						name: 'widgets',
-						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								default: { sql: '1' },
+							},
+						],
 						primaryKey: 'id',
 						foreignKeys: [],
-						indexes: [],
+						indexes: [
+							{
+								name: 'widgets_fillfactor',
+								columns: ['id'],
+								with: { fillfactor: '70' },
+							},
+						],
 						checkConstraints: [
 							{ name: 'widgets_positive', expression: 'id > 0' },
 						],
+						policies: [{ name: 'widgets_read', roles: ['app_user'] }],
 					},
 				]),
 				externalTables: new Set(['outside']),
@@ -323,6 +360,18 @@ describe('createPgPhysicalModel', () => {
 		expect(Object.isFrozen(table)).toBe(true);
 		expect(Object.isFrozen(table.columns[0]!)).toBe(true);
 		expect(Object.isFrozen(table.checkConstraints?.[0]!)).toBe(true);
+		expect(() => {
+			(table.columns[0]!.default as { sql: string }).sql = '2';
+		}).toThrow();
+		expect(() => {
+			(table.indexes[0]!.with as Record<string, string>).fillfactor = '80';
+		}).toThrow();
+		expect(() => {
+			(table.policies?.[0]?.roles as string[])[0] = 'other_user';
+		}).toThrow();
+		expect(Object.isFrozen(table.columns[0]!.default!)).toBe(true);
+		expect(Object.isFrozen(table.indexes[0]!.with!)).toBe(true);
+		expect(Object.isFrozen(table.policies?.[0]?.roles!)).toBe(true);
 	});
 
 	it('physicalizes identifiers once while retaining metadata and expression text', () => {

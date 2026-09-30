@@ -1,6 +1,7 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type { Pool } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
+import * as physicalModel from '../physical-model/index.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { PgConvergeRefusalError } from './converge.js';
 import { convergePg } from './public-api.js';
@@ -66,6 +67,43 @@ function assertStep(owns: unknown): unknown {
 }
 
 describe('public convergePg', () => {
+	it('consumes a physical snapshot without recreating its catalog names', async () => {
+		const physical = createPgPhysicalModel({
+			mode: 'physical',
+			schema: 'public',
+			model: new ModelIRImpl(
+				new Map([
+					[
+						'widgets',
+						{
+							name: 'widgets',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							primaryKeyName: 'widgets_catalog_pkey',
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+				]),
+				new Map(),
+			),
+		});
+		const factory = vi.spyOn(physicalModel, 'createPgPhysicalModel');
+		const connect = vi.fn(() => {
+			throw new Error('test pool reached after snapshot consumption');
+		});
+
+		try {
+			await expect(
+				convergePg({ connect } as unknown as Pool, physical),
+			).rejects.toThrow('test pool reached after snapshot consumption');
+			expect(factory).not.toHaveBeenCalled();
+			expect(connect).toHaveBeenCalledTimes(1);
+		} finally {
+			factory.mockRestore();
+		}
+	});
+
 	it('refuses an undeclared external-index table before inventory resolution', () => {
 		const physical = createPgPhysicalModel({
 			mode: 'logical',

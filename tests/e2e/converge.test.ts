@@ -1429,6 +1429,57 @@ describe('convergePg', () => {
 		);
 	});
 
+	it('adds same-column partial indexes by their carried physical names', async () => {
+		const pool = await getTestPool();
+		const name = 'same_column_partial_indexes';
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'score', type: 'integer', nullable: false },
+				],
+				indexes: [
+					{
+						name: `${name}_positive`,
+						columns: ['score'],
+						where: 'score > 0',
+					},
+					{
+						name: `${name}_negative`,
+						columns: ['score'],
+						where: 'score < 0',
+					},
+				],
+			},
+		]);
+
+		await expect(convergePg(pool, desired, { schema })).resolves.toMatchObject({
+			kind: 'applied',
+		});
+		await expect(
+			pool.query(
+				'SELECT indexname, indexdef FROM pg_catalog.pg_indexes WHERE schemaname = $1 AND tablename = $2 AND indexname = ANY($3::text[]) ORDER BY indexname',
+				[schema, name, [`${name}_negative`, `${name}_positive`]],
+			),
+		).resolves.toMatchObject({
+			rows: [
+				{
+					indexname: `${name}_negative`,
+					indexdef: expect.stringContaining('WHERE (score < 0)'),
+				},
+				{
+					indexname: `${name}_positive`,
+					indexdef: expect.stringContaining('WHERE (score > 0)'),
+				},
+			],
+		});
+		await expect(convergePg(pool, desired, { schema })).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
 	it('masks a caller-named external index while adopting', async () => {
 		const pool = await getTestPool();
 		const databaseId = await database();

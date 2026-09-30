@@ -350,6 +350,12 @@ export interface MigrationSQLOptions {
 	readonly includeDestructive?: boolean;
 	/** Automatically create indexes on FK columns for new tables (default: true) */
 	readonly fkAutoIndex?: boolean;
+	/**
+	 * Declared model whose FK-index coverage controls automatic index emission.
+	 * This lets callers mask generated DDL surfaces without changing the
+	 * declaration-level decision to emit an automatic FK index.
+	 */
+	readonly fkAutoIndexCoverage?: ModelIR;
 	/** Dialect capabilities — unsupported index features throw during migration SQL generation */
 	readonly dialectCapabilities?: DialectCapabilities;
 }
@@ -554,18 +560,20 @@ function buildFkAutoIndexFromSpec(spec: IndexRenderSpec): IndexIR {
 export function collectFkAutoIndexSpecs(
 	changes: readonly SchemaChange[],
 	schemaName: string | undefined,
+	fkAutoIndexCoverage?: ModelIR,
 ): IndexRenderSpec[] {
 	const specs: IndexRenderSpec[] = [];
 	for (const change of changes) {
 		if (change.kind !== 'create_table') continue;
 		const table = change.meta?.table as TableIR | undefined;
 		if (!table) continue;
+		const coverageTable = fkAutoIndexCoverage?.getTable(table.name) ?? table;
 		for (const [foreignKeyIndex, fk] of table.foreignKeys.entries()) {
 			const fkCol = fk.columns[0];
 			if (
 				fk.columns.length === 1 &&
 				fkCol &&
-				shouldEmitAutoFkIndex(table, fkCol)
+				shouldEmitAutoFkIndex(coverageTable, fkCol)
 			) {
 				specs.push(
 					buildFkAutoIndexSpec(
@@ -585,6 +593,7 @@ function collectUpCreateIndexSpecs(
 	changes: readonly SchemaChange[],
 	schemaName: string | undefined,
 	fkAutoIndex: boolean,
+	fkAutoIndexCoverage?: ModelIR,
 ): IndexRenderSpec[] {
 	const specs = changes.flatMap((change) =>
 		change.kind === 'create_index'
@@ -592,7 +601,9 @@ function collectUpCreateIndexSpecs(
 			: [],
 	);
 	if (fkAutoIndex) {
-		specs.push(...collectFkAutoIndexSpecs(changes, schemaName));
+		specs.push(
+			...collectFkAutoIndexSpecs(changes, schemaName, fkAutoIndexCoverage),
+		);
 	}
 	return specs;
 }
@@ -648,6 +659,7 @@ export function generateMigrationSQL(
 		changes,
 		schemaName,
 		options?.fkAutoIndex !== false,
+		options?.fkAutoIndexCoverage,
 	);
 	assertCreateIndexesSupported(createIndexSpecs, indexContext);
 
@@ -696,7 +708,11 @@ export function generateMigrationSQL(
 	// FK auto-indexes for new tables (single-column FKs without a declared
 	// single-column index or another covering declared key)
 	if (options?.fkAutoIndex !== false) {
-		for (const spec of collectFkAutoIndexSpecs(changes, schemaName)) {
+		for (const spec of collectFkAutoIndexSpecs(
+			changes,
+			schemaName,
+			options?.fkAutoIndexCoverage,
+		)) {
 			statements.push(
 				generateCreateIndex(
 					spec.table,

@@ -529,7 +529,9 @@ export function createPgPhysicalModel(
 	for (const [key, sequence] of input.model.sequences ?? []) {
 		if (key !== sequence.name)
 			throw new SequenceNameMapKeyMismatchError(key, sequence.name);
-		const sequenceSchema = sequence.schema ?? input.schema;
+		const sequenceSchema = physical
+			? input.schema
+			: (sequence.schema ?? input.schema);
 		const physicalSequence = name(sequence.name);
 		const physicalSequenceDefinition = authoredSequences.get(physicalSequence);
 		if (physicalSequenceDefinition === undefined)
@@ -551,8 +553,11 @@ export function createPgPhysicalModel(
 		);
 	}
 
-	// A logical model is dbsp's emitted vocabulary, so reject spellings its
-	// renderers cannot represent before returning it.  Physical input is an
+	// A logical model is dbsp's emitted vocabulary, so reject a claimed name
+	// (schema or object) its renderers cannot represent before returning it.
+	// Other identifiers the renderers read (referenced schemas, roles,
+	// collations, opclasses, methods, storage keys) are validated when SQL is
+	// rendered, before any statement runs.  Physical input is an
 	// introspected PostgreSQL catalogue: quoted identifiers there are already
 	// accepted by PostgreSQL and must not be narrowed by dbsp's logical alias
 	// grammar.
@@ -986,13 +991,15 @@ function cloneRecord<T extends object>(value: T): T {
 	return clone(value) as T;
 }
 function clone(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(clone);
+	if (Array.isArray(value)) return Object.freeze(value.map(clone));
 	if (value instanceof Map)
 		return new Map([...value].map(([key, item]) => [clone(key), clone(item)]));
 	if (value instanceof Set) return new Set([...value].map(clone));
 	if (value !== null && typeof value === 'object')
-		return Object.fromEntries(
-			Object.entries(value).map(([key, item]) => [key, clone(item)]),
+		return Object.freeze(
+			Object.fromEntries(
+				Object.entries(value).map(([key, item]) => [key, clone(item)]),
+			),
 		);
 	return value;
 }

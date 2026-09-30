@@ -3642,7 +3642,7 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
-	it('passes the caller model without an ownership mask when no step owns a surface', async () => {
+	it('passes the physical snapshot without an ownership mask when no step owns a surface', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		mocks.identity.mockResolvedValue(undefined);
 		const model = emptyModel();
@@ -3651,9 +3651,10 @@ describe('convergePg refusal boundary', () => {
 			applied: [],
 		});
 		expect(mocks.declaredComparison).toHaveBeenCalledWith(
-			expect.objectContaining({
-				model: expect.objectContaining({ tables: model.tables }),
-			}),
+			expect.objectContaining({ model: expect.anything() }),
+		);
+		expect(mocks.declaredComparison.mock.calls[0]?.[0]?.model.tables).not.toBe(
+			model.tables,
 		);
 		expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
 			'ownershipMask',

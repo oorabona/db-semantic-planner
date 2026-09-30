@@ -16,7 +16,6 @@ import type {
 	LedgerHome,
 	ModelIR,
 	NormalizedManagedStep,
-	PhysicalNameInventory,
 	SequenceIR,
 	TableIR,
 	TransitionRunMetadata,
@@ -45,7 +44,10 @@ import {
 } from '../ddl/managed-step-manifest.js';
 import { generateMigrationSQL, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+} from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import {
@@ -475,20 +477,11 @@ async function declaredRelationNames(
 	return { tables, sequences };
 }
 
-function declaredIndexNames(
-	model: ModelIR,
-	inventory: PhysicalNameInventory,
-	schema: string,
-): ReadonlySet<string> {
+function declaredIndexNames(model: ModelIR): ReadonlySet<string> {
 	return new Set(
 		[...model.tables.values()].flatMap((table) => {
 			return table.indexes.map((index) =>
-				inventory.get({
-					kind: 'index',
-					schema,
-					table: table.name,
-					name: resolvePgsqlDeclaredIndexName(table, index),
-				}),
+				resolvePgsqlDeclaredIndexName(table, index),
 			);
 		}),
 	);
@@ -524,7 +517,6 @@ function sortedOwnershipEntries(
 function validateApplicationOwnership(
 	model: ModelIR,
 	steps: readonly PgConvergeApplicationStep[],
-	inventory: PhysicalNameInventory,
 	schema: string,
 ): ReadonlyMap<string, ResolvedApplicationOwnership> {
 	const resolved = new Map<string, ResolvedApplicationOwnership>();
@@ -570,25 +562,14 @@ function validateApplicationOwnership(
 		const checkNameMultiplicity = new Map<string, number>();
 		for (const check of table.checkConstraints ?? []) {
 			if (!checks.has(check.name)) checks.set(check.name, check);
-			const physicalName = inventory.get({
-				kind: 'constraint',
-				schema,
-				table: table.name,
-				name: check.name,
-			});
 			checkNameMultiplicity.set(
-				physicalName,
-				(checkNameMultiplicity.get(physicalName) ?? 0) + 1,
+				check.name,
+				(checkNameMultiplicity.get(check.name) ?? 0) + 1,
 			);
 		}
 		const indexes = new Map<string, IndexIR[]>();
 		for (const index of table.indexes) {
-			const physicalName = inventory.get({
-				kind: 'index',
-				schema,
-				table: table.name,
-				name: resolvePgsqlDeclaredIndexName(table, index),
-			});
+			const physicalName = resolvePgsqlDeclaredIndexName(table, index);
 			const matching = indexes.get(physicalName);
 			if (matching) matching.push(index);
 			else indexes.set(physicalName, [index]);
@@ -598,11 +579,7 @@ function validateApplicationOwnership(
 			checks,
 			checkNameMultiplicity,
 			indexes,
-			physicalTable: inventory.get({
-				kind: 'table',
-				schema,
-				name: table.name,
-			}),
+			physicalTable: table.name,
 		};
 		ownershipLookups.set(table.name, lookup);
 		return lookup;
@@ -649,12 +626,7 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared column ${entry.table}.${entry.column}`,
 				);
-			const physicalColumn = inventory.get({
-				kind: 'column',
-				schema,
-				table: table.name,
-				name: column.name,
-			});
+			const physicalColumn = column.name;
 			const key = pgsqlSurfaceKey(lookup.physicalTable, physicalColumn);
 			if (claimed.columnTypes.has(key))
 				throw invalidOptions(
@@ -679,12 +651,7 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared CHECK ${entry.table}.${entry.name}`,
 				);
-			const physicalName = inventory.get({
-				kind: 'constraint',
-				schema,
-				table: table.name,
-				name: check.name,
-			});
+			const physicalName = check.name;
 			const multiplicity = lookup.checkNameMultiplicity.get(physicalName) ?? 0;
 			if (multiplicity !== 1)
 				throw invalidOptions(
@@ -724,12 +691,7 @@ function validateApplicationOwnership(
 				throw invalidOptions(
 					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
 				);
-			const physicalName = inventory.get({
-				kind: 'index',
-				schema,
-				table: table.name,
-				name: entry.name,
-			});
+			const physicalName = entry.name;
 			const matching = lookup.indexes.get(physicalName) ?? [];
 			if (matching.length !== 1)
 				throw invalidOptions(
@@ -807,20 +769,14 @@ function validateApplicationOwnership(
 function validateExternalIndexes(
 	model: ModelIR,
 	options: ConvergePgBaseOptions,
-	inventory: PhysicalNameInventory,
-	schema: string,
 ): ReadonlySet<string> {
 	const supplied = options.externalIndexes;
 	if (supplied === undefined) return new Set();
 	if (!Array.isArray(supplied))
 		throw invalidOptions('converge externalIndexes must be an array');
 
-	const declaredTables = new Set(
-		inventory.entries
-			.filter((entry) => entry.logical.kind === 'table')
-			.map((entry) => entry.logical.name),
-	);
-	const declaredIndexes = declaredIndexNames(model, inventory, schema);
+	const declaredTables = new Set(model.tables.keys());
+	const declaredIndexes = declaredIndexNames(model);
 	const seen = new Set<string>();
 	const externalIndexKeys = new Set<string>();
 	for (const [position, entry] of supplied.entries()) {
@@ -852,12 +808,7 @@ function validateExternalIndexes(
 			throw invalidOptions(
 				`converge ${label} names declared index ${entry.name}`,
 			);
-		externalIndexKeys.add(
-			pgsqlSurfaceKey(
-				inventory.get({ kind: 'table', schema, name: entry.table }),
-				entry.name,
-			),
-		);
+		externalIndexKeys.add(pgsqlSurfaceKey(entry.table, entry.name));
 	}
 	return externalIndexKeys;
 }
@@ -976,84 +927,6 @@ function generatedAddress(
 	schema: string,
 ): LedgerAddress {
 	return addressForChange({ change, database, schema });
-}
-
-function sameStrings(
-	left: readonly string[],
-	right: readonly string[],
-): boolean {
-	return (
-		left.length === right.length &&
-		left.every((value, index) => value === right[index])
-	);
-}
-
-/**
- * Comparison normally receives the physical model and therefore returns carried
- * names. Tests and narrow internal callers may supply changes independently;
- * resolve those from the caller's already-created physical snapshot instead of
- * composing a second PostgreSQL name here.
- */
-function carryPhysicalChangeNames(
-	change: SchemaChange,
-	model: ModelIR,
-): SchemaChange {
-	const table = model.getTable(change.table);
-	if (table === undefined) return change;
-	if (change.kind === 'create_table' && change.meta?.table !== undefined)
-		return { ...change, meta: { ...change.meta, table } };
-	if (change.kind === 'add_primary_key' || change.kind === 'drop_primary_key')
-		return {
-			...change,
-			meta: { ...change.meta, name: table.primaryKeyName },
-		};
-	if (
-		change.kind === 'add_foreign_key' ||
-		change.kind === 'drop_foreign_key' ||
-		change.kind === 'alter_foreign_key' ||
-		change.kind === 'validate_constraint'
-	) {
-		const candidate = change.meta?.fk as ForeignKeyIR | undefined;
-		const fk =
-			candidate === undefined
-				? undefined
-				: table.foreignKeys.find(
-						(item) =>
-							sameStrings(item.columns, candidate.columns) &&
-							item.references.table === candidate.references.table &&
-							sameStrings(
-								item.references.columns,
-								candidate.references.columns,
-							),
-					);
-		return fk === undefined
-			? change
-			: { ...change, meta: { ...change.meta, fk } };
-	}
-	if (change.kind === 'create_index' || change.kind === 'drop_index') {
-		const candidate = change.meta?.index as IndexIR | undefined;
-		const index =
-			candidate === undefined
-				? undefined
-				: table.indexes.find(
-						(item) =>
-							sameStrings(item.columns, candidate.columns) &&
-							item.unique === candidate.unique,
-					);
-		return index === undefined
-			? change
-			: { ...change, meta: { ...change.meta, index } };
-	}
-	if (change.kind === 'alter_column_unique') {
-		const column = table.columns.find((item) => item.name === change.column);
-		return column === undefined
-			? change
-			: {
-					...change,
-					meta: { ...change.meta, constraintName: column.uniqueConstraintName },
-				};
-	}
-	return change;
 }
 
 function referencedTableAddress(
@@ -1585,6 +1458,252 @@ function projectCheckedPlan(
 	});
 }
 
+type ValidatedConvergeOptions = Readonly<{
+	check: boolean;
+	initialization: 'never' | 'pristine' | 'adopt-existing';
+	applicationSteps: readonly PgConvergeApplicationStep[];
+}>;
+
+function validateConvergeOptions(
+	options: ConvergePgOptions | ConvergePgCheckOptions,
+): ValidatedConvergeOptions {
+	const mode: unknown = options.mode;
+	if (mode !== undefined && mode !== 'apply' && mode !== 'check')
+		throw invalidOptions('converge mode must be apply or check');
+	const initialize: unknown = options.initialize;
+	if (
+		initialize !== undefined &&
+		initialize !== 'never' &&
+		initialize !== 'pristine' &&
+		initialize !== 'adopt-existing'
+	)
+		throw invalidOptions(
+			'converge initialize must be never, pristine, or adopt-existing',
+		);
+	let applicationSteps: readonly PgConvergeApplicationStep[];
+	try {
+		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
+	if (applicationSteps.length > 0 && options.schema === '$user')
+		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
+	return {
+		check: mode === 'check',
+		initialization:
+			initialize === 'pristine'
+				? 'pristine'
+				: initialize === 'adopt-existing'
+					? 'adopt-existing'
+					: 'never',
+		applicationSteps,
+	};
+}
+
+function rejectApplicationStepsOnDollarUserSchema(
+	options: ConvergePgOptions | ConvergePgCheckOptions,
+): void {
+	if (options.schema !== '$user') return;
+	let applicationSteps: readonly PgConvergeApplicationStep[];
+	try {
+		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
+	if (applicationSteps.length > 0)
+		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
+}
+
+function physicalTable(physical: PgPhysicalModel, table: string): string {
+	return physical.inventory.get({
+		kind: 'table',
+		schema: physical.schema,
+		name: table,
+	});
+}
+
+function validateLogicalOwnership(
+	physical: PgPhysicalModel,
+	steps: readonly PgConvergeApplicationStep[],
+): void {
+	const tables = new Set(
+		physical.inventory.entries.flatMap((entry) =>
+			entry.logical.kind === 'table' && entry.logical.schema === physical.schema
+				? [entry.logical.name]
+				: [],
+		),
+	);
+	for (const step of steps) {
+		if (step.kind !== 'assert' || step.owns === undefined) continue;
+		for (const entry of step.owns.columnTypes ?? []) {
+			if (!tables.has(entry.table))
+				throw invalidOptions(
+					`converge application step ${step.id} owns columnTypes on undeclared table ${entry.table}`,
+				);
+			if (
+				!physical.inventory.has({
+					kind: 'column',
+					schema: physical.schema,
+					table: entry.table,
+					name: entry.column,
+				})
+			)
+				throw invalidOptions(
+					`converge application step ${step.id} owns undeclared column ${entry.table}.${entry.column}`,
+				);
+		}
+		for (const entry of step.owns.checks ?? []) {
+			if (!tables.has(entry.table))
+				throw invalidOptions(
+					`converge application step ${step.id} owns checks on undeclared table ${entry.table}`,
+				);
+			if (
+				!physical.inventory.has({
+					kind: 'constraint',
+					schema: physical.schema,
+					table: entry.table,
+					name: entry.name,
+				})
+			)
+				throw invalidOptions(
+					`converge application step ${step.id} owns undeclared CHECK ${entry.table}.${entry.name}`,
+				);
+		}
+		for (const entry of step.owns.indexes ?? []) {
+			if (!tables.has(entry.table))
+				throw invalidOptions(
+					`converge owns names undeclared table ${entry.table}`,
+				);
+		}
+	}
+}
+
+function validateLogicalExternalIndexes(
+	physical: PgPhysicalModel,
+	externalIndexes: ConvergePgBaseOptions['externalIndexes'],
+): void {
+	if (externalIndexes === undefined) return;
+	if (!Array.isArray(externalIndexes))
+		throw invalidOptions('converge externalIndexes must be an array');
+	const declaredTables = new Set(
+		physical.inventory.entries.flatMap((entry) =>
+			entry.logical.kind === 'table' && entry.logical.schema === physical.schema
+				? [entry.logical.name]
+				: [],
+		),
+	);
+	for (const [position, entry] of externalIndexes.entries()) {
+		const label = `externalIndexes[${position}]`;
+		if (
+			entry === null ||
+			typeof entry !== 'object' ||
+			Array.isArray(entry) ||
+			typeof entry.table !== 'string' ||
+			entry.table.length === 0 ||
+			typeof entry.name !== 'string' ||
+			entry.name.length === 0
+		)
+			throw invalidOptions(
+				`converge ${label} must be an object with non-empty string table and name fields`,
+			);
+		if (!declaredTables.has(entry.table))
+			throw invalidOptions(
+				`converge ${label} names undeclared table ${entry.table}`,
+			);
+	}
+}
+
+/**
+ * Validates options in the caller's logical vocabulary, then resolves their
+ * table, column, and CHECK references exactly once through the snapshot.
+ */
+export function physicalConvergeOptions(
+	physical: PgPhysicalModel,
+	options: ConvergePgOptions | ConvergePgCheckOptions,
+): ConvergePgOptions | ConvergePgCheckOptions {
+	validateLogicalExternalIndexes(physical, options.externalIndexes);
+	let validatedSteps: readonly PgConvergeApplicationStep[];
+	try {
+		validatedSteps = validatePgConvergeApplicationSteps(options.steps);
+	} catch (error) {
+		throw invalidOptions(
+			error instanceof PgApplicationStepError
+				? error.message
+				: 'converge steps are invalid',
+		);
+	}
+	if (validatedSteps.length > 0 && options.schema === '$user')
+		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
+	validateLogicalOwnership(physical, validatedSteps);
+	const externalIndexes = options.externalIndexes?.map((entry) => ({
+		...entry,
+		table: physicalTable(physical, entry.table),
+	}));
+	const steps = validatedSteps.map((step) => {
+		if (step.kind !== 'assert' || step.owns === undefined) return step;
+		const owns = step.owns;
+		return {
+			...step,
+			owns: {
+				...owns,
+				...(owns.columnTypes === undefined
+					? {}
+					: {
+							columnTypes: owns.columnTypes.map((entry) => ({
+								table: physicalTable(physical, entry.table),
+								column: physical.inventory.get({
+									kind: 'column',
+									schema: physical.schema,
+									table: entry.table,
+									name: entry.column,
+								}),
+							})),
+						}),
+				...(owns.checks === undefined
+					? {}
+					: {
+							checks: owns.checks.map((entry) => ({
+								table: physicalTable(physical, entry.table),
+								name: physical.inventory.get({
+									kind: 'constraint',
+									schema: physical.schema,
+									table: entry.table,
+									name: entry.name,
+								}),
+							})),
+						}),
+				...(owns.indexes === undefined
+					? {}
+					: {
+							indexes: owns.indexes.map((entry) => ({
+								...entry,
+								table: physicalTable(physical, entry.table),
+							})),
+						}),
+			},
+		};
+	});
+	return {
+		...options,
+		...(externalIndexes === undefined ? {} : { externalIndexes }),
+		...(steps === undefined ? {} : { steps }),
+		schema: physical.schema,
+		dbCasing: 'preserve',
+		fkAutoIndex: physical.fkAutoIndex,
+		declaredSequenceNames: declaredSequenceNamesFromInventory(
+			physical.inventory,
+		),
+	};
+}
+
 /**
  * Converges only startup-safe PostgreSQL additions: it creates tables and
  * sequences, adds nullable columns without defaults and NOT NULL columns with
@@ -1659,57 +1778,51 @@ export async function convergePg(
 	model: ModelIR,
 	options: ConvergePgOptions | ConvergePgCheckOptions = {},
 ): Promise<PgConvergeResult | PgConvergeCheckResult> {
-	const mode: unknown = options.mode;
-	if (mode !== undefined && mode !== 'apply' && mode !== 'check')
-		throw invalidOptions('converge mode must be apply or check');
-	const initialize: unknown = options.initialize;
-	if (
-		initialize !== undefined &&
-		initialize !== 'never' &&
-		initialize !== 'pristine' &&
-		initialize !== 'adopt-existing'
-	)
-		throw invalidOptions(
-			'converge initialize must be never, pristine, or adopt-existing',
-		);
-	let validatedApplicationSteps: readonly PgConvergeApplicationStep[];
-	try {
-		validatedApplicationSteps = validatePgConvergeApplicationSteps(
-			options.steps,
-		);
-	} catch (error) {
-		throw invalidOptions(
-			error instanceof PgApplicationStepError
-				? error.message
-				: 'converge steps are invalid',
-		);
-	}
-	if (validatedApplicationSteps.length > 0 && options.schema === '$user')
-		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
-	const check = mode === 'check';
-	const initialization = initialize ?? 'never';
-	const schema = options.schema ?? 'public';
-	const sourceCasing = options.dbCasing ?? 'preserve';
-	const logicalModel = model;
+	rejectApplicationStepsOnDollarUserSchema(options);
 	const physical = createPgPhysicalModel({
 		mode: 'logical',
 		model,
-		schema,
-		dbCasing: sourceCasing,
+		schema: options.schema ?? 'public',
+		dbCasing: options.dbCasing ?? 'preserve',
 		fkAutoIndex: options.fkAutoIndex ?? true,
 	});
-	validateDeclarationModel(physical.model);
-	const externalIndexes = validateExternalIndexes(
-		logicalModel,
-		options,
-		physical.inventory,
-		schema,
+	return convergePgPhysical(
+		pool,
+		physical,
+		physicalConvergeOptions(physical, options),
 	);
-	const applicationSteps = validatedApplicationSteps;
+}
+
+/** Executes converge from an already-created physical-name snapshot. */
+export function convergePgPhysical(
+	pool: Pool,
+	physical: PgPhysicalModel,
+	options?: ConvergePgOptions,
+): Promise<PgConvergeResult>;
+export function convergePgPhysical(
+	pool: Pool,
+	physical: PgPhysicalModel,
+	options: ConvergePgCheckOptions,
+): Promise<PgConvergeCheckResult>;
+export function convergePgPhysical(
+	pool: Pool,
+	physical: PgPhysicalModel,
+	options: ConvergePgOptions | ConvergePgCheckOptions,
+): Promise<PgConvergeResult | PgConvergeCheckResult>;
+export async function convergePgPhysical(
+	pool: Pool,
+	physical: PgPhysicalModel,
+	options: ConvergePgOptions | ConvergePgCheckOptions = {},
+): Promise<PgConvergeResult | PgConvergeCheckResult> {
+	const resolved = validateConvergeOptions(options);
+	const { check, initialization, applicationSteps } = resolved;
+	const schema = physical.schema;
+	const model = physical.model;
+	validateDeclarationModel(physical.model);
+	const externalIndexes = validateExternalIndexes(model, options);
 	const applicationOwnership = validateApplicationOwnership(
-		logicalModel,
+		model,
 		applicationSteps,
-		physical.inventory,
 		schema,
 	);
 	const applicationOwnedChecks = new Map(
@@ -1735,13 +1848,6 @@ export async function convergePg(
 						]),
 					),
 				};
-	// An empty caller model has no physical name-bearing surface to replace.
-	// Retaining it preserves the no-op comparison identity while every non-empty
-	// model flows through the immutable physical snapshot.
-	model =
-		logicalModel.tables.size === 0 && (logicalModel.sequences?.size ?? 0) === 0
-			? logicalModel
-			: physical.model;
 	const casing: DbCasing = 'preserve';
 	const declaredSequenceNames =
 		options.declaredSequenceNames ??
@@ -1877,12 +1983,7 @@ export async function convergePg(
 			declaredSequenceNames,
 			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 		});
-		const diff = {
-			...compared,
-			changes: compared.changes.map((change) =>
-				carryPhysicalChangeNames(change, model),
-			),
-		};
+		const diff = compared;
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
 			const physicalName = table.name;
@@ -2199,6 +2300,7 @@ export async function convergePg(
 					includeDestructive: false,
 					schemaName: schema,
 					fkAutoIndex: physical.fkAutoIndex,
+					fkAutoIndexCoverage: model,
 				},
 			);
 			const step = createPgsqlGeneratedManagedStep({

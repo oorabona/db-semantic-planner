@@ -3959,6 +3959,36 @@ describe('FK enhancements — migration SQL', () => {
 		expect(autoIndexCount).toBe(0);
 	});
 
+	it('uses declared FK coverage when rendering a create table with an owned index masked', () => {
+		const declared = {
+			...makeTable('orders', [makeCol({ name: 'user_id', type: 'integer' })]),
+			foreignKeys: [baseFk],
+			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
+		};
+		const masked = { ...declared, indexes: [] };
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: masked },
+			},
+		]);
+
+		const sql = generateMigrationSQL(diff, {
+			fkAutoIndex: true,
+			fkAutoIndexCoverage: makeModel([
+				makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+				declared,
+			]),
+		});
+
+		expect(sql).not.toContain(
+			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
+		);
+	});
+
 	it('should not generate an FK auto-index when only a partial index is declared on the FK column', () => {
 		const usersTable = makeTable(
 			'users',
