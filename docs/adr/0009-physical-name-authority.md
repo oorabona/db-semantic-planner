@@ -43,7 +43,9 @@ Derived names are composed from already-physical parts with one template each (`
 `fk_<table>_<columns>`, `idx_<table>_<columns>`), and the 63-byte rule is applied to every mapped and derived
 name. Names PostgreSQL chooses itself — the sequence behind a serial column (`<table>_<column>_seq`) and the
 index behind an unnamed column `UNIQUE` (`<table>_<column>_key`) — are predicted with PostgreSQL's rule and
-claimed, not rewritten; dbsp finds those sequences through `pg_depend`, never by name.
+claimed, not rewritten; dbsp finds those sequences through `pg_depend`, never by name. A model built from an
+introspected catalog records only the names its IR carries and predicts none: the catalog's own constraint, index and
+sequence names are whatever PostgreSQL holds, and PostgreSQL already keeps them collision-free.
 
 Before any SQL is produced, the model admits every claim into its PostgreSQL namespace: `pg_class` and
 `pg_type` (row types and implicit array types included) per effective schema, and columns, constraints and
