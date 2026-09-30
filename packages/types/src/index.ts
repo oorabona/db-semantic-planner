@@ -26,6 +26,8 @@ export { isValidSchema } from './loaded-schema.js';
 export * from './model-ir.js';
 // Dialect-neutral output source/shape provenance and read-handling resolver
 export * from './output-provenance.js';
+// Dialect-neutral physical-name inventory
+export * from './physical-name-inventory.js';
 // Planner types (plan report, decisions, warnings)
 export * from './planner.js';
 // Dialect-neutral RelationIR key-field builder

@@ -219,6 +219,17 @@ export {
 	PgsqlTransactionTimeoutError,
 	type RollbackOnlyPgsqlScope,
 } from './pgsql-adapter.js';
+// PostgreSQL physical-name authority
+export {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+	type PgPhysicalModelInput,
+	PgPhysicalModelInputError,
+	type PgPhysicalNameClaim,
+	type PgPhysicalNameCollision,
+	PgPhysicalNameCollisionError,
+	type PgPhysicalNamespace,
+} from './physical-model/index.js';
 export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)
 export {
