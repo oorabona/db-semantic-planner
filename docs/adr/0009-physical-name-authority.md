@@ -72,7 +72,10 @@ and internal symbols do not (#860 tracks the convention for the existing exports
   per-call naming options move to its construction, and persisted plans and manifests built before it must be
   regenerated. The squash commit of #784 lists the changed signatures in its `BREAKING CHANGE` footer, which
   release-please carries into the release notes.
-- A live object whose desired physical name changes is drift; dbsp never renames it automatically.
+- A table, column, index, CHECK, enum or standalone sequence whose desired physical name changes is drift; dbsp
+  never renames it automatically. Primary-key, foreign-key and column-`UNIQUE` constraint names are not compared:
+  the comparison matches those constraints by their columns (a foreign key also by its reference), as it did before
+  this decision.
 - A colliding model is refused before any SQL is rendered, any connection is made, or any ledger row is written.
 - The table physicalisation is exhaustive: adding a field to `TableIR` without classifying it fails the type
   check, so a field cannot be silently dropped again.
