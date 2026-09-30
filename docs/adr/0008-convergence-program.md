@@ -74,11 +74,14 @@ How they are recorded and run:
 - **The digest is the caller's contract.** dbsp cannot hash a function: a `once` whose body changes
   needs a new id, and an `assert` records the digest it last repaired with.
 - Schema scope only in this delivery; `scope: 'database'` is refused until needed.
-- **A step does not touch what the comparison sees.** Converge compares a declared table's columns,
-  keys, foreign keys, CHECK constraints and indexes; a step that creates or changes one of them makes
-  the next call refuse `unsupported-change` during planning, before any step runs. Functions,
-  triggers, data and undeclared tables are outside the comparison. An application that repairs a
-  declared CHECK or column type needs an ownership mask, the next delivery.
+- **A step does not touch what the comparison sees unless it owns the surface.** An `assert` can
+  declare named CHECK constraints, column types, and named indexes in `owns`. Converge removes those
+  declared and live surfaces before expression canonicalisation and comparison, including adoption
+  re-verification; fresh generated DDL omits owned CHECKs and indexes. The assertion's `inspect` and
+  `apply` alone maintain them. Ownership is validated before connecting, cannot be duplicated, and
+  an assert that owns a CHECK or an index must be `after-generated-ddl`. All other declared columns,
+  keys, foreign keys, CHECKs and indexes remain compared; functions, triggers, data and undeclared
+  tables remain outside it.
 
 ### Initialisation and adoption are a library operation
 
@@ -116,7 +119,7 @@ application should not run as.
    `application-step-failed`): shipped.
 4. Ownership: an `assert` declares the named CHECK constraints, column types and named indexes it
    owns, and converge leaves them out of every comparison (diff, planning refusals, generated DDL,
-   `no-drift`, check plan, plan digest), so the model can still declare them. Not shipped.
+   `no-drift`, check plan, plan digest), so the model can still declare them. Shipped.
 5. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
    and check mode is selected with `ConvergePgCheckOptions`.
 

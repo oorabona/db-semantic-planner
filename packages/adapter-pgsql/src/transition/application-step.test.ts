@@ -298,6 +298,41 @@ describe('converge application steps', () => {
 		).toHaveLength(1);
 	});
 
+	it('normalizes assertion ownership and refuses malformed ownership before connection work', () => {
+		const assertion = {
+			kind: 'assert' as const,
+			id: 'owned-check',
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+			inspect: async () => 'healthy' as const,
+			apply,
+		};
+		expect(validatePgConvergeApplicationSteps([assertion])).toEqual([
+			expect.objectContaining({ owns: assertion.owns }),
+		]);
+		expect(() =>
+			validatePgConvergeApplicationSteps([
+				{
+					...assertion,
+					owns: { checks: [{ table: 'projects', name: 'x', extra: true }] },
+				},
+			]),
+		).toThrow('owns.checks entries');
+		expect(() =>
+			validatePgConvergeApplicationSteps([
+				{
+					kind: 'once',
+					id: 'once-owned',
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+					apply,
+				},
+			]),
+		).toThrow('once steps cannot declare owns');
+	});
+
 	it('rolls back and identifies a planning inspection failure', async () => {
 		const query = vi.fn(async (..._args: unknown[]) => ({ rows: [] }));
 		await expect(

@@ -156,10 +156,10 @@ records the decision.
 Work the model cannot declare (a backfill, a function or trigger you maintain yourself, dropping an
 obsolete table) goes in `steps`, and converge runs it under its lock and records it in the ledger.
 A step must not create or change what converge compares on a declared table: its columns, keys,
-foreign keys, CHECK constraints and indexes (other than [external indexes](#external-indexes)). The
-next call would compare that object against the model and refuse the difference as
-`unsupported-change` before any step runs. Functions, triggers, data, and tables the model does not
-declare are outside the comparison.
+foreign keys, CHECK constraints and indexes (other than [owned surfaces](#owned-surfaces) and
+[external indexes](#external-indexes)). The next call would compare an unowned difference against
+the model and refuse `unsupported-change` before any step runs. Functions, triggers, data, and
+tables the model does not declare are outside the comparison.
 
 ```typescript
 // doctest: skip — illustrates the option only
@@ -251,6 +251,46 @@ await convergePg(pool, model, {
 - dbsp cannot compare function bodies: the `digest` is your statement that a step changed.
 - Steps apply to the converged schema only; `scope: 'database'` is refused.
 
+### Owned surfaces
+
+An `assert` may declare `owns` for named declared CHECK constraints, column types, and named
+declared indexes that its `apply` maintains. `table`, `column`, and CHECK `name` are model names;
+an index `name` is its resolved physical name (the naming plugin's resolved explicit name, or the
+default index name). An owned surface is compared by nobody but that step's `inspect`: converge no
+longer detects its drift, does not emit its CHECK or index on a fresh table, and adoption does not
+check it. Other column properties, including defaults and nullability, remain compared.
+
+```typescript
+// doctest: skip — illustrates an assertion-owned CHECK
+{
+  kind: 'assert', id: 'project-state-check', digest: 'v2',
+  phase: 'after-generated-ddl',
+  owns: { checks: [{ table: 'projects', name: 'project_state_check' }] },
+  inspect: async (tx) => {
+    const result = await tx.query(
+      "SELECT pg_catalog.pg_get_constraintdef(constraint.oid) AS definition FROM pg_catalog.pg_constraint AS constraint JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint.conrelid WHERE constraint.conname = 'project_state_check' AND relation.relname = 'projects'",
+    )
+    return result.rows[0]?.definition === 'CHECK ((state IN (\'ready\', \'archived\')))' ? 'healthy' : 'unhealthy'
+  },
+  apply: async (tx) => {
+    await tx.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS project_state_check')
+    await tx.query("ALTER TABLE projects ADD CONSTRAINT project_state_check CHECK (state IN ('ready', 'archived'))")
+  },
+}
+```
+
+`owns` must be a non-empty object containing only `checks`, `columnTypes`, and `indexes` arrays.
+Entries have exactly the required non-empty string fields and must name one declared surface; no
+surface may be owned twice. CHECKs and indexes require `after-generated-ddl`. An owned unique index
+cannot be the declared key required by a fresh foreign key. A `once` cannot own anything.
+`owns` is not part of the recorded step, so changing it never refuses `application-step-changed`;
+it changes the check-mode `planDigest`.
+
+An equivalent live index with a different name remains an unowned live index and is refused as
+drift. `dbsp plan` and `dbsp apply` do not read `owns`, so they still report such drift. To stop
+ownership, remove its entry: the next converge compares it again and refuses a difference as it
+would without `owns`.
+
 ## Refusals
 
 A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail` explains it;
@@ -264,7 +304,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, or reserves a foreign-key unique key, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
@@ -373,7 +413,9 @@ await convergePg(pool, model, {
 ```
 
 Each entry names a declared table and the exact physical index name. Converge never drops a live
-index named here and does not report it as drift.
+index named here and does not report it as drift. This is unlike `owns`: an external index is not
+declared in the model and only filters a live-side `drop_index`; an owned index remains declared,
+is removed from both comparison sides, and is maintained by an assert.
 
 ## Running alongside `dbsp apply`
 

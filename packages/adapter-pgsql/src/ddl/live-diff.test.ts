@@ -727,6 +727,53 @@ describe('comparePgsqlDatabaseSchema', () => {
 		);
 	});
 
+	it('masks only an owned live column type before comparison', async () => {
+		const liveColumn = {
+			table_name: 'projects',
+			column_name: 'revision',
+			data_type: 'bigint',
+			udt_name: 'int8',
+			is_nullable: 'NO',
+			column_default: null,
+			collation_name: null,
+			is_identity: 'NO',
+			identity_generation: null,
+		};
+		const model = makeModel([
+			makeTable({
+				name: 'projects',
+				columns: [{ name: 'revision', type: 'integer', nullable: false }],
+			}),
+		]);
+		const compare = (ownershipMask?: {
+			readonly checks: ReadonlySet<string>;
+			readonly columnTypes: ReadonlySet<string>;
+			readonly indexes: ReadonlySet<string>;
+		}) =>
+			comparePgsqlDeclaredAdoptionSchema({
+				executor: new FakeLiveDiffPool(
+					new FakeLiveDiffClient('', false, [liveColumn]),
+				),
+				model,
+				schema: 'public',
+				dbCasing: 'preserve',
+				...(ownershipMask === undefined ? {} : { ownershipMask }),
+			});
+
+		await expect(compare()).resolves.toMatchObject({
+			changes: expect.arrayContaining([
+				expect.objectContaining({ kind: 'alter_column_type' }),
+			]),
+		});
+		await expect(
+			compare({
+				checks: new Set(),
+				columnTypes: new Set([JSON.stringify(['projects', 'revision'])]),
+				indexes: new Set(),
+			}),
+		).resolves.toMatchObject({ changes: [] });
+	});
+
 	it('admits separately declared foreign-key-linked table adoptions after projection', async () => {
 		const columns = [
 			{

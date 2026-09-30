@@ -67,6 +67,17 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
+let cannedComparisonChanges: readonly SchemaChange[] = [];
+const mockResolvedComparison = mocks.compare.mockResolvedValue.bind(
+	mocks.compare,
+);
+mocks.compare.mockResolvedValue = ((value: {
+	readonly changes?: readonly SchemaChange[];
+}) => {
+	cannedComparisonChanges = value.changes ?? [];
+	return mockResolvedComparison(value);
+}) as never;
+
 function forward(fn: unknown, args: readonly unknown[]): unknown {
 	return (fn as (...values: readonly unknown[]) => unknown)(...args);
 }
@@ -223,10 +234,32 @@ import {
 import { rollbackPgOutcomeGroup } from './outcome-protocol.js';
 
 function emptyModel(): ModelIR {
+	const tables = new Map(
+		cannedComparisonChanges.flatMap((change) =>
+			change.kind === 'create_table'
+				? [
+						[
+							change.table,
+							change.meta?.table !== undefined &&
+							Array.isArray((change.meta.table as TableIR).columns) &&
+							Array.isArray((change.meta.table as TableIR).foreignKeys) &&
+							Array.isArray((change.meta.table as TableIR).indexes)
+								? (change.meta.table as TableIR)
+								: {
+										name: change.table,
+										columns: [],
+										foreignKeys: [],
+										indexes: [],
+									},
+						] as const,
+					]
+				: [],
+		),
+	);
 	return {
-		tables: new Map(),
+		tables,
 		relations: new Map(),
-		getTable: () => undefined,
+		getTable: (name) => tables.get(name),
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
@@ -583,6 +616,7 @@ async function expectAdmittedAddColumn(
 }
 
 afterEach(() => {
+	cannedComparisonChanges = [];
 	for (const mock of Object.values(mocks)) {
 		if ('mockReset' in mock) mock.mockReset();
 	}
@@ -779,6 +813,197 @@ describe('convergePg refusal boundary', () => {
 		).rejects.toMatchObject({ refusal: 'invalid-options' });
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
+
+	it.each([
+		[
+			'an unknown owns key',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'unknown-key',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { tables: [] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns has an unknown key',
+		],
+		[
+			'an empty owns object',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'empty-owns',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { checks: [] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns must name at least one surface',
+		],
+		[
+			'an owns entry with an extra field',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'extra-field',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { checks: [{ table: 'projects', name: 'state', extra: true }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns.checks entries',
+		],
+		[
+			'an undeclared owned table',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'missing-table',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { checks: [{ table: 'missing', name: 'state' }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'undeclared table missing',
+		],
+		[
+			'an undeclared owned CHECK',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'missing-check',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { checks: [{ table: 'projects', name: 'state' }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'undeclared CHECK projects.state',
+		],
+		[
+			'an undeclared owned column',
+			modelWithTable('projects'),
+			{
+				kind: 'assert',
+				id: 'missing-column',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns undeclared column projects.state',
+		],
+		[
+			'an index name other than its declared physical name',
+			modelWithTables([
+				{
+					name: 'projects',
+					columns: [{ name: 'revision', type: 'integer', nullable: false }],
+					foreignKeys: [],
+					indexes: [{ name: 'idx_projects_revision', columns: ['revision'] }],
+				},
+			]),
+			{
+				kind: 'assert',
+				id: 'logical-index-name',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: {
+					indexes: [{ table: 'projects', name: 'project_revision_index' }],
+				},
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns undeclared index projects.project_revision_index',
+		],
+		[
+			'an owned CHECK before generated DDL',
+			modelWithTables([
+				{
+					name: 'projects',
+					columns: [],
+					foreignKeys: [],
+					indexes: [],
+					checkConstraints: [{ name: 'state_check', expression: 'true' }],
+				},
+			]),
+			{
+				kind: 'assert',
+				id: 'wrong-phase',
+				digest: 'v1',
+				phase: 'before-generated-ddl',
+				owns: { checks: [{ table: 'projects', name: 'state_check' }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns CHECKs or indexes but is not after-generated-ddl',
+		],
+		[
+			'an owned unique index required by a declared foreign key',
+			modelWithTables([
+				{
+					name: 'projects',
+					columns: [{ name: 'code', type: 'integer', nullable: false }],
+					foreignKeys: [],
+					indexes: [
+						{ name: 'idx_projects_code', columns: ['code'], unique: true },
+					],
+				},
+				{
+					name: 'tasks',
+					columns: [{ name: 'project_code', type: 'integer', nullable: false }],
+					foreignKeys: [
+						{
+							columns: ['project_code'],
+							references: { table: 'projects', columns: ['code'] },
+						},
+					],
+					indexes: [],
+				},
+			]),
+			{
+				kind: 'assert',
+				id: 'owned-fk-key',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { indexes: [{ table: 'projects', name: 'idx_projects_code' }] },
+				inspect: async () => 'healthy',
+				apply: async () => undefined,
+			},
+			'owns unique index projects.idx_projects_code required by a declared foreign key',
+		],
+		[
+			'owns on a once step',
+			modelWithTable('projects'),
+			{
+				kind: 'once',
+				id: 'once-owned',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns: { checks: [{ table: 'projects', name: 'state' }] },
+				apply: async () => undefined,
+			},
+			'once steps cannot declare owns',
+		],
+	] as const)(
+		'refuses %s before connecting',
+		async (_case, model, step, detail) => {
+			const pool = poolFor();
+			await expect(
+				Reflect.apply(convergePg, undefined, [pool, model, { steps: [step] }]),
+			).rejects.toMatchObject({
+				refusal: 'invalid-options',
+				detail: expect.stringContaining(detail),
+			});
+			expect(pool.connect).not.toHaveBeenCalled();
+		},
+	);
 
 	it('does not run an application step apply callback in check mode', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });

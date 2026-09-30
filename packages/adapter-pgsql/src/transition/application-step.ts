@@ -44,8 +44,25 @@ export interface PgConvergeOnceStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'once';
 }
 
+export interface PgConvergeAssertOwnership {
+	readonly checks?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
+	readonly columnTypes?: readonly {
+		readonly table: string;
+		readonly column: string;
+	}[];
+	readonly indexes?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
+}
+
 export interface PgConvergeAssertStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'assert';
+	/** Declaration surfaces maintained by this assertion rather than converge. */
+	readonly owns?: PgConvergeAssertOwnership;
 	readonly inspect: (
 		tx: PgApplicationStepTx,
 	) => Promise<'healthy' | 'unhealthy'> | 'healthy' | 'unhealthy';
@@ -84,6 +101,68 @@ export class PgApplicationStepError extends Error {
 	}
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (value === null || typeof value !== 'object' || Array.isArray(value))
+		return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function validateOwns(owns: unknown): PgConvergeAssertOwnership {
+	if (!isPlainObject(owns))
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns must be a plain object',
+		);
+	const allowed = new Set(['checks', 'columnTypes', 'indexes']);
+	if (!Object.keys(owns).every((key) => allowed.has(key)))
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns has an unknown key',
+		);
+
+	let count = 0;
+	for (const [surface, fields] of [
+		['checks', ['table', 'name']],
+		['columnTypes', ['table', 'column']],
+		['indexes', ['table', 'name']],
+	] as const) {
+		const entries = owns[surface];
+		if (entries === undefined) continue;
+		if (!Array.isArray(entries))
+			throw new PgApplicationStepError(
+				'application-step-failed',
+				'',
+				`converge assert owns.${surface} must be an array`,
+			);
+		for (const entry of entries) {
+			if (
+				!isPlainObject(entry) ||
+				Object.keys(entry).length !== fields.length ||
+				!fields.every(
+					(field) =>
+						typeof entry[field] === 'string' && entry[field].length > 0,
+				)
+			)
+				throw new PgApplicationStepError(
+					'application-step-failed',
+					'',
+					`converge assert owns.${surface} entries must have exactly non-empty string ${fields.join(' and ')} fields`,
+				);
+			count += 1;
+		}
+	}
+	if (count === 0)
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns must name at least one surface',
+		);
+	return owns as PgConvergeAssertOwnership;
+}
+
 /** Validate before a pool client is acquired; wording deliberately omits caller data. */
 export function validatePgConvergeApplicationSteps(
 	steps: unknown,
@@ -113,6 +192,8 @@ export function validatePgConvergeApplicationSteps(
 		const statementTimeoutMs = step.statementTimeoutMs;
 		const apply = step.apply;
 		const inspect = step.inspect;
+		const hasOwns = Object.hasOwn(step, 'owns');
+		const owns = step.owns;
 		if (kind !== 'once' && kind !== 'assert')
 			throw new PgApplicationStepError(
 				'application-step-failed',
@@ -174,6 +255,14 @@ export function validatePgConvergeApplicationSteps(
 				'',
 				'converge assert inspect must be a function',
 			);
+		if (kind === 'once' && hasOwns)
+			throw new PgApplicationStepError(
+				'application-step-failed',
+				'',
+				'converge once steps cannot declare owns',
+			);
+		const validatedOwns =
+			kind === 'assert' && hasOwns ? validateOwns(owns) : undefined;
 		return kind === 'once'
 			? {
 					kind: 'once',
@@ -201,6 +290,7 @@ export function validatePgConvergeApplicationSteps(
 					...(statementTimeoutMs === undefined
 						? {}
 						: { statementTimeoutMs: statementTimeoutMs as number }),
+					...(validatedOwns === undefined ? {} : { owns: validatedOwns }),
 					inspect: inspect as PgConvergeAssertStep['inspect'],
 					apply: apply as PgConvergeAssertStep['apply'],
 				};
