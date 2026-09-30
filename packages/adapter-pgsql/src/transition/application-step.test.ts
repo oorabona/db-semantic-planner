@@ -1489,6 +1489,161 @@ describe('converge application steps', () => {
 		expect(secondInspect).not.toHaveBeenCalled();
 	});
 
+	it('plans interleaved phases in execution order and stops after the first unhealthy assert', async () => {
+		const afterInspect = vi.fn(async () => 'healthy' as const);
+		const query = vi.fn(async (statement: unknown) => {
+			if (
+				typeof statement === 'string' &&
+				statement.startsWith('CREATE TEMP TABLE ')
+			)
+				throw new Error('after-generated-ddl owned CHECK must not render');
+			return { rows: [] };
+		});
+		await expect(
+			planPgApplicationSteps({
+				client: { query } as never,
+				database: 'app',
+				schema: 'public',
+				check: true,
+				steps: [
+					{
+						kind: 'assert',
+						id: 'after-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+						inspect: afterInspect,
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'before-column-type',
+						digest: 'v1',
+						phase: 'before-generated-ddl',
+						owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+						inspect: async () => 'unhealthy' as const,
+						apply,
+					},
+				],
+				ownedChecks: new Map([
+					[
+						'after-check',
+						[
+							{
+								table: 'projects',
+								name: 'project_state',
+								physicalTable: 'projects',
+								physicalName: 'project_state',
+								expression: "state IN ('ready')",
+							},
+						],
+					],
+				]),
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'before-column-type',
+				step: 'assert',
+				inspected: true,
+			},
+			{
+				kind: 'application-step',
+				id: 'after-check',
+				step: 'assert',
+				inspected: false,
+			},
+		]);
+		expect(afterInspect).not.toHaveBeenCalled();
+		expect(
+			query.mock.calls.some(
+				([statement]) =>
+					typeof statement === 'string' &&
+					statement.startsWith('CREATE TEMP TABLE '),
+			),
+		).toBe(false);
+	});
+
+	it('inspects healthy interleaved phases in execution order', async () => {
+		const inspectionOrder: string[] = [];
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'after-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+						inspect: async () => {
+							inspectionOrder.push('after-check');
+							return 'healthy' as const;
+						},
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'before-column-type',
+						digest: 'v1',
+						phase: 'before-generated-ddl',
+						owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+						inspect: async () => {
+							inspectionOrder.push('before-column-type');
+							return 'healthy' as const;
+						},
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([]);
+		expect(inspectionOrder).toEqual(['before-column-type', 'after-check']);
+	});
+
+	it('keeps a non-interleaved planned list in declaration order', async () => {
+		await expect(
+			planPgApplicationSteps({
+				client: { query: vi.fn(async () => ({ rows: [] })) } as never,
+				database: 'app',
+				schema: 'public',
+				check: true,
+				steps: [
+					{
+						kind: 'assert',
+						id: 'before-unhealthy',
+						digest: 'v1',
+						phase: 'before-generated-ddl',
+						inspect: async () => 'unhealthy' as const,
+						apply,
+					},
+					{
+						kind: 'assert',
+						id: 'after-deferred',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						inspect: async () => 'healthy' as const,
+						apply,
+					},
+				],
+			}),
+		).resolves.toEqual([
+			{
+				kind: 'application-step',
+				id: 'before-unhealthy',
+				step: 'assert',
+				inspected: true,
+			},
+			{
+				kind: 'application-step',
+				id: 'after-deferred',
+				step: 'assert',
+				inspected: false,
+			},
+		]);
+	});
+
 	it('keeps mixed application steps in declaration order in check plans', async () => {
 		await expect(
 			planPgApplicationSteps({

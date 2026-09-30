@@ -307,7 +307,10 @@ A refusal throws `PgConvergeRefusalError`: `refusal` names the case and `detail`
 invalid model, a connection failure, a database error while planning — is thrown as it is, except a
 database error inside an `initialize` preflight scope (a missing privilege, for example), which
 becomes `initialization-refused` with the error in `initialization.detail`, and an error in an
-application step's `inspect` or `apply`, which becomes `application-step-failed`. A failure
+application step's `inspect` or `apply`, or while rendering an owned CHECK's state, which becomes
+`application-step-failed` naming the step with the original error as `cause`. A failed cleanup of
+that rendering scope destroys the session: during planning only the rendering scope is rolled back
+and no step ran; during execution the step transaction rolls back as for any `application-step-failed`. A failure
 during execution becomes an `execution-refused`, `adoption-refused` or `application-step-failed`
 refusal, or a `partially-applied` or `transport-ambiguous` result.
 
@@ -315,7 +318,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 |---|---|
 | `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
-| `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
+| `application-step-failed` | A step's `inspect` or `apply` threw, owned CHECK state rendering failed, an `assert` stayed unhealthy after `apply`, or a step timed out. It names the step and carries the original rendering error as `cause`; failed rendering-scope cleanup destroys the session. During planning only that scope is rolled back and no step ran; during execution the step transaction is rolled back and not recorded. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
 | `initialization-refused` | `initialize` could not create the ledger: under `'pristine'` a declared table or sequence already exists, or the schema does not exist, or the role lacks a privilege. `initialization` carries the failing home, a refusal code, the step and the detail; the `'pristine'` guard's code is `pristine-live-relations`, other failures carry the preflight's code. The schema's ledger is created only after `dbsp_meta` is ready, so a refused `dbsp_meta` leaves the schema without a ledger and the next call refuses again; a refusal of the schema itself can leave `dbsp_meta` prepared, which the next call reuses. |
 | `incompatible-ledger` | The schema's ledger fails its currency check; `detail` gives the reason. |

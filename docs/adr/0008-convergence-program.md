@@ -61,7 +61,10 @@ How they are recorded and run:
   built-in names win; otherwise a name that exists
   in the target resolves there and a session temporary table cannot shadow it, while a name absent
   from it continues down the path. A target schema literally named `$user` cannot host steps.
-  Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
+  An owned-CHECK state rendering failure during planning or execution is `application-step-failed`
+  naming the step with the original error as `cause`; failed rendering-scope cleanup destroys the
+  session, so planning rolls back only that scope without running a step while execution rolls back
+  its step transaction. Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
   deadline on the callback; planning admission runs without them.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and

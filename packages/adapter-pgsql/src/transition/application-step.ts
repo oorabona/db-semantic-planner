@@ -898,33 +898,39 @@ export async function planPgApplicationSteps(input: {
 	const deferAssertInspection =
 		input.hasPendingGeneratedWork === true || pendingOnceIds.size > 0;
 	let unhealthyAssertFound = false;
-	for (const step of input.steps) {
-		if (step.kind === 'once') {
-			if (pendingOnceIds.has(step.id))
-				planned.push({ kind: 'application-step', id: step.id, step: 'once' });
-			continue;
-		}
-		if (deferAssertInspection || unhealthyAssertFound) {
-			if (input.check)
+	for (const phase of [
+		'before-generated-ddl',
+		'after-generated-ddl',
+	] as const) {
+		for (const step of input.steps) {
+			if (step.phase !== phase) continue;
+			if (step.kind === 'once') {
+				if (pendingOnceIds.has(step.id))
+					planned.push({ kind: 'application-step', id: step.id, step: 'once' });
+				continue;
+			}
+			if (deferAssertInspection || unhealthyAssertFound) {
+				if (input.check)
+					planned.push({
+						kind: 'application-step',
+						id: step.id,
+						step: 'assert',
+						inspected: false,
+					});
+				continue;
+			}
+			if (
+				(await inspectPgApplicationStepDuringPlanning(input, step)) ===
+				'unhealthy'
+			) {
+				unhealthyAssertFound = true;
 				planned.push({
 					kind: 'application-step',
 					id: step.id,
 					step: 'assert',
-					inspected: false,
+					inspected: true,
 				});
-			continue;
-		}
-		if (
-			(await inspectPgApplicationStepDuringPlanning(input, step)) ===
-			'unhealthy'
-		) {
-			unhealthyAssertFound = true;
-			planned.push({
-				kind: 'application-step',
-				id: step.id,
-				step: 'assert',
-				inspected: true,
-			});
+			}
 		}
 	}
 	return planned;
