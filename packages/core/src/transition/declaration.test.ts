@@ -100,36 +100,39 @@ describe('managed declaration slicing', () => {
 		);
 	});
 
-	it('keeps declared enum names physical while mapping tables and sequences', () => {
+	it('uses the supplied model names as physical declaration addresses', () => {
 		const declarations = declarationSetFromModel(
 			{
 				...model(
 					table({
-						name: 'postComments',
-						columns: [{ name: 'postId', type: 'uuid', nullable: false }],
-						primaryKey: 'postId',
+						name: 'post_comments',
+						columns: [{ name: 'post_id', type: 'uuid', nullable: false }],
+						primaryKey: 'post_id',
 						foreignKeys: [
 							{
-								columns: ['postId'],
-								references: { table: 'blogPosts', columns: ['id'] },
+								columns: ['post_id'],
+								references: { table: 'blog_posts', columns: ['id'] },
 							},
 						],
-						indexes: [{ name: 'postCommentsPostIdIdx', columns: ['postId'] }],
+						indexes: [
+							{ name: 'post_comments_post_id_idx', columns: ['post_id'] },
+						],
 						checkConstraints: [
-							{ name: 'postCommentsCheck', expression: 'post_id IS NOT NULL' },
+							{
+								name: 'post_comments_check',
+								expression: 'post_id IS NOT NULL',
+							},
 						],
 					}),
 				),
 				enums: new Map([
 					['commentStatus', { name: 'commentStatus', values: ['open'] }],
 				]),
-				sequences: new Map([['postCommentsSeq', { name: 'postCommentsSeq' }]]),
+				sequences: new Map([
+					['post_comments_seq', { name: 'post_comments_seq' }],
+				]),
 			},
 			context,
-			{
-				toDatabase: (name) =>
-					name.replace(/([a-z0-9])([A-Z])/gu, '$1_$2').toLowerCase(),
-			},
 		);
 		expect(
 			declarations.declarations.map((declaration) => ({

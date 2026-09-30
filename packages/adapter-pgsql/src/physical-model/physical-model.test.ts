@@ -1,3 +1,4 @@
+import { declarationSetFromModel } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -67,6 +68,59 @@ const orderItems: TableIR = {
 };
 
 describe('createPgPhysicalModel', () => {
+	it('supplies physical names to core declaration binding', () => {
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'app',
+			dbCasing: 'snake_case',
+			model: model([
+				{
+					name: 'userProfiles',
+					columns: [{ name: 'ownerId', type: 'integer', nullable: false }],
+					primaryKey: 'ownerId',
+					foreignKeys: [],
+					indexes: [{ name: 'userProfilesOwnerIndex', columns: ['ownerId'] }],
+					checkConstraints: [
+						{ name: 'userProfilesOwnerCheck', expression: 'owner_id > 0' },
+					],
+				},
+			]),
+		});
+		const declarations = declarationSetFromModel(physical.model, {
+			engine: 'postgresql',
+			database: 'app',
+			schema: physical.schema,
+		});
+
+		expect(
+			declarations.declarations.map((declaration) => ({
+				kind: declaration.address.kind,
+				name: declaration.address.name,
+				parent: declaration.address.parent?.name,
+			})),
+		).toEqual(
+			expect.arrayContaining([
+				{ kind: 'table', name: 'user_profiles', parent: undefined },
+				{ kind: 'column', name: 'owner_id', parent: 'user_profiles' },
+				{
+					kind: 'index',
+					name: 'user_profiles_owner_index',
+					parent: 'user_profiles',
+				},
+				{
+					kind: 'constraint',
+					name: 'pk_user_profiles',
+					parent: 'user_profiles',
+				},
+				{
+					kind: 'constraint',
+					name: 'user_profiles_owner_check',
+					parent: 'user_profiles',
+				},
+			]),
+		);
+	});
+
 	it('is the sole naming authority for DDL, comparison, and migration SQL', () => {
 		const logical = model([
 			{

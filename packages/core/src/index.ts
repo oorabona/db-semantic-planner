@@ -388,7 +388,6 @@ export {
 	createStagedTransitionOrchestrator,
 	createTransitionLessor,
 	createTransitionRunMetadata,
-	type DeclarationNamingStrategy,
 	declarationSetFromModel,
 	defaultIndexName,
 	enumAddDelta,

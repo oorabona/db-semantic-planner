@@ -3,8 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
+	createPgPhysicalModel,
 	escapeDiagnosticText,
-	getNamingPluginForDbCasing,
 	type PgReinitializePreflightPool,
 	runPgReinitializePreflight,
 } from '@dbsp/adapter-pgsql';
@@ -117,15 +117,11 @@ function declarationsForScopes(
 	model: Awaited<ReturnType<typeof loadSchema>>['model'],
 	database: string,
 	scopes: readonly string[],
-	naming: Parameters<typeof declarationSetFromModel>[2],
 ): DeclarationSet {
 	const declarations = scopes.flatMap(
 		(schema) =>
-			declarationSetFromModel(
-				model,
-				{ engine: 'postgresql', database, schema },
-				naming,
-			).declarations,
+			declarationSetFromModel(model, { engine: 'postgresql', database, schema })
+				.declarations,
 	);
 	// Database-scoped declarations (extensions) are shared by every tenant
 	// model, while their home ledger is singular. Keep one exact declaration.
@@ -170,19 +166,25 @@ export async function runPreflight(
 		throw new Error('dbsp preflight requires --reinitialize');
 	if (!options.out)
 		throw new Error('dbsp preflight --reinitialize requires --out <file>');
-	if (options.scopes.length === 0)
+	const physicalSchema = options.scopes[0];
+	if (physicalSchema === undefined)
 		throw new Error(
 			'dbsp preflight requires at least one explicit --scope <schema>',
 		);
 	const loaded = await deps.loadSchema(options.schemaFile);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: loaded.model,
+		schema: physicalSchema,
+		...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+	});
 	const connection = await deps.createDbConnection(options.db);
 	try {
 		const database = await databaseName(connection.pool);
 		const declarations = declarationsForScopes(
-			loaded.model,
+			physical.model,
 			database,
 			options.scopes,
-			getNamingPluginForDbCasing(loaded.dbCasing ?? 'preserve'),
 		);
 		return await runPgReinitializePreflight({
 			pool: connection.pool as unknown as PgReinitializePreflightPool,

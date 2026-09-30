@@ -221,7 +221,6 @@ export {
 	assertCanonicalizableJson,
 	bindDeclarationSet,
 	type DeclarationAddressContext,
-	type DeclarationNamingStrategy,
 	declarationSetFromModel,
 	validateDeclarationModel,
 } from './declaration.js';

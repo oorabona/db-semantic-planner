@@ -307,7 +307,7 @@ describe('dbsp plan outcomes', () => {
 		expect(runMetadata.planDigest).toBe(transitionPlanDigest(result.plan!));
 	});
 
-	it('binds declarations using the schema physical naming strategy', async () => {
+	it('binds declarations from the schema physical model', async () => {
 		const camelCaseModel = {
 			...model,
 			tables: new Map([

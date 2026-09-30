@@ -439,7 +439,6 @@ export {
 	runPgReinitializePreflight,
 	SET_NOT_NULL_RULE_ID,
 	type SetNotNullMatch,
-	type SetNotNullRuleOptions,
 	TransitionRunIdentityMismatchError,
 	validatePgLedgerRuntimeIntegrity,
 	validatePgManagedLedgerCurrency,

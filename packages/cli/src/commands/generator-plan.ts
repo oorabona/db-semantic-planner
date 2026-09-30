@@ -18,7 +18,6 @@ import {
 	createPgTransitionRunPersister,
 	generatedPostconditionForChange,
 	generateMigrationSQL,
-	getNamingPluginForDbCasing,
 	ReferencedKeyRemovalError,
 	readPgCatalogueIdentity,
 	renderPgTableReaddressStatements,
@@ -475,11 +474,19 @@ export async function runGeneratorPlan(input: {
 				`generator planning refuses sequence adoption for ${sequence.name}: sequence adoption is available through convergePg / dbsp migrate`,
 			);
 	}
+	const schema = input.schema ?? 'public';
 	const dbCasing = loaded.dbCasing ?? 'preserve';
-	const naming = getNamingPluginForDbCasing(dbCasing);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model: loaded.model,
+		schema,
+		...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+	});
+	const physicalTable = (name: string) =>
+		physical.inventory.get({ kind: 'table', schema, name });
 	for (const table of loaded.model.tables.values()) {
 		if (table.replace !== true) continue;
-		const physicalName = naming.toDatabase(table.name);
+		const physicalName = physicalTable(table.name);
 		if (physicalName !== table.name)
 			throw new Error(
 				`generator planning refuses replacement ${table.name}: dbCasing addresses physical table ${physicalName}; replacement requires preserve casing`,
@@ -487,13 +494,6 @@ export async function runGeneratorPlan(input: {
 	}
 	const { pool } = await createDbConnection(input.db);
 	try {
-		const schema = input.schema ?? 'public';
-		const physical = createPgPhysicalModel({
-			mode: 'logical',
-			model: loaded.model,
-			schema,
-			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
-		});
 		const diff = await comparePgsqlDatabaseSchema(
 			createPgsqlAdapter(pool),
 			physical,
@@ -542,7 +542,7 @@ export async function runGeneratorPlan(input: {
 		const adoptionMismatches = new Set<string>();
 		for (const table of loaded.model.tables.values()) {
 			if (table.adopt !== true) continue;
-			const physicalName = naming.toDatabase(table.name);
+			const physicalName = physicalTable(table.name);
 			adoptionPhysicalNames.set(table.name, physicalName);
 			const compared = await comparePgsqlDeclaredAdoptionSchema({
 				executor: pool,
