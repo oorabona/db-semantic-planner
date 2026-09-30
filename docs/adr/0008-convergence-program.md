@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-09-29). It records the decision taken on #837. The check mode, `initialize` and
-application steps are shipped; the program signature below is the accepted target, and "Deliveries" gives the state of each part.
+application steps and ownership are shipped; "Deliveries" gives the state of each part.
 
 ## Context
 
@@ -16,9 +16,9 @@ and each dbsp upgrade can break the pairing.
 
 ## Decision
 
-dbsp owns one convergence program: `convergePg(pool, program, { mode, initialize })`, where the program
-holds the model, the schema, `dbCasing`, the external indexes and the application's declared steps. dbsp
-computes every fingerprint and records every step run in its ledger under its lock.
+dbsp owns one convergence program: `convergePg(pool, model, options)`, where `options` holds the schema,
+`dbCasing`, the external indexes, the application's declared steps, `mode` and `initialize`. dbsp computes
+every fingerprint and records every step run in its ledger under its lock.
 
 ### `check` plans without committing
 
@@ -126,8 +126,10 @@ application should not run as.
    generated DDL, while an owned column type is still emitted with its declared type when its table or
    column is created; each step's canonical `owns` is included in `planDigest`. `inspect` remains
    read-only and receives canonical owned-CHECK health state. Shipped.
-5. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
-   and check mode is selected with `ConvergePgCheckOptions`.
+5. Composition into a `convergePg(pool, program, { mode, initialize })` signature: dropped
+   (operator decision 2026-09-30). It only regrouped what `(pool, model, options)` already carries and
+   would have cost a deprecation path on a published API. It is reconsidered if a consumer needs to load
+   a program as one value, for example `dbsp migrate` loading declared steps from a module.
 
 ## Consequences
 
