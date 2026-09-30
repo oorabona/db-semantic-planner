@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
 	);
 	return {
 		compare: vi.fn(),
+		declaredComparison: vi.fn(),
 		createStep: vi.fn(),
 		generate: vi.fn<(...args: unknown[]) => readonly string[]>(() => [
 			'CREATE TABLE "users" ()',
@@ -97,7 +98,9 @@ vi.mock('../ddl/live-diff.js', async (importOriginal) => ({
 			readonly schema: string;
 			readonly dbCasing: DbCasing;
 			readonly externalIndexMask?: ReadonlySet<string>;
+			readonly ownershipMask?: unknown;
 		};
+		forward(mocks.declaredComparison, [input]);
 		const declaredTables = new Set(
 			[...input.model.tables.values()].map((table) =>
 				input.dbCasing === 'snake_case'
@@ -1039,6 +1042,49 @@ describe('convergePg refusal boundary', () => {
 		},
 	);
 
+	it.each([
+		['an owns symbol key', () => ({ checks: [], [Symbol('extra')]: [] })],
+		[
+			'an owns non-enumerable key',
+			() => {
+				const owns = { checks: [] };
+				Object.defineProperty(owns, 'extra', { value: [], enumerable: false });
+				return owns;
+			},
+		],
+		[
+			'an entry symbol key',
+			() => ({
+				checks: [{ table: 'projects', name: 'state', [Symbol('extra')]: true }],
+			}),
+		],
+	] as const)(
+		'refuses %s as invalid-options before connecting',
+		async (_case, makeOwns) => {
+			const pool = poolFor();
+			await expect(
+				Reflect.apply(convergePg, undefined, [
+					pool,
+					modelWithTable('projects'),
+					{
+						steps: [
+							{
+								kind: 'assert',
+								id: 'invalid-owned-keys',
+								digest: 'v1',
+								phase: 'after-generated-ddl',
+								owns: makeOwns(),
+								inspect: async () => 'healthy',
+								apply: async () => undefined,
+							},
+						],
+					},
+				]),
+			).rejects.toMatchObject({ refusal: 'invalid-options' });
+			expect(pool.connect).not.toHaveBeenCalled();
+		},
+	);
+
 	it('allows an owned local unique index for a foreign key targeting another schema', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		const pool = poolFor();
@@ -1221,6 +1267,77 @@ describe('convergePg refusal boundary', () => {
 				],
 			}),
 		);
+	});
+
+	it('uses the first read of an owned index name for ownership masking', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const declared = modelWithTables([
+			{
+				name: 'projects',
+				columns: [
+					{ name: 'code', type: 'integer', nullable: false },
+					{ name: 'revision', type: 'integer', nullable: false },
+				],
+				foreignKeys: [],
+				indexes: [
+					{ name: 'idx_projects_code', columns: ['code'], unique: true },
+					{ name: 'idx_projects_surface', columns: ['revision'] },
+				],
+			},
+			{
+				name: 'entries',
+				columns: [{ name: 'project_code', type: 'integer', nullable: false }],
+				foreignKeys: [
+					{
+						columns: ['project_code'],
+						references: { table: 'projects', columns: ['code'] },
+					},
+				],
+				indexes: [],
+			},
+		]);
+		mocks.introspect.mockResolvedValue(declared);
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		let nameReads = 0;
+		const result = await Reflect.apply(convergePg, undefined, [
+			poolFor(),
+			declared,
+			{
+				mode: 'check',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'snapshot-owned-index',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: {
+							indexes: [
+								{
+									table: 'projects',
+									get name() {
+										nameReads += 1;
+										return nameReads === 1
+											? 'idx_projects_surface'
+											: 'idx_projects_code';
+									},
+								},
+							],
+						},
+						inspect: async () => 'unhealthy',
+						apply: async () => undefined,
+					},
+				],
+			},
+		]);
+		expect(result).toMatchObject({ kind: 'would-apply' });
+		expect(nameReads).toBe(1);
+		expect(mocks.declaredComparison.mock.calls[0]?.[0]).toMatchObject({
+			ownershipMask: {
+				indexes: new Set([
+					JSON.stringify(['projects', 'idx_projects_surface']),
+				]),
+			},
+		});
 	});
 
 	it('does not run an application step apply callback in check mode', async () => {
@@ -3320,6 +3437,22 @@ describe('convergePg refusal boundary', () => {
 			kind: 'no-drift',
 			applied: [],
 		});
+	});
+
+	it('passes the caller model without an ownership mask when no step owns a surface', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mocks.identity.mockResolvedValue(undefined);
+		const model = emptyModel();
+		await expect(convergePg(poolFor(), model)).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		expect(mocks.declaredComparison).toHaveBeenCalledWith(
+			expect.objectContaining({ model }),
+		);
+		expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
+			'ownershipMask',
+		);
 	});
 
 	it('refuses a declared table absent after comparison without sending DDL', async () => {

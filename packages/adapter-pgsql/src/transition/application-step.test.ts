@@ -308,9 +308,22 @@ describe('converge application steps', () => {
 			inspect: async () => 'healthy' as const,
 			apply,
 		};
-		expect(validatePgConvergeApplicationSteps([assertion])).toEqual([
+		const validated = validatePgConvergeApplicationSteps([assertion]);
+		expect(validated).toEqual([
 			expect.objectContaining({ owns: assertion.owns }),
 		]);
+		const first = validated[0];
+		if (first?.kind !== 'assert' || first.owns === undefined)
+			throw new Error('expected validated assertion ownership');
+		const owned = first.owns;
+		const checks = owned.checks;
+		if (checks === undefined)
+			throw new Error('expected validated owned checks');
+		expect(owned).not.toBe(assertion.owns);
+		expect(checks).not.toBe(assertion.owns.checks);
+		expect(checks[0]).not.toBe(assertion.owns.checks[0]);
+		assertion.owns.checks.push({ table: 'projects', name: 'later' });
+		expect(checks).toEqual([{ table: 'projects', name: 'project_state' }]);
 		expect(() =>
 			validatePgConvergeApplicationSteps([
 				{
@@ -331,6 +344,88 @@ describe('converge application steps', () => {
 				},
 			]),
 		).toThrow('once steps cannot declare owns');
+	});
+
+	it('reads each ownership value once into a snapshot', () => {
+		let nameReads = 0;
+		const entry = {
+			table: 'projects',
+			get name() {
+				nameReads += 1;
+				return nameReads === 1 ? 'first_name' : 'second_name';
+			},
+		};
+		const owns = { indexes: [entry] };
+		const [validated] = validatePgConvergeApplicationSteps([
+			{
+				kind: 'assert',
+				id: 'read-owned-name-once',
+				digest: 'v1',
+				phase: 'after-generated-ddl',
+				owns,
+				inspect: async () => 'healthy' as const,
+				apply,
+			},
+		]);
+		expect(validated).toMatchObject({
+			owns: { indexes: [{ table: 'projects', name: 'first_name' }] },
+		});
+		expect(nameReads).toBe(1);
+	});
+
+	it.each([
+		['an owns symbol key', () => ({ [Symbol('extra')]: [], checks: [] })],
+		[
+			'an owns non-enumerable key',
+			() => {
+				const owns = { checks: [] };
+				Object.defineProperty(owns, 'extra', { value: [], enumerable: false });
+				return owns;
+			},
+		],
+		[
+			'an entry symbol key',
+			() => ({
+				checks: [{ table: 'projects', name: 'state', [Symbol('extra')]: true }],
+			}),
+		],
+	] as const)('refuses %s', (_case, makeOwns) => {
+		expect(() =>
+			validatePgConvergeApplicationSteps([
+				{
+					kind: 'assert',
+					id: 'invalid-owned-keys',
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					owns: makeOwns(),
+					inspect: async () => 'healthy' as const,
+					apply,
+				},
+			]),
+		).toThrow('owns');
+	});
+
+	it('treats an own undefined ownership list as absent', () => {
+		expect(
+			validatePgConvergeApplicationSteps([
+				{
+					kind: 'assert',
+					id: 'undefined-owned-checks',
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					owns: {
+						checks: undefined,
+						indexes: [{ table: 'projects', name: 'project_state_index' }],
+					},
+					inspect: async () => 'healthy' as const,
+					apply,
+				},
+			]),
+		).toMatchObject([
+			{
+				owns: { indexes: [{ table: 'projects', name: 'project_state_index' }] },
+			},
+		]);
 	});
 
 	it('rolls back and identifies a planning inspection failure', async () => {

@@ -518,6 +518,21 @@ function validateApplicationOwnership(
 	const tables = new Map(
 		[...model.tables.values()].map((table) => [table.name, table]),
 	);
+	const foreignKeyReferencedKeys = new Set(
+		[...model.tables.values()].flatMap((table) =>
+			table.foreignKeys.flatMap((foreignKey) => {
+				if (
+					foreignKey.references.schema !== undefined &&
+					foreignKey.references.schema !== schema
+				)
+					return [];
+				const columns = canonicalColumnSet(foreignKey.references.columns);
+				return columns === undefined
+					? []
+					: [pgsqlSurfaceKey(foreignKey.references.table, columns)];
+			}),
+		),
+	);
 	for (const step of steps) {
 		if (step.kind !== 'assert' || step.owns === undefined) continue;
 		const masks: {
@@ -616,14 +631,8 @@ function validateApplicationOwnership(
 			const index = matching[0]!;
 			if (
 				index.unique === true &&
-				[...model.tables.values()].some((candidate) =>
-					candidate.foreignKeys.some(
-						(foreignKey) =>
-							(foreignKey.references.schema === undefined ||
-								foreignKey.references.schema === schema) &&
-							foreignKey.references.table === table.name &&
-							sameColumnSet(index.columns, foreignKey.references.columns),
-					),
+				foreignKeyReferencedKeys.has(
+					pgsqlSurfaceKey(table.name, canonicalColumnSet(index.columns) ?? ''),
 				)
 			)
 				throw invalidOptions(
@@ -732,7 +741,7 @@ async function compareConvergeMaskedSchema(input: {
 	readonly schema: string;
 	readonly casing: DbCasing;
 	readonly externalIndexes: ReadonlySet<string>;
-	readonly ownership: ResolvedOwnershipMask;
+	readonly ownership?: ResolvedOwnershipMask;
 }) {
 	return comparePgsqlDeclaredAdoptionSchema({
 		executor: input.executor,
@@ -740,7 +749,9 @@ async function compareConvergeMaskedSchema(input: {
 		schema: input.schema,
 		dbCasing: input.casing,
 		externalIndexMask: input.externalIndexes,
-		ownershipMask: input.ownership,
+		...(input.ownership === undefined
+			? {}
+			: { ownershipMask: input.ownership }),
 	});
 }
 
@@ -1474,23 +1485,26 @@ export async function convergePg(
 		naming,
 		schema,
 	);
-	const ownershipMask: ResolvedOwnershipMask = {
-		checks: new Set(
-			[...applicationOwnership.values()].flatMap((ownership) => [
-				...ownership.mask.checks,
-			]),
-		),
-		columnTypes: new Set(
-			[...applicationOwnership.values()].flatMap((ownership) => [
-				...ownership.mask.columnTypes,
-			]),
-		),
-		indexes: new Set(
-			[...applicationOwnership.values()].flatMap((ownership) => [
-				...ownership.mask.indexes,
-			]),
-		),
-	};
+	const ownershipMask: ResolvedOwnershipMask | undefined =
+		applicationOwnership.size === 0
+			? undefined
+			: {
+					checks: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.checks,
+						]),
+					),
+					columnTypes: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.columnTypes,
+						]),
+					),
+					indexes: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.indexes,
+						]),
+					),
+				};
 	if (applicationSteps.length > 0 && schema === '$user')
 		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
@@ -1626,7 +1640,7 @@ export async function convergePg(
 			schema,
 			casing,
 			externalIndexes,
-			ownership: ownershipMask,
+			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 		});
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
@@ -2106,7 +2120,7 @@ export async function convergePg(
 					schema,
 					casing,
 					externalIndexes,
-					ownership: ownershipMask,
+					...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 				});
 				return !compared.changes.some(
 					(change) => change.table === address.name,

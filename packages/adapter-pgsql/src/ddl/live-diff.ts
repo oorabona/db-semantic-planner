@@ -321,9 +321,16 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 					);
 				})();
 	const naming = getNamingPluginForDbCasing(input.dbCasing);
+	const ownershipMask =
+		input.ownershipMask !== undefined &&
+		(input.ownershipMask.checks.size > 0 ||
+			input.ownershipMask.columnTypes.size > 0 ||
+			input.ownershipMask.indexes.size > 0)
+			? input.ownershipMask
+			: undefined;
 	const desired = modelWithOwnedSurfacesRemoved(
 		input.model,
-		input.ownershipMask,
+		ownershipMask,
 		naming,
 	);
 	const declaredTables = new Set(
@@ -395,13 +402,8 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 								),
 							),
 						};
-						const masked = maskOwnedLiveSurfaces(scoped, input.ownershipMask);
-						applyOwnedColumnTypeMask(
-							desired,
-							masked,
-							input.ownershipMask,
-							naming,
-						);
+						const masked = maskOwnedLiveSurfaces(scoped, ownershipMask);
+						applyOwnedColumnTypeMask(desired, masked, ownershipMask, naming);
 						return masked;
 					});
 			return Reflect.get(target, property, receiver);

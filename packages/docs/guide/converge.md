@@ -87,7 +87,8 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
 
 ## What converge applies
 
-- **New tables**, with the indexes, CHECK constraints and foreign keys declared on them.
+- **New tables**, with the indexes, CHECK constraints and foreign keys declared on them, except that
+  [owned CHECKs and indexes](#owned-surfaces) are left to their assertion.
 - **New sequences.** A sequence is created under its physical name, the declared name mapped through
   `dbCasing` like a table's (`orderNumberSeq` becomes `order_number_seq` under `snake_case`). A raw
   `nextval(...)` default is not rewritten, so it names the physical sequence. When a live sequence
@@ -100,10 +101,11 @@ runs still executing, and the execution ids no dbsp command resolves, whose owne
   [Adopting an existing install](#adopting-an-existing-install)).
 
 It does not drop, rename or change existing definitions, it does not add indexes, CHECK constraints
-or foreign keys to a table that already exists, and it refuses `replace` and `readdress`. It does not
-create enums or extensions: those the model uses must already exist. An enum's declared name is its
-physical PostgreSQL type name under every `dbCasing`, the name its columns' types refer to, so
-declare `mood_type` to match a live `mood_type`.
+or foreign keys to a table that already exists, and it refuses `replace` and `readdress`, except that
+an assert may change an [owned CHECK, index or column type](#owned-surfaces). Owned CHECKs and indexes
+on an existing table are left to that assert. It does not create enums or extensions: those the model
+uses must already exist. An enum's declared name is its physical PostgreSQL type name under every
+`dbCasing`, the name its columns' types refer to, so declare `mood_type` to match a live `mood_type`.
 
 - A foreign key needs both of its tables created by the same call, its referenced columns covered by
   a primary key, a unique column or a declared unique index that is neither partial nor on an
@@ -280,10 +282,11 @@ check it. Other column properties, including defaults and nullability, remain co
 }
 ```
 
-`owns` must be a non-empty object containing only `checks`, `columnTypes`, and `indexes` arrays.
+`owns` must be a non-empty object containing only `checks`, `columnTypes`, and `indexes` arrays; at
+runtime, a list set to `undefined` is treated as absent.
 Entries have exactly the required non-empty string fields and must name one declared surface; no
 surface may be owned twice. CHECKs and indexes require `after-generated-ddl`. An owned unique index
-cannot be the declared key required by a fresh foreign key. A `once` cannot own anything.
+cannot be a key referenced by a declared foreign key toward the converged schema. A `once` cannot own anything.
 `owns` is not part of the recorded step, so changing it never refuses `application-step-changed`;
 it changes the check-mode `planDigest`.
 
@@ -336,8 +339,9 @@ them as `unmanaged-object`. Two ways take them into management:
   apply to both ways:
 
 - A table is adopted only if it exists, its ledger state is unknown, and it matches its declaration
-  exactly, columns, types, defaults, keys and indexes included (after
-  [External indexes](#external-indexes) masking). A mismatch found while planning refuses
+  exactly, columns, types, defaults, keys and indexes included (after [External indexes](#external-indexes)
+  masking and [Owned surfaces](#owned-surfaces) masking: owned CHECKs, owned indexes and owned column
+  types are masked). A mismatch found while planning refuses
   `adoption-refused` before anything is written.
 - Each table is adopted in its own transaction. A table that changes while its adoption runs is
   refused, and tables adopted earlier in the same call stay adopted; the next call skips them.

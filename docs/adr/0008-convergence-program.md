@@ -118,8 +118,10 @@ application should not run as.
 3. `once` and `assert` steps (`steps` option, refusals `application-step-changed` and
    `application-step-failed`): shipped.
 4. Ownership: an `assert` declares the named CHECK constraints, column types and named indexes it
-   owns, and converge leaves them out of every comparison (diff, planning refusals, generated DDL,
-   `no-drift`, check plan, plan digest), so the model can still declare them. Shipped.
+   owns, and converge leaves them out of schema comparison, planning refusals, `no-drift` and adoption
+   re-verification, so the model can still declare them. Owned CHECKs and indexes are left out of
+   generated DDL, while an owned column type is still emitted with its declared type when its table or
+   column is created; each step's canonical `owns` is included in `planDigest`. Shipped.
 5. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
    and check mode is selected with `ConvergePgCheckOptions`.
 
