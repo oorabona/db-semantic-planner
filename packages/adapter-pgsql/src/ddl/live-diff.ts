@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { defaultIndexName } from '@dbsp/core';
 import { assertDeclaredEnumMapIdentity } from '@dbsp/core/internal';
 import type {
 	CheckConstraintIR,
@@ -89,6 +90,15 @@ export interface ComparePgsqlDeclaredAdoptionSchemaInput {
 	readonly dbCasing: DbCasing;
 	/** Physical [table, index] JSON keys whose drop drift is unmanaged. */
 	readonly externalIndexMask?: ReadonlySet<string>;
+	/** Physical [table, surface] JSON keys maintained by application assertions. */
+	readonly ownershipMask?: PgsqlDeclaredAdoptionOwnershipMask;
+}
+
+/** Internal converge-only declaration mask; public database comparison is unchanged. */
+export interface PgsqlDeclaredAdoptionOwnershipMask {
+	readonly checks: ReadonlySet<string>;
+	readonly columnTypes: ReadonlySet<string>;
+	readonly indexes: ReadonlySet<string>;
 }
 
 /** Minimal pool surface retained so callers can keep their executor opaque. */
@@ -146,6 +156,147 @@ function indexNameForChange(change: SchemaChange): string | undefined {
 		: undefined;
 }
 
+/** Stable physical [table, name] key shared by converge's index masks. */
+export function pgsqlSurfaceKey(table: string, name: string): string {
+	return JSON.stringify([table, name]);
+}
+
+/** Resolve a declared index to the exact name PostgreSQL will receive. */
+export function resolvePgsqlDeclaredIndexName(
+	table: TableIR,
+	index: IndexIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): string {
+	const physicalTable = naming.toDatabase(table.name);
+	return defaultIndexName(physicalTable, {
+		...index,
+		...(index.name === undefined
+			? {}
+			: { name: naming.toDatabase(index.name) }),
+		columns: index.columns.map((column) => naming.toDatabase(column)),
+	});
+}
+
+function modelWithOwnedSurfacesRemoved(
+	model: ModelIR,
+	mask: PgsqlDeclaredAdoptionOwnershipMask | undefined,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): ModelIR {
+	if (!mask) return model;
+	const tables = new Map(
+		[...model.tables.values()].map((table) => {
+			const physicalTable = naming.toDatabase(table.name);
+			return [
+				table.name,
+				{
+					...table,
+					checkConstraints: (table.checkConstraints ?? []).filter(
+						(check) =>
+							!mask.checks.has(
+								pgsqlSurfaceKey(
+									physicalTable,
+									getCheckConstraintDatabaseName(check, naming),
+								),
+							),
+					),
+					indexes: table.indexes.filter(
+						(index) =>
+							!mask.indexes.has(
+								pgsqlSurfaceKey(
+									physicalTable,
+									resolvePgsqlDeclaredIndexName(table, index, naming),
+								),
+							),
+					),
+				},
+			] as const;
+		}),
+	);
+	return {
+		...model,
+		tables,
+		getTable: (name) => tables.get(name),
+	};
+}
+
+function maskOwnedLiveSurfaces(
+	model: ModelIR,
+	mask: PgsqlDeclaredAdoptionOwnershipMask | undefined,
+): ModelIR {
+	if (!mask) return model;
+	return {
+		...model,
+		tables: new Map(
+			[...model.tables].map(
+				([name, table]) =>
+					[
+						name,
+						{
+							...table,
+							checkConstraints: (table.checkConstraints ?? []).filter(
+								(check) => !mask.checks.has(pgsqlSurfaceKey(name, check.name)),
+							),
+							indexes: table.indexes.filter(
+								(index) =>
+									index.name === undefined ||
+									!mask.indexes.has(pgsqlSurfaceKey(name, index.name)),
+							),
+						},
+					] as const,
+			),
+		),
+	};
+}
+
+function applyOwnedColumnTypeMask(
+	desired: ModelIR,
+	live: ModelIR,
+	mask: PgsqlDeclaredAdoptionOwnershipMask | undefined,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+): void {
+	if (!mask) return;
+	for (const [logicalName, table] of desired.tables) {
+		const physicalTable = naming.toDatabase(logicalName);
+		const liveTable = live.tables.get(physicalTable);
+		if (!liveTable) continue;
+		const columns = table.columns.map((column) => {
+			const physicalColumn = naming.toDatabase(column.name);
+			if (!mask.columnTypes.has(pgsqlSurfaceKey(physicalTable, physicalColumn)))
+				return column;
+			const liveColumn = liveTable.columns.find(
+				(candidate) => candidate.name === physicalColumn,
+			);
+			if (!liveColumn) return column;
+			const {
+				type: _type,
+				originalDbType: _originalDbType,
+				originalDbTypeSchema: _originalDbTypeSchema,
+				originalDbTypeSchemaScope: _originalDbTypeSchemaScope,
+				...other
+			} = column;
+			return {
+				...other,
+				type: liveColumn.type,
+				...(liveColumn.originalDbType === undefined
+					? {}
+					: { originalDbType: liveColumn.originalDbType }),
+				...(liveColumn.originalDbTypeSchema === undefined
+					? {}
+					: { originalDbTypeSchema: liveColumn.originalDbTypeSchema }),
+				...(liveColumn.originalDbTypeSchemaScope === undefined
+					? {}
+					: {
+							originalDbTypeSchemaScope: liveColumn.originalDbTypeSchemaScope,
+						}),
+			};
+		});
+		(desired.tables as Map<string, TableIR>).set(logicalName, {
+			...table,
+			columns,
+		});
+	}
+}
+
 /**
  * PostgreSQL-aware comparison used to admit a declared table adoption. A
  * claimed session remains pinned by constructing a borrowed, transaction-aware
@@ -170,6 +321,18 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 					);
 				})();
 	const naming = getNamingPluginForDbCasing(input.dbCasing);
+	const ownershipMask =
+		input.ownershipMask !== undefined &&
+		(input.ownershipMask.checks.size > 0 ||
+			input.ownershipMask.columnTypes.size > 0 ||
+			input.ownershipMask.indexes.size > 0)
+			? input.ownershipMask
+			: undefined;
+	const desired = modelWithOwnedSurfacesRemoved(
+		input.model,
+		ownershipMask,
+		naming,
+	);
 	const declaredTables = new Set(
 		[...input.model.tables.values()].map((table) =>
 			naming.toDatabase(table.name),
@@ -215,7 +378,7 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 								}
 							}
 						}
-						return {
+						const scoped = {
 							...introspected,
 							tables,
 							relations: new Map(
@@ -239,13 +402,16 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 								),
 							),
 						};
+						const masked = maskOwnedLiveSurfaces(scoped, ownershipMask);
+						applyOwnedColumnTypeMask(desired, masked, ownershipMask, naming);
+						return masked;
 					});
 			return Reflect.get(target, property, receiver);
 		},
 	});
 	const compared = await comparePgsqlDatabaseSchema(
 		declarationScopedAdapter,
-		input.model,
+		desired,
 		{
 			schema: input.schema,
 			dbCasing: input.dbCasing,
@@ -258,7 +424,7 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			const indexName = indexNameForChange(change);
 			return (
 				indexName === undefined ||
-				!input.externalIndexMask?.has(JSON.stringify([change.table, indexName]))
+				!input.externalIndexMask?.has(pgsqlSurfaceKey(change.table, indexName))
 			);
 		}),
 	};

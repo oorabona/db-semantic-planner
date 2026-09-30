@@ -44,8 +44,25 @@ export interface PgConvergeOnceStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'once';
 }
 
+export interface PgConvergeAssertOwnership {
+	readonly checks?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
+	readonly columnTypes?: readonly {
+		readonly table: string;
+		readonly column: string;
+	}[];
+	readonly indexes?: readonly {
+		readonly table: string;
+		readonly name: string;
+	}[];
+}
+
 export interface PgConvergeAssertStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'assert';
+	/** Declaration surfaces maintained by this assertion rather than converge. */
+	readonly owns?: PgConvergeAssertOwnership;
 	readonly inspect: (
 		tx: PgApplicationStepTx,
 	) => Promise<'healthy' | 'unhealthy'> | 'healthy' | 'unhealthy';
@@ -84,6 +101,104 @@ export class PgApplicationStepError extends Error {
 	}
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (value === null || typeof value !== 'object' || Array.isArray(value))
+		return false;
+	const prototype = Object.getPrototypeOf(value);
+	return prototype === Object.prototype || prototype === null;
+}
+
+function validateOwns(owns: unknown): PgConvergeAssertOwnership {
+	if (!isPlainObject(owns))
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns must be a plain object',
+		);
+	const allowed = new Set(['checks', 'columnTypes', 'indexes']);
+	if (
+		!Reflect.ownKeys(owns).every(
+			(key) => typeof key === 'string' && allowed.has(key),
+		)
+	)
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns has an unknown key',
+		);
+
+	const normalized: {
+		checks: { table: string; name: string }[];
+		columnTypes: { table: string; column: string }[];
+		indexes: { table: string; name: string }[];
+	} = { checks: [], columnTypes: [], indexes: [] };
+	for (const [surface, fields] of [
+		['checks', ['table', 'name']],
+		['columnTypes', ['table', 'column']],
+		['indexes', ['table', 'name']],
+	] as const) {
+		if (!Object.hasOwn(owns, surface)) continue;
+		const entries = owns[surface];
+		if (entries === undefined) continue;
+		if (!Array.isArray(entries))
+			throw new PgApplicationStepError(
+				'application-step-failed',
+				'',
+				`converge assert owns.${surface} must be an array`,
+			);
+		for (const entry of entries) {
+			const hasRequiredEnumerableFields =
+				isPlainObject(entry) &&
+				Reflect.ownKeys(entry).length === fields.length &&
+				fields.every((field) =>
+					Object.prototype.propertyIsEnumerable.call(entry, field),
+				);
+			if (!hasRequiredEnumerableFields)
+				throw new PgApplicationStepError(
+					'application-step-failed',
+					'',
+					`converge assert owns.${surface} entries must have exactly non-empty string ${fields.join(' and ')} fields`,
+				);
+			const values = fields.map((field) => entry[field]);
+			if (
+				!values.every((value) => typeof value === 'string' && value.length > 0)
+			)
+				throw new PgApplicationStepError(
+					'application-step-failed',
+					'',
+					`converge assert owns.${surface} entries must have exactly non-empty string ${fields.join(' and ')} fields`,
+				);
+			if (surface === 'columnTypes')
+				normalized.columnTypes.push({
+					table: values[0] as string,
+					column: values[1] as string,
+				});
+			else
+				normalized[surface].push({
+					table: values[0] as string,
+					name: values[1] as string,
+				});
+		}
+	}
+	if (
+		normalized.checks.length === 0 &&
+		normalized.columnTypes.length === 0 &&
+		normalized.indexes.length === 0
+	)
+		throw new PgApplicationStepError(
+			'application-step-failed',
+			'',
+			'converge assert owns must name at least one surface',
+		);
+	return {
+		...(normalized.checks.length === 0 ? {} : { checks: normalized.checks }),
+		...(normalized.columnTypes.length === 0
+			? {}
+			: { columnTypes: normalized.columnTypes }),
+		...(normalized.indexes.length === 0 ? {} : { indexes: normalized.indexes }),
+	};
+}
+
 /** Validate before a pool client is acquired; wording deliberately omits caller data. */
 export function validatePgConvergeApplicationSteps(
 	steps: unknown,
@@ -113,6 +228,8 @@ export function validatePgConvergeApplicationSteps(
 		const statementTimeoutMs = step.statementTimeoutMs;
 		const apply = step.apply;
 		const inspect = step.inspect;
+		const hasOwns = Object.hasOwn(step, 'owns');
+		const owns = hasOwns ? step.owns : undefined;
 		if (kind !== 'once' && kind !== 'assert')
 			throw new PgApplicationStepError(
 				'application-step-failed',
@@ -174,6 +291,14 @@ export function validatePgConvergeApplicationSteps(
 				'',
 				'converge assert inspect must be a function',
 			);
+		if (kind === 'once' && hasOwns)
+			throw new PgApplicationStepError(
+				'application-step-failed',
+				'',
+				'converge once steps cannot declare owns',
+			);
+		const validatedOwns =
+			kind === 'assert' && hasOwns ? validateOwns(owns) : undefined;
 		return kind === 'once'
 			? {
 					kind: 'once',
@@ -201,6 +326,7 @@ export function validatePgConvergeApplicationSteps(
 					...(statementTimeoutMs === undefined
 						? {}
 						: { statementTimeoutMs: statementTimeoutMs as number }),
+					...(validatedOwns === undefined ? {} : { owns: validatedOwns }),
 					inspect: inspect as PgConvergeAssertStep['inspect'],
 					apply: apply as PgConvergeAssertStep['apply'],
 				};

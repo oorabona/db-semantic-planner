@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import {
 	canonicalJsonDigest,
-	defaultIndexName,
 	projectLedgerChain,
 	validateDeclarationModel,
 	validateNormalizedManagedStepManifest,
@@ -22,6 +21,7 @@ import type {
 	TransitionRunMetadata,
 } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
+import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
 import { hasDeclaredFkIndexAdmission } from '../ddl/fk-index-coverage.js';
 import {
 	createPgsqlGeneratedManagedStep,
@@ -36,6 +36,8 @@ import {
 import {
 	comparePgsqlDeclaredAdoptionSchema,
 	modelForDeclaredAdoption,
+	pgsqlSurfaceKey,
+	resolvePgsqlDeclaredIndexName,
 } from '../ddl/live-diff.js';
 import {
 	addressForChange,
@@ -50,6 +52,7 @@ import { escapeDiagnosticText } from '../validate.js';
 import {
 	PgApplicationStepError,
 	type PgConvergeApplicationStep,
+	type PgConvergeAssertOwnership,
 	planPgApplicationSteps,
 	runPgApplicationSteps,
 	validatePgConvergeApplicationSteps,
@@ -467,22 +470,250 @@ function declaredIndexNames(
 ): ReadonlySet<string> {
 	return new Set(
 		[...model.tables.values()].flatMap((table) => {
-			const physicalTable = naming.toDatabase(table.name);
 			return table.indexes.map((index) =>
-				defaultIndexName(physicalTable, {
-					...index,
-					...(index.name === undefined
-						? {}
-						: { name: naming.toDatabase(index.name) }),
-					columns: index.columns.map((column) => naming.toDatabase(column)),
-				}),
+				resolvePgsqlDeclaredIndexName(table, index, naming),
 			);
 		}),
 	);
 }
 
-function externalIndexKey(table: string, name: string): string {
-	return JSON.stringify([table, name]);
+type ResolvedOwnershipMask = Readonly<{
+	checks: ReadonlySet<string>;
+	columnTypes: ReadonlySet<string>;
+	indexes: ReadonlySet<string>;
+}>;
+
+type ResolvedApplicationOwnership = Readonly<{
+	mask: ResolvedOwnershipMask;
+	canonical: PgConvergeAssertOwnership;
+}>;
+
+function compareCodeUnits(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function sortedOwnershipEntries(
+	entries: readonly { readonly table: string; readonly name: string }[],
+): readonly { readonly table: string; readonly name: string }[] {
+	return [...entries].sort((left, right) =>
+		compareCodeUnits(
+			pgsqlSurfaceKey(left.table, left.name),
+			pgsqlSurfaceKey(right.table, right.name),
+		),
+	);
+}
+
+function validateApplicationOwnership(
+	model: ModelIR,
+	steps: readonly PgConvergeApplicationStep[],
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	schema: string,
+): ReadonlyMap<string, ResolvedApplicationOwnership> {
+	const resolved = new Map<string, ResolvedApplicationOwnership>();
+	const claimed = {
+		checks: new Set<string>(),
+		columnTypes: new Set<string>(),
+		indexes: new Set<string>(),
+	};
+	const tables = new Map(
+		[...model.tables.values()].map((table) => [table.name, table]),
+	);
+	const ownershipLookups = new Map<
+		string,
+		{
+			readonly columns: ReadonlyMap<string, ColumnIR>;
+			readonly checks: ReadonlyMap<
+				string,
+				NonNullable<TableIR['checkConstraints']>[number]
+			>;
+			readonly checkNameMultiplicity: ReadonlyMap<string, number>;
+			readonly indexes: ReadonlyMap<string, readonly IndexIR[]>;
+			readonly physicalTable: string;
+		}
+	>();
+	const lookupFor = (table: TableIR) => {
+		const existing = ownershipLookups.get(table.name);
+		if (existing) return existing;
+		const columns = new Map<string, ColumnIR>();
+		for (const column of table.columns) {
+			if (!columns.has(column.name)) columns.set(column.name, column);
+		}
+		const checks = new Map<
+			string,
+			NonNullable<TableIR['checkConstraints']>[number]
+		>();
+		const checkNameMultiplicity = new Map<string, number>();
+		for (const check of table.checkConstraints ?? []) {
+			if (!checks.has(check.name)) checks.set(check.name, check);
+			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			checkNameMultiplicity.set(
+				physicalName,
+				(checkNameMultiplicity.get(physicalName) ?? 0) + 1,
+			);
+		}
+		const indexes = new Map<string, IndexIR[]>();
+		for (const index of table.indexes) {
+			const physicalName = resolvePgsqlDeclaredIndexName(table, index, naming);
+			const matching = indexes.get(physicalName);
+			if (matching) matching.push(index);
+			else indexes.set(physicalName, [index]);
+		}
+		const lookup = {
+			columns,
+			checks,
+			checkNameMultiplicity,
+			indexes,
+			physicalTable: naming.toDatabase(table.name),
+		};
+		ownershipLookups.set(table.name, lookup);
+		return lookup;
+	};
+	const foreignKeyReferencedKeys = new Set(
+		[...model.tables.values()].flatMap((table) =>
+			table.foreignKeys.flatMap((foreignKey) => {
+				if (
+					foreignKey.references.schema !== undefined &&
+					foreignKey.references.schema !== schema
+				)
+					return [];
+				const columns = canonicalColumnSet(foreignKey.references.columns);
+				return columns === undefined
+					? []
+					: [pgsqlSurfaceKey(foreignKey.references.table, columns)];
+			}),
+		),
+	);
+	for (const step of steps) {
+		if (step.kind !== 'assert' || step.owns === undefined) continue;
+		const masks: {
+			checks: Set<string>;
+			columnTypes: Set<string>;
+			indexes: Set<string>;
+		} = {
+			checks: new Set(),
+			columnTypes: new Set(),
+			indexes: new Set(),
+		};
+		const checks: { table: string; name: string }[] = [];
+		const columnTypes: { table: string; column: string }[] = [];
+		const indexes: { table: string; name: string }[] = [];
+		for (const entry of step.owns.columnTypes ?? []) {
+			const table = tables.get(entry.table);
+			if (!table)
+				throw invalidOptions(
+					`converge application step ${step.id} owns columnTypes on undeclared table ${entry.table}`,
+				);
+			const lookup = lookupFor(table);
+			const column = lookup.columns.get(entry.column);
+			if (!column)
+				throw invalidOptions(
+					`converge application step ${step.id} owns undeclared column ${entry.table}.${entry.column}`,
+				);
+			const key = pgsqlSurfaceKey(
+				lookup.physicalTable,
+				naming.toDatabase(column.name),
+			);
+			if (claimed.columnTypes.has(key))
+				throw invalidOptions(
+					`converge application steps own column type twice: ${key}`,
+				);
+			claimed.columnTypes.add(key);
+			masks.columnTypes.add(key);
+			columnTypes.push({
+				table: lookup.physicalTable,
+				column: naming.toDatabase(column.name),
+			});
+		}
+		for (const entry of step.owns.checks ?? []) {
+			const table = tables.get(entry.table);
+			if (!table)
+				throw invalidOptions(
+					`converge application step ${step.id} owns checks on undeclared table ${entry.table}`,
+				);
+			const lookup = lookupFor(table);
+			const check = lookup.checks.get(entry.name);
+			if (!check)
+				throw invalidOptions(
+					`converge application step ${step.id} owns undeclared CHECK ${entry.table}.${entry.name}`,
+				);
+			const physicalName = getCheckConstraintDatabaseName(check, naming);
+			const multiplicity = lookup.checkNameMultiplicity.get(physicalName) ?? 0;
+			if (multiplicity !== 1)
+				throw invalidOptions(
+					`converge application step ${step.id} owns ambiguous CHECK ${lookup.physicalTable}.${physicalName}`,
+				);
+			const key = pgsqlSurfaceKey(lookup.physicalTable, physicalName);
+			if (claimed.checks.has(key))
+				throw invalidOptions(
+					`converge application steps own CHECK twice: ${key}`,
+				);
+			claimed.checks.add(key);
+			masks.checks.add(key);
+			checks.push({ table: lookup.physicalTable, name: physicalName });
+		}
+		for (const entry of step.owns.indexes ?? []) {
+			const table = tables.get(entry.table);
+			if (!table)
+				throw invalidOptions(
+					`converge application step ${step.id} owns indexes on undeclared table ${entry.table}`,
+				);
+			const lookup = lookupFor(table);
+			const matching = lookup.indexes.get(entry.name) ?? [];
+			if (matching.length === 0)
+				throw invalidOptions(
+					`converge application step ${step.id} owns undeclared index ${entry.table}.${entry.name}`,
+				);
+			if (matching.length !== 1)
+				throw invalidOptions(
+					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
+				);
+			const index = matching[0]!;
+			if (
+				index.unique === true &&
+				foreignKeyReferencedKeys.has(
+					pgsqlSurfaceKey(table.name, canonicalColumnSet(index.columns) ?? ''),
+				)
+			)
+				throw invalidOptions(
+					`converge application step ${step.id} owns unique index ${lookup.physicalTable}.${entry.name} required by a declared foreign key`,
+				);
+			const key = pgsqlSurfaceKey(lookup.physicalTable, entry.name);
+			if (claimed.indexes.has(key))
+				throw invalidOptions(
+					`converge application steps own index twice: ${key}`,
+				);
+			claimed.indexes.add(key);
+			masks.indexes.add(key);
+			indexes.push({ table: lookup.physicalTable, name: entry.name });
+		}
+		if (
+			(checks.length > 0 || indexes.length > 0) &&
+			step.phase !== 'after-generated-ddl'
+		)
+			throw invalidOptions(
+				`converge application step ${step.id} owns CHECKs or indexes but is not after-generated-ddl`,
+			);
+		const canonical: PgConvergeAssertOwnership = {
+			...(checks.length === 0
+				? {}
+				: { checks: sortedOwnershipEntries(checks) }),
+			...(columnTypes.length === 0
+				? {}
+				: {
+						columnTypes: [...columnTypes].sort((left, right) =>
+							compareCodeUnits(
+								pgsqlSurfaceKey(left.table, left.column),
+								pgsqlSurfaceKey(right.table, right.column),
+							),
+						),
+					}),
+			...(indexes.length === 0
+				? {}
+				: { indexes: sortedOwnershipEntries(indexes) }),
+		};
+		resolved.set(step.id, { mask: masks, canonical });
+	}
+	return resolved;
 }
 
 /** Validate logical option entries and produce physical keys for diff matching. */
@@ -532,7 +763,7 @@ function validateExternalIndexes(
 				`converge ${label} names declared index ${entry.name}`,
 			);
 		externalIndexKeys.add(
-			externalIndexKey(naming.toDatabase(entry.table), entry.name),
+			pgsqlSurfaceKey(naming.toDatabase(entry.table), entry.name),
 		);
 	}
 	return externalIndexKeys;
@@ -549,6 +780,7 @@ async function compareConvergeMaskedSchema(input: {
 	readonly schema: string;
 	readonly casing: DbCasing;
 	readonly externalIndexes: ReadonlySet<string>;
+	readonly ownership?: ResolvedOwnershipMask;
 }) {
 	return comparePgsqlDeclaredAdoptionSchema({
 		executor: input.executor,
@@ -556,6 +788,9 @@ async function compareConvergeMaskedSchema(input: {
 		schema: input.schema,
 		dbCasing: input.casing,
 		externalIndexMask: input.externalIndexes,
+		...(input.ownership === undefined
+			? {}
+			: { ownershipMask: input.ownership }),
 	});
 }
 
@@ -1123,11 +1358,18 @@ function assertFreshForeignKeysReferenceUniqueKeys(
 
 function uncoveredFreshFkColumns(
 	changes: readonly SchemaChange[],
+	model: ModelIR,
+	naming: ReturnType<typeof getNamingPluginForDbCasing>,
 ): readonly { readonly table: string; readonly column: string }[] {
 	return changes.flatMap((change) => {
 		if (change.kind !== 'create_table') return [];
-		const table = change.meta?.table as TableIR | undefined;
-		if (table === undefined) return [];
+		const table = [...model.tables.values()].find(
+			(candidate) => naming.toDatabase(candidate.name) === change.table,
+		);
+		if (table === undefined)
+			throw new Error(
+				`converge create_table ${change.table} has no declared physical table`,
+			);
 		return table.foreignKeys.flatMap((foreignKey) => {
 			const column = foreignKey.columns[0];
 			return foreignKey.columns.length === 1 &&
@@ -1190,7 +1432,10 @@ function projectCheckedPlan(
  * managed admission. It compares the declared tables, sequences, and enums'
  * structural shape; it does not audit the provenance of an exact-matching child
  * already present on a managed table.
- * `externalIndexes` accepts exact physical index names on logical model tables;
+ * An assert may own declared CHECKs, column types, and named indexes; those
+ * surfaces are excluded from comparison and generated DDL, and its callback is
+ * responsible for maintaining them. `externalIndexes` accepts exact physical
+ * index names on logical model tables;
  * entries are validated before the ledger lock or any query, and converge
  * never drops a matching live index. A name that collides with another
  * relation the model creates fails when that step runs.
@@ -1207,7 +1452,7 @@ function projectCheckedPlan(
  * A declared table with `adopt: true` is taken into management when it exists,
  * the ledger projects its address as unknown (the only state an adoption claim
  * opens from), and it matches the declaration exactly after `externalIndexes`
- * masking. A mismatch found while planning refuses
+ * and application ownership masking. A mismatch found while planning refuses
  * `adoption-refused` before anything is written. A table that changes while
  * its adoption runs is refused under its claim and the ledger records that
  * refused adoption; tables adopted earlier in the same call stay adopted.
@@ -1273,6 +1518,32 @@ export async function convergePg(
 				: 'converge steps are invalid',
 		);
 	}
+	const applicationOwnership = validateApplicationOwnership(
+		model,
+		applicationSteps,
+		naming,
+		schema,
+	);
+	const ownershipMask: ResolvedOwnershipMask | undefined =
+		applicationOwnership.size === 0
+			? undefined
+			: {
+					checks: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.checks,
+						]),
+					),
+					columnTypes: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.columnTypes,
+						]),
+					),
+					indexes: new Set(
+						[...applicationOwnership.values()].flatMap((ownership) => [
+							...ownership.mask.indexes,
+						]),
+					),
+				};
 	if (applicationSteps.length > 0 && schema === '$user')
 		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
@@ -1408,6 +1679,7 @@ export async function convergePg(
 			schema,
 			casing,
 			externalIndexes,
+			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 		});
 		const adoptionSteps: NormalizedManagedStep[] = [];
 		for (const table of model.tables.values()) {
@@ -1568,7 +1840,11 @@ export async function convergePg(
 			database,
 			schema,
 		);
-		const uncoveredFkColumns = uncoveredFreshFkColumns(diff.changes);
+		const uncoveredFkColumns = uncoveredFreshFkColumns(
+			diff.changes,
+			model,
+			naming,
+		);
 		if (uncoveredFkColumns.length > 0) {
 			const tables = new Set(uncoveredFkColumns.map(({ table }) => table));
 			throw refusal(
@@ -1784,6 +2060,9 @@ export async function convergePg(
 				...(step.statementTimeoutMs === undefined
 					? {}
 					: { statementTimeoutMs: step.statementTimeoutMs }),
+				...(step.kind !== 'assert' || !applicationOwnership.has(step.id)
+					? {}
+					: { owns: applicationOwnership.get(step.id)!.canonical }),
 			})),
 		});
 		if (check) {
@@ -1880,6 +2159,7 @@ export async function convergePg(
 					schema,
 					casing,
 					externalIndexes,
+					...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 				});
 				return !compared.changes.some(
 					(change) => change.table === address.name,

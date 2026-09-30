@@ -3308,4 +3308,505 @@ describe('convergePg', () => {
 			await dropSchema(absentSchema);
 		}
 	});
+
+	it('lets an after-DDL assert repair an owned CHECK body while the unowned baseline refuses it', async () => {
+		const pool = await getTestPool();
+		const name = `owned_check_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_score_check`;
+		const initial = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 10' }],
+			},
+		]);
+		const step = {
+			kind: 'assert' as const,
+			id: `${name}-score-check`,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: { checks: [{ table: name, name: checkName }] },
+			inspect: async (tx: PgApplicationStepTx) => {
+				const result = await tx.query<{ readonly definition: string }>(
+					'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2',
+					[name, checkName],
+				);
+				return result.rows[0]?.definition === 'CHECK ((score > 10))'
+					? 'healthy'
+					: 'unhealthy';
+			},
+			apply: async (tx: PgApplicationStepTx) => {
+				await tx.query(
+					`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"`,
+				);
+				await tx.query(
+					`ALTER TABLE "${schema}"."${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 10)`,
+				);
+			},
+		};
+
+		await convergePg(pool, initial, { schema });
+		await expect(convergePg(pool, desired, { schema })).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+		});
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: [`application-step:${step.id}`],
+		});
+		await expect(
+			pool.query<{ readonly definition: string }>(
+				'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3',
+				[schema, name, checkName],
+			),
+		).resolves.toMatchObject({
+			rows: [{ definition: 'CHECK ((score > 10))' }],
+		});
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+	});
+
+	it('lets an assert own only a column type, not that column default', async () => {
+		const pool = await getTestPool();
+		const name = `owned_type_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+			},
+		]);
+		const step = {
+			kind: 'assert' as const,
+			id: `${name}-score-type`,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: { columnTypes: [{ table: name, column: 'score' }] },
+			inspect: async (tx: PgApplicationStepTx) => {
+				const result = await tx.query<{ readonly data_type: string }>(
+					'SELECT data_type FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3',
+					[schema, name, 'score'],
+				);
+				return result.rows[0]?.data_type === 'integer'
+					? 'healthy'
+					: 'unhealthy';
+			},
+			apply: async (tx: PgApplicationStepTx) => {
+				await tx.query(
+					`ALTER TABLE "${schema}"."${name}" ALTER COLUMN score TYPE integer`,
+				);
+			},
+		};
+		await convergePg(pool, desired, { schema });
+		await pool.query(
+			`ALTER TABLE "${schema}"."${name}" ALTER COLUMN score TYPE bigint`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: [`application-step:${step.id}`],
+		});
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		const defaultChanged = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'score', type: 'integer', nullable: false, default: 1 },
+				],
+				primaryKey: 'score',
+			},
+		]);
+		await expect(
+			convergePg(pool, defaultChanged, { schema, steps: [step] }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: expect.arrayContaining([
+				expect.objectContaining({ kind: 'alter_column_default', table: name }),
+			]),
+		});
+	});
+
+	it('creates a fresh owned CHECK only after its assert creates the function it calls', async () => {
+		const freshSchema = `converge_owned_function_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const name = 'scores';
+		const functionName = 'score_is_valid';
+		const checkName = 'scores_valid_check';
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [
+					{
+						name: checkName,
+						expression: `"${freshSchema}"."${functionName}"(score)`,
+					},
+				],
+			},
+		]);
+		const step = {
+			kind: 'assert' as const,
+			id: 'scores-function-and-check',
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: { checks: [{ table: name, name: checkName }] },
+			inspect: async (tx: PgApplicationStepTx) => {
+				const result = await tx.query<{ readonly exists: boolean }>(
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2) AS exists',
+					[name, checkName],
+				);
+				return result.rows[0]?.exists ? 'healthy' : 'unhealthy';
+			},
+			apply: async (tx: PgApplicationStepTx) => {
+				await tx.query(
+					`CREATE FUNCTION "${freshSchema}"."${functionName}"(value integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT value > 0 $$`,
+				);
+				await tx.query(
+					`ALTER TABLE scores ADD CONSTRAINT "${checkName}" CHECK ("${freshSchema}"."${functionName}"(score))`,
+				);
+			},
+		};
+		await createSchema(freshSchema);
+		try {
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					initialize: 'pristine',
+					steps: [step],
+				}),
+			).resolves.toMatchObject({
+				kind: 'applied',
+				applied: ['create_table', `application-step:${step.id}`],
+			});
+			await expect(
+				pool.query<{ readonly exists: boolean }>(
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3) AS exists',
+					[freshSchema, name, checkName],
+				),
+			).resolves.toMatchObject({ rows: [{ exists: true }] });
+			await expect(
+				convergePg(pool, desired, { schema: freshSchema, steps: [step] }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(freshSchema);
+		}
+	});
+
+	it('treats an owned index as healthy drift but refuses the same unowned index under another name', async () => {
+		const pool = await getTestPool();
+		const name = `owned_index_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const indexName = `idx_${name}_a`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [
+					{ name: 'a', type: 'integer', nullable: false },
+					{ name: 'b', type: 'integer', nullable: false },
+				],
+				primaryKey: 'a',
+				indexes: [{ name: indexName, columns: ['a'] }],
+			},
+		]);
+		const step = {
+			kind: 'assert' as const,
+			id: `${name}-index`,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: { indexes: [{ table: name, name: indexName }] },
+			inspect: async () => 'healthy' as const,
+			apply: async () => undefined,
+		};
+		await convergePg(pool, desired, { schema });
+		await pool.query(`DROP INDEX "${schema}"."${indexName}"`);
+		await pool.query(
+			`CREATE INDEX "${indexName}" ON "${schema}"."${name}" (a, b)`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).resolves.toEqual({
+			kind: 'no-drift',
+			applied: [],
+		});
+		await pool.query(
+			`CREATE INDEX "${indexName}_unowned" ON "${schema}"."${name}" (a)`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps: [step] }),
+		).rejects.toMatchObject({
+			refusal: 'unsupported-change',
+			changes: expect.arrayContaining([
+				expect.objectContaining({ kind: 'drop_index', table: name }),
+			]),
+		});
+	});
+
+	it('includes canonical ownership in a check plan digest and reports no drift for owned drift', async () => {
+		const pool = await getTestPool();
+		const name = `owned_digest_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_check`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const base = {
+			kind: 'assert' as const,
+			id: `${name}-assert`,
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			inspect: async () => 'unhealthy' as const,
+			apply: async () => undefined,
+		};
+		await convergePg(pool, desired, { schema });
+		await pool.query(
+			`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"`,
+		);
+		const owned = {
+			...base,
+			owns: { checks: [{ table: name, name: checkName }] },
+		};
+		const ownedCheck = await convergePg(pool, desired, {
+			schema,
+			mode: 'check',
+			steps: [owned],
+		});
+		expect(ownedCheck).toMatchObject({ kind: 'would-apply' });
+		const withoutOwns = await convergePg(pool, model([]), {
+			schema,
+			mode: 'check',
+			steps: [base],
+		});
+		const withoutOwnsAgain = await convergePg(pool, model([]), {
+			schema,
+			mode: 'check',
+			steps: [{ ...base }],
+		});
+		if (
+			withoutOwns.kind !== 'would-apply' ||
+			withoutOwnsAgain.kind !== 'would-apply'
+		)
+			throw new Error('expected check plans for an unhealthy assertion');
+		expect(withoutOwns.planDigest).toBe(withoutOwnsAgain.planDigest);
+		if (ownedCheck.kind !== 'would-apply')
+			throw new Error('expected an owned check plan');
+		expect(ownedCheck.planDigest).not.toBe(withoutOwns.planDigest);
+
+		const indexedName = `${name}_indexed`;
+		const indexName = `idx_${indexedName}_score`;
+		const indexed = model([
+			{
+				...table(indexedName, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				indexes: [{ name: indexName, columns: ['score'] }],
+			},
+		]);
+		await convergePg(pool, indexed, { schema });
+		const indexStep = {
+			...base,
+			id: `${name}-index-assert`,
+			owns: { indexes: [{ table: indexedName, name: indexName }] },
+		};
+		const withEmptyChecks = await convergePg(pool, indexed, {
+			schema,
+			mode: 'check',
+			steps: [
+				{
+					...indexStep,
+					owns: { checks: [], indexes: indexStep.owns.indexes },
+				},
+			],
+		});
+		const withIndexesOnly = await convergePg(pool, indexed, {
+			schema,
+			mode: 'check',
+			steps: [indexStep],
+		});
+		if (
+			withEmptyChecks.kind !== 'would-apply' ||
+			withIndexesOnly.kind !== 'would-apply'
+		)
+			throw new Error('expected canonical ownership check plans');
+		expect(withEmptyChecks.planDigest).toBe(withIndexesOnly.planDigest);
+		const withoutIndexOwnership = await convergePg(pool, indexed, {
+			schema,
+			mode: 'check',
+			steps: [{ ...base, id: indexStep.id }],
+		});
+		if (withoutIndexOwnership.kind !== 'would-apply')
+			throw new Error('expected an unowned index check plan');
+		expect(withIndexesOnly.planDigest).not.toBe(
+			withoutIndexOwnership.planDigest,
+		);
+		await expect(
+			convergePg(pool, desired, {
+				schema,
+				mode: 'check',
+				steps: [
+					{
+						...owned,
+						inspect: async () => 'healthy' as const,
+					},
+				],
+			}),
+		).resolves.toEqual({ kind: 'no-drift' });
+	});
+
+	it('adopts an owned CHECK difference but refuses an unowned difference on the same table', async () => {
+		const pool = await getTestPool();
+		const makeAdoption = (name: string): ModelIR =>
+			model([
+				{
+					...table(name, false),
+					adopt: true,
+					columns: [{ name: 'score', type: 'integer', nullable: false }],
+					primaryKey: 'score',
+					checkConstraints: [
+						{ name: `${name}_owned`, expression: 'score > 10' },
+						{ name: `${name}_unowned`, expression: 'score < 100' },
+					],
+				},
+			]);
+		const adoptOwnedDifference = async (
+			name: string,
+			unownedExpression: string,
+		) => {
+			const adoptionSchema = `converge_owned_adopt_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+			await createSchema(adoptionSchema);
+			try {
+				await pool.query(
+					`CREATE TABLE "${adoptionSchema}"."${name}" (score integer NOT NULL PRIMARY KEY, CONSTRAINT "${name}_owned" CHECK (score > 0), CONSTRAINT "${name}_unowned" CHECK (${unownedExpression}))`,
+				);
+				return await convergePg(pool, makeAdoption(name), {
+					schema: adoptionSchema,
+					initialize: 'adopt-existing',
+					steps: [
+						{
+							kind: 'assert' as const,
+							id: `${name}-owned-check`,
+							digest: 'v1',
+							phase: 'after-generated-ddl' as const,
+							owns: { checks: [{ table: name, name: `${name}_owned` }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				});
+			} finally {
+				await dropSchema(adoptionSchema);
+			}
+		};
+		await expect(
+			adoptOwnedDifference('owned_only', 'score < 100'),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: ['adopt_table'],
+		});
+		await expect(
+			adoptOwnedDifference('owned_and_unowned', 'score < 50'),
+		).rejects.toMatchObject({
+			refusal: 'adoption-refused',
+			detail: expect.stringContaining('owned_and_unowned'),
+		});
+	});
+
+	it('allows snake_case fresh foreign-key coverage supplied only by an owned index', async () => {
+		const freshSchema = `converge_owned_snake_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const ownedIndex = 'idx_child_records_parent_id';
+		const desired = model([
+			{
+				name: 'parentRecords',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'parentValid', expression: 'id > 0' }],
+			},
+			{
+				name: 'childRecords',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'parentId', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['parentId'],
+						references: { table: 'parentRecords', columns: ['id'] },
+					},
+				],
+				indexes: [{ name: ownedIndex, columns: ['parentId'] }],
+			},
+		]);
+		const step = {
+			kind: 'assert' as const,
+			id: 'snake-owned-surfaces',
+			digest: 'v1',
+			phase: 'after-generated-ddl' as const,
+			owns: {
+				checks: [{ table: 'parentRecords', name: 'parentValid' }],
+				indexes: [{ table: 'childRecords', name: ownedIndex }],
+			},
+			inspect: async (tx: PgApplicationStepTx) => {
+				const result = await tx.query<{ readonly healthy: boolean }>(
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2) AND EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = pg_catalog.current_schema() AND tablename = $3 AND indexname = $4) AS healthy',
+					['parent_records', 'parent_valid', 'child_records', ownedIndex],
+				);
+				return result.rows[0]?.healthy ? 'healthy' : 'unhealthy';
+			},
+			apply: async (tx: PgApplicationStepTx) => {
+				await tx.query(
+					'ALTER TABLE parent_records ADD CONSTRAINT parent_valid CHECK (id > 0)',
+				);
+				await tx.query(
+					`CREATE INDEX "${ownedIndex}" ON child_records (parent_id)`,
+				);
+			},
+		};
+		await createSchema(freshSchema);
+		try {
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					initialize: 'pristine',
+					dbCasing: 'snake_case',
+					steps: [step],
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					dbCasing: 'snake_case',
+					steps: [{ ...step, inspect: async () => 'healthy' as const }],
+				}),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(freshSchema);
+		}
+	});
 });
