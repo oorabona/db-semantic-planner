@@ -24,6 +24,10 @@ import {
 	identityNaming,
 	type NamingPlugin,
 } from '../naming-plugin.js';
+import {
+	physicalizeDeclaredSequences,
+	SequenceNameMapKeyMismatchError,
+} from '../sequence-name.js';
 
 export type PgPhysicalModelInput =
 	| {
@@ -381,13 +385,6 @@ export function createPgPhysicalModel(
 				entry('policy', tableSchema, table.name, policy.name, physicalPolicy),
 			);
 			claims.add(
-				'constraint',
-				tableSchema,
-				physicalTable,
-				physicalPolicy,
-				`policy ${table.name}.${policy.name}`,
-			);
-			claims.add(
 				'policy',
 				tableSchema,
 				physicalTable,
@@ -472,13 +469,25 @@ export function createPgPhysicalModel(
 			`enum array type ${value.name}`,
 		);
 	}
+	const sequenceNaming: NamingPlugin = {
+		toDatabase: (value) => truncateIdentifier(naming.toDatabase(value)),
+		toModel: (value) => naming.toModel(value),
+	};
+	const authoredSequences = physicalizeDeclaredSequences(
+		input.model.sequences,
+		sequenceNaming,
+	);
 	const sequences = new Map<string, SequenceIR>();
-	for (const sequence of input.model.sequences?.values() ?? []) {
+	for (const [key, sequence] of input.model.sequences ?? []) {
+		if (key !== sequence.name)
+			throw new SequenceNameMapKeyMismatchError(key, sequence.name);
 		const sequenceSchema = sequence.schema ?? input.schema;
 		const physicalSequence = name(sequence.name);
+		const physicalSequenceDefinition = authoredSequences.get(physicalSequence);
+		if (physicalSequenceDefinition === undefined)
+			throw new Error(`physical sequence ${sequence.name} was not resolved`);
 		const copied = Object.freeze({
-			...cloneRecord(sequence),
-			name: physicalSequence,
+			...cloneRecord(physicalSequenceDefinition),
 		});
 		sequences.set(physicalSequence, copied);
 		entries.push(
@@ -670,7 +679,7 @@ function createModel(
 	map: (value: string) => string,
 ): ModelIR {
 	const relations = new Map<string, RelationIR>();
-	for (const [key, relation] of model.relations) {
+	for (const [key, relation] of model.relations ?? []) {
 		void key;
 		const copiedRelation = Object.freeze({
 			...cloneRecord(relation),

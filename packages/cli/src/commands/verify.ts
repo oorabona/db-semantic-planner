@@ -7,6 +7,7 @@
 
 import {
 	comparePgsqlDatabaseSchema,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	escapeDiagnosticText,
 } from '@dbsp/adapter-pgsql';
@@ -49,6 +50,14 @@ export const verifyCommand = new Command('verify')
 				// Load schema from file → ModelIR
 				const loaded = await loadSchema(schemaPath);
 				const schemaModel = loaded.model;
+				const physical = createPgPhysicalModel({
+					mode: 'logical',
+					model: schemaModel,
+					schema: options.schemaName ?? 'public',
+					...(loaded.dbCasing === undefined
+						? {}
+						: { dbCasing: loaded.dbCasing }),
+				});
 
 				// Connect to database
 				const { pool } = await createDbConnection(options.db);
@@ -57,11 +66,7 @@ export const verifyCommand = new Command('verify')
 					const adapter = createPgsqlAdapter(pool);
 					// Live diff: introspect database and canonicalise PostgreSQL CHECK
 					// expressions before comparing.
-					const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel, {
-						...(options.schemaName ? { schema: options.schemaName } : {}),
-						...(loaded.dbCasing !== undefined
-							? { dbCasing: loaded.dbCasing }
-							: {}),
+					const diff = await comparePgsqlDatabaseSchema(adapter, physical, {
 						onExpressionCanonicalizationWarning: (warning) =>
 							console.warn(
 								`⚠️  [${warning.kind} ${escapeDiagnosticText(warning.table)}.${escapeDiagnosticText(warning.name)}] ${warning.message}`,

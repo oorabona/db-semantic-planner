@@ -107,15 +107,13 @@ import {
 	renderColumnDbType,
 	validateDbType,
 } from './db-type.js';
-import {
-	type GenerateDDLOptions,
-	generateDDL as generateDDLStatements,
-} from './ddl/index.js';
+import type { GenerateDDLOptions } from './ddl/index.js';
 import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
 import { qualifyTableIdent, quoteIdent } from './ddl/phases/utils.js';
+import { generateDDL as generateDDLStatements } from './ddl/public-api.js';
 import {
 	generateAlterColumnSQL,
 	generateTruncateSQL,
@@ -134,6 +132,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import type { PgPhysicalModel } from './physical-model/index.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import {
 	derivePreparedStatementFingerprint,
@@ -6348,11 +6347,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	// =========================================================================
-	// DDLGeneratingAdapter Methods
+	// PostgreSQL DDL Methods
 	// =========================================================================
 
 	/**
-	 * Generate DDL statements from a ModelIR schema.
+	 * Generate DDL statements from the PostgreSQL physical model.
 	 *
 	 * Uses PostgreSQL AST nodes and pgsql-deparser for consistent SQL generation.
 	 * Applies the naming plugin for identifier transformation.
@@ -6362,17 +6361,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @returns Array of DDL statements in dependency order
 	 */
 	generateDDL(
-		schema: ModelIR,
-		overrideOptions?: Partial<GenerateDDLOptions>,
+		physical: PgPhysicalModel,
+		overrideOptions?: GenerateDDLOptions,
 	): string[] {
 		const options: GenerateDDLOptions = {
-			...(this.schemaName ? { schemaName: this.schemaName } : {}),
-			naming: this.naming,
 			...overrideOptions,
 			dialectCapabilities:
 				overrideOptions?.dialectCapabilities ?? this.dialectCapabilities,
 		};
-		return generateDDLStatements(schema, options);
+		return generateDDLStatements(physical, options);
 	}
 
 	/**

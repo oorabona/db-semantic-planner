@@ -15,6 +15,7 @@ import {
 	PgsqlPreparedStatementReplayError,
 	PgsqlTransactionAbortedError,
 } from './pgsql-adapter.js';
+import { createPgPhysicalModel } from './physical-model/index.js';
 import {
 	derivePreparedStatementFingerprint,
 	derivePreparedStatementName,
@@ -3057,7 +3058,13 @@ describe('PgsqlAdapter', () => {
 			} as any;
 
 			const adapter = new PgsqlAdapter(undefined, {});
-			const ddl = adapter.generateDDL(schema);
+			const ddl = adapter.generateDDL(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: schema,
+					schema: 'public',
+				}),
+			);
 			expect(ddl.length).toBeGreaterThan(0);
 			expect(ddl[0]).toContain('CREATE TABLE');
 		});

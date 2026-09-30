@@ -1,5 +1,7 @@
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import { compareSchemata as comparePhysicalSchemata } from './public-api.js';
 import { compareSchemata } from './schema-diff.js';
 
 function model(tables: readonly TableIR[]): ModelIR {
@@ -68,8 +70,21 @@ describe('declared table re-addressing in schema diff', () => {
 				to: { name: 'newUsers' },
 			}),
 		]);
+		const physicalDesired = createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
 		const compare = (db: ModelIR) =>
-			compareSchemata(desired, db, { dbCasing: 'snake_case' }).changes;
+			comparePhysicalSchemata(
+				physicalDesired,
+				createPgPhysicalModel({
+					mode: 'physical',
+					model: db,
+					schema: 'public',
+				}),
+			).changes;
 
 		const sourceOnly = compare(model([table('old_users')]));
 		expect(sourceOnly).toHaveLength(1);

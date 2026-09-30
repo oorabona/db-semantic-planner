@@ -4,7 +4,11 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { compareSchemata, generateMigrationSQL } from '@dbsp/adapter-pgsql';
+import {
+	compareSchemata,
+	createPgPhysicalModel,
+	generateMigrationSQL,
+} from '@dbsp/adapter-pgsql';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { generateSchemaFileWithDiagnostics } from '../../packages/cli/src/generators/schema-codegen.js';
 import { loadSchema } from '../../packages/cli/src/utils/schema-loader.js';
@@ -141,17 +145,24 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 			const schemaPath = join(tmpDir, 'dbsp.schema.ts');
 			writeFileSync(schemaPath, generatedCode, 'utf8');
 			const generated = await loadSchema(schemaPath);
-			const diff = compareSchemata(generated.model, dbModel, {
-				dbCasing: 'snake_case',
-				ignoreUnmanagedExtensions: true,
-			});
-			expect(diff.changes).toEqual([]);
-			expect(
-				generateMigrationSQL(diff, {
-					includeDestructive: false,
-					schemaName: SCHEMA,
+			const diff = compareSchemata(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: generated.model,
+					schema: SCHEMA,
+					dbCasing: 'snake_case',
 				}),
-			).toEqual([]);
+				createPgPhysicalModel({
+					mode: 'physical',
+					model: dbModel,
+					schema: SCHEMA,
+				}),
+				{ ignoreUnmanagedExtensions: true },
+			);
+			expect(diff.changes).toEqual([]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
 		} finally {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}

@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-	convergePg,
 	DBSP_LEDGER_EVENT_TABLE,
 	DBSP_LEDGER_IDENTITY_TABLE,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -17,6 +16,7 @@ import {
 	ensureTransitionJournal,
 	PG_LEDGER_SHAPE_VERSION,
 } from '@dbsp/adapter-pgsql';
+import { convergePg } from '@dbsp/adapter-pgsql/internal';
 import type { ModelIR, ReinitializePreflightReport } from '@dbsp/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { writeAdoptionFileAtomically } from '../../packages/cli/src/commands/preflight.js';

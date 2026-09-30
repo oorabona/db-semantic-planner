@@ -84,6 +84,7 @@ export {
 	NonConvergentSchemaDiffError,
 	type NonConvergentSchemaDiffSurface,
 	PartialIndexPredicateNewEnumValueError,
+	type PgSchemaDiff,
 	RawIndexPredicateFallbackError,
 	type ReferencedKeyKind,
 	type ReferencedKeyRemovalConflict,
@@ -273,10 +274,6 @@ export type {
 } from './transition/application-step.js';
 // Startup convergence
 export {
-	type ConvergePgBaseOptions,
-	type ConvergePgCheckOptions,
-	type ConvergePgOptions,
-	convergePg,
 	type PgConvergeCheckResult,
 	type PgConvergeInitializationFailure,
 	type PgConvergePlannedStep,
@@ -448,6 +445,12 @@ export {
 	validatePgManagedLedgerCurrency,
 	withPgTransitionRunLock,
 } from './transition/index.js';
+export {
+	type ConvergePgBaseOptions,
+	type ConvergePgCheckOptions,
+	type ConvergePgOptions,
+	convergePg,
+} from './transition/public-api.js';
 // Durable transition recovery. This is the supported non-CLI reconciliation API.
 export {
 	executionIdsForRun,

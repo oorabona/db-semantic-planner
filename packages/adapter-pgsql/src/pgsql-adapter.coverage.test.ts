@@ -20,6 +20,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 } from './pgsql-adapter.js';
+import { createPgPhysicalModel } from './physical-model/index.js';
 
 function testQuery<T = unknown>(
 	sql: string,
@@ -2075,7 +2076,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 								{ name: 'id', type: 'integer', nullable: false },
 								{ name: 'name', type: 'text', nullable: false },
 							],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2088,7 +2089,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				getRelation: () => undefined,
 			} as any;
 
-			const ddl = adapter.generateDDL(model);
+			const ddl = adapter.generateDDL(
+				createPgPhysicalModel({ mode: 'logical', model, schema: 'public' }),
+			);
 			expect(ddl.length).toBeGreaterThan(0);
 			expect(ddl.some((s) => s.toLowerCase().includes('create table'))).toBe(
 				true,
@@ -2106,7 +2109,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 						{
 							name: 'users',
 							columns: [{ name: 'id', type: 'integer', nullable: false }],
-							primaryKey: { columns: ['id'] },
+							primaryKey: 'id',
 							foreignKeys: [],
 							indexes: [],
 						},
@@ -2119,7 +2122,13 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				getRelation: () => undefined,
 			} as any;
 
-			const ddl = adapter.generateDDL(model);
+			const ddl = adapter.generateDDL(
+				createPgPhysicalModel({
+					mode: 'logical',
+					model,
+					schema: 'tenant_ddl',
+				}),
+			);
 			expect(ddl.some((s) => s.includes('tenant_ddl'))).toBe(true);
 		});
 	});

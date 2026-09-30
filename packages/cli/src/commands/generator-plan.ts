@@ -11,6 +11,7 @@ import {
 	assertDeclarableChangeKind,
 	classifyGeneratedMutation,
 	comparePgsqlDatabaseSchema,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	createPgsqlGeneratedManagedStep,
 	createPgTransitionLessor,
@@ -27,6 +28,7 @@ import {
 	collectReferencedKeyRemovalConflicts,
 	comparePgsqlDeclaredAdoptionSchema,
 	createPgsqlDeclaredAdoptionStep,
+	generateMigrationSQL as generateMigrationSQLForPhysicalDiff,
 	modelForDeclaredAdoption,
 	pgsqlDeclaredAdoptionDeclaration,
 } from '@dbsp/adapter-pgsql/internal';
@@ -143,7 +145,7 @@ function replacementStatements(table: TableIR, schema: string) {
 	};
 	return {
 		retireStatements: [`DROP TABLE ${quote(schema)}.${quote(table.name)}`],
-		createStatements: generateMigrationSQL(createDiff, {
+		createStatements: generateMigrationSQLForPhysicalDiff(createDiff, {
 			includeDestructive: true,
 			schemaName: schema,
 		}),
@@ -486,16 +488,20 @@ export async function runGeneratorPlan(input: {
 	const { pool } = await createDbConnection(input.db);
 	try {
 		const schema = input.schema ?? 'public';
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: loaded.model,
+			schema,
+			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+		});
 		const diff = await comparePgsqlDatabaseSchema(
 			createPgsqlAdapter(pool),
-			loaded.model,
+			physical,
 			{
-				schema,
 				// `apply --schema` owns one schema. Extensions are database-scoped,
 				// so an extension not declared by this schema must not become a
 				// schema-plan removal merely because it is installed in the database.
 				ignoreUnmanagedExtensions: true,
-				...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
 			},
 		);
 		const declaredLifecycleWork = [...loaded.model.tables.values()].some(
@@ -610,8 +616,8 @@ export async function runGeneratorPlan(input: {
 							change.meta.readdress as TableReaddressDeclaration,
 						)
 					: generateMigrationSQL(
-							{ ...executableDiff, changes: [change] },
-							{ includeDestructive: true, schemaName: schema },
+							{ ...executableDiff, physical: diff.physical, changes: [change] },
+							{ includeDestructive: true },
 						),
 			...(change.kind === 'readdress_table' && change.meta?.readdress
 				? { readdress: change.meta.readdress as TableReaddressDeclaration }

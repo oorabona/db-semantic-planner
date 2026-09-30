@@ -25,7 +25,6 @@ import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
 import { hasDeclaredFkIndexAdmission } from '../ddl/fk-index-coverage.js';
 import {
 	createPgsqlGeneratedManagedStep,
-	generateMigrationSQL,
 	type SchemaChange,
 } from '../ddl/index.js';
 import {
@@ -44,10 +43,14 @@ import {
 	createPgsqlDeclaredAdoptionStep,
 	createPgsqlDeclaredSequenceAdoptionStep,
 } from '../ddl/managed-step-manifest.js';
-import { getPhase } from '../ddl/migration-sql.js';
+import { generateMigrationSQL, getPhase } from '../ddl/migration-sql.js';
 import { mapColumnType } from '../ddl/type-mapping.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
-import { physicalizeDeclaredSequences } from '../sequence-name.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	declaredSequenceNamesFromInventory,
+	physicalizeDeclaredSequences,
+} from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import {
 	PgApplicationStepError,
@@ -318,6 +321,8 @@ export type PgConvergeCheckResult =
 export interface ConvergePgBaseOptions {
 	readonly schema?: string;
 	readonly dbCasing?: DbCasing;
+	/** Internal physical-to-authored sequence provenance for legacy-name refusal. */
+	readonly declaredSequenceNames?: ReadonlyMap<string, string>;
 	/**
 	 * In apply mode, create a ledger for an absent schema ledger. `pristine`
 	 * refuses declared live tables or standalone sequences; `adopt-existing`
@@ -824,6 +829,7 @@ async function compareConvergeMaskedSchema(input: {
 	readonly casing: DbCasing;
 	readonly externalIndexes: ReadonlySet<string>;
 	readonly ownership?: ResolvedOwnershipMask;
+	readonly declaredSequenceNames: ReadonlyMap<string, string>;
 }) {
 	return comparePgsqlDeclaredAdoptionSchema({
 		executor: input.executor,
@@ -834,6 +840,7 @@ async function compareConvergeMaskedSchema(input: {
 		...(input.ownership === undefined
 			? {}
 			: { ownershipMask: input.ownership }),
+		declaredSequenceNames: input.declaredSequenceNames,
 	});
 }
 
@@ -1549,9 +1556,9 @@ export async function convergePg(
 	const check = mode === 'check';
 	const initialization = initialize ?? 'never';
 	const schema = options.schema ?? 'public';
-	const casing = options.dbCasing ?? 'preserve';
-	const naming = getNamingPluginForDbCasing(casing);
-	const externalIndexes = validateExternalIndexes(model, options, naming);
+	const sourceCasing = options.dbCasing ?? 'preserve';
+	const sourceNaming = getNamingPluginForDbCasing(sourceCasing);
+	const externalIndexes = validateExternalIndexes(model, options, sourceNaming);
 	let applicationSteps: readonly PgConvergeApplicationStep[];
 	try {
 		applicationSteps = validatePgConvergeApplicationSteps(options.steps);
@@ -1565,7 +1572,7 @@ export async function convergePg(
 	const applicationOwnership = validateApplicationOwnership(
 		model,
 		applicationSteps,
-		naming,
+		sourceNaming,
 		schema,
 	);
 	const applicationOwnedChecks = new Map(
@@ -1593,6 +1600,19 @@ export async function convergePg(
 				};
 	if (applicationSteps.length > 0 && schema === '$user')
 		throw invalidOptions(APPLICATION_STEP_DOLLAR_USER_SCHEMA_MESSAGE);
+	const physical = createPgPhysicalModel({
+		mode: 'logical',
+		model,
+		schema,
+		dbCasing: sourceCasing,
+		fkAutoIndex: false,
+	});
+	model = physical.model;
+	const casing: DbCasing = 'preserve';
+	const naming = getNamingPluginForDbCasing(casing);
+	const declaredSequenceNames =
+		options.declaredSequenceNames ??
+		declaredSequenceNamesFromInventory(physical.inventory);
 	const declaredSequences = assertDeclaredSequenceNamesPreserved(model, naming);
 	if (!check && initialization !== 'never') {
 		const initializationClient = await pool.connect();
@@ -1726,6 +1746,7 @@ export async function convergePg(
 			schema,
 			casing,
 			externalIndexes,
+			declaredSequenceNames,
 			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 		});
 		const adoptionSteps: NormalizedManagedStep[] = [];
@@ -2210,6 +2231,7 @@ export async function convergePg(
 					schema,
 					casing,
 					externalIndexes,
+					declaredSequenceNames,
 					...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
 				});
 				return !compared.changes.some(

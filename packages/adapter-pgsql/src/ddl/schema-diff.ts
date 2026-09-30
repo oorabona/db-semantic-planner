@@ -23,10 +23,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import {
-	assertNoCheckConstraintNameCollisions,
-	getCheckConstraintDatabaseName,
-} from '../check-constraint-name.js';
+import { assertNoCheckConstraintNameCollisions } from '../check-constraint-name.js';
 import { splitCheckConstraintState } from '../check-expression.js';
 import {
 	columnDbTypeSchemaIdentity,
@@ -35,19 +32,8 @@ import {
 	renderColumnDbType,
 	stripDbTypeSchema,
 } from '../db-type.js';
+import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import {
-	isEngineCanonicalCheck,
-	isEngineCanonicalIndex,
-	markEngineCanonicalCheck,
-	markEngineCanonicalIndex,
-} from '../expression-provenance.js';
-import {
-	getNamingPluginForDbCasing,
-	identityNaming,
-	type NamingPlugin,
-} from '../naming-plugin.js';
-import {
-	getSequenceDatabaseName,
 	LegacySequenceNameError,
 	physicalizeDeclaredSequences,
 } from '../sequence-name.js';
@@ -158,14 +144,12 @@ export interface SchemaDiff {
 // ============================================================================
 
 export interface CompareSchemataOptions {
-	/** Schema represented by the compared models (default: `public`). */
+	/** Internal compatibility metadata; public physical-model comparison owns schema. */
 	readonly schema?: string;
-	/**
-	 * Database naming convention.
-	 * When set, schema model names (camelCase) are converted to DB format
-	 * (e.g. snake_case) before comparison with the introspected model.
-	 */
+	/** Internal callers must already pass physical names; this value is ignored. */
 	dbCasing?: DbCasing;
+	/** Authored standalone-sequence names retained by the physical-model boundary. */
+	readonly declaredSequenceNames?: ReadonlyMap<string, string>;
 	/** Dialect capabilities — comparisons for unsupported features will be skipped */
 	readonly dialectCapabilities?: DialectCapabilities;
 	/**
@@ -285,19 +269,13 @@ export function compareSchemata(
 
 	const changes: SchemaChange[] = [];
 
-	const schemaNaming =
-		options?.dbCasing !== undefined
-			? getNamingPluginForDbCasing(options.dbCasing)
-			: identityNaming;
+	const schemaNaming = identityNaming;
 	if (supportsCheckConstraints) {
 		for (const table of schema.tables.values()) {
 			assertNoCheckConstraintNameCollisions(table, schemaNaming);
 		}
 	}
-	const plugin = options?.dbCasing !== undefined ? schemaNaming : undefined;
-	const schemaTables = plugin
-		? normalizeTableMap(schema.tables, plugin)
-		: new Map(schema.tables);
+	const schemaTables = new Map(schema.tables);
 	const dbTables = new Map(db.tables);
 	const declaredReaddresses = new Map(
 		[...schema.tables]
@@ -324,11 +302,7 @@ export function compareSchemata(
 			(declaration) => declaration.from.name,
 		),
 	);
-	const externalTables = new Set(
-		[...(schema.externalTables ?? [])].map((name) =>
-			plugin ? plugin.toDatabase(name) : name,
-		),
-	);
+	const externalTables = new Set([...(schema.externalTables ?? [])]);
 	// 0. Compare ENUM types (schema-level, before tables)
 	if (sup(caps?.supportsDDLEnumTypes)) {
 		assertDeclaredEnumMapIdentity(schema.enums);
@@ -344,7 +318,14 @@ export function compareSchemata(
 
 	// 0b. Compare sequences (schema-level, before tables)
 	if (sup(caps?.supportsDDLSequences)) {
-		compareSequences(schema, db, changes, schemaNaming);
+		compareSequences(
+			schema,
+			db,
+			changes,
+			schemaNaming,
+			options?.declaredSequenceNames,
+			options?.schema,
+		);
 	}
 
 	// 1. Tables that exist in schema but not in DB → create_table
@@ -757,97 +738,6 @@ export function collectExpressionSurfaces(
 
 function formatConstraintName(check: CheckConstraintIR): string {
 	return check.name || '<unnamed>';
-}
-
-/**
- * Convert all identifiers in a table map from model format to database format.
- * This allows comparing a schema definition (camelCase) against an introspected
- * database (snake_case) without false positives.
- */
-function normalizeTableMap(
-	tables: ReadonlyMap<string, TableIR>,
-	plugin: NamingPlugin,
-): Map<string, TableIR> {
-	const result = new Map<string, TableIR>();
-	for (const [_key, table] of tables) {
-		const dbName = plugin.toDatabase(table.name);
-		result.set(dbName, normalizeTable(table, plugin));
-	}
-	return result;
-}
-
-function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
-	const dbName = plugin.toDatabase(table.name);
-	const toDb = (name: string) => plugin.toDatabase(name);
-
-	return {
-		name: dbName,
-		columns: table.columns.map((col) => ({
-			...col,
-			name: toDb(col.name),
-		})),
-		...(table.primaryKey !== undefined && {
-			primaryKey:
-				typeof table.primaryKey === 'string'
-					? toDb(table.primaryKey)
-					: table.primaryKey.map(toDb),
-		}),
-		foreignKeys: table.foreignKeys.map((fk) => ({
-			...fk,
-			columns: fk.columns.map(toDb),
-			references: {
-				table: toDb(fk.references.table),
-				columns: fk.references.columns.map(toDb),
-				...(fk.references.schema !== undefined
-					? { schema: fk.references.schema }
-					: {}),
-			},
-		})),
-		indexes: table.indexes.map((idx) => {
-			const normalized = {
-				...idx,
-				...(idx.name !== undefined ? { name: toDb(idx.name) } : {}),
-				columns: idx.columns.map(toDb),
-				...(idx.include !== undefined
-					? { include: idx.include.map(toDb) }
-					: {}),
-				...(idx.opclass !== undefined
-					? {
-							opclass: Object.fromEntries(
-								Object.entries(idx.opclass).map(([key, value]) => [
-									toDb(key),
-									value,
-								]),
-							),
-						}
-					: {}),
-			};
-			return isEngineCanonicalIndex(idx)
-				? markEngineCanonicalIndex({ ...normalized, where: idx.where })
-				: normalized;
-		}),
-		...(table.checkConstraints !== undefined
-			? {
-					checkConstraints: table.checkConstraints.map((check) => {
-						const normalized = {
-							...check,
-							name: getCheckConstraintDatabaseName(check, plugin),
-						};
-						return isEngineCanonicalCheck(check)
-							? markEngineCanonicalCheck(normalized)
-							: normalized;
-					}),
-				}
-			: {}),
-		...(table.partition
-			? {
-					partition: {
-						strategy: table.partition.strategy,
-						columns: table.partition.columns.map(toDb),
-					},
-				}
-			: {}),
-	};
 }
 
 // ============================================================================
@@ -2010,18 +1900,20 @@ function compareSequences(
 	db: ModelIR,
 	changes: SchemaChange[],
 	naming: NamingPlugin,
+	declaredSequenceNames?: ReadonlyMap<string, string>,
+	schemaName?: string,
 ): void {
 	const schemaSeqs = physicalizeDeclaredSequences(schema.sequences, naming);
 	const dbSeqs = db.sequences ?? new Map<string, SequenceIR>();
 
-	for (const sequence of schema.sequences?.values() ?? []) {
-		const databaseName = getSequenceDatabaseName(sequence, naming);
+	for (const [databaseName, authoredName] of declaredSequenceNames ??
+		new Map([...schemaSeqs.keys()].map((name) => [name, name]))) {
 		if (
-			databaseName !== sequence.name &&
-			dbSeqs.has(sequence.name) &&
+			databaseName !== authoredName &&
+			dbSeqs.has(authoredName) &&
 			!dbSeqs.has(databaseName)
 		)
-			throw new LegacySequenceNameError(sequence.name, databaseName);
+			throw new LegacySequenceNameError(authoredName, databaseName, schemaName);
 	}
 
 	// Sequences in schema but not in DB → create

@@ -3,7 +3,6 @@ import type { DbCasing, IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
-import { generateMigrationSQL as generateMigrationSql } from '../ddl/migration-sql.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import {
@@ -100,6 +99,10 @@ vi.mock('../ddl/index.js', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../ddl/index.js')>()),
 	createPgsqlGeneratedManagedStep: (...args: unknown[]) =>
 		forward(mocks.createStep, args),
+}));
+
+vi.mock('../ddl/migration-sql.js', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../ddl/migration-sql.js')>()),
 	generateMigrationSQL: (...args: unknown[]) => forward(mocks.generate, args),
 }));
 
@@ -3426,12 +3429,6 @@ describe('convergePg refusal boundary', () => {
 				),
 			],
 		});
-		mocks.generate.mockImplementation((...args: unknown[]) =>
-			generateMigrationSql(
-				args[0] as Parameters<typeof generateMigrationSql>[0],
-				args[1] as Parameters<typeof generateMigrationSql>[1],
-			),
-		);
 		mocks.createStep.mockImplementation(createPgsqlGeneratedManagedStep);
 
 		await expect(convergePg(poolFor(), emptyModel())).resolves.toMatchObject({
@@ -3650,7 +3647,9 @@ describe('convergePg refusal boundary', () => {
 			applied: [],
 		});
 		expect(mocks.declaredComparison).toHaveBeenCalledWith(
-			expect.objectContaining({ model }),
+			expect.objectContaining({
+				model: expect.objectContaining({ tables: model.tables }),
+			}),
 		);
 		expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
 			'ownershipMask',

@@ -1,12 +1,14 @@
 /** #383 — PostgreSQL partial-index predicates converge in live diffs. */
 
 import {
-	comparePgsqlDatabaseSchema,
-	compareSchemata,
 	createPgsqlAdapter,
-	generateMigrationSQL,
 	IndexPredicateCanonicalizationError,
 } from '@dbsp/adapter-pgsql';
+import {
+	comparePgsqlDatabaseSchema,
+	compareSchemata,
+	generateMigrationSQL,
+} from '@dbsp/adapter-pgsql/internal';
 import { ModelIRImpl } from '@dbsp/core';
 import type { IndexIR, ModelIR, TableIR } from '@dbsp/types';
 import {

@@ -1,5 +1,4 @@
 import {
-	compareSchemata,
 	ensurePgLedger,
 	introspect,
 	readPgLedgerAddressChain,
@@ -7,6 +6,7 @@ import {
 import {
 	appendPgLedgerClaim,
 	appendPgLedgerResolution,
+	compareSchemata,
 } from '@dbsp/adapter-pgsql/internal';
 import { projectLedgerChain } from '@dbsp/core';
 import type {

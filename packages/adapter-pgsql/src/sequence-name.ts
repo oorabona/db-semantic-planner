@@ -1,4 +1,4 @@
-import type { SequenceIR } from '@dbsp/types';
+import type { PhysicalNameInventory, SequenceIR } from '@dbsp/types';
 import { quoteIdent } from './ddl/phases/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { escapeDiagnosticText } from './validate.js';
@@ -73,6 +73,23 @@ export function getSequenceDatabaseName(
 	naming: NamingPlugin,
 ): string {
 	return naming.toDatabase(sequence.name);
+}
+
+/**
+ * Retains authored standalone-sequence names after a model has been made
+ * physical. The inventory is the physical model's authority for that
+ * provenance; its ModelIR deliberately contains physical names only.
+ */
+export function declaredSequenceNamesFromInventory(
+	inventory: PhysicalNameInventory,
+): ReadonlyMap<string, string> {
+	return new Map(
+		inventory.entries.flatMap((entry) =>
+			entry.logical.kind === 'sequence'
+				? ([[entry.physical, entry.logical.name]] as const)
+				: [],
+		),
+	);
 }
 
 /**

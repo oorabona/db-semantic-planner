@@ -165,18 +165,20 @@ describe('dbsp migrate outcomes', () => {
 			{ db, schema: 'tenant', externalIndex: ['a:b:c'] },
 			deps,
 		);
-		expect(deps.converge).toHaveBeenCalledWith(deps.pool, model, {
-			schema: 'tenant',
-			dbCasing: 'snake_case',
-			externalIndexes: [{ table: 'a', name: 'b:c' }],
-		});
+		expect(deps.converge).toHaveBeenCalledWith(
+			deps.pool,
+			expect.objectContaining({ schema: 'tenant' }),
+			{ externalIndexes: [{ table: 'a', name: 'b:c' }] },
+		);
 	});
 
 	it('omits absent casing and external index keys', async () => {
 		const { deps } = await migrate({ kind: 'no-drift', applied: [] });
-		expect(deps.converge).toHaveBeenCalledWith(deps.pool, model, {
-			schema: 'public',
-		});
+		expect(deps.converge).toHaveBeenCalledWith(
+			deps.pool,
+			expect.objectContaining({ schema: 'public' }),
+			{},
+		);
 	});
 
 	it('ends the pool once after successful, refused, and thrown convergence', async () => {

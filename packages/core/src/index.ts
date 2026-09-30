@@ -456,7 +456,6 @@ export type {
 	ConnectionAvailability,
 	// PGSQL-PHASE2: Intuitive DB casing convention
 	DbCasing,
-	DDLGeneratingAdapter,
 	Dump,
 	DumpMeta,
 	ExecutingAdapter,
@@ -472,7 +471,6 @@ export {
 	assertCapability,
 	assertConnectionAvailable,
 	// DX-104: Feature detection helpers
-	supportsDDLGeneration,
 	supportsExecution,
 	supportsIntrospection,
 	supportsRawSql,

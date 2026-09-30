@@ -6,13 +6,12 @@
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generateCreateIndex, identityNaming } from '@dbsp/adapter-pgsql';
 import {
 	compareSchemata,
-	generateCreateIndex,
 	generateDDL,
 	generateMigrationSQL,
-	identityNaming,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import type { ModelIR, TableIR } from '@dbsp/core';
 import { ref, schema } from '@dbsp/core';
 import type { IndexIR } from '@dbsp/types';

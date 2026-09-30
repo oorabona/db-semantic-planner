@@ -277,10 +277,11 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow('users_age_check refused');
-		expect(mockCanonicalizeExpressionSurfaces).toHaveBeenCalledWith(
-			adapter,
-			desired,
-			dbModel,
+		const call = mockCanonicalizeExpressionSurfaces.mock.calls[0];
+		expect(call?.[0]).toBe(adapter);
+		expect(call?.[1]).toMatchObject({ tables: desired.tables });
+		expect(call?.[2]).toMatchObject({ tables: dbModel.tables });
+		expect(call?.[3]).toEqual(
 			expect.objectContaining({ requireCanonicalization: true }),
 		);
 	});

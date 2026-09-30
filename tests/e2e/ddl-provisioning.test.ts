@@ -2,7 +2,9 @@
  * DDL provisioning checks that remain after the removal of direct push and
  * file-based migration execution. These tests require DATABASE_URL.
  */
-import { compareSchemata, introspect } from '@dbsp/adapter-pgsql';
+
+import { introspect } from '@dbsp/adapter-pgsql';
+import { compareSchemata } from '@dbsp/adapter-pgsql/internal';
 import { ref, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {

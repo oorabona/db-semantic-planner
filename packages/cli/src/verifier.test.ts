@@ -3,7 +3,7 @@
  */
 
 import type { SchemaDiff } from '@dbsp/adapter-pgsql';
-import { compareSchemata } from '@dbsp/adapter-pgsql';
+import { compareSchemata } from '@dbsp/adapter-pgsql/internal';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { formatVerifyResult, verifyFromDiff } from './verifier.js';

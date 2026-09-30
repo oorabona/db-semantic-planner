@@ -21,13 +21,18 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { camelCaseNaming } from '../naming-plugin.js';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import { generateDDL } from './ddl-generator.js';
 import {
 	generateDownMigrationSQL,
 	generateDownSQL,
 	generateMigrationSQL,
 } from './migration-sql.js';
+import {
+	compareSchemata as comparePhysicalSchemata,
+	generateDDL as generatePhysicalDDL,
+	generateMigrationSQL as generatePhysicalMigrationSQL,
+} from './public-api.js';
 import {
 	compareSchemata,
 	ReferencedKeyRemovalError,
@@ -3849,21 +3854,28 @@ describe('FK enhancements — migration SQL', () => {
 			new Map(),
 		);
 
-		const ddl = generateDDL(schema, { naming: camelCaseNaming });
-		const diff = compareSchemata(
-			schema,
-			new ModelIRImpl(new Map(), new Map()),
-			{
-				dbCasing: 'snake_case',
-			},
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: schema,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
+		const ddl = generatePhysicalDDL(physical);
+		const diff = comparePhysicalSchemata(
+			physical,
+			createPgPhysicalModel({
+				mode: 'physical',
+				model: new ModelIRImpl(new Map(), new Map()),
+				schema: 'public',
+			}),
 		);
-		const sql = generateMigrationSQL(diff);
+		const sql = generatePhysicalMigrationSQL(diff);
 
 		expect(ddl).toContain(
-			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+			'CREATE INDEX "idx_posts_author_id" ON "public"."posts" ("author_id");',
 		);
 		expect(sql).toContain(
-			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+			'CREATE INDEX "idx_posts_author_id" ON "public"."posts" ("author_id");',
 		);
 	});
 
@@ -3876,15 +3888,26 @@ describe('FK enhancements — migration SQL', () => {
 			new Map([['orderNumberSeq', { name: 'orderNumberSeq' }]]),
 		);
 
-		const ddl = generateDDL(schema, { naming: camelCaseNaming });
-		const migration = generateMigrationSQL(
-			compareSchemata(schema, new ModelIRImpl(new Map(), new Map()), {
-				dbCasing: 'snake_case',
-			}),
+		const physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: schema,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		});
+		const ddl = generatePhysicalDDL(physical);
+		const migration = generatePhysicalMigrationSQL(
+			comparePhysicalSchemata(
+				physical,
+				createPgPhysicalModel({
+					mode: 'physical',
+					model: new ModelIRImpl(new Map(), new Map()),
+					schema: 'public',
+				}),
+			),
 		);
 
-		expect(ddl).toContain('CREATE SEQUENCE "order_number_seq";');
-		expect(migration).toContain('CREATE SEQUENCE "order_number_seq";');
+		expect(ddl).toContain('CREATE SEQUENCE "public"."order_number_seq";');
+		expect(migration).toContain('CREATE SEQUENCE "public"."order_number_seq";');
 	});
 
 	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {

@@ -4,11 +4,16 @@
  */
 
 import {
+	compareSchemata as comparePhysicalSchemata,
+	createPgPhysicalModel,
+	generateMigrationSQL as generatePhysicalMigrationSQL,
+	ReferencedKeyRemovalError,
+} from '@dbsp/adapter-pgsql';
+import {
 	comparePgsqlDatabaseSchema,
 	compareSchemata,
 	generateMigrationSQL,
-	ReferencedKeyRemovalError,
-} from '@dbsp/adapter-pgsql';
+} from '@dbsp/adapter-pgsql/internal';
 import { ModelIRImpl } from '@dbsp/core';
 import type {
 	ColumnIR,
@@ -289,12 +294,21 @@ describe('#797 schema-diff fixed points (real PG)', () => {
 			[{ name: 'orderNumberSeq' }],
 		);
 		const current = await adapter.introspect({ schema: SCHEMA });
-		const diff = compareSchemata(desired, current, {
-			dbCasing: 'snake_case',
-		});
-		const statements = generateMigrationSQL(diff, {
+		const diff = comparePhysicalSchemata(
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: desired,
+				schema: SCHEMA,
+				dbCasing: 'snake_case',
+			}),
+			createPgPhysicalModel({
+				mode: 'physical',
+				model: current,
+				schema: SCHEMA,
+			}),
+		);
+		const statements = generatePhysicalMigrationSQL(diff, {
 			includeDestructive: false,
-			schemaName: SCHEMA,
 		});
 
 		expect(statements).toContain(

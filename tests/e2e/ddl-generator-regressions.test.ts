@@ -5,10 +5,10 @@ import {
 	camelCaseNaming,
 	createPgsqlGeneratedManagedStep,
 	derivePostgresqlCapabilitiesForVersion,
-	generateDDL,
 	readGeneratedPostcondition,
 	withGeneratedPostconditionSession,
 } from '@dbsp/adapter-pgsql';
+import { generateDDL } from '@dbsp/adapter-pgsql/internal';
 import { schema } from '@dbsp/core';
 import { afterAll, describe, expect, it } from 'vitest';
 import {

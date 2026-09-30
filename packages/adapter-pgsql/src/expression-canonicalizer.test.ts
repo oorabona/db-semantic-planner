@@ -11,6 +11,7 @@ import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { generateMigrationSQL } from './ddl/migration-sql.js';
 import { formatSqlDefault } from './ddl/phases/utils.js';
+import { compareSchemata as comparePhysicalSchemata } from './ddl/public-api.js';
 import { compareSchemata } from './ddl/schema-diff.js';
 import {
 	CheckConstraintCanonicalizationError,
@@ -28,6 +29,7 @@ import {
 } from './expression-provenance.js';
 import * as namingPlugin from './naming-plugin.js';
 import { PgsqlAdapter } from './pgsql-adapter.js';
+import { createPgPhysicalModel } from './physical-model/index.js';
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
 	return {
@@ -45,6 +47,22 @@ function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
 		indexes: [],
 		...overrides,
 	};
+}
+
+function compareSnakeCase(desired: ModelIR, database: ModelIR) {
+	return comparePhysicalSchemata(
+		createPgPhysicalModel({
+			mode: 'logical',
+			model: desired,
+			schema: 'public',
+			dbCasing: 'snake_case',
+		}),
+		createPgPhysicalModel({
+			mode: 'physical',
+			model: database,
+			schema: 'public',
+		}),
+	);
 }
 
 describe('owned CHECK rendering', () => {
@@ -2691,9 +2709,7 @@ describe('canonicalizeExpressionSurfaces partial-index predicates', () => {
 		);
 
 		expect(
-			compareSchemata(canonical.desired, canonical.database, {
-				dbCasing: 'snake_case',
-			}).changes,
+			compareSnakeCase(canonical.desired, canonical.database).changes,
 		).toEqual([]);
 	});
 
@@ -3082,9 +3098,7 @@ describe('canonicalizeExpressionSurfaces column defaults', () => {
 			},
 		]);
 		expect(
-			compareSchemata(canonical.desired, canonical.database, {
-				dbCasing: 'snake_case',
-			}).changes,
+			compareSnakeCase(canonical.desired, canonical.database).changes,
 		).toEqual([]);
 		expect(client.searchPathQueries).toEqual([
 			'SET LOCAL search_path TO pg_catalog',

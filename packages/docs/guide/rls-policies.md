@@ -4,6 +4,10 @@ title: Row-Level Security Policies
 
 # How to Use Row-Level Security Policies
 
+Build the declared schema with `createPgPhysicalModel` before DDL or comparison.
+Under a casing rule, table and policy identifiers are derived there once; policy
+`USING` and `WITH CHECK` expressions remain physical SQL and are not rewritten.
+
 Row-Level Security (RLS) lets PostgreSQL enforce access control at the row level, so different database roles see only the rows they are allowed to see. Use this guide when you need multi-tenant isolation or per-role data filtering enforced at the database layer rather than in application code.
 
 ## When
@@ -88,4 +92,3 @@ RLS is gated by `supportsDDLRowLevelSecurity` capability flag:
 - Introspection reads from `pg_policy` catalog — requires appropriate privileges
 - Phase ordering: RLS enable (phase 17) runs before policy creation (phase 18) — never reversed
 - Changed policies are replaced (DROP + CREATE), not altered — no `ALTER POLICY` is emitted
-

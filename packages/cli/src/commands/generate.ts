@@ -128,9 +128,8 @@ export const generateCommand = new Command('generate')
 						const casingLabel = formatGenerateCasingLabel(dbCasing);
 
 						// Import adapter from adapter-pgsql (compile-only, no DB connection needed)
-						const { createPgsqlCompileOnlyAdapter } = await import(
-							'@dbsp/adapter-pgsql'
-						);
+						const { createPgPhysicalModel, createPgsqlCompileOnlyAdapter } =
+							await import('@dbsp/adapter-pgsql');
 
 						const adapter = createPgsqlCompileOnlyAdapter({
 							dbCasing,
@@ -139,7 +138,13 @@ export const generateCommand = new Command('generate')
 
 						{
 							// ARCH-005: Use schema.model directly (already ModelIR)
-							const ddlStatements = adapter.generateDDL(schema.model, {
+							const physical = createPgPhysicalModel({
+								mode: 'logical',
+								model: schema.model,
+								schema: options.schemaName ?? 'public',
+								dbCasing,
+							});
+							const ddlStatements = adapter.generateDDL(physical, {
 								...(options.drop !== undefined && {
 									includeDropStatements: options.drop,
 								}),

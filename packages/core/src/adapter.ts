@@ -24,7 +24,6 @@ export type {
 	ConnectionAvailability,
 	CreateIndexOptions,
 	DbCasing,
-	DDLGeneratingAdapter,
 	DropIndexOptions,
 	Dump,
 	DumpMeta,
@@ -52,7 +51,6 @@ import type {
 	AdapterCapabilities,
 	BaseAdapter,
 	CompiledQuery,
-	DDLGeneratingAdapter,
 	ExecutingAdapter,
 	IntrospectingAdapter,
 	RawSqlAdapter,
@@ -197,18 +195,6 @@ export function supportsRawSql(adapter: BaseAdapter): adapter is RawSqlAdapter {
 	return (
 		'executeRaw' in adapter &&
 		typeof (adapter as RawSqlAdapter).executeRaw === 'function'
-	);
-}
-
-/**
- * Check if adapter supports DDL generation.
- */
-export function supportsDDLGeneration(
-	adapter: BaseAdapter,
-): adapter is DDLGeneratingAdapter {
-	return (
-		'generateDDL' in adapter &&
-		typeof (adapter as DDLGeneratingAdapter).generateDDL === 'function'
 	);
 }
 

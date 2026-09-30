@@ -1,6 +1,11 @@
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	compareSchemata,
+	generateDDL,
+	generateMigrationSQL,
+} from '../index.js';
+import {
 	createPgPhysicalModel,
 	PgPhysicalModelInputError,
 	PgPhysicalNameCollisionError,
@@ -62,6 +67,74 @@ const orderItems: TableIR = {
 };
 
 describe('createPgPhysicalModel', () => {
+	it('is the sole naming authority for DDL, comparison, and migration SQL', () => {
+		const logical = model([
+			{
+				name: 'owners',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			},
+			{
+				name: 'userProfile',
+				columns: [
+					{ name: 'ownerId', type: 'integer', nullable: false, unique: true },
+				],
+				primaryKey: 'ownerId',
+				foreignKeys: [
+					{
+						columns: ['ownerId'],
+						references: { table: 'owners', columns: ['id'] },
+					},
+				],
+				indexes: [{ name: 'profileOwnerIndex', columns: ['ownerId'] }],
+			},
+		]);
+		const desired = createPgPhysicalModel({
+			mode: 'logical',
+			model: logical,
+			schema: 'app',
+			dbCasing: 'snake_case',
+		});
+		const database = createPgPhysicalModel({
+			mode: 'physical',
+			model: model([]),
+			schema: 'app',
+		});
+		const ddl = generateDDL(desired).join('\n');
+		const diff = compareSchemata(desired, database);
+		const migration = generateMigrationSQL(diff).join('\n');
+		for (const name of [
+			'pk_user_profile',
+			'fk_user_profile_owner_id',
+			'profile_owner_index',
+		]) {
+			expect(ddl).toContain(`"${name}"`);
+			expect(migration).toContain(`"${name}"`);
+		}
+		expect(diff.changes.some((change) => change.table === 'user_profile')).toBe(
+			true,
+		);
+	});
+
+	it('refuses physical comparison across schemas', () => {
+		const source = model([]);
+		const desired = createPgPhysicalModel({
+			mode: 'physical',
+			model: source,
+			schema: 'one',
+		});
+		const database = createPgPhysicalModel({
+			mode: 'physical',
+			model: source,
+			schema: 'two',
+		});
+		expect(() => compareSchemata(desired, database)).toThrow(
+			'different schemas',
+		);
+	});
+
 	it('physicalizes identifiers once while retaining metadata and expression text', () => {
 		const source = model([
 			orderItems,
@@ -187,7 +260,7 @@ describe('createPgPhysicalModel', () => {
 		).toThrow(PgPhysicalNameCollisionError);
 	});
 
-	it('refuses a policy name reused by a CHECK on its table', () => {
+	it('accepts a policy name reused by a CHECK on its table', () => {
 		const source = model([
 			{
 				name: 'audits',
@@ -198,15 +271,24 @@ describe('createPgPhysicalModel', () => {
 				policies: [{ name: 'tenantGuard' }],
 			},
 		]);
-		try {
-			createPgPhysicalModel({ mode: 'logical', model: source, schema: 'app' });
-			expect.unreachable();
-		} catch (error) {
-			expect(error).toBeInstanceOf(PgPhysicalNameCollisionError);
-			expect((error as PgPhysicalNameCollisionError).namespace).toBe(
-				'constraint',
-			);
-		}
+		expect(() =>
+			createPgPhysicalModel({ mode: 'logical', model: source, schema: 'app' }),
+		).not.toThrow();
+	});
+
+	it('refuses two policies with the same name on one table', () => {
+		const source = model([
+			{
+				name: 'audits',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+				policies: [{ name: 'tenantGuard' }, { name: 'tenantGuard' }],
+			},
+		]);
+		expect(() =>
+			createPgPhysicalModel({ mode: 'logical', model: source, schema: 'app' }),
+		).toThrow(PgPhysicalNameCollisionError);
 	});
 
 	it.each([

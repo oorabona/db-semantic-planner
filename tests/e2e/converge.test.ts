@@ -2,8 +2,8 @@
 import { randomUUID } from 'node:crypto';
 import {
 	appendIntentJournal,
-	comparePgsqlDatabaseSchema,
-	convergePg,
+	convergePg as convergePhysicalPg,
+	createPgPhysicalModel,
 	createPgsqlAdapter,
 	createPgTransitionRunPersister,
 	DBSP_LEDGER_MARKER_TABLE,
@@ -14,6 +14,8 @@ import {
 } from '@dbsp/adapter-pgsql';
 import {
 	appendPgLedgerClaim,
+	comparePgsqlDatabaseSchema,
+	convergePg,
 	PgConvergeRefusalError,
 } from '@dbsp/adapter-pgsql/internal';
 import {
@@ -2010,7 +2012,15 @@ describe('convergePg', () => {
 		await pool.query(`CREATE SEQUENCE "${schema}"."invoiceNumberSeq"`);
 
 		await expect(
-			convergePg(pool, desired, { schema, dbCasing: 'snake_case' }),
+			convergePhysicalPg(
+				pool,
+				createPgPhysicalModel({
+					mode: 'logical',
+					model: desired,
+					schema,
+					dbCasing: 'snake_case',
+				}),
+			),
 		).rejects.toThrow(
 			`ALTER SEQUENCE "${schema}"."invoiceNumberSeq" RENAME TO "invoice_number_seq"`,
 		);

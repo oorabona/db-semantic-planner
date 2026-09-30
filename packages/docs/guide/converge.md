@@ -20,7 +20,8 @@ planning; plan those with
 ## The startup sequence
 
 1. **Create the schema** you converge (`CREATE SCHEMA`); converge never creates it.
-2. **At every start:** `convergePg(pool, model, { schema, initialize })`. When the schema has no
+2. **At every start:** build a `PgPhysicalModel` for the target schema, then call
+   `convergePg(pool, physical, { initialize })`. When the schema has no
    ledger, `initialize` decides what happens:
    - `'never'` (the default): refuse `ledger-absent`.
    - `'pristine'`: create the `dbsp_meta` schema, the transition journal and the schema's ledger,
@@ -45,7 +46,7 @@ The ledger needs PostgreSQL 15 or later.
 
 ```typescript
 // doctest: real-db-only — initializes and converges a real schema
-import { convergePg } from '@dbsp/adapter-pgsql';
+import { convergePg, createPgPhysicalModel } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 
 const app = schema({
@@ -58,8 +59,10 @@ const app = schema({
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
 
 // At every start: 'applied' the first time, 'no-drift' afterwards.
-const result = await convergePg(pool, app.model, {
-  schema: 'converge_guide',
+const physical = createPgPhysicalModel({
+	mode: 'logical', model: app.model, schema: 'converge_guide',
+});
+const result = await convergePg(pool, physical, {
   initialize: 'pristine',
 });
 if (result.kind !== 'applied' && result.kind !== 'no-drift') {
@@ -134,7 +137,7 @@ same call commits on its own and can remain after a failure.
 
 ## Checking without applying
 
-`convergePg(pool, model, { schema, mode: 'check' })` takes the ledger lock, runs the checks and
+`convergePg(pool, physical, { mode: 'check' })` takes the ledger lock, runs the checks and
 planning refusals an apply runs before it starts executing, and returns without executing:
 
 | `result.kind` | Meaning |
@@ -165,8 +168,7 @@ tables the model does not declare are outside the comparison.
 
 ```typescript
 // doctest: skip — illustrates the option only
-await convergePg(pool, model, {
-  schema: 'app',
+await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: 'app' }), {
   initialize: 'adopt-existing',
   steps: [
     {
@@ -378,7 +380,7 @@ in the schema's `sequences` for the same pass, or converge with `initialize: 'ad
 
 ```typescript
 // doctest: real-db-only — adopts a table created outside dbsp
-import { convergePg, runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
+import { convergePg, createPgPhysicalModel, runPgReinitializePreflight } from '@dbsp/adapter-pgsql';
 import { schema } from '@dbsp/core';
 
 await pool.query('CREATE SCHEMA IF NOT EXISTS converge_guide');
@@ -404,12 +406,17 @@ const tables = {
 } as const;
 
 // The one-time pass over the existing install.
-await convergePg(pool, schema(tables, { legacy_notes: { adopt: true } }).model, {
-  schema: 'converge_guide',
+await convergePg(pool, createPgPhysicalModel({
+	mode: 'logical',
+	model: schema(tables, { legacy_notes: { adopt: true } }).model,
+	schema: 'converge_guide',
+}), {
 });
 
 // Every later start omits adopt.
-const result = await convergePg(pool, schema(tables).model, { schema: 'converge_guide' });
+const result = await convergePg(pool, createPgPhysicalModel({
+	mode: 'logical', model: schema(tables).model, schema: 'converge_guide',
+}));
 if (result.kind !== 'no-drift') throw new Error(`expected no-drift, got ${result.kind}`);
 ```
 
@@ -420,8 +427,7 @@ Create them yourself after `convergePg`, and name them so converge leaves them a
 
 ```typescript
 // doctest: skip — illustrates the option only
-await convergePg(pool, model, {
-  schema: 'app',
+await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: 'app' }), {
   externalIndexes: [{ table: 'documents', name: 'documents_search_index' }],
 });
 ```
