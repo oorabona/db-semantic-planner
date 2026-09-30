@@ -227,7 +227,7 @@ await convergePg(pool, createPgPhysicalModel({ mode: 'logical', model, schema: '
   Otherwise a name that exists in `options.schema` resolves there and a session temporary table
   cannot shadow it; a name absent from it continues down the path, like any query your application
   runs with that path, so schema-qualify names that live elsewhere. A schema literally named `$user`
-  cannot host steps (`invalid-options`).
+  cannot be a converge target: `createPgPhysicalModel` refuses a schema the DDL renderers cannot write.
 - `lockTimeoutMs` and `statementTimeoutMs` set PostgreSQL's `lock_timeout` and `statement_timeout`
   in the transactions that run the step's `inspect` or `apply`, so they limit each lock wait and
   each statement there, converge's ledger statements included. They do not limit how long the
@@ -319,7 +319,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, or a missing `inspect` or `apply`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, owned CHECK state rendering failed, an `assert` stayed unhealthy after `apply`, or a step timed out. It names the step and carries the original rendering error as `cause`; failed rendering-scope cleanup destroys the session. During planning only that scope is rolled back and no step ran; during execution the step transaction is rolled back and not recorded. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
