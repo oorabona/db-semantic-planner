@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPgsqlGeneratedManagedStep } from '../ddl/managed-step-manifest.js';
 import { compareSchemata, type SchemaChange } from '../ddl/schema-diff.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import * as physicalModel from '../physical-model/index.js';
 import {
 	physicalizeDeclaredSequences,
 	SequenceNameMapKeyMismatchError,
@@ -246,6 +247,7 @@ import {
 	type ConvergePgCheckOptions,
 	type ConvergePgOptions,
 	convergePg,
+	convergePgPhysical,
 	type PgConvergeCheckResult,
 	PgConvergeRefusalError,
 	type PgConvergeResult,
@@ -3642,23 +3644,31 @@ describe('convergePg refusal boundary', () => {
 		});
 	});
 
-	it('passes the physical snapshot without an ownership mask when no step owns a surface', async () => {
+	it('passes the physical snapshot to adoption comparison without rebuilding it', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		mocks.identity.mockResolvedValue(undefined);
 		const model = emptyModel();
-		await expect(convergePg(poolFor(), model)).resolves.toEqual({
-			kind: 'no-drift',
-			applied: [],
+		const physical = physicalModel.createPgPhysicalModel({
+			mode: 'logical',
+			model,
+			schema: 'public',
 		});
-		expect(mocks.declaredComparison).toHaveBeenCalledWith(
-			expect.objectContaining({ model: expect.anything() }),
-		);
-		expect(mocks.declaredComparison.mock.calls[0]?.[0]?.model.tables).not.toBe(
-			model.tables,
-		);
-		expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
-			'ownershipMask',
-		);
+		const factory = vi.spyOn(physicalModel, 'createPgPhysicalModel');
+		try {
+			await expect(convergePgPhysical(poolFor(), physical)).resolves.toEqual({
+				kind: 'no-drift',
+				applied: [],
+			});
+			expect(factory).not.toHaveBeenCalled();
+			expect(mocks.declaredComparison).toHaveBeenCalledWith(
+				expect.objectContaining({ model: physical.model, physical }),
+			);
+			expect(mocks.declaredComparison.mock.calls[0]?.[0]).not.toHaveProperty(
+				'ownershipMask',
+			);
+		} finally {
+			factory.mockRestore();
+		}
 	});
 
 	it('refuses a declared table absent after comparison without sending DDL', async () => {

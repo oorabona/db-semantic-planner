@@ -314,6 +314,19 @@ describe('createPgPhysicalModel', () => {
 		).not.toThrow();
 	});
 
+	it('does not claim PostgreSQL-generated array type names in physical mode', () => {
+		const source = {
+			...model([{ name: 'status', columns: [], foreignKeys: [], indexes: [] }]),
+			enums: new Map([['_status', { name: '_status', values: ['active'] }]]),
+		};
+		expect(() =>
+			createPgPhysicalModel({ mode: 'physical', model: source, schema: 'app' }),
+		).not.toThrow();
+		expect(() =>
+			createPgPhysicalModel({ mode: 'logical', model: source, schema: 'app' }),
+		).toThrow(PgPhysicalNameCollisionError);
+	});
+
 	it('exposes an immutable snapshot through its model collections', () => {
 		const physical = createPgPhysicalModel({
 			mode: 'logical',
@@ -355,7 +368,20 @@ describe('createPgPhysicalModel', () => {
 		expect(() =>
 			(physical.model.externalTables as Set<string>).add('other'),
 		).toThrow('collections are read-only');
+		physical.model.tables.forEach((_, __, collection) => {
+			expect(collection).toBe(physical.model.tables);
+			expect(() => (collection as Map<string, TableIR>).clear()).toThrow(
+				'collections are read-only',
+			);
+		});
+		physical.model.externalTables?.forEach((_, __, collection) => {
+			expect(collection).toBe(physical.model.externalTables);
+			expect(() => (collection as Set<string>).clear()).toThrow(
+				'collections are read-only',
+			);
+		});
 		expect(physical.model.tables.get('widgets')).toBe(table);
+		expect([...(physical.model.externalTables ?? [])]).toEqual(['outside']);
 		expect(physical.model.getTable('widgets')).toBe(table);
 		expect(Object.isFrozen(table)).toBe(true);
 		expect(Object.isFrozen(table.columns[0]!)).toBe(true);

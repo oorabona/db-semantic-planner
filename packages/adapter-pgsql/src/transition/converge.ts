@@ -820,18 +820,18 @@ function validateExternalIndexes(
  */
 async function compareConvergeMaskedSchema(input: {
 	readonly executor: PoolClient;
-	readonly model: ModelIR;
-	readonly schema: string;
-	readonly casing: DbCasing;
+	readonly physical: PgPhysicalModel;
+	readonly model?: ModelIR;
 	readonly externalIndexes: ReadonlySet<string>;
 	readonly ownership?: ResolvedOwnershipMask;
 	readonly declaredSequenceNames: ReadonlyMap<string, string>;
 }) {
 	return comparePgsqlDeclaredAdoptionSchema({
 		executor: input.executor,
-		model: input.model,
-		schema: input.schema,
-		dbCasing: input.casing,
+		model: input.model ?? input.physical.model,
+		schema: input.physical.schema,
+		dbCasing: 'preserve',
+		physical: input.physical,
 		externalIndexMask: input.externalIndexes,
 		...(input.ownership === undefined
 			? {}
@@ -1976,9 +1976,7 @@ export async function convergePgPhysical(
 				: undefined;
 		const compared = await compareConvergeMaskedSchema({
 			executor: client,
-			model,
-			schema,
-			casing,
+			physical,
 			externalIndexes,
 			declaredSequenceNames,
 			...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),
@@ -2460,11 +2458,10 @@ export async function convergePgPhysical(
 				if (address?.kind !== 'table') return false;
 				const compared = await compareConvergeMaskedSchema({
 					executor: client,
+					physical,
 					model: modelForDeclaredAdoption(
 						declaredAdoptionTable(model, address),
 					),
-					schema,
-					casing,
 					externalIndexes,
 					declaredSequenceNames,
 					...(ownershipMask === undefined ? {} : { ownership: ownershipMask }),

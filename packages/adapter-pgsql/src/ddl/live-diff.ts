@@ -25,7 +25,10 @@ import type {
 	SchemaScopeOptions,
 } from '../introspection.js';
 import { createPgsqlAdapter, type PgsqlAdapter } from '../pgsql-adapter.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
+import {
+	createPgPhysicalModel,
+	type PgPhysicalModel,
+} from '../physical-model/index.js';
 import {
 	declaredSequenceNamesFromInventory,
 	LegacySequenceNameError,
@@ -87,6 +90,11 @@ export interface ComparePgsqlDeclaredAdoptionSchemaInput {
 	readonly model: ModelIR;
 	readonly schema: string;
 	readonly dbCasing: DbCasing;
+	/**
+	 * Already-physicalized naming authority for `model`. Callers that own a
+	 * snapshot pass it here so comparison never re-applies logical naming.
+	 */
+	readonly physical?: PgPhysicalModel;
 	/** Physical [table, index] JSON keys whose drop drift is unmanaged. */
 	readonly externalIndexMask?: ReadonlySet<string>;
 	/** Physical [table, surface] JSON keys maintained by application assertions. */
@@ -317,14 +325,16 @@ export async function comparePgsqlDeclaredAdoptionSchema(
 			input.ownershipMask.indexes.size > 0)
 			? input.ownershipMask
 			: undefined;
-	const physicalDesired = createPgPhysicalModel({
-		mode: 'logical',
-		model: input.model,
-		schema: input.schema,
-		dbCasing: input.dbCasing,
-	});
+	const physicalDesired =
+		input.physical ??
+		createPgPhysicalModel({
+			mode: 'logical',
+			model: input.model,
+			schema: input.schema,
+			dbCasing: input.dbCasing,
+		});
 	const desired = modelWithOwnedSurfacesRemoved(
-		physicalDesired.model,
+		input.physical === undefined ? physicalDesired.model : input.model,
 		ownershipMask,
 	);
 	const declaredSequenceNames =

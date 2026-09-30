@@ -4,6 +4,7 @@ import type { Pool, PoolClient } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import type { PgsqlCanonicalizationScope } from '../expression-canonicalizer.js';
 import { PgsqlAdapter } from '../pgsql-adapter.js';
+import * as physicalModel from '../physical-model/index.js';
 import { createPgPhysicalModel } from '../physical-model/index.js';
 import { declaredSequenceNamesFromInventory } from '../sequence-name.js';
 import {
@@ -580,6 +581,36 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
+	it('uses a supplied physical adoption snapshot without recreating it', async () => {
+		const physical = createPgPhysicalModel({
+			mode: 'physical',
+			schema: 'public',
+			model: makeModel([
+				makeTable({
+					name: 'widgets',
+					primaryKey: 'id',
+					primaryKeyName: 'widgets_catalog_pkey',
+					checkConstraints: [{ name: 'pk_widgets', expression: 'id > 0' }],
+				}),
+			]),
+		});
+		const factory = vi.spyOn(physicalModel, 'createPgPhysicalModel');
+		try {
+			await expect(
+				comparePgsqlDeclaredAdoptionSchema({
+					executor: new FakeLiveDiffPool(new FakeLiveDiffClient('', false, [])),
+					model: physical.model,
+					schema: physical.schema,
+					dbCasing: 'preserve',
+					physical,
+				}),
+			).resolves.toBeDefined();
+			expect(factory).not.toHaveBeenCalled();
+		} finally {
+			factory.mockRestore();
+		}
+	});
+
 	it('retains only a legacy raw declared sequence when its physical name is absent', async () => {
 		const desired = makeModelWithSequences(['orderNumberSeq']);
 		const sequence = (name: string) => ({

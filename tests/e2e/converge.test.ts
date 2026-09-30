@@ -2331,6 +2331,41 @@ describe('convergePg', () => {
 		).resolves.toEqual({ kind: 'no-drift' });
 	});
 
+	it('adopts a physical snapshot with catalog primary-key and CHECK names without renaming either', async () => {
+		const pool = await getTestPool();
+		const adoptionSchema = `converge_physical_names_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		await createSchema(adoptionSchema);
+		try {
+			await pool.query(
+				`CREATE TABLE "${adoptionSchema}"."widgets" (id integer NOT NULL, CONSTRAINT "widgets_catalog_pkey" PRIMARY KEY (id), CONSTRAINT "pk_widgets" CHECK (id > 0))`,
+			);
+			const physical = createPgPhysicalModel({
+				mode: 'physical',
+				schema: adoptionSchema,
+				model: model([
+					{
+						name: 'widgets',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						primaryKeyName: 'widgets_catalog_pkey',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'pk_widgets', expression: 'id > 0' }],
+						adopt: true,
+					},
+				]),
+			});
+			await expect(
+				convergePhysicalPg(pool, physical, { initialize: 'adopt-existing' }),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePhysicalPg(pool, physical, { mode: 'check' }),
+			).resolves.toEqual({ kind: 'no-drift' });
+		} finally {
+			await dropSchema(adoptionSchema);
+		}
+	});
+
 	it('refuses fresh single-column FKs without declared foreign key indexes when automatic indexes are disabled', async () => {
 		const pool = await getTestPool();
 		const desired = model([

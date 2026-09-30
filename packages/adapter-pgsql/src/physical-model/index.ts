@@ -195,13 +195,14 @@ export function createPgPhysicalModel(
 			physicalTable,
 			`table row type ${table.name}`,
 		);
-		claims.add(
-			'pg_type',
-			tableSchema,
-			undefined,
-			derived(`_${physicalTable}`),
-			`table array type ${table.name}`,
-		);
+		if (physical)
+			claims.add(
+				'pg_type',
+				tableSchema,
+				undefined,
+				derived(`_${physicalTable}`),
+				`table array type ${table.name}`,
+			);
 
 		const columnNames = new Map<string, string>();
 		for (const column of table.columns)
@@ -509,13 +510,14 @@ export function createPgPhysicalModel(
 			value.name,
 			`enum ${value.name}`,
 		);
-		claims.add(
-			'pg_type',
-			enumSchema,
-			undefined,
-			derived(`_${value.name}`),
-			`enum array type ${value.name}`,
-		);
+		if (physical)
+			claims.add(
+				'pg_type',
+				enumSchema,
+				undefined,
+				derived(`_${value.name}`),
+				`enum array type ${value.name}`,
+			);
 	}
 	const sequenceNaming: NamingPlugin = {
 		toDatabase: (value) => truncateIdentifier(naming.toDatabase(value)),
@@ -558,9 +560,10 @@ export function createPgPhysicalModel(
 	// Other identifiers the renderers read (referenced schemas, roles,
 	// collations, opclasses, methods, storage keys) are validated when SQL is
 	// rendered, before any statement runs.  Physical input is an
-	// introspected PostgreSQL catalogue: quoted identifiers there are already
-	// accepted by PostgreSQL and must not be narrowed by dbsp's logical alias
-	// grammar.
+	// introspected PostgreSQL catalogue: building its model does not narrow
+	// the quoted identifiers PostgreSQL accepted, so comparison can read any
+	// catalogue.  Rendering SQL from such a model still applies the renderers'
+	// identifier rule.
 	if (physical)
 		for (const claim of claims.values) {
 			validateIdentifier(claim.schema, 'schema');
@@ -839,34 +842,54 @@ function createModel(
 /** Map/Set objects cannot be frozen into immutability; expose mutation traps instead. */
 function readOnlyMap<K, V>(source: ReadonlyMap<K, V>): ReadonlyMap<K, V> {
 	const values = new Map(source);
-	return Object.freeze(
+	let facade: ReadonlyMap<K, V>;
+	facade = Object.freeze(
 		new Proxy(values, {
 			get(target, property) {
 				if (property === 'set' || property === 'delete' || property === 'clear')
 					return () => {
 						throw new TypeError('PgPhysicalModel collections are read-only');
 					};
+				if (property === 'forEach')
+					return (
+						callback: (value: V, key: K, map: ReadonlyMap<K, V>) => void,
+						thisArg?: unknown,
+					) =>
+						target.forEach((value, key) => {
+							callback.call(thisArg, value, key, facade);
+						});
 				const value = Reflect.get(target, property, target);
 				return typeof value === 'function' ? value.bind(target) : value;
 			},
 		}),
 	) as ReadonlyMap<K, V>;
+	return facade;
 }
 
 function readOnlySet<T>(source: ReadonlySet<T>): ReadonlySet<T> {
 	const values = new Set(source);
-	return Object.freeze(
+	let facade: ReadonlySet<T>;
+	facade = Object.freeze(
 		new Proxy(values, {
 			get(target, property) {
 				if (property === 'add' || property === 'delete' || property === 'clear')
 					return () => {
 						throw new TypeError('PgPhysicalModel collections are read-only');
 					};
+				if (property === 'forEach')
+					return (
+						callback: (value: T, key: T, set: ReadonlySet<T>) => void,
+						thisArg?: unknown,
+					) =>
+						target.forEach((value, key) => {
+							callback.call(thisArg, value, key, facade);
+						});
 				const value = Reflect.get(target, property, target);
 				return typeof value === 'function' ? value.bind(target) : value;
 			},
 		}),
 	) as ReadonlySet<T>;
+	return facade;
 }
 
 function mapNameList(
