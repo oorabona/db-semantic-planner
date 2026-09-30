@@ -19,6 +19,7 @@ import {
 	canonicalizeExpressionSurfaces,
 	fallbackToRawExpressionComparison,
 	isExpressionCanonicalizationInfrastructureUnavailableError,
+	renderOwnedTableChecksInScratchScope,
 } from './expression-canonicalizer.js';
 import {
 	isEngineCanonicalCheck,
@@ -45,6 +46,151 @@ function makeTable(overrides: Partial<TableIR> & { name: string }): TableIR {
 		...overrides,
 	};
 }
+
+describe('owned CHECK rendering', () => {
+	it('does not create a scratch table when every requested CHECK is absent', async () => {
+		const executeRaw = vi.fn(async (sql: string) => {
+			if (sql.includes("current_setting('search_path')"))
+				return [{ search_path: 'app, public' }];
+			if (sql.includes('SELECT pg_catalog.to_regclass'))
+				return [{ exists: true }];
+			if (sql.includes('FROM pg_catalog.pg_constraint c')) return [];
+			return [];
+		});
+		const scope = {
+			executeRaw,
+			transaction: async (fn: (inner: unknown) => Promise<unknown>) =>
+				fn(scope),
+		};
+
+		await expect(
+			renderOwnedTableChecksInScratchScope(scope as never, {
+				schema: 'app',
+				physicalTable: 'projects',
+				checks: [
+					{ physicalName: 'missing_one', expression: 'state > 0' },
+					{ physicalName: 'missing_two', expression: 'state < 10' },
+				],
+				tempPrefix: 'owned',
+			}),
+		).resolves.toEqual([
+			{ physicalName: 'missing_one', state: 'absent' },
+			{ physicalName: 'missing_two', state: 'absent' },
+		]);
+		expect(
+			executeRaw.mock.calls.some(([sql]) =>
+				sql.startsWith('CREATE TEMP TABLE '),
+			),
+		).toBe(false);
+	});
+
+	it('renders only the requested CHECKs that exist live', async () => {
+		const executeRaw = vi.fn(async (sql: string, parameters?: unknown[]) => {
+			if (sql.includes("current_setting('search_path')"))
+				return [{ search_path: 'app, public' }];
+			if (sql.includes('SELECT pg_catalog.to_regclass'))
+				return [{ exists: true }];
+			if (sql.includes('FROM pg_catalog.pg_constraint c'))
+				return [
+					{
+						name: 'present_check',
+						expression: 'CHECK ((state > 0))',
+						validated: true,
+					},
+				];
+			if (sql.includes('FROM pg_catalog.pg_constraint'))
+				return [
+					{
+						name:
+							(parameters?.[1] as readonly string[] | undefined)?.[0] ??
+							'owned_0',
+						expression: 'CHECK ((state > 0))',
+					},
+				];
+			return [];
+		});
+		const scope = {
+			executeRaw,
+			transaction: async (fn: (inner: unknown) => Promise<unknown>) =>
+				fn(scope),
+		};
+
+		await expect(
+			renderOwnedTableChecksInScratchScope(scope as never, {
+				schema: 'app',
+				physicalTable: 'projects',
+				checks: [
+					{ physicalName: 'missing_check', expression: 'state < 0' },
+					{ physicalName: 'present_check', expression: 'state > 0' },
+				],
+				tempPrefix: 'owned',
+			}),
+		).resolves.toEqual([
+			{ physicalName: 'missing_check', state: 'absent' },
+			{ physicalName: 'present_check', state: 'healthy' },
+		]);
+		expect(
+			executeRaw.mock.calls.filter(([sql]) => sql.includes('ADD CONSTRAINT')),
+		).toHaveLength(1);
+	});
+
+	it('reports canonical definition and validation state without exposing rendered text', async () => {
+		const scope = {
+			executeRaw: async (sql: string) => {
+				if (sql.includes("current_setting('search_path')"))
+					return [{ search_path: 'app, public' }];
+				if (sql.includes('SELECT pg_catalog.to_regclass'))
+					return [{ exists: true }];
+				if (sql.includes('FROM pg_catalog.pg_constraint c'))
+					return [
+						{
+							name: 'healthy_check',
+							expression: 'CHECK ((state > 0))',
+							validated: true,
+						},
+						{
+							name: 'not_valid_check',
+							expression: 'CHECK ((state > 0)) NOT VALID',
+							validated: false,
+						},
+						{
+							name: 'different_check',
+							expression: 'CHECK ((state < 0))',
+							validated: true,
+						},
+					];
+				if (sql.includes('FROM pg_catalog.pg_constraint'))
+					return [
+						{ name: 'owned_0', expression: 'CHECK ((state > 0))' },
+						{ name: 'owned_1', expression: 'CHECK ((state > 0))' },
+						{ name: 'owned_2', expression: 'CHECK ((state > 0))' },
+						{ name: 'owned_3', expression: 'CHECK ((state > 0))' },
+					];
+				return [];
+			},
+			transaction: async (fn: (inner: unknown) => Promise<unknown>) =>
+				fn(scope),
+		};
+		await expect(
+			renderOwnedTableChecksInScratchScope(scope as never, {
+				schema: 'app',
+				physicalTable: 'projects',
+				checks: [
+					{ physicalName: 'healthy_check', expression: 'state > 0' },
+					{ physicalName: 'not_valid_check', expression: 'state > 0' },
+					{ physicalName: 'different_check', expression: 'state > 0' },
+					{ physicalName: 'missing_check', expression: 'state > 0' },
+				],
+				tempPrefix: 'owned',
+			}),
+		).resolves.toEqual([
+			{ physicalName: 'healthy_check', state: 'healthy' },
+			{ physicalName: 'not_valid_check', state: 'unvalidated' },
+			{ physicalName: 'different_check', state: 'definition-mismatch' },
+			{ physicalName: 'missing_check', state: 'absent' },
+		]);
+	});
+});
 
 function makeModel(
 	tables: readonly TableIR[],

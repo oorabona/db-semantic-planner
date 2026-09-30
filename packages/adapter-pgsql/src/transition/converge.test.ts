@@ -64,7 +64,20 @@ const mocks = vi.hoisted(() => {
 		})),
 		sequenceShape: vi.fn(async () => true),
 		introspect,
-		adapter: { introspect },
+		adapter: {
+			introspect,
+			withScratchScope: async (fn: (scope: unknown) => Promise<unknown>) => {
+				const scope = {
+					executeRaw: async (sql: string) =>
+						sql.includes("current_setting('search_path')")
+							? [{ search_path: 'public' }]
+							: [],
+					transaction: async (inner: (value: unknown) => Promise<unknown>) =>
+						inner(scope),
+				};
+				return fn(scope);
+			},
+		},
 	};
 });
 
@@ -785,6 +798,77 @@ describe('convergePg refusal boundary', () => {
 		expect(pool.connect).not.toHaveBeenCalled();
 	});
 
+	it('keeps the shape of refusals constructed without error options', () => {
+		const error = new PgConvergeRefusalError('invalid-options', []);
+		expect(Object.hasOwn(error, 'cause')).toBe(false);
+	});
+
+	it('keeps an owned-CHECK rendering error as an application-step refusal cause', async () => {
+		const renderingError = new Error('scratch table unavailable');
+		const withScratchScope = mocks.adapter.withScratchScope;
+		mocks.adapter.withScratchScope = async (callback) => {
+			type ScratchScope = {
+				readonly executeRaw: (sql: string) => Promise<unknown[]>;
+				readonly transaction: (
+					inner: (value: ScratchScope) => Promise<unknown>,
+				) => Promise<unknown>;
+			};
+			const scope: ScratchScope = {
+				executeRaw: async (sql: string) => {
+					if (sql.includes("current_setting('search_path')"))
+						return [{ search_path: 'public' }];
+					if (sql.includes('SELECT pg_catalog.to_regclass'))
+						return [{ exists: true }];
+					if (sql.includes('FROM pg_catalog.pg_constraint c'))
+						return [
+							{
+								name: 'positive',
+								expression: 'CHECK ((score > 0))',
+								validated: true,
+							},
+						];
+					if (sql.startsWith('CREATE TEMP TABLE ')) throw renderingError;
+					return [];
+				},
+				transaction: async (inner) => inner(scope),
+			};
+			return callback(scope);
+		};
+		mocks.compare.mockResolvedValue({ changes: [] });
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		try {
+			const error = await convergePg(
+				poolFor(),
+				modelWithTables([
+					{
+						name: 'projects',
+						columns: [{ name: 'score', type: 'integer', nullable: false }],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+					},
+				]),
+				{
+					steps: [
+						{
+							kind: 'assert',
+							id: 'owned-check-rendering',
+							digest: 'v1',
+							phase: 'after-generated-ddl',
+							owns: { checks: [{ table: 'projects', name: 'positive' }] },
+							inspect: async () => 'healthy' as const,
+							apply: async () => undefined,
+						},
+					],
+				},
+			).catch((caught: unknown) => caught);
+			expect(error).toMatchObject({ refusal: 'application-step-failed' });
+			expect((error as Error).cause).toBe(renderingError);
+		} finally {
+			mocks.adapter.withScratchScope = withScratchScope;
+		}
+	});
+
 	it('allows schema $user without application steps', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await expect(
@@ -1084,6 +1168,124 @@ describe('convergePg refusal boundary', () => {
 			expect(pool.connect).not.toHaveBeenCalled();
 		},
 	);
+
+	it('refuses a CHECK owner before another column-type owner for its table before connecting', async () => {
+		const pool = poolFor();
+		const model = modelWithTables([
+			{
+				name: 'projects',
+				columns: [{ name: 'state', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'project_state', expression: 'state > 0' }],
+			},
+		]);
+		await expect(
+			convergePg(pool, model, {
+				steps: [
+					{
+						kind: 'assert',
+						id: 'check-first',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { checks: [{ table: 'projects', name: 'project_state' }] },
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+					{
+						kind: 'assert',
+						id: 'type-second',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({ refusal: 'invalid-options' });
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('orders CHECK and column-type ownership by execution phase before connecting', async () => {
+		const pool = poolFor();
+		const model = modelWithTables([
+			{
+				name: 'projects',
+				columns: [{ name: 'state', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'project_state', expression: 'state > 0' }],
+			},
+		]);
+		await expect(
+			convergePg(pool, model, {
+				schema: '$user',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'check-first-in-array',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: {
+							checks: [{ table: 'projects', name: 'project_state' }],
+						},
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+					{
+						kind: 'assert',
+						id: 'type-second-in-array',
+						digest: 'v1',
+						phase: 'before-generated-ddl',
+						owns: { columnTypes: [{ table: 'projects', column: 'state' }] },
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'invalid-options',
+			message: 'converge application steps do not support schema $user',
+		});
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('allows one assertion to own a table column type and CHECK before connecting', async () => {
+		const pool = poolFor();
+		const model = modelWithTables([
+			{
+				name: 'projects',
+				columns: [{ name: 'state', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'project_state', expression: 'state > 0' }],
+			},
+		]);
+		await expect(
+			convergePg(pool, model, {
+				schema: '$user',
+				steps: [
+					{
+						kind: 'assert',
+						id: 'type-and-check',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: {
+							checks: [{ table: 'projects', name: 'project_state' }],
+							columnTypes: [{ table: 'projects', column: 'state' }],
+						},
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).rejects.toMatchObject({
+			refusal: 'invalid-options',
+			message: 'converge application steps do not support schema $user',
+		});
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
 
 	it('allows an owned local unique index for a foreign key targeting another schema', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });

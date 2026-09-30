@@ -51,6 +51,7 @@ import { physicalizeDeclaredSequences } from '../sequence-name.js';
 import { escapeDiagnosticText } from '../validate.js';
 import {
 	PgApplicationStepError,
+	type PgApplicationStepResolvedOwnedCheck,
 	type PgConvergeApplicationStep,
 	type PgConvergeAssertOwnership,
 	planPgApplicationSteps,
@@ -125,8 +126,9 @@ export class PgConvergeRefusalError extends Error {
 		readonly executionIds?: readonly string[],
 		readonly busyRunIds?: readonly string[],
 		readonly initialization?: PgConvergeInitializationFailure,
+		options?: ErrorOptions,
 	) {
-		super(detail ?? `converge refuses ${refusal}`);
+		super(detail ?? `converge refuses ${refusal}`, options);
 		this.name = 'PgConvergeRefusalError';
 	}
 }
@@ -373,6 +375,7 @@ function refusal(
 	kind: PgConvergeRefusal,
 	changes: readonly SchemaChange[],
 	detail: string,
+	options?: ErrorOptions,
 ): PgConvergeRefusalError {
 	return new PgConvergeRefusalError(
 		kind,
@@ -383,6 +386,11 @@ function refusal(
 			details: change.details,
 		})),
 		detail,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		options,
 	);
 }
 
@@ -486,6 +494,7 @@ type ResolvedOwnershipMask = Readonly<{
 type ResolvedApplicationOwnership = Readonly<{
 	mask: ResolvedOwnershipMask;
 	canonical: PgConvergeAssertOwnership;
+	checks: readonly PgApplicationStepResolvedOwnedCheck[];
 }>;
 
 function compareCodeUnits(left: string, right: string): number {
@@ -515,6 +524,13 @@ function validateApplicationOwnership(
 		columnTypes: new Set<string>(),
 		indexes: new Set<string>(),
 	};
+	const executionRanks = new Map(
+		steps.map((step, index) => [
+			step.id,
+			(step.phase === 'before-generated-ddl' ? 0 : steps.length) + index,
+		]),
+	);
+	const earlierCheckOwners = new Map<string, { id: string; rank: number }>();
 	const tables = new Map(
 		[...model.tables.values()].map((table) => [table.name, table]),
 	);
@@ -595,6 +611,7 @@ function validateApplicationOwnership(
 			indexes: new Set(),
 		};
 		const checks: { table: string; name: string }[] = [];
+		const resolvedChecks: PgApplicationStepResolvedOwnedCheck[] = [];
 		const columnTypes: { table: string; column: string }[] = [];
 		const indexes: { table: string; name: string }[] = [];
 		for (const entry of step.owns.columnTypes ?? []) {
@@ -650,6 +667,13 @@ function validateApplicationOwnership(
 			claimed.checks.add(key);
 			masks.checks.add(key);
 			checks.push({ table: lookup.physicalTable, name: physicalName });
+			resolvedChecks.push({
+				table: entry.table,
+				name: entry.name,
+				physicalTable: lookup.physicalTable,
+				physicalName,
+				expression: check.expression,
+			});
 		}
 		for (const entry of step.owns.indexes ?? []) {
 			const table = tables.get(entry.table);
@@ -693,6 +717,25 @@ function validateApplicationOwnership(
 			throw invalidOptions(
 				`converge application step ${step.id} owns CHECKs or indexes but is not after-generated-ddl`,
 			);
+		const rank = executionRanks.get(step.id);
+		if (rank === undefined)
+			throw new Error(
+				`converge application step ${step.id} has no execution rank`,
+			);
+		for (const columnType of columnTypes) {
+			const earlierCheckOwner = earlierCheckOwners.get(columnType.table);
+			if (
+				earlierCheckOwner !== undefined &&
+				earlierCheckOwner.id !== step.id &&
+				earlierCheckOwner.rank < rank
+			)
+				throw invalidOptions(
+					`converge application step ${earlierCheckOwner.id} owns CHECKs on ${columnType.table} before column type owner ${step.id}; CHECK owners must run after column type owners on the same table`,
+				);
+		}
+		for (const check of resolvedChecks)
+			if (!earlierCheckOwners.has(check.physicalTable))
+				earlierCheckOwners.set(check.physicalTable, { id: step.id, rank });
 		const canonical: PgConvergeAssertOwnership = {
 			...(checks.length === 0
 				? {}
@@ -711,7 +754,7 @@ function validateApplicationOwnership(
 				? {}
 				: { indexes: sortedOwnershipEntries(indexes) }),
 		};
-		resolved.set(step.id, { mask: masks, canonical });
+		resolved.set(step.id, { mask: masks, canonical, checks: resolvedChecks });
 	}
 	return resolved;
 }
@@ -1433,7 +1476,8 @@ function projectCheckedPlan(
  * structural shape; it does not audit the provenance of an exact-matching child
  * already present on a managed table.
  * An assert may own declared CHECKs, column types, and named indexes; those
- * surfaces are excluded from comparison and generated DDL, and its callback is
+ * surfaces are excluded from comparison and generated DDL. Its read-only
+ * `inspect` receives canonical owned-CHECK state, while its callback is
  * responsible for maintaining them. `externalIndexes` accepts exact physical
  * index names on logical model tables;
  * entries are validated before the ledger lock or any query, and converge
@@ -1523,6 +1567,9 @@ export async function convergePg(
 		applicationSteps,
 		naming,
 		schema,
+	);
+	const applicationOwnedChecks = new Map(
+		[...applicationOwnership].map(([id, ownership]) => [id, ownership.checks]),
 	);
 	const ownershipMask: ResolvedOwnershipMask | undefined =
 		applicationOwnership.size === 0
@@ -1883,6 +1930,7 @@ export async function convergePg(
 				database,
 				schema,
 				steps: applicationSteps,
+				ownedChecks: applicationOwnedChecks,
 				hasPendingGeneratedWork:
 					diff.changes.length > 0 || adoptionSteps.length > 0,
 				check,
@@ -1896,6 +1944,7 @@ export async function convergePg(
 					error.refusal,
 					[],
 					`application step ${error.stepId}: ${error.message}`,
+					{ cause: error.cause ?? error },
 				);
 			throw error;
 		}
@@ -2098,6 +2147,7 @@ export async function convergePg(
 				schema,
 				phase: 'before-generated-ddl',
 				steps: applicationSteps,
+				ownedChecks: applicationOwnedChecks,
 				onApplicationStepCallback: () => {
 					applicationStepCallbackRan = true;
 				},
@@ -2112,6 +2162,7 @@ export async function convergePg(
 					error.refusal,
 					[],
 					`application step ${error.stepId}: ${error.message}`,
+					{ cause: error.cause ?? error },
 				);
 			throw error;
 		}
@@ -2177,6 +2228,7 @@ export async function convergePg(
 						schema,
 						phase: 'after-generated-ddl',
 						steps: applicationSteps,
+						ownedChecks: applicationOwnedChecks,
 						onApplicationStepCallback: () => {
 							applicationStepCallbackRan = true;
 						},
@@ -2192,6 +2244,7 @@ export async function convergePg(
 						error.refusal,
 						[],
 						`application step ${error.stepId}: ${error.message}`,
+						{ cause: error.cause ?? error },
 					);
 				throw error;
 			}

@@ -33,7 +33,7 @@ re-verification at claim time, lock timeouts) do not run.
 ### Application steps are transactional and recorded in the ledger
 
 - `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
-- `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only; every apply
+- `assert` `{ id, digest, scope, phase, inspect(tx, owned), apply(tx, owned) }`: `inspect` is read-only; every apply
   runs it by the assert's phase, and a check runs it only when nothing else is pending.
   `apply` runs in apply mode when inspection reports the database unhealthy.
 
@@ -61,7 +61,10 @@ How they are recorded and run:
   built-in names win; otherwise a name that exists
   in the target resolves there and a session temporary table cannot shadow it, while a name absent
   from it continues down the path. A target schema literally named `$user` cannot host steps.
-  Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
+  An owned-CHECK state rendering failure during planning or execution is `application-step-failed`
+  naming the step with the original error as `cause`; failed rendering-scope cleanup destroys the
+  session, so planning rolls back only that scope without running a step while execution rolls back
+  its step transaction. Step timeouts are PostgreSQL's per-statement and lock-wait limits in those transactions, not a
   deadline on the callback; planning admission runs without them.
 - **Placement.** `phase: 'before-generated-ddl'` runs after every planning refusal and before the first
   generated DDL step; `'after-generated-ddl'` after the last. `no-drift` needs every `once` recorded and
@@ -76,9 +79,9 @@ How they are recorded and run:
 - Schema scope only in this delivery; `scope: 'database'` is refused until needed.
 - **A step does not touch what the comparison sees unless it owns the surface.** An `assert` can
   declare named CHECK constraints, column types, and named indexes in `owns`. Converge removes those
-  declared and live surfaces before expression canonicalisation and comparison, including adoption
-  re-verification; fresh generated DDL omits owned CHECKs and indexes. The assertion's `inspect` and
-  `apply` alone maintain them. Ownership is validated before connecting, cannot be duplicated, and
+  declared and live surfaces from its schema comparison, planning and adoption path; fresh generated
+  DDL omits owned CHECKs and indexes. Owned CHECKs are rendered separately to produce the state handed
+  to the assertion's `inspect` and `apply`, which alone maintain them. Ownership is validated before connecting, cannot be duplicated, and
   an assert that owns a CHECK or an index must be `after-generated-ddl`. All other declared columns,
   keys, foreign keys, CHECKs and indexes remain compared; functions, triggers, data and undeclared
   tables remain outside it.
@@ -121,7 +124,8 @@ application should not run as.
    owns, and converge leaves them out of schema comparison, planning refusals, `no-drift` and adoption
    re-verification, so the model can still declare them. Owned CHECKs and indexes are left out of
    generated DDL, while an owned column type is still emitted with its declared type when its table or
-   column is created; each step's canonical `owns` is included in `planDigest`. Shipped.
+   column is created; each step's canonical `owns` is included in `planDigest`. `inspect` remains
+   read-only and receives canonical owned-CHECK health state. Shipped.
 5. Composition into the program signature: not shipped. Until it ships, `convergePg` takes a model,
    and check mode is selected with `ConvergePgCheckOptions`.
 

@@ -253,10 +253,12 @@ export {
 	type StreamConfig,
 } from './streaming/index.js';
 export type {
+	PgApplicationStepOwnedState,
 	PgApplicationStepTx,
 	PgConvergeApplicationStep,
 	PgConvergeAssertStep,
 	PgConvergeOnceStep,
+	PgOwnedCheckState,
 } from './transition/application-step.js';
 // Startup convergence
 export {

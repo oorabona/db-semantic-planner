@@ -174,6 +174,37 @@ export type PgsqlCanonicalizationScope = {
 	readonly [pgsqlCanonicalizationScopeBrand]: typeof pgsqlCanonicalizationScopeBrand;
 };
 
+/** The comparison result for one CHECK owned by an application assertion. */
+export type OwnedCheckState =
+	| 'healthy'
+	| 'absent'
+	| 'unrenderable'
+	| 'definition-mismatch'
+	| 'unvalidated';
+
+export interface OwnedTableCheckRequest {
+	readonly physicalName: string;
+	readonly expression: string;
+}
+
+export interface RenderedOwnedTableCheck {
+	readonly physicalName: string;
+	readonly state: OwnedCheckState;
+}
+
+/** Run owned-CHECK rendering inside an adapter-created rollback-only scope. */
+export function renderOwnedTableChecksInScratchScope(
+	adapter: RollbackOnlyPgsqlScope,
+	request: {
+		readonly schema: string;
+		readonly physicalTable: string;
+		readonly checks: readonly OwnedTableCheckRequest[];
+		readonly tempPrefix: string;
+	},
+): Promise<readonly RenderedOwnedTableCheck[]> {
+	return renderOwnedTableChecks(canonicalizationScope(adapter), request);
+}
+
 /** Mint canonicalization provenance from the adapter's rollback-only scope. */
 function canonicalizationScope(
 	adapter: RollbackOnlyPgsqlScope,
@@ -1420,6 +1451,165 @@ export async function canonicalizeIndexPredicate(
 		throw new Error('PostgreSQL did not return a canonical index predicate.');
 	}
 	return engineCanonicalExpression(predicate);
+}
+
+/**
+ * Render checks maintained by one application assertion against the live
+ * relation.  This deliberately uses a LIKE scratch table rather than staging
+ * the model: application CHECK owners run after generated DDL, and the live
+ * relation is the authority for its columns and enum types.
+ */
+async function renderOwnedTableChecks(
+	adapter: PgsqlCanonicalizationScope,
+	request: {
+		readonly schema: string;
+		readonly physicalTable: string;
+		readonly checks: readonly OwnedTableCheckRequest[];
+		readonly tempPrefix: string;
+	},
+): Promise<readonly RenderedOwnedTableCheck[]> {
+	if (request.checks.length === 0) return [];
+	await pinCanonicalizationSettings(adapter);
+
+	const live = await deparseOwnedTableChecks(
+		adapter,
+		request.schema,
+		request.physicalTable,
+		request.checks.map((check) => check.physicalName),
+	);
+	if (!live.exists)
+		return request.checks.map((check) => ({
+			physicalName: check.physicalName,
+			state: 'absent',
+		}));
+	const presentChecks = request.checks.filter((check) =>
+		live.checks.has(check.physicalName),
+	);
+	if (presentChecks.length === 0)
+		return request.checks.map((check) => ({
+			physicalName: check.physicalName,
+			state: 'absent',
+		}));
+
+	const tempTableName = `${request.tempPrefix}_table`;
+	const tempTable = quoteIdent(tempTableName, 'table');
+	const liveRelation = `${quoteIdent(request.schema, 'schema')}.${quoteIdent(
+		request.physicalTable,
+		'table',
+	)}`;
+	await adapter.executeRaw(
+		`CREATE TEMP TABLE ${tempTable} (LIKE ${liveRelation}) ON COMMIT DROP`,
+	);
+
+	const declaredByPhysicalName = new Map<string, EngineCanonicalExpression>();
+	const tempNamesByPhysicalName = new Map<string, string>();
+	for (let i = 0; i < presentChecks.length; i++) {
+		const check = presentChecks[i]!;
+		validateCheckExpression(check.expression, 'owned CHECK constraint');
+		const tempName = `${request.tempPrefix}_${i}`;
+		try {
+			await adapter.transaction((tx) =>
+				tx.executeRaw(
+					`ALTER TABLE ${tempTable} ADD CONSTRAINT ${quoteIdent(tempName, 'alias')} ${renderCheckConstraintClause({ expression: check.expression })}`,
+				),
+			);
+			tempNamesByPhysicalName.set(check.physicalName, tempName);
+		} catch (error) {
+			const rejection = markExpressionRejection(error, 'add_check_constraint');
+			if (!isSemanticExpressionRejection(rejection, 'add_check_constraint'))
+				throw rejection;
+		}
+	}
+
+	if (tempNamesByPhysicalName.size > 0) {
+		const tempNames = [...tempNamesByPhysicalName.values()];
+		const rows = await deparseWithCatalogSearchPath(adapter, (tx) =>
+			tx.executeRaw<{ name: string; expression: string }>(
+				`SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression
+				   FROM pg_catalog.pg_constraint
+				  WHERE conrelid = $1::pg_catalog.regclass
+				    AND conname = ANY($2::pg_catalog.text[])`,
+				[tempTableName, tempNames],
+			),
+		);
+		const byTempName = new Map(
+			rows.map((row) => [
+				row.name,
+				engineCanonicalExpression(stripNotValidSuffix(row.expression)),
+			]),
+		);
+		for (const [physicalName, tempName] of tempNamesByPhysicalName) {
+			const declared = byTempName.get(tempName);
+			if (declared === undefined)
+				throw new Error('PostgreSQL did not return a canonical owned CHECK.');
+			declaredByPhysicalName.set(physicalName, declared);
+		}
+	}
+
+	return request.checks.map((check) => {
+		const liveCheck = live.checks.get(check.physicalName);
+		if (liveCheck === undefined)
+			return { physicalName: check.physicalName, state: 'absent' };
+		const declared = declaredByPhysicalName.get(check.physicalName);
+		if (declared === undefined)
+			return { physicalName: check.physicalName, state: 'unrenderable' };
+		if (declared !== stripNotValidSuffix(liveCheck.expression))
+			return { physicalName: check.physicalName, state: 'definition-mismatch' };
+		return {
+			physicalName: check.physicalName,
+			state: liveCheck.validated ? 'healthy' : 'unvalidated',
+		};
+	});
+}
+
+async function deparseOwnedTableChecks(
+	adapter: PgsqlCanonicalizationScope,
+	schema: string,
+	table: string,
+	constraintNames: readonly string[],
+): Promise<
+	Readonly<{
+		exists: boolean;
+		checks: ReadonlyMap<
+			string,
+			{ readonly expression: string; readonly validated: boolean }
+		>;
+	}>
+> {
+	const relationName = `${quoteIdent(schema, 'schema')}.${quoteIdent(table, 'table')}`;
+	const relation = await adapter.executeRaw<{ exists: boolean }>(
+		'SELECT pg_catalog.to_regclass($1::pg_catalog.text) IS NOT NULL AS exists',
+		[relationName],
+	);
+	if (relation[0]?.exists !== true) return { exists: false, checks: new Map() };
+	const rows = await deparseWithCatalogSearchPath(adapter, (tx) =>
+		tx.executeRaw<{
+			name: string;
+			expression: string;
+			validated: boolean;
+		}>(
+			`SELECT c.conname AS name,
+			        pg_catalog.pg_get_constraintdef(c.oid, false) AS expression,
+			        c.convalidated AS validated
+			   FROM pg_catalog.pg_constraint c
+			  WHERE c.conrelid = $1::pg_catalog.regclass
+			    AND c.contype = 'c'
+			    AND c.conname = ANY($2::pg_catalog.text[])`,
+			[relationName, constraintNames],
+		),
+	);
+	return {
+		exists: true,
+		checks: new Map(
+			rows.map((row) => [
+				row.name,
+				{
+					expression: stripNotValidSuffix(row.expression),
+					validated: row.validated,
+				},
+			]),
+		),
+	};
 }
 
 async function deparseDatabaseIndexPredicate(

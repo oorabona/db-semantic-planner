@@ -45,6 +45,23 @@ import {
 	runPreflight,
 } from './transition-reinitialize-preflight-testkit.js';
 
+type OwnedCheckInspection = {
+	readonly checks: readonly {
+		readonly table: string;
+		readonly name: string;
+		readonly physicalTable: string;
+		readonly physicalName: string;
+		readonly state:
+			| 'healthy'
+			| 'absent'
+			| 'definition-mismatch'
+			| 'unvalidated'
+			| 'unrenderable';
+	}[];
+};
+
+const emptyOwnedCheckInspection: OwnedCheckInspection = { checks: [] };
+
 const schema = `converge_e2e_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
 const typesSchema = `${schema}_types`;
 const typesSearchPath = `${typesSchema},public`;
@@ -3807,6 +3824,696 @@ describe('convergePg', () => {
 			).resolves.toEqual({ kind: 'no-drift', applied: [] });
 		} finally {
 			await dropSchema(freshSchema);
+		}
+	});
+
+	it('passes owned CHECK state to an assert and repairs its physical constraint', async () => {
+		const pool = await getTestPool();
+		const name = `owned_state_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_score_check`;
+		const id = `${name}-assert`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		let owned: OwnedCheckInspection | undefined;
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: name, name: checkName }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					inspected: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					owned = inspected;
+					return inspected.checks.every(({ state }) => state === 'healthy')
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (
+					tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const check = owned.checks[0];
+					if (!check) throw new Error('apply did not receive the owned CHECK');
+					await tx.query(
+						`ALTER TABLE "${check.physicalTable}" DROP CONSTRAINT IF EXISTS "${check.physicalName}"`,
+					);
+					await tx.query(
+						`ALTER TABLE "${check.physicalTable}" ADD CONSTRAINT "${check.physicalName}" CHECK (score > 0)`,
+					);
+				},
+			},
+		];
+		await expect(
+			convergePg(pool, desired, {
+				schema,
+				initialize: 'pristine',
+				steps,
+			}),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: ['create_table', `application-step:${id}`],
+		});
+		expect(owned?.checks).toEqual([
+			expect.objectContaining({
+				table: name,
+				name: checkName,
+				physicalTable: name,
+				physicalName: checkName,
+				state: 'healthy',
+			}),
+		]);
+		await expect(convergePg(pool, desired, { schema, steps })).resolves.toEqual(
+			{
+				kind: 'no-drift',
+				applied: [],
+			},
+		);
+		await pool.query(
+			`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"`,
+		);
+		await pool.query(
+			`ALTER TABLE "${schema}"."${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 1)`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps }),
+		).resolves.toMatchObject({
+			kind: 'applied',
+			applied: [`application-step:${id}`],
+		});
+		await expect(convergePg(pool, desired, { schema, steps })).resolves.toEqual(
+			{
+				kind: 'no-drift',
+				applied: [],
+			},
+		);
+	});
+
+	it('renders an owned enum CHECK in its target schema rather than the pool search_path', async () => {
+		const targetSchema = `converge_owned_enum_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const dedicatedPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+			options: '-c search_path=public',
+			max: 1,
+		});
+		const desired = model(
+			[
+				{
+					name: 'jobs',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{
+							name: 'status',
+							type: 'string',
+							nullable: false,
+							originalDbType: 'status',
+							originalDbTypeSchema: targetSchema,
+							originalDbTypeSchemaScope: 'target',
+						},
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+					checkConstraints: [
+						{ name: 'jobs_status_check', expression: "status = 'queued'" },
+					],
+				},
+			],
+			[],
+			[{ name: 'status', schema: targetSchema, values: ['queued', 'done'] }],
+		);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'jobs-status-check',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: 'jobs', name: 'jobs_status_check' }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) =>
+					owned.checks.every(({ state }) => state === 'healthy')
+						? ('healthy' as const)
+						: ('unhealthy' as const),
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						"ALTER TABLE jobs ADD CONSTRAINT jobs_status_check CHECK (status = 'queued')",
+					);
+				},
+			},
+		];
+		await createSchema(targetSchema);
+		try {
+			await runPreflight([targetSchema], { writeAdoptionFile: async () => {} });
+			await dedicatedPool.query(
+				`CREATE TYPE "${targetSchema}".status AS ENUM ('queued', 'done')`,
+			);
+			await expect(
+				convergePg(dedicatedPool, desired, {
+					schema: targetSchema,
+					steps,
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(dedicatedPool, desired, { schema: targetSchema, steps }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			try {
+				await dedicatedPool.end();
+			} finally {
+				await dropSchema(targetSchema);
+			}
+		}
+	});
+
+	it('creates a fresh owned CHECK after its assert creates the referenced function', async () => {
+		const freshSchema = `converge_owned_state_function_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const functionName = 'score_is_valid';
+		const desired = model([
+			{
+				...table('scores', false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [
+					{
+						name: 'scores_valid_check',
+						expression: `"${freshSchema}"."${functionName}"(score)`,
+					},
+				],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'scores-valid-check',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: 'scores', name: 'scores_valid_check' }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) =>
+					owned.checks.every(({ state }) => state === 'healthy')
+						? ('healthy' as const)
+						: ('unhealthy' as const),
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`CREATE FUNCTION "${freshSchema}"."${functionName}"(value integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT value > 0 $$`,
+					);
+					await tx.query(
+						`ALTER TABLE scores ADD CONSTRAINT scores_valid_check CHECK ("${freshSchema}"."${functionName}"(score))`,
+					);
+				},
+			},
+		];
+		await createSchema(freshSchema);
+		try {
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					initialize: 'pristine',
+					steps,
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			await expect(
+				convergePg(pool, desired, { schema: freshSchema, steps }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		} finally {
+			await dropSchema(freshSchema);
+		}
+	});
+
+	it('reports an owned CHECK drift in check mode without changing the CHECK or ledger', async () => {
+		const pool = await getTestPool();
+		const name = `owned_check_mode_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_check`;
+		const id = `${name}-assert`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: name, name: checkName }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) =>
+					owned.checks[0]?.state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const),
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`ALTER TABLE "${name}" DROP CONSTRAINT IF EXISTS "${checkName}"`,
+					);
+					await tx.query(
+						`ALTER TABLE "${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 0)`,
+					);
+				},
+			},
+		];
+		await convergePg(pool, desired, { schema, initialize: 'pristine', steps });
+		await pool.query(
+			`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"`,
+		);
+		const before = await ledgerRowCounts(pool);
+		const definitionBefore = await pool.query<{ readonly definition: string }>(
+			'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3',
+			[schema, name, checkName],
+		);
+		await expect(
+			convergePg(pool, desired, { schema, mode: 'check', steps }),
+		).resolves.toMatchObject({
+			kind: 'would-apply',
+			steps: [
+				expect.objectContaining({
+					kind: 'application-step',
+					id,
+					step: 'assert',
+					inspected: true,
+				}),
+			],
+		});
+		expect(await ledgerRowCounts(pool)).toEqual(before);
+		await expect(
+			pool.query<{ readonly definition: string }>(
+				'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3',
+				[schema, name, checkName],
+			),
+		).resolves.toEqual(definitionBefore);
+	});
+
+	it('reports and repairs absent, mismatched, unvalidated, and unrenderable owned CHECK state', async () => {
+		const pool = await getTestPool();
+		const name = `owned_states_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_check`;
+		const desired = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const observed: string[] = [];
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `${name}-assert`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: name, name: checkName }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const state = owned.checks[0]?.state;
+					if (state) observed.push(state);
+					return state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`ALTER TABLE "${name}" DROP CONSTRAINT IF EXISTS "${checkName}"`,
+					);
+					await tx.query(
+						`ALTER TABLE "${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 0)`,
+					);
+				},
+			},
+		];
+		await convergePg(pool, desired, { schema, initialize: 'pristine', steps });
+		for (const [state, sql] of [
+			[
+				'absent',
+				`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"`,
+			],
+			[
+				'definition-mismatch',
+				`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"; ALTER TABLE "${schema}"."${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 1)`,
+			],
+			[
+				'unvalidated',
+				`ALTER TABLE "${schema}"."${name}" DROP CONSTRAINT "${checkName}"; ALTER TABLE "${schema}"."${name}" ADD CONSTRAINT "${checkName}" CHECK (score > 0) NOT VALID`,
+			],
+		] as const) {
+			await pool.query(sql);
+			observed.length = 0;
+			await expect(
+				convergePg(pool, desired, { schema, steps }),
+			).resolves.toMatchObject({
+				kind: 'applied',
+			});
+			expect(observed).toContain(state);
+			expect(observed).toContain('healthy');
+		}
+
+		const unrenderableFunction = `${name}_missing`;
+		const unrenderableDesired = model([
+			{
+				...desired.tables.get(name)!,
+				checkConstraints: [
+					{ name: checkName, expression: `${unrenderableFunction}(score)` },
+				],
+			},
+		]);
+		const unrenderableSteps = [
+			{
+				...steps[0]!,
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const state = owned.checks[0]?.state;
+					if (state) observed.push(state);
+					return state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						`CREATE FUNCTION "${unrenderableFunction}"(value integer) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT value > 0 $$`,
+					);
+					await tx.query(
+						`ALTER TABLE "${name}" DROP CONSTRAINT IF EXISTS "${checkName}"`,
+					);
+					await tx.query(
+						`ALTER TABLE "${name}" ADD CONSTRAINT "${checkName}" CHECK (${unrenderableFunction}(score))`,
+					);
+				},
+			},
+		];
+		observed.length = 0;
+		await expect(
+			convergePg(pool, unrenderableDesired, {
+				schema,
+				steps: unrenderableSteps,
+			}),
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(observed).toContain('unrenderable');
+		expect(observed).toContain('healthy');
+	});
+
+	it('keeps same-named owned CHECK state with the table that owns it', async () => {
+		const pool = await getTestPool();
+		const suffix = randomUUID().replaceAll('-', '').slice(0, 12);
+		const projects = `owned_same_name_projects_${suffix}`;
+		const accounts = `owned_same_name_accounts_${suffix}`;
+		const observed: (readonly string[])[] = [];
+		let repairs = 0;
+		const repair = async (tx: PgApplicationStepTx) => {
+			repairs++;
+			for (const tableName of [projects, accounts]) {
+				await tx.query(
+					`ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS positive`,
+				);
+				await tx.query(
+					`ALTER TABLE "${tableName}" ADD CONSTRAINT positive CHECK (score > 0)`,
+				);
+			}
+		};
+		const desired = model(
+			[projects, accounts].map((name) => ({
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: 'positive', expression: 'score > 0' }],
+			})),
+		);
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: `owned-same-name-${suffix}`,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: {
+					checks: [
+						{ table: projects, name: 'positive' },
+						{ table: accounts, name: 'positive' },
+					],
+				},
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const states = owned.checks.map((check) => check.state);
+					observed.push(states);
+					return states.every((state) => state === 'healthy')
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: repair,
+			},
+		];
+
+		await convergePg(pool, desired, { schema, initialize: 'pristine', steps });
+		observed.length = 0;
+		repairs = 0;
+		await pool.query(
+			`ALTER TABLE "${schema}"."${projects}" DROP CONSTRAINT positive`,
+		);
+		await expect(
+			convergePg(pool, desired, { schema, steps }),
+		).resolves.toMatchObject({ kind: 'applied' });
+		expect(observed).toContainEqual(['absent', 'healthy']);
+		expect(observed).toContainEqual(['healthy', 'healthy']);
+		expect(repairs).toBe(1);
+	});
+
+	it('uses snake_case physical CHECK names for a camelCase owned assertion', async () => {
+		const freshSchema = `converge_owned_casing_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const desired = model([
+			{
+				name: 'userProfiles',
+				columns: [{ name: 'scoreValue', type: 'integer', nullable: false }],
+				primaryKey: 'scoreValue',
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [
+					{ name: 'scoreIsValid', expression: 'score_value > 0' },
+				],
+			},
+		]);
+		let owned: OwnedCheckInspection | undefined;
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'profile-score-check',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: 'userProfiles', name: 'scoreIsValid' }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					inspected: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					owned = inspected;
+					return inspected.checks[0]?.state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (
+					tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const check = owned.checks[0];
+					if (!check) throw new Error('apply did not receive the owned CHECK');
+					await tx.query(
+						`ALTER TABLE "${check.physicalTable}" DROP CONSTRAINT IF EXISTS "${check.physicalName}"`,
+					);
+					await tx.query(
+						`ALTER TABLE "${check.physicalTable}" ADD CONSTRAINT "${check.physicalName}" CHECK (score_value > 0)`,
+					);
+				},
+			},
+		];
+		await createSchema(freshSchema);
+		try {
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					initialize: 'pristine',
+					dbCasing: 'snake_case',
+					steps,
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+			expect(owned?.checks).toEqual([
+				expect.objectContaining({
+					physicalTable: 'user_profiles',
+					physicalName: 'score_is_valid',
+					state: 'healthy',
+				}),
+			]);
+			await pool.query(
+				`ALTER TABLE "${freshSchema}".user_profiles DROP CONSTRAINT score_is_valid`,
+			);
+			await expect(
+				convergePg(pool, desired, {
+					schema: freshSchema,
+					dbCasing: 'snake_case',
+					steps,
+				}),
+			).resolves.toMatchObject({ kind: 'applied' });
+		} finally {
+			await dropSchema(freshSchema);
+		}
+	});
+
+	it('sets the target schema before rendering an owned CHECK for inspect', async () => {
+		const targetSchema = `converge_owned_render_path_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const pool = await getTestPool();
+		const desired = model([
+			{
+				...table('scores', false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: 'scores_check', expression: 'score > 0' }],
+			},
+		]);
+		let renderedSchema: string | undefined;
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id: 'scores-check',
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				owns: { checks: [{ table: 'scores', name: 'scores_check' }] },
+				inspect: async (
+					tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					renderedSchema = (
+						await tx.query<{ readonly schema: string }>(
+							'SELECT pg_catalog.current_schema() AS schema',
+						)
+					).rows[0]?.schema;
+					return owned.checks[0]?.state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(
+						'ALTER TABLE scores ADD CONSTRAINT scores_check CHECK (score > 0)',
+					);
+				},
+			},
+		];
+		await createSchema(targetSchema);
+		try {
+			await convergePg(pool, desired, {
+				schema: targetSchema,
+				initialize: 'pristine',
+				steps,
+			});
+			renderedSchema = undefined;
+			await expect(
+				convergePg(pool, desired, { schema: targetSchema, steps }),
+			).resolves.toEqual({ kind: 'no-drift', applied: [] });
+			expect(renderedSchema).toBe(targetSchema);
+		} finally {
+			await dropSchema(targetSchema);
+		}
+	});
+
+	it('rolls back an assert when its post-apply owned-CHECK rendering hits the step lock timeout', async () => {
+		const pool = await getTestPool();
+		const lockPool = new pg.Pool({
+			connectionString: process.env.DATABASE_URL!,
+		});
+		const name = `owned_render_lock_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+		const checkName = `${name}_check`;
+		const effectTable = `${name}_effect`;
+		const sideTable = `${name}_side`;
+		const id = `${name}-assert`;
+		const base = model([
+			{
+				...table(name, false),
+				columns: [{ name: 'score', type: 'integer', nullable: false }],
+				primaryKey: 'score',
+				checkConstraints: [{ name: checkName, expression: 'score > 0' }],
+			},
+		]);
+		const desired = model([
+			...base.tables.values(),
+			...model([table(sideTable, false)]).tables.values(),
+		]);
+		let lockClient: pg.PoolClient | undefined;
+		let inspectCalls = 0;
+		const steps = [
+			{
+				kind: 'assert' as const,
+				id,
+				digest: 'v1',
+				phase: 'after-generated-ddl' as const,
+				lockTimeoutMs: 25,
+				owns: { checks: [{ table: name, name: checkName }] },
+				inspect: async (
+					_tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					inspectCalls++;
+					if (inspectCalls === 1) {
+						lockClient = await lockPool.connect();
+						await lockClient.query('BEGIN');
+						await lockClient.query(
+							`LOCK TABLE "${schema}"."${name}" IN ACCESS EXCLUSIVE MODE`,
+						);
+						return 'unhealthy' as const;
+					}
+					return owned.checks[0]?.state === 'healthy'
+						? ('healthy' as const)
+						: ('unhealthy' as const);
+				},
+				apply: async (tx: PgApplicationStepTx) => {
+					await tx.query(`CREATE TABLE "${effectTable}" (id integer)`);
+				},
+			},
+		];
+		try {
+			await convergePg(pool, base, { schema, initialize: 'pristine' });
+			await expect(
+				convergePg(pool, desired, { schema, steps }),
+			).rejects.toMatchObject({
+				refusal: 'application-step-failed',
+				changes: expect.any(Array),
+			});
+			await expect(
+				pool.query<{ readonly event_kind: string }>(
+					`SELECT event_kind FROM "${schema}".dbsp_ledger_event WHERE planned_claim_key = $1 AND event_kind IN ('intent', 'observed')`,
+					[id],
+				),
+			).resolves.toMatchObject({ rows: [] });
+			await expect(
+				pool.query('SELECT pg_catalog.to_regclass($1) AS relation', [
+					`${schema}.${effectTable}`,
+				]),
+			).resolves.toMatchObject({ rows: [{ relation: null }] });
+		} finally {
+			try {
+				if (lockClient) await lockClient.query('ROLLBACK');
+			} finally {
+				lockClient?.release();
+				await lockPool.end();
+			}
 		}
 	});
 });
