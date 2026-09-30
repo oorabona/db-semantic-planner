@@ -33,7 +33,7 @@ re-verification at claim time, lock timeouts) do not run.
 ### Application steps are transactional and recorded in the ledger
 
 - `once` `{ id, digest, scope, phase, apply(tx) }` runs once; a changed step needs a new id.
-- `assert` `{ id, digest, scope, phase, inspect(tx), apply(tx) }`: `inspect` is read-only; every apply
+- `assert` `{ id, digest, scope, phase, inspect(tx, owned), apply(tx, owned) }`: `inspect` is read-only; every apply
   runs it by the assert's phase, and a check runs it only when nothing else is pending.
   `apply` runs in apply mode when inspection reports the database unhealthy.
 
@@ -76,9 +76,9 @@ How they are recorded and run:
 - Schema scope only in this delivery; `scope: 'database'` is refused until needed.
 - **A step does not touch what the comparison sees unless it owns the surface.** An `assert` can
   declare named CHECK constraints, column types, and named indexes in `owns`. Converge removes those
-  declared and live surfaces before expression canonicalisation and comparison, including adoption
-  re-verification; fresh generated DDL omits owned CHECKs and indexes. The assertion's `inspect` and
-  `apply` alone maintain them. Ownership is validated before connecting, cannot be duplicated, and
+  declared and live surfaces from its schema comparison, planning and adoption path; fresh generated
+  DDL omits owned CHECKs and indexes. Owned CHECKs are rendered separately to produce the state handed
+  to the assertion's `inspect` and `apply`, which alone maintain them. Ownership is validated before connecting, cannot be duplicated, and
   an assert that owns a CHECK or an index must be `after-generated-ddl`. All other declared columns,
   keys, foreign keys, CHECKs and indexes remain compared; functions, triggers, data and undeclared
   tables remain outside it.

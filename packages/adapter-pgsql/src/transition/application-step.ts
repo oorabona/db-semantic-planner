@@ -47,11 +47,11 @@ interface PgConvergeApplicationStepBase {
 	readonly phase: 'before-generated-ddl' | 'after-generated-ddl';
 	readonly lockTimeoutMs?: number;
 	readonly statementTimeoutMs?: number;
-	readonly apply: (tx: PgApplicationStepTx) => Promise<void> | void;
 }
 
 export interface PgConvergeOnceStep extends PgConvergeApplicationStepBase {
 	readonly kind: 'once';
+	readonly apply: (tx: PgApplicationStepTx) => Promise<void> | void;
 }
 
 export interface PgConvergeAssertOwnership {
@@ -98,6 +98,10 @@ export interface PgConvergeAssertStep extends PgConvergeApplicationStepBase {
 		tx: PgApplicationStepTx,
 		owned: PgApplicationStepOwnedState,
 	) => Promise<'healthy' | 'unhealthy'> | 'healthy' | 'unhealthy';
+	readonly apply: (
+		tx: PgApplicationStepTx,
+		owned: PgApplicationStepOwnedState,
+	) => Promise<void> | void;
 }
 
 export type PgConvergeApplicationStep =
@@ -969,18 +973,22 @@ export async function runPgApplicationSteps(input: {
 				assertPgApplicationStepSessionHealthy(input.client, step);
 				continue;
 			}
+			const owned =
+				step.kind === 'assert'
+					? await renderPgApplicationStepOwnedChecks(
+							input.client,
+							input.schema,
+							step,
+							input.ownedChecks?.get(step.id) ?? [],
+							false,
+						)
+					: undefined;
 			if (
 				step.kind === 'assert' &&
 				(await inspectPgApplicationStep(
 					step,
 					input.client,
-					await renderPgApplicationStepOwnedChecks(
-						input.client,
-						input.schema,
-						step,
-						input.ownedChecks?.get(step.id) ?? [],
-						false,
-					),
+					owned!,
 					input.onApplicationStepCallback,
 				)) === 'healthy'
 			) {
@@ -1027,7 +1035,8 @@ export async function runPgApplicationSteps(input: {
 			);
 			await withPgApplicationStepTx(
 				input.client,
-				(tx) => step.apply(tx),
+				(tx) =>
+					step.kind === 'assert' ? step.apply(tx, owned!) : step.apply(tx),
 				input.onApplicationStepCallback,
 			);
 			if (

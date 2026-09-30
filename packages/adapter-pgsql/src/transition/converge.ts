@@ -126,8 +126,9 @@ export class PgConvergeRefusalError extends Error {
 		readonly executionIds?: readonly string[],
 		readonly busyRunIds?: readonly string[],
 		readonly initialization?: PgConvergeInitializationFailure,
+		options?: ErrorOptions,
 	) {
-		super(detail ?? `converge refuses ${refusal}`);
+		super(detail ?? `converge refuses ${refusal}`, options);
 		this.name = 'PgConvergeRefusalError';
 	}
 }
@@ -374,6 +375,7 @@ function refusal(
 	kind: PgConvergeRefusal,
 	changes: readonly SchemaChange[],
 	detail: string,
+	options?: ErrorOptions,
 ): PgConvergeRefusalError {
 	return new PgConvergeRefusalError(
 		kind,
@@ -384,6 +386,11 @@ function refusal(
 			details: change.details,
 		})),
 		detail,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		options,
 	);
 }
 
@@ -517,7 +524,13 @@ function validateApplicationOwnership(
 		columnTypes: new Set<string>(),
 		indexes: new Set<string>(),
 	};
-	const earlierCheckOwners = new Map<string, string>();
+	const executionRanks = new Map(
+		steps.map((step, index) => [
+			step.id,
+			(step.phase === 'before-generated-ddl' ? 0 : steps.length) + index,
+		]),
+	);
+	const earlierCheckOwners = new Map<string, { id: string; rank: number }>();
 	const tables = new Map(
 		[...model.tables.values()].map((table) => [table.name, table]),
 	);
@@ -704,16 +717,25 @@ function validateApplicationOwnership(
 			throw invalidOptions(
 				`converge application step ${step.id} owns CHECKs or indexes but is not after-generated-ddl`,
 			);
+		const rank = executionRanks.get(step.id);
+		if (rank === undefined)
+			throw new Error(
+				`converge application step ${step.id} has no execution rank`,
+			);
 		for (const columnType of columnTypes) {
 			const earlierCheckOwner = earlierCheckOwners.get(columnType.table);
-			if (earlierCheckOwner !== undefined && earlierCheckOwner !== step.id)
+			if (
+				earlierCheckOwner !== undefined &&
+				earlierCheckOwner.id !== step.id &&
+				earlierCheckOwner.rank < rank
+			)
 				throw invalidOptions(
-					`converge application step ${earlierCheckOwner} owns CHECKs on ${columnType.table} before column type owner ${step.id}; CHECK owners must run after column type owners on the same table`,
+					`converge application step ${earlierCheckOwner.id} owns CHECKs on ${columnType.table} before column type owner ${step.id}; CHECK owners must run after column type owners on the same table`,
 				);
 		}
 		for (const check of resolvedChecks)
 			if (!earlierCheckOwners.has(check.physicalTable))
-				earlierCheckOwners.set(check.physicalTable, step.id);
+				earlierCheckOwners.set(check.physicalTable, { id: step.id, rank });
 		const canonical: PgConvergeAssertOwnership = {
 			...(checks.length === 0
 				? {}
@@ -1922,6 +1944,7 @@ export async function convergePg(
 					error.refusal,
 					[],
 					`application step ${error.stepId}: ${error.message}`,
+					{ cause: error.cause ?? error },
 				);
 			throw error;
 		}
@@ -2139,6 +2162,7 @@ export async function convergePg(
 					error.refusal,
 					[],
 					`application step ${error.stepId}: ${error.message}`,
+					{ cause: error.cause ?? error },
 				);
 			throw error;
 		}
@@ -2220,6 +2244,7 @@ export async function convergePg(
 						error.refusal,
 						[],
 						`application step ${error.stepId}: ${error.message}`,
+						{ cause: error.cause ?? error },
 					);
 				throw error;
 			}

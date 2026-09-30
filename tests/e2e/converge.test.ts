@@ -3857,10 +3857,12 @@ describe('convergePg', () => {
 						? ('healthy' as const)
 						: ('unhealthy' as const);
 				},
-				apply: async (tx: PgApplicationStepTx) => {
-					const check = owned?.checks[0];
-					if (!check)
-						throw new Error('inspect did not receive the owned CHECK');
+				apply: async (
+					tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const check = owned.checks[0];
+					if (!check) throw new Error('apply did not receive the owned CHECK');
 					await tx.query(
 						`ALTER TABLE "${check.physicalTable}" DROP CONSTRAINT IF EXISTS "${check.physicalName}"`,
 					);
@@ -3871,7 +3873,11 @@ describe('convergePg', () => {
 			},
 		];
 		await expect(
-			convergePg(pool, desired, { schema, initialize: 'pristine', steps }),
+			convergePg(pool, desired, {
+				schema,
+				initialize: 'pristine',
+				steps,
+			}),
 		).resolves.toMatchObject({
 			kind: 'applied',
 			applied: ['create_table', `application-step:${id}`],
@@ -4325,10 +4331,12 @@ describe('convergePg', () => {
 						? ('healthy' as const)
 						: ('unhealthy' as const);
 				},
-				apply: async (tx: PgApplicationStepTx) => {
-					const check = owned?.checks[0];
-					if (!check)
-						throw new Error('inspect did not receive the owned CHECK');
+				apply: async (
+					tx: PgApplicationStepTx,
+					owned: OwnedCheckInspection = emptyOwnedCheckInspection,
+				) => {
+					const check = owned.checks[0];
+					if (!check) throw new Error('apply did not receive the owned CHECK');
 					await tx.query(
 						`ALTER TABLE "${check.physicalTable}" DROP CONSTRAINT IF EXISTS "${check.physicalName}"`,
 					);

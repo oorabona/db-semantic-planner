@@ -258,9 +258,10 @@ await convergePg(pool, model, {
 An `assert` may declare `owns` for named declared CHECK constraints, column types, and named
 declared indexes that its `apply` maintains. `table`, `column`, and CHECK `name` are model names;
 an index `name` is its resolved physical name (the naming plugin's resolved explicit name, or the
-default index name). An owned surface is compared by nobody but that step's `inspect`: converge no
-longer detects its drift, does not emit its CHECK or index on a fresh table, and adoption does not
-check it. Other column properties, including defaults and nullability, remain compared.
+default index name). Converge leaves owned surfaces out of its schema comparison and planning, does
+not emit an owned CHECK or index on a fresh table, and does not check one during adoption. For owned
+CHECKs it renders the state handed to `inspect` and `apply`; the step decides whether that state is
+healthy. Other column properties, including defaults and nullability, remain compared.
 
 ```typescript
 // doctest: skip — illustrates an assertion-owned CHECK
@@ -270,11 +271,11 @@ check it. Other column properties, including defaults and nullability, remain co
   owns: { checks: [{ table: 'projects', name: 'project_state_check' }] },
   inspect: async (_tx, owned) =>
     owned.checks.every((check) => check.state === 'healthy') ? 'healthy' : 'unhealthy',
-  apply: async (tx) => {
-    // `projects` and `project_state_check` are the physical names (`owned.checks[0].physicalTable`,
-    // `physicalName`); quote them in SQL when the naming plugin produces names that need quoting.
-    await tx.query('ALTER TABLE projects DROP CONSTRAINT IF EXISTS project_state_check')
-    await tx.query("ALTER TABLE projects ADD CONSTRAINT project_state_check CHECK (state IN ('ready', 'archived'))")
+  apply: async (tx, owned) => {
+    const quoteIdentifier = (name: string) => `"${name.replaceAll('"', '""')}"`
+    const check = owned.checks[0]!
+    await tx.query(`ALTER TABLE ${quoteIdentifier(check.physicalTable)} DROP CONSTRAINT IF EXISTS ${quoteIdentifier(check.physicalName)}`)
+    await tx.query(`ALTER TABLE ${quoteIdentifier(check.physicalTable)} ADD CONSTRAINT ${quoteIdentifier(check.physicalName)} CHECK (state IN ('ready', 'archived'))`)
   },
 }
 ```
@@ -284,12 +285,12 @@ runtime, a list set to `undefined` is treated as absent.
 Entries have exactly the required non-empty string fields and must name one declared surface; no
 surface may be owned twice. CHECKs and indexes require `after-generated-ddl`. An owned unique index
 cannot be a key referenced by a declared foreign key toward the converged schema. A `once` cannot own anything.
-`inspect` receives a second, read-only `owned` parameter. Its `checks` are in the declared `owns.checks`
+An assert's `inspect` and `apply` both receive a second, read-only `owned` parameter. Its `checks` are in the declared `owns.checks`
 order and carry model `table`/`name`, resolved `physicalTable`/`physicalName`, and one of `healthy`,
 `absent`, `unrenderable`, `definition-mismatch`, or `unvalidated`. Treat `unrenderable` as unhealthy:
 it means PostgreSQL could not render the declared expression yet. `apply` can use the physical names
-for DDL; rendered definitions are intentionally not exposed. A CHECK-owning step must follow every
-other step that owns a column type on the same table (a step owning both is allowed), so rendering
+for DDL; rendered definitions are intentionally not exposed. A CHECK-owning step must run after every
+other step that owns a column type on the same table in execution order (a step owning both is allowed), so rendering
 uses the current live column types.
 `owns` is not part of the recorded step, so changing it never refuses `application-step-changed`;
 it changes the check-mode `planDigest`.
@@ -312,7 +313,7 @@ refusal, or a `partially-applied` or `transport-ambiguous` result.
 
 | `refusal` | Meaning |
 |---|---|
-| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or puts a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
+| `invalid-options` | `mode` is not `'apply'`, `'check'` or absent, `initialize` is not `'never'`, `'pristine'`, `'adopt-existing'` or absent, a step is malformed (duplicate or empty `id`, empty `digest`, unknown `phase`, `scope` other than `'schema'`, a timeout that is not a whole number of milliseconds from 1 to 2147483647, a missing `inspect` or `apply`, or steps declared for a schema literally named `$user`), `owns` is malformed, duplicated, undeclared, in the wrong phase, reserves a foreign-key unique key, or runs a CHECK owner before another column-type owner for the same table, or `externalIndexes` is malformed, duplicated, names an undeclared table, or names a declared index. |
 | `application-step-changed` | A `once` step already recorded under its `id` is declared with another `digest`. Give the changed step a new `id`. |
 | `application-step-failed` | A step's `inspect` or `apply` threw, an `assert` stayed unhealthy after `apply`, or a step timed out. The step is rolled back and not recorded; `detail` names it. |
 | `ledger-absent` | The schema has no ledger and `initialize` is `'never'`, or the call is a check: pass `initialize`, or run `runPgReinitializePreflight`. |
