@@ -6354,10 +6354,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Generate DDL statements from the PostgreSQL physical model.
 	 *
 	 * Uses PostgreSQL AST nodes and pgsql-deparser for consistent SQL generation.
-	 * Applies the naming plugin for identifier transformation.
+	 * Names are already physical: they were mapped once when the model was built
+	 * with `createPgPhysicalModel`, and this method maps none again.
 	 *
-	 * @param schema - The ModelIR schema to generate DDL from
-	 * @param overrideOptions - Optional overrides for DDL generation (e.g., includeDropStatements)
+	 * @param physical - The physical model to generate DDL from; its schema and
+	 *   `fkAutoIndex` apply
+	 * @param overrideOptions - Optional rendering overrides (e.g., includeDropStatements)
 	 * @returns Array of DDL statements in dependency order
 	 */
 	generateDDL(

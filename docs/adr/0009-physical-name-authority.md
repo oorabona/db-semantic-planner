@@ -53,8 +53,10 @@ policies per table. A collision refuses the model with `PgPhysicalNameCollisionE
 the physical name and both logical origins. dbsp never relies on PostgreSQL adding a numeric suffix.
 
 `@dbsp/types` owns the dialect-neutral part: an immutable logical-address-to-physical-name inventory and the
-generic duplicate rule (tables per schema, columns per table). Core's declaration binding consumes that
-inventory instead of a naming strategy. Everything PostgreSQL-specific stays in the adapter.
+generic duplicate rule (tables per schema, columns per table). The adapter uses the inventory while it builds
+the physical model; core's declaration binding takes no naming strategy and binds the already-physical names the
+model carries, primary-key, foreign-key and automatic-index names included. Everything PostgreSQL-specific stays
+in the adapter.
 
 Expression text — CHECK expressions, index predicates and expressions, policy `USING`/`WITH CHECK`, SQL column
 defaults — is physical SQL and is never rewritten (#318, option a). Enum names keep their existing physical
@@ -68,7 +70,8 @@ and internal symbols do not (#860 tracks the convention for the existing exports
 
 - This is a breaking release with no compatibility layer: the model-taking APIs take a `PgPhysicalModel`, the
   per-call naming options move to its construction, and persisted plans and manifests built before it must be
-  regenerated. The changed signatures are listed once in the release notes.
+  regenerated. The squash commit of #784 lists the changed signatures in its `BREAKING CHANGE` footer, which
+  release-please carries into the release notes.
 - A live object whose desired physical name changes is drift; dbsp never renames it automatically.
 - A colliding model is refused before any SQL is rendered, any connection is made, or any ledger row is written.
 - The table physicalisation is exhaustive: adding a field to `TableIR` without classifying it fails the type
