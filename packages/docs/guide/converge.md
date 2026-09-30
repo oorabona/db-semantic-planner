@@ -308,7 +308,8 @@ invalid model, a connection failure, a database error while planning — is thro
 database error inside an `initialize` preflight scope (a missing privilege, for example), which
 becomes `initialization-refused` with the error in `initialization.detail`, and an error in an
 application step's `inspect` or `apply`, or while rendering an owned CHECK's state, which becomes
-`application-step-failed` naming the step with the original error as `cause`. A failed cleanup of
+`application-step-failed` naming the step. A rendering failure carries the original error as
+`cause`; an error thrown by `inspect` or `apply` is reported by its message in `detail`. A failed cleanup of
 that rendering scope destroys the session: during planning only the rendering scope is rolled back
 and no step ran; during execution the step transaction rolls back as for any `application-step-failed`. A failure
 during execution becomes an `execution-refused`, `adoption-refused` or `application-step-failed`
