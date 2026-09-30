@@ -32,9 +32,10 @@ model is already physical, and mapping it again is wrong.
 The PostgreSQL adapter owns one immutable physical model, `PgPhysicalModel`, built once by
 `createPgPhysicalModel` from either a logical model (with the target schema and one naming choice) or an
 introspected physical model (with the target schema and no naming). Logical names are mapped exactly once;
-physical input is never mapped. Every PostgreSQL consumer of a declared object — DDL generation, schema
-comparison and migration SQL, live comparison and converge, declaration binding, and model-backed query
-compilation — takes this value, and no public path emits SQL for a declared object without it.
+physical input is never mapped. Every PostgreSQL schema consumer of a declared object — DDL generation, schema
+comparison and migration SQL, live comparison and converge, and declaration binding — takes this value. Model-backed
+query compilation still maps names with the adapter's naming plugin; it moves onto this value in the second delivery
+(#762).
 
 The model records the physical name of every table, column, index (explicit, default and automatic
 foreign-key), primary-key, foreign-key, CHECK and column-unique constraint, standalone sequence, enum and policy.
@@ -75,5 +76,6 @@ and internal symbols do not (#860 tracks the convention for the existing exports
 
 1. Physical model, namespace verdict, neutral inventory, and the closed DDL, comparison, migration, live
    comparison, converge, declaration and CLI entry points (#784): not shipped.
-2. Query-local aliases and the `orm.tables` runtime helpers (#762): not shipped.
+2. Model-backed query compilation on the physical model, query-local aliases and the `orm.tables` runtime
+   helpers (#762): not shipped.
 3. Expression text documented as physical SQL (#318): not shipped.
