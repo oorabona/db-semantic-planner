@@ -488,6 +488,7 @@ function freshForeignKeyChanges(
 			details: 'child references parent',
 			meta: {
 				fk: {
+					name: 'fk_child_table_parent_first_parent_second',
 					columns: ['parent_first', 'parent_second'],
 					references: { table: 'parent_table', columns: referencedColumns },
 				},
@@ -874,14 +875,14 @@ describe('convergePg refusal boundary', () => {
 		}
 	});
 
-	it('allows schema $user without application steps', async () => {
+	it('refuses a renderer-invalid schema before application step handling', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
 		await expect(
 			convergePg(poolFor(), emptyModel(), {
 				mode: 'check',
 				schema: '$user',
 			}),
-		).resolves.toEqual({ kind: 'no-drift' });
+		).rejects.toThrow('Invalid schema identifier');
 	});
 
 	it('keeps an unexpected step getter error out of invalid-options detail', async () => {
@@ -2976,7 +2977,9 @@ describe('convergePg refusal boundary', () => {
 
 	it('refuses a create_index before execution', async () => {
 		await expectRefusal(
-			change('create_index', { index: { columns: ['email'] } }),
+			change('create_index', {
+				index: { name: 'idx_users_email', columns: ['email'] },
+			}),
 			'unsupported-change',
 		);
 	});
@@ -3034,6 +3037,7 @@ describe('convergePg refusal boundary', () => {
 				{
 					...change('add_foreign_key', {
 						fk: {
+							name: 'fk_new_table_user_id',
 							columns: ['user_id'],
 							references: { table: 'users', columns: ['id'] },
 						},
@@ -3837,6 +3841,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'left references right',
 				meta: {
 					fk: {
+						name: 'fk_left_table_right_id',
 						columns: ['right_id'],
 						references: { table: 'right_table', columns: ['id'] },
 					},
@@ -3880,6 +3885,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'right references left',
 				meta: {
 					fk: {
+						name: 'fk_right_table_left_id',
 						columns: ['left_id'],
 						references: { table: 'left_table', columns: ['id'] },
 					},
@@ -3948,6 +3954,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent external id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_external_id',
 						columns: ['parent_external_id'],
 						references: { table: 'parent_table', columns: ['external_id'] },
 					},
@@ -4275,6 +4282,7 @@ describe('convergePg refusal boundary', () => {
 					details: 'child references parent external id',
 					meta: {
 						fk: {
+							name: 'fk_child_table_parent_external_id',
 							columns: ['parent_external_id'],
 							references: { table: 'parent_table', columns: ['external_id'] },
 						},
@@ -4348,6 +4356,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_id',
 						columns: ['parent_id'],
 						references: { table: 'parent_table', columns: ['id'] },
 					},
@@ -4360,6 +4369,7 @@ describe('convergePg refusal boundary', () => {
 				details: 'child references parent external id',
 				meta: {
 					fk: {
+						name: 'fk_child_table_parent_external_id',
 						columns: ['parent_external_id'],
 						references: { table: 'parent_table', columns: ['external_id'] },
 					},

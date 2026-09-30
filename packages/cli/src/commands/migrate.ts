@@ -265,6 +265,17 @@ export async function runMigrate(
 	} catch (error) {
 		return failureResult('load-failed', error, schema, schemaPath);
 	}
+	let physical: PgPhysicalModel;
+	try {
+		physical = createPgPhysicalModel({
+			mode: 'logical',
+			model: loaded.model,
+			schema,
+			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
+		});
+	} catch (error) {
+		return failureResult('migrate-failed', error, schema, schemaPath);
+	}
 	let pool: Pool;
 	try {
 		({ pool } = await deps.createDbConnection(options.db));
@@ -274,12 +285,6 @@ export async function runMigrate(
 	let result: MigrateResult;
 	let convergeResult: PgConvergeResult | undefined;
 	try {
-		const physical = createPgPhysicalModel({
-			mode: 'logical',
-			model: loaded.model,
-			schema,
-			...(loaded.dbCasing === undefined ? {} : { dbCasing: loaded.dbCasing }),
-		});
 		convergeResult = await deps.converge(pool, physical, {
 			...(externalIndexes === undefined ? {} : { externalIndexes }),
 		});

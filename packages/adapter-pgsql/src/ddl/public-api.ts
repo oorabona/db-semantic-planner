@@ -38,7 +38,10 @@ export interface ComparePgsqlDatabaseSchemaOptions
 		'schema' | 'dbCasing' | 'declaredSequenceNames'
 	> {}
 export interface MigrationSQLOptions
-	extends Omit<InternalMigrationSQLOptions, 'schemaName' | 'fkAutoIndex'> {}
+	extends Omit<
+		InternalMigrationSQLOptions,
+		'schemaName' | 'fkAutoIndex' | 'fkAutoIndexCoverage'
+	> {}
 
 export interface PgSchemaDiff extends SchemaDiff {
 	readonly physical: Pick<PgPhysicalModel, 'schema' | 'fkAutoIndex'>;
@@ -62,6 +65,19 @@ function stamp(diff: SchemaDiff, physical: PgPhysicalModel): PgSchemaDiff {
 		...diff,
 		physical: { schema: physical.schema, fkAutoIndex: physical.fkAutoIndex },
 	});
+}
+
+function publicMigrationOptions(
+	options: MigrationSQLOptions | undefined,
+): MigrationSQLOptions {
+	// JavaScript callers can still supply the internal coverage model. It must
+	// not cross the public physical-model boundary, which has one authority.
+	const { fkAutoIndexCoverage: ignoredCoverage, ...publicOptions } = (options ??
+		{}) as MigrationSQLOptions & {
+		readonly fkAutoIndexCoverage?: unknown;
+	};
+	void ignoredCoverage;
+	return publicOptions;
 }
 
 export function generateDDL(
@@ -119,7 +135,7 @@ export function generateMigrationSQL(
 	options?: MigrationSQLOptions,
 ): readonly string[] {
 	return generateMigrationSQLForDiff(diff, {
-		...options,
+		...publicMigrationOptions(options),
 		schemaName: diff.physical.schema,
 		fkAutoIndex: diff.physical.fkAutoIndex,
 	});
@@ -130,7 +146,7 @@ export function generateDownSQL(
 	options?: MigrationSQLOptions,
 ): readonly string[] {
 	return generateDownSQLForDiff(diff, {
-		...options,
+		...publicMigrationOptions(options),
 		schemaName: diff.physical.schema,
 		fkAutoIndex: diff.physical.fkAutoIndex,
 	});

@@ -564,11 +564,12 @@ export function createPgPhysicalModel(
 	// the quoted identifiers PostgreSQL accepted, so comparison can read any
 	// catalogue.  Rendering SQL from such a model still applies the renderers'
 	// identifier rule.
-	if (physical)
+	if (physical) {
+		validateIdentifier(input.schema, 'schema');
 		for (const claim of claims.values) {
-			validateIdentifier(claim.schema, 'schema');
 			validateIdentifier(claim.physicalName, 'alias');
 		}
+	}
 	const copiedModel = createModel(
 		input.model,
 		tables,

@@ -1,5 +1,11 @@
-import { canonicalResourceParent, ledgerAddressKey } from '@dbsp/types';
+import { ModelIRImpl } from '@dbsp/core';
+import {
+	canonicalResourceParent,
+	ledgerAddressKey,
+	type TableIR,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { createPgPhysicalModel } from '../physical-model/index.js';
 import {
 	GENERATED_POSTCONDITION_MAX_JSON_BYTES,
 	GeneratedPostconditionV3DeclarationError,
@@ -20,6 +26,7 @@ import {
 	generatedPostconditionForChange,
 } from './managed-step-manifest.js';
 import { buildSequenceClause } from './migration-sql.js';
+import { compareSchemata, generateMigrationSQL } from './public-api.js';
 
 function v3(declaration: Record<string, unknown>) {
 	return {
@@ -33,6 +40,126 @@ function v3(declaration: Record<string, unknown>) {
 }
 
 describe('PostgreSQL generated managed-step manifest', () => {
+	it('records destructive comparison changes at the carried physical names', () => {
+		const model = (tables: readonly TableIR[]) =>
+			new ModelIRImpl(
+				new Map(tables.map((table) => [table.name, table] as const)),
+				new Map(),
+				new Map(),
+			);
+		const desired = createPgPhysicalModel({
+			mode: 'physical',
+			schema: 'public',
+			model: model([
+				{
+					name: 'widgets',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'email', type: 'string', nullable: false },
+					],
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'children',
+					columns: [{ name: 'owner_id', type: 'integer', nullable: false }],
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'owners',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					foreignKeys: [],
+					indexes: [],
+				},
+			]),
+		});
+		const database = createPgPhysicalModel({
+			mode: 'physical',
+			schema: 'public',
+			model: model([
+				{
+					name: 'widgets',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{
+							name: 'email',
+							type: 'string',
+							nullable: false,
+							unique: true,
+							uniqueConstraintName: 'widgets_catalog_unique',
+						},
+					],
+					primaryKey: 'id',
+					primaryKeyName: 'widgets_catalog_pkey',
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'children',
+					columns: [{ name: 'owner_id', type: 'integer', nullable: false }],
+					foreignKeys: [
+						{
+							name: 'children_catalog_fk',
+							columns: ['owner_id'],
+							references: { table: 'owners', columns: ['id'] },
+						},
+					],
+					indexes: [],
+				},
+				{
+					name: 'owners',
+					columns: [{ name: 'id', type: 'integer', nullable: false }],
+					foreignKeys: [],
+					indexes: [],
+				},
+			]),
+		});
+		const diff = compareSchemata(desired, database);
+		const expected = [
+			['alter_column_unique', 'widgets_catalog_unique'],
+			['drop_primary_key', 'widgets_catalog_pkey'],
+			['drop_foreign_key', 'children_catalog_fk'],
+		] as const;
+		for (const [kind, name] of expected) {
+			const change = diff.changes.find((candidate) => candidate.kind === kind);
+			expect(change).toBeDefined();
+			expect(
+				addressForChange({
+					change: change!,
+					database: 'app',
+					schema: 'public',
+				}).name,
+			).toBe(name);
+		}
+		expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual(
+			expect.arrayContaining([
+				'ALTER TABLE "public"."widgets" DROP CONSTRAINT IF EXISTS "widgets_catalog_unique";',
+				'ALTER TABLE "public"."widgets" DROP CONSTRAINT IF EXISTS "widgets_catalog_pkey" CASCADE;',
+				'ALTER TABLE "public"."children" DROP CONSTRAINT IF EXISTS "children_catalog_fk";',
+			]),
+		);
+	});
+
+	it('refuses an address change without its carried physical name', () => {
+		expect(() =>
+			addressForChange({
+				change: {
+					kind: 'alter_column_unique',
+					table: 'widgets',
+					column: 'email',
+					destructive: true,
+					details: 'drop unique',
+					meta: { unique: false },
+				},
+				database: 'app',
+				schema: 'public',
+			}),
+		).toThrow(
+			'generator planning refuses alter_column_unique on table widgets: missing physical UNIQUE constraint name',
+		);
+	});
+
 	it('persists physical sequence adoption material without the adopt directive', () => {
 		const step = createPgsqlDeclaredSequenceAdoptionStep({
 			address: {
@@ -654,6 +781,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'add FK',
 				meta: {
 					fk: {
+						name: 'fk_orders_account_id',
 						columns: ['account_id'],
 						references: { table: 'accounts', columns: ['id'] },
 					},
@@ -682,7 +810,9 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				table: 'orders',
 				destructive: false,
 				details: 'create index',
-				meta: { index: { columns: ['created_at'] } },
+				meta: {
+					index: { name: 'idx_orders_created_at', columns: ['created_at'] },
+				},
 			},
 			database: 'app',
 			schema: 'public',
@@ -744,7 +874,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 						table: 'orders',
 						destructive: false,
 						details: 'create index',
-						meta: { index: { columns } },
+						meta: { index: { name: 'idx_orders_id', columns } },
 					},
 					database: 'app',
 					schema: 'public',
@@ -995,6 +1125,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				details: 'unequal foreign key lists',
 				meta: {
 					fk: {
+						name: 'fk_orders_account_id',
 						columns: ['account_id'],
 						references: {
 							schema: 'public',
@@ -1157,6 +1288,7 @@ describe('PostgreSQL generated managed-step manifest', () => {
 				column: 'external_id',
 				destructive: false,
 				details: 'add unique',
+				meta: { constraintName: 'orders_external_id_key' },
 			},
 			database: 'app',
 			schema: 'public',

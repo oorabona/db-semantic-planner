@@ -138,6 +138,41 @@ describe('dbsp migrate outcomes', () => {
 		expect(deps.converge).not.toHaveBeenCalled();
 	});
 
+	it('refuses a physical-name collision before creating a database connection', async () => {
+		const collidingModel = new ModelIRImpl(
+			new Map([
+				[
+					'widgets',
+					{
+						name: 'widgets',
+						columns: [
+							{
+								name: 'email',
+								type: 'string',
+								nullable: false,
+								unique: true,
+							},
+						],
+						foreignKeys: [],
+						indexes: [{ name: 'widgets_email_key', columns: ['email'] }],
+					},
+				],
+			]),
+			new Map(),
+			new Map(),
+		);
+		const deps = dependencies({
+			loadSchema: vi
+				.fn()
+				.mockResolvedValue({ ...loaded, model: collidingModel }),
+		});
+		const value = await runMigrate('schema.ts', { db }, deps);
+		expect(value).toMatchObject({ outcome: 'migrate-failed', exitCode: 29 });
+		expect(value.error).toContain('PostgreSQL physical name collision');
+		expect(deps.createDbConnection).not.toHaveBeenCalled();
+		expect(deps.converge).not.toHaveBeenCalled();
+	});
+
 	it.each(['missing', ':index', 'table:'])(
 		'rejects malformed external index %s before loading',
 		async (externalIndex) => {
@@ -594,16 +629,12 @@ describe('dbsp migrate outcomes', () => {
 
 	it('prints ledger preflight placeholders and labeled escaped values but no URL', async () => {
 		const schemaFile = 'schema file; $(x).ts';
-		const { value } = await migrate(
-			{ kind: 'no-drift', applied: [] },
-			{
-				converge: vi
-					.fn()
-					.mockRejectedValue(new PgConvergeRefusalError('ledger-absent', [])),
-			},
-			{ schema: 'tenant\nschema' },
-		);
-		const withPath = { ...value, schemaFile };
+		const withPath: MigrateResult = {
+			outcome: 'ledger-absent',
+			exitCode: exitCodeForMigrateOutcome('ledger-absent'),
+			schema: 'tenant\nschema',
+			schemaFile,
+		};
 		const text = formatMigrateHuman(withPath, db);
 		expect(text).toContain(
 			'dbsp preflight --reinitialize --db <database> --schema-file <schema-file> --scope <schema> --out <adoption-file>',

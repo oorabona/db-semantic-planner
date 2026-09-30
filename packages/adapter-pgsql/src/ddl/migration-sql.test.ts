@@ -31,7 +31,9 @@ import {
 import {
 	compareSchemata as comparePhysicalSchemata,
 	generateDDL as generatePhysicalDDL,
+	generateDownSQL as generatePhysicalDownSQL,
 	generateMigrationSQL as generatePhysicalMigrationSQL,
+	type MigrationSQLOptions,
 } from './public-api.js';
 import {
 	compareSchemata,
@@ -3986,6 +3988,56 @@ describe('FK enhancements — migration SQL', () => {
 
 		expect(sql).not.toContain(
 			'CREATE INDEX "idx_orders_user_id" ON "orders" ("user_id");',
+		);
+	});
+
+	it('does not expose FK coverage as a second public migration model', () => {
+		type PublicMigrationOptionsOmitCoverage =
+			'fkAutoIndexCoverage' extends keyof MigrationSQLOptions ? false : true;
+		const exposesNoCoverage: PublicMigrationOptionsOmitCoverage = true;
+		expect(exposesNoCoverage).toBe(true);
+
+		const declared = {
+			...makeTable('orders', [makeCol({ name: 'user_id', type: 'integer' })]),
+			foreignKeys: [baseFk],
+			indexes: [{ name: 'idx_orders_user_id', columns: ['user_id'] }],
+		};
+		const desired = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'public',
+			model: makeModel([
+				makeTable('users', [makeCol({ name: 'id', type: 'integer' })], 'id'),
+				declared,
+			]),
+		});
+		const database = createPgPhysicalModel({
+			mode: 'logical',
+			schema: 'public',
+			model: makeModel([]),
+		});
+		const compared = comparePhysicalSchemata(desired, database);
+		const masked = {
+			...compared,
+			changes: compared.changes.map((change) =>
+				change.kind !== 'create_table' || change.table !== 'orders'
+					? change
+					: {
+							...change,
+							meta: {
+								...change.meta,
+								table: { ...(change.meta?.table as TableIR), indexes: [] },
+							},
+						},
+			),
+		};
+		const injectedCoverage = {
+			fkAutoIndexCoverage: desired.model,
+		} as unknown as MigrationSQLOptions;
+		expect(generatePhysicalMigrationSQL(masked, injectedCoverage)).toEqual(
+			generatePhysicalMigrationSQL(masked),
+		);
+		expect(generatePhysicalDownSQL(masked, injectedCoverage)).toEqual(
+			generatePhysicalDownSQL(masked),
 		);
 	});
 

@@ -13,7 +13,12 @@
 import { randomUUID } from 'node:crypto';
 import { writeFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
-import { convergePg, generateDDL } from '@dbsp/adapter-pgsql';
+import {
+	convergePg,
+	createPgPhysicalModel,
+	generateDDL,
+	type PgPhysicalModel,
+} from '@dbsp/adapter-pgsql';
 import type { ModelIR, TableIR } from '@dbsp/types';
 import pg from 'pg';
 
@@ -230,14 +235,12 @@ async function readStatementProfile(pool: pg.Pool): Promise<StatementProfile> {
 
 async function timedConverge(
 	pool: pg.Pool,
-	modelIr: ModelIR,
-	schema: string,
+	physical: PgPhysicalModel,
 	caseName: CaseName,
 ): Promise<TimedRun> {
 	await resetStatementStats(pool);
 	const startedAt = performance.now();
-	const result = await convergePg(pool, modelIr, {
-		schema,
+	const result = await convergePg(pool, physical, {
 		...(caseName === 'fresh'
 			? { initialize: 'pristine' as const }
 			: caseName === 'adopt'
@@ -260,10 +263,9 @@ async function createSchema(pool: pg.Pool, schema: string): Promise<void> {
 
 async function createAdoptedTables(
 	pool: pg.Pool,
-	modelIr: ModelIR,
-	schema: string,
+	physical: PgPhysicalModel,
 ): Promise<void> {
-	for (const statement of generateDDL(modelIr, { schemaName: schema }))
+	for (const statement of generateDDL(physical))
 		await pool.query(statement);
 }
 
@@ -371,19 +373,29 @@ async function main(): Promise<void> {
 				const freshSchema = benchmarkSchema('fresh', tableCount);
 				schemas.add(freshSchema);
 				await createSchema(pool, freshSchema);
+				const freshPhysical = createPgPhysicalModel({
+					mode: 'logical',
+					model: modelIr,
+					schema: freshSchema,
+				});
 				freshRuns.push(
-					await timedConverge(pool, modelIr, freshSchema, 'fresh'),
+					await timedConverge(pool, freshPhysical, 'fresh'),
 				);
 				noDriftRuns.push(
-					await timedConverge(pool, modelIr, freshSchema, 'no-drift'),
+					await timedConverge(pool, freshPhysical, 'no-drift'),
 				);
 
 				const adoptSchema = benchmarkSchema('adopt', tableCount);
 				schemas.add(adoptSchema);
 				await createSchema(pool, adoptSchema);
-				await createAdoptedTables(pool, modelIr, adoptSchema);
+				const adoptPhysical = createPgPhysicalModel({
+					mode: 'logical',
+					model: modelIr,
+					schema: adoptSchema,
+				});
+				await createAdoptedTables(pool, adoptPhysical);
 				adoptRuns.push(
-					await timedConverge(pool, modelIr, adoptSchema, 'adopt'),
+					await timedConverge(pool, adoptPhysical, 'adopt'),
 				);
 			}
 			tables.push({

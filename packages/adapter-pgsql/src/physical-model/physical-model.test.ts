@@ -683,6 +683,24 @@ describe('createPgPhysicalModel', () => {
 		).toThrow('Invalid alias identifier');
 	});
 
+	it('validates a logical target schema even when the model has no claims', () => {
+		const empty = model([]);
+		expect(() =>
+			createPgPhysicalModel({
+				mode: 'logical',
+				model: empty,
+				schema: 'bad;drop',
+			}),
+		).toThrow('Invalid schema identifier');
+		expect(() =>
+			createPgPhysicalModel({
+				mode: 'physical',
+				model: empty,
+				schema: 'bad;drop',
+			}),
+		).not.toThrow();
+	});
+
 	it('keeps PostgreSQL-accepted quoted identifiers in physical mode', () => {
 		const source = model([
 			{ name: 'café', columns: [], foreignKeys: [], indexes: [] },

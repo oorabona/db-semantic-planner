@@ -680,23 +680,16 @@ function validateApplicationOwnership(
 					`converge application step ${step.id} owns indexes on undeclared table ${entry.table}`,
 				);
 			const lookup = lookupFor(table);
-			const declared = table.indexes.filter(
-				(index) => resolvePgsqlDeclaredIndexName(table, index) === entry.name,
-			);
-			if (declared.length === 0)
+			const matching = lookup.indexes.get(entry.name) ?? [];
+			if (matching.length === 0)
 				throw invalidOptions(
 					`converge application step ${step.id} owns undeclared index ${entry.table}.${entry.name}`,
 				);
-			if (declared.length !== 1)
-				throw invalidOptions(
-					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
-				);
-			const physicalName = entry.name;
-			const matching = lookup.indexes.get(physicalName) ?? [];
 			if (matching.length !== 1)
 				throw invalidOptions(
 					`converge application step ${step.id} owns ambiguous index ${lookup.physicalTable}.${entry.name}`,
 				);
+			const physicalName = entry.name;
 			const index = matching[0]!;
 			if (
 				index.unique === true &&

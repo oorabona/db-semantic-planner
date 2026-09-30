@@ -5,7 +5,6 @@ import type {
 	DeclarableResourceAddress,
 	LedgerClaimKind,
 	LedgerPayload,
-	ModelIR,
 	NormalizedManagedStep,
 	SequenceIR,
 	TableIR,
@@ -13,7 +12,6 @@ import type {
 import { canonicalResourceParent } from '@dbsp/types';
 import { splitCheckConstraintState } from '../check-expression.js';
 import { renderColumnDbType } from '../db-type.js';
-import { createPgPhysicalModel } from '../physical-model/index.js';
 import { decideColumnEmission } from './column-emission-decision.js';
 import {
 	classifyGeneratedMutation,
@@ -46,80 +44,6 @@ function stringList(value: unknown, label: string): readonly string[] {
 			`generator planning refuses ${label}: missing typed columns`,
 		);
 	return value as readonly string[];
-}
-
-/** Resolve a standalone generated change through the sole physical authority. */
-function carryAddressNames(change: SchemaChange): SchemaChange {
-	const meta = change.meta;
-	const fk = meta?.fk as TableIR['foreignKeys'][number] | undefined;
-	const index = meta?.index as TableIR['indexes'][number] | undefined;
-	const indexColumns =
-		index === undefined
-			? []
-			: (index.expressions?.length ?? 0) > 0
-				? index.columns
-				: stringList(index.columns, change.kind);
-	const primaryKey =
-		change.kind === 'add_primary_key' || change.kind === 'drop_primary_key'
-			? stringList(meta?.columns, `${change.kind} columns`)
-			: undefined;
-	const columns = [
-		...(fk === undefined
-			? []
-			: stringList(fk.columns, `${change.kind} columns`)),
-		...indexColumns,
-		...(primaryKey ?? []),
-		...(change.kind === 'alter_column_unique' && change.column !== undefined
-			? [change.column]
-			: []),
-	];
-	if (columns.length === 0) return change;
-	const table: TableIR = {
-		name: change.table,
-		columns: [...new Set(columns)].map((name) => ({
-			name,
-			type: 'string',
-			nullable: true,
-			...(change.kind === 'alter_column_unique' && name === change.column
-				? { unique: true }
-				: {}),
-		})),
-		foreignKeys: fk === undefined ? [] : [fk],
-		indexes: index === undefined ? [] : [index],
-		...(primaryKey === undefined ? {} : { primaryKey }),
-	};
-	const model: ModelIR = {
-		tables: new Map([[table.name, table]]),
-		relations: new Map(),
-		getTable: (name) => (name === table.name ? table : undefined),
-		getRelation: () => undefined,
-		getRelationsFrom: () => [],
-		getRelationsTo: () => [],
-		isAmbiguous: () => ({ ambiguous: false, options: [] }),
-	};
-	const physical = createPgPhysicalModel({
-		mode: 'logical',
-		model,
-		schema: 'public',
-	});
-	const physicalTable = physical.model.getTable(change.table)!;
-	if (fk !== undefined) {
-		const namedFk = physicalTable.foreignKeys[0]!;
-		return { ...change, meta: { ...meta, fk: namedFk } };
-	}
-	if (index !== undefined)
-		return { ...change, meta: { ...meta, index: physicalTable.indexes[0]! } };
-	if (primaryKey !== undefined)
-		return { ...change, meta: { ...meta, name: physicalTable.primaryKeyName } };
-	if (change.kind === 'alter_column_unique')
-		return {
-			...change,
-			meta: {
-				...meta,
-				constraintName: physicalTable.columns[0]!.uniqueConstraintName,
-			},
-		};
-	return change;
 }
 
 export type GeneratedColumnPostcondition = {
@@ -1070,7 +994,7 @@ export function addressForChange(input: {
 	readonly schema: string;
 }): Address {
 	const { database, schema } = input;
-	const change = carryAddressNames(input.change);
+	const change = input.change;
 	const meta = change.meta;
 	const column = () =>
 		childAddress(
@@ -1085,7 +1009,7 @@ export function addressForChange(input: {
 	const physicalName = (value: unknown, subject: string): string => {
 		if (typeof value !== 'string' || value.length === 0)
 			throw new Error(
-				`generator planning refuses ${change.kind}: missing physical ${subject} name`,
+				`generator planning refuses ${change.kind} on table ${change.table}: missing physical ${subject} name`,
 			);
 		return value;
 	};
@@ -1137,6 +1061,9 @@ export function addressForChange(input: {
 					`generator planning refuses ${change.kind}: missing typed index`,
 				);
 			const record = index as Record<string, unknown>;
+			const typedIndex = index as TableIR['indexes'][number];
+			if ((typedIndex.expressions?.length ?? 0) === 0)
+				stringList(typedIndex.columns, change.kind);
 			const name = physicalName(record.name, 'index');
 			return childAddress(database, schema, 'index', name, change.table);
 		}

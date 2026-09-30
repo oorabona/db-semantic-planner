@@ -446,6 +446,7 @@ describe('generated managed-step dependencies', () => {
 					details: 'child foreign key',
 					meta: {
 						fk: {
+							name: 'fk_child_parent_id',
 							columns: ['parent_id'],
 							references: { table: 'parent', columns: ['id'] },
 						},
@@ -471,6 +472,7 @@ describe('generated managed-step dependencies', () => {
 					details: 'self foreign key',
 					meta: {
 						fk: {
+							name: 'fk_self_ref_parent_id',
 							columns: ['parent_id'],
 							references: { table: 'self_ref', columns: ['id'] },
 						},
@@ -504,10 +506,12 @@ describe('generated managed-step dependencies', () => {
 					details: 'alter child foreign key',
 					meta: {
 						oldFk: {
+							name: 'fk_self_ref_parent_id',
 							columns: ['parent_id'],
 							references: { table: 'legacy_self_ref', columns: ['id'] },
 						},
 						fk: {
+							name: 'fk_self_ref_parent_id',
 							columns: ['parent_id'],
 							references: { table: 'self_ref', columns: ['id'] },
 						},
