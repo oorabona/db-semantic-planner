@@ -488,11 +488,16 @@ type ResolvedApplicationOwnership = Readonly<{
 	canonical: PgConvergeAssertOwnership;
 }>;
 
+function compareCodeUnits(left: string, right: string): number {
+	return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function sortedOwnershipEntries(
 	entries: readonly { readonly table: string; readonly name: string }[],
 ): readonly { readonly table: string; readonly name: string }[] {
 	return [...entries].sort((left, right) =>
-		pgsqlSurfaceKey(left.table, left.name).localeCompare(
+		compareCodeUnits(
+			pgsqlSurfaceKey(left.table, left.name),
 			pgsqlSurfaceKey(right.table, right.name),
 		),
 	);
@@ -502,6 +507,7 @@ function validateApplicationOwnership(
 	model: ModelIR,
 	steps: readonly PgConvergeApplicationStep[],
 	naming: ReturnType<typeof getNamingPluginForDbCasing>,
+	schema: string,
 ): ReadonlyMap<string, ResolvedApplicationOwnership> {
 	const resolved = new Map<string, ResolvedApplicationOwnership>();
 	const claimed = {
@@ -613,6 +619,8 @@ function validateApplicationOwnership(
 				[...model.tables.values()].some((candidate) =>
 					candidate.foreignKeys.some(
 						(foreignKey) =>
+							(foreignKey.references.schema === undefined ||
+								foreignKey.references.schema === schema) &&
 							foreignKey.references.table === table.name &&
 							sameColumnSet(index.columns, foreignKey.references.columns),
 					),
@@ -645,7 +653,8 @@ function validateApplicationOwnership(
 				? {}
 				: {
 						columnTypes: [...columnTypes].sort((left, right) =>
-							pgsqlSurfaceKey(left.table, left.column).localeCompare(
+							compareCodeUnits(
+								pgsqlSurfaceKey(left.table, left.column),
 								pgsqlSurfaceKey(right.table, right.column),
 							),
 						),
@@ -1463,6 +1472,7 @@ export async function convergePg(
 		model,
 		applicationSteps,
 		naming,
+		schema,
 	);
 	const ownershipMask: ResolvedOwnershipMask = {
 		checks: new Set(

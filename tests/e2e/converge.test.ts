@@ -3337,8 +3337,8 @@ describe('convergePg', () => {
 			owns: { checks: [{ table: name, name: checkName }] },
 			inspect: async (tx: PgApplicationStepTx) => {
 				const result = await tx.query<{ readonly definition: string }>(
-					'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3',
-					[schema, name, checkName],
+					'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2',
+					[name, checkName],
 				);
 				return result.rows[0]?.definition === 'CHECK ((score > 10))'
 					? 'healthy'
@@ -3366,8 +3366,8 @@ describe('convergePg', () => {
 		});
 		await expect(
 			pool.query<{ readonly definition: string }>(
-				'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid WHERE relation.relname = $1 AND con.conname = $2',
-				[name, checkName],
+				'SELECT pg_catalog.pg_get_constraintdef(con.oid) AS definition FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = $1 AND relation.relname = $2 AND con.conname = $3',
+				[schema, name, checkName],
 			),
 		).resolves.toMatchObject({
 			rows: [{ definition: 'CHECK ((score > 10))' }],
@@ -3473,7 +3473,7 @@ describe('convergePg', () => {
 			owns: { checks: [{ table: name, name: checkName }] },
 			inspect: async (tx: PgApplicationStepTx) => {
 				const result = await tx.query<{ readonly exists: boolean }>(
-					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid WHERE relation.relname = $1 AND con.conname = $2) AS exists',
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2) AS exists',
 					[name, checkName],
 				);
 				return result.rows[0]?.exists ? 'healthy' : 'unhealthy';
@@ -3774,8 +3774,8 @@ describe('convergePg', () => {
 			},
 			inspect: async (tx: PgApplicationStepTx) => {
 				const result = await tx.query<{ readonly healthy: boolean }>(
-					"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = current_schema() AND relation.relname = 'parent_records' AND con.conname = 'parent_valid') AND EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = current_schema() AND tablename = 'child_records' AND indexname = $1) AS healthy",
-					[ownedIndex],
+					'SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_constraint AS con JOIN pg_catalog.pg_class AS relation ON relation.oid = con.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND con.conname = $2) AND EXISTS (SELECT 1 FROM pg_catalog.pg_indexes WHERE schemaname = pg_catalog.current_schema() AND tablename = $3 AND indexname = $4) AS healthy',
+					['parent_records', 'parent_valid', 'child_records', ownedIndex],
 				);
 				return result.rows[0]?.healthy ? 'healthy' : 'unhealthy';
 			},

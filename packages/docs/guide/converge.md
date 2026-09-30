@@ -268,7 +268,8 @@ check it. Other column properties, including defaults and nullability, remain co
   owns: { checks: [{ table: 'projects', name: 'project_state_check' }] },
   inspect: async (tx) => {
     const result = await tx.query(
-      "SELECT pg_catalog.pg_get_constraintdef(constraint.oid) AS definition FROM pg_catalog.pg_constraint AS constraint JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint.conrelid WHERE constraint.conname = 'project_state_check' AND relation.relname = 'projects'",
+      'SELECT pg_catalog.pg_get_constraintdef(constraint.oid) AS definition FROM pg_catalog.pg_constraint AS constraint JOIN pg_catalog.pg_class AS relation ON relation.oid = constraint.conrelid JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = pg_catalog.current_schema() AND relation.relname = $1 AND constraint.conname = $2',
+      ['projects', 'project_state_check'],
     )
     return result.rows[0]?.definition === 'CHECK ((state IN (\'ready\', \'archived\')))' ? 'healthy' : 'unhealthy'
   },

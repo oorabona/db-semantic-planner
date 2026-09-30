@@ -330,6 +330,40 @@ function mockManagedObjects(): void {
 	}) as never);
 }
 
+function mockManagedObjectsWithUnmanagedApplicationSteps(): void {
+	const catalogueIdentity = {
+		engine: 'postgresql',
+		format: 1,
+		value: { oid: '1' },
+	};
+	mocks.identity.mockResolvedValue({ catalogueIdentity });
+	mocks.chain.mockImplementation((async (...args: unknown[]) => {
+		const address = args[2] as Record<string, unknown>;
+		if (address.kind === 'application-step') return { address, events: [] };
+		return {
+			ledger: { scope: 'schema', schema: 'public' },
+			address,
+			events: [
+				{
+					eventId: 'adopt-intent',
+					address,
+					eventKind: 'adopt-intent',
+					controller: 'deployment',
+				},
+				{
+					eventId: 'adopt',
+					predecessor: 'adopt-intent',
+					address,
+					eventKind: 'adopt',
+					controller: 'deployment',
+					observed: { value: { table: address.name }, digest: 'observed' },
+				},
+			],
+			terminalMember: { catalogueIdentity },
+		};
+	}) as never);
+}
+
 function createTableWithForeignKey(
 	table: string,
 	foreignKeyColumns: readonly string[],
@@ -1004,6 +1038,190 @@ describe('convergePg refusal boundary', () => {
 			expect(pool.connect).not.toHaveBeenCalled();
 		},
 	);
+
+	it('allows an owned local unique index for a foreign key targeting another schema', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const pool = poolFor();
+		const declared = modelWithTables([
+			{
+				name: 'accounts',
+				columns: [{ name: 'code', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [
+					{ name: 'idx_accounts_code', columns: ['code'], unique: true },
+				],
+			},
+			{
+				name: 'entries',
+				columns: [{ name: 'account_code', type: 'integer', nullable: false }],
+				foreignKeys: [
+					{
+						columns: ['account_code'],
+						references: {
+							schema: 'archive',
+							table: 'accounts',
+							columns: ['code'],
+						},
+					},
+				],
+				indexes: [],
+			},
+		]);
+		mocks.introspect.mockResolvedValue(declared);
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		await expect(
+			convergePg(pool, declared, {
+				steps: [
+					{
+						kind: 'assert',
+						id: 'owned-archive-key',
+						digest: 'v1',
+						phase: 'after-generated-ddl',
+						owns: {
+							indexes: [{ table: 'accounts', name: 'idx_accounts_code' }],
+						},
+						inspect: async () => 'healthy' as const,
+						apply: async () => undefined,
+					},
+				],
+			}),
+		).resolves.toEqual({ kind: 'no-drift', applied: [] });
+		expect(pool.connect).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([undefined, 'public'] as const)(
+		'refuses an owned local unique index when the foreign key targets %s or the target schema is absent',
+		async (referenceSchema) => {
+			const pool = poolFor();
+			await expect(
+				convergePg(
+					pool,
+					modelWithTables([
+						{
+							name: 'accounts',
+							columns: [{ name: 'code', type: 'integer', nullable: false }],
+							foreignKeys: [],
+							indexes: [
+								{ name: 'idx_accounts_code', columns: ['code'], unique: true },
+							],
+						},
+						{
+							name: 'entries',
+							columns: [
+								{ name: 'account_code', type: 'integer', nullable: false },
+							],
+							foreignKeys: [
+								{
+									columns: ['account_code'],
+									references: {
+										...(referenceSchema === undefined
+											? {}
+											: { schema: referenceSchema }),
+										table: 'accounts',
+										columns: ['code'],
+									},
+								},
+							],
+							indexes: [],
+						},
+					]),
+					{
+						steps: [
+							{
+								kind: 'assert',
+								id: 'owned-local-fk-key',
+								digest: 'v1',
+								phase: 'after-generated-ddl',
+								owns: {
+									indexes: [{ table: 'accounts', name: 'idx_accounts_code' }],
+								},
+								inspect: async () => 'healthy' as const,
+								apply: async () => undefined,
+							},
+						],
+					},
+				),
+			).rejects.toMatchObject({
+				refusal: 'invalid-options',
+				detail: expect.stringContaining('idx_accounts_code'),
+			});
+			expect(pool.connect).not.toHaveBeenCalled();
+		},
+	);
+
+	it('uses code-unit order for canonical owned checks and column types', async () => {
+		mocks.compare.mockResolvedValue({ changes: [] });
+		const declared = modelWithTables([
+			{
+				name: 'B',
+				columns: [{ name: 'value', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'valid', expression: 'true' }],
+			},
+			{
+				name: 'a',
+				columns: [{ name: 'value', type: 'integer', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [{ name: 'valid', expression: 'true' }],
+			},
+		]);
+		mocks.introspect.mockResolvedValue(declared);
+		mockManagedObjectsWithUnmanagedApplicationSteps();
+		const result = await convergePg(poolFor(), declared, {
+			mode: 'check',
+			steps: [
+				{
+					kind: 'assert',
+					id: 'canonical-owned-surfaces',
+					digest: 'v1',
+					phase: 'after-generated-ddl',
+					owns: {
+						checks: [
+							{ table: 'a', name: 'valid' },
+							{ table: 'B', name: 'valid' },
+						],
+						columnTypes: [
+							{ table: 'a', column: 'value' },
+							{ table: 'B', column: 'value' },
+						],
+					},
+					inspect: async () => 'unhealthy' as const,
+					apply: async () => undefined,
+				},
+			],
+		});
+		expect(result).toMatchObject({ kind: 'would-apply' });
+		if (result.kind !== 'would-apply') return;
+		expect(result.planDigest).toBe(
+			canonicalJsonDigest({
+				kind: 'postgresql-additive-converge-v1',
+				database: 'app',
+				schema: 'public',
+				steps: [],
+				applicationSteps: [
+					{
+						kind: 'assert',
+						id: 'canonical-owned-surfaces',
+						digest: 'v1',
+						scope: 'schema',
+						phase: 'after-generated-ddl',
+						owns: {
+							checks: [
+								{ table: 'B', name: 'valid' },
+								{ table: 'a', name: 'valid' },
+							],
+							columnTypes: [
+								{ table: 'B', column: 'value' },
+								{ table: 'a', column: 'value' },
+							],
+						},
+					},
+				],
+			}),
+		);
+	});
 
 	it('does not run an application step apply callback in check mode', async () => {
 		mocks.compare.mockResolvedValue({ changes: [] });
