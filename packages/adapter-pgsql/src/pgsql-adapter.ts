@@ -148,10 +148,12 @@ import {
 	finalizeEnvelope,
 	fromCompiledQuery,
 	fromOutputDescriptors,
+	outputKeyMapFor,
 	type ProjectionEnvelope,
 	type ProjectNamedFieldsExpression,
 	type ProjectNamedFieldsSelection,
 	preserveOneToOne,
+	preserveOutputKeyMap,
 	projectNamedFields,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
@@ -2141,13 +2143,14 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 function compileNqlRuntimeBindingCte(
 	name: string,
 	binding: NqlRuntimeBinding,
-	naming: NamingPlugin,
+	deps: AdapterCompilerDeps,
 	parameterOffset: number,
 	sourceTable: string | undefined,
 	schemaName: string | undefined,
 	model: ModelIR | undefined,
 	returningItems?: readonly MutationReturningItem[],
 ): { cte: string; parameters: readonly unknown[] } {
+	const { naming } = deps;
 	// #217: an aliased mutation RETURNING projects OUTPUT names that are not
 	// physical columns of the source table. The CTE header (columnSql) names
 	// the outputs positionally, so the source-table anchor and the type walk
@@ -2164,22 +2167,28 @@ function compileNqlRuntimeBindingCte(
 	}
 	const sourceColumnFor = (output: string): string =>
 		returningItems?.find((item) => item.output === output)?.source ?? output;
+	const sourcePhysicalColumnFor = (output: string): string =>
+		(sourceTable !== undefined
+			? deps.declaredNames?.column(sourceTable, sourceColumnFor(output))
+			: undefined) ?? naming.toDatabase(sourceColumnFor(output));
+	const physicalColumnFor = (output: string): string =>
+		sourceColumnFor(output) !== output
+			? output
+			: sourcePhysicalColumnFor(output);
 	if (binding.columns.length === 0) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
 		);
 	}
 	const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
-	const emittedColumnNames = binding.columns.map((column) =>
-		naming.toDatabase(column),
-	);
+	const emittedColumnNames = binding.columns.map(physicalColumnFor);
 	if (new Set(emittedColumnNames).size !== emittedColumnNames.length) {
 		throw new Error(
 			`NQL runtime binding '${name}' emits duplicate column names after database naming.`,
 		);
 	}
 	const columnSql = binding.columns
-		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
+		.map((column) => quoteIdent(physicalColumnFor(column), 'column'))
 		.join(', ');
 
 	// #213: a binding carrying per-column type info (currently: snapshotted
@@ -2223,9 +2232,7 @@ function compileNqlRuntimeBindingCte(
 		);
 	}
 	const projectedColumns = binding.columns
-		.map((column) =>
-			quoteIdent(naming.toDatabase(sourceColumnFor(column)), 'column'),
-		)
+		.map((column) => quoteIdent(sourcePhysicalColumnFor(column), 'column'))
 		.join(', ');
 	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${schemaName ? `${quoteIdent(schemaName, 'schema')}.` : ''}${quoteIdent(naming.toDatabase(sourceTable), 'table')} WHERE false`;
 	if (binding.rows.length === 0) {
@@ -3295,15 +3302,33 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					runtimeBinding.declaredOutputs === undefined
 						? { ...runtimeBinding, declaredOutputs }
 						: runtimeBinding;
+				const runtimeSourceTable = runtimeBindingSourceTable(bundle, name);
+				const returningItems =
+					bundle.mutationBindings?.get(name)?.returningItems;
+				const physicalOutputKeys = new Map(
+					materializedRuntimeBinding.columns.map((output) => {
+						const source =
+							returningItems?.find((item) => item.output === output)?.source ??
+							output;
+						return [
+							output,
+							source !== output
+								? output
+								: ((runtimeSourceTable !== undefined
+										? deps.declaredNames?.column(runtimeSourceTable, source)
+										: undefined) ?? naming.toDatabase(source)),
+						] as const;
+					}),
+				);
 				const compiledRuntimeBinding = compileNqlRuntimeBindingCte(
 					name,
 					materializedRuntimeBinding,
-					naming,
+					deps,
 					parameters.length,
-					runtimeBindingSourceTable(bundle, name),
+					runtimeSourceTable,
 					deps.schemaName,
 					deps.model,
-					bundle.mutationBindings?.get(name)?.returningItems,
+					returningItems,
 				);
 				ctes.push(compiledRuntimeBinding.cte);
 				parameters.push(...compiledRuntimeBinding.parameters);
@@ -3315,6 +3340,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						columns: runtimeBinding.columns,
 						...(declaredOutputs !== undefined && { declaredOutputs }),
 						naming,
+						emittedOutputKeys: physicalOutputKeys,
 					}),
 				);
 				continue;
@@ -3379,13 +3405,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		return guardCompiledQuery(
-			rebuildCompiledQuery(compiled, {
-				sql: prefixNqlBindingCtes(
-					ctes,
-					renumberSqlParams(compiled.sql, parameters.length),
-				),
-				parameters: [...parameters, ...compiled.parameters],
-			}),
+			preserveOutputKeyMap(
+				compiled,
+				rebuildCompiledQuery(compiled, {
+					sql: prefixNqlBindingCtes(
+						ctes,
+						renumberSqlParams(compiled.sql, parameters.length),
+					),
+					parameters: [...parameters, ...compiled.parameters],
+				}),
+			),
 			'NQL bundle',
 		);
 	}
@@ -3819,8 +3848,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Transform result rows from database naming to model naming convention.
-	 * For CamelCaseNamingPlugin: price_cents → priceCents
+	 * Transform result rows through the projection's returned-label map.
 	 */
 	private transformResultRows(
 		rows: Record<string, unknown>[],
@@ -3838,8 +3866,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 								outputKey: key,
 							})
 						: value;
-				// Use toModel to convert database column name to model column name
-				const modelKey = this.naming.toModel(key);
+				const modelKey = outputKeyMapFor(query)?.get(key) ?? key;
 				transformed[modelKey] = converted;
 			}
 			return transformed;

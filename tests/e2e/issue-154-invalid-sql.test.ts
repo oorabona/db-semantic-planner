@@ -59,11 +59,11 @@ describe('FIX-154 invalid SQL regressions', () => {
 
 		const rows = (await query.execute()) as unknown as Array<{
 			id: number;
-			useIds: number[] | null;
+			use_ids: number[] | null;
 		}>;
 		expect(rows).toEqual([
-			{ id: 100, useIds: [1000, 1001] },
-			{ id: 200, useIds: null },
+			{ id: 100, use_ids: [1000, 1001] },
+			{ id: 200, use_ids: null },
 		]);
 	});
 
@@ -95,12 +95,12 @@ describe('FIX-154 invalid SQL regressions', () => {
 		expect(sql).toContain('file_1.path AS use_file');
 
 		const rows = (await query.execute()) as unknown as Array<{
-			defFile: string;
-			useFile: string;
+			def_file: string;
+			use_file: string;
 		}>;
 		expect(rows).toEqual([
-			{ defFile: '/def.ts', useFile: '/use.ts' },
-			{ defFile: '/def.ts', useFile: '/use.ts' },
+			{ def_file: '/def.ts', use_file: '/use.ts' },
+			{ def_file: '/def.ts', use_file: '/use.ts' },
 		]);
 	});
 

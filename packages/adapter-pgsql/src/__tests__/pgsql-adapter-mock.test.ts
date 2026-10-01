@@ -15,7 +15,7 @@
  *  - listIndexes() / storageSize() schema fallback branches
  */
 
-import { type Adapter, createOrm, schema } from '@dbsp/core';
+import { type Adapter, createOrm, plan, schema } from '@dbsp/core';
 import type { TransactionOptions } from '@dbsp/types';
 import { projectionlessCompiledQuery } from '@dbsp/types/adapter-sdk';
 import type { Pool, PoolClient } from 'pg';
@@ -3732,7 +3732,7 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		expect(rows).toEqual([{ user_id: 1, full_name: 'Alice' }]);
 	});
 
-	it('converts snake_case columns to camelCase with snake_case dbCasing', async () => {
+	it('leaves projectionless rows unchanged because they carry no output map', async () => {
 		const pool = makePool({
 			rows: [{ user_id: 1, full_name: 'Alice', is_active: true }],
 		});
@@ -3742,10 +3742,10 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			testQuery('SELECT 1'),
 		);
 
-		expect(rows).toEqual([{ userId: 1, fullName: 'Alice', isActive: true }]);
+		expect(rows).toEqual([{ user_id: 1, full_name: 'Alice', is_active: true }]);
 	});
 
-	it('transforms multiple rows', async () => {
+	it('maps rows through a compiler projection output map', async () => {
 		const pool = makePool({
 			rows: [
 				{ order_id: 1, total_price: 100 },
@@ -3759,9 +3759,81 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		);
 
 		expect(rows).toEqual([
-			{ orderId: 1, totalPrice: 100 },
-			{ orderId: 2, totalPrice: 200 },
+			{ order_id: 1, total_price: 100 },
+			{ order_id: 2, total_price: 200 },
 		]);
+	});
+
+	it('restores a long snake_case declared column to its full logical key', async () => {
+		const longColumn =
+			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
+		const returnedLabel = longColumn
+			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+			.slice(0, 63);
+		const model = schema({ records: { [longColumn]: 'string' } }).model;
+		const adapter = createPgsqlAdapter(
+			makePool({ rows: [{ [returnedLabel]: 'value' }] }),
+			{ dbCasing: 'snake_case', model },
+		);
+		const query = adapter.compile(
+			plan(
+				{
+					type: 'select',
+					from: 'records',
+					select: { type: 'fields', fields: [longColumn] },
+				},
+				model,
+			),
+			{ model },
+		);
+
+		const rows = await adapter.execute(query);
+
+		expect(rows).toEqual([{ [longColumn]: 'value' }]);
+		expect(rows[0]).not.toHaveProperty(longColumn.slice(0, 63));
+	});
+
+	it('maps a declared snake_case projection through its compiler output map', async () => {
+		const model = schema({ records: { record_id: 'integer' } }).model;
+		const adapter = createPgsqlAdapter(
+			makePool({ rows: [{ record_id: 42 }] }),
+			{ dbCasing: 'snake_case', model },
+		);
+		const query = adapter.compile(
+			plan(
+				{
+					type: 'select',
+					from: 'records',
+					select: { type: 'fields', fields: ['record_id'] },
+				},
+				model,
+			),
+			{ model },
+		);
+
+		expect(query.outputKeyMap?.get('record_id')).toBe('recordId');
+		expect(await adapter.execute(query)).toEqual([{ recordId: 42 }]);
+	});
+
+	it('refuses compiler aliases that collide after PostgreSQL truncation', () => {
+		const prefix = 'a'.repeat(63);
+		const model = schema({ records: { id: 'integer' } }).model;
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+
+		expect(() =>
+			adapter.compile(
+				{
+					rootTable: 'records',
+					decisions: [
+						{ type: 'select', column: 'id', alias: `${prefix}one` },
+						{ type: 'select', column: 'id', alias: `${prefix}two` },
+					],
+				} as never,
+				{ model },
+			),
+		).toThrow(
+			`PostgreSQL projection outputs '${prefix}one' and '${prefix}two' both return label '${prefix}'`,
+		);
 	});
 
 	it('propagates pool.query rejection', async () => {
@@ -5647,7 +5719,7 @@ describe('PgsqlAdapter [P2-T5]: withSchema preserves full config', () => {
 		);
 
 		// camelCase keys prove the scoped adapter inherited snake_case dbCasing
-		expect(rows).toEqual([{ userId: 42, fullName: 'Bob' }]);
+		expect(rows).toEqual([{ user_id: 42, full_name: 'Bob' }]);
 	});
 
 	it('withSchema overrides schemaName while preserving other options — observable via inTransaction and dbCasing', () => {
@@ -5686,7 +5758,7 @@ describe('PgsqlAdapter [P2-T5]: withSchema preserves full config', () => {
 		const rows = await scoped.execute<Record<string, unknown>>(
 			testQuery('SELECT 1'),
 		);
-		expect(rows).toEqual([{ orderId: 7 }]);
+		expect(rows).toEqual([{ order_id: 7 }]);
 		// dbCasing public getter confirms the option snapshot was correct
 		expect(scoped.dbCasing).toBe('snake_case');
 	});
@@ -5734,7 +5806,7 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		});
 
 		// camelCase keys prove the tx adapter inherited snake_case dbCasing
-		expect(capturedRows).toEqual([{ userId: 5, fullName: 'Eve' }]);
+		expect(capturedRows).toEqual([{ user_id: 5, full_name: 'Eve' }]);
 	});
 
 	it('transaction-scoped adapter inTransaction flag is true', async () => {

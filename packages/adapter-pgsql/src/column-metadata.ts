@@ -14,13 +14,26 @@ type ProjectionCandidate = {
 export type ColumnMetadataProjection =
 	| {
 			readonly kind: 'modelColumn';
+			readonly logicalKey: string;
 			readonly table: string;
 			readonly column: string;
 			readonly js?: ColumnJsReadType;
 	  }
-	| { readonly kind: 'expression'; readonly reason: string }
-	| { readonly kind: 'ambiguous'; readonly reason: string }
-	| { readonly kind: 'unresolved'; readonly reason: string };
+	| {
+			readonly kind: 'expression';
+			readonly logicalKey: string;
+			readonly reason: string;
+	  }
+	| {
+			readonly kind: 'ambiguous';
+			readonly logicalKey: string;
+			readonly reason: string;
+	  }
+	| {
+			readonly kind: 'unresolved';
+			readonly logicalKey: string;
+			readonly reason: string;
+	  };
 
 type AliasContext = {
 	readonly aliases: ReadonlyMap<string, string>;
@@ -43,7 +56,7 @@ function recordTableLookup(
 	const lookup = new Map<string, string>();
 	for (const table of model.tables.values()) {
 		lookup.set(table.name, table.name);
-		lookup.set(naming.toDatabase(table.name), table.name);
+		lookup.set(pgReturnedIdentifier(naming.toDatabase(table.name)), table.name);
 	}
 	return lookup;
 }
@@ -212,7 +225,7 @@ function buildAliasContext(
 		addVisibleTable(
 			aliases,
 			visibleTables,
-			naming.toDatabase(rootTable),
+			pgReturnedIdentifier(naming.toDatabase(rootTable)),
 			rootTable,
 		);
 	}
@@ -248,8 +261,21 @@ function findColumnByDbName(
 	if (!table) return undefined;
 	return table.columns.find(
 		(column) =>
-			column.name === dbColumn || naming.toDatabase(column.name) === dbColumn,
+			column.name === dbColumn ||
+			pgReturnedIdentifier(naming.toDatabase(column.name)) === dbColumn,
 	);
+}
+
+function pgReturnedIdentifier(identifier: string): string {
+	let result = '';
+	let byteLength = 0;
+	for (const character of identifier) {
+		const width = Buffer.byteLength(character, 'utf8');
+		if (byteLength + width > 63) break;
+		result += character;
+		byteLength += width;
+	}
+	return result;
 }
 
 function resolveQualifiedColumn(
@@ -285,11 +311,13 @@ function resolveUnqualifiedColumn(
 
 function projectionForSource(
 	source: ProjectionSource,
+	logicalKey = source.column.name,
 ): ColumnMetadataProjection {
 	const js: ColumnJsReadType | undefined =
 		source.column.type === 'bigint' ? source.column.js : undefined;
 	return {
 		kind: 'modelColumn',
+		logicalKey,
 		table: source.table,
 		column: source.column.name,
 		...(js !== undefined ? { js } : {}),
@@ -310,10 +338,12 @@ function addColumnCandidate(
 	candidates: Map<string, ProjectionCandidate[]>,
 	outputKey: string,
 	source: ProjectionSource | 'ambiguous' | undefined,
+	logicalKey: string,
 ): void {
 	if (source === 'ambiguous') {
 		addCandidate(candidates, outputKey, {
 			kind: 'ambiguous',
+			logicalKey,
 			reason: 'projection column resolved to multiple visible model columns',
 		});
 		return;
@@ -321,11 +351,12 @@ function addColumnCandidate(
 	if (source === undefined) {
 		addCandidate(candidates, outputKey, {
 			kind: 'unresolved',
+			logicalKey,
 			reason: 'projection column could not be resolved to a model column',
 		});
 		return;
 	}
-	addCandidate(candidates, outputKey, projectionForSource(source));
+	addCandidate(candidates, outputKey, projectionForSource(source, logicalKey));
 }
 
 function expandStar(
@@ -344,8 +375,11 @@ function expandStar(
 		for (const column of table.columns) {
 			addCandidate(
 				candidates,
-				naming.toDatabase(column.name),
-				projectionForSource({ table: tableName, column }),
+				pgReturnedIdentifier(naming.toDatabase(column.name)),
+				projectionForSource(
+					{ table: tableName, column },
+					naming.toModel(column.name),
+				),
 			);
 		}
 	}
@@ -369,6 +403,7 @@ function addTargetCandidates(
 		if (outputAlias) {
 			addCandidate(candidates, outputAlias, {
 				kind: 'expression',
+				logicalKey: outputAlias,
 				reason: 'projection expression has no model column provenance',
 			});
 		}
@@ -382,6 +417,7 @@ function addTargetCandidates(
 		if (outputAlias) {
 			addCandidate(candidates, outputAlias, {
 				kind: 'expression',
+				logicalKey: outputAlias,
 				reason: 'aliased star projection has no single model column provenance',
 			});
 			return;
@@ -395,6 +431,7 @@ function addTargetCandidates(
 		if (outputAlias) {
 			addCandidate(candidates, outputAlias, {
 				kind: 'unresolved',
+				logicalKey: outputAlias,
 				reason: 'projection column reference could not be read',
 			});
 		}
@@ -405,7 +442,15 @@ function addTargetCandidates(
 	const source = qualifier
 		? resolveQualifiedColumn(qualifier, dbColumn, ctx, model, naming)
 		: resolveUnqualifiedColumn(dbColumn, ctx, model, naming);
-	addColumnCandidate(candidates, outputAlias ?? dbColumn, source);
+	addColumnCandidate(
+		candidates,
+		outputAlias ?? dbColumn,
+		source,
+		outputAlias ??
+			(source && source !== 'ambiguous'
+				? naming.toModel(source.column.name)
+				: dbColumn),
+	);
 }
 
 function finalizeProjections(
@@ -416,6 +461,7 @@ function finalizeProjections(
 		if (entries.length !== 1) {
 			projections.set(outputKey, {
 				kind: 'ambiguous',
+				logicalKey: outputKey,
 				reason: 'projection output key matched multiple sources',
 			});
 			continue;
@@ -476,8 +522,11 @@ export function buildModelColumnProjections(
 		);
 		if (!column) continue;
 		projections.set(
-			naming.toDatabase(column.name),
-			projectionForSource({ table: tableName, column }),
+			pgReturnedIdentifier(naming.toDatabase(column.name)),
+			projectionForSource(
+				{ table: tableName, column },
+				naming.toModel(column.name),
+			),
 		);
 	}
 	return projections.size > 0 ? projections : undefined;

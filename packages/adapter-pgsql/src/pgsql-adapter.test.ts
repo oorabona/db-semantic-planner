@@ -2641,7 +2641,7 @@ describe('PgsqlAdapter', () => {
 			const result = await adapter.executeWithMeta(query);
 
 			expect(result).toEqual({
-				rows: [{ id: 1, fullName: 'Alice' }],
+				rows: [{ id: 1, full_name: 'Alice' }],
 				rowCount: 1,
 				command: 'UPDATE',
 			});

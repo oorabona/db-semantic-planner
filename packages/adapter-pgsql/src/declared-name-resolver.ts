@@ -63,11 +63,16 @@ export function canCreatePgPhysicalModel(model: ModelIR): boolean {
 	for (const table of model.tables.values()) {
 		if (
 			!Array.isArray(table.columns) ||
+			(table.primaryKey !== undefined &&
+				typeof table.primaryKey !== 'string' &&
+				!Array.isArray(table.primaryKey)) ||
 			!Array.isArray(table.foreignKeys) ||
 			!Array.isArray(table.indexes) ||
-			!Array.isArray(table.checkConstraints) ||
-			!Array.isArray(table.pseudoColumns) ||
-			!Array.isArray(table.policies)
+			(table.checkConstraints !== undefined &&
+				!Array.isArray(table.checkConstraints)) ||
+			(table.pseudoColumns !== undefined &&
+				!Array.isArray(table.pseudoColumns)) ||
+			(table.policies !== undefined && !Array.isArray(table.policies))
 		) {
 			return false;
 		}

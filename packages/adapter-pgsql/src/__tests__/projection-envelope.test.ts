@@ -2,7 +2,10 @@ import { schema } from '@dbsp/core';
 import { resolveOutputReadHandling } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { describe, expect, it } from 'vitest';
-import { identityNaming } from '../naming-plugin.js';
+import {
+	getNamingPluginForDbCasing,
+	identityNaming,
+} from '../naming-plugin.js';
 import {
 	dropPositionalUnion,
 	expressionColumn,
@@ -55,6 +58,57 @@ function selectAst(targetList: readonly unknown[]): Node {
 }
 
 describe('projection envelope', () => {
+	it('maps a declared snake_case projection to its logical result key', () => {
+		const snakeSchema = schema({ events: { event_id: 'integer' } });
+		const env = fromAstProjection({
+			sql: 'SELECT event_id FROM events',
+			parameters: [],
+			ast: selectAst([columnTarget('event_id')]),
+			rootTable: 'events',
+			model: snakeSchema.model,
+			naming: getNamingPluginForDbCasing('snake_case'),
+		});
+
+		const compiled = finalizeEnvelope(env);
+
+		expect(compiled.outputKeyMap?.get('event_id')).toBe('eventId');
+	});
+
+	it('preserves a source logical key through an unchanged CTE output label', () => {
+		const source = supplementOutputDescriptors(
+			fromModelColumns({
+				sql: 'SELECT sequence FROM events',
+				parameters: [],
+				table: 'events',
+				columns: ['sequence'],
+				model: testSchema.model,
+				naming: identityNaming,
+			}),
+			[
+				{
+					outputKey: 'sequence',
+					logicalKey: 'logicalSequence',
+					source: {
+						kind: 'modelColumn',
+						table: 'events',
+						column: 'sequence',
+						js: 'bigint',
+					},
+					shape: { kind: 'scalar', cardinality: 'one' },
+				},
+			],
+		);
+		const projected = projectNamedFields(source, {
+			sql: 'SELECT sequence FROM bound_events',
+			parameters: [],
+			selections: [{ inputKey: 'sequence', outputKey: 'sequence' }],
+		});
+
+		expect(finalizeEnvelope(projected).outputKeyMap?.get('sequence')).toBe(
+			'logicalSequence',
+		);
+	});
+
 	it('finalizeEnvelope emits metadata only for modelColumn outputs with js', () => {
 		const env = fromAstProjection({
 			sql: 'SELECT sequence AS seq, safeSequence, legacySequence, label FROM events',
@@ -86,6 +140,30 @@ describe('projection envelope', () => {
 		expect(compiled.columnMetadata?.has('label') ?? false).toBe(false);
 	});
 
+	it('refuses projected aliases that collide after PostgreSQL truncation', () => {
+		const prefix = 'a'.repeat(63);
+		const source = fromModelColumns({
+			sql: 'SELECT id FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['id'],
+			model: testSchema.model,
+			naming: identityNaming,
+		});
+		const projected = projectNamedFields(source, {
+			sql: 'SELECT id AS first, id AS second FROM events',
+			parameters: [],
+			selections: [
+				{ inputKey: 'id', outputKey: `${prefix}one` },
+				{ inputKey: 'id', outputKey: `${prefix}two` },
+			],
+		});
+
+		expect(() => finalizeEnvelope(projected)).toThrow(
+			`PostgreSQL projection outputs '${prefix}one' and '${prefix}two' both return label '${prefix}'`,
+		);
+	});
+
 	it('finalizeEnvelope routes descriptor handling through the neutral resolver', () => {
 		const source = fromModelColumns({
 			sql: 'SELECT sequence FROM events',
@@ -101,6 +179,7 @@ describe('projection envelope', () => {
 		const scalarDescriptor = source.projection.outputs.get('sequence');
 		expect(scalarDescriptor).toEqual({
 			outputKey: 'sequence',
+			logicalKey: 'sequence',
 			source: {
 				kind: 'modelColumn',
 				table: 'events',
@@ -276,6 +355,7 @@ describe('projection envelope', () => {
 		expect(outputKey).toBe('total');
 		expect(output).toEqual({
 			outputKey: 'total',
+			logicalKey: 'total',
 			source: {
 				kind: 'expression',
 				reason: 'aggregate result',

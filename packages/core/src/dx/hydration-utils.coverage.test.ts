@@ -317,8 +317,8 @@ describe('hydrateJsonAggIncludes', () => {
 		expect(results[0]).toEqual({ id: 1, author: null });
 	});
 
-	it('matches camelCase column name (snake_case → camelCase transform)', () => {
-		const results = [{ id: 1, authorPostsJson: '[{"id":10}]' }];
+	it('uses the exact query-local json aggregation label', () => {
+		const results = [{ id: 1, author_posts_json: '[{"id":10}]' }];
 		const report = makePlanReport([
 			{
 				type: 'include-strategy',

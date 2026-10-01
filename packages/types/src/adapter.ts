@@ -125,6 +125,15 @@ export interface CompiledQuery<T = unknown> {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
 	readonly columnMetadata?: ReadonlyMap<string, CompiledColumnMetadata>;
+	/**
+	 * Maps the identifier PostgreSQL returns for each projected output (including
+	 * its 63-byte identifier truncation) to the logical result key.
+	 *
+	 * This is intentionally projection-owned rather than a database-casing
+	 * conversion: aliases and declared physical identifiers need not be
+	 * reversible through a naming convention.
+	 */
+	readonly outputKeyMap?: ReadonlyMap<string, string>;
 	readonly hydrationPlan?: PlanReport;
 	/** Phantom type for result inference - not used at runtime */
 	readonly __resultType?: T;

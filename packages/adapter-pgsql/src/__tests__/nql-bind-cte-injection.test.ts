@@ -200,6 +200,38 @@ function aggregateOutput(outputKey: string): OutputDescriptor {
 }
 
 describe('NQL bind CTE identifier injection defense', () => {
+	it('materializes long logical bind columns through their physical PostgreSQL name', () => {
+		const longColumn =
+			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
+		const model = schema({ records: { [longColumn]: 'string' } }).model;
+		const source: QueryIntent = {
+			type: 'select',
+			from: 'records',
+			select: { type: 'fields', fields: [longColumn] },
+		};
+		const bundle: CompiledNqlQuery = {
+			query: { ...source, from: 'bound_records' },
+			bindings: new Map([['bound_records', source]]),
+			runtimeBindings: new Map([
+				[
+					'bound_records',
+					{ columns: [longColumn], rows: [{ [longColumn]: 'value' }] },
+				],
+			]),
+		};
+		const adapter = createPgsqlCompileOnlyAdapter({
+			dbCasing: 'snake_case',
+			model,
+		});
+
+		const compiled = adapter.compile(bundle, { model });
+		const physicalColumn = longColumn
+			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+			.slice(0, 63);
+
+		expect(compiled.sql).toContain(`"${physicalColumn}"`);
+		expect(compiled.parameters).toEqual(['value']);
+	});
 	it('rejects NQL multi-statement quoted bind name with embedded double quote before WITH CTE emission', () => {
 		const dangerousBindName = 'x"; drop table users; --';
 		const dangerousPayload = '"; drop table users; --';
@@ -941,7 +973,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(params).toEqual(['ok']);
 	});
 
-	it('rejects a runtime binding whose columns collide after database naming (#217)', () => {
+	it('keeps runtime-binding output aliases query-local under snake_case (#217)', () => {
 		const forgedMutation: UpdateIntent = {
 			type: 'update',
 			table: 'items',
@@ -970,10 +1002,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		const { error } = tryCompileNqlBundle(bundle, { dbCasing: 'snake_case' });
 
-		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain(
-			'duplicate column names after database naming',
-		);
+		expect(error).toBeUndefined();
 	});
 
 	it('keeps the model-walk source-table anchor byte-identical to pre-#213 SQL when columnTypes is absent (regression lock)', () => {

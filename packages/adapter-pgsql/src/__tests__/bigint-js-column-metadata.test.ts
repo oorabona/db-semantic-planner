@@ -504,6 +504,7 @@ describe('bigint js column metadata provenance', () => {
 
 		expect(projections?.get('sequence')).toEqual({
 			kind: 'unresolved',
+			logicalKey: 'sequence',
 			reason: 'projection column could not be resolved to a model column',
 		});
 	});

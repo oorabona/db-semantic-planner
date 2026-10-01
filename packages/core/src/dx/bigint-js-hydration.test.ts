@@ -81,6 +81,24 @@ const sampleArrayTransforms = [
 	nestedTransform('samples', 'rawValue', 'bigint'),
 ] as const;
 
+const readingColumnKeyMap = {
+	id: 'id',
+	parent_id: 'parentId',
+	observed_at: 'observedAt',
+	safe_count: 'safeCount',
+	string_count: 'stringCount',
+	parse_json: 'parseJSON',
+	constructor: 'constructor',
+	to_string: 'toString',
+	legacy_count: 'legacyCount',
+};
+
+const sampleColumnKeyMap = {
+	id: 'id',
+	reading_id: 'readingId',
+	raw_value: 'rawValue',
+};
+
 const report = {
 	rootTable: 'parents',
 	decisions: [
@@ -92,6 +110,7 @@ const report = {
 				target: 'readings',
 				relation: 'readings',
 				relationType: 'hasMany',
+				jsonAggColumnKeyMap: readingColumnKeyMap,
 				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
@@ -103,6 +122,7 @@ const report = {
 				target: 'samples',
 				relation: 'samples',
 				relationType: 'hasMany',
+				jsonAggColumnKeyMap: sampleColumnKeyMap,
 				intentPath: 'include[readings].include[samples]',
 				jsonAggNestedReadTransforms: sampleArrayTransforms,
 			},
@@ -121,6 +141,7 @@ const toOneReport = {
 				target: 'readings',
 				relation: 'reading',
 				relationType: 'belongsTo',
+				jsonAggColumnKeyMap: readingColumnKeyMap,
 				jsonAggNestedReadTransforms: readingObjectTransforms,
 			},
 		},
@@ -138,6 +159,7 @@ const noNestedIncludeReport = {
 				target: 'readings',
 				relation: 'readings',
 				relationType: 'hasMany',
+				jsonAggColumnKeyMap: readingColumnKeyMap,
 				jsonAggNestedReadTransforms: readingArrayTransforms,
 			},
 		},
@@ -258,6 +280,7 @@ describe('bigint js json_agg hydration', () => {
 						target: 'readings',
 						relation: 'readings',
 						relationType: 'hasMany',
+						jsonAggColumnKeyMap: readingColumnKeyMap,
 						jsonAggNestedReadTransforms: [
 							nestedTransform('readings', 'observedAt', 'bigint'),
 						],
@@ -383,8 +406,8 @@ describe('bigint js json_agg hydration', () => {
 				readings_json: JSON.stringify([
 					{
 						id: 'reading-1',
-						observedAt: '1',
-						safeCount: '9007199254740992',
+						observed_at: '1',
+						safe_count: '9007199254740992',
 					},
 				]),
 			},

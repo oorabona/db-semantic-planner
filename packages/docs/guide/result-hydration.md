@@ -73,10 +73,11 @@ SELECT
 FROM "users"
 ```
 
-**Hydration:** `hydrateJsonAggIncludes()` finds columns named
-`{relation}_json` (or camelCase variant `{relation}Json`), parses the JSON
-string, and renames the key to the relation name. For to-one relations it
-unwraps the single-element array to a plain object.
+**Hydration:** compiler projections carry an emitted-label → logical-key map.
+`hydrateJsonAggIncludes()` therefore reads the exact query-local
+`{relation}_json` label, parses the JSON string, and renames the key to the
+relation name. For to-one relations it unwraps the single-element array to a
+plain object; it does not infer camel/snake spellings from returned keys.
 
 ```typescript
 // doctest: skip — illustrative data/type literal fragment (not executable code)
@@ -395,9 +396,9 @@ is cheaper.
 - **`json_agg` returns a string, not a parsed object.** The pg driver returns
   JSON columns as strings in some configurations. `hydrateJsonAggIncludes()`
   always calls `JSON.parse()` defensively.
-- **CamelCase plugin compatibility.** If a naming plugin transforms column names,
-  the `_json` suffix may become `Json`. The hydrator tries both `relation_json`
-  and `relationJson` as candidates.
+- **Projection-label authority.** Returned labels are mapped by the compiler,
+  including PostgreSQL's 63-byte identifier truncation. Do not depend on
+  camel/snake inference for a result or JSON key.
 - **LEFT JOIN null propagation.** When a `join` strategy include has no match
   (LEFT JOIN returns all-null columns), the hydrator sets `relation: null`
   rather than an empty object. Check `allNull` logic in `hydrateJoinIncludes()`.

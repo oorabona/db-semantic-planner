@@ -21,12 +21,16 @@ export function compiledQueryFromProjection<T>(fields: {
 	sql: string;
 	parameters: readonly unknown[];
 	columnMetadata: ReadonlyMap<string, CompiledColumnMetadata>;
+	outputKeyMap?: ReadonlyMap<string, string>;
 	hydrationPlan?: PlanReport;
 }): CompiledQuery<T> {
 	const query = Object.freeze({
 		sql: fields.sql,
 		parameters: Object.freeze([...fields.parameters]),
 		columnMetadata: fields.columnMetadata,
+		...(fields.outputKeyMap !== undefined
+			? { outputKeyMap: fields.outputKeyMap }
+			: {}),
 		...(fields.hydrationPlan !== undefined
 			? { hydrationPlan: fields.hydrationPlan }
 			: {}),
@@ -63,6 +67,9 @@ export function rebuildCompiledQuery<T>(
 		parameters: Object.freeze([...patch.parameters]),
 		...(prior.columnMetadata !== undefined
 			? { columnMetadata: prior.columnMetadata }
+			: {}),
+		...(prior.outputKeyMap !== undefined
+			? { outputKeyMap: prior.outputKeyMap }
 			: {}),
 		...(prior.hydrationPlan !== undefined
 			? { hydrationPlan: prior.hydrationPlan }

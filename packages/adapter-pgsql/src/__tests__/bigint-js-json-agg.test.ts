@@ -32,6 +32,52 @@ const includeSchema = schema({
 });
 
 describe('bigint js json_agg SQL projection', () => {
+	it('maps a truncated physical json_agg key back to its full logical column', () => {
+		const longColumn =
+			'extremelyLongCamelCaseColumnNameThatExceedsPostgresqlIdentifierLimitByFar';
+		const longSchema = schema({
+			parents: { id: 'uuid' },
+			readings: {
+				id: 'uuid',
+				parentId: ref('parents', {
+					as: 'parent',
+					inverse: 'readings',
+					references: ['id'],
+				}),
+				[longColumn]: 'string',
+			},
+		});
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: longSchema.model,
+			dbCasing: 'snake_case',
+		});
+		const plan = createOrm({ model: longSchema.model, adapter })
+			.select('parents')
+			.include('readings')
+			.withPlanOptions({ defaultIncludeStrategy: 'json_agg' })
+			.plan();
+
+		const compiled = adapter.compileWithIncludes(plan, {
+			model: longSchema.model,
+		});
+		const physicalColumn = longColumn
+			.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+			.slice(0, 63);
+		const hydrationDecision = compiled.main.hydrationPlan?.decisions.find(
+			(candidate) =>
+				candidate.type === 'include-strategy' &&
+				candidate.context.relation === 'readings',
+		);
+
+		expect(
+			(
+				hydrationDecision?.context as
+					| { jsonAggColumnKeyMap?: Record<string, string> }
+					| undefined
+			)?.jsonAggColumnKeyMap?.[physicalColumn],
+		).toBe(longColumn);
+	});
+
 	it('refuses to carry a convertible JSON container through a projected CTE', () => {
 		const projectedReadings = fromOutputDescriptors({
 			sql: 'SELECT readings_json FROM prior_readings',

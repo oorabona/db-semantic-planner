@@ -667,11 +667,15 @@ function buildJsonAggColumnKeyMap(
 		const map: Record<string, string> = {};
 		for (const outputKey of columns) {
 			const descriptor = projected.get(outputKey);
-			if (
-				descriptor?.source.kind === 'modelColumn' &&
-				outputKey === naming.toDatabase(descriptor.source.column)
-			) {
-				map[outputKey] = descriptor.source.column;
+			if (descriptor) {
+				const logicalKey = (
+					descriptor as OutputDescriptor & { logicalKey?: string }
+				).logicalKey;
+				map[outputKey] =
+					logicalKey ??
+					(descriptor.source.kind === 'modelColumn'
+						? descriptor.source.column
+						: outputKey);
 			}
 		}
 		return Object.keys(map).length > 0 ? map : undefined;
@@ -683,7 +687,10 @@ function buildJsonAggColumnKeyMap(
 		const modelColumn =
 			table?.columns.find((column) => column.name === columnName)?.name ??
 			columnName;
-		map[naming.toDatabase(modelColumn)] = modelColumn;
+		map[
+			deps?.declaredNames?.column(targetTable, modelColumn) ??
+				naming.toDatabase(modelColumn)
+		] = modelColumn;
 	}
 	return Object.keys(map).length > 0 ? map : undefined;
 }
@@ -853,6 +860,7 @@ function buildTrustedRelationColumnOutputDescriptor(
 	const js = column.type === 'bigint' ? column.js : undefined;
 	return {
 		outputKey: naming.toDatabase(outputColumn),
+		logicalKey: decision.alias ?? naming.toModel(column.name),
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
@@ -934,6 +942,13 @@ function buildPhysicalRelationColumnOutputDescriptor(
 			return {
 				...descriptor,
 				outputKey: naming.toDatabase(decision.alias ?? decision.column),
+				logicalKey:
+					decision.alias ??
+					naming.toModel(
+						descriptor.source.kind === 'modelColumn'
+							? descriptor.source.column
+							: decision.column,
+					),
 				shape: { kind: 'scalar', cardinality: 'one' },
 			};
 		}
@@ -949,6 +964,7 @@ function buildPhysicalRelationColumnOutputDescriptor(
 	const outputColumn = decision.alias ?? decision.column;
 	return {
 		outputKey: naming.toDatabase(outputColumn),
+		logicalKey: decision.alias ?? naming.toModel(column.name),
 		source: {
 			kind: 'modelColumn',
 			table: table.name,
